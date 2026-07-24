@@ -3149,6 +3149,14 @@ export interface RuntimeMissionAggregationRecordInput {
   expectedLastSequence: number;
 }
 
+export interface RuntimeMissionHumanEvaluationInput {
+  runId: string;
+  criterionKey: string;
+  passed: boolean;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
 export interface RuntimeMissionProgress {
   version: 1;
   state: "ready" | "running" | "waiting" | "blocked" | "complete" | "cancelled";
@@ -3185,6 +3193,20 @@ export interface RuntimeMissionProgress {
     evidenceCount: number;
     summary?: string;
   }>;
+  humanReview?: {
+    runId: string;
+    expectedRunRevision: number;
+    expectedLastSequence: number;
+    criteria: Array<{
+      criterionKey: string;
+      description: string;
+      required: boolean;
+      evaluator: "human";
+      status: "not-evaluated";
+      evidenceCount: number;
+      summary?: string;
+    }>;
+  } | null;
   nextAction: string;
 }
 
@@ -3294,6 +3316,20 @@ export async function readRuntimeMissionProgress(runId: string): Promise<Runtime
   if (!hasTauriRuntime()) return null;
   try { return await invoke<RuntimeMissionProgress>("mission_coordination_progress_read", { runId }); }
   catch (error) { throw toRuntimeError(error); }
+}
+
+export async function recordRuntimeMissionHumanEvaluation(
+  input: RuntimeMissionHumanEvaluationInput,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<Record<string, unknown>>(
+      "mission_coordination_human_evaluation_record",
+      { input },
+    );
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
 }
 
 export async function prepareRuntimeMissionWorkers(runId: string) {

@@ -445,8 +445,11 @@ evidence references come only from the attested receipt, retained citation ids,
 and any exact required evidence; renderer assertions cannot create acceptance.
 The general finalizer can now consume authenticated human and graph-worker
 evaluation facts, multiple uniquely produced outputs, and mission-level
-acceptance, while external evaluation remains unattested. General production of
-those evaluator facts, ambiguous output-selection policy, and inspectable plans
+acceptance, while external evaluation remains unattested. A settled general
+Mission can now produce the identified-human fact through the native review
+boundary described below; no renderer-supplied identity, target, evidence,
+timestamp, summary, or event id is accepted. General policy and reviewer-worker
+evaluation production, ambiguous output-selection policy, and inspectable plans
 for other mission shapes remain open, so the acceptance/evaluation box stays
 unchecked.
 
@@ -955,9 +958,21 @@ declared evaluator. It appends a stable terminal fact, writes the exact Run
 result, and projects the matching Mission result in one transaction. Successful,
 recoverable partial, failed, and cancelled paths are covered, including
 encrypted reopen. Plans with ambiguous deliverable producers fail closed until
-a future immutable output-selection contract exists. Automatic worker
-creation/routing, general evaluator production and waits, restart dispatch, and
-arbitrary artifact materialization remain open.
+a future immutable output-selection contract exists.
+
+The identified-human evaluator path is now native and product-composed for a
+fully settled general Mission. The progress projection exposes only unevaluated
+human-owned criteria plus the exact Run revision and event head. A calm result
+review offers `Accept` or `Needs revision`; Rust reloads the active
+workspace/member and selected Plan, derives the internal-user actor, Run target,
+time, stable event identity, and evidence references from immutable terminal
+outputs, and appends one encrypted `evaluation-recorded` fact. Passing is
+refused when declared durable evidence is absent. Exact replay returns the
+original decision, a changed replay fails, and after the final human criterion
+the desktop invokes the existing native finalizer so rejected work becomes an
+explicit partial result rather than success. General policy/worker evaluator
+production, automatic worker creation/routing, restart dispatch, and arbitrary
+artifact materialization remain open.
 
 A provider-neutral continuation policy now supplies the bounded decision layer
 for iterative workers. It accepts at most sixty-four contiguous durable

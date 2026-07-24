@@ -49,6 +49,16 @@ pub struct MissionAggregationRecordInput {
     expected_last_sequence: i64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionHumanEvaluationInput {
+    run_id: String,
+    criterion_key: String,
+    passed: bool,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+}
+
 struct AuthorizedRun {
     scope: DataScope,
     member: String,
@@ -961,6 +971,338 @@ fn append_event(
         &event,
         &Value::Object(projected),
         at,
+    )
+}
+
+fn exact_durable_evidence_refs(
+    journal: &mission_run::MissionRunJournalRow,
+) -> Result<BTreeSet<String>, String> {
+    let mut references = BTreeSet::new();
+    for event in &journal.events {
+        let outputs = match event.get("type").and_then(Value::as_str) {
+            Some("worker-completed") => event.pointer("/payload/outputs"),
+            Some("aggregation-recorded") => event.pointer("/payload/aggregation/producedOutputs"),
+            _ => None,
+        };
+        if let Some(outputs) = outputs {
+            let outputs = outputs
+                .as_array()
+                .filter(|values| values.len() <= 128)
+                .ok_or_else(|| "Stored Mission output evidence is invalid.".to_string())?;
+            for output in outputs {
+                for field in [
+                    "valueReference",
+                    "artifactId",
+                    "artifactVersionId",
+                    "handoffId",
+                ] {
+                    if let Some(reference) = output.get(field).and_then(Value::as_str) {
+                        references.insert(bounded(reference, "Mission output evidence", 512)?);
+                    }
+                }
+            }
+        }
+        if event.get("type").and_then(Value::as_str) == Some("artifact-produced") {
+            for field in ["artifactId", "versionId"] {
+                if let Some(reference) = event
+                    .get("payload")
+                    .and_then(|payload| payload.get(field))
+                    .and_then(Value::as_str)
+                {
+                    references.insert(bounded(reference, "Mission artifact evidence", 512)?);
+                }
+            }
+        }
+    }
+    Ok(references)
+}
+
+fn human_evaluation_identity(run_id: &str, criterion_key: &str) -> (String, String, String) {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.mission.human-evaluation.v1\0");
+    digest.update(run_id.as_bytes());
+    digest.update(b"\0");
+    digest.update(criterion_key.as_bytes());
+    let digest = format!("{:x}", digest.finalize());
+    (
+        format!("mission_human_evaluation_event_{digest}"),
+        format!("mission-human-evaluation:{digest}"),
+        format!("mission_human_evaluation_{digest}"),
+    )
+}
+
+fn append_human_evaluation_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    authorized: AuthorizedRun,
+    criterion_key: &str,
+    passed: bool,
+    expected_revision: i64,
+    expected_sequence: i64,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    let run_id = bounded(
+        authorized
+            .journal
+            .run
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run identity is invalid.".into())
+            })?,
+        "Mission run",
+        160,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
+    let criterion_key = bounded(criterion_key, "Mission acceptance criterion", 160)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let (event_id, idempotency_key, evaluation_key) =
+        human_evaluation_identity(&run_id, &criterion_key);
+    let decision_summary = if passed {
+        "The signed-in member accepted this criterion after reviewing the durable Mission evidence."
+    } else {
+        "The signed-in member did not accept this criterion after reviewing the durable Mission evidence."
+    };
+    let matching_events = authorized
+        .journal
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("id").and_then(Value::as_str) == Some(event_id.as_str())
+                || event.get("idempotencyKey").and_then(Value::as_str)
+                    == Some(idempotency_key.as_str())
+                || event
+                    .pointer("/payload/evaluation/evaluationKey")
+                    .and_then(Value::as_str)
+                    == Some(evaluation_key.as_str())
+        })
+        .collect::<Vec<_>>();
+    if matching_events.len() > 1 {
+        return Err(crate::store::StoreError::Invalid(
+            "Stored human Mission evaluation is ambiguous.".into(),
+        ));
+    }
+    if let Some(event) = matching_events.first() {
+        let criteria = event
+            .pointer("/payload/evaluation/criteria")
+            .and_then(Value::as_array);
+        let exact_replay = event.get("id").and_then(Value::as_str) == Some(event_id.as_str())
+            && event.get("idempotencyKey").and_then(Value::as_str)
+                == Some(idempotency_key.as_str())
+            && event.get("type").and_then(Value::as_str) == Some("evaluation-recorded")
+            && event.pointer("/actor/kind").and_then(Value::as_str) == Some("internal-user")
+            && event
+                .pointer("/actor/internalUserId")
+                .and_then(Value::as_str)
+                == Some(authorized.actor.as_str())
+            && event
+                .pointer("/payload/evaluation/reviewerInternalUserId")
+                .and_then(Value::as_str)
+                == Some(authorized.actor.as_str())
+            && event
+                .pointer("/payload/evaluation/target/kind")
+                .and_then(Value::as_str)
+                == Some("run")
+            && event
+                .pointer("/payload/evaluation/target/runId")
+                .and_then(Value::as_str)
+                == Some(run_id.as_str())
+            && event
+                .pointer("/payload/evaluation/evaluationKey")
+                .and_then(Value::as_str)
+                == Some(evaluation_key.as_str())
+            && event
+                .pointer("/payload/evaluation/verdict")
+                .and_then(Value::as_str)
+                == Some(if passed { "pass" } else { "fail" })
+            && event
+                .pointer("/payload/evaluation/summary")
+                .and_then(Value::as_str)
+                == Some(decision_summary)
+            && event
+                .pointer("/payload/evaluation/recommendedAction")
+                .and_then(Value::as_str)
+                == Some(if passed { "accept" } else { "revise" })
+            && criteria.is_some_and(|criteria| {
+                criteria.len() == 1
+                    && criteria[0].get("criterionKey").and_then(Value::as_str)
+                        == Some(criterion_key.as_str())
+                    && criteria[0].get("passed").and_then(Value::as_bool) == Some(passed)
+                    && criteria[0].get("summary").and_then(Value::as_str) == Some(decision_summary)
+            });
+        if exact_replay {
+            return Ok(authorized.journal);
+        }
+        return Err(crate::store::StoreError::Invalid(
+            "Human Mission evaluation replay changed its durable decision.".into(),
+        ));
+    }
+    validate_head(&authorized.journal, expected_revision, expected_sequence)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let criteria = authorized
+        .lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .filter(|criteria| criteria.len() <= 128)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
+        })?;
+    let matching = criteria
+        .iter()
+        .filter(|criterion| {
+            criterion.get("key").and_then(Value::as_str) == Some(criterion_key.as_str())
+        })
+        .collect::<Vec<_>>();
+    if matching.len() != 1 || matching[0].get("evaluator").and_then(Value::as_str) != Some("human")
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission criterion is unavailable for human review.".into(),
+        ));
+    }
+    let progress = mission_progress_projection(&authorized.lifecycle, &authorized.journal)
+        .map_err(crate::store::StoreError::Invalid)?;
+    if progress
+        .get("steps")
+        .and_then(Value::as_array)
+        .is_none_or(|steps| {
+            steps.iter().any(|step| {
+                matches!(
+                    step.get("state").and_then(Value::as_str),
+                    Some("ready" | "running" | "waiting")
+                )
+            })
+        })
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission work must settle before human acceptance review.".into(),
+        ));
+    }
+    let available_evidence = exact_durable_evidence_refs(&authorized.journal)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let required_evidence = matching[0]
+        .get("evidenceRequired")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    bounded(
+                        value
+                            .as_str()
+                            .ok_or_else(|| "Mission required evidence is invalid.".to_string())?,
+                        "Mission required evidence",
+                        512,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
+        .map_err(crate::store::StoreError::Invalid)?
+        .unwrap_or_default();
+    if passed
+        && required_evidence
+            .iter()
+            .any(|reference| !available_evidence.contains(reference))
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Required durable evidence is unavailable for this acceptance decision.".into(),
+        ));
+    }
+    let evidence = required_evidence
+        .into_iter()
+        .filter(|reference| available_evidence.contains(reference))
+        .collect::<Vec<_>>();
+    let at = now();
+    let revision = authorized
+        .journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+        })?;
+    let sequence = authorized
+        .journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?
+        + 1;
+    let previous = authorized
+        .journal
+        .run
+        .pointer("/eventHead/lastEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+        })?;
+    let workspace = authorized
+        .journal
+        .run
+        .get("workspaceId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run workspace is invalid.".into())
+        })?;
+    let attempt_number = authorized
+        .journal
+        .run
+        .get("currentAttemptNumber")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run attempt is invalid.".into())
+        })?;
+    let evaluation = json!({
+        "evaluationKey":evaluation_key,
+        "target":{"kind":"run","runId":run_id},
+        "reviewerInternalUserId":authorized.actor,
+        "verdict":if passed {"pass"} else {"fail"},
+        "criteria":[{
+            "criterionKey":criterion_key,
+            "passed":passed,
+            "summary":decision_summary,
+            "evidenceRefs":evidence
+        }],
+        "summary":decision_summary,
+        "recommendedAction":if passed {"accept"} else {"revise"},
+        "evaluatedAt":at
+    });
+    let event = json!({
+        "workspaceId":workspace,"visibility":"member-private",
+        "ownerMemberId":authorized.member,"authority":"local","schemaVersion":1,"revision":1,
+        "createdByInternalUserId":authorized.actor,"createdAt":at,"updatedAt":at,
+        "id":event_id,"runId":run_id,"type":"evaluation-recorded",
+        "sequence":sequence,"previousEventId":previous,"attemptNumber":attempt_number,
+        "occurredAt":at,
+        "actor":{"kind":"internal-user","internalUserId":authorized.actor},
+        "idempotencyKey":idempotency_key,
+        "payload":{"evaluation":evaluation}
+    });
+    let mut projected = authorized.journal.run.as_object().cloned().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+    })?;
+    projected.insert("revision".into(), json!(revision + 1));
+    projected.insert("updatedAt".into(), json!(at));
+    projected.insert(
+        "eventHead".into(),
+        json!({"lastSequence":sequence,"lastEventId":event_id}),
+    );
+    mission_run::append(
+        tx,
+        store,
+        &authorized.scope,
+        &authorized.member,
+        &run_id,
+        revision,
+        sequence - 1,
+        &event_id,
+        "evaluation-recorded",
+        &idempotency_key,
+        &event,
+        &Value::Object(projected),
+        &at,
     )
 }
 
@@ -2476,7 +2818,36 @@ fn mission_progress_projection(
         "blocked" => "Review the blocked step before continuing.",
         "running" => "Wait for current bounded work to settle.",
         "ready" => "Continue the next ready step.",
+        _ if projected_acceptance.iter().any(|criterion| {
+            criterion.get("evaluator").and_then(Value::as_str) == Some("human")
+                && criterion.get("status").and_then(Value::as_str) == Some("not-evaluated")
+        }) =>
+        {
+            "Review the declared human acceptance criteria."
+        }
         _ => "Wait for the declared dependency or human response.",
+    };
+    let review = if matches!(state, "waiting" | "blocked") {
+        let criteria = projected_acceptance
+            .iter()
+            .filter(|criterion| {
+                criterion.get("evaluator").and_then(Value::as_str) == Some("human")
+                    && criterion.get("status").and_then(Value::as_str) == Some("not-evaluated")
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        if criteria.is_empty() {
+            None
+        } else {
+            Some(json!({
+                "runId":journal.run.get("id"),
+                "expectedRunRevision":journal.run.get("revision"),
+                "expectedLastSequence":journal.run.pointer("/eventHead/lastSequence"),
+                "criteria":criteria
+            }))
+        }
+    } else {
+        None
     };
     Ok(json!({
         "version":1,
@@ -2500,6 +2871,7 @@ fn mission_progress_projection(
         },
         "budget":safe_budget_projection(&journal.run)?,
         "acceptance":projected_acceptance,
+        "humanReview":review,
         "nextAction":next_action
     }))
 }
@@ -2514,6 +2886,30 @@ pub fn mission_coordination_progress_read(run_id: String) -> Result<Value, Strin
             let authorized = authorized_run_for_read(tx, store, &run_id)?;
             mission_progress_projection(&authorized.lifecycle, &authorized.journal)
                 .map_err(crate::store::StoreError::Invalid)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_coordination_human_evaluation_record(
+    input: MissionHumanEvaluationInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let run_id = bounded(&input.run_id, "Mission run", 160)?;
+    let criterion_key = bounded(&input.criterion_key, "Mission acceptance criterion", 160)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let authorized = authorized_run(tx, store, &run_id)?;
+            append_human_evaluation_in_tx(
+                tx,
+                store,
+                authorized,
+                &criterion_key,
+                input.passed,
+                input.expected_run_revision,
+                input.expected_last_sequence,
+            )
         })
         .map_err(|error| error.to_string())
 }
@@ -3902,7 +4298,7 @@ mod tests {
     }
 
     #[test]
-    fn general_terminal_transaction_persists_run_and_mission_across_reopen() {
+    fn human_evaluation_and_general_terminal_persist_across_reopen() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("general-terminal.db");
         let vault =
@@ -3929,9 +4325,10 @@ mod tests {
                         "outcome":{"title":"Final brief","desiredOutcome":"Create it.",
                             "deliverables":[{"key":"final","description":"the final brief","required":true}]},
                         "scope":{"departmentIds":[],"context":[]},"constraints":[],
-                        "acceptance":{"requiresHumanAcceptance":false,"criteria":[{
+                        "acceptance":{"requiresHumanAcceptance":true,"criteria":[{
                             "key":"grounded","description":"The brief is grounded.",
-                            "required":true,"evaluator":"policy","evidenceRequired":["source-1"]
+                            "required":true,"evaluator":"human",
+                            "evidenceRequired":["mission-output:final"]
                         }]}
                     });
                     let plan = json!({
@@ -4090,26 +4487,175 @@ mod tests {
                         json!({"kind":"system"}),
                         at,
                     )?;
-                    append_general_store_event(
-                        tx,
-                        &store,
-                        &scope,
-                        &mut run,
-                        "event-evaluation",
-                        "evaluation-recorded",
-                        json!({"evaluation":{
-                            "evaluationKey":"policy-grounded",
-                            "target":{"kind":"worker","workerId":prepared_worker_id},
-                            "verdict":"pass","summary":"Policy passed.","evaluatedAt":at,
-                            "criteria":[{"criterionKey":"grounded","passed":true,
-                                "summary":"Grounded.","evidenceRefs":["source-1"]}]
-                        }}),
-                        json!({"kind":"system"}),
-                        at,
-                    )?;
                     let journal =
                         mission_run::get(tx, &store, &scope, "member-1", "run-general-store")?
                             .unwrap();
+                    let lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-general-store",
+                    )?
+                    .unwrap();
+                    let review_progress =
+                        mission_progress_projection(&lifecycle, &journal)
+                            .map_err(crate::store::StoreError::Invalid)?;
+                    assert_eq!(
+                        review_progress["humanReview"]["runId"],
+                        "run-general-store"
+                    );
+                    assert_eq!(
+                        review_progress["humanReview"]["criteria"][0]["criterionKey"],
+                        "grounded"
+                    );
+                    let expected_revision = journal.run["revision"].as_i64().unwrap();
+                    let expected_sequence = journal.run["eventHead"]["lastSequence"]
+                        .as_i64()
+                        .unwrap();
+                    let mut missing_evidence_lifecycle =
+                        mission_plan::MissionPlanLifecycleRow {
+                            mission: lifecycle.mission.clone(),
+                            plan: lifecycle.plan.clone(),
+                            current_revision: lifecycle.current_revision.clone(),
+                        };
+                    missing_evidence_lifecycle.mission["acceptance"]["criteria"][0]
+                        ["evidenceRequired"] = json!(["missing-output"]);
+                    let missing_evidence_journal = mission_run::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-general-store",
+                    )?
+                    .unwrap();
+                    let missing_evidence = append_human_evaluation_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal: missing_evidence_journal,
+                            lifecycle: missing_evidence_lifecycle,
+                        },
+                        "grounded",
+                        true,
+                        expected_revision,
+                        expected_sequence,
+                    )
+                    .unwrap_err();
+                    assert!(missing_evidence
+                        .to_string()
+                        .contains("Required durable evidence is unavailable"));
+                    let evaluated = append_human_evaluation_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal,
+                            lifecycle,
+                        },
+                        "grounded",
+                        true,
+                        expected_revision,
+                        expected_sequence,
+                    )?;
+                    assert_eq!(
+                        evaluated.events.last().unwrap()["actor"]["kind"],
+                        "internal-user"
+                    );
+                    assert_eq!(
+                        evaluated.events.last().unwrap()["payload"]["evaluation"]["criteria"][0]
+                            ["evidenceRefs"],
+                        json!(["mission-output:final"])
+                    );
+                    let evaluated_progress =
+                        mission_progress_projection(
+                            &mission_plan::get(
+                                tx,
+                                &store,
+                                &scope,
+                                "member-1",
+                                "mission-general-store",
+                            )?
+                            .unwrap(),
+                            &evaluated,
+                        )
+                        .map_err(crate::store::StoreError::Invalid)?;
+                    assert!(evaluated_progress["humanReview"].is_null());
+                    let replay_lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-general-store",
+                    )?
+                    .unwrap();
+                    let replayed = append_human_evaluation_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal: evaluated,
+                            lifecycle: replay_lifecycle,
+                        },
+                        "grounded",
+                        true,
+                        expected_revision,
+                        expected_sequence,
+                    )?;
+                    assert_eq!(
+                        replayed
+                            .events
+                            .iter()
+                            .filter(|event| {
+                                event.get("type").and_then(Value::as_str)
+                                    == Some("evaluation-recorded")
+                            })
+                            .count(),
+                        1
+                    );
+                    let changed_lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-general-store",
+                    )?
+                    .unwrap();
+                    let changed_journal = mission_run::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-general-store",
+                    )?
+                    .unwrap();
+                    let changed = append_human_evaluation_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal: changed_journal,
+                            lifecycle: changed_lifecycle,
+                        },
+                        "grounded",
+                        false,
+                        expected_revision,
+                        expected_sequence,
+                    )
+                    .unwrap_err();
+                    assert!(changed
+                        .to_string()
+                        .contains("changed its durable decision"));
+                    let journal = replayed;
                     let lifecycle = mission_plan::get(
                         tx,
                         &store,

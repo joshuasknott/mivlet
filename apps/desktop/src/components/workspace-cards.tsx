@@ -176,8 +176,16 @@ export function ParallelMissionPlanSummary({ plan }: { plan: {
   );
 }
 
-export function MissionProgressSummary({ progress }: {
+export function MissionProgressSummary({
+  progress,
+  reviewBusyCriterion,
+  reviewError,
+  onReview
+}: {
   progress: import("../runtime").RuntimeMissionProgress;
+  reviewBusyCriterion?: string;
+  reviewError?: string;
+  onReview?: (criterionKey: string, passed: boolean) => void;
 }) {
   const stateLabel = progress.state === "complete"
     ? "Finished"
@@ -219,6 +227,41 @@ export function MissionProgressSummary({ progress }: {
         ))}
         <li>{progress.nextAction}</li>
       </ul>
+      {progress.humanReview?.criteria.length && onReview ? (
+        <section className="mission-approval-card" aria-label="Mission acceptance review">
+          <div>
+            <strong>Review the result</strong>
+            <p>Only your decision can settle these acceptance checks. Fable records it against the exact durable result.</p>
+          </div>
+          {progress.humanReview.criteria.map((criterion) => {
+            const busy = reviewBusyCriterion === criterion.criterionKey;
+            return (
+              <div key={criterion.criterionKey}>
+                <p><strong>{criterion.description}</strong></p>
+                <div className="mission-approval-card__actions">
+                  <button
+                    type="button"
+                    className="button button--primary"
+                    disabled={Boolean(reviewBusyCriterion)}
+                    onClick={() => onReview(criterion.criterionKey, true)}
+                  >
+                    {busy ? "Saving decision…" : "Accept"}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    disabled={Boolean(reviewBusyCriterion)}
+                    onClick={() => onReview(criterion.criterionKey, false)}
+                  >
+                    Needs revision
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+          {reviewError ? <p role="alert" className="mission-approval-card__error">{reviewError}</p> : null}
+        </section>
+      ) : null}
     </details>
   );
 }

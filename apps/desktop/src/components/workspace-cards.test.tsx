@@ -243,6 +243,57 @@ describe("RunContextSummary", () => {
     expect(progress).not.toHaveTextContent("approach-a");
   });
 
+  it("offers a calm human acceptance decision only from a reviewable progress receipt", () => {
+    const onReview = vi.fn();
+    render(<MissionProgressSummary progress={{
+      version: 1,
+      state: "waiting",
+      summary: "Mission work is waiting at a declared boundary.",
+      runStatus: "running",
+      completedSteps: 1,
+      totalSteps: 1,
+      runningWorkers: 0,
+      readyWorkers: 0,
+      waitingSteps: 0,
+      blockedSteps: 0,
+      steps: [{
+        stepKey: "draft", title: "Prepare draft", kind: "produce",
+        state: "completed", detail: "The durable output is complete."
+      }],
+      usage: { records: 1, inputTokens: 20, outputTokens: 40, toolCalls: 0, durationMs: 500, costObservations: [] },
+      budget: { maxWorkers: 1, maxAttempts: 1 },
+      acceptance: [{
+        criterionKey: "member-review",
+        description: "The result is ready to use.",
+        required: true,
+        evaluator: "human",
+        status: "not-evaluated",
+        evidenceCount: 1
+      }],
+      humanReview: {
+        runId: "run-review",
+        expectedRunRevision: 4,
+        expectedLastSequence: 3,
+        criteria: [{
+          criterionKey: "member-review",
+          description: "The result is ready to use.",
+          required: true,
+          evaluator: "human",
+          status: "not-evaluated",
+          evidenceCount: 1
+        }]
+      },
+      nextAction: "Review the declared human acceptance criteria."
+    }} onReview={onReview} />);
+    expect(screen.getByLabelText("Mission acceptance review")).toHaveTextContent(
+      "Only your decision can settle these acceptance checks."
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(onReview).toHaveBeenCalledWith("member-review", true);
+    fireEvent.click(screen.getByRole("button", { name: "Needs revision" }));
+    expect(onReview).toHaveBeenCalledWith("member-review", false);
+  });
+
   it("makes the fresh-authority boundary explicit before starting another mission", () => {
     const onStart = vi.fn();
     const { rerender } = render(<NewCitedMissionAction disabled={false} starting={false} onStart={onStart} />);

@@ -209,6 +209,7 @@ pub fn run() {
             mission_coordination::mission_coordination_join_resolve,
             mission_coordination::mission_coordination_aggregation_record,
             mission_coordination::mission_coordination_progress_read,
+            mission_coordination::mission_coordination_human_evaluation_record,
             mission_coordination::mission_coordination_prepare_workers,
             mission_coordination::mission_coordination_advance,
             mission_coordination::mission_coordination_finalize,

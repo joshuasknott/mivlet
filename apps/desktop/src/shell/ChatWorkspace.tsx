@@ -18,7 +18,7 @@ import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, is
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
+import { finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -121,6 +121,10 @@ export function ChatWorkspace() {
   const [pendingMissionProgress, setPendingMissionProgress] = useState<Record<string, {
     loading: boolean;
     progress?: RuntimeMissionProgress;
+    error?: string;
+  }>>({});
+  const [missionReviewState, setMissionReviewState] = useState<Record<string, {
+    busyCriterion?: string;
     error?: string;
   }>>({});
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
@@ -955,9 +959,78 @@ export function ChatWorkspace() {
     }
   };
 
+  const recordMissionReview = async (
+    progress: RuntimeMissionProgress,
+    criterionKey: string,
+    passed: boolean
+  ) => {
+    const review = progress.humanReview;
+    if (!review || !review.criteria.some((criterion) => criterion.criterionKey === criterionKey)) {
+      return;
+    }
+    if (missionReviewState[review.runId]?.busyCriterion) return;
+    setMissionReviewState((current) => ({
+      ...current,
+      [review.runId]: { busyCriterion: criterionKey }
+    }));
+    try {
+      await recordRuntimeMissionHumanEvaluation({
+        runId: review.runId,
+        criterionKey,
+        passed,
+        expectedRunRevision: review.expectedRunRevision,
+        expectedLastSequence: review.expectedLastSequence
+      });
+      let nextProgress = await readRuntimeMissionProgress(review.runId);
+      if (!nextProgress) {
+        throw new Error("Mission progress is available only in the desktop app.");
+      }
+      if (!nextProgress.humanReview?.criteria.length) {
+        const terminal = await finalizeRuntimeMissionCoordination(review.runId);
+        if (terminal?.progress) nextProgress = terminal.progress;
+      }
+      setPendingMissionProgress((current) => current[review.runId]
+        ? {
+            ...current,
+            [review.runId]: { loading: false, progress: nextProgress }
+          }
+        : current);
+      setConversationMessages((current) => current.map((message) =>
+        message.runId === review.runId
+          || message.missionProgress?.humanReview?.runId === review.runId
+          ? { ...message, missionProgress: nextProgress }
+          : message
+      ));
+      setMissionReviewState((current) => {
+        const next = { ...current };
+        delete next[review.runId];
+        return next;
+      });
+      await durableConversation.refresh().catch(() => undefined);
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : "Fable could not save this Mission review.";
+      setMissionReviewState((current) => ({
+        ...current,
+        [review.runId]: { error: message }
+      }));
+    }
+  };
+
   const renderPendingMissionProgress = (runId: string) => {
     const state = pendingMissionProgress[runId];
-    if (state?.progress) return <MissionProgressSummary progress={state.progress} />;
+    if (state?.progress) {
+      return (
+        <MissionProgressSummary
+          progress={state.progress}
+          reviewBusyCriterion={missionReviewState[runId]?.busyCriterion}
+          reviewError={missionReviewState[runId]?.error}
+          onReview={(criterionKey, passed) =>
+            void recordMissionReview(state.progress!, criterionKey, passed)}
+        />
+      );
+    }
     if (state?.error) {
       return <p className="conversation-feed__notice" role="status">{state.error}</p>;
     }
@@ -1016,7 +1089,17 @@ export function ChatWorkspace() {
                 ? <ParallelMissionPlanSummary plan={message.parallelMissionPlan} />
                 : null}
               {message.role === "assistant" && message.missionProgress
-                ? <MissionProgressSummary progress={message.missionProgress} />
+                ? <MissionProgressSummary
+                    progress={message.missionProgress}
+                    reviewBusyCriterion={message.missionProgress.humanReview
+                      ? missionReviewState[message.missionProgress.humanReview.runId]?.busyCriterion
+                      : undefined}
+                    reviewError={message.missionProgress.humanReview
+                      ? missionReviewState[message.missionProgress.humanReview.runId]?.error
+                      : undefined}
+                    onReview={(criterionKey, passed) =>
+                      void recordMissionReview(message.missionProgress!, criterionKey, passed)}
+                  />
                 : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}

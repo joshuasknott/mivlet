@@ -33,6 +33,7 @@ import {
   readRuntimeCitedMissionReceipts,
   readRuntimeCitedMissionPlanSummaries,
   readRuntimeMissionProgress,
+  recordRuntimeMissionHumanEvaluation,
   readRuntimeMissionWorkerOutput,
   recoverRuntimeInterruptedCitedMissions,
   recoverRuntimeInterruptedGeneralMissions,
@@ -72,6 +73,10 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionReceipts("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(readRuntimeMissionProgress("run-1")).resolves.toBeNull();
+    await expect(recordRuntimeMissionHumanEvaluation({
+      runId: "run-1", criterionKey: "review", passed: true,
+      expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toBeNull();
     await expect(advanceRuntimeMissionCoordination("run-1")).resolves.toBeNull();
     await expect(finalizeRuntimeMissionCoordination("run-1")).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
@@ -591,6 +596,11 @@ describe("mission runtime boundary", () => {
     await resolveRuntimeMissionJoin(resolveJoin);
     await recordRuntimeMissionAggregation(aggregation);
     await readRuntimeMissionProgress("run-1");
+    const humanEvaluation = {
+      runId: "run-1", criterionKey: "review", passed: true,
+      expectedRunRevision: 4, expectedLastSequence: 3
+    };
+    await recordRuntimeMissionHumanEvaluation(humanEvaluation);
     await prepareRuntimeMissionWorkers("run-1");
     await advanceRuntimeMissionCoordination("run-1");
     await finalizeRuntimeMissionCoordination("run-1");
@@ -627,6 +637,7 @@ describe("mission runtime boundary", () => {
       ["mission_coordination_join_resolve", { input: resolveJoin }],
       ["mission_coordination_aggregation_record", { input: aggregation }],
       ["mission_coordination_progress_read", { runId: "run-1" }],
+      ["mission_coordination_human_evaluation_record", { input: humanEvaluation }],
       ["mission_coordination_prepare_workers", { runId: "run-1" }],
       ["mission_coordination_advance", { runId: "run-1" }],
       ["mission_coordination_finalize", { runId: "run-1" }],
