@@ -108,6 +108,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 - CI file: `.github/workflows/ci.yml` exists and uses pnpm for typecheck, tests, build, Tauri check, Rust tests, clippy, and fmt on Windows.
 - Tests exist across desktop, connectors, native API, local files, knowledge search, backend registry, and Rust runtime modules.
  
+- General provider-worker settlement (**Wave 4C partial; automatic dispatch open**): provider-only workers derived from a selected general Plan can use the existing authenticated native start/provider boundary. Rust persists bounded usage and an encrypted output receipt without invoking cited-policy evaluation, cited artifact creation, or cited conversation projection. General acceptance remains explicitly unevaluated and the Run remains nonterminal for deterministic coordination/finalization; one failed general worker remains a worker fact instead of incorrectly failing the whole graph. Automatic ready-worker route selection/dispatch, tool-bearing native grant composition, and general restart dispatch remain open.
+
 ## Runtime Availability Matrix
  
 | Area | Category | Details / Location |

@@ -102,6 +102,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     attempt_number: i64,
     max_attempts: i64,
     evidence: Option<Value>,
+    cited_policy_shape: bool,
     parallel_evidence_free: bool,
     reviewed_parallel_context: Option<crate::mission_parallel_approaches::ReviewedWorkerContext>,
 }
@@ -2065,7 +2066,10 @@ pub(crate) fn preflight_native_worker_completion(
                 }
             };
             let output = native_output_spec(worker).map_err(crate::store::StoreError::Invalid)?;
-            if output.as_ref().is_some_and(|spec| spec.include_evidence) != evidence.is_some() {
+            let cited_policy_shape = is_cited_terminal_status_shape(&journal, &lifecycle);
+            if cited_policy_shape
+                && output.as_ref().is_some_and(|spec| spec.include_evidence) != evidence.is_some()
+            {
                 return Err(crate::store::StoreError::Invalid(
                     "Mission output evidence does not match its worker contract.".into(),
                 ));
@@ -2164,14 +2168,22 @@ pub(crate) fn preflight_native_worker_completion(
                     validate_output_receipt_replay(
                         tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
                     )?;
-                    validate_native_result_replay(&journal, existing, binding, output.as_ref())
-                        .map_err(crate::store::StoreError::Invalid)?;
-                    validate_accepted_mission_artifact_replay(
-                        tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
-                    )?;
-                    validate_cited_mission_transcript_replay(
-                        tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
-                    )?;
+                    validate_native_result_replay(
+                        &journal,
+                        existing,
+                        binding,
+                        output.as_ref(),
+                        cited_policy_shape,
+                    )
+                    .map_err(crate::store::StoreError::Invalid)?;
+                    if cited_policy_shape {
+                        validate_accepted_mission_artifact_replay(
+                            tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
+                        )?;
+                        validate_cited_mission_transcript_replay(
+                            tx, store, &scope, &member, &journal, existing, binding, output.as_ref(),
+                        )?;
+                    }
                     return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
                 }
             }
@@ -2211,6 +2223,7 @@ pub(crate) fn preflight_native_worker_completion(
                 attempt_number,
                 max_attempts,
                 evidence,
+                cited_policy_shape,
                 parallel_evidence_free,
                 reviewed_parallel_context,
             }))
@@ -2476,28 +2489,31 @@ pub(crate) fn settle_native_worker_completion(
                     existing,
                     &authority.binding,
                     authority.output.as_ref(),
+                    authority.cited_policy_shape,
                 )
                 .map_err(crate::store::StoreError::Invalid)?;
-                validate_accepted_mission_artifact_replay(
-                    tx,
-                    store,
-                    &scope,
-                    &authority.member_id,
-                    &journal,
-                    existing,
-                    &authority.binding,
-                    authority.output.as_ref(),
-                )?;
-                validate_cited_mission_transcript_replay(
-                    tx,
-                    store,
-                    &scope,
-                    &authority.member_id,
-                    &journal,
-                    existing,
-                    &authority.binding,
-                    authority.output.as_ref(),
-                )?;
+                if authority.cited_policy_shape {
+                    validate_accepted_mission_artifact_replay(
+                        tx,
+                        store,
+                        &scope,
+                        &authority.member_id,
+                        &journal,
+                        existing,
+                        &authority.binding,
+                        authority.output.as_ref(),
+                    )?;
+                    validate_cited_mission_transcript_replay(
+                        tx,
+                        store,
+                        &scope,
+                        &authority.member_id,
+                        &journal,
+                        existing,
+                        &authority.binding,
+                        authority.output.as_ref(),
+                    )?;
+                }
                 return Ok(());
             }
             validate_native_completion_head(
@@ -2812,46 +2828,52 @@ pub(crate) fn settle_native_worker_completion(
                     &at,
                 )?;
             }
-            if let Some((_, reference, _, _, receipt_value)) = receipt.as_ref() {
-                append_native_policy_evaluation(
-                    tx,
-                    store,
-                    &scope,
-                    &authority.member_id,
-                    &authority.internal_user_id,
-                    &journal,
-                    &authority.binding,
-                    reference,
-                    receipt_value,
-                    usage.and_then(ObservedNativeUsage::tokens),
-                    &authority.provider_id,
-                    &authority.requested_model,
-                    &authority.provider_route_id,
-                    terminal_expected_revision + 1,
-                    sequence,
-                    event_id,
-                    &at,
-                )?;
-            } else if event_type == "worker-failed" && !authority.parallel_evidence_free {
-                let error = event.pointer("/payload/error").ok_or_else(|| {
-                    crate::store::StoreError::Invalid(
-                        "Mission worker failure error is unavailable.".into(),
-                    )
-                })?;
-                append_single_worker_run_failure(
-                    tx,
-                    store,
-                    &scope,
-                    &authority.member_id,
-                    &authority.internal_user_id,
-                    &journal,
-                    &authority.binding,
-                    error,
-                    terminal_expected_revision + 1,
-                    sequence,
-                    event_id,
-                    &at,
-                )?;
+            if authority.cited_policy_shape {
+                if let Some((_, reference, _, _, receipt_value)) = receipt.as_ref() {
+                    append_native_policy_evaluation(
+                        tx,
+                        store,
+                        &scope,
+                        &authority.member_id,
+                        &authority.internal_user_id,
+                        &journal,
+                        &authority.binding,
+                        reference,
+                        receipt_value,
+                        usage.and_then(ObservedNativeUsage::tokens),
+                        &authority.provider_id,
+                        &authority.requested_model,
+                        &authority.provider_route_id,
+                        terminal_expected_revision + 1,
+                        sequence,
+                        event_id,
+                        &at,
+                    )?;
+                } else if event_type == "worker-failed" {
+                    let error = event.pointer("/payload/error").ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Mission worker failure error is unavailable.".into(),
+                        )
+                    })?;
+                    append_single_worker_run_failure(
+                        tx,
+                        store,
+                        &scope,
+                        &authority.member_id,
+                        &authority.internal_user_id,
+                        &journal,
+                        &authority.binding,
+                        error,
+                        terminal_expected_revision + 1,
+                        sequence,
+                        event_id,
+                        &at,
+                    )?;
+                } else {
+                    return Err(crate::store::StoreError::Invalid(
+                        "Cited Mission output receipt is unavailable.".into(),
+                    ));
+                }
             }
             Ok(())
         })
@@ -6614,7 +6636,11 @@ fn validate_native_result_replay(
     terminal: &Value,
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
+    cited_policy_shape: bool,
 ) -> Result<(), String> {
+    if !cited_policy_shape {
+        return Ok(());
+    }
     if terminal.get("type").and_then(Value::as_str) == Some("run-cancelled") {
         return Ok(());
     }
@@ -9601,7 +9627,8 @@ mod tests {
             &terminal_failed_journal,
             &budget_failure,
             &binding,
-            None
+            None,
+            true
         )
         .is_ok());
         let live = mission_run::MissionRunJournalRow {
@@ -10149,13 +10176,27 @@ mod tests {
             events: vec![terminal.clone(), evaluation.clone(), failed.clone()],
         };
         assert!(
-            validate_native_result_replay(&journal, &terminal, &binding, Some(&output)).is_ok()
+            validate_native_result_replay(&journal, &terminal, &binding, Some(&output), true)
+                .is_ok()
         );
         let mut mismatched = journal;
         mismatched.events[2]["payload"]["error"]["category"] = json!("provider");
-        assert!(
-            validate_native_result_replay(&mismatched, &terminal, &binding, Some(&output)).is_err()
-        );
+        assert!(validate_native_result_replay(
+            &mismatched,
+            &terminal,
+            &binding,
+            Some(&output),
+            true
+        )
+        .is_err());
+        assert!(validate_native_result_replay(
+            &mismatched,
+            &terminal,
+            &binding,
+            Some(&output),
+            false
+        )
+        .is_ok());
     }
 
     #[test]

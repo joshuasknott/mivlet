@@ -905,7 +905,12 @@ evidence only when the encrypted Mission, selected one-step Plan, capability,
 output contract, acceptance, and worker facts match the exact cited-brief shape.
 General workers stay quality-unobserved instead of inheriting an unrelated
 benchmark cohort; persisted egress revalidates the exact policy reference, if
-any, that the native start transaction accepted.
+any, that the native start transaction accepted. The same provider boundary can
+now persist bounded usage and an encrypted output receipt for a provider-only
+general worker without invoking cited-policy evaluation, cited artifact creation,
+or cited conversation projection. It leaves general acceptance unevaluated and
+the Run nonterminal for the native coordinator/finalizer; general worker failure
+likewise remains one worker fact instead of incorrectly failing the whole graph.
 
 A provider-neutral portable graph runner now drives arbitrary compiled worker
 graphs through replay-safe callbacks rather than assuming either benchmark
