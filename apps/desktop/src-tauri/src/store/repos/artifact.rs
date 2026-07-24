@@ -277,6 +277,68 @@ fn handoff_aad(scope: &PrivateDataScope, id: &str) -> String {
     )
 }
 
+/// Remove project-only handoff authority when a private project is deleted.
+/// Source lineage becomes workspace lineage; a handoff into a deleted target
+/// is removed rather than silently transferred to another scope.
+pub fn detach_project_handoffs(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    project_id: &str,
+    updated_at: &str,
+) -> Result<(usize, usize)> {
+    let removed = tx.execute(
+        "DELETE FROM artifact_handoff
+         WHERE workspace_id=?1 AND owner_subject=?2 AND target_project_id=?3;",
+        rusqlite::params![scope.workspace_id(), scope.owner_subject(), project_id],
+    )?;
+    let mut stmt = tx.prepare(
+        "SELECT id,payload,payload_nonce FROM artifact_handoff
+         WHERE workspace_id=?1 AND owner_subject=?2 AND source_project_id=?3;",
+    )?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![scope.workspace_id(), scope.owner_subject(), project_id],
+            |row| Ok((row.get::<_, String>(0)?, payload_of(row)?)),
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut detached = 0;
+    for (handoff_id, sealed) in rows {
+        let mut payload = open_json(store, &sealed, &handoff_aad(scope, &handoff_id))?;
+        let source = payload
+            .get_mut("source")
+            .and_then(Value::as_object_mut)
+            .ok_or_else(|| StoreError::Invalid("Artifact handoff source is invalid.".into()))?;
+        if source.get("projectId").and_then(Value::as_str) != Some(project_id) {
+            return Err(StoreError::Invalid(
+                "Artifact handoff source does not match its encrypted content.".into(),
+            ));
+        }
+        source.remove("projectId");
+        payload["updatedAt"] = Value::String(updated_at.into());
+        let sealed = seal_json(store, &payload, &handoff_aad(scope, &handoff_id))?;
+        let changed = tx.execute(
+            "UPDATE artifact_handoff SET source_project_id=NULL,payload=?1,payload_nonce=?2
+             WHERE workspace_id=?3 AND owner_subject=?4 AND id=?5 AND source_project_id=?6;",
+            rusqlite::params![
+                sealed.ciphertext,
+                sealed.nonce,
+                scope.workspace_id(),
+                scope.owner_subject(),
+                handoff_id,
+                project_id
+            ],
+        )?;
+        if changed != 1 {
+            return Err(StoreError::Invalid(
+                "Artifact handoff changed during project deletion.".into(),
+            ));
+        }
+        detached += 1;
+    }
+    Ok((detached, removed))
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn create_private(
     tx: &Connection,
@@ -3508,6 +3570,98 @@ mod tests {
                 )?)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn project_handoff_detachment_never_transfers_target_authority() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        seed(&store, "shared", "member-a");
+        let scope = owner("shared", "member-a");
+        store
+            .transaction(|tx| {
+                let payload = seal_json(&store, &json!({"id":"project-2"}), "project:project-2")?;
+                tx.execute(
+                    "INSERT INTO project(id,workspace_id,title_fingerprint,authority,visibility,
+                     owner_member_id,created_by_internal_user_id,lifecycle,created_at,updated_at,
+                     payload,payload_nonce)
+                     VALUES ('project-2','shared','title','local','member-private','member-a',
+                     'user-member-a','active','t','t',?1,?2)",
+                    rusqlite::params![payload.ciphertext, payload.nonce],
+                )?;
+                create_private(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "run-1",
+                    "thread-1",
+                    "message-1",
+                    "document",
+                    "title",
+                    "hash-1",
+                    3,
+                    "t",
+                    &artifact_value("shared", "member-a", "version-1", 1),
+                    &version("version-1", 1, "One", None),
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let handoff = store
+            .transaction(|tx| {
+                propose_handoff(
+                    tx,
+                    &store,
+                    &scope,
+                    "artifact-1",
+                    "version-1",
+                    "project-2",
+                    "user-member-a",
+                    None,
+                    "t2",
+                )
+            })
+            .unwrap();
+        let handoff_id = handoff["id"].as_str().unwrap().to_string();
+        assert_eq!(
+            store
+                .transaction(|tx| {
+                    detach_project_handoffs(tx, &store, &scope, "project-1", "t3")
+                })
+                .unwrap(),
+            (1, 0)
+        );
+        let source = store
+            .with_conn(|tx| {
+                let sealed = tx.query_row(
+                    "SELECT payload,payload_nonce FROM artifact_handoff
+                     WHERE workspace_id='shared' AND owner_subject=?1 AND id=?2",
+                    rusqlite::params![scope.owner_subject(), handoff_id],
+                    payload_of,
+                )?;
+                open_json(&store, &sealed, &handoff_aad(&scope, &handoff_id))
+            })
+            .unwrap();
+        assert_eq!(source.pointer("/source/projectId"), None);
+        assert_eq!(source["updatedAt"], "t3");
+        assert_eq!(
+            store
+                .transaction(|tx| {
+                    detach_project_handoffs(tx, &store, &scope, "project-2", "t4")
+                })
+                .unwrap(),
+            (0, 1)
+        );
+        let count: i64 = store
+            .with_conn(|tx| {
+                Ok(tx.query_row(
+                    "SELECT COUNT(*) FROM artifact_handoff WHERE workspace_id='shared'",
+                    [],
+                    |row| row.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]

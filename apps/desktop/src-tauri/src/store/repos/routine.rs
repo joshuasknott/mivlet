@@ -493,6 +493,135 @@ pub fn list(
     Ok(out)
 }
 
+/// Detach canonical Routines from a project that is being deleted while
+/// preserving their immutable versions and occurrence history.
+pub fn detach_project(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    project_id: &str,
+    updated_at: &str,
+) -> Result<usize> {
+    let subject = format!("member:{owner_member_id}");
+    let mut stmt = tx.prepare(
+        "SELECT id,payload,payload_nonce FROM routine_record
+         WHERE workspace_id=?1 AND owner_subject=?2 AND project_id=?3;",
+    )?;
+    let rows = stmt
+        .query_map(
+            rusqlite::params![scope.workspace_id(), subject, project_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Sealed {
+                        ciphertext: row.get(1)?,
+                        nonce: row.get(2)?,
+                    },
+                ))
+            },
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let mut detached = 0;
+    for (routine_id, sealed) in rows {
+        let mut routine = open_json(
+            store,
+            &sealed,
+            &routine_aad(scope.workspace_id(), &subject, &routine_id),
+        )?;
+        detach_project_fields(&mut routine, project_id, updated_at, "Routine")?;
+        let sealed = seal_json(
+            store,
+            &routine,
+            &routine_aad(scope.workspace_id(), &subject, &routine_id),
+        )?;
+        tx.execute(
+            "UPDATE routine_record SET project_id=NULL,revision=revision+1,updated_at=?1,
+             payload=?2,payload_nonce=?3
+             WHERE workspace_id=?4 AND owner_subject=?5 AND id=?6 AND project_id=?7;",
+            rusqlite::params![
+                updated_at,
+                sealed.ciphertext,
+                sealed.nonce,
+                scope.workspace_id(),
+                subject,
+                routine_id,
+                project_id
+            ],
+        )?;
+
+        let mut trigger_stmt = tx.prepare(
+            "SELECT id,payload,payload_nonce FROM routine_trigger
+             WHERE workspace_id=?1 AND owner_subject=?2 AND routine_id=?3 AND project_id=?4;",
+        )?;
+        let triggers = trigger_stmt
+            .query_map(
+                rusqlite::params![scope.workspace_id(), subject, routine_id, project_id],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        Sealed {
+                            ciphertext: row.get(1)?,
+                            nonce: row.get(2)?,
+                        },
+                    ))
+                },
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (trigger_id, sealed) in triggers {
+            let mut trigger = open_json(
+                store,
+                &sealed,
+                &trigger_aad(scope.workspace_id(), &subject, &trigger_id),
+            )?;
+            detach_project_fields(&mut trigger, project_id, updated_at, "Trigger")?;
+            let sealed = seal_json(
+                store,
+                &trigger,
+                &trigger_aad(scope.workspace_id(), &subject, &trigger_id),
+            )?;
+            tx.execute(
+                "UPDATE routine_trigger SET project_id=NULL,revision=revision+1,updated_at=?1,
+                 payload=?2,payload_nonce=?3
+                 WHERE workspace_id=?4 AND owner_subject=?5 AND id=?6 AND project_id=?7;",
+                rusqlite::params![
+                    updated_at,
+                    sealed.ciphertext,
+                    sealed.nonce,
+                    scope.workspace_id(),
+                    subject,
+                    trigger_id,
+                    project_id
+                ],
+            )?;
+        }
+        detached += 1;
+    }
+    Ok(detached)
+}
+
+fn detach_project_fields(
+    value: &mut Value,
+    project_id: &str,
+    updated_at: &str,
+    label: &str,
+) -> Result<()> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Invalid(format!("{label} content is invalid.")))?;
+    if object.get("projectId").and_then(Value::as_str) != Some(project_id) {
+        return Err(StoreError::Invalid(format!(
+            "{label} project does not match its encrypted content."
+        )));
+    }
+    object.remove("projectId");
+    object.insert("updatedAt".into(), Value::String(updated_at.into()));
+    if let Some(scope) = object.get_mut("scope").and_then(Value::as_object_mut) {
+        scope.remove("projectId");
+    }
+    Ok(())
+}
+
 pub fn scheduler_inputs(
     tx: &Connection,
     store: &Store,
@@ -1912,5 +2041,36 @@ mod tests {
                 )
             })
             .is_ok());
+        store
+            .transaction(|tx| {
+                project::delete(
+                    tx,
+                    &store,
+                    &DataScope::workspace("w1")?,
+                    "member-1",
+                    "user-1",
+                    "p1",
+                    1,
+                    "later",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let workspace_scope = DataScope::workspace("w1").unwrap();
+        let workspace_private = PrivateDataScope::for_authenticated_user(
+            workspace_scope.clone(),
+            "user-1",
+            Some("member-1"),
+        )
+        .unwrap();
+        let detached = store
+            .with_conn(|tx| list(tx, &store, &workspace_scope, &workspace_private))
+            .unwrap();
+        assert_eq!(detached.len(), 1);
+        assert_eq!(detached[0].routine.get("projectId"), None);
+        assert_eq!(detached[0].routine.pointer("/scope/projectId"), None);
+        assert_eq!(detached[0].routine["updatedAt"], "later");
+        assert_eq!(detached[0].triggers[0].get("projectId"), None);
+        assert_eq!(detached[0].triggers[0]["updatedAt"], "later");
     }
 }

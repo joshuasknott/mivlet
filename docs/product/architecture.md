@@ -55,6 +55,12 @@ are also fully persisted in the SQLite vault.
   stale, error, indexing, disconnected, or out-of-scope sources are excluded before
   context assembly. Hybrid retrieval uses Reciprocal-Rank Fusion (RRF, k=60) to combine
   lexical and semantic scores.
+- Deleting a private Project is one native transaction. Workspace-owned context
+  is detached, canonical Routine and trigger ciphertext is rewritten without a
+  project identity, immutable Routine versions and occurrence history remain,
+  source-side artifact handoffs retain lineage without the deleted source
+  association, and target-side handoffs are removed rather than acquiring
+  workspace authority.
 - Citations identify the exact source and excerpt used. Pinned context is
   deliberate, not a trust upgrade.
 - Imported content never becomes durable memory implicitly. “Remember” uses the

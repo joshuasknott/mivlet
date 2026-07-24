@@ -433,6 +433,13 @@ pub fn delete(
     }
     tx.execute("INSERT INTO project_tombstone (workspace_id,project_id,deleted_at,deleted_by_internal_user_id,last_revision) VALUES (?1,?2,?3,?4,?5);",
         rusqlite::params![scope.workspace_id(),id,deleted_at,internal_user_id,base_revision+1])?;
+    super::routine::detach_project(tx, store, scope, owner_member_id, id, deleted_at)?;
+    let private = super::scope::PrivateDataScope::for_authenticated_user(
+        scope.clone(),
+        internal_user_id,
+        Some(owner_member_id),
+    )?;
+    super::artifact::detach_project_handoffs(tx, store, &private, id, deleted_at)?;
     for table in [
         "thread",
         "knowledge_source",
