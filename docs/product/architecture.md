@@ -320,8 +320,11 @@ filters to the transient untrusted payload; and persists only a hashed source
 reference plus content-free trigger evidence. Duplicate source references are
 idempotent, while stale Connection authority, cross-owner state, malformed
 identity, or oversized/deep payloads fail closed. Native provider/MCP adapters
-still need to call this boundary with their authenticated event evidence before
-the product can claim event-trigger execution.
+must call this boundary with authenticated event evidence. Local STDIO and
+remote MCP sessions now do so for native `tools/list_changed` and
+`resources/list_changed` notifications, reusing their exact Connection revision
+and owner while retaining no raw notification content. Other provider events and
+signed webhooks remain unconnected.
 
 For records created after this boundary, native commands overwrite renderer
 identity and stamp the authenticated workspace, project, member, and creator on

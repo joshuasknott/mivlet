@@ -1169,7 +1169,9 @@ migration mappings, in-flight work, and another private owner's state fail close
 instead of being stranded or guessed. The native driver additionally supports
 bounded five-field cron recurrence with timezone/DST, named month/weekday,
 range/list/step, cutoff, missed-run, deduplication, and restart semantics;
-malformed or unsupported cron syntax fails closed. Event triggers,
+malformed or unsupported cron syntax fails closed. Local MCP tool/resource-list
+change notifications now cross the native adapter into the same encrypted,
+fenced Connection-event intake. Other event triggers,
 workspace-shared writes, packaged restart observation, and live provider
 validation remain open, so the broader migration and experience checkboxes stay
 unchecked.
@@ -1192,9 +1194,13 @@ cron editor. A native-only Connection-event intake now proves the exact active
 owner, live Connection revision, fenced writer, bounded structural filter,
 source-reference deduplication, and secret/content-free occurrence evidence.
 Duplicate, stale, nonmatching, and oversized fixture events are covered. No
-renderer command can forge this evidence. Native provider/MCP adapter wiring,
-signed webhooks, thresholds, monitoring/follow-up inputs, and live event
-validation remain open; therefore the aggregate checkboxes stay open.
+renderer command can forge this evidence. Native STDIO and remote MCP
+tool/resource-list change notifications now provide the first real adapter call:
+the session's exact workspace, private owner, Connection revision, transport,
+and native receipt time are revalidated, while raw notification payload is not
+stored. Other provider events, signed webhooks, thresholds,
+monitoring/follow-up inputs, and live event validation remain open; therefore
+the aggregate checkboxes stay open.
 
 ### Wave 5C - Always-on execution
 

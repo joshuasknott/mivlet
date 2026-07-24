@@ -18,26 +18,10 @@ use crate::store::repos::routine::{self, DriverLeaseRow, RoutineSchedulerInput};
 
 const MAX_SCAN_MINUTES: i64 = 370 * 24 * 60;
 const MAX_MISSED_OCCURRENCES: usize = 100;
-#[allow(
-    dead_code,
-    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
-)]
 const MAX_CONNECTION_EVENT_BYTES: usize = 64 * 1024;
-#[allow(
-    dead_code,
-    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
-)]
 const MAX_CONNECTION_EVENT_NODES: usize = 512;
-#[allow(
-    dead_code,
-    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
-)]
 const MAX_CONNECTION_EVENT_DEPTH: usize = 8;
 
-#[allow(
-    dead_code,
-    reason = "constructed only by native Connection adapters once they have authenticated exact source evidence"
-)]
 pub(crate) struct ConnectionEventObservation<'a> {
     pub connection_id: &'a str,
     pub connection_revision: i64,
@@ -457,10 +441,6 @@ fn stable_id(prefix: &str, parts: &[&str]) -> String {
     format!("{prefix}_{:x}", digest.finalize())
 }
 
-#[allow(
-    dead_code,
-    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
-)]
 fn bounded_connection_event_value(value: &Value, depth: usize, nodes: &mut usize) -> bool {
     *nodes += 1;
     if *nodes > MAX_CONNECTION_EVENT_NODES || depth > MAX_CONNECTION_EVENT_DEPTH {
@@ -487,10 +467,6 @@ fn bounded_connection_event_value(value: &Value, depth: usize, nodes: &mut usize
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
-)]
 fn event_filter_matches(filter: &Value, payload: &Value) -> bool {
     match (filter, payload) {
         (Value::Object(expected), Value::Object(actual)) => expected.iter().all(|(key, value)| {
@@ -502,10 +478,6 @@ fn event_filter_matches(filter: &Value, payload: &Value) -> bool {
     }
 }
 
-#[allow(
-    dead_code,
-    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
-)]
 fn connection_event_trigger_matches(
     trigger: &Value,
     connection_id: &str,
@@ -528,10 +500,6 @@ fn connection_event_trigger_matches(
     bounded_connection_event_value(filter, 0, &mut nodes) && event_filter_matches(filter, payload)
 }
 
-#[allow(
-    dead_code,
-    reason = "native Connection adapters will call this boundary; exposing it to the renderer would allow forged provider events"
-)]
 pub(crate) fn observe_connection_event(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,

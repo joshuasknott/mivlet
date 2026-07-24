@@ -226,6 +226,19 @@ active worker's saved provider independently from the current connected
 provider catalogue; neither general nor cited recovery depends on the model
 picker's active provider.
 
+## Routine MCP Event Adapter Update (2026-07-24)
+
+This update supersedes the earlier statement that no MCP adapter calls the
+native Routine event intake. Authenticated local STDIO and remote MCP
+`tools/list_changed` and `resources/list_changed` notifications now enter that
+boundary using the native session's exact workspace, private owner, Connection
+identity and revision, transport, and receipt time. Raw notification content is
+not persisted; the Routine ledger receives only the bounded semantic event,
+hashed source reference, and content-free trigger evidence. Duplicate delivery
+remains deduplicated by the canonical occurrence key. Other provider event
+adapters, signed webhooks, thresholds/monitoring/follow-up triggers, packaged
+restart observation, and live event validation remain open.
+
 ## Evidence Checked
 
 - `docs/product/vision.md`

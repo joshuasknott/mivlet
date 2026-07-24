@@ -11,4 +11,5 @@ mod routine_runtime;
 mod runtime;
 mod state;
 
+pub(crate) use routine_runtime::{observe_connection_event, ConnectionEventObservation};
 pub use runtime::*;

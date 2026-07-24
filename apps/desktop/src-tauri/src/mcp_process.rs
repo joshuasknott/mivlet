@@ -2584,11 +2584,12 @@ fn observe_discovery_frame(session_id: &str, frame: &str) {
     let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
         return;
     };
-    if matches!(
-        object.get("method").and_then(Value::as_str),
-        Some("notifications/tools/list_changed" | "notifications/resources/list_changed")
-    ) {
+    if let Some(
+        method @ ("notifications/tools/list_changed" | "notifications/resources/list_changed"),
+    ) = object.get("method").and_then(Value::as_str)
+    {
         mark_discovery_changed(session_id);
+        let _ = observe_routine_discovery_change(session_id, method);
         return;
     }
     let Some(id) = object.get("id").and_then(discovery_request_id) else {
@@ -2673,6 +2674,78 @@ fn observe_discovery_frame(session_id: &str, frame: &str) {
     collection.values = values;
     collection.expected_cursor = next_cursor;
     collection.complete = collection.expected_cursor.is_none();
+}
+
+fn observe_routine_discovery_change(session_id: &str, method: &str) -> Result<usize, String> {
+    let event_type = match method {
+        "notifications/tools/list_changed" => "mcp.tools.list_changed",
+        "notifications/resources/list_changed" => "mcp.resources.list_changed",
+        _ => return Err("The MCP discovery change event is unsupported.".into()),
+    };
+    let local = process_map()
+        .lock()
+        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .get(session_id)
+        .map(|process| {
+            (
+                process.workspace_id.clone(),
+                process.owner_subject.clone(),
+                process.connection_id.clone(),
+                process.connection_revision,
+                "stdio",
+            )
+        });
+    let authority = if let Some(local) = local {
+        local
+    } else {
+        remote_sessions()
+            .lock()
+            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?
+            .get(session_id)
+            .map(|session| {
+                (
+                    session.workspace_id.clone(),
+                    session.owner_subject.clone(),
+                    session.connection_id.clone(),
+                    session.connection_revision,
+                    "remote",
+                )
+            })
+            .ok_or_else(|| "This MCP session is unavailable.".to_string())?
+    };
+    let (workspace_id, owner_subject, connection_id, connection_revision, transport) = authority;
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Write,
+    )?;
+    if scope.private.owner_subject() != owner_subject {
+        return Err("This MCP session belongs to another private owner.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let received_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+    let payload = serde_json::json!({
+        "transport":transport,
+        "change":if event_type == "mcp.tools.list_changed" {"tools"} else {"resources"}
+    });
+    store
+        .transaction(|tx| {
+            crate::scheduler::observe_connection_event(
+                tx,
+                store,
+                &scope,
+                crate::scheduler::ConnectionEventObservation {
+                    connection_id: &connection_id,
+                    connection_revision,
+                    event_type,
+                    source_reference: session_id,
+                    payload: &payload,
+                    received_at: &received_at,
+                },
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn verify_discovery_proof(
