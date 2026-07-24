@@ -73,6 +73,56 @@ function TransientTriggerHarness() {
   );
 }
 
+function NestedModalHarness() {
+  const [parentOpen, setParentOpen] = useState(false);
+  const [childOpen, setChildOpen] = useState(false);
+  const parentRef = useRef<HTMLElement>(null);
+  const childRef = useRef<HTMLElement>(null);
+
+  useModalFocusTrap({
+    active: parentOpen,
+    containerRef: parentRef,
+    onClose: () => setParentOpen(false)
+  });
+  useModalFocusTrap({
+    active: childOpen,
+    containerRef: childRef,
+    onClose: () => setChildOpen(false)
+  });
+
+  return (
+    <>
+      <button type="button" onClick={() => setParentOpen(true)}>
+        Open parent
+      </button>
+      {parentOpen ? (
+        <section
+          ref={parentRef}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Parent modal"
+          tabIndex={-1}
+        >
+          <button type="button" onClick={() => setChildOpen(true)}>
+            Open child
+          </button>
+          {childOpen ? (
+            <section
+              ref={childRef}
+              role="dialog"
+              aria-modal="true"
+              aria-label="Child modal"
+              tabIndex={-1}
+            >
+              <button type="button">Child action</button>
+            </section>
+          ) : null}
+        </section>
+      ) : null}
+    </>
+  );
+}
+
 describe("useModalFocusTrap", () => {
   it("focuses the modal, wraps Tab in both directions, closes on Escape, and restores focus", async () => {
     const user = userEvent.setup();
@@ -83,6 +133,7 @@ describe("useModalFocusTrap", () => {
     const first = screen.getByRole("textbox", { name: "First field" });
     const last = screen.getByRole("button", { name: "Last action" });
     await waitFor(() => expect(first).toHaveFocus());
+    expect(trigger).toHaveAttribute("inert");
 
     await user.click(last);
     await user.tab();
@@ -94,6 +145,7 @@ describe("useModalFocusTrap", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).not.toHaveAttribute("inert");
   });
 
   it("returns focus to an explicit stable control when the opener unmounts", async () => {
@@ -101,10 +153,31 @@ describe("useModalFocusTrap", () => {
     render(<TransientTriggerHarness />);
 
     await user.click(screen.getByRole("button", { name: "Transient action" }));
+    expect(screen.getByRole("button", { name: "Stable control", hidden: true })).toHaveAttribute(
+      "inert"
+    );
     await user.keyboard("{Escape}");
 
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Stable control" })).toHaveFocus()
     );
+  });
+
+  it("reference-counts inert background branches across nested dialogs", async () => {
+    const user = userEvent.setup();
+    render(<NestedModalHarness />);
+
+    const outerTrigger = screen.getByRole("button", { name: "Open parent" });
+    await user.click(outerTrigger);
+    await user.click(screen.getByRole("button", { name: "Open child" }));
+    expect(outerTrigger).toHaveAttribute("inert");
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Child modal" })).not.toBeInTheDocument();
+    expect(outerTrigger).toHaveAttribute("inert");
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Parent modal" })).not.toBeInTheDocument();
+    expect(outerTrigger).not.toHaveAttribute("inert");
   });
 });

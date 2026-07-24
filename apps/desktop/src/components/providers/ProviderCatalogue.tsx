@@ -13,6 +13,7 @@ import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BackendAuthState, BackendProvider, BackendVerifyResult } from "@fable/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { ProviderIcon } from "../ProviderIcon";
 
 export const FEATURED_PROVIDER_FAMILY_IDS = [
@@ -585,23 +586,27 @@ function ProviderConnectionModal({
   const [replacingCredential, setReplacingCredential] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; tone: string } | null>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
-  const returnFocusRef = useRef<HTMLElement | null>(null);
   const keyInputRef = useRef<HTMLInputElement>(null);
   const customBaseUrlRef = useRef<HTMLInputElement>(null);
   const customModelRef = useRef<HTMLInputElement>(null);
   const customKeyRef = useRef<HTMLInputElement>(null);
   const selectedMethod = family.methods.find((method) => method.id === selectedMethodId);
 
+  useModalFocusTrap({
+    active: true,
+    containerRef: modalRef,
+    initialFocusRef: closeRef,
+    onClose
+  });
+
   useEffect(() => {
-    returnFocusRef.current = document.activeElement as HTMLElement | null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    window.requestAnimationFrame(() => closeRef.current?.focus());
     return () => {
       document.body.style.overflow = previousOverflow;
-      returnFocusRef.current?.focus();
     };
   }, []);
 
@@ -610,31 +615,6 @@ function ProviderConnectionModal({
       window.requestAnimationFrame(() => backRef.current?.focus());
     }
   }, [selectedMethodId]);
-
-  const handleDialogKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-
-    const focusable = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), input:not(:disabled), [href], [tabindex]:not([tabindex="-1"])'
-      )
-    ).filter((element) => !element.hasAttribute("hidden"));
-    if (focusable.length === 0) return;
-    const first = focusable[0];
-    const last = focusable[focusable.length - 1];
-    if (event.shiftKey && (document.activeElement === first || !event.currentTarget.contains(document.activeElement))) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && (document.activeElement === last || !event.currentTarget.contains(document.activeElement))) {
-      event.preventDefault();
-      first.focus();
-    }
-  };
 
   const connect = async (providerId: string, secret: string, clearSecret?: () => void) => {
     setPending(true);
@@ -707,12 +687,13 @@ function ProviderConnectionModal({
 
   return (
     <div
+      ref={modalRef}
       className="provider-connection-modal"
       role="dialog"
       aria-modal="true"
       aria-labelledby={`provider-family-${family.id}`}
       aria-describedby={`provider-family-${family.id}-description`}
-      onKeyDown={handleDialogKeyDown}
+      tabIndex={-1}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

@@ -9,6 +9,8 @@ const FOCUSABLE_SELECTOR = [
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
+const inertClaims = new Map<HTMLElement, { count: number; originallyInert: boolean }>();
+
 function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
     (element) =>
@@ -18,9 +20,47 @@ function focusableElements(container: HTMLElement) {
   );
 }
 
+function claimModalBackground(container: HTMLElement) {
+  const claimed: HTMLElement[] = [];
+  let branch: HTMLElement = container;
+  let parent = branch.parentElement;
+
+  while (parent) {
+    for (const sibling of parent.children) {
+      if (!(sibling instanceof HTMLElement) || sibling === branch) continue;
+      const existing = inertClaims.get(sibling);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        inertClaims.set(sibling, {
+          count: 1,
+          originallyInert: sibling.hasAttribute("inert")
+        });
+        sibling.setAttribute("inert", "");
+      }
+      claimed.push(sibling);
+    }
+    if (parent === document.body) break;
+    branch = parent;
+    parent = parent.parentElement;
+  }
+
+  return () => {
+    for (const element of claimed) {
+      const claim = inertClaims.get(element);
+      if (!claim) continue;
+      claim.count -= 1;
+      if (claim.count > 0) continue;
+      inertClaims.delete(element);
+      if (!claim.originallyInert) element.removeAttribute("inert");
+    }
+  };
+}
+
 /**
  * Keeps keyboard focus inside an active modal, focuses its first useful
- * control, closes it on Escape, and returns focus to the opening control.
+ * control, removes background branches from keyboard and assistive-technology
+ * navigation, closes it on Escape, and returns focus to the opening control.
  *
  * A parent modal yields while a nested aria-modal dialog is present so only
  * the top-most dialog owns the keyboard.
@@ -49,6 +89,7 @@ export function useModalFocusTrap({
 
     const inferredReturnFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const releaseModalBackground = claimModalBackground(container);
     const focusInitial = () => {
       const target = initialFocusRef?.current ?? focusableElements(container)[0] ?? container;
       target.focus();
@@ -92,6 +133,7 @@ export function useModalFocusTrap({
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
+      releaseModalBackground();
       const returnFocus = returnFocusRef?.current ?? inferredReturnFocus;
       if (returnFocus?.isConnected) {
         returnFocus.focus();

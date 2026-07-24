@@ -102,11 +102,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   that their synthetic records stay in the browser and cannot run provider
   work. Every current modal entry point now has initial focus, keyboard
   containment, safe Escape close, and restoration to the opener or an explicit
-  stable invoking control through the shared focus scope or the provider
-  catalogue's equivalent dedicated trap. The final desktop style layer also
-  applies an operating-system reduced-motion preference globally to scrolling,
-  transitions, and animations. This is not a claim of complete packaged-WebView
-  or assistive-technology validation.
+  stable invoking control through one shared focus scope. It also makes
+  background branches inert for keyboard and assistive-technology navigation
+  while the modal is active, including nested confirmations. The final desktop
+  style layer applies an operating-system reduced-motion preference globally to
+  scrolling, transitions, and animations. This is not a claim of complete
+  packaged-WebView or assistive-technology validation.
 - Native API providers use bounded dynamic model discovery. Live availability
   and entitlements still depend on each provider account and are not proven by
   fixture tests.
