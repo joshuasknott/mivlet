@@ -205,6 +205,7 @@ pub fn run() {
             mission_runs::mission_run_restore_checkpoint,
             mission_coordination::mission_coordination_join_open,
             mission_coordination::mission_coordination_join_resolve,
+            mission_coordination::mission_coordination_aggregation_record,
             mission_human_input::mission_human_input_request,
             mission_human_input::mission_human_input_pending_list,
             mission_human_input::mission_human_input_receive,

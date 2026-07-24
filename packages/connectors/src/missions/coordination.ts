@@ -57,22 +57,8 @@ export interface MissionCoordinationDecision {
   complete: boolean;
 }
 
-export interface DeterministicAggregationInput {
-  sourceStepKey: string;
-  workerId: Spine.Primitives.WorkerId;
-  status: Extract<CoordinationWorkerState, "completed" | "failed" | "cancelled">;
-  outputs: readonly Spine.Missions.ProducedOutput[];
-}
-
-export interface DeterministicAggregationReceipt {
-  version: 1;
-  strategy: "ordered-manifest-v1";
-  stepKey: string;
-  status: "complete" | "partial";
-  inputs: readonly DeterministicAggregationInput[];
-  producedOutputs: readonly Spine.Missions.ProducedOutput[];
-  missingRequiredOutputKeys: readonly string[];
-}
+export type DeterministicAggregationInput = Spine.Missions.DeterministicAggregationInput;
+export type DeterministicAggregationReceipt = Spine.Missions.DeterministicAggregationReceipt;
 
 export class MissionCoordinationError extends Error {
   constructor(message: string) {

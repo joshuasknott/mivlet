@@ -740,6 +740,23 @@ export interface ProducedOutput {
   valueReference?: string;
 }
 
+export interface DeterministicAggregationInput {
+  sourceStepKey: string;
+  workerId: WorkerId;
+  status: "completed" | "failed" | "cancelled";
+  outputs: readonly ProducedOutput[];
+}
+
+export interface DeterministicAggregationReceipt {
+  version: 1;
+  strategy: "ordered-manifest-v1";
+  stepKey: string;
+  status: "complete" | "partial";
+  inputs: readonly DeterministicAggregationInput[];
+  producedOutputs: readonly ProducedOutput[];
+  missingRequiredOutputKeys: readonly string[];
+}
+
 export interface AcceptanceResult {
   criterionKey: string;
   status: "met" | "partially-met" | "not-met" | "not-evaluated";
@@ -823,6 +840,7 @@ export const RUN_EVENT_TYPES = [
   "handoff-created",
   "join-opened",
   "join-resolved",
+  "aggregation-recorded",
   "evaluation-recorded",
   "artifact-produced",
   "usage-recorded",
@@ -891,6 +909,7 @@ export interface RunEventPayloadByType {
   "handoff-created": { handoffId: HandoffId; fromWorkerId?: WorkerId; toWorkerId?: WorkerId };
   "join-opened": { join: WorkerJoin };
   "join-resolved": { join: WorkerJoin };
+  "aggregation-recorded": { aggregation: DeterministicAggregationReceipt };
   "evaluation-recorded": { evaluation: EvaluationResult };
   "artifact-produced": { artifactId: ArtifactId; versionId?: ArtifactVersionId; workerId?: WorkerId };
   "usage-recorded": { usage: UsageMeasurement };

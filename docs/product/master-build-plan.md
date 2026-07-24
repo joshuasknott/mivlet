@@ -794,8 +794,16 @@ dependency workers, deadline, journal head, and exact replay. Creating a worker
 for a multi-source step requires that exact satisfied join, and a `coordinate`
 step cannot be substituted with a model worker. The desktop runtime exposes the
 boundary only under Tauri; browser preview creates no durable coordination state.
-General worker/aggregation orchestration, provider routing across those workers,
-restart recovery, and the calm product surface remain open.
+Product Spine contract 1.5 adds a replay-safe `aggregation-recorded` fact. For an
+explicit coordinate step, Rust derives its ordered manifest from the exact saved
+worker output contracts and reference-bearing terminal outputs after the required
+join is satisfied. It records complete or partial truth and missing required keys,
+but copies no referenced output body and grants no policy, acceptance, or artifact
+authority. The portable journal independently rejects substituted workers,
+outputs, order, status, and duplicate aggregation. General automatic graph
+advancement, provider routing across arbitrary workers, artifact materialization
+from the general manifest, restart recovery, and the calm product surface remain
+open.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and

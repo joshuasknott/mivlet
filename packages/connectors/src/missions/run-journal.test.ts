@@ -548,6 +548,74 @@ describe("durable run journal projection", () => {
     }, id<"run-event">("event-7")))).toThrow("declared deadline");
   });
 
+  it("records only an exact deterministic aggregation over terminal worker outputs", () => {
+    const left = worker("worker-1", {
+      outputContract: {
+        slots: [{ key: "left", description: "Left result", required: true }],
+        includeEvidence: false,
+        includeUncertainty: true,
+        delivery: "join"
+      }
+    });
+    const right = worker("worker-2", {
+      outputContract: {
+        slots: [{ key: "right", description: "Right result", required: true }],
+        includeEvidence: false,
+        includeUncertainty: true,
+        delivery: "join"
+      }
+    });
+    const started = startedWorkers(left, right);
+    const leftOutput: Spine.Missions.ProducedOutput = {
+      key: "left", summary: "Left output is available.",
+      valueReference: "mission-output:v1:left"
+    };
+    const rightOutput: Spine.Missions.ProducedOutput = {
+      key: "right", summary: "Right output is available.",
+      valueReference: "mission-output:v1:right"
+    };
+    const join = openJoin();
+    const opened = appendRunEvent(started, event("join-opened", 7, {
+      join
+    }, id<"run-event">("event-6")));
+    const first = appendRunEvent(opened, event("worker-completed", 8, {
+      workerId: left.id, outputs: [leftOutput]
+    }, id<"run-event">("event-7")));
+    const settled = appendRunEvent(first, event("worker-completed", 9, {
+      workerId: right.id, outputs: [rightOutput]
+    }, id<"run-event">("event-8")));
+    const joined = appendRunEvent(settled, event("join-resolved", 10, {
+      join: { ...join, status: "satisfied", satisfiedWorkerIds: join.workerIds }
+    }, id<"run-event">("event-9")));
+    const aggregation: Spine.Missions.DeterministicAggregationReceipt = {
+      version: 1,
+      strategy: "ordered-manifest-v1",
+      stepKey: "combine",
+      status: "complete",
+      inputs: [
+        { sourceStepKey: "step-worker-1", workerId: left.id, status: "completed", outputs: [leftOutput] },
+        { sourceStepKey: "step-worker-2", workerId: right.id, status: "completed", outputs: [rightOutput] }
+      ],
+      producedOutputs: [leftOutput, rightOutput],
+      missingRequiredOutputKeys: []
+    };
+    const recorded = appendRunEvent(joined, event("aggregation-recorded", 11, {
+      aggregation
+    }, id<"run-event">("event-10")));
+    expect(recorded.events.at(-1)?.type).toBe("aggregation-recorded");
+
+    expect(() => appendRunEvent(joined, event("aggregation-recorded", 11, {
+      aggregation: { ...aggregation, producedOutputs: [rightOutput, leftOutput] }
+    }, id<"run-event">("event-10")))).toThrow("derived exactly");
+    expect(() => appendRunEvent(recorded, event("aggregation-recorded", 12, {
+      aggregation
+    }, id<"run-event">("event-11")))).toThrow("immutable");
+
+    expect(() => appendRunEvent(settled, event("aggregation-recorded", 10, {
+      aggregation
+    }, id<"run-event">("event-9")))).toThrow("satisfied dependency join");
+  });
+
   it("can cancel the exact active join while its run is cancelling", () => {
     const join = openJoin();
     const opened = appendRunEvent(startedWorkers(), event("join-opened", 7, { join }, id<"run-event">("event-6")));

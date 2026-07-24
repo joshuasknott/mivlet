@@ -124,9 +124,15 @@ Resolution derives only from immutable terminal worker facts and is fenced to th
 selected Plan revision, target step, ordered workers, strategy, quorum, deadline,
 owner, journal head, and exact replay identity. A later multi-source worker can
 start only after that exact join is satisfied; deterministic coordinate steps
-cannot be replaced by model workers. The current desktop parallel journey remains
-a fixed native composition while arbitrary worker and aggregation orchestration
-is completed.
+cannot be replaced by model workers. Product Spine contract 1.5 represents the
+result as one immutable `aggregation-recorded` run event. Native code derives its
+ordered complete-or-partial manifest from exact reference-bearing terminal worker
+outputs and saved output contracts, while the portable journal revalidates worker
+scope, plan revision, terminal facts, output declarations, order, missing keys,
+and replay. The event carries no referenced output body and grants no acceptance or
+artifact authority. The current desktop parallel journey remains a fixed native
+composition while arbitrary graph advancement and artifact orchestration are
+completed.
 
 ## Schedules And Commands
 

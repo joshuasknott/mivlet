@@ -21,6 +21,7 @@ import {
   finalizeRuntimeParallelApproaches,
   recoverRuntimeCompletedParallelApproaches,
   prepareRuntimeCitedMissionRetry,
+  recordRuntimeMissionAggregation,
   receiveRuntimeMissionHumanInput,
   verifiedLatestRuntimePendingMissionWait,
   readRuntimeCitedMissionReceipts,
@@ -70,6 +71,10 @@ describe("mission runtime boundary", () => {
     await expect(resolveRuntimeMissionJoin({
       runId: "run-1", joinKey: "mission_join_1", eventId: "event-join-resolve",
       idempotencyKey: "join-resolve-1", expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toBeNull();
+    await expect(recordRuntimeMissionAggregation({
+      runId: "run-1", targetStepKey: "combine", eventId: "event-aggregation",
+      idempotencyKey: "aggregation-1", expectedRunRevision: 4, expectedLastSequence: 3
     })).resolves.toBeNull();
     await expect(openRuntimeParallelApproachesJoin({
       runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
@@ -405,6 +410,10 @@ describe("mission runtime boundary", () => {
       runId: "run-1", joinKey: "mission_join_1", eventId: "event-join-resolve",
       idempotencyKey: "join-resolve-1", expectedRunRevision: 5, expectedLastSequence: 4
     };
+    const aggregation = {
+      runId: "run-1", targetStepKey: "combine", eventId: "event-aggregation",
+      idempotencyKey: "aggregation-1", expectedRunRevision: 6, expectedLastSequence: 5
+    };
 
     await createRuntimeMissionPlan(plan);
     await createRuntimeMissionRun(run);
@@ -412,6 +421,7 @@ describe("mission runtime boundary", () => {
     await startRuntimeMissionWorker(start);
     await openRuntimeMissionJoin(join);
     await resolveRuntimeMissionJoin(resolveJoin);
+    await recordRuntimeMissionAggregation(aggregation);
     await getRuntimeMissionPlan("mission-1");
     await getRuntimeCitedMissionPlanSummary("mission-1");
     await getRuntimeMissionRun("run-1");
@@ -442,6 +452,7 @@ describe("mission runtime boundary", () => {
       ["mission_worker_start", { input: start }],
       ["mission_coordination_join_open", { input: join }],
       ["mission_coordination_join_resolve", { input: resolveJoin }],
+      ["mission_coordination_aggregation_record", { input: aggregation }],
       ["mission_plan_get", { missionId: "mission-1" }],
       ["mission_plan_cited_summary_get", { missionId: "mission-1" }],
       ["mission_run_get", { runId: "run-1" }],

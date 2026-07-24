@@ -3102,6 +3102,15 @@ export interface RuntimeMissionJoinResolveInput {
   expectedLastSequence: number;
 }
 
+export interface RuntimeMissionAggregationRecordInput {
+  runId: string;
+  targetStepKey: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
 export async function createRuntimeMissionPlan(input: RuntimeMissionPlanCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_plan_create", { input }); }
@@ -3189,6 +3198,12 @@ export async function openRuntimeMissionJoin(input: RuntimeMissionJoinOpenInput)
 export async function resolveRuntimeMissionJoin(input: RuntimeMissionJoinResolveInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_coordination_join_resolve", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function recordRuntimeMissionAggregation(input: RuntimeMissionAggregationRecordInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_coordination_aggregation_record", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

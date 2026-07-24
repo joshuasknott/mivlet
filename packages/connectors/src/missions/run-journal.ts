@@ -25,6 +25,14 @@ const JOIN_LIMITS = {
   maximumWorkers: 32,
   timestamp: 64
 } as const;
+const AGGREGATION_LIMITS = {
+  stepKey: 160,
+  outputKey: 160,
+  summary: 2_000,
+  reference: 512,
+  maximumInputs: 32,
+  maximumOutputs: 128
+} as const;
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   created: ["planning", "queued", "running", "cancelling", "cancelled", "failed"],
   planning: ["queued", "running", "waiting-human-input", "cancelling", "cancelled", "failed"],
@@ -213,6 +221,9 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
   }
   if (event.type === "join-opened") validateJoinOpened(current, event.payload.join);
   if (event.type === "join-resolved") validateJoinResolved(current, event.payload.join, event.occurredAt);
+  if (event.type === "aggregation-recorded") {
+    validateAggregationRecorded(current, event.payload.aggregation);
+  }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
   }
@@ -409,6 +420,148 @@ function validOpenJoin(join: Spine.Missions.WorkerJoin, workerLimit: number): bo
     return Number.isInteger(join.quorum) && join.quorum! >= 1 && join.quorum! <= join.workerIds.length;
   }
   return join.quorum === undefined;
+}
+
+function validateAggregationRecorded(
+  current: RunJournalProjection,
+  aggregation: Spine.Missions.DeterministicAggregationReceipt
+): void {
+  if (
+    current.run.status !== "running" ||
+    current.run.executionDepth !== "multi-worker" ||
+    aggregation.version !== 1 ||
+    aggregation.strategy !== "ordered-manifest-v1" ||
+    !boundedString(aggregation.stepKey, AGGREGATION_LIMITS.stepKey) ||
+    !["complete", "partial"].includes(aggregation.status) ||
+    aggregation.inputs.length < 1 ||
+    aggregation.inputs.length > AGGREGATION_LIMITS.maximumInputs ||
+    aggregation.producedOutputs.length > AGGREGATION_LIMITS.maximumOutputs ||
+    current.events.some(
+      (candidate) =>
+        candidate.type === "aggregation-recorded" &&
+        candidate.payload.aggregation.stepKey === aggregation.stepKey
+    )
+  ) {
+    throw new RunJournalError(
+      "A deterministic aggregation must be one bounded immutable running-run fact."
+    );
+  }
+
+  const selectedPlanRevisionId = current.events.reduce<
+    Spine.Primitives.PlanRevisionId | undefined
+  >(
+    (selected, candidate) =>
+      candidate.type === "plan-revision-selected"
+        ? candidate.payload.planRevisionId
+        : selected,
+    current.run.planRevisionId
+  );
+  const workers = new Map<string, Spine.Missions.Worker>();
+  const terminal = new Map<
+    string,
+    { status: "completed" | "failed"; outputs: readonly Spine.Missions.ProducedOutput[] }
+  >();
+  for (const candidate of current.events) {
+    if (candidate.type === "worker-created") {
+      workers.set(candidate.payload.worker.id, candidate.payload.worker);
+    } else if (candidate.type === "worker-completed") {
+      terminal.set(candidate.payload.workerId, {
+        status: "completed",
+        outputs: candidate.payload.outputs
+      });
+    } else if (candidate.type === "worker-failed") {
+      terminal.set(candidate.payload.workerId, {
+        status: "failed",
+        outputs: candidate.payload.partial?.completedOutputs ?? []
+      });
+    }
+  }
+
+  const sourceSteps = new Set<string>();
+  const workerIds = new Set<string>();
+  const orderedWorkerIds: Spine.Primitives.WorkerId[] = [];
+  const outputKeys = new Set<string>();
+  const requiredKeys = new Set<string>();
+  const expectedOutputs: Spine.Missions.ProducedOutput[] = [];
+  for (const input of aggregation.inputs) {
+    const worker = workers.get(input.workerId);
+    const outcome = terminal.get(input.workerId);
+    if (
+      !worker ||
+      !outcome ||
+      input.status === "cancelled" ||
+      input.status !== outcome.status ||
+      worker.runId !== current.run.id ||
+      worker.planRevisionId !== selectedPlanRevisionId ||
+      worker.planStepKey !== input.sourceStepKey ||
+      aggregation.stepKey === input.sourceStepKey ||
+      !sameWorkerScope(current.run, worker) ||
+      !sourceSteps.add(input.sourceStepKey) ||
+      !workerIds.add(input.workerId) ||
+      JSON.stringify(input.outputs) !== JSON.stringify(outcome.outputs)
+    ) {
+      throw new RunJournalError(
+        "Aggregation inputs must match unique terminal workers in the selected run."
+      );
+    }
+    orderedWorkerIds.push(input.workerId);
+    const declared = new Map(worker.outputContract.slots.map((slot) => [slot.key, slot]));
+    for (const slot of worker.outputContract.slots) {
+      if (slot.required) requiredKeys.add(slot.key);
+    }
+    for (const output of input.outputs) {
+      if (
+        !declared.has(output.key) ||
+        !validProducedOutput(output) ||
+        outputKeys.has(output.key)
+      ) {
+        throw new RunJournalError(
+          "Aggregation outputs must be unique exact outputs declared by their source workers."
+        );
+      }
+      outputKeys.add(output.key);
+      requiredKeys.delete(output.key);
+      expectedOutputs.push(output);
+    }
+  }
+  if (
+    orderedWorkerIds.length > 1 &&
+    !current.events.some(
+      (candidate) =>
+        candidate.type === "join-resolved" &&
+        candidate.payload.join.status === "satisfied" &&
+        sameStrings(candidate.payload.join.workerIds, orderedWorkerIds)
+    )
+  ) {
+    throw new RunJournalError(
+      "A multi-source aggregation requires its exact satisfied dependency join."
+    );
+  }
+  const expectedMissing = [...requiredKeys].sort();
+  const expectedStatus =
+    aggregation.inputs.every((input) => input.status === "completed") &&
+    expectedMissing.length === 0
+      ? "complete"
+      : "partial";
+  if (
+    aggregation.status !== expectedStatus ||
+    JSON.stringify(aggregation.producedOutputs) !== JSON.stringify(expectedOutputs) ||
+    !sameStrings(aggregation.missingRequiredOutputKeys, expectedMissing)
+  ) {
+    throw new RunJournalError(
+      "Aggregation result must be derived exactly from its ordered immutable inputs."
+    );
+  }
+}
+
+function validProducedOutput(output: Spine.Missions.ProducedOutput): boolean {
+  return (
+    boundedString(output.key, AGGREGATION_LIMITS.outputKey) &&
+    boundedString(output.summary, AGGREGATION_LIMITS.summary) &&
+    [output.artifactId, output.artifactVersionId, output.handoffId, output.valueReference].every(
+      (value) => value === undefined || boundedString(value, AGGREGATION_LIMITS.reference)
+    )
+  );
 }
 
 function activeWorkerJoin(events: readonly RunEvent[]): Spine.Missions.WorkerJoin | undefined {

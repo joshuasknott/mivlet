@@ -22,7 +22,7 @@ const ARTIFACTS_AND_ROUTINES: &str =
 
 /// Rust's reviewed mirror of the canonical TypeScript vocabulary payload.
 const RUST_CANONICAL_SHA256: &str =
-    "13107861e08077ae01f4a794aae2e7b7d9d0b028036db4a1809bde7640cc6fe1";
+    "ea720c49e8721983378d72330c31d1785a80e90fe55485bdbb2788c8b9c76100";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

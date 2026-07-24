@@ -38,6 +38,17 @@ pub struct MissionJoinResolveInput {
     expected_last_sequence: i64,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionAggregationRecordInput {
+    run_id: String,
+    target_step_key: String,
+    event_id: String,
+    idempotency_key: String,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+}
+
 struct AuthorizedRun {
     scope: DataScope,
     member: String,
@@ -215,6 +226,215 @@ fn exact_dependency_workers(
                 .ok_or_else(|| "Every joined dependency requires one durable worker.".to_string())
         })
         .collect()
+}
+
+fn deterministic_aggregation_receipt(
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    journal: &mission_run::MissionRunJournalRow,
+    target_step_key: &str,
+) -> Result<Value, String> {
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Selected plan steps are invalid.".to_string())?;
+    let target = steps
+        .iter()
+        .find(|step| step.get("key").and_then(Value::as_str) == Some(target_step_key))
+        .ok_or_else(|| "Aggregation target step is unavailable.".to_string())?;
+    if target.get("kind").and_then(Value::as_str) != Some("coordinate") {
+        return Err(
+            "Only an explicit coordinate step can record deterministic aggregation.".into(),
+        );
+    }
+    let dependencies = target
+        .get("dependsOnStepKeys")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Aggregation dependencies are invalid.".to_string())?
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .ok_or_else(|| "Aggregation dependency is invalid.".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if dependencies.is_empty() || dependencies.len() > 32 {
+        return Err("Deterministic aggregation requires one to thirty-two dependencies.".into());
+    }
+
+    let worker_ids = workers_by_step(journal)?;
+    if worker_ids.contains_key(target_step_key) {
+        return Err("A deterministic coordinate step cannot also have a worker.".into());
+    }
+    let ordered_workers = dependencies
+        .iter()
+        .map(|step| {
+            worker_ids
+                .get(*step)
+                .cloned()
+                .ok_or_else(|| "Every aggregation dependency requires one durable worker.".into())
+        })
+        .collect::<Result<Vec<String>, String>>()?;
+    if dependencies.len() > 1 {
+        let revision_id = lifecycle
+            .current_revision
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Selected plan revision is invalid.".to_string())?;
+        if !has_satisfied_dependency_join(journal, revision_id, target_step_key, &ordered_workers) {
+            return Err("Aggregation requires its exact satisfied dependency join.".into());
+        }
+    }
+
+    let mut worker_facts = BTreeMap::<String, &Value>::new();
+    for event in &journal.events {
+        if event.get("type").and_then(Value::as_str) != Some("worker-created") {
+            continue;
+        }
+        let worker = event
+            .pointer("/payload/worker")
+            .ok_or_else(|| "Stored worker assignment is invalid.".to_string())?;
+        let id = worker
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Stored worker identity is invalid.".to_string())?;
+        if worker_facts.insert(id.to_string(), worker).is_some() {
+            return Err("Stored worker identities are ambiguous.".into());
+        }
+    }
+
+    let mut inputs = Vec::with_capacity(dependencies.len());
+    let mut produced_outputs = Vec::new();
+    let mut output_keys = BTreeSet::<String>::new();
+    let mut required_keys = BTreeSet::<String>::new();
+    let mut all_completed = true;
+    for (source_step, worker_id) in dependencies.iter().zip(&ordered_workers) {
+        let worker = worker_facts
+            .get(worker_id)
+            .ok_or_else(|| "Aggregation worker assignment is unavailable.".to_string())?;
+        if worker.get("planStepKey").and_then(Value::as_str) != Some(*source_step) {
+            return Err("Aggregation worker no longer matches its selected Plan step.".into());
+        }
+        let slots = worker
+            .pointer("/outputContract/slots")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "Aggregation worker output contract is invalid.".to_string())?;
+        let mut declared = BTreeSet::<String>::new();
+        for slot in slots {
+            let key = slot
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Aggregation worker output slot is invalid.".to_string())?;
+            let key = bounded(key, "Aggregation output key", 160)?;
+            if !declared.insert(key.clone()) {
+                return Err("Aggregation worker output slots are ambiguous.".into());
+            }
+            if slot.get("required").and_then(Value::as_bool) == Some(true) {
+                required_keys.insert(key);
+            }
+        }
+
+        let terminals = journal
+            .events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.get("type").and_then(Value::as_str),
+                    Some("worker-completed" | "worker-failed")
+                ) && event.pointer("/payload/workerId").and_then(Value::as_str)
+                    == Some(worker_id.as_str())
+            })
+            .collect::<Vec<_>>();
+        if terminals.len() != 1 {
+            return Err("Aggregation requires one exact terminal fact per worker.".into());
+        }
+        let terminal = terminals[0];
+        let status = terminal
+            .get("type")
+            .and_then(Value::as_str)
+            .map(|kind| {
+                if kind == "worker-completed" {
+                    "completed"
+                } else {
+                    "failed"
+                }
+            })
+            .unwrap_or("failed");
+        if dependencies.len() == 1 && status != "completed" {
+            return Err("A single aggregation dependency must complete successfully.".into());
+        }
+        all_completed &= status == "completed";
+        let outputs = if status == "completed" {
+            terminal.pointer("/payload/outputs")
+        } else {
+            terminal.pointer("/payload/partial/completedOutputs")
+        }
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+        if produced_outputs.len() + outputs.len() > 128 {
+            return Err("Deterministic aggregation output count is too large.".into());
+        }
+        for output in &outputs {
+            let object = output
+                .as_object()
+                .ok_or_else(|| "Aggregation worker output is invalid.".to_string())?;
+            let key = object
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Aggregation worker output key is invalid.".to_string())?;
+            let key = bounded(key, "Aggregation output key", 160)?;
+            let summary = object
+                .get("summary")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Aggregation worker output summary is invalid.".to_string())?;
+            bounded(summary, "Aggregation output summary", 2_000)?;
+            if !declared.contains(&key) || !output_keys.insert(key.clone()) {
+                return Err(
+                    "Aggregation outputs must be unique and declared by their source workers."
+                        .into(),
+                );
+            }
+            let mut has_reference = false;
+            for field in [
+                "artifactId",
+                "artifactVersionId",
+                "handoffId",
+                "valueReference",
+            ] {
+                if let Some(reference) = object.get(field) {
+                    let reference = reference
+                        .as_str()
+                        .ok_or_else(|| "Aggregation output reference is invalid.".to_string())?;
+                    bounded(reference, "Aggregation output reference", 512)?;
+                    has_reference = true;
+                }
+            }
+            if !has_reference {
+                return Err(
+                    "Deterministic aggregation can combine only reference-bearing outputs.".into(),
+                );
+            }
+            required_keys.remove(&key);
+            produced_outputs.push(output.clone());
+        }
+        inputs.push(json!({
+            "sourceStepKey":source_step,
+            "workerId":worker_id,
+            "status":status,
+            "outputs":outputs
+        }));
+    }
+    let missing_required_output_keys = required_keys.into_iter().collect::<Vec<_>>();
+    Ok(json!({
+        "version":1,
+        "strategy":"ordered-manifest-v1",
+        "stepKey":target_step_key,
+        "status":if all_completed && missing_required_output_keys.is_empty() {"complete"} else {"partial"},
+        "inputs":inputs,
+        "producedOutputs":produced_outputs,
+        "missingRequiredOutputKeys":missing_required_output_keys
+    }))
 }
 
 fn validate_head(
@@ -690,6 +910,77 @@ pub fn mission_coordination_join_resolve(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+pub fn mission_coordination_aggregation_record(
+    input: MissionAggregationRecordInput,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let authorized = authorized_run(tx, store, &input.run_id)?;
+            let event_key = format!(
+                "coordination-aggregation:{}",
+                bounded(&input.idempotency_key, "Aggregation idempotency key", 200)
+                    .map_err(crate::store::StoreError::Invalid)?
+            );
+            let aggregation = deterministic_aggregation_receipt(
+                &authorized.lifecycle,
+                &authorized.journal,
+                &input.target_step_key,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            if let Some(existing) = authorized.journal.events.iter().find(|event| {
+                event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            }) {
+                if existing.get("id").and_then(Value::as_str) == Some(input.event_id.as_str())
+                    && existing.get("type").and_then(Value::as_str) == Some("aggregation-recorded")
+                    && existing.pointer("/payload/aggregation") == Some(&aggregation)
+                {
+                    return Ok(authorized.journal);
+                }
+                return Err(crate::store::StoreError::Invalid(
+                    "Aggregation idempotency key already represents another receipt.".into(),
+                ));
+            }
+            validate_head(
+                &authorized.journal,
+                input.expected_run_revision,
+                input.expected_last_sequence,
+            )
+            .map_err(crate::store::StoreError::Invalid)?;
+            bounded(&input.run_id, "Mission run", 160)
+                .map_err(crate::store::StoreError::Invalid)?;
+            bounded(&input.target_step_key, "Aggregation target step", 160)
+                .map_err(crate::store::StoreError::Invalid)?;
+            bounded(&input.event_id, "Aggregation event", 160)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if authorized.journal.events.iter().any(|event| {
+                event.get("type").and_then(Value::as_str) == Some("aggregation-recorded")
+                    && event
+                        .pointer("/payload/aggregation/stepKey")
+                        .and_then(Value::as_str)
+                        == Some(input.target_step_key.as_str())
+            }) {
+                return Err(crate::store::StoreError::Invalid(
+                    "This deterministic aggregation is already recorded.".into(),
+                ));
+            }
+            let at = now();
+            append_event(
+                tx,
+                store,
+                &authorized,
+                &input.event_id,
+                "aggregation-recorded",
+                &event_key,
+                json!({"aggregation":aggregation}),
+                &at,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
 pub(crate) fn has_satisfied_dependency_join(
     journal: &mission_run::MissionRunJournalRow,
     plan_revision_id: &str,
@@ -820,5 +1111,75 @@ mod tests {
             "another-target",
             &["worker-a".into(), "worker-b".into()]
         ));
+    }
+
+    #[test]
+    fn aggregation_is_derived_in_plan_order_from_reference_bearing_terminal_outputs() {
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({}),
+            plan: json!({}),
+            current_revision: json!({
+                "id":"revision-1",
+                "steps":[
+                    {"key":"research","kind":"investigate","dependsOnStepKeys":[]},
+                    {"key":"draft","kind":"compose","dependsOnStepKeys":[]},
+                    {"key":"combine","kind":"coordinate","dependsOnStepKeys":["research","draft"]}
+                ]
+            }),
+        };
+        let join_key = coordination_join_key("revision-1", "combine");
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-research","planStepKey":"research",
+                    "outputContract":{"slots":[{"key":"evidence","required":true}]}
+                }}}),
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-draft","planStepKey":"draft",
+                    "outputContract":{"slots":[{"key":"draft","required":true}]}
+                }}}),
+                json!({"type":"worker-completed","payload":{
+                    "workerId":"worker-draft","outputs":[{
+                        "key":"draft","summary":"Draft output.",
+                        "valueReference":"mission-output:v1:draft"
+                    }]
+                }}),
+                json!({"type":"worker-completed","payload":{
+                    "workerId":"worker-research","outputs":[{
+                        "key":"evidence","summary":"Evidence output.",
+                        "artifactId":"artifact-1","artifactVersionId":"version-1"
+                    }]
+                }}),
+                json!({"type":"join-resolved","payload":{"join":{
+                    "joinKey":join_key,"status":"satisfied",
+                    "workerIds":["worker-research","worker-draft"]
+                }}}),
+            ],
+        };
+        let receipt = deterministic_aggregation_receipt(&lifecycle, &journal, "combine").unwrap();
+        assert_eq!(receipt["status"], "complete");
+        assert_eq!(receipt["inputs"][0]["sourceStepKey"], "research");
+        assert_eq!(receipt["producedOutputs"][0]["key"], "evidence");
+        assert_eq!(receipt["producedOutputs"][1]["key"], "draft");
+        assert_eq!(receipt["missingRequiredOutputKeys"], json!([]));
+
+        let mut without_join = mission_run::MissionRunJournalRow {
+            run: journal.run.clone(),
+            events: journal.events.clone(),
+        };
+        without_join.events.pop();
+        assert!(deterministic_aggregation_receipt(&lifecycle, &without_join, "combine").is_err());
+
+        let mut content_only = journal;
+        content_only.events[3]["payload"]["outputs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("artifactId");
+        content_only.events[3]["payload"]["outputs"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("artifactVersionId");
+        assert!(deterministic_aggregation_receipt(&lifecycle, &content_only, "combine").is_err());
     }
 }
