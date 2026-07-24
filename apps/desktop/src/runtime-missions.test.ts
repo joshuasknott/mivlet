@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   advanceRuntimeMissionCoordination,
+  cancelRuntimeMissionApproval,
   cancelRuntimeMissionHumanInput,
   createRuntimeMissionCheckpoint,
   createRuntimeMissionPlan,
@@ -11,6 +12,7 @@ import {
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
   latestRuntimeCitedApproval,
+  latestRuntimeMissionApproval,
   latestRuntimeMissionHumanInput,
   latestRuntimePendingMissionWait,
   listRuntimePendingCitedApprovals,
@@ -236,8 +238,32 @@ describe("mission runtime boundary", () => {
     const newest = request("input-run", "2026-07-13T13:00:00.000Z");
     const approvalList = { approvals: [approval], unavailableCount: 0, truncated: false };
     const inputList = { requests: [newest], unavailableCount: 0, truncated: false };
+    const effectApproval = {
+      runId: "effect-run", missionId: "effect-mission", sourceThreadId: "thread-1",
+      planRevisionId: "revision-1",
+      waitKey: `mission-approval-wait:v1:${"a".repeat(64)}`, requestKey: "publish-1",
+      actionSummary: "Publish one update.", proposalHash: "b".repeat(64),
+      effect: {
+        effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+        targetSummary: "One update"
+      },
+      requestedAt: "2026-07-13T14:00:00.000Z", runRevision: 6, lastSequence: 5
+    };
+    const effectList = {
+      approvals: [effectApproval],
+      unavailableCount: 0,
+      truncated: false
+    };
+    expect(latestRuntimeMissionApproval([
+      { ...effectApproval, runId: "effect-a" },
+      effectApproval,
+      { ...effectApproval, runId: "effect-old", requestedAt: "2026-07-12T14:00:00.000Z" }
+    ])?.runId).toBe("effect-run");
     expect(latestRuntimePendingMissionWait(approvalList, inputList)).toEqual({
       kind: "human-input", request: newest
+    });
+    expect(latestRuntimePendingMissionWait(approvalList, inputList, effectList)).toEqual({
+      kind: "effect-approval", request: effectApproval
     });
     expect(latestRuntimePendingMissionWait(approvalList, { ...inputList, requests: [] })).toEqual({
       kind: "approval", request: approval
@@ -248,6 +274,9 @@ describe("mission runtime boundary", () => {
     expect(latestRuntimePendingMissionWait(
       approvalList, { ...inputList, unavailableCount: 1 }
     )).toBeUndefined();
+    expect(latestRuntimePendingMissionWait(
+      approvalList, inputList, { ...effectList, truncated: true }
+    )).toBeUndefined();
     expect(() => verifiedLatestRuntimePendingMissionWait(
       { status: "fulfilled", value: approvalList },
       { status: "fulfilled", value: { ...inputList, truncated: true } }
@@ -256,6 +285,27 @@ describe("mission runtime boundary", () => {
       { status: "rejected", reason: new Error("offline") },
       { status: "fulfilled", value: inputList }
     )).toThrow("nothing was stopped");
+    expect(() => verifiedLatestRuntimePendingMissionWait(
+      { status: "fulfilled", value: approvalList },
+      { status: "fulfilled", value: inputList },
+      { status: "rejected", reason: new Error("offline") }
+    )).toThrow("nothing was stopped");
+  });
+
+  it("rejects malformed general Mission approval identities before cancellation", async () => {
+    setNative(true);
+    await expect(cancelRuntimeMissionApproval({
+      runId: "run-approval", missionId: "mission-approval", sourceThreadId: "thread-1",
+      planRevisionId: "revision-1", waitKey: "mission-approval-wait:v1:not-a-digest",
+      requestKey: "publish-1", actionSummary: "Publish one update.",
+      proposalHash: "b".repeat(64),
+      effect: {
+        effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+        targetSummary: "One update"
+      },
+      requestedAt: "2026-07-23T12:00:00Z", runRevision: 6, lastSequence: 5
+    })).rejects.toThrow("identity is invalid");
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
   it("accepts only the bounded native pending-approval projection", async () => {
@@ -457,6 +507,49 @@ describe("mission runtime boundary", () => {
       requestKey: "human-input-stop:v1:test", expectedRunRevision: 5, expectedLastSequence: 4,
       mode: "cooperative", reason: "User requested stop while mission input was pending."
     } });
+  });
+
+  it("durably cancels the newest general Mission approval without resolving it as approved", async () => {
+    setNative(true);
+    const approval = {
+      runId: "run-approval", missionId: "mission-approval", sourceThreadId: "thread-1",
+      planRevisionId: "revision-1",
+      waitKey: `mission-approval-wait:v1:${"a".repeat(64)}`,
+      requestKey: "publish-1", actionSummary: "Publish one update.",
+      proposalHash: "b".repeat(64),
+      effect: {
+        effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+        targetSummary: "One update"
+      },
+      requestedAt: "2026-07-23T12:00:00Z", runRevision: 6, lastSequence: 5
+    };
+    const requested = {
+      run: { status: "cancelling", revision: 8, eventHead: { lastSequence: 7 } },
+      events: []
+    };
+    const settled = {
+      run: { status: "cancelled", revision: 9, eventHead: { lastSequence: 8 } },
+      events: []
+    };
+    mocks.invoke.mockResolvedValueOnce(requested).mockResolvedValueOnce(settled);
+    await expect(cancelRuntimeMissionApproval(approval)).resolves.toEqual(settled);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_run_request_cancellation", { input: {
+        runId: "run-approval",
+        eventId: `mission-approval-cancel-requested-${"a".repeat(64)}`,
+        requestKey: `mission-approval-stop:v1:${"a".repeat(64)}`,
+        expectedRunRevision: 6,
+        expectedLastSequence: 5,
+        mode: "cooperative",
+        reason: "User requested stop while a Mission action approval was pending."
+      } }],
+      ["mission_run_finalize_cancellation", { input: {
+        runId: "run-approval",
+        eventId: `mission-approval-cancelled-${"a".repeat(64)}`,
+        expectedRunRevision: 8,
+        expectedLastSequence: 7
+      } }]
+    ]);
   });
 
   it("composes only the authenticated native mission commands", async () => {

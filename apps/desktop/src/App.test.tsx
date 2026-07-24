@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -272,6 +272,7 @@ vi.mock("./runtime", () => ({
   resolveRuntimeCitedApproval: vi.fn(async () => null),
   resolveRuntimeMissionApproval: vi.fn(async () => null),
   cancelRuntimeCitedApproval: vi.fn(async () => null),
+  cancelRuntimeMissionApproval: vi.fn(async () => null),
   receiveRuntimeMissionHumanInput: vi.fn(async () => null),
   startRuntimeStructuredIntake: vi.fn(async (input: Record<string, unknown>) => {
     runtimeMocks.structuredIntakeCalls.push(input);
@@ -601,6 +602,8 @@ describe("Fable home", () => {
     vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
     vi.mocked(cancelRuntimeMissionHumanInput).mockReset();
     vi.mocked(cancelRuntimeMissionHumanInput).mockResolvedValue(null);
+    vi.mocked(cancelRuntimeMissionApproval).mockReset();
+    vi.mocked(cancelRuntimeMissionApproval).mockResolvedValue(null);
     vi.mocked(readRuntimeCitedMissionReceipts).mockReset();
     vi.mocked(readRuntimeCitedMissionReceipts).mockImplementation(async (_threadId, messageIds) =>
       messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));

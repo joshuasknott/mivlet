@@ -7,7 +7,7 @@ import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, verifiedLatestRuntimePendingMissionWait } from "../runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, verifiedLatestRuntimePendingMissionWait } from "../runtime";
 
 export function useShellAgentController({ onDictation, onVoiceCancel, threadId }: { onDictation: (transcript: string) => void; onVoiceCancel: () => void; threadId?: string }) {
   const approvalGate = useMemo(() => createApprovalGate(), []);
@@ -100,11 +100,16 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       return true;
     }
     if (threadId) {
-      const [approvalResult, inputResult] = await Promise.allSettled([
+      const [approvalResult, inputResult, effectApprovalResult] = await Promise.allSettled([
         listRuntimePendingCitedApprovals(threadId),
-        listRuntimePendingMissionHumanInputs(threadId)
+        listRuntimePendingMissionHumanInputs(threadId),
+        listRuntimePendingMissionApprovals(threadId)
       ]);
-      const latestWait = verifiedLatestRuntimePendingMissionWait(approvalResult, inputResult);
+      const latestWait = verifiedLatestRuntimePendingMissionWait(
+        approvalResult,
+        inputResult,
+        effectApprovalResult
+      );
       if (latestWait?.kind === "human-input") {
         await cancelRuntimeMissionHumanInput(latestWait.request);
         await durableConversation.refresh();
@@ -112,6 +117,11 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       }
       if (latestWait?.kind === "approval") {
         await cancelRuntimeCitedApproval(latestWait.request);
+        await durableConversation.refresh();
+        return true;
+      }
+      if (latestWait?.kind === "effect-approval") {
+        await cancelRuntimeMissionApproval(latestWait.request);
         await durableConversation.refresh();
         return true;
       }

@@ -413,6 +413,14 @@ general checkpoint restoration, worker recreation/dispatch, renderer
 composition, other mission artifact shapes, and packaged restart observation
 remain open, so the durable-run box remains unchecked.
 
+The native `/stop` path now includes these general effect-approval waits. Before
+stopping anything, the desktop verifies bounded native lists for cited approval,
+typed human-input, and general effect-approval waits, fails closed if any list is
+unavailable or truncated, and chooses the newest exact wait deterministically.
+For a general approval it records the same native `cancelled` resolution used by
+the run journal, then terminalizes from the returned durable head; it never
+approves or consumes the proposed effect.
+
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.
 It accepts only declared unique deliverables, matches evaluations to the exact

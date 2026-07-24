@@ -3564,6 +3564,19 @@ export interface RuntimeMissionApprovalList {
   truncated: boolean;
 }
 
+export function latestRuntimeMissionApproval(
+  approvals: readonly RuntimeMissionApproval[]
+): RuntimeMissionApproval | undefined {
+  return approvals.reduce<RuntimeMissionApproval | undefined>((latest, candidate) => {
+    if (!latest) return candidate;
+    const byRequestedAt = candidate.requestedAt.localeCompare(latest.requestedAt);
+    return byRequestedAt > 0
+      || (byRequestedAt === 0 && candidate.runId.localeCompare(latest.runId) > 0)
+      ? candidate
+      : latest;
+  }, undefined);
+}
+
 function isRuntimeMissionApprovalEffect(value: unknown): value is RuntimeMissionApprovalEffect {
   return isRecord(value)
     && Object.keys(value).length === 3
@@ -3586,6 +3599,7 @@ function isRuntimeMissionApproval(value: unknown): value is RuntimeMissionApprov
       "runId", "missionId", "sourceThreadId", "planRevisionId", "waitKey", "requestKey",
       "actionSummary", "requestedAt"
     ].every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)
+    && /^mission-approval-wait:v1:[0-9a-f]{64}$/i.test(String(value.waitKey))
     && /^[0-9a-f]{64}$/i.test(String(value.proposalHash))
     && (value.workerId === undefined
       || (typeof value.workerId === "string" && value.workerId.trim().length > 0))
@@ -3654,6 +3668,33 @@ export async function resolveRuntimeMissionApproval(
       }
     });
   } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function cancelRuntimeMissionApproval(approval: RuntimeMissionApproval) {
+  const waitIdentity = /^mission-approval-wait:v1:([0-9a-f]{64})$/i.exec(approval.waitKey);
+  if (!waitIdentity) throw new Error("The Mission approval identity is invalid.");
+  const identity = waitIdentity[1].toLowerCase();
+  const requested = await requestRuntimeMissionRunCancellation({
+    runId: approval.runId,
+    eventId: `mission-approval-cancel-requested-${identity}`,
+    requestKey: `mission-approval-stop:v1:${identity}`,
+    expectedRunRevision: approval.runRevision,
+    expectedLastSequence: approval.lastSequence,
+    mode: "cooperative",
+    reason: "User requested stop while a Mission action approval was pending."
+  });
+  if (!requested || !isRecord(requested.run) || !isRecord(requested.run.eventHead)
+    || !Number.isInteger(requested.run.revision)
+    || !Number.isInteger(requested.run.eventHead.lastSequence)) {
+    throw new Error("The Mission approval cancellation did not reach a durable request.");
+  }
+  if (requested.run.status === "cancelled") return requested;
+  return finalizeRuntimeMissionRunCancellation({
+    runId: approval.runId,
+    eventId: `mission-approval-cancelled-${identity}`,
+    expectedRunRevision: requested.run.revision as number,
+    expectedLastSequence: requested.run.eventHead.lastSequence as number
+  });
 }
 
 export interface RuntimeCitedApproval {
@@ -3796,35 +3837,65 @@ export function latestRuntimeMissionHumanInput(
 
 export type RuntimePendingMissionWait =
   | { kind: "approval"; request: RuntimeCitedApproval }
+  | { kind: "effect-approval"; request: RuntimeMissionApproval }
   | { kind: "human-input"; request: RuntimeMissionHumanInputRequest };
 
 export function latestRuntimePendingMissionWait(
   approvals: RuntimeCitedApprovalList,
-  inputs: RuntimeMissionHumanInputList
+  inputs: RuntimeMissionHumanInputList,
+  effectApprovals: RuntimeMissionApprovalList = {
+    approvals: [],
+    unavailableCount: 0,
+    truncated: false
+  }
 ): RuntimePendingMissionWait | undefined {
   if (approvals.unavailableCount > 0 || approvals.truncated
-    || inputs.unavailableCount > 0 || inputs.truncated) return undefined;
+    || inputs.unavailableCount > 0 || inputs.truncated
+    || effectApprovals.unavailableCount > 0 || effectApprovals.truncated) return undefined;
+  const candidates: Array<{ key: string; wait: RuntimePendingMissionWait }> = [];
   const approval = latestRuntimeCitedApproval(approvals.approvals);
+  if (approval) candidates.push({
+    key: `${approval.requestedAt}\0${approval.runId}\0approval`,
+    wait: { kind: "approval", request: approval }
+  });
   const input = latestRuntimeMissionHumanInput(inputs.requests);
-  if (!approval) return input ? { kind: "human-input", request: input } : undefined;
-  if (!input) return { kind: "approval", request: approval };
-  const approvalKey = `${approval.requestedAt}\0${approval.runId}\0approval`;
-  const inputKey = `${input.requestedAt}\0${input.runId}\0human-input`;
-  return inputKey > approvalKey
-    ? { kind: "human-input", request: input }
-    : { kind: "approval", request: approval };
+  if (input) candidates.push({
+    key: `${input.requestedAt}\0${input.runId}\0human-input`,
+    wait: { kind: "human-input", request: input }
+  });
+  const effectApproval = latestRuntimeMissionApproval(effectApprovals.approvals);
+  if (effectApproval) candidates.push({
+    key: `${effectApproval.requestedAt}\0${effectApproval.runId}\0effect-approval`,
+    wait: { kind: "effect-approval", request: effectApproval }
+  });
+  return candidates.reduce<{ key: string; wait: RuntimePendingMissionWait } | undefined>(
+    (latest, candidate) => !latest || candidate.key > latest.key ? candidate : latest,
+    undefined
+  )?.wait;
 }
 
 export function verifiedLatestRuntimePendingMissionWait(
   approvals: PromiseSettledResult<RuntimeCitedApprovalList>,
-  inputs: PromiseSettledResult<RuntimeMissionHumanInputList>
+  inputs: PromiseSettledResult<RuntimeMissionHumanInputList>,
+  effectApprovals: PromiseSettledResult<RuntimeMissionApprovalList> = {
+    status: "fulfilled",
+    value: { approvals: [], unavailableCount: 0, truncated: false }
+  }
 ): RuntimePendingMissionWait | undefined {
   if (approvals.status === "rejected" || inputs.status === "rejected"
+    || effectApprovals.status === "rejected"
     || approvals.value.unavailableCount > 0 || approvals.value.truncated
     || inputs.value.unavailableCount > 0 || inputs.value.truncated) {
     throw new Error("Fable could not verify every pending mission wait, so nothing was stopped.");
   }
-  return latestRuntimePendingMissionWait(approvals.value, inputs.value);
+  if (effectApprovals.value.unavailableCount > 0 || effectApprovals.value.truncated) {
+    throw new Error("Fable could not verify every pending mission wait, so nothing was stopped.");
+  }
+  return latestRuntimePendingMissionWait(
+    approvals.value,
+    inputs.value,
+    effectApprovals.value
+  );
 }
 
 export interface RuntimeMissionHumanInputList {
