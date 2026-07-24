@@ -110,6 +110,18 @@ adapters. Custom can target a compatible endpoint only when ordinary optional
 Bearer authentication is sufficient; it does not implement cloud IAM,
 SigV4/request signing, service accounts, or provider-specific regional routing.
 
+Mission coordination is compiled independently of provider transport. The
+portable compiler binds each worker to the authenticated selected Plan revision,
+preserves its dependency DAG, requires an explicit `all`, `any`, or quorum join
+for every multi-source step, and clamps total and concurrent work to the saved
+budgets. A deterministic evaluator derives only which workers or reference-only
+aggregations are ready; it does not grant tools, select credentials, evaluate
+acceptance, or treat model output as authority. Native persistence and execution
+must still revalidate the exact route, grants, approvals, journal head, and owner
+before any worker or tool crosses a runtime boundary. The current desktop
+parallel journey remains a fixed native composition while that general native
+orchestrator is completed.
+
 ## Schedules And Commands
 
 The composer parses `/remember`, `/goal`, `/plan`, and `/schedule` through the

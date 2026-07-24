@@ -772,6 +772,23 @@ counts, general joins, multiple providers, tool-bearing parallel steps, bounded
 iteration, escalation, or live packaged-app/provider validation, so the Wave 4C
 checkbox remains unchecked.
 
+The provider-neutral coordination layer is no longer limited to that benchmark's
+two hard-coded producers. A reusable compiler now binds up to thirty-two worker
+records to the exact selected Plan revision, preserves arbitrary acyclic step
+dependencies, requires every multi-source dependency to declare its `all`, `any`,
+or quorum join explicitly, and enforces both total-worker and parallel-width
+budgets. Its deterministic evaluator derives runnable, waiting, running, blocked,
+and complete work only from durable worker/aggregation states; a failed join is
+never silently treated as satisfied. Coordinate steps may declare an
+`ordered-manifest-v1` aggregation that combines only exact worker output
+references in Plan order, reports missing required outputs, and makes no policy,
+human-acceptance, or factual-correctness claim. Focused coverage includes
+arbitrary roots, mixed running/failed states, explicit joins, impossible joins,
+authority substitution, and partial deterministic aggregation. The existing
+native desktop journey still uses its fixed two-producer/reviewer composer; wiring
+this general coordinator through encrypted native persistence, provider routing,
+restart recovery, and the calm product surface remains open.
+
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
 hash-verifies both immutable receipts, derives the bounded reviewer prompt and
