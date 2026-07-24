@@ -3,10 +3,10 @@ import type { Spine } from "@fable/protocol";
 const MAX_ITERATION_HISTORY = 64;
 
 export type ContinuationAcceptanceAuthority =
-  | "policy"
-  | "human"
-  | "worker"
-  | "external";
+  | { kind: "policy"; policyRef: string }
+  | { kind: "human"; reviewerInternalUserId: Spine.Primitives.InternalUserId }
+  | { kind: "worker"; reviewerWorkerId: Spine.Primitives.WorkerId }
+  | { kind: "external"; attestationRef?: string };
 
 export interface WorkerIterationFact {
   iterationNumber: number;
@@ -173,6 +173,7 @@ function validateInput(input: DecideWorkerContinuationInput): void {
         "Worker acceptance status must retain its exact evaluation authority."
       );
     }
+    if (fact.acceptanceAuthority) validateAcceptanceAuthority(fact.acceptanceAuthority);
     if (index > 0 && fact.attemptNumber < facts[index - 1]!.attemptNumber) {
       throw new WorkerContinuationError("Worker attempts cannot move backwards.");
     }
@@ -182,7 +183,26 @@ function validateInput(input: DecideWorkerContinuationInput): void {
 function matchesAcceptanceAuthority(
   authority: ContinuationAcceptanceAuthority | undefined
 ): boolean {
-  return authority === "policy" || authority === "human";
+  return authority?.kind === "policy" || authority?.kind === "human";
+}
+
+function validateAcceptanceAuthority(authority: ContinuationAcceptanceAuthority): void {
+  const reference = authority.kind === "policy"
+    ? authority.policyRef
+    : authority.kind === "human"
+      ? authority.reviewerInternalUserId
+      : authority.kind === "worker"
+        ? authority.reviewerWorkerId
+        : authority.attestationRef;
+  if (
+    (authority.kind !== "external" || reference !== undefined) &&
+    (reference === undefined ||
+      !reference.trim() ||
+      reference.length > 240 ||
+      [...reference].some((character) => character < " "))
+  ) {
+    throw new WorkerContinuationError("Worker acceptance authority is invalid.");
+  }
 }
 
 function exceedsBudget(worker: Spine.Missions.Worker, fact: WorkerIterationFact): boolean {

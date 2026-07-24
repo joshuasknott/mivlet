@@ -56,7 +56,10 @@ describe("bounded worker continuation", () => {
   });
 
   it("never treats worker or external opinion as completion authority", () => {
-    for (const acceptanceAuthority of ["worker", "external"] as const) {
+    for (const acceptanceAuthority of [
+      { kind: "worker", reviewerWorkerId: "reviewer-1" as never },
+      { kind: "external", attestationRef: "external-evaluation-1" }
+    ] as const) {
       expect(() => decideWorkerContinuation({
         worker,
         history: [],
@@ -68,7 +71,10 @@ describe("bounded worker continuation", () => {
     expect(decideWorkerContinuation({
       worker,
       history: [],
-      current: fact(1, { acceptanceStatus: "accepted", acceptanceAuthority: "policy" }),
+      current: fact(1, {
+        acceptanceStatus: "accepted",
+        acceptanceAuthority: { kind: "policy", policyRef: "policy:v1" }
+      }),
       maxIterations: 2,
       allowEscalation: false
     })).toMatchObject({ action: "complete", reason: "accepted" });
@@ -130,7 +136,7 @@ describe("bounded worker continuation", () => {
       history: [],
       current: fact(1, {
         acceptanceStatus: "unevaluated",
-        acceptanceAuthority: "worker"
+        acceptanceAuthority: { kind: "worker", reviewerWorkerId: "reviewer-1" as never }
       }),
       maxIterations: 4,
       allowEscalation: false
