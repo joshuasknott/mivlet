@@ -31,6 +31,7 @@ import { PERMISSION_PROFILES } from "../../lib/agent-run";
 import {
   acceptRuntimePendingInvitation,
   createRuntimeLocalBackup,
+  deleteRuntimeLocalData,
   exportRuntimeWorkspaceArchive,
   getRuntimeRemoteControlStatus,
   importRuntimeWorkspaceArchive,
@@ -416,6 +417,8 @@ function PrivacySettingsView({
   const [restorePath, setRestorePath] = useState("");
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [recoveryAction, setRecoveryAction] = useState<"backup" | "restore" | null>(null);
+  const [localDeletionConfirmation, setLocalDeletionConfirmation] = useState("");
+  const [localDeletionPending, setLocalDeletionPending] = useState(false);
   const [diagnostics, setDiagnostics] = useState<RuntimeLocalDiagnosticsSnapshot | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [executionControl, setExecutionControl] = useState<RuntimeExecutionControlState | null>(null);
@@ -601,6 +604,24 @@ function PrivacySettingsView({
       onStatus(error instanceof Error ? error.message : "Fable could not run the local health check.");
     } finally {
       setDiagnosticsLoading(false);
+    }
+  };
+
+  const handleLocalDeletion = async () => {
+    if (localDeletionConfirmation !== "delete local data") return;
+    setLocalDeletionPending(true);
+    try {
+      const receipt = await deleteRuntimeLocalData("delete local data");
+      if (receipt) {
+        setLocalDeletionConfirmation("");
+        onStatus("Local data deleted. Restart Fable before continuing. Hosted data and provider credentials were not removed.");
+      } else {
+        onStatus("Local data deletion is available only in the Fable desktop app.");
+      }
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not delete local data.");
+    } finally {
+      setLocalDeletionPending(false);
     }
   };
 
@@ -1044,6 +1065,49 @@ function PrivacySettingsView({
               <small>
                 This check returns bounded counts and health states only. It does not read saved prompts, artifacts, citations, provider responses, file paths, account identifiers, or secrets.
               </small>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="local-data-deletion-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <Trash size={19} />
+              </span>
+              <span>
+                <strong id="local-data-deletion-title">Delete local data from this device</strong>
+                <small>Remove this installation&rsquo;s conversations, projects, artifacts, routines, settings, and local history.</small>
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "10px", marginTop: "16px" }}>
+              <p>
+                This does not delete hosted workspace data, close your Fable account, revoke provider-side keys, or remove credentials from the operating system. Disconnect those accounts separately first if you also want their local credentials removed.
+              </p>
+              <label htmlFor="local-data-deletion-confirmation">
+                Type <strong>delete local data</strong> to confirm
+              </label>
+              <input
+                id="local-data-deletion-confirmation"
+                className="input"
+                value={localDeletionConfirmation}
+                onChange={(event) => setLocalDeletionConfirmation(event.target.value)}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              <div>
+                <button
+                  type="button"
+                  className="button button--destructive"
+                  onClick={() => void handleLocalDeletion()}
+                  disabled={
+                    localDeletionConfirmation !== "delete local data"
+                    || localDeletionPending
+                  }
+                >
+                  {localDeletionPending ? <Spinner size={14} /> : null}
+                  <span>Delete local data</span>
+                </button>
+              </div>
+              <small>Restart Fable after deletion so no pre-deletion screen state remains in memory.</small>
             </div>
           </section>
         </div>

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeLocalBackup,
+  deleteRuntimeLocalData,
   exportRuntimeWorkspaceArchive,
   importRuntimeWorkspaceArchive,
   loadRuntimeExecutionControl,
@@ -46,6 +47,7 @@ describe("local recovery runtime boundary", () => {
     await expect(loadRuntimeExecutionControl("workspace-1")).resolves.toBeNull();
     await expect(pauseRuntimeExecution("workspace-1", "pause all execution")).resolves.toBeNull();
     await expect(resumeRuntimeExecution("workspace-1", 1, "resume execution")).resolves.toBeNull();
+    await expect(deleteRuntimeLocalData("delete local data")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -78,11 +80,17 @@ describe("local recovery runtime boundary", () => {
       warnings: [],
       errors: []
     };
+    const deleted = {
+      restartRequired: true,
+      hostedDataDeleted: false,
+      providerCredentialsRevoked: false
+    };
     mocks.invoke
       .mockResolvedValueOnce(backup)
       .mockResolvedValueOnce(portable)
       .mockResolvedValueOnce(imported)
-      .mockResolvedValueOnce(restore);
+      .mockResolvedValueOnce(restore)
+      .mockResolvedValueOnce(deleted);
 
     await expect(createRuntimeLocalBackup(backup.path)).resolves.toEqual(backup);
     await expect(
@@ -98,6 +106,7 @@ describe("local recovery runtime boundary", () => {
     await expect(
       prepareRuntimeLocalRestore(backup.path, "restore local data")
     ).resolves.toEqual(restore);
+    await expect(deleteRuntimeLocalData("delete local data")).resolves.toEqual(deleted);
     expect(mocks.invoke.mock.calls).toEqual([
       ["backup_local_data", { destination: backup.path }],
       ["export_workspace_archive_to_file", {
@@ -112,7 +121,8 @@ describe("local recovery runtime boundary", () => {
       ["prepare_local_data_restore", {
         source: backup.path,
         confirmation: "restore local data"
-      }]
+      }],
+      ["delete_local_data", { confirmation: "delete local data" }]
     ]);
   });
 

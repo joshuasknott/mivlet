@@ -425,6 +425,18 @@ describe("Settings → Privacy UX states", () => {
     });
     expect(await screen.findByText("Local restore is available only in the Fable desktop app.")).toBeTruthy();
 
+    const deletionConfirmation = screen.getByLabelText(/Type delete local data to confirm/i);
+    const deleteLocalData = screen.getByRole("button", { name: "Delete local data" });
+    expect(deleteLocalData).toBeDisabled();
+    fireEvent.change(deletionConfirmation, { target: { value: "delete local data" } });
+    expect(deleteLocalData).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(deleteLocalData);
+    });
+    expect(
+      await screen.findByText("Local data deletion is available only in the Fable desktop app.")
+    ).toBeTruthy();
+
     fireEvent.change(backupPath, { target: { value: "C:\\Backups\\new-fable.db" } });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Create verified backup" }));

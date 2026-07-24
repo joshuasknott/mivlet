@@ -1004,69 +1004,49 @@ pub fn prepare_local_data_restore(
     })
 }
 
-/// Delete local database content after an exact destructive confirmation. The
-/// vault key and provider credentials are separate lifecycles and are retained.
-#[tauri::command]
-pub fn delete_local_data(
-    app: tauri::AppHandle,
-    confirmation: String,
-) -> std::result::Result<(), String> {
-    if confirmation != "delete local data" {
-        return Err("Type \"delete local data\" to confirm local deletion.".to_string());
-    }
-    let store = GLOBAL_STORE
-        .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .transaction(|tx| {
-            tx.execute_batch(
-                "DELETE FROM message;
-                 DELETE FROM tool_call;
-                 DELETE FROM approval;
-                 DELETE FROM artifact;
-                 DELETE FROM run_state;
-                 DELETE FROM run;
-                 DELETE FROM thread;
-                 DELETE FROM project;
-                 DELETE FROM audit_event;
-                 DELETE FROM connector_account;
-                 DELETE FROM backend_connection;
-                 DELETE FROM knowledge_source;
-                 DELETE FROM memory_record;
-                 DELETE FROM schedule;
-                  DELETE FROM scheduled_job;
-                 DELETE FROM scheduler_queue_entry;
-                 DELETE FROM workflow_definition;
-                 DELETE FROM workflow_run;
-                 DELETE FROM cloud_conflict;
-                 DELETE FROM cloud_record_tombstone;
-                 DELETE FROM cloud_record_shadow;
-                 DELETE FROM cloud_mutation_outbox;
-                 DELETE FROM cloud_sync_cursor;
-                 DELETE FROM cloud_workspace_link;
-                 DELETE FROM cloud_workspace_link_legacy_clerk_org;
-                 DELETE FROM fable_workspace_device_mirror;
-                 DELETE FROM fable_membership_mirror;
-                 DELETE FROM fable_device_mirror;
-                 DELETE FROM fable_internal_user_mirror;
-                 DELETE FROM fable_workspace_mirror;
-                 DELETE FROM model_config;
-                 DELETE FROM draft;
-                 DELETE FROM connector_cache;
-                 DELETE FROM connector_cache_settings;
-                 DELETE FROM preferences;
-                 DELETE FROM profile;
-                 DELETE FROM migration_log;
-                 DELETE FROM workspace;
-                 INSERT INTO workspace (id, name, created_at, updated_at)
-                   VALUES ('default', 'My Workspace', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');",
-            )?;
-            Ok(())
-        })
-        .map_err(|error| error.to_string())?;
-    // Use hardened (portable-aware) resolution; do not bypass via direct tauri path().
-    let app_data = crate::paths::app_data_dir(&app)?;
-    for name in [
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalDataDeletionReceipt {
+    restart_required: bool,
+    hosted_data_deleted: bool,
+    provider_credentials_revoked: bool,
+}
+
+fn delete_local_store_content(store: &Store) -> Result<()> {
+    store.transaction(|tx| {
+        tx.execute_batch("PRAGMA defer_foreign_keys = ON;")?;
+        let table_names = {
+            let mut statement = tx.prepare("PRAGMA table_list;")?;
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?;
+            let mut names = Vec::new();
+            for row in rows {
+                let (name, table_type) = row?;
+                if !name.starts_with("sqlite_")
+                    && name != "schema_meta"
+                    && matches!(table_type.as_str(), "table" | "virtual")
+                {
+                    names.push(name);
+                }
+            }
+            names
+        };
+        for table_name in table_names {
+            let quoted = table_name.replace('"', "\"\"");
+            tx.execute_batch(&format!("DELETE FROM \"{quoted}\";"))?;
+        }
+        tx.execute(
+            "INSERT INTO workspace (id, name, created_at, updated_at)
+             VALUES ('default', 'My Workspace', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');",
+            [],
+        )?;
+        Ok(())
+    })
+}
+
+fn delete_local_compatibility_files(app_data: &Path) -> std::result::Result<(), String> {
+    let mut candidates = [
         "runtime-snapshot.json",
         "agent-runs.json",
         "approval-audit.json",
@@ -1074,16 +1054,76 @@ pub fn delete_local_data(
         "connector-approval-records.json",
         "execution-approvals.json",
         "connector-connections.json",
+        "connector-sync-state.json",
         "connected-backends.json",
         "memory-state.json",
         "imported-knowledge.json",
         "scheduler-store.json",
         "workflow-definitions.json",
         "workflow-runs.json",
-    ] {
-        let _ = std::fs::remove_file(app_data.join(name));
+        RESTORE_PENDING_FILENAME,
+    ]
+    .into_iter()
+    .map(|name| app_data.join(name))
+    .collect::<Vec<_>>();
+
+    let entries = std::fs::read_dir(app_data).map_err(|_| {
+        "Local database content was cleared, but Fable could not inspect legacy and recovery files. Restart Fable, then retry local deletion.".to_string()
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|_| {
+            "Local database content was cleared, but Fable could not inspect every legacy and recovery file. Restart Fable, then retry local deletion.".to_string()
+        })?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(&format!("{DB_FILENAME}.pre-restore-"))
+            || name.starts_with(&format!("{DB_FILENAME}.failed-restore-"))
+        {
+            candidates.push(entry.path());
+        }
+    }
+
+    let mut failures = 0_u32;
+    for path in candidates {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => failures += 1,
+        }
+    }
+    if failures > 0 {
+        return Err(format!(
+            "Local database content was cleared, but Fable could not remove {failures} legacy or recovery file(s). Restart Fable, then retry local deletion."
+        ));
     }
     Ok(())
+}
+
+/// Delete this installation's local database content after an exact
+/// destructive confirmation. The vault key, hosted account/workspace data,
+/// and provider credentials are separate lifecycles and are retained.
+#[tauri::command]
+pub fn delete_local_data(
+    app: tauri::AppHandle,
+    confirmation: String,
+) -> std::result::Result<LocalDataDeletionReceipt, String> {
+    if confirmation != "delete local data" {
+        return Err("Type \"delete local data\" to confirm local deletion.".to_string());
+    }
+    let store = GLOBAL_STORE
+        .get()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    delete_local_store_content(store).map_err(|error| error.to_string())?;
+    // Use hardened (portable-aware) resolution; do not bypass via direct tauri path().
+    let app_data = crate::paths::app_data_dir(&app)?;
+    delete_local_compatibility_files(&app_data)?;
+    Ok(LocalDataDeletionReceipt {
+        restart_required: true,
+        hosted_data_deleted: false,
+        provider_credentials_revoked: false,
+    })
 }
 
 /// Read the persisted schema version, or 0 if the meta row is absent.
@@ -1116,6 +1156,96 @@ mod tests {
 
     fn vault() -> Vault {
         Vault::new(&vault::MasterKey::generate().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn local_deletion_clears_every_application_table_and_preserves_schema() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace(id,name,created_at,updated_at)
+                     VALUES('workspace-2','Workspace 2','t','t');",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT INTO routine_record(
+                       workspace_id,owner_subject,id,visibility,status,current_version,revision,
+                       created_by_internal_user_id,created_at,updated_at,payload,payload_nonce
+                     ) VALUES(
+                       'workspace-2','member-2','routine-1','private','paused',1,1,
+                       'user-2','t','t',x'01',x'02'
+                     );",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        delete_local_store_content(&store).unwrap();
+
+        store
+            .with_conn(|conn| {
+                let workspaces: Vec<(String, String)> = {
+                    let mut statement =
+                        conn.prepare("SELECT id,name FROM workspace ORDER BY id;")?;
+                    let rows = statement.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                    rows.collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                assert_eq!(
+                    workspaces,
+                    vec![("default".to_string(), "My Workspace".to_string())]
+                );
+
+                let mut statement = conn.prepare("PRAGMA table_list;")?;
+                let rows = statement.query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+                })?;
+                for row in rows {
+                    let (name, table_type) = row?;
+                    if name.starts_with("sqlite_")
+                        || matches!(name.as_str(), "schema_meta" | "workspace")
+                        || !matches!(table_type.as_str(), "table" | "virtual")
+                    {
+                        continue;
+                    }
+                    let quoted = name.replace('"', "\"\"");
+                    let count: i64 = conn.query_row(
+                        &format!("SELECT COUNT(*) FROM \"{quoted}\";"),
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert_eq!(count, 0, "{name} retained rows after local deletion");
+                }
+                assert_eq!(read_schema_version(conn)?, CURRENT_SCHEMA_VERSION);
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn local_deletion_removes_only_owned_compatibility_and_recovery_files() {
+        let directory = TempDir::new().unwrap();
+        for name in [
+            "runtime-snapshot.json",
+            "connector-sync-state.json",
+            RESTORE_PENDING_FILENAME,
+            "fable-vault.db.pre-restore-1-2.db",
+            "fable-vault.db.failed-restore-3-4.db",
+        ] {
+            std::fs::write(directory.path().join(name), b"local data").unwrap();
+        }
+        let unrelated = directory.path().join("workspace-copy.json");
+        std::fs::write(&unrelated, b"portable copy").unwrap();
+
+        delete_local_compatibility_files(directory.path()).unwrap();
+
+        assert!(unrelated.exists());
+        assert_eq!(
+            std::fs::read_dir(directory.path()).unwrap().count(),
+            1,
+            "only the unrelated user-created export should remain"
+        );
     }
 
     #[test]

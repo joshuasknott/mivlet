@@ -137,6 +137,12 @@ export interface RuntimeLocalRestorePreparation {
   credentialsIncluded: false;
 }
 
+export interface RuntimeLocalDataDeletionReceipt {
+  restartRequired: true;
+  hostedDataDeleted: false;
+  providerCredentialsRevoked: false;
+}
+
 export interface RuntimePortableExportReceipt {
   path: string;
   formatVersion: number;
@@ -267,6 +273,19 @@ export async function prepareRuntimeLocalRestore(
   try {
     return await invoke<RuntimeLocalRestorePreparation>("prepare_local_data_restore", {
       source,
+      confirmation
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function deleteRuntimeLocalData(
+  confirmation: "delete local data"
+): Promise<RuntimeLocalDataDeletionReceipt | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeLocalDataDeletionReceipt>("delete_local_data", {
       confirmation
     });
   } catch (error) {
