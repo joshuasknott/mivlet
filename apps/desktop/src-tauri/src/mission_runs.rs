@@ -163,6 +163,7 @@ pub enum GeneralMissionRestartRecovery {
         completed_worker_ids: Vec<String>,
         completed_plan_step_keys: Vec<String>,
         committed_effect_keys: Vec<String>,
+        tool_evidence: Vec<GeneralMissionRestartToolEvidence>,
         expected_run_revision: i64,
         expected_last_sequence: i64,
         new_attempt_number: i64,
@@ -171,6 +172,15 @@ pub enum GeneralMissionRestartRecovery {
     Terminalized {
         journal: mission_run::MissionRunJournalRow,
     },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneralMissionRestartToolEvidence {
+    worker_id: String,
+    tool_event_id: String,
+    output_reference: String,
+    evidence: Value,
 }
 
 fn authorized(
@@ -1207,6 +1217,15 @@ fn general_resume_descriptor(
                 "General mission checkpoint replay boundary is invalid.".into(),
             )
         })?;
+    let checkpoint_sequence = checkpoint_event
+        .get("sequence")
+        .and_then(Value::as_i64)
+        .filter(|sequence| *sequence == durable_through + 1)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "General mission checkpoint sequence is invalid.".into(),
+            )
+        })?;
     let resume_after = checkpoint_event
         .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
         .and_then(Value::as_str)
@@ -1220,8 +1239,6 @@ fn general_resume_descriptor(
             && event.get("sequence").and_then(Value::as_i64) == Some(durable_through)
     });
     if checkpoint_event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
-        || checkpoint_event.get("sequence").and_then(Value::as_i64) != Some(last_sequence)
-        || checkpoint_event.get("id").and_then(Value::as_str) != Some(head_event_id)
         || checkpoint_event
             .pointer("/payload/checkpoint/stateStorage")
             .and_then(Value::as_str)
@@ -1237,33 +1254,48 @@ fn general_resume_descriptor(
             "General mission checkpoint is not the exact durable run head.".into(),
         ));
     }
-    let facts = derive_replay_facts(&journal.events, durable_through)
+    validate_general_recovery_terminal_suffix(
+        journal,
+        checkpoint_sequence,
+        head_event_id,
+        last_sequence,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
+    let checkpoint_facts = derive_replay_facts(&journal.events, durable_through)
         .map_err(crate::store::StoreError::Invalid)?;
-    if checkpoint.state != facts.state
+    if checkpoint.state != checkpoint_facts.state
         || checkpoint_event.pointer("/payload/checkpoint/replayBoundary/completedPlanStepKeys")
-            != Some(&json!(facts.completed_plan_step_keys))
+            != Some(&json!(checkpoint_facts.completed_plan_step_keys))
         || checkpoint_event.pointer("/payload/checkpoint/replayBoundary/completedWorkerIds")
-            != Some(&json!(facts.completed_worker_ids))
+            != Some(&json!(checkpoint_facts.completed_worker_ids))
         || checkpoint_event.pointer("/payload/checkpoint/replayBoundary/committedEffectKeys")
-            != Some(&json!(facts.committed_effect_keys))
+            != Some(&json!(checkpoint_facts.committed_effect_keys))
     {
         return Err(crate::store::StoreError::Invalid(
             "General mission checkpoint does not match its replayed durable facts.".into(),
         ));
     }
-    let active_worker_ids =
-        checkpoint_string_ids(checkpoint.state.get("activeWorkerIds"), "active worker", 64)
-            .map_err(crate::store::StoreError::Invalid)?;
+    let current_facts = derive_replay_facts(&journal.events, last_sequence)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let active_worker_ids = checkpoint_string_ids(
+        current_facts.state.get("activeWorkerIds"),
+        "active worker",
+        64,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
     let active_plan_step_keys = checkpoint_string_ids(
-        checkpoint.state.get("activePlanStepKeys"),
+        current_facts.state.get("activePlanStepKeys"),
         "active plan step",
         64,
     )
     .map_err(crate::store::StoreError::Invalid)?;
-    let pending_wait_keys =
-        checkpoint_string_ids(checkpoint.state.get("pendingWaitKeys"), "pending wait", 64)
-            .map_err(crate::store::StoreError::Invalid)?;
-    if checkpoint
+    let pending_wait_keys = checkpoint_string_ids(
+        current_facts.state.get("pendingWaitKeys"),
+        "pending wait",
+        64,
+    )
+    .map_err(crate::store::StoreError::Invalid)?;
+    if current_facts
         .state
         .as_object()
         .is_none_or(|state| state.len() != 3)
@@ -1273,6 +1305,15 @@ fn general_resume_descriptor(
             "General mission execution checkpoints cannot conceal a pending wait.".into(),
         ));
     }
+    let tool_evidence = general_resume_tool_evidence(
+        tx,
+        store,
+        scope,
+        member,
+        journal,
+        &active_worker_ids,
+        durable_through,
+    )?;
     let identity = format!(
         "fable.general-mission-resume.v1\0{}\0{}\0{}\0{}\0{}\0{}",
         scope.workspace_id(),
@@ -1291,14 +1332,204 @@ fn general_resume_descriptor(
         restore_idempotency_key: format!("general-mission-resume:v1:{}", &digest[..32]),
         active_worker_ids,
         active_plan_step_keys,
-        completed_worker_ids: facts.completed_worker_ids,
-        completed_plan_step_keys: facts.completed_plan_step_keys,
-        committed_effect_keys: facts.committed_effect_keys,
+        completed_worker_ids: current_facts.completed_worker_ids,
+        completed_plan_step_keys: current_facts.completed_plan_step_keys,
+        committed_effect_keys: current_facts.committed_effect_keys,
+        tool_evidence,
         expected_run_revision: revision,
         expected_last_sequence: last_sequence,
         new_attempt_number: current_attempt + 1,
         requires_fresh_route_selection: true,
     }))
+}
+
+fn validate_general_recovery_terminal_suffix(
+    journal: &mission_run::MissionRunJournalRow,
+    checkpoint_sequence: i64,
+    head_event_id: &str,
+    last_sequence: i64,
+) -> Result<(), String> {
+    if last_sequence < checkpoint_sequence {
+        return Err("General mission recovery head precedes its checkpoint.".into());
+    }
+    let checkpoint = journal
+        .events
+        .iter()
+        .find(|event| event.get("sequence").and_then(Value::as_i64) == Some(checkpoint_sequence))
+        .ok_or_else(|| {
+            "General mission recovery checkpoint sequence is unavailable.".to_string()
+        })?;
+    let checkpoint_active = derive_replay_facts(&journal.events, checkpoint_sequence - 1)?
+        .state
+        .get("activeWorkerIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "General mission recovery active workers are invalid.".to_string())?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect::<BTreeSet<_>>();
+    let mut previous = checkpoint
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "General mission recovery checkpoint identity is invalid.".to_string())?
+        .to_string();
+    let mut pending_usage: Option<&str> = None;
+    let mut settled = BTreeSet::new();
+    for sequence in checkpoint_sequence + 1..=last_sequence {
+        let mut matches = journal
+            .events
+            .iter()
+            .filter(|event| event.get("sequence").and_then(Value::as_i64) == Some(sequence));
+        let event = matches
+            .next()
+            .ok_or_else(|| "General mission recovery event chain has a gap.".to_string())?;
+        if matches.next().is_some()
+            || event.get("previousEventId").and_then(Value::as_str) != Some(previous.as_str())
+        {
+            return Err("General mission recovery event chain is ambiguous.".into());
+        }
+        let worker_id = event
+            .pointer("/payload/usage/workerId")
+            .or_else(|| event.pointer("/payload/workerId"))
+            .and_then(Value::as_str)
+            .filter(|worker_id| checkpoint_active.contains(*worker_id))
+            .ok_or_else(|| {
+                "General mission recovery suffix contains an unknown worker.".to_string()
+            })?;
+        match event.get("type").and_then(Value::as_str) {
+            Some("usage-recorded") if pending_usage.is_none() && !settled.contains(worker_id) => {
+                pending_usage = Some(worker_id);
+            }
+            Some("worker-completed" | "worker-failed")
+                if pending_usage == Some(worker_id) && settled.insert(worker_id) =>
+            {
+                pending_usage = None;
+            }
+            _ => {
+                return Err("General mission recovery suffix is not an exact terminal pair.".into())
+            }
+        }
+        previous = event
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "General mission recovery event identity is invalid.".to_string())?
+            .to_string();
+    }
+    if pending_usage.is_some() || previous != head_event_id {
+        return Err("General mission recovery terminal suffix is incomplete.".into());
+    }
+    Ok(())
+}
+
+fn general_resume_tool_evidence(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    member: &str,
+    journal: &mission_run::MissionRunJournalRow,
+    active_worker_ids: &[String],
+    durable_through: i64,
+) -> crate::store::Result<Vec<GeneralMissionRestartToolEvidence>> {
+    let run_id = journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run identity is invalid.".into())
+        })?;
+    let mut evidence = Vec::new();
+    for worker_id in active_worker_ids {
+        let worker = journal
+            .events
+            .iter()
+            .find_map(|event| {
+                (event.get("type").and_then(Value::as_str) == Some("worker-created")
+                    && event.pointer("/payload/worker/id").and_then(Value::as_str)
+                        == Some(worker_id.as_str()))
+                .then(|| event.pointer("/payload/worker"))
+                .flatten()
+            })
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "General mission recovery worker is unavailable.".into(),
+                )
+            })?;
+        let tools = worker
+            .get("tools")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "General mission recovery worker tools are invalid.".into(),
+                )
+            })?;
+        let tool_events = journal
+            .events
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(Value::as_str) == Some("tool-call-completed")
+                    && event
+                        .pointer("/payload/result/workerId")
+                        .and_then(Value::as_str)
+                        == Some(worker_id.as_str())
+                    && event
+                        .get("sequence")
+                        .and_then(Value::as_i64)
+                        .is_some_and(|sequence| sequence <= durable_through)
+            })
+            .collect::<Vec<_>>();
+        if tools.is_empty() {
+            if !tool_events.is_empty()
+                || worker
+                    .get("capabilityIds")
+                    .and_then(Value::as_array)
+                    .is_none_or(|items| !items.is_empty())
+                || worker
+                    .get("capabilityGrantIds")
+                    .and_then(Value::as_array)
+                    .is_none_or(|items| !items.is_empty())
+            {
+                return Err(crate::store::StoreError::Invalid(
+                    "General mission recovery has ambiguous tool authority.".into(),
+                ));
+            }
+            continue;
+        }
+        if tool_events.len() != 1 {
+            return Err(crate::store::StoreError::Invalid(
+                "General mission recovery requires one exact tool evidence receipt.".into(),
+            ));
+        }
+        let tool_event_id = tool_events[0]
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "General mission recovery tool event is invalid.".into(),
+                )
+            })?;
+        let output_reference = tool_events[0]
+            .pointer("/payload/result/outputReference")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "General mission recovery tool evidence reference is invalid.".into(),
+                )
+            })?;
+        let binding = crate::mission_workers::NativeWorkerToolEvidenceBinding {
+            tool_event_id: tool_event_id.to_string(),
+            output_reference: output_reference.to_string(),
+        };
+        let result = crate::mission_workers::load_cited_tool_evidence(
+            tx, store, scope, member, journal, run_id, worker_id, worker, &binding,
+        )?;
+        evidence.push(GeneralMissionRestartToolEvidence {
+            worker_id: worker_id.clone(),
+            tool_event_id: tool_event_id.to_string(),
+            output_reference: output_reference.to_string(),
+            evidence: result,
+        });
+    }
+    Ok(evidence)
 }
 
 fn checkpoint_string_ids(
@@ -3107,7 +3338,8 @@ mod tests {
                     "sequence":2,"previousEventId":"event-create","occurredAt":"t3",
                     "idempotencyKey":"worker:create","payload":{"worker":{
                         "id":"worker-1","runId":"run-general",
-                        "planRevisionId":"revision-general","planStepKey":"produce"
+                        "planRevisionId":"revision-general","planStepKey":"produce",
+                        "tools":[],"capabilityIds":[],"capabilityGrantIds":[]
                     }}
                 });
                 let with_worker = mission_run::append(
@@ -3278,6 +3510,40 @@ mod tests {
         );
         assert!(
             checkpoint_string_ids(Some(&json!(["worker-1", "worker-2"])), "worker", 1).is_err()
+        );
+    }
+
+    #[test]
+    fn general_recovery_accepts_only_exact_partial_sibling_settlement() {
+        let events = vec![
+            json!({"id":"create-a","type":"worker-created","sequence":1,
+                "payload":{"worker":{"id":"worker-a","planStepKey":"a"}}}),
+            json!({"id":"create-b","type":"worker-created","sequence":2,
+                "payload":{"worker":{"id":"worker-b","planStepKey":"b"}}}),
+            json!({"id":"start-a","type":"worker-started","sequence":3,
+                "payload":{"workerId":"worker-a"}}),
+            json!({"id":"start-b","type":"worker-started","sequence":4,
+                "payload":{"workerId":"worker-b"}}),
+            json!({"id":"checkpoint","type":"checkpoint-created","sequence":5,
+                "previousEventId":"start-b"}),
+            json!({"id":"usage-a","runId":"run-1","type":"usage-recorded","sequence":6,
+                "previousEventId":"checkpoint","payload":{"usage":{"workerId":"worker-a"}}}),
+            json!({"id":"complete-a","runId":"run-1","type":"worker-completed","sequence":7,
+                "previousEventId":"usage-a","payload":{"workerId":"worker-a"}}),
+        ];
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"eventHead":{"lastSequence":7,"lastEventId":"complete-a"}}),
+            events,
+        };
+        assert!(validate_general_recovery_terminal_suffix(&journal, 5, "complete-a", 7).is_ok());
+        let facts = derive_replay_facts(&journal.events, 7).unwrap();
+        assert_eq!(facts.state["activeWorkerIds"], json!(["worker-b"]));
+        assert_eq!(facts.completed_worker_ids, ["worker-a"]);
+
+        let mut substituted = journal;
+        substituted.events[5]["type"] = json!("side-effect-recorded");
+        assert!(
+            validate_general_recovery_terminal_suffix(&substituted, 5, "complete-a", 7).is_err()
         );
     }
 

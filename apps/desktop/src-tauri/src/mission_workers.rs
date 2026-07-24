@@ -5203,13 +5203,11 @@ fn is_general_concurrent_provider_run(
     binding: &NativeWorkerExecutionBinding,
     output: Option<&NativeWorkerOutputSpec>,
 ) -> bool {
-    if binding.tool_evidence.is_some()
-        || output.is_some_and(|spec| spec.include_evidence)
-        || lifecycle
-            .mission
-            .get("executionDepth")
-            .and_then(Value::as_str)
-            != Some("multi-worker")
+    if lifecycle
+        .mission
+        .get("executionDepth")
+        .and_then(Value::as_str)
+        != Some("multi-worker")
     {
         return false;
     }
@@ -5219,23 +5217,25 @@ fn is_general_concurrent_provider_run(
         .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
         .filter_map(|event| event.pointer("/payload/worker"))
         .collect::<Vec<_>>();
+    let assigned = workers.iter().find(|worker| {
+        worker.get("id").and_then(Value::as_str) == Some(binding.worker_id.as_str())
+    });
     (2..=64).contains(&workers.len())
-        && workers.iter().any(|worker| {
-            worker.get("id").and_then(Value::as_str) == Some(binding.worker_id.as_str())
+        && assigned.is_some()
+        && assigned.is_some_and(|worker| {
+            let expects_evidence = general_provider_worker_has_connected_search(worker);
+            binding.tool_evidence.is_some() == expects_evidence
+                && output.is_some_and(|spec| spec.include_evidence) == expects_evidence
         })
         && workers.iter().all(|worker| {
-            ["tools", "capabilityIds", "capabilityGrantIds"]
-                .iter()
-                .all(|key| {
-                    worker
-                        .get(*key)
-                        .and_then(Value::as_array)
-                        .is_some_and(Vec::is_empty)
-                })
-                && worker
-                    .pointer("/routePreference/allowFallback")
-                    .and_then(Value::as_bool)
-                    == Some(false)
+            general_provider_worker_has_no_tools(worker)
+                || general_provider_worker_has_connected_search(worker)
+        })
+        && workers.iter().all(|worker| {
+            worker
+                .pointer("/routePreference/allowFallback")
+                .and_then(Value::as_bool)
+                == Some(false)
                 && worker
                     .pointer("/placementPreference/policy")
                     .and_then(Value::as_str)
@@ -5254,9 +5254,38 @@ fn is_general_concurrent_provider_run(
                     .is_some_and(|nodes| {
                         nodes.len() == 1 && nodes[0].as_str() == Some("local-desktop")
                     })
-                && native_output_spec(worker)
-                    .is_ok_and(|spec| spec.is_none_or(|spec| !spec.include_evidence))
+                && native_output_spec(worker).is_ok_and(|spec| {
+                    spec.is_none_or(|spec| {
+                        spec.include_evidence
+                            == general_provider_worker_has_connected_search(worker)
+                    })
+                })
         })
+}
+
+fn general_provider_worker_has_no_tools(worker: &Value) -> bool {
+    ["tools", "capabilityIds", "capabilityGrantIds"]
+        .iter()
+        .all(|key| {
+            worker
+                .get(*key)
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        })
+}
+
+fn general_provider_worker_has_connected_search(worker: &Value) -> bool {
+    let tools = worker.get("tools").and_then(Value::as_array);
+    let capabilities = worker.get("capabilityIds").and_then(Value::as_array);
+    let grants = worker.get("capabilityGrantIds").and_then(Value::as_array);
+    tools.is_some_and(|items| {
+        items.len() == 1
+            && items[0].get("toolName").and_then(Value::as_str) == Some("connection-read")
+            && items[0].get("access").and_then(Value::as_str) == Some("read")
+            && items[0].get("required").and_then(Value::as_bool) == Some(true)
+    }) && capabilities.is_some_and(|items| {
+        items.len() == 1 && items[0].as_str() == Some("knowledge.content.search")
+    }) && grants.is_some_and(|items| items.len() == 1 && items[0].as_str().is_some())
 }
 
 fn validate_parallel_evidence_free_authority(
@@ -10390,6 +10419,98 @@ mod tests {
         let mut substituted = journal;
         substituted.events[7]["payload"]["usage"]["workerId"] = json!("worker-a");
         assert!(validate_native_completion_head(&substituted, &binding, false, true).is_err());
+    }
+
+    #[test]
+    fn general_provider_shape_accepts_only_exact_connected_search_evidence() {
+        let connected_worker = json!({
+            "id":"worker-a",
+            "tools":[{"toolName":"connection-read","access":"read",
+                "purpose":"Search connected sources","required":true}],
+            "capabilityIds":["knowledge.content.search"],
+            "capabilityGrantIds":["grant-search-1"],
+            "routePreference":{"policy":"require","providerRouteIds":["route-a"],
+                "allowFallback":false},
+            "placementPreference":{"policy":"require",
+                "executionNodeIds":["local-desktop"],"locality":"local",
+                "allowTransfer":false},
+            "outputContract":{"slots":[{"key":"a","description":"A","required":true,
+                "format":"text/markdown"}],"includeEvidence":true,
+                "includeUncertainty":true,"delivery":"run-result"}
+        });
+        let plain_worker = json!({
+            "id":"worker-b","tools":[],"capabilityIds":[],"capabilityGrantIds":[],
+            "routePreference":{"policy":"require","providerRouteIds":["route-b"],
+                "allowFallback":false},
+            "placementPreference":{"policy":"require",
+                "executionNodeIds":["local-desktop"],"locality":"local",
+                "allowTransfer":false},
+            "outputContract":{"slots":[{"key":"b","description":"B","required":true,
+                "format":"text/markdown"}],"includeEvidence":false,
+                "includeUncertainty":true,"delivery":"run-result"}
+        });
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({"executionDepth":"multi-worker"}),
+            plan: json!({}),
+            current_revision: json!({}),
+        };
+        let mut journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":connected_worker}}),
+                json!({"type":"worker-created","payload":{"worker":plain_worker}}),
+            ],
+        };
+        let mut binding = NativeWorkerExecutionBinding {
+            run_id: "run-general".into(),
+            worker_id: "worker-a".into(),
+            worker_started_event_id: "start-a".into(),
+            route_selected_event_id: "route-a".into(),
+            usage_event_id: "usage-a".into(),
+            completion_event_id: "complete-a".into(),
+            evaluation_event_id: "evaluation-a".into(),
+            result_event_id: "result-a".into(),
+            failure_event_id: "failure-a".into(),
+            idempotency_key: "terminal-a".into(),
+            expected_run_revision: 8,
+            expected_last_sequence: 7,
+            checkpoint_event_id: Some("checkpoint-general".into()),
+            checkpoint_restore_event_id: None,
+            tool_evidence: Some(NativeWorkerToolEvidenceBinding {
+                tool_event_id: "tool-a".into(),
+                output_reference: "mission-tool:v1:evidence".into(),
+            }),
+        };
+        let output = NativeWorkerOutputSpec {
+            key: "a".into(),
+            description: "A".into(),
+            include_uncertainty: true,
+            include_evidence: true,
+        };
+        assert!(is_general_concurrent_provider_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            Some(&output)
+        ));
+        binding.tool_evidence = None;
+        assert!(!is_general_concurrent_provider_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            Some(&output)
+        ));
+        binding.tool_evidence = Some(NativeWorkerToolEvidenceBinding {
+            tool_event_id: "tool-a".into(),
+            output_reference: "mission-tool:v1:evidence".into(),
+        });
+        journal.events[0]["payload"]["worker"]["capabilityGrantIds"] = json!([]);
+        assert!(!is_general_concurrent_provider_run(
+            &journal,
+            &lifecycle,
+            &binding,
+            Some(&output)
+        ));
     }
 
     #[test]

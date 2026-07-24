@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
+import { buildToolApproval, createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import { executeCitedBriefMission, resumeInterruptedCitedBriefMissions, type CitedBriefMissionPlanSummary } from "../lib/cited-brief-mission";
 import { resumeInterruptedRuntimeProviderMissions } from "../lib/runtime-mission-graph";
@@ -55,6 +55,41 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
             recoveryBackend.providerId === route.providerFamily
               ? recoveryBackend
               : null,
+          executeMissionTool: async (toolInput) => {
+            const approval = {
+              ...buildToolApproval(
+                recoveryBackend.providerId,
+                toolInput.tool,
+                toolInput.argumentsJson
+              ),
+              id: toolInput.binding.callKey,
+              requestedAt: new Date().toISOString()
+            };
+            queueToolApproval({
+              callId: approval.id,
+              tool: toolInput.tool,
+              arguments: toolInput.argumentsJson,
+              approval
+            });
+            const missionExecutor = createDesktopToolExecutor(approvalGate, {
+              workspaceId: toolInput.workspaceId,
+              ...(toolInput.projectId ? { projectId: toolInput.projectId } : {}),
+              missionWorkerToolExecution: toolInput.binding,
+              queueApproval: (request, tool, argumentsJson) =>
+                queueToolApproval({
+                  callId: request.id,
+                  tool,
+                  arguments: argumentsJson,
+                  approval: request
+                })
+            });
+            const output = await missionExecutor(approval, toolInput.argumentsJson);
+            try {
+              return JSON.parse(output) as unknown;
+            } catch {
+              throw new Error("The connected-source Mission evidence is invalid.");
+            }
+          },
           onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
         })
       ]);

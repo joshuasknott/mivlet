@@ -3267,6 +3267,12 @@ export type RuntimeGeneralMissionRestartRecovery =
       completedWorkerIds: string[];
       completedPlanStepKeys: string[];
       committedEffectKeys: string[];
+      toolEvidence: Array<{
+        workerId: string;
+        toolEventId: string;
+        outputReference: string;
+        evidence: unknown;
+      }>;
       expectedRunRevision: number;
       expectedLastSequence: number;
       newAttemptNumber: number;

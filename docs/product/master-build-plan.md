@@ -914,8 +914,13 @@ worker now retains an immutable no-fallback provider-route envelope from the
 Mission data boundary plus an exact local-desktop, no-transfer placement policy.
 A Mission that excludes local execution or repeats an authority identity fails
 before preparation. Provider-only ready workers now have fresh dispatch and
-restart recovery; native grant composition and execution/recovery for
-tool-bearing steps remain open.
+restart recovery. A selected Plan that already contains one exact
+`knowledge.content.search` grant can also run one required `connection-read`:
+the desktop uses the existing approval/native receipt boundary, checkpoints
+only after the encrypted tool receipt is durable, and passes its
+untrusted/no-instruction-authority evidence into a tool-free provider-writing
+turn. Native arbitrary-plan preparation still does not invent grants, so grant
+composition and broader tool shapes remain open.
 
 The existing native worker-start boundary now selects cited-policy quality
 evidence only when the encrypted Mission, selected one-step Plan, capability,
@@ -983,13 +988,19 @@ until every sibling has a native terminal fact. This keeps provider work
 parallel without allowing a fast `any` join to race unfinished native
 settlement while ensuring an interrupted batch can qualify for the existing
 native recovery descriptor. On startup, the desktop consumes that descriptor
-only for provider-only workers: it verifies the exact Plan and active set,
+for provider-only workers and the same exact connected-source shape: it verifies
+the exact Plan and active set,
 freshly selects each current route inside saved policy, requires the same
 durable route identity, restores the checkpoint once, and resumes the active
-provider turns from one shared head. A cooperative stop is persisted before
+provider turns from one shared head. For a connected-source worker, Rust reloads
+and revalidates the encrypted tool receipt and the desktop reuses that attested
+evidence without repeating the tool call. Exact post-checkpoint sibling
+usage/terminal pairs are replayed and retained, so only workers still active at
+interruption resume. A cooperative stop is persisted before
 resumed egress is aborted; native terminal facts are required before graph
-coordination continues. Tool-bearing native grant composition and recovery
-remain open, so the Wave 4C checkboxes remain unchecked.
+coordination continues. Native grant composition, other tool shapes, and
+packaged restart observation remain open, so the Wave 4C checkboxes remain
+unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently

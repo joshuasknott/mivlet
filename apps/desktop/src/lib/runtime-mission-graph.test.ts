@@ -552,6 +552,17 @@ describe("authenticated runtime Mission graph composition", () => {
 
   it("restores and freshly routes an exact interrupted provider batch", async () => {
     const { workerA, workerB } = installFixture();
+    (workerA.tools as Array<Spine.Missions.Worker["tools"][number]>).push({
+      toolName: "connection-read",
+      access: "read",
+      purpose: "Search connected sources",
+      required: true
+    });
+    (workerA.capabilityIds as Array<Spine.Missions.Worker["capabilityIds"][number]>)
+      .push("knowledge.content.search" as Spine.Missions.Worker["capabilityIds"][number]);
+    (workerA.capabilityGrantIds as Array<Spine.Missions.Worker["capabilityGrantIds"][number]>)
+      .push("grant-search-1" as Spine.Missions.Worker["capabilityGrantIds"][number]);
+    workerA.outputContract.includeEvidence = true;
     const routeSelection = {
       providerRouteId: "provider-route-openai-gpt5",
       selectedAt: "2026-07-23T10:00:00.000Z",
@@ -566,17 +577,21 @@ describe("authenticated runtime Mission graph composition", () => {
       { id: "start-a", type: "worker-started", sequence: 4, payload: { workerId: workerA.id } },
       { id: "route-a", type: "route-selected", sequence: 5, previousEventId: "start-a",
         payload: { workerId: workerA.id, providerId: "openai", modelReference: "gpt-5", selection: routeSelection } },
-      { id: "start-b", type: "worker-started", sequence: 6, payload: { workerId: workerB.id } },
-      { id: "route-b", type: "route-selected", sequence: 7, previousEventId: "start-b",
+      { id: "tool-a", type: "tool-call-completed", sequence: 6, previousEventId: "route-a",
+        payload: { result: { workerId: workerA.id, toolName: "connection-read",
+          outputReference: "mission-tool:v1:worker-a:evidence" } } },
+      { id: "start-b", type: "worker-started", sequence: 7, previousEventId: "tool-a",
+        payload: { workerId: workerB.id } },
+      { id: "route-b", type: "route-selected", sequence: 8, previousEventId: "start-b",
         payload: { workerId: workerB.id, providerId: "openai", modelReference: "gpt-5", selection: routeSelection } },
-      { id: "checkpoint-general", type: "checkpoint-created", sequence: 8, previousEventId: "route-b",
+      { id: "checkpoint-general", type: "checkpoint-created", sequence: 9, previousEventId: "route-b",
         payload: { checkpoint: { attemptNumber: 1, stateStorage: "portable-redacted",
           executionNodeId: "local-desktop", replayBoundary: {
-            durableThroughSequence: 7, resumeAfterEventId: "route-b"
+            durableThroughSequence: 8, resumeAfterEventId: "route-b"
           } } } }
     );
-    journal.run.revision = 6;
-    journal.run.eventHead = { lastSequence: 8, lastEventId: "checkpoint-general" };
+    journal.run.revision = 7;
+    journal.run.eventHead = { lastSequence: 9, lastEventId: "checkpoint-general" };
     mocks.recoverGeneral.mockResolvedValue([{
       status: "resumable",
       runId: "run-1",
@@ -589,15 +604,41 @@ describe("authenticated runtime Mission graph composition", () => {
       completedWorkerIds: [],
       completedPlanStepKeys: [],
       committedEffectKeys: [],
-      expectedRunRevision: 6,
-      expectedLastSequence: 8,
+      toolEvidence: [{
+        workerId: "worker-a",
+        toolEventId: "tool-a",
+        outputReference: "mission-tool:v1:worker-a:evidence",
+        evidence: {
+          capabilityId: "knowledge.content.search",
+          result: {
+            matchedGrantIds: ["grant-search-1"],
+            trust: "external-untrusted",
+            instructionAuthority: "none"
+          }
+        }
+      }],
+      expectedRunRevision: 7,
+      expectedLastSequence: 9,
       newAttemptNumber: 2,
       requiresFreshRouteSelection: true
     }]);
     const backendRun = vi.fn((request: {
-      missionWorkerExecution?: { workerId: string };
+      missionWorkerExecution?: {
+        workerId: string;
+        toolEvidence?: { outputReference: string };
+      };
+      messages?: Array<{ content: string }>;
     }) => (async function* () {
       const workerId = request.missionWorkerExecution!.workerId;
+      if (workerId === "worker-a") {
+        expect(request.missionWorkerExecution?.toolEvidence).toEqual({
+          toolEventId: "tool-a",
+          outputReference: "mission-tool:v1:worker-a:evidence"
+        });
+        expect(request.messages?.[0]?.content).toContain(
+          '"instructionAuthority":"none"'
+        );
+      }
       const stepKey = workerId === "worker-a" ? "a" : "b";
       yield { type: "text-delta", text: `${stepKey} resumed` };
       yield { type: "usage", inputTokens: 10, outputTokens: 3, costUsd: 0, costUnknown: true };
@@ -631,16 +672,16 @@ describe("authenticated runtime Mission graph composition", () => {
       runId: "run-1",
       eventId: "restore-general",
       idempotencyKey: "restore-general-1",
-      expectedRunRevision: 6,
-      expectedLastSequence: 8,
+      expectedRunRevision: 7,
+      expectedLastSequence: 9,
       newAttemptNumber: 2
     });
     expect(backendRun).toHaveBeenCalledTimes(2);
     for (const [request] of backendRun.mock.calls) {
       expect(request).toMatchObject({
         missionWorkerExecution: {
-          expectedRunRevision: 7,
-          expectedLastSequence: 9,
+          expectedRunRevision: 8,
+          expectedLastSequence: 10,
           checkpointEventId: "checkpoint-general",
           checkpointRestoreEventId: "restore-general"
         }
@@ -666,6 +707,134 @@ describe("authenticated runtime Mission graph composition", () => {
       resolveBackend: vi.fn()
     })).rejects.toThrow("failed without recording a durable terminal fact");
     expect(mocks.startWorker).not.toHaveBeenCalled();
+  });
+
+  it("attests one connected-source search before checkpointed provider egress", async () => {
+    const { workerA } = installFixture();
+    (workerA.tools as Array<Spine.Missions.Worker["tools"][number]>).push({
+      toolName: "connection-read",
+      access: "read",
+      purpose: "Search connected sources",
+      required: true
+    });
+    (workerA.capabilityIds as Array<Spine.Missions.Worker["capabilityIds"][number]>)
+      .push("knowledge.content.search" as Spine.Missions.Worker["capabilityIds"][number]);
+    (workerA.capabilityGrantIds as Array<Spine.Missions.Worker["capabilityGrantIds"][number]>)
+      .push("grant-search-1" as Spine.Missions.Worker["capabilityGrantIds"][number]);
+    workerA.outputContract.includeEvidence = true;
+    const executeMissionTool = vi.fn(async (input: {
+      worker: Spine.Missions.Worker;
+      argumentsJson: string;
+      binding: {
+        toolEventId: string;
+        expectedRunRevision: number;
+        expectedLastSequence: number;
+      };
+    }) => {
+      expect(mocks.startWorker).toHaveBeenCalledTimes(1);
+      expect(input.worker.id).toBe("worker-a");
+      expect(JSON.parse(input.argumentsJson)).toEqual({
+        capability: "knowledge.content.search",
+        input: { query: "Complete a.", limit: 10 }
+      });
+      const journal = mocks.journal as {
+        run: Record<string, unknown>;
+        events: Array<Record<string, unknown>>;
+      };
+      const outputReference = "mission-tool:v1:worker-a:evidence";
+      journal.events.push({
+        id: input.binding.toolEventId,
+        type: "tool-call-completed",
+        sequence: input.binding.expectedLastSequence + 1,
+        payload: {
+          result: {
+            workerId: "worker-a",
+            toolName: "connection-read",
+            outputReference
+          }
+        }
+      });
+      journal.run.revision = input.binding.expectedRunRevision + 1;
+      journal.run.eventHead = {
+        lastSequence: input.binding.expectedLastSequence + 1,
+        lastEventId: input.binding.toolEventId
+      };
+      return {
+        result: {
+          matchedGrantIds: ["grant-search-1"],
+          trust: "external-untrusted",
+          instructionAuthority: "none"
+        }
+      };
+    });
+    const backendRun = vi.fn((request: {
+      missionWorkerExecution?: {
+        workerId: string;
+        checkpointEventId?: string;
+        toolEvidence?: { outputReference: string };
+      };
+      messages?: Array<{ content: string }>;
+      missionToolEvidence?: unknown;
+    }) => (async function* () {
+      const workerId = request.missionWorkerExecution!.workerId;
+      const stepKey = workerId === "worker-a" ? "a" : "b";
+      if (workerId === "worker-a") {
+        expect(request.messages?.[0]?.content).toContain(
+          '"instructionAuthority":"none"'
+        );
+        expect(request.missionWorkerExecution?.toolEvidence).toEqual({
+          toolEventId: expect.stringMatching(/^mission-tool-/),
+          outputReference: "mission-tool:v1:worker-a:evidence"
+        });
+      } else {
+        expect(request.messages?.[0]?.content).not.toContain(
+          '"instructionAuthority":"none"'
+        );
+        expect(request.missionWorkerExecution?.toolEvidence).toBeUndefined();
+      }
+      yield { type: "text-delta", text: `${stepKey} output` };
+      yield {
+        type: "usage",
+        inputTokens: 20,
+        outputTokens: 4,
+        costUsd: 0,
+        costUnknown: true
+      };
+      (mocks.journal!.events as Array<Record<string, unknown>>).push({
+        id: `${workerId}-completed`,
+        type: "worker-completed",
+        payload: {
+          workerId,
+          outputs: [{
+            key: stepKey,
+            summary: `${stepKey} output`,
+            valueReference: `mission-output:${stepKey}`
+          }]
+        }
+      });
+      yield { type: "done", finishReason: "stop" };
+    })());
+    const backend = {
+      providerId: "openai",
+      backend: { backendType: "native-api" },
+      capabilities: [],
+      run: backendRun,
+      cancel: vi.fn(async () => {})
+    };
+
+    await expect(executeRuntimeProviderMissionGraph({
+      runId: "run-1",
+      resolveBackend: async () => backend as never,
+      executeMissionTool
+    })).resolves.toMatchObject({ status: "complete" });
+
+    expect(executeMissionTool).toHaveBeenCalledTimes(1);
+    expect(mocks.createCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
+      expectedRunRevision: 6,
+      expectedLastSequence: 8,
+      durableThroughSequence: 8,
+      resumeAfterEventId: expect.stringMatching(/^mission-route-/)
+    }));
   });
 
   it("persists cancellation before it asks the worker callback to abort", async () => {

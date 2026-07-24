@@ -10,7 +10,7 @@ import {
   type MissionCoordinationGraph,
   type MissionGraphRunReceipt
 } from "@fable/connectors";
-import type { Spine } from "@fable/protocol";
+import type { MissionWorkerToolExecutionBinding, Spine } from "@fable/protocol";
 import {
   advanceRuntimeMissionCoordination,
   createRuntimeMissionCheckpoint,
@@ -58,7 +58,19 @@ export interface ExecuteRuntimeProviderMissionGraphInput {
   resolveBackend(
     route: RuntimeNativeProviderRoute
   ): AgentBackend | null | Promise<AgentBackend | null>;
+  executeMissionTool?(
+    input: RuntimeMissionToolExecutionInput
+  ): Promise<unknown>;
   signal?: AbortSignal;
+}
+
+export interface RuntimeMissionToolExecutionInput {
+  worker: Spine.Missions.Worker;
+  workspaceId: string;
+  projectId?: string;
+  tool: "connection-read";
+  argumentsJson: string;
+  binding: MissionWorkerToolExecutionBinding;
 }
 
 export interface RuntimeProviderMissionRecoverySummary {
@@ -203,11 +215,20 @@ type PreparedProviderWorker = PendingProviderWorker & {
   backend: AgentBackend;
   route: RuntimeNativeProviderRoute;
   routeSelection: Spine.Missions.ProviderRouteSelection;
+  toolRequest: {
+    tool: "connection-read";
+    argumentsJson: string;
+  } | null;
 };
 
 type StartedProviderWorker = PreparedProviderWorker & {
   workerStartedEventId: string;
   routeSelectedEventId: string;
+  missionToolEvidence?: unknown;
+  toolEvidence?: {
+    toolEventId: string;
+    outputReference: string;
+  };
 };
 
 class RuntimeProviderWorkerStarter {
@@ -260,7 +281,50 @@ class RuntimeProviderWorkerStarter {
         }
         journal = missionJournal(startedJournal);
         const binding = workerStartBinding(journal, item.worker.id);
-        started.push({ ...item, ...binding });
+        const startedItem: StartedProviderWorker = { ...item, ...binding };
+        if (item.toolRequest) {
+          const executeMissionTool = this.input.executeMissionTool;
+          if (!executeMissionTool) {
+            throw new Error("Tool-bearing Mission dispatch requires an exact desktop tool executor.");
+          }
+          const toolHead = runHead(journal);
+          const toolEventId = runtimeIdentity("mission-tool");
+          const missionToolEvidence = await executeMissionTool({
+            worker: item.worker,
+            workspaceId: text(journal.run.workspaceId, "Mission workspace"),
+            ...projectScope(journal.run),
+            tool: item.toolRequest.tool,
+            argumentsJson: item.toolRequest.argumentsJson,
+            binding: {
+              runId: this.input.runId,
+              workerId: item.worker.id,
+              workerStartedEventId: binding.workerStartedEventId,
+              routeSelectedEventId: binding.routeSelectedEventId,
+              toolEventId,
+              callKey: runtimeIdentity("mission-tool-call"),
+              idempotencyKey: runtimeIdentity("mission-worker-tool"),
+              expectedRunRevision: toolHead.revision,
+              expectedLastSequence: toolHead.lastSequence
+            }
+          });
+          journal = await requireRuntimeJournal(this.input.runId);
+          const outputReference = missionToolOutputReference(
+            journal,
+            item.worker.id,
+            toolEventId
+          );
+          const afterTool = runHead(journal);
+          if (
+            afterTool.revision !== toolHead.revision + 1
+            || afterTool.lastSequence !== toolHead.lastSequence + 1
+            || afterTool.lastEventId !== toolEventId
+          ) {
+            throw new Error("The native Mission tool receipt did not become the exact execution head.");
+          }
+          startedItem.missionToolEvidence = missionToolEvidence;
+          startedItem.toolEvidence = { toolEventId, outputReference };
+        }
+        started.push(startedItem);
       }
       const checkpointBase = runHead(journal);
       const checkpointEventId = runtimeIdentity("mission-general-checkpoint");
@@ -305,7 +369,10 @@ class RuntimeProviderWorkerStarter {
   }
 
   private async prepare(item: PendingProviderWorker): Promise<PreparedProviderWorker> {
-    validateProviderOnlyWorker(item.worker);
+    const toolRequest = validateGeneralProviderWorker(item.worker);
+    if (toolRequest && !this.input.executeMissionTool) {
+      throw new Error("Tool-bearing Mission dispatch requires an exact desktop tool executor.");
+    }
     const selected = await selectRuntimeMissionWorkerRoute(item.worker);
     const backend = await this.input.resolveBackend(selected.route);
     if (!backend || backend.providerId !== selected.route.providerFamily) {
@@ -315,7 +382,8 @@ class RuntimeProviderWorkerStarter {
       ...item,
       backend,
       route: selected.route,
-      routeSelection: selected.execution.selection
+      routeSelection: selected.execution.selection,
+      toolRequest
     };
   }
 
@@ -325,14 +393,19 @@ class RuntimeProviderWorkerStarter {
     checkpointEventId: string
   ): Promise<void> {
     await executeLocalWorker({
-      worker: item.worker,
+      worker: item.missionToolEvidence !== undefined
+        ? { ...item.worker, status: "running" }
+        : item.worker,
       backend: item.backend,
       model: item.route.modelOrRuntimeReference,
       prompt: item.worker.role.objective,
       toolSpecs: [],
       execute: async () => {
-        throw new Error("Provider-only Mission workers cannot call tools.");
+        throw new Error("Mission provider writing turns cannot call tools.");
       },
+      ...(item.missionToolEvidence !== undefined
+        ? { missionToolEvidence: item.missionToolEvidence }
+        : {}),
       signal: item.signal,
       missionWorkerExecution: {
         runId: this.input.runId,
@@ -347,10 +420,19 @@ class RuntimeProviderWorkerStarter {
         idempotencyKey: runtimeIdentity("mission-worker-terminal"),
         expectedRunRevision: executionHead.revision,
         expectedLastSequence: executionHead.lastSequence,
-        checkpointEventId
+        checkpointEventId,
+        ...(item.toolEvidence ? { toolEvidence: item.toolEvidence } : {})
       }
     });
   }
+}
+
+function projectScope(
+  run: Spine.Missions.Run
+): { projectId?: string } {
+  return run.projectId
+    ? { projectId: run.projectId }
+    : {};
 }
 
 type RecoveredProviderWorker = {
@@ -359,6 +441,11 @@ type RecoveredProviderWorker = {
   route: RuntimeNativeProviderRoute;
   workerStartedEventId: string;
   routeSelectedEventId: string;
+  missionToolEvidence?: unknown;
+  toolEvidence?: {
+    toolEventId: string;
+    outputReference: string;
+  };
 };
 
 async function resumeRuntimeProviderMission(
@@ -394,7 +481,16 @@ async function resumeRuntimeProviderMission(
     if (!worker || !recovery.activePlanStepKeys.includes(worker.planStepKey ?? "")) {
       throw new Error("General Mission recovery worker is not in the selected Plan.");
     }
-    validateProviderOnlyWorker(worker);
+    const toolRequest = validateGeneralProviderWorker(worker);
+    const recoveredTool = recovery.toolEvidence.find(
+      (candidate) => candidate.workerId === worker.id
+    );
+    if (toolRequest && !recoveredTool) {
+      throw new Error("General Mission recovery tool evidence is unavailable.");
+    }
+    if (!toolRequest && recoveredTool) {
+      throw new Error("General Mission recovery returned unexpected tool evidence.");
+    }
     const persisted = persistedWorkerRoute(state.journal, workerId);
     const selected = await selectRuntimeMissionWorkerRoute(worker);
     if (
@@ -414,6 +510,14 @@ async function resumeRuntimeProviderMission(
       route: selected.route,
       workerStartedEventId: persisted.workerStartedEventId,
       routeSelectedEventId: persisted.routeSelectedEventId
+      ,
+      ...(recoveredTool ? {
+        missionToolEvidence: recoveredTool.evidence,
+        toolEvidence: {
+          toolEventId: recoveredTool.toolEventId,
+          outputReference: recoveredTool.outputReference
+        }
+      } : {})
     };
   }));
 
@@ -474,8 +578,11 @@ async function resumeRuntimeProviderMission(
         prompt: item.worker.role.objective,
         toolSpecs: [],
         execute: async () => {
-          throw new Error("Recovered provider-only Mission workers cannot call tools.");
+          throw new Error("Recovered Mission provider writing turns cannot call tools.");
         },
+        ...(item.missionToolEvidence !== undefined
+          ? { missionToolEvidence: item.missionToolEvidence }
+          : {}),
         signal: cancellation.signal,
         missionWorkerExecution: {
           runId: recovery.runId,
@@ -491,7 +598,8 @@ async function resumeRuntimeProviderMission(
           expectedRunRevision: restoredHead.revision,
           expectedLastSequence: restoredHead.lastSequence,
           checkpointEventId: recovery.checkpointEventId,
-          checkpointRestoreEventId: recovery.restoreEventId
+          checkpointRestoreEventId: recovery.restoreEventId,
+          ...(item.toolEvidence ? { toolEvidence: item.toolEvidence } : {})
         }
       })
     ));
@@ -508,6 +616,9 @@ async function resumeRuntimeProviderMission(
     await executeRuntimeProviderMissionGraph({
       runId: recovery.runId,
       resolveBackend: input.resolveBackend,
+      ...(input.executeMissionTool
+        ? { executeMissionTool: input.executeMissionTool }
+        : {}),
       ...(input.signal ? { signal: input.signal } : {})
     });
   } finally {
@@ -553,6 +664,40 @@ function persistedWorkerRoute(
   };
 }
 
+function validateGeneralProviderWorker(
+  worker: Spine.Missions.Worker
+): PreparedProviderWorker["toolRequest"] {
+  const hasAuthority = worker.tools.length > 0
+    || worker.capabilityIds.length > 0
+    || worker.capabilityGrantIds.length > 0;
+  if (!hasAuthority) {
+    validateGeneralProviderOutput(worker, false);
+    return null;
+  }
+  const tool = worker.tools[0];
+  if (
+    worker.tools.length !== 1
+    || tool?.toolName !== "connection-read"
+    || tool.access !== "read"
+    || tool.required !== true
+    || worker.capabilityIds.length !== 1
+    || worker.capabilityIds[0] !== "knowledge.content.search"
+    || worker.capabilityGrantIds.length !== 1
+  ) {
+    throw new Error(
+      "General Mission dispatch supports only one exact connected-source search grant."
+    );
+  }
+  validateGeneralProviderOutput(worker, true);
+  return {
+    tool: "connection-read",
+    argumentsJson: JSON.stringify({
+      capability: "knowledge.content.search",
+      input: { query: worker.role.objective, limit: 10 }
+    })
+  };
+}
+
 function validateProviderOnlyWorker(worker: Spine.Missions.Worker): void {
   if (
     worker.tools.length > 0
@@ -561,18 +706,53 @@ function validateProviderOnlyWorker(worker: Spine.Missions.Worker): void {
   ) {
     throw new Error("General provider dispatch cannot infer tool or capability authority.");
   }
+  validateGeneralProviderOutput(worker, false);
+}
+
+function validateGeneralProviderOutput(
+  worker: Spine.Missions.Worker,
+  includeEvidence: boolean
+): void {
   const slots = worker.outputContract.slots;
   if (
     slots.length > 1
     || (slots.length === 1 && (
       !slots[0]?.required
       || slots[0].format !== "text/markdown"
-      || worker.outputContract.includeEvidence
+      || worker.outputContract.includeEvidence !== includeEvidence
       || worker.outputContract.delivery !== "run-result"
     ))
   ) {
-    throw new Error("General provider dispatch supports one evidence-free required Markdown output.");
+    throw new Error(
+      includeEvidence
+        ? "Connected-source Mission dispatch requires one evidence-bearing Markdown output."
+        : "General provider dispatch supports one evidence-free required Markdown output."
+    );
   }
+}
+
+function missionToolOutputReference(
+  journal: MissionJournal,
+  workerId: string,
+  toolEventId: string
+): string {
+  const event = journal.events.find((candidate) => candidate.id === toolEventId);
+  if (
+    event?.type !== "tool-call-completed"
+    || record(
+      record(event.payload, "Mission tool event payload").result,
+      "Mission tool result"
+    ).workerId !== workerId
+  ) {
+    throw new Error("The native Mission tool receipt is unavailable.");
+  }
+  return text(
+    record(
+      record(event.payload, "Mission tool event payload").result,
+      "Mission tool result"
+    ).outputReference,
+    "Mission tool output reference"
+  );
 }
 
 async function requireRuntimeJournal(runId: string): Promise<MissionJournal> {

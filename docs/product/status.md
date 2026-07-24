@@ -201,6 +201,28 @@ Departments remain explicitly deferred and are not presented as an available pri
 - Encrypted database restoration intentionally requires the matching OS-secure master key. The desktop now exposes verified backup and restart-staged restore controls, but exporting or escrow of that key is not implemented; a missing key remains an explicit unrecoverable boundary for raw database backups, with credential-free portable workspace export as the separate migration path.
 - Scheduled work still depends on a connected runnable backend and user approval gates for consequential actions; live account coverage was not externally validated in this checkout.
 
+## General Mission Tool-Bearing Update (2026-07-24)
+
+This update supersedes the earlier open wording in this status snapshot for
+general connected-source tool dispatch and recovery. A selected general Plan
+whose worker already owns one exact `knowledge.content.search` grant can execute
+one required, approved `connection-read` through the existing native tool
+boundary. The ready batch is fully preflighted before mutation; each
+tool-bearing worker's start, route, encrypted result receipt, and untrusted
+no-instruction-authority evidence become durable before the shared checkpoint
+and parallel provider-writing turns.
+
+Restart recovery does not repeat that search or consume another approval. Rust
+reloads and revalidates the exact owner/workspace/run/worker tool receipt,
+returns only its attested evidence in the authenticated resume descriptor, and
+the desktop restores the shared checkpoint once before continuing the
+provider-writing turn. Provider-only siblings retain the same behavior.
+Arbitrary grant creation, write tools, multiple tools per worker, other
+capability shapes, product UI for arbitrary Plan creation, and
+packaged/live-provider observation remain open. Exact post-checkpoint sibling
+usage/terminal pairs are replayed on restart, so already-settled workers are
+preserved and only the remaining active workers resume.
+
 ## Evidence Checked
 
 - `docs/product/vision.md`

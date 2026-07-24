@@ -175,16 +175,23 @@ placement policy. The desktop's execution-time resolver considers only current
 routes inside that workspace and saved envelope, reuses the portable health,
 capability, context, tool, risk, budget, cost, quality, and speed selector, and
 fails if candidates cross provider, billing, privacy, or placement boundaries.
-The provider-only product composition preflights each ready worker, resolves its
+The general provider product composition preflights each ready worker, resolves its
 already-authorized backend, serializes all native starts in the ready batch, and
-only then permits their provider egress to run in parallel against one shared
-durable head. Rust rechecks the saved worker policy before appending route facts;
+for an already-granted connected-source worker executes exactly one
+`connection-read` through the existing approval/native receipt boundary. It
+then seals every start, route, and tool receipt into one shared checkpoint before
+provider egress runs in parallel. Other tool or grant shapes fail before start.
+Rust rechecks the saved worker policy before appending route facts;
 concurrent settlement advances only across exact usage and terminal facts for
-other known provider-only siblings. Provider egress remains concurrent, but the
+other known siblings. Provider egress remains concurrent, but the
 desktop releases the ready batch back to graph coordination only after every
 sibling has settled to a native terminal fact. A fast `any` outcome therefore
 cannot append coordination facts across a still-settling sibling.
-Tool-bearing composition and general restart dispatch remain separate boundaries.
+Restart descriptors reload any active connected-source worker's exact encrypted
+tool receipt and attested evidence, restore the shared checkpoint once, and
+resume only the provider-writing turn without repeating the tool call. An exact
+post-checkpoint suffix of sibling usage/terminal pairs is retained, so restart
+resumes only workers that were still active at interruption.
 A native-owned bounded advance command can settle every
 currently decidable declared join and reference-only coordinate aggregation in
 one transaction. It derives stable event identities from the run and selected
@@ -199,8 +206,8 @@ committed-effect facts; a hidden wait, changed head, exhausted attempt budget, o
 failed integrity check cannot resume. The descriptor deliberately requires fresh
 route selection. Unreplayable active graphs are terminalized with the same
 explicit Run and Mission result instead of remaining falsely active. Automatic
-route selection, worker start/egress, restore dispatch, and artifact
-orchestration for arbitrary graphs remain open. Once graph workers are terminal,
+native grant composition, broader tool shapes, product creation of arbitrary
+plans, and artifact orchestration remain open. Once graph workers are terminal,
 a separate portable aggregator can derive one Mission result from their exact
 durable Run results and independently recomputed coordinate receipts. It binds
 every worker and usage record to the selected graph, verifies output contracts
