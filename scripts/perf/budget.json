@@ -1,28 +1,7 @@
 {
-  "version": 1,
-  "recordedAt": "2026-07-02",
-  "recordedBaseline": {
-    "totalJsCss": {
-      "rawBytes": 858726,
-      "gzipBytes": 233267
-    },
-    "css": {
-      "rawBytes": 138138
-    },
-    "initialEntryJs": {
-      "rawBytes": 315500
-    },
-    "routeChunks": {
-      "SchedulesPage": { "rawBytes": 22835 },
-      "SettingsPage": { "rawBytes": 73100 },
-      "KnowledgePage": { "rawBytes": 39000 },
-      "OnboardingPage": { "rawBytes": 15100 },
-      "ConnectorsPage": { "rawBytes": 8200 },
-      "ApprovalPanel": { "rawBytes": 8200 },
-      "DepartmentsPage": { "rawBytes": 700 }
-    }
-  },
-  "observedBuild": {
+  "version": 2,
+  "recordedAt": "2026-07-24",
+  "previousBaseline": {
     "recordedAt": "2026-07-03",
     "totalJsCss": {
       "rawBytes": 871450,
@@ -33,59 +12,93 @@
     },
     "initialEntryJs": {
       "rawBytes": 323101
+    }
+  },
+  "recordedBaseline": {
+    "totalJsCss": {
+      "rawBytes": 1462564,
+      "gzipBytes": 388413
+    },
+    "css": {
+      "rawBytes": 189977
+    },
+    "initialEntryJs": {
+      "rawBytes": 680884
     },
     "routeChunks": {
-      "SchedulesPage": { "rawBytes": 26233 },
-      "SettingsPage": { "rawBytes": 73144 },
-      "KnowledgePage": { "rawBytes": 39943 },
-      "OnboardingPage": { "rawBytes": 15103 },
-      "ConnectorsPage": { "rawBytes": 8202 },
+      "SchedulesPage": { "rawBytes": 41168 },
+      "SettingsPage": { "rawBytes": 89513 },
+      "KnowledgePage": { "rawBytes": 44635 },
+      "OnboardingPage": { "rawBytes": 3871 },
+      "ConnectorsPage": { "rawBytes": 8253 },
       "ApprovalPanel": { "rawBytes": 8196 },
-      "DepartmentsPage": { "rawBytes": 669 }
+      "DepartmentsPage": { "rawBytes": 632 }
+    }
+  },
+  "observedBuild": {
+    "recordedAt": "2026-07-24",
+    "totalJsCss": {
+      "rawBytes": 1462564,
+      "gzipBytes": 388413
+    },
+    "css": {
+      "rawBytes": 189977
+    },
+    "initialEntryJs": {
+      "rawBytes": 680884
+    },
+    "routeChunks": {
+      "SchedulesPage": { "rawBytes": 41168 },
+      "SettingsPage": { "rawBytes": 89513 },
+      "KnowledgePage": { "rawBytes": 44635 },
+      "OnboardingPage": { "rawBytes": 3871 },
+      "ConnectorsPage": { "rawBytes": 8253 },
+      "ApprovalPanel": { "rawBytes": 8196 },
+      "DepartmentsPage": { "rawBytes": 632 }
     }
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 896000,
-      "gzipBytes": 243712,
-      "marginNote": "+24 KiB raw / +8 KiB gzip above observed build; ignores hash churn and small gzip variance"
+      "rawBytes": 1528100,
+      "gzipBytes": 413000,
+      "marginNote": "+64 KiB raw / +24 KiB gzip above the measured repository build"
     },
     "css": {
-      "rawBytes": 157184,
-      "marginNote": "+12 KiB raw above observed build"
+      "rawBytes": 206400,
+      "marginNote": "+16 KiB raw above the measured repository build"
     },
     "initialEntryJs": {
-      "rawBytes": 343552,
-      "marginNote": "+20 KiB raw above observed build"
+      "rawBytes": 730100,
+      "marginNote": "+48 KiB raw above the measured repository build"
     },
     "routeChunks": {
       "SchedulesPage": {
-        "rawBytes": 34816,
-        "marginNote": "+8 KiB raw above observed build"
+        "rawBytes": 49408,
+        "marginNote": "+8 KiB raw above the measured repository build"
       },
       "SettingsPage": {
-        "rawBytes": 89088,
-        "marginNote": "+16 KiB raw above observed build"
+        "rawBytes": 101824,
+        "marginNote": "+12 KiB raw above the measured repository build"
       },
       "KnowledgePage": {
-        "rawBytes": 51200,
-        "marginNote": "+11 KiB raw above observed build"
+        "rawBytes": 52864,
+        "marginNote": "+8 KiB raw above the measured repository build"
       },
       "OnboardingPage": {
-        "rawBytes": 23552,
-        "marginNote": "+8 KiB raw above observed build"
+        "rawBytes": 12288,
+        "marginNote": "+8 KiB raw above the measured repository build"
       },
       "ConnectorsPage": {
-        "rawBytes": 16384,
-        "marginNote": "+8 KiB raw above observed build"
+        "rawBytes": 16448,
+        "marginNote": "+8 KiB raw above the measured repository build"
       },
       "ApprovalPanel": {
-        "rawBytes": 16384,
-        "marginNote": "+8 KiB raw above observed build"
+        "rawBytes": 16448,
+        "marginNote": "+8 KiB raw above the measured repository build"
       },
       "DepartmentsPage": {
-        "rawBytes": 4096,
-        "marginNote": "+3.4 KiB raw above observed build"
+        "rawBytes": 5120,
+        "marginNote": "+4 KiB raw above the measured repository build"
       }
     }
   }

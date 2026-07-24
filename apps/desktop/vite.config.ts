@@ -32,7 +32,14 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes("@phosphor-icons")) return undefined;
           if (id.includes("node_modules")) {
-            if (id.includes("react-dom") || /[/\\]node_modules[/\\]react[/\\]/.test(id)) {
+            if (
+              id.includes("@tanstack/react-query") ||
+              id.includes("react-dom") ||
+              id.includes("react-is") ||
+              id.includes("scheduler") ||
+              id.includes("use-sync-external-store") ||
+              /[/\\]node_modules[/\\]react[/\\]/.test(id)
+            ) {
               return "react-vendor";
             }
             return "vendor";

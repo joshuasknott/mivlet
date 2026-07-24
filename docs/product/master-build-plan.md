@@ -1329,6 +1329,7 @@ validation remain open; therefore the aggregate checkboxes stay open.
 - [ ] Complete responsive behavior, onboarding, and contextual help.
 - [ ] Remove fixtures, misleading states, duplicate paths, stale copy, and dead ends.
 - [ ] Meet startup, memory, storage, retrieval, streaming, and long-run performance budgets.
+  - Repo-local progress: the standard `pnpm check` and Windows CI gates now enforce the measured desktop JS/CSS aggregate, gzip aggregate, initial-entry payload, CSS payload, and every current lazy product route against narrow explicit byte ceilings. The 24 July baseline truthfully replaces the obsolete pre-Mission/Routine/MCP size ceiling while retaining it as history, and React Query plus React scheduler bridges now share the React vendor chunk without a circular dependency. The same gate runs deterministic connector shaping, Knowledge retrieval/retention, encrypted-store/cache, and scheduler-queue fixture checks; protocol, Mission, Routine, and MCP suites separately enforce bounded frames, outputs, histories, workers, iterations, leases, and retries. The 681 KiB initial entry remains an acknowledged optimization target rather than a hidden warning. Packaged Windows cold start, comparable RSS, real-provider streaming, and long private soak evidence require the packaged application and remain open, so the full item stays unchecked.
 - [ ] Add end-to-end regression coverage for the Product Blueprint success journeys.
 
 ### Wave 10D - Windows private distribution

@@ -1,6 +1,6 @@
 # Release Readiness
 
-Last updated: 2026-07-23.
+Last updated: 2026-07-24.
 
 > **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. The current Clerk/Convex implementation is still a config-gated foundation, so the repository must not be presented as having completed that account requirement.
 
@@ -68,6 +68,7 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, one-time Mission approval consumption, artifacts, Connections, and grants persist in `fable-vault.db` under schema v35.
 - Privacy settings can create and immediately verify a non-overwriting encrypted SQLite recovery backup. Raw backup restore requires the same OS-held vault key, is staged without replacing the live database, applies only at restart, preserves the prior database, and rolls back if the candidate cannot open or migrate. Provider and OAuth credentials are excluded and still require their own account recovery or reconnection. Portable workspace export is the separate credential-free cross-device path. Packaged installer/upgrade restore observation and any vault-key export or escrow decision remain release gates.
 - Privacy settings also expose a secret-free local health report for storage, providers, Connections, MCP, Missions, Routines, queues, migrations, and sync. It returns only authenticated workspace-scoped states and counts from control columns and never includes content, paths, account identifiers, or credentials. Deployed monitoring and runtime-node telemetry remain open.
+- Repository and Windows CI checks enforce the current desktop bundle, CSS, initial-entry, and lazy-route size budgets plus deterministic connector, Knowledge, encrypted-storage/cache, and scheduler-queue performance fixtures. The initial entry remains above Vite's 600 KiB advisory threshold and is an explicit optimization target. These checks are not evidence of packaged cold start, comparable RSS, live-provider streaming, or private long-run soak behavior.
 - Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store.
 - Canonical Routines can be created, edited, paused, resumed, deleted, listed,
   migrated, and executed locally with encrypted evidence, time-zone-aware

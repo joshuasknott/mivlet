@@ -137,6 +137,8 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
 | Native voice providers, Convex collaboration | **Mixed** | Dictation still depends on the host Web Speech API. Convex now has hosted membership lifecycle, config-gated hash-only verified-email invitation creation and acceptance, a capability-projected member roster, member role/status/removal controls, and shared-project revision history plus an authenticated native encrypted cache/outbox adapter. Workspace Settings can create, list, and accept invitations and manage eligible members without exposing hosted member authority or fabricating preview data; realtime desktop consumption, deployment, and live multi-member validation remain open. |
 
+Performance regression gates are repository-local and current as of 24 July 2026. Windows CI and `pnpm check` enforce measured byte ceilings for the desktop bundle, CSS, initial entry, and current lazy product routes, then run bounded connector, Knowledge, encrypted-store/cache, and scheduler-queue fixtures. React and its scheduler/query bridges no longer form a circular vendor split. The 681 KiB initial entry is recorded honestly and remains an optimization target. Packaged cold-start, comparable RSS, live-provider streaming, and long private soak performance are not validated.
+
 ## Partially Implemented Or Preview-Only
 
 - Browser preview uses an explicit synthetic identity/workspace fixture. The Tauri path requires a Fable account and then one provider; it no longer offers a local profile, password, or skip route.
