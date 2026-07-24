@@ -2858,6 +2858,100 @@ describe("Fable home", () => {
     expect(listRuntimeThreadMissionProgress).toHaveBeenCalledWith("thread-general-progress");
   });
 
+  it("rehydrates every accepted Artifact produced by a completed general Mission", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-artifacts", projectId: null, title: "Reviewed outputs",
+      lifecycle: "active", updatedAt: "2026-07-24T12:00:00Z",
+      messageHead: { lastSequence: 1, lastMessageId: "message-general-artifacts" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-general-artifacts", threadId: "thread-general-artifacts",
+        kind: "assistant", sequence: 1, runId: "run-general-artifacts",
+        currentRevisionId: "revision-general-artifacts",
+        currentRevisionNumber: 1, currentRevisionState: "terminal"
+      },
+      currentRevision: {
+        id: "revision-general-artifacts", threadId: "thread-general-artifacts",
+        messageId: "message-general-artifacts", messageRevisionNumber: 1,
+        state: "terminal", content: "Both reviewed deliverables are ready."
+      }
+    }];
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [{
+        runId: "run-general-artifacts",
+        progress: {
+          version: 1, state: "complete", summary: "The mission is complete.",
+          runStatus: "completed", completedSteps: 2, totalSteps: 2,
+          runningWorkers: 0, readyWorkers: 0, waitingSteps: 0, blockedSteps: 0,
+          steps: [{
+            stepKey: "brief", title: "Launch brief", kind: "produce",
+            state: "completed", detail: "The durable output is complete."
+          }, {
+            stepKey: "risks", title: "Risk review", kind: "produce",
+            state: "completed", detail: "The durable output is complete."
+          }],
+          usage: {
+            records: 2, inputTokens: 40, outputTokens: 20,
+            toolCalls: 0, durationMs: 500, costObservations: []
+          },
+          budget: { maxWorkers: 2 },
+          acceptance: [{
+            criterionKey: "accept-brief", description: "Review the launch brief.",
+            evaluator: "human", required: true, status: "met", evidenceRefs: ["output-brief"]
+          }, {
+            criterionKey: "accept-risks", description: "Review the risks.",
+            evaluator: "human", required: true, status: "met", evidenceRefs: ["output-risks"]
+          }],
+          humanReview: null,
+          nextAction: "The reviewed artifacts are ready."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    } as never);
+    vi.mocked(listRuntimeThreadArtifacts).mockResolvedValueOnce([
+      {
+        artifact: {
+          id: "artifact-brief", title: "Launch brief", status: "accepted", revision: 1,
+          currentVersionId: "artifact-brief-v1", producingRunId: "run-general-artifacts",
+          context: { threadId: "thread-general-artifacts" }, reviews: []
+        },
+        currentVersion: {
+          id: "artifact-brief-v1", artifactId: "artifact-brief", version: 1,
+          status: "available", content: { kind: "inline", text: "Reviewed launch brief." },
+          citations: []
+        },
+        versions: [], sourceMessageId: null
+      },
+      {
+        artifact: {
+          id: "artifact-risks", title: "Risk review", status: "accepted", revision: 1,
+          currentVersionId: "artifact-risks-v1", producingRunId: "run-general-artifacts",
+          context: { threadId: "thread-general-artifacts" }, reviews: []
+        },
+        currentVersion: {
+          id: "artifact-risks-v1", artifactId: "artifact-risks", version: 1,
+          status: "available", content: { kind: "inline", text: "Reviewed risks." },
+          citations: []
+        },
+        versions: [], sourceMessageId: null
+      }
+    ] as never);
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Reviewed outputs" }));
+
+    const artifacts = await screen.findByRole("region", { name: "Mission artifacts" });
+    expect(within(artifacts).getByRole("button", {
+      name: "View artifact Launch brief"
+    })).toBeInTheDocument();
+    expect(within(artifacts).getByRole("button", {
+      name: "View artifact Risk review"
+    })).toBeInTheDocument();
+  });
+
   it("turns a completed request into an editable Routine draft without auto-saving it", async () => {
     installDesktopRuntime();
     runtimeMocks.backends = [

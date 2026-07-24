@@ -1072,8 +1072,27 @@ refused when declared durable evidence is absent. Exact replay returns the
 original decision, a changed replay fails, and after the final human criterion
 the desktop invokes the existing native finalizer so rejected work becomes an
 explicit partial result rather than success. General policy/worker evaluator
-production, arbitrary multi-stage dependency composition, and arbitrary artifact
-materialization remain open.
+production and arbitrary multi-stage dependency composition remain open. The
+bounded product Artifact path is covered below.
+
+Successful composer-owned general Missions now materialize every required final
+deliverable as one immutable accepted Artifact only after the identified human
+criteria bound to that exact output are durably met. Rust derives the Artifact
+and version ids from the owner, Run, worker completion, output key, and encrypted
+receipt hash; adds those ids to the Run and Mission terminal results before the
+terminal event is committed; and creates the Artifact plus exact Mission-source
+provenance in the same transaction. The repository independently reloads the
+selected Plan, completion receipt, provider-generated untrusted classification,
+signed-in evaluator events, evidence references, terminal result, source
+conversation, and private owner before materializing. Exact replay returns the
+same Artifact, changed identity fails, partial/failed/cancelled results create
+none, and restart coverage reopens and validates the Artifact and its immutable
+input/decision receipt. The conversation refreshes and exposes every Artifact
+produced by the Run rather than showing only the first result. This closes
+general-manifest Artifact materialization for the bounded `/mission` shape; it
+does not implement arbitrary cross-Mission handoff, iterative revision, or
+multi-stage graph authoring, so the broader replay-safe handoff checkbox remains
+unchecked.
 
 The normal desktop composer now owns one explicit bounded general-Mission entry
 point. `/mission` accepts a short title followed by two to six distinct bullet
@@ -1101,7 +1120,7 @@ references in the evaluation, and verifies them on exact replay. Parser,
 dispatcher, composition, renderer, transcript, native validation, evidence,
 replay, and encrypted-reopen coverage are repository-local. Arbitrary multi-stage
 or branching graph authoring, quorum joins, dynamic tool/grant composition,
-arbitrary artifact materialization, and packaged/live-provider observation
+arbitrary cross-Mission handoff/iteration, and packaged/live-provider observation
 remain open.
 
 A provider-neutral continuation policy now supplies the bounded decision layer

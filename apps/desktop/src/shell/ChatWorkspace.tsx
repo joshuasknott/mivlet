@@ -1056,6 +1056,13 @@ export function ChatWorkspace() {
       if (!nextProgress.humanReview?.criteria.length) {
         const terminal = await finalizeRuntimeMissionCoordination(review.runId);
         if (terminal?.progress) nextProgress = terminal.progress;
+        const threadId = selectedConversationThreadIdRef.current;
+        if (threadId) {
+          const artifacts = await listRuntimeThreadArtifacts(threadId);
+          if (selectedConversationThreadIdRef.current === threadId) {
+            setThreadArtifacts(artifacts);
+          }
+        }
       }
       setPendingMissionProgress((current) => current[review.runId]
         ? {
@@ -1160,6 +1167,9 @@ export function ChatWorkspace() {
             ? threadMissionProgress.find((entry) => entry.runId === message.runId)?.progress
             : undefined;
           const visibleMissionProgress = message.missionProgress ?? durableMissionProgress;
+          const missionArtifacts = visibleMissionProgress && message.runId
+            ? threadArtifacts.filter((entry) => entry.artifact.producingRunId === message.runId)
+            : [];
           return (
             <article
               key={message.id}
@@ -1183,6 +1193,27 @@ export function ChatWorkspace() {
                       void recordMissionReview(visibleMissionProgress, criterionKey, passed)}
                   />
                 : null}
+              {message.role === "assistant" && missionArtifacts.length > 0 ? (
+                <section aria-label="Mission artifacts">
+                  {missionArtifacts.map((entry) => (
+                    <ResponseArtifactAction
+                      key={entry.artifact.id}
+                      threadId={selectedConversationThreadId ?? ""}
+                      messageId={`${message.id}-${entry.artifact.id}`}
+                      runId={message.runId ?? ""}
+                      content={entry.currentVersion.content.kind === "inline"
+                        ? entry.currentVersion.content.text
+                        : message.content}
+                      citations={[]}
+                      existing={entry}
+                      onSaved={(saved) => setThreadArtifacts((current) => [
+                        ...current.filter((artifact) => artifact.artifact.id !== saved.artifact.id),
+                        saved
+                      ])}
+                    />
+                  ))}
+                </section>
+              ) : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
               {message.role === "assistant" && citedApproval ? (
@@ -1230,6 +1261,7 @@ export function ChatWorkspace() {
                 <RunContextSummary receipt={agent.state.contextReceipts[message.runId]} />
               ) : null}
               {message.role === "assistant" && message.runId && message.content
+                && missionArtifacts.length === 0
                 && (!message.missionOutcome || existingArtifact) ? (
                 <ResponseArtifactAction
                   threadId={selectedConversationThreadId ?? ""}

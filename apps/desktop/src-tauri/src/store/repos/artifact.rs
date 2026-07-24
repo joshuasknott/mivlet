@@ -9,6 +9,7 @@ use crate::store::vault::Sealed;
 use crate::store::{Result, Store, StoreError};
 
 const ACCEPTED_MISSION_ARTIFACT_TITLE: &str = "Connected work brief";
+const GENERAL_DECLARED_GRAPH_MARKER: &str = "native:general-declared-graph:v1";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AcceptedMissionArtifactBinding {
@@ -431,6 +432,69 @@ pub fn accepted_mission_output_binding(
         artifact_id: format!("mission-artifact-{}", &digest[..40]),
         artifact_version_id: format!("mission-artifact-version-{}", &digest[..40]),
     }
+}
+
+fn reviewed_general_mission_output_binding(
+    workspace_id: &str,
+    owner_member_id: &str,
+    run_id: &str,
+    worker_id: &str,
+    completion_event_id: &str,
+    output_key: &str,
+    content_hash: &str,
+) -> AcceptedMissionArtifactBinding {
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(
+            format!(
+                "reviewed-general-mission-artifact:v1|{workspace_id}|{owner_member_id}|{run_id}|{worker_id}|{completion_event_id}|{output_key}|{content_hash}"
+            )
+            .as_bytes()
+        )
+    );
+    AcceptedMissionArtifactBinding {
+        artifact_id: format!("mission-reviewed-artifact-{}", &digest[..40]),
+        artifact_version_id: format!("mission-reviewed-artifact-version-{}", &digest[..40]),
+    }
+}
+
+pub fn reviewed_general_mission_binding_for_reference(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    output_key: &str,
+    value_reference: &str,
+) -> Result<AcceptedMissionArtifactBinding> {
+    scope.ensure_exists(tx)?;
+    if scope.owner_member_id() != Some(owner_member_id) {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact owner does not match its authenticated member.".into(),
+        ));
+    }
+    let receipt = super::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope.data(),
+        owner_member_id,
+        value_reference,
+    )?
+    .ok_or_else(|| StoreError::Invalid("Reviewed Mission output receipt is unavailable.".into()))?;
+    if receipt.run_id != run_id || receipt.output_key != output_key {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output receipt represents another result.".into(),
+        ));
+    }
+    Ok(reviewed_general_mission_output_binding(
+        scope.workspace_id(),
+        owner_member_id,
+        run_id,
+        &receipt.worker_id,
+        &receipt.completion_event_id,
+        output_key,
+        &receipt.content_hash,
+    ))
 }
 
 pub fn direct_mission_output_binding(
@@ -1218,6 +1282,482 @@ fn linked_human_resolution<'a>(
                 .and_then(Value::as_str)
                 == Some("approved")
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn create_reviewed_general_mission_output(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    result_event_id: &str,
+    output_key: &str,
+    value_reference: &str,
+    title: &str,
+    expected: &AcceptedMissionArtifactBinding,
+) -> Result<AcceptedMissionArtifactBinding> {
+    scope.ensure_exists(tx)?;
+    if scope.owner_member_id() != Some(owner_member_id)
+        || title.trim().is_empty()
+        || title.chars().count() > 400
+    {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact input is invalid.".into(),
+        ));
+    }
+    let receipt = super::mission_worker_output::get_by_reference(
+        tx,
+        store,
+        scope.data(),
+        owner_member_id,
+        value_reference,
+    )?
+    .ok_or_else(|| StoreError::Invalid("Reviewed Mission output receipt is unavailable.".into()))?;
+    if receipt.run_id != run_id || receipt.output_key != output_key {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output receipt represents another result.".into(),
+        ));
+    }
+    let derived = reviewed_general_mission_output_binding(
+        scope.workspace_id(),
+        owner_member_id,
+        run_id,
+        &receipt.worker_id,
+        &receipt.completion_event_id,
+        output_key,
+        &receipt.content_hash,
+    );
+    if &derived != expected {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact identity does not match its immutable output.".into(),
+        ));
+    }
+    let journal = super::mission_run::get(tx, store, scope.data(), owner_member_id, run_id)?
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission artifact run is unavailable.".into())
+        })?;
+    let mission_id = journal
+        .run
+        .pointer("/initiator/missionId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission artifact Mission is unavailable.".into())
+        })?;
+    let lifecycle = super::mission_plan::get(tx, store, scope.data(), owner_member_id, mission_id)?
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission artifact plan is unavailable.".into())
+        })?;
+    let declared_general = lifecycle
+        .mission
+        .get("constraints")
+        .and_then(Value::as_array)
+        .is_some_and(|constraints| {
+            constraints.iter().any(|constraint| {
+                constraint.get("key").and_then(Value::as_str) == Some(GENERAL_DECLARED_GRAPH_MARKER)
+                    && constraint.get("severity").and_then(Value::as_str) == Some("required")
+            })
+        });
+    if !declared_general
+        || lifecycle.current_revision.get("id") != journal.run.get("planRevisionId")
+        || journal.run.get("status").and_then(Value::as_str) != Some("completed")
+        || journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(result_event_id)
+    {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact is outside the selected completed general plan.".into(),
+        ));
+    }
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| StoreError::Invalid("Reviewed Mission plan steps are invalid.".into()))?;
+    let producers = steps
+        .iter()
+        .filter(|step| {
+            step.get("expectedOutputs")
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| {
+                    outputs
+                        .iter()
+                        .any(|output| output.get("key").and_then(Value::as_str) == Some(output_key))
+                })
+        })
+        .collect::<Vec<_>>();
+    if producers.len() != 1 {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output has no exact producing step.".into(),
+        ));
+    }
+    let producer = producers[0];
+    let step_key = producer
+        .get("key")
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Reviewed Mission producing step is invalid.".into()))?;
+    let workers = journal
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("type").and_then(Value::as_str) == Some("worker-created")
+                && event
+                    .pointer("/payload/worker/planStepKey")
+                    .and_then(Value::as_str)
+                    == Some(step_key)
+        })
+        .collect::<Vec<_>>();
+    if workers.len() != 1
+        || workers[0]
+            .pointer("/payload/worker/id")
+            .and_then(Value::as_str)
+            != Some(receipt.worker_id.as_str())
+    {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output crosses its selected worker boundary.".into(),
+        ));
+    }
+    let completion = journal.events.iter().find(|event| {
+        event.get("id").and_then(Value::as_str) == Some(receipt.completion_event_id.as_str())
+    });
+    let completion_matches = completion.is_some_and(|event| {
+        event.get("type").and_then(Value::as_str) == Some("worker-completed")
+            && event.pointer("/payload/workerId").and_then(Value::as_str)
+                == Some(receipt.worker_id.as_str())
+            && event
+                .pointer("/payload/outputs")
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| {
+                    outputs.len() == 1
+                        && outputs[0].get("key").and_then(Value::as_str) == Some(output_key)
+                        && outputs[0].get("valueReference").and_then(Value::as_str)
+                            == Some(value_reference)
+                })
+    });
+    if !completion_matches
+        || receipt.receipt.get("version").and_then(Value::as_i64) != Some(1)
+        || receipt.receipt.get("trust").and_then(Value::as_str) != Some("provider-generated")
+    {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output is not an exact untrusted provider receipt.".into(),
+        ));
+    }
+    let text = receipt
+        .receipt
+        .get("text")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission artifact content is missing.".into())
+        })?;
+    if text.trim().is_empty()
+        || text.len() as i64 != receipt.size_bytes
+        || format!("{:x}", Sha256::digest(text.as_bytes())) != receipt.content_hash
+    {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact content does not match its immutable receipt.".into(),
+        ));
+    }
+    let criteria = lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission acceptance criteria are invalid.".into())
+        })?;
+    let criterion_keys = producer
+        .get("acceptanceCriterionKeys")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission producing step acceptance is invalid.".into())
+        })?
+        .iter()
+        .map(|value| {
+            value.as_str().ok_or_else(|| {
+                StoreError::Invalid("Reviewed Mission producing step acceptance is invalid.".into())
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let human_keys = criterion_keys
+        .iter()
+        .filter(|key| {
+            criteria.iter().any(|criterion| {
+                criterion.get("key").and_then(Value::as_str) == Some(**key)
+                    && criterion.get("evaluator").and_then(Value::as_str) == Some("human")
+                    && criterion.get("required").and_then(Value::as_bool) == Some(true)
+            })
+        })
+        .copied()
+        .collect::<Vec<_>>();
+    if human_keys.is_empty() {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission output has no required identified-human acceptance.".into(),
+        ));
+    }
+    let actor = journal
+        .run
+        .get("createdByInternalUserId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| StoreError::Invalid("Reviewed Mission creator is invalid.".into()))?;
+    let terminal_acceptance = journal
+        .run
+        .pointer("/terminalResult/acceptance")
+        .and_then(Value::as_array)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission terminal acceptance is invalid.".into())
+        })?;
+    let mut evaluation_events = Vec::with_capacity(human_keys.len());
+    for key in human_keys {
+        let matching = journal
+            .events
+            .iter()
+            .filter(|event| {
+                event.get("type").and_then(Value::as_str) == Some("evaluation-recorded")
+                    && event.pointer("/actor/kind").and_then(Value::as_str) == Some("internal-user")
+                    && event
+                        .pointer("/actor/internalUserId")
+                        .and_then(Value::as_str)
+                        == Some(actor)
+                    && event
+                        .pointer("/payload/evaluation/reviewerInternalUserId")
+                        .and_then(Value::as_str)
+                        == Some(actor)
+                    && event
+                        .pointer("/payload/evaluation/target/runId")
+                        .and_then(Value::as_str)
+                        == Some(run_id)
+                    && event
+                        .pointer("/payload/evaluation/verdict")
+                        .and_then(Value::as_str)
+                        == Some("pass")
+                    && event
+                        .pointer("/payload/evaluation/criteria")
+                        .and_then(Value::as_array)
+                        .is_some_and(|values| {
+                            values.len() == 1
+                                && values[0].get("criterionKey").and_then(Value::as_str)
+                                    == Some(key)
+                                && values[0].get("passed").and_then(Value::as_bool) == Some(true)
+                                && values[0]
+                                    .get("evidenceRefs")
+                                    .and_then(Value::as_array)
+                                    .is_some_and(|refs| {
+                                        refs.iter().any(|reference| {
+                                            reference.as_str() == Some(value_reference)
+                                        })
+                                    })
+                        })
+            })
+            .collect::<Vec<_>>();
+        let terminal_met = terminal_acceptance.iter().any(|result| {
+            result.get("criterionKey").and_then(Value::as_str) == Some(key)
+                && result.get("status").and_then(Value::as_str) == Some("met")
+                && result
+                    .get("evidenceRefs")
+                    .and_then(Value::as_array)
+                    .is_some_and(|refs| {
+                        refs.iter()
+                            .any(|reference| reference.as_str() == Some(value_reference))
+                    })
+        });
+        if matching.len() != 1 || !terminal_met {
+            return Err(StoreError::Invalid(
+                "Reviewed Mission output lacks exact identified-human acceptance.".into(),
+            ));
+        }
+        evaluation_events.push(matching[0]);
+    }
+    evaluation_events.sort_by_key(|event| event.get("sequence").and_then(Value::as_i64));
+    let representative_evaluation_id = evaluation_events
+        .last()
+        .and_then(|event| event.get("id"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission acceptance event is invalid.".into())
+        })?;
+    let result = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(result_event_id));
+    let output_matches = |value: &Value| {
+        value.get("key").and_then(Value::as_str) == Some(output_key)
+            && value.get("valueReference").and_then(Value::as_str) == Some(value_reference)
+            && value.get("artifactId").and_then(Value::as_str)
+                == Some(expected.artifact_id.as_str())
+            && value.get("artifactVersionId").and_then(Value::as_str)
+                == Some(expected.artifact_version_id.as_str())
+    };
+    if !result.is_some_and(|event| {
+        event.get("type").and_then(Value::as_str) == Some("run-completed")
+            && event
+                .pointer("/payload/result/outcome")
+                .and_then(Value::as_str)
+                == Some("succeeded")
+            && event
+                .pointer("/payload/result/outputs")
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| outputs.iter().any(output_matches))
+    }) {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission artifact is not linked to its exact successful result.".into(),
+        ));
+    }
+    if let Some(existing) = get_mission_source_binding(
+        tx,
+        scope,
+        owner_member_id,
+        run_id,
+        output_key,
+        &receipt.completion_event_id,
+        representative_evaluation_id,
+        result_event_id,
+        value_reference,
+        &receipt.content_hash,
+    )? {
+        validate_mission_artifact_bundle(tx, store, scope, &existing, &receipt.content_hash)?;
+        return if existing == *expected {
+            Ok(existing)
+        } else {
+            Err(StoreError::Invalid(
+                "Reviewed Mission source represents another artifact.".into(),
+            ))
+        };
+    }
+    if mission_source_exists(tx, scope, owner_member_id, run_id, output_key)? {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission source changed after artifact materialization.".into(),
+        ));
+    }
+    let source_thread_id = journal
+        .run
+        .get("sourceThreadId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission source conversation is missing.".into())
+        })?;
+    let owns_thread: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE id=?1 AND workspace_id=?2 AND authority='local'
+          AND visibility='member-private' AND deleted_at IS NULL AND owner_member_id=?3)",
+        rusqlite::params![source_thread_id, scope.workspace_id(), owner_member_id],
+        |row| row.get(0),
+    )?;
+    if !owns_thread {
+        return Err(StoreError::Invalid(
+            "Reviewed Mission source conversation is unavailable for this owner.".into(),
+        ));
+    }
+    let at = evaluation_events
+        .last()
+        .and_then(|event| event.get("occurredAt"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            StoreError::Invalid("Reviewed Mission acceptance time is invalid.".into())
+        })?;
+    let provenance = json!({
+        "kind":"run","runId":run_id,"externalReference":value_reference,"observedAt":at
+    });
+    let media =
+        json!({"mediaType":"text/markdown","byteLength":receipt.size_bytes,"encoding":"utf-8"});
+    let content_hash = json!({"algorithm":"sha-256","value":receipt.content_hash});
+    let decisions = evaluation_events
+        .iter()
+        .map(|event| {
+            json!({
+                "id":event.get("id"),"kind":"user",
+                "summary":"The authenticated owner accepted this exact Mission output against its declared criterion.",
+                "decidedAt":event.get("occurredAt"),
+                "decidedByInternalUserId":actor
+            })
+        })
+        .collect::<Vec<_>>();
+    let artifact_value = json!({
+        "id":expected.artifact_id,"workspaceId":scope.workspace_id(),"authority":"local",
+        "visibility":"member-private","ownerMemberId":owner_member_id,"schemaVersion":1,"revision":1,
+        "createdByInternalUserId":actor,"createdAt":at,"updatedAt":at,"kind":"document",
+        "status":"accepted","title":title.trim(),"currentVersionId":expected.artifact_version_id,
+        "producingRunId":run_id,"sourceProvenance":[provenance.clone()],
+        "context":{"threadId":source_thread_id,"missionId":mission_id,
+            "projectId":journal.run.get("projectId")},
+        "reviews":[],"retention":{"status":"active"}
+    });
+    let version_value = json!({
+        "id":expected.artifact_version_id,"artifactId":expected.artifact_id,"version":1,
+        "status":"available","createdAt":at,"createdByInternalUserId":actor,
+        "content":{"kind":"inline","text":text,"media":media,"contentHash":content_hash},
+        "media":media,"contentHash":content_hash,"provenance":provenance,"citations":[],
+        "inputs":[{
+            "kind":"source","referenceId":value_reference,
+            "label":"Reviewed untrusted Mission output","recordedAt":receipt.created_at,
+            "contentHash":content_hash
+        }],
+        "decisions":decisions,"lineage":[]
+    });
+    let sealed_artifact = seal_json(
+        store,
+        &artifact_value,
+        &artifact_aad(scope, &expected.artifact_id),
+    )?;
+    let sealed_version = seal_json(
+        store,
+        &version_value,
+        &version_aad(scope, &expected.artifact_id, &expected.artifact_version_id),
+    )?;
+    let title_fingerprint = format!("{:x}", Sha256::digest(title.trim().as_bytes()));
+    tx.execute(
+        "INSERT INTO artifact
+         (workspace_id,owner_subject,authority,visibility,owner_member_id,owner_internal_user_id,
+          id,run_id,thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,
+          content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce)
+         VALUES (?1,?2,'local','member-private',?3,NULL,?4,NULL,?5,NULL,'document','accepted',1,
+          ?6,?7,?8,?9,?10,?10,?11,?12)",
+        rusqlite::params![
+            scope.workspace_id(),scope.owner_subject(),owner_member_id,expected.artifact_id,
+            source_thread_id,expected.artifact_version_id,title_fingerprint,receipt.content_hash,
+            receipt.size_bytes,at,sealed_artifact.ciphertext,sealed_artifact.nonce
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO artifact_version
+         (workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,
+          created_at,payload,payload_nonce)
+         VALUES (?1,?2,?3,?4,1,'available',?5,?6,?7,?8,?9)",
+        rusqlite::params![
+            scope.workspace_id(),
+            scope.owner_subject(),
+            expected.artifact_id,
+            expected.artifact_version_id,
+            receipt.content_hash,
+            receipt.size_bytes,
+            at,
+            sealed_version.ciphertext,
+            sealed_version.nonce
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO mission_artifact_source
+         (workspace_id,owner_member_id,mission_run_id,output_key,owner_subject,artifact_id,
+          artifact_version_id,completion_event_id,evaluation_event_id,result_event_id,
+          value_reference,content_hash,created_at)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+        rusqlite::params![
+            scope.workspace_id(),
+            owner_member_id,
+            run_id,
+            output_key,
+            scope.owner_subject(),
+            expected.artifact_id,
+            expected.artifact_version_id,
+            receipt.completion_event_id,
+            representative_evaluation_id,
+            result_event_id,
+            value_reference,
+            receipt.content_hash,
+            at
+        ],
+    )?;
+    validate_mission_artifact_bundle(tx, store, scope, expected, &receipt.content_hash)?;
+    Ok(expected.clone())
 }
 
 #[allow(clippy::too_many_arguments)]

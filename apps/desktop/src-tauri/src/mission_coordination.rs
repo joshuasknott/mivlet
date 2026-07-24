@@ -11,7 +11,9 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::store::repos::{
-    mission_plan, mission_run, mission_worker_output, scope::DataScope, workspace_directory,
+    artifact, mission_plan, mission_run, mission_worker_output,
+    scope::{DataScope, PrivateDataScope},
+    workspace_directory,
 };
 
 const GENERAL_DECLARED_GRAPH_MARKER: &str = "native:general-declared-graph:v1";
@@ -2310,6 +2312,180 @@ struct GeneralMissionTerminal {
     outcome: &'static str,
 }
 
+#[derive(Debug)]
+struct GeneralMissionArtifactSpec {
+    output_key: String,
+    value_reference: String,
+    title: String,
+    binding: artifact::AcceptedMissionArtifactBinding,
+}
+
+fn general_output_title(
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    output_key: &str,
+) -> Result<String, String> {
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Selected plan steps are invalid.".to_string())?;
+    let producers = steps
+        .iter()
+        .filter(|step| {
+            step.get("expectedOutputs")
+                .and_then(Value::as_array)
+                .is_some_and(|outputs| {
+                    outputs
+                        .iter()
+                        .any(|output| output.get("key").and_then(Value::as_str) == Some(output_key))
+                })
+        })
+        .collect::<Vec<_>>();
+    if producers.len() != 1 {
+        return Err("General Mission output has no exact producing step.".into());
+    }
+    bounded(
+        producers[0]
+            .get("title")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "General Mission output title is invalid.".to_string())?,
+        "General Mission output title",
+        400,
+    )
+}
+
+fn reviewed_general_artifact_specs(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    authorized: &AuthorizedRun,
+    outputs: &mut Value,
+) -> crate::store::Result<Vec<GeneralMissionArtifactSpec>> {
+    let run_id = authorized
+        .journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("General Mission run id is invalid.".into())
+        })?;
+    let private = PrivateDataScope::for_authenticated_user(
+        authorized.scope.clone(),
+        &authorized.actor,
+        Some(&authorized.member),
+    )?;
+    let outputs = outputs.as_array_mut().ok_or_else(|| {
+        crate::store::StoreError::Invalid("General Mission outputs are invalid.".into())
+    })?;
+    let mut specs = Vec::with_capacity(outputs.len());
+    for output in outputs {
+        let output_key = output
+            .get("key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("General Mission output key is invalid.".into())
+            })?
+            .to_string();
+        let value_reference = output
+            .get("valueReference")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "General Mission output reference is invalid.".into(),
+                )
+            })?
+            .to_string();
+        let binding = artifact::reviewed_general_mission_binding_for_reference(
+            tx,
+            store,
+            &private,
+            &authorized.member,
+            run_id,
+            &output_key,
+            &value_reference,
+        )?;
+        let object = output.as_object_mut().ok_or_else(|| {
+            crate::store::StoreError::Invalid("General Mission output is invalid.".into())
+        })?;
+        object.insert("artifactId".into(), json!(binding.artifact_id));
+        object.insert(
+            "artifactVersionId".into(),
+            json!(binding.artifact_version_id),
+        );
+        specs.push(GeneralMissionArtifactSpec {
+            title: general_output_title(&authorized.lifecycle, &output_key)
+                .map_err(crate::store::StoreError::Invalid)?,
+            output_key,
+            value_reference,
+            binding,
+        });
+    }
+    Ok(specs)
+}
+
+fn bind_reviewed_general_artifacts(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    authorized: &AuthorizedRun,
+    terminal: &mut GeneralMissionTerminal,
+) -> crate::store::Result<Vec<GeneralMissionArtifactSpec>> {
+    if terminal.outcome != "succeeded" {
+        return Ok(Vec::new());
+    }
+    let specs = reviewed_general_artifact_specs(
+        tx,
+        store,
+        authorized,
+        terminal.run_result.get_mut("outputs").ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "General Mission terminal outputs are unavailable.".into(),
+            )
+        })?,
+    )?;
+    terminal.mission_result["outputs"] = terminal.run_result["outputs"].clone();
+    terminal.event_payload = json!({"result":terminal.run_result});
+    Ok(specs)
+}
+
+fn materialize_reviewed_general_artifacts(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    authorized: &AuthorizedRun,
+    result_event_id: &str,
+    specs: &[GeneralMissionArtifactSpec],
+) -> crate::store::Result<()> {
+    if specs.is_empty() {
+        return Ok(());
+    }
+    let private = PrivateDataScope::for_authenticated_user(
+        authorized.scope.clone(),
+        &authorized.actor,
+        Some(&authorized.member),
+    )?;
+    let run_id = authorized
+        .journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("General Mission run id is invalid.".into())
+        })?;
+    for spec in specs {
+        artifact::create_reviewed_general_mission_output(
+            tx,
+            store,
+            &private,
+            &authorized.member,
+            run_id,
+            result_event_id,
+            &spec.output_key,
+            &spec.value_reference,
+            &spec.title,
+            &spec.binding,
+        )?;
+    }
+    Ok(())
+}
+
 fn exact_evaluations_and_acceptance(
     lifecycle: &mission_plan::MissionPlanLifecycleRow,
     journal: &mission_run::MissionRunJournalRow,
@@ -3880,6 +4056,51 @@ pub fn mission_coordination_finalize(run_id: String) -> Result<Value, String> {
                         "Terminal Mission coordination does not match this finalizer.".into(),
                     ));
                 }
+                if authorized.journal.run.get("status").and_then(Value::as_str) == Some("completed")
+                    && authorized
+                        .journal
+                        .run
+                        .pointer("/terminalResult/outcome")
+                        .and_then(Value::as_str)
+                        == Some("succeeded")
+                    && declared_general_graph(&authorized.lifecycle)
+                {
+                    let mut outputs = authorized
+                        .journal
+                        .run
+                        .pointer("/terminalResult/outputs")
+                        .cloned()
+                        .ok_or_else(|| {
+                            crate::store::StoreError::Invalid(
+                                "Completed general Mission outputs are unavailable.".into(),
+                            )
+                        })?;
+                    let specs =
+                        reviewed_general_artifact_specs(tx, store, &authorized, &mut outputs)?;
+                    if outputs
+                        != *authorized
+                            .journal
+                            .run
+                            .pointer("/terminalResult/outputs")
+                            .ok_or_else(|| {
+                                crate::store::StoreError::Invalid(
+                                    "Completed general Mission outputs are unavailable.".into(),
+                                )
+                            })?
+                    {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Completed general Mission outputs predate reviewed Artifact binding."
+                                .into(),
+                        ));
+                    }
+                    materialize_reviewed_general_artifacts(
+                        tx,
+                        store,
+                        &authorized,
+                        &event_id,
+                        &specs,
+                    )?;
+                }
                 let progress =
                     mission_progress_projection(&authorized.lifecycle, &authorized.journal)
                         .map_err(crate::store::StoreError::Invalid)?;
@@ -3890,9 +4111,11 @@ pub fn mission_coordination_finalize(run_id: String) -> Result<Value, String> {
                     "terminalEventId":event_id
                 }));
             }
-            let terminal =
+            let mut terminal =
                 derive_general_terminal(&authorized.lifecycle, &authorized.journal, &now())
                     .map_err(crate::store::StoreError::Invalid)?;
+            let artifact_specs =
+                bind_reviewed_general_artifacts(tx, store, &authorized, &mut terminal)?;
             let at = terminal
                 .run_result
                 .get("completedAt")
@@ -3909,6 +4132,13 @@ pub fn mission_coordination_finalize(run_id: String) -> Result<Value, String> {
                 &event_id,
                 &event_key,
                 &at,
+            )?;
+            materialize_reviewed_general_artifacts(
+                tx,
+                store,
+                &authorized,
+                &event_id,
+                &artifact_specs,
             )?;
             match terminal.outcome {
                 "succeeded" => mission_plan::mark_completed(
@@ -5099,6 +5329,22 @@ mod tests {
                         "INSERT INTO workspace(id,name,created_at,updated_at) VALUES ('workspace-1','W',?1,?1)",
                         [at],
                     )?;
+                    crate::store::repos::thread::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "thread-general-store",
+                        None,
+                        "General Mission",
+                        at,
+                        &json!({}),
+                    )?;
+                    tx.execute(
+                        "UPDATE thread SET authority='local',visibility='member-private',
+                         owner_member_id='member-1' WHERE workspace_id='workspace-1'
+                         AND id='thread-general-store'",
+                        [],
+                    )?;
                     let mission = json!({
                         "id":"mission-general-store","workspaceId":"workspace-1",
                         "visibility":"member-private","ownerMemberId":"member-1",
@@ -5109,7 +5355,11 @@ mod tests {
                         "currentPlanRevisionId":"revision-general-store",
                         "outcome":{"title":"Final brief","desiredOutcome":"Create it.",
                             "deliverables":[{"key":"final","description":"the final brief","required":true}]},
-                        "scope":{"departmentIds":[],"context":[]},"constraints":[],
+                        "scope":{"departmentIds":[],"context":[]},"constraints":[{
+                            "key":GENERAL_DECLARED_GRAPH_MARKER,
+                            "description":"Use the authenticated native general Mission graph.",
+                            "severity":"required","source":"user"
+                        }],
                         "acceptance":{"requiresHumanAcceptance":true,"criteria":[{
                             "key":"grounded","description":"The brief is grounded.",
                             "required":true,"evaluator":"human",
@@ -5259,6 +5509,18 @@ mod tests {
                     )?;
                     assert_eq!(replayed.events.len(), prepared_event_count);
                     run = replayed.run;
+                    let output_text = "Final cited brief.";
+                    let output_hash = format!("{:x}", Sha256::digest(output_text.as_bytes()));
+                    let output_reference =
+                        mission_worker_output::binding_reference(
+                            "workspace-1",
+                            "member-1",
+                            "run-general-store",
+                            &prepared_worker_id,
+                            "event-completed",
+                            "final",
+                            &output_hash,
+                        );
                     append_general_store_event(
                         tx,
                         &store,
@@ -5269,9 +5531,35 @@ mod tests {
                         json!({"workerId":prepared_worker_id,
                             "outputs":[{
                             "key":"final","summary":"Final cited brief.",
-                            "valueReference":"mission-output:final"
+                            "valueReference":output_reference
                         }]}),
                         json!({"kind":"system"}),
+                        at,
+                    )?;
+                    mission_worker_output::put(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-general-store",
+                        &prepared_worker_id,
+                        "event-completed",
+                        "final",
+                        &output_reference,
+                        &output_hash,
+                        output_text.len() as i64,
+                        &json!({
+                            "version":1,"workspaceId":"workspace-1",
+                            "ownerMemberId":"member-1","runId":"run-general-store",
+                            "workerId":prepared_worker_id,
+                            "completionEventId":"event-completed","outputKey":"final",
+                            "valueReference":output_reference,"contentHash":output_hash,
+                            "sizeBytes":output_text.len() as i64,"text":output_text,
+                            "mediaType":"text/markdown","encoding":"utf-8",
+                            "observedProvider":"fixture-provider",
+                            "providerRouteId":"fixture-route","requestedModel":"fixture-model",
+                            "trust":"provider-generated","citations":[],"createdAt":at
+                        }),
                         at,
                     )?;
                     let journal =
@@ -5382,7 +5670,7 @@ mod tests {
                     assert_eq!(
                         evaluated.events.last().unwrap()["payload"]["evaluation"]["criteria"][0]
                             ["evidenceRefs"],
-                        json!(["mission-output:final"])
+                        json!([output_reference])
                     );
                     let evaluated_progress =
                         mission_progress_projection(
@@ -5476,7 +5764,7 @@ mod tests {
                         "mission-general-store",
                     )?
                     .unwrap();
-                    let terminal = derive_general_terminal(&lifecycle, &journal, at)
+                    let mut terminal = derive_general_terminal(&lifecycle, &journal, at)
                         .map_err(crate::store::StoreError::Invalid)?;
                     let authorized = AuthorizedRun {
                         scope: scope.clone(),
@@ -5490,6 +5778,8 @@ mod tests {
                         "run-terminal",
                         "revision-general-store",
                     );
+                    let artifact_specs =
+                        bind_reviewed_general_artifacts(tx, &store, &authorized, &mut terminal)?;
                     append_general_terminal(
                         tx,
                         &store,
@@ -5498,6 +5788,13 @@ mod tests {
                         &event_id,
                         &event_key,
                         at,
+                    )?;
+                    materialize_reviewed_general_artifacts(
+                        tx,
+                        &store,
+                        &authorized,
+                        &event_id,
+                        &artifact_specs,
                     )?;
                     mission_plan::mark_completed(
                         tx,
@@ -5532,6 +5829,88 @@ mod tests {
             lifecycle.mission["terminalResult"]["producingRunIds"],
             json!(["run-general-store"])
         );
+        let artifact_id = journal.run["terminalResult"]["outputs"][0]["artifactId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let artifact_version_id = journal.run["terminalResult"]["outputs"][0]["artifactVersionId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(artifact_id.starts_with("mission-reviewed-artifact-"));
+        reopened
+            .transaction(|tx| {
+                let replay_journal =
+                    mission_run::get(tx, &reopened, &scope, "member-1", "run-general-store")?
+                        .unwrap();
+                let replay_lifecycle =
+                    mission_plan::get(tx, &reopened, &scope, "member-1", "mission-general-store")?
+                        .unwrap();
+                let authorized = AuthorizedRun {
+                    scope: scope.clone(),
+                    member: "member-1".into(),
+                    actor: "user-1".into(),
+                    journal: replay_journal,
+                    lifecycle: replay_lifecycle,
+                };
+                let mut outputs = authorized.journal.run["terminalResult"]["outputs"].clone();
+                let specs =
+                    reviewed_general_artifact_specs(tx, &reopened, &authorized, &mut outputs)?;
+                assert_eq!(outputs, authorized.journal.run["terminalResult"]["outputs"]);
+                materialize_reviewed_general_artifacts(
+                    tx,
+                    &reopened,
+                    &authorized,
+                    authorized
+                        .journal
+                        .run
+                        .pointer("/eventHead/lastEventId")
+                        .and_then(Value::as_str)
+                        .unwrap(),
+                    &specs,
+                )?;
+                let mut changed_binding = specs[0].binding.clone();
+                changed_binding.artifact_id.push_str("-changed");
+                let changed = artifact::create_reviewed_general_mission_output(
+                    tx,
+                    &reopened,
+                    &PrivateDataScope::for_authenticated_user(
+                        scope.clone(),
+                        "user-1",
+                        Some("member-1"),
+                    )?,
+                    "member-1",
+                    "run-general-store",
+                    authorized
+                        .journal
+                        .run
+                        .pointer("/eventHead/lastEventId")
+                        .and_then(Value::as_str)
+                        .unwrap(),
+                    &specs[0].output_key,
+                    &specs[0].value_reference,
+                    &specs[0].title,
+                    &changed_binding,
+                )
+                .unwrap_err();
+                assert!(changed
+                    .to_string()
+                    .contains("identity does not match its immutable output"));
+                let private = PrivateDataScope::for_authenticated_user(
+                    scope.clone(),
+                    "user-1",
+                    Some("member-1"),
+                )?;
+                let bundle = artifact::get_bundle(tx, &reopened, &private, &artifact_id)?.unwrap();
+                assert_eq!(bundle["artifact"]["status"], "accepted");
+                assert_eq!(bundle["artifact"]["currentVersionId"], artifact_version_id);
+                assert_eq!(
+                    bundle["currentVersion"]["inputs"][0]["label"],
+                    "Reviewed untrusted Mission output"
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
