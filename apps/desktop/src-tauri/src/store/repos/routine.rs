@@ -1070,7 +1070,7 @@ pub fn enqueue_driver_occurrence(
     expected_epoch: i64,
     available_at: &str,
     driver_evidence: &Value,
-) -> Result<()> {
+) -> Result<bool> {
     let authority = read_scheduler_authority(tx, scope.workspace_id())?
         .ok_or_else(|| StoreError::Invalid("Scheduler authority is unavailable.".into()))?;
     if authority.writer != "routine"
@@ -1088,13 +1088,13 @@ pub fn enqueue_driver_occurrence(
         driver_evidence,
         &driver_aad(scope.workspace_id(), &subject, &occurrence_id),
     )?;
-    tx.execute(
+    let inserted = tx.execute(
         "INSERT INTO routine_driver_occurrence(workspace_id,owner_subject,occurrence_id,writer_epoch,state,available_at,updated_at,payload,payload_nonce)
          VALUES (?1,?2,?3,?4,'queued',?5,?5,?6,?7)
          ON CONFLICT(workspace_id,owner_subject,occurrence_id) DO NOTHING;",
         rusqlite::params![scope.workspace_id(),subject,occurrence_id,expected_epoch,available_at,sealed.ciphertext,sealed.nonce],
     )?;
-    Ok(())
+    Ok(inserted == 1)
 }
 
 pub fn lease_due(

@@ -178,6 +178,16 @@ calm Scheduled Task form intentionally remains on one-time, daily, weekly, and
 monthly choices; cron is currently an expert/native contract rather than a
 second scheduling UI.
 
+Connection-event Routines have a native-only intake boundary rather than a
+renderer command. It requires the active member, exact live Connection id and
+revision, and fenced Routine writer; applies only bounded structural equality
+filters to the transient untrusted payload; and persists only a hashed source
+reference plus content-free trigger evidence. Duplicate source references are
+idempotent, while stale Connection authority, cross-owner state, malformed
+identity, or oversized/deep payloads fail closed. Native provider/MCP adapters
+still need to call this boundary with their authenticated event evidence before
+the product can claim event-trigger execution.
+
 For records created after this boundary, native commands overwrite renderer
 identity and stamp the authenticated workspace, project, member, and creator on
 the schedule and immutable workflow version. Queue occurrences and workflow runs

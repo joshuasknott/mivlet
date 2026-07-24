@@ -899,9 +899,13 @@ recovery, retry, restart cursors, immutable history, and matching one-time,
 daily, weekly, and monthly form/command editing. The native contract also accepts
 bounded five-field cron expressions with numeric or named fields, lists, ranges,
 and steps while rejecting unsupported extensions. The calm form has no expert
-cron editor. Signed webhooks,
-Connection events, thresholds, monitoring/follow-up inputs, and their untrusted
-payload normalization remain open; therefore the aggregate checkboxes stay open.
+cron editor. A native-only Connection-event intake now proves the exact active
+owner, live Connection revision, fenced writer, bounded structural filter,
+source-reference deduplication, and secret/content-free occurrence evidence.
+Duplicate, stale, nonmatching, and oversized fixture events are covered. No
+renderer command can forge this evidence. Native provider/MCP adapter wiring,
+signed webhooks, thresholds, monitoring/follow-up inputs, and live event
+validation remain open; therefore the aggregate checkboxes stay open.
 
 ### Wave 5C - Always-on execution
 

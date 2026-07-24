@@ -18,6 +18,34 @@ use crate::store::repos::routine::{self, DriverLeaseRow, RoutineSchedulerInput};
 
 const MAX_SCAN_MINUTES: i64 = 370 * 24 * 60;
 const MAX_MISSED_OCCURRENCES: usize = 100;
+#[allow(
+    dead_code,
+    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
+)]
+const MAX_CONNECTION_EVENT_BYTES: usize = 64 * 1024;
+#[allow(
+    dead_code,
+    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
+)]
+const MAX_CONNECTION_EVENT_NODES: usize = 512;
+#[allow(
+    dead_code,
+    reason = "reserved for the native-only Connection event adapter boundary; no renderer command may forge provider events"
+)]
+const MAX_CONNECTION_EVENT_DEPTH: usize = 8;
+
+#[allow(
+    dead_code,
+    reason = "constructed only by native Connection adapters once they have authenticated exact source evidence"
+)]
+pub(crate) struct ConnectionEventObservation<'a> {
+    pub connection_id: &'a str,
+    pub connection_revision: i64,
+    pub event_type: &'a str,
+    pub source_reference: &'a str,
+    pub payload: &'a Value,
+    pub received_at: &'a str,
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -429,6 +457,261 @@ fn stable_id(prefix: &str, parts: &[&str]) -> String {
     format!("{prefix}_{:x}", digest.finalize())
 }
 
+#[allow(
+    dead_code,
+    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
+)]
+fn bounded_connection_event_value(value: &Value, depth: usize, nodes: &mut usize) -> bool {
+    *nodes += 1;
+    if *nodes > MAX_CONNECTION_EVENT_NODES || depth > MAX_CONNECTION_EVENT_DEPTH {
+        return false;
+    }
+    match value {
+        Value::Null | Value::Bool(_) | Value::Number(_) => true,
+        Value::String(value) => value.len() <= 4_096 && !value.chars().any(char::is_control),
+        Value::Array(values) => {
+            values.len() <= 64
+                && values
+                    .iter()
+                    .all(|value| bounded_connection_event_value(value, depth + 1, nodes))
+        }
+        Value::Object(values) => {
+            values.len() <= 64
+                && values.iter().all(|(key, value)| {
+                    !key.is_empty()
+                        && key.len() <= 128
+                        && !key.chars().any(char::is_control)
+                        && bounded_connection_event_value(value, depth + 1, nodes)
+                })
+        }
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
+)]
+fn event_filter_matches(filter: &Value, payload: &Value) -> bool {
+    match (filter, payload) {
+        (Value::Object(expected), Value::Object(actual)) => expected.iter().all(|(key, value)| {
+            actual
+                .get(key)
+                .is_some_and(|candidate| event_filter_matches(value, candidate))
+        }),
+        _ => filter == payload,
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "used by the native-only Connection event intake reserved for authenticated adapters"
+)]
+fn connection_event_trigger_matches(
+    trigger: &Value,
+    connection_id: &str,
+    event_type: &str,
+    payload: &Value,
+) -> bool {
+    let Some(spec) = trigger.get("spec") else {
+        return false;
+    };
+    if spec.get("kind").and_then(Value::as_str) != Some("connection-event")
+        || spec.get("connectionId").and_then(Value::as_str) != Some(connection_id)
+        || spec.get("eventType").and_then(Value::as_str) != Some(event_type)
+    {
+        return false;
+    }
+    let Some(filter) = spec.get("eventFilter") else {
+        return true;
+    };
+    let mut nodes = 0;
+    bounded_connection_event_value(filter, 0, &mut nodes) && event_filter_matches(filter, payload)
+}
+
+#[allow(
+    dead_code,
+    reason = "native Connection adapters will call this boundary; exposing it to the renderer would allow forged provider events"
+)]
+pub(crate) fn observe_connection_event(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    event: ConnectionEventObservation<'_>,
+) -> crate::store::Result<usize> {
+    if scope.data.project_id().is_some() {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection events require workspace Connection authority.".into(),
+        ));
+    }
+    let connection =
+        crate::store::repos::connection_record::get(tx, store, scope, event.connection_id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Connection event source is unavailable.".into())
+            })?;
+    if connection.revision != event.connection_revision
+        || connection.lifecycle != "authorized"
+        || !matches!(
+            connection.authorization_state.as_str(),
+            "authorized" | "not-required"
+        )
+        || !matches!(
+            connection.credential_state.as_str(),
+            "available" | "not-required"
+        )
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection event source revision or authority is stale.".into(),
+        ));
+    }
+    if event.event_type.is_empty()
+        || event.event_type.len() > 160
+        || event.event_type.chars().any(|character| {
+            !(character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-'))
+        })
+        || event.source_reference.is_empty()
+        || event.source_reference.len() > 2_048
+        || event.source_reference.chars().any(char::is_control)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection event identity is invalid.".into(),
+        ));
+    }
+    parse_instant(event.received_at, "Connection event receipt")
+        .map_err(crate::store::StoreError::Invalid)?;
+    let encoded = serde_json::to_vec(event.payload).map_err(|_| {
+        crate::store::StoreError::Invalid("Connection event payload is invalid.".into())
+    })?;
+    let mut nodes = 0;
+    if encoded.len() > MAX_CONNECTION_EVENT_BYTES
+        || !bounded_connection_event_value(event.payload, 0, &mut nodes)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection event payload exceeds Fable's safe local boundary.".into(),
+        ));
+    }
+    let authority =
+        routine::scheduler_authority(tx, store, scope.data.workspace_id(), event.received_at)?;
+    if authority.writer != "routine" || authority.phase != "routine" {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection events require the fenced Routine writer.".into(),
+        ));
+    }
+    let source_reference_hash = stable_id(
+        "connection_event_source",
+        &[
+            scope.data.workspace_id(),
+            event.connection_id,
+            &event.connection_revision.to_string(),
+            event.event_type,
+            event.source_reference,
+        ],
+    );
+    let inputs = routine::scheduler_inputs(tx, store, scope.data.workspace_id())?;
+    let mut enqueued = 0;
+    for input in inputs {
+        if input.private.owner_subject() != scope.private.owner_subject() {
+            continue;
+        }
+        let routine_id = input
+            .bundle
+            .routine
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Stored Routine id is invalid.".into())
+            })?;
+        let routine_version = input
+            .bundle
+            .current_version
+            .get("version")
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 1)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Stored Routine version is invalid.".into())
+            })?;
+        for trigger in active_triggers(&input) {
+            if !connection_event_trigger_matches(
+                trigger,
+                event.connection_id,
+                event.event_type,
+                event.payload,
+            ) {
+                continue;
+            }
+            let trigger_id = trigger.get("id").and_then(Value::as_str).ok_or_else(|| {
+                crate::store::StoreError::Invalid("Stored Routine trigger id is invalid.".into())
+            })?;
+            let occurrence_id = stable_id(
+                "routine_occurrence",
+                &[
+                    input.scope.workspace_id(),
+                    input.private.owner_subject(),
+                    trigger_id,
+                    &source_reference_hash,
+                ],
+            );
+            let run_id = stable_id(
+                "routine_run",
+                &[
+                    input.scope.workspace_id(),
+                    input.private.owner_subject(),
+                    routine_id,
+                    trigger_id,
+                    &source_reference_hash,
+                ],
+            );
+            let occurrence = serde_json::json!({
+                "id":occurrence_id,
+                "routineId":routine_id,
+                "triggerId":trigger_id,
+                "routineVersion":routine_version,
+                "status":"scheduled",
+                "scheduledFor":event.received_at,
+                "observedAt":event.received_at,
+                "deduplicationKey":format!(
+                    "routine-connection-event:v1:{trigger_id}:{source_reference_hash}"
+                ),
+                "runId":run_id
+            });
+            routine::append_occurrence(tx, store, &input.scope, &input.private, &occurrence)?;
+            let driver_evidence = serde_json::json!({
+                "routineId":routine_id,
+                "workspaceId":input.scope.workspace_id(),
+                "routineVersion":routine_version,
+                "triggerId":trigger_id,
+                "projectId":input.scope.project_id(),
+                "scheduledAt":event.received_at,
+                "runId":run_id,
+                "triggerEvidence":{
+                    "kind":"connection-event",
+                    "connectionId":event.connection_id,
+                    "connectionRevision":event.connection_revision,
+                    "eventType":event.event_type,
+                    "sourceReferenceHash":source_reference_hash,
+                    "untrustedPayloadStored":false
+                },
+                "action":input.bundle.current_version.get("action"),
+                "routePolicy":input.bundle.current_version.get("routePolicy"),
+                "placementPolicy":input.bundle.current_version.get("placementPolicy"),
+                "budgets":input.bundle.current_version.get("budgets")
+            });
+            if routine::enqueue_driver_occurrence(
+                tx,
+                store,
+                &input.scope,
+                &input.private,
+                &occurrence_id,
+                authority.epoch,
+                event.received_at,
+                &driver_evidence,
+            )? {
+                enqueued += 1;
+            }
+        }
+    }
+    Ok(enqueued)
+}
+
 fn fresh_token(prefix: &str) -> Result<String, String> {
     let mut bytes = [0_u8; 24];
     getrandom::fill(&mut bytes).map_err(|_| format!("Could not create {prefix} token."))?;
@@ -684,8 +967,13 @@ pub(super) fn run_tick(app: &AppHandle) -> Result<usize, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::store::repos::scope::{DataScope, PrivateDataScope};
     use crate::store::repos::workspace;
+    use crate::store::repos::workspace_directory::{
+        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
+        WorkspaceDirectoryUpsert,
+    };
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
 
@@ -715,6 +1003,22 @@ mod tests {
                 "missedRunPolicy":policy
             }
         })
+    }
+
+    fn directory_summary() -> WorkspaceDirectoryUpsert {
+        WorkspaceDirectoryUpsert {
+            internal_user_id: "user-1".into(),
+            fable_workspace_id: "fable-workspace-1".into(),
+            name: "One".into(),
+            workspace_status: "active".into(),
+            workspace_revision: 1,
+            policy_revision: 1,
+            member_id: "member-1".into(),
+            role: "owner".into(),
+            membership_status: "active".into(),
+            membership_revision: 1,
+            updated_at: "2026-01-01T00:00:00Z".into(),
+        }
     }
 
     #[test]
@@ -1011,5 +1315,198 @@ mod tests {
         assert_eq!(history.len(), 1);
         assert_eq!(history[0]["status"], "completed");
         assert_eq!(history[0]["attemptCount"], 1);
+    }
+
+    #[test]
+    fn connection_events_require_exact_live_authority_and_never_persist_payload_content() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        let (scope, connection) = store
+            .transaction(|tx| {
+                let workspace = upsert_authoritative_summary(tx, &directory_summary())?;
+                set_current_internal_user(tx, "user-1", "2026-01-01T00:00:00Z")?;
+                select_active_workspace(
+                    tx,
+                    "user-1",
+                    "fable-workspace-1",
+                    "2026-01-01T00:00:00Z",
+                )?;
+                let scope = resolve(
+                    tx,
+                    Some(&workspace.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )?;
+                let connection = crate::store::repos::connection_record::upsert_mcp_stdio(
+                    tx,
+                    &store,
+                    &scope,
+                    "fixture-server",
+                    "Fixture server",
+                    "2026-01-01T00:00:00Z",
+                )?;
+                let routine_value = serde_json::json!({
+                    "id":"routine-event","status":"active","title":"React to issue",
+                    "currentVersion":1,"scope":{},"authorityPolicy":"no-expansion",
+                    "workspaceId":scope.data.workspace_id(),"authority":"local",
+                    "schemaVersion":1,"revision":1,"visibility":"member-private",
+                    "ownerMemberId":"member-1","createdByInternalUserId":"user-1",
+                    "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"
+                });
+                let version = serde_json::json!({
+                    "routineId":"routine-event","version":1,
+                    "createdAt":"2026-01-01T00:00:00Z",
+                    "createdByInternalUserId":"user-1",
+                    "action":{"kind":"direct-request","title":"React","instruction":"Review the referenced issue."},
+                    "scope":{},"routePolicy":{"kind":"resolve-at-run"},
+                    "placementPolicy":{"kind":"resolve-at-run"},
+                    "budgets":{"capabilityGrantIds":[]},"triggerIds":["trigger-event"]
+                });
+                let trigger = serde_json::json!({
+                    "id":"trigger-event","routineId":"routine-event","status":"active",
+                    "spec":{
+                        "kind":"connection-event","connectionId":connection.id,
+                        "eventType":"issue.changed",
+                        "eventFilter":{"state":"ready","details":{"kind":"issue"}}
+                    },
+                    "deduplication":{"strategy":"source-reference"},
+                    "workspaceId":scope.data.workspace_id(),"authority":"local",
+                    "schemaVersion":1,"revision":1,"visibility":"member-private",
+                    "ownerMemberId":"member-1","createdByInternalUserId":"user-1",
+                    "createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"
+                });
+                routine::create(
+                    tx,
+                    &store,
+                    &scope.data,
+                    &scope.private,
+                    "user-1",
+                    &routine_value,
+                    &version,
+                    &[trigger],
+                )?;
+                let shadow = routine::transition_scheduler_authority(
+                    tx,
+                    &store,
+                    scope.data.workspace_id(),
+                    1,
+                    "legacy",
+                    "shadow",
+                    "shadow-event",
+                    None,
+                    &serde_json::json!({"comparison":"pending"}),
+                    "2026-01-01T00:00:01Z",
+                )?;
+                routine::transition_scheduler_authority(
+                    tx,
+                    &store,
+                    scope.data.workspace_id(),
+                    shadow.epoch,
+                    "routine",
+                    "routine",
+                    "routine-event",
+                    Some(&format!("sha256:{}", "b".repeat(64))),
+                    &serde_json::json!({"comparison":"matched"}),
+                    "2026-01-01T00:00:02Z",
+                )?;
+                Ok((scope, connection))
+            })
+            .unwrap();
+        let untrusted = serde_json::json!({
+            "state":"ready",
+            "details":{"kind":"issue","title":"DO-NOT-PERSIST"},
+            "providerToken":"fixture-secret"
+        });
+        store
+            .transaction(|tx| {
+                let event = || ConnectionEventObservation {
+                    connection_id: &connection.id,
+                    connection_revision: connection.revision,
+                    event_type: "issue.changed",
+                    source_reference: "provider-issue-42",
+                    payload: &untrusted,
+                    received_at: "2026-01-02T09:00:00Z",
+                };
+                assert_eq!(observe_connection_event(tx, &store, &scope, event())?, 1);
+                assert_eq!(observe_connection_event(tx, &store, &scope, event())?, 0);
+                let nonmatching = serde_json::json!({
+                    "state":"draft","details":{"kind":"issue"}
+                });
+                assert_eq!(
+                    observe_connection_event(
+                        tx,
+                        &store,
+                        &scope,
+                        ConnectionEventObservation {
+                            source_reference: "provider-issue-43",
+                            payload: &nonmatching,
+                            ..event()
+                        }
+                    )?,
+                    0
+                );
+                let stale = observe_connection_event(
+                    tx,
+                    &store,
+                    &scope,
+                    ConnectionEventObservation {
+                        connection_revision: connection.revision + 1,
+                        ..event()
+                    },
+                )
+                .unwrap_err();
+                assert!(stale.to_string().contains("authority is stale"));
+                let oversized = Value::String("x".repeat(MAX_CONNECTION_EVENT_BYTES + 1));
+                let oversized_error = observe_connection_event(
+                    tx,
+                    &store,
+                    &scope,
+                    ConnectionEventObservation {
+                        source_reference: "provider-issue-oversized",
+                        payload: &oversized,
+                        ..event()
+                    },
+                )
+                .unwrap_err();
+                assert!(oversized_error.to_string().contains("safe local boundary"));
+                let history = routine::occurrence_history(
+                    tx,
+                    &store,
+                    &scope.data,
+                    &scope.private,
+                    "routine-event",
+                )?;
+                assert_eq!(history.len(), 1);
+                let history_json = serde_json::to_string(&history).unwrap();
+                assert!(!history_json.contains("DO-NOT-PERSIST"));
+                assert!(!history_json.contains("fixture-secret"));
+                assert!(!history_json.contains("provider-issue-42"));
+                let authority = routine::scheduler_authority(
+                    tx,
+                    &store,
+                    scope.data.workspace_id(),
+                    "2026-01-02T09:00:01Z",
+                )?;
+                let lease = routine::lease_due(
+                    tx,
+                    &store,
+                    &scope.data,
+                    &scope.private,
+                    authority.epoch,
+                    "node-event",
+                    "lease-event",
+                    "2026-01-02T09:00:01Z",
+                    "2026-01-02T09:15:01Z",
+                )?
+                .unwrap();
+                let evidence = serde_json::to_string(&lease.driver_evidence).unwrap();
+                assert!(evidence.contains("issue.changed"));
+                assert!(evidence.contains("sourceReferenceHash"));
+                assert!(!evidence.contains("DO-NOT-PERSIST"));
+                assert!(!evidence.contains("fixture-secret"));
+                assert!(!evidence.contains("provider-issue-42"));
+                Ok(())
+            })
+            .unwrap();
     }
 }
