@@ -223,6 +223,40 @@ fn terminal_workers(
     (completed, failed)
 }
 
+fn strict_terminal_workers(
+    journal: &mission_run::MissionRunJournalRow,
+) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
+    let known = workers_by_step(journal)?
+        .into_values()
+        .collect::<BTreeSet<_>>();
+    let mut completed = BTreeSet::new();
+    let mut failed = BTreeSet::new();
+    for event in &journal.events {
+        let terminal = match event.get("type").and_then(Value::as_str) {
+            Some("worker-completed") => Some(true),
+            Some("worker-failed") => Some(false),
+            _ => None,
+        };
+        let Some(completed_fact) = terminal else {
+            continue;
+        };
+        let worker_id = event
+            .pointer("/payload/workerId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Stored Mission worker terminal fact is invalid.".to_string())?;
+        if !known.contains(worker_id) || completed.contains(worker_id) || failed.contains(worker_id)
+        {
+            return Err("Stored Mission worker terminal facts are ambiguous.".into());
+        }
+        if completed_fact {
+            completed.insert(worker_id.to_string());
+        } else {
+            failed.insert(worker_id.to_string());
+        }
+    }
+    Ok((completed, failed))
+}
+
 fn exact_dependency_workers(
     lifecycle: &mission_plan::MissionPlanLifecycleRow,
     journal: &mission_run::MissionRunJournalRow,
@@ -704,6 +738,254 @@ fn safe_budget_projection(run: &Value) -> Result<Value, String> {
         );
     }
     Ok(Value::Object(projected))
+}
+
+fn automatic_coordination_identity(
+    run_id: &str,
+    event_kind: &str,
+    reference: &str,
+) -> (String, String) {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.mission.coordination.advance.v1\0");
+    digest.update(run_id.as_bytes());
+    digest.update(b"\0");
+    digest.update(event_kind.as_bytes());
+    digest.update(b"\0");
+    digest.update(reference.as_bytes());
+    let digest = format!("{:x}", digest.finalize());
+    (
+        format!("mission-event-{}", &digest[..32]),
+        format!("coordination-auto:{event_kind}:{}", &digest[..32]),
+    )
+}
+
+fn next_automatic_join_resolution(
+    journal: &mission_run::MissionRunJournalRow,
+) -> Result<Option<(String, Value)>, String> {
+    let resolved_values = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("join-resolved"))
+        .filter_map(|event| {
+            event
+                .pointer("/payload/join/joinKey")
+                .and_then(Value::as_str)
+        })
+        .collect::<Vec<_>>();
+    let resolved = resolved_values.iter().copied().collect::<BTreeSet<_>>();
+    if resolved.len() != resolved_values.len() {
+        return Err("Stored Mission join resolutions are ambiguous.".into());
+    }
+    let known_workers = workers_by_step(journal)?
+        .into_values()
+        .collect::<BTreeSet<_>>();
+    let (completed, failed) = strict_terminal_workers(journal)?;
+    let mut opened = BTreeSet::new();
+    for event in &journal.events {
+        if event.get("type").and_then(Value::as_str) != Some("join-opened") {
+            continue;
+        }
+        let join = event
+            .pointer("/payload/join")
+            .and_then(Value::as_object)
+            .ok_or_else(|| "Stored Mission join declaration is invalid.".to_string())?;
+        let join_key = bounded(
+            join.get("joinKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Stored Mission join identity is invalid.".to_string())?,
+            "Mission join",
+            200,
+        )?;
+        if !opened.insert(join_key.clone()) {
+            return Err("Stored Mission join declarations are ambiguous.".into());
+        }
+        if resolved.contains(join_key.as_str()) {
+            continue;
+        }
+        let strategy = join
+            .get("strategy")
+            .and_then(Value::as_str)
+            .filter(|strategy| matches!(*strategy, "all" | "any" | "quorum"))
+            .ok_or_else(|| "Stored Mission join strategy is invalid.".to_string())?;
+        let worker_ids = join
+            .get("workerIds")
+            .and_then(Value::as_array)
+            .filter(|workers| (2..=32).contains(&workers.len()))
+            .ok_or_else(|| "Stored Mission join workers are invalid.".to_string())?
+            .iter()
+            .map(|worker| {
+                bounded(
+                    worker
+                        .as_str()
+                        .ok_or_else(|| "Stored Mission join worker is invalid.".to_string())?,
+                    "Mission join worker",
+                    200,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if worker_ids.iter().collect::<BTreeSet<_>>().len() != worker_ids.len() {
+            return Err("Stored Mission join workers are ambiguous.".into());
+        }
+        if worker_ids
+            .iter()
+            .any(|worker| !known_workers.contains(worker))
+        {
+            return Err("Stored Mission join references an unknown worker.".into());
+        }
+        let quorum = join
+            .get("quorum")
+            .and_then(Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok());
+        if (strategy == "quorum"
+            && quorum.is_none_or(|value| value == 0 || value > worker_ids.len()))
+            || (strategy != "quorum" && quorum.is_some())
+        {
+            return Err("Stored Mission join quorum is invalid.".into());
+        }
+        let allow_failed = join
+            .get("allowFailedWorkers")
+            .and_then(Value::as_bool)
+            .ok_or_else(|| "Stored Mission join failure policy is invalid.".to_string())?;
+        let deadline = join.get("deadline").filter(|value| !value.is_null());
+        let deadline_elapsed = deadline
+            .and_then(Value::as_str)
+            .map(|deadline| {
+                DateTime::parse_from_rfc3339(deadline)
+                    .map(|deadline| deadline <= Utc::now())
+                    .map_err(|_| "Stored Mission join deadline is invalid.".to_string())
+            })
+            .transpose()?
+            .unwrap_or(false);
+        let status = resolve_status(
+            strategy,
+            quorum,
+            allow_failed,
+            &worker_ids,
+            &completed,
+            &failed,
+            deadline_elapsed,
+            matches!(
+                journal.run.get("status").and_then(Value::as_str),
+                Some("cancelling" | "cancelled")
+            ),
+        );
+        let Some(status) = status else {
+            continue;
+        };
+        let satisfied_workers = worker_ids
+            .iter()
+            .filter(|worker| completed.contains(*worker))
+            .cloned()
+            .collect::<Vec<_>>();
+        let failed_workers = worker_ids
+            .iter()
+            .filter(|worker| failed.contains(*worker))
+            .cloned()
+            .collect::<Vec<_>>();
+        return Ok(Some((
+            join_key.clone(),
+            json!({
+                "joinKey":join_key,
+                "status":status,
+                "strategy":strategy,
+                "workerIds":worker_ids,
+                "quorum":quorum,
+                "allowFailedWorkers":allow_failed,
+                "deadline":deadline,
+                "satisfiedWorkerIds":satisfied_workers,
+                "failedWorkerIds":failed_workers
+            }),
+        )));
+    }
+    Ok(None)
+}
+
+fn next_automatic_aggregation(
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    journal: &mission_run::MissionRunJournalRow,
+) -> Result<Option<(String, Value)>, String> {
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Selected plan steps are invalid.".to_string())?;
+    let recorded_values = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("aggregation-recorded"))
+        .filter_map(|event| {
+            event
+                .pointer("/payload/aggregation/stepKey")
+                .and_then(Value::as_str)
+        })
+        .collect::<Vec<_>>();
+    let recorded = recorded_values.iter().copied().collect::<BTreeSet<_>>();
+    if recorded.len() != recorded_values.len() {
+        return Err("Stored Mission aggregation facts are ambiguous.".into());
+    }
+    let workers = workers_by_step(journal)?;
+    let (completed, failed) = strict_terminal_workers(journal)?;
+    for step in steps {
+        if step.get("kind").and_then(Value::as_str) != Some("coordinate") {
+            continue;
+        }
+        let step_key = bounded(
+            step.get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Selected coordinate step is invalid.".to_string())?,
+            "Coordinate step",
+            160,
+        )?;
+        if recorded.contains(step_key.as_str()) {
+            continue;
+        }
+        let dependencies = step
+            .get("dependsOnStepKeys")
+            .and_then(Value::as_array)
+            .filter(|dependencies| (1..=32).contains(&dependencies.len()))
+            .ok_or_else(|| "Coordinate step dependencies are invalid.".to_string())?
+            .iter()
+            .map(|dependency| {
+                dependency
+                    .as_str()
+                    .ok_or_else(|| "Coordinate step dependency is invalid.".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let dependency_workers = dependencies
+            .iter()
+            .map(|dependency| {
+                workers
+                    .get(*dependency)
+                    .cloned()
+                    .ok_or_else(|| "Coordinate dependency worker is unavailable.".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let all_terminal = dependency_workers
+            .iter()
+            .all(|worker| completed.contains(worker) || failed.contains(worker));
+        if !all_terminal {
+            continue;
+        }
+        if dependencies.len() == 1 && !completed.contains(&dependency_workers[0]) {
+            continue;
+        }
+        if dependencies.len() > 1 {
+            let revision_id = lifecycle
+                .current_revision
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Selected plan revision is invalid.".to_string())?;
+            if !has_satisfied_dependency_join(journal, revision_id, &step_key, &dependency_workers)
+            {
+                continue;
+            }
+        }
+        return Ok(Some((
+            step_key.clone(),
+            deterministic_aggregation_receipt(lifecycle, journal, &step_key)?,
+        )));
+    }
+    Ok(None)
 }
 
 fn mission_progress_projection(
@@ -1261,6 +1543,93 @@ pub fn mission_coordination_progress_read(run_id: String) -> Result<Value, Strin
             let authorized = authorized_run_for_read(tx, store, &run_id)?;
             mission_progress_projection(&authorized.lifecycle, &authorized.journal)
                 .map_err(crate::store::StoreError::Invalid)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn mission_coordination_advance(run_id: String) -> Result<Value, String> {
+    let run_id = bounded(&run_id, "Mission run", 160)?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let mut appended_event_ids = Vec::new();
+            for _ in 0..64 {
+                let authorized = authorized_run(tx, store, &run_id)?;
+                if let Some((join_key, join)) =
+                    next_automatic_join_resolution(&authorized.journal)
+                        .map_err(crate::store::StoreError::Invalid)?
+                {
+                    let (event_id, event_key) =
+                        automatic_coordination_identity(&run_id, "join-resolved", &join_key);
+                    if authorized.journal.events.iter().any(|event| {
+                        event.get("idempotencyKey").and_then(Value::as_str)
+                            == Some(event_key.as_str())
+                    }) {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Automatic Mission join replay no longer matches its durable fact."
+                                .into(),
+                        ));
+                    }
+                    let at = now();
+                    append_event(
+                        tx,
+                        store,
+                        &authorized,
+                        &event_id,
+                        "join-resolved",
+                        &event_key,
+                        json!({"join":join}),
+                        &at,
+                    )?;
+                    appended_event_ids.push(event_id);
+                    continue;
+                }
+                if let Some((step_key, aggregation)) =
+                    next_automatic_aggregation(&authorized.lifecycle, &authorized.journal)
+                        .map_err(crate::store::StoreError::Invalid)?
+                {
+                    let (event_id, event_key) = automatic_coordination_identity(
+                        &run_id,
+                        "aggregation-recorded",
+                        &step_key,
+                    );
+                    if authorized.journal.events.iter().any(|event| {
+                        event.get("idempotencyKey").and_then(Value::as_str)
+                            == Some(event_key.as_str())
+                    }) {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Automatic Mission aggregation replay no longer matches its durable fact."
+                                .into(),
+                        ));
+                    }
+                    let at = now();
+                    append_event(
+                        tx,
+                        store,
+                        &authorized,
+                        &event_id,
+                        "aggregation-recorded",
+                        &event_key,
+                        json!({"aggregation":aggregation}),
+                        &at,
+                    )?;
+                    appended_event_ids.push(event_id);
+                    continue;
+                }
+                let progress =
+                    mission_progress_projection(&authorized.lifecycle, &authorized.journal)
+                        .map_err(crate::store::StoreError::Invalid)?;
+                return Ok(json!({
+                    "journal":authorized.journal,
+                    "progress":progress,
+                    "appendedEventIds":appended_event_ids
+                }));
+            }
+            Err(crate::store::StoreError::Invalid(
+                "Automatic Mission coordination exceeded its bounded advance limit.".into(),
+            ))
         })
         .map_err(|error| error.to_string())
 }
@@ -1917,6 +2286,130 @@ mod tests {
             "provenance":"invented"
         }))
         .is_err());
+    }
+
+    #[test]
+    fn automatic_advancement_resolves_only_declared_terminal_join_facts() {
+        let join = "join-general";
+        let waiting = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running"}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-a","planStepKey":"a"
+                }}}),
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-b","planStepKey":"b"
+                }}}),
+                json!({"type":"join-opened","payload":{"join":{
+                    "joinKey":join,"status":"open","strategy":"all",
+                    "workerIds":["worker-a","worker-b"],"quorum":null,
+                    "allowFailedWorkers":false,"deadline":null,
+                    "satisfiedWorkerIds":[],"failedWorkerIds":[]
+                }}}),
+                json!({"type":"worker-completed","payload":{"workerId":"worker-a","outputs":[]}}),
+            ],
+        };
+        assert!(next_automatic_join_resolution(&waiting).unwrap().is_none());
+
+        let mut complete = waiting;
+        complete.events.push(
+            json!({"type":"worker-completed","payload":{"workerId":"worker-b","outputs":[]}}),
+        );
+        let (join_key, resolution) = next_automatic_join_resolution(&complete)
+            .unwrap()
+            .expect("all declared workers are terminal");
+        assert_eq!(join_key, join);
+        assert_eq!(
+            resolution.get("status").and_then(Value::as_str),
+            Some("satisfied")
+        );
+        assert_eq!(
+            resolution
+                .get("satisfiedWorkerIds")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
+
+        complete.events.push(
+            json!({"type":"worker-completed","payload":{"workerId":"worker-b","outputs":[]}}),
+        );
+        assert!(next_automatic_join_resolution(&complete)
+            .unwrap_err()
+            .contains("terminal facts are ambiguous"));
+    }
+
+    #[test]
+    fn automatic_advancement_materializes_only_a_ready_coordinate_step() {
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({}),
+            plan: json!({}),
+            current_revision: json!({
+                "id":"revision-auto",
+                "steps":[
+                    {"key":"a","kind":"produce","dependsOnStepKeys":[]},
+                    {"key":"b","kind":"produce","dependsOnStepKeys":[]},
+                    {"key":"combine","kind":"coordinate","dependsOnStepKeys":["a","b"]}
+                ]
+            }),
+        };
+        let join_key = coordination_join_key("revision-auto", "combine");
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running"}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-a","planStepKey":"a",
+                    "outputContract":{"slots":[{"key":"output-a","required":true}]}
+                }}}),
+                json!({"type":"worker-created","payload":{"worker":{
+                    "id":"worker-b","planStepKey":"b",
+                    "outputContract":{"slots":[{"key":"output-b","required":true}]}
+                }}}),
+                json!({"type":"worker-completed","payload":{"workerId":"worker-a","outputs":[{
+                    "key":"output-a","summary":"First output.","valueReference":"mission-output:a"
+                }]}}),
+                json!({"type":"worker-completed","payload":{"workerId":"worker-b","outputs":[{
+                    "key":"output-b","summary":"Second output.","valueReference":"mission-output:b"
+                }]}}),
+                json!({"type":"join-opened","payload":{"join":{
+                    "joinKey":join_key,"status":"open","strategy":"all",
+                    "workerIds":["worker-a","worker-b"],"quorum":null,
+                    "allowFailedWorkers":false,"deadline":null,
+                    "satisfiedWorkerIds":[],"failedWorkerIds":[]
+                }}}),
+                json!({"type":"join-resolved","payload":{"join":{
+                    "joinKey":coordination_join_key("revision-auto", "combine"),
+                    "status":"satisfied","strategy":"all",
+                    "workerIds":["worker-a","worker-b"],"quorum":null,
+                    "allowFailedWorkers":false,"deadline":null,
+                    "satisfiedWorkerIds":["worker-a","worker-b"],"failedWorkerIds":[]
+                }}}),
+            ],
+        };
+        let (step_key, aggregation) = next_automatic_aggregation(&lifecycle, &journal)
+            .unwrap()
+            .expect("satisfied terminal coordinate step");
+        assert_eq!(step_key, "combine");
+        assert_eq!(
+            aggregation.get("status").and_then(Value::as_str),
+            Some("complete")
+        );
+        assert_eq!(
+            aggregation
+                .get("producedOutputs")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
+        let identity = automatic_coordination_identity("run-1", "join-resolved", "join-1");
+        assert_eq!(
+            identity,
+            automatic_coordination_identity("run-1", "join-resolved", "join-1")
+        );
+        assert_ne!(
+            identity,
+            automatic_coordination_identity("run-1", "aggregation-recorded", "join-1")
+        );
     }
 
     #[test]

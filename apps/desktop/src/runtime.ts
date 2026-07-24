@@ -3252,6 +3252,23 @@ export async function readRuntimeMissionProgress(runId: string): Promise<Runtime
   catch (error) { throw toRuntimeError(error); }
 }
 
+export async function advanceRuntimeMissionCoordination(runId: string): Promise<{
+  journal: Record<string, unknown>;
+  progress: RuntimeMissionProgress;
+  appendedEventIds: string[];
+} | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      journal: Record<string, unknown>;
+      progress: RuntimeMissionProgress;
+      appendedEventIds: string[];
+    }>("mission_coordination_advance", { runId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export interface RuntimeParallelApproachesResult {
   missionId: string;
   runId: string;

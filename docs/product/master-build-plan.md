@@ -820,6 +820,17 @@ join, worker settlement, optional reviewer, and terminal boundaries. Browser
 preview returns no synthetic progress. This is inspectability, not automatic
 execution authority.
 
+A native-owned bounded advance command now removes renderer orchestration from
+the deterministic part of that graph. Given only an authenticated run id, one
+transaction repeatedly reloads the selected Plan and journal, resolves every
+currently decidable declared join from immutable terminal worker facts, and
+records every now-ready reference-only coordinate aggregation in Plan order.
+Event and idempotency identities are derived from the run, event kind, and exact
+join or step reference; no renderer-selected head, status, worker set, time, or
+output crosses the boundary. The loop is capped at sixty-four facts and rolls
+back on malformed or over-limit state. Starting/routing arbitrary ready workers,
+terminal result aggregation, and general restart dispatch remain open.
+
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
 hash-verifies both immutable receipts, derives the bounded reviewer prompt and

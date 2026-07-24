@@ -144,7 +144,12 @@ rejects unknown workers, duplicate terminal facts, work outside the selected
 Plan, malformed usage, and ambiguous evaluations. The parallel desktop journey
 publishes that projection after its durable join, worker settlement, reviewer,
 and terminal boundaries; browser preview invents no progress. Arbitrary graph
-advancement and artifact orchestration remain open.
+worker execution and artifact orchestration remain open. A native-owned bounded
+advance command can, however, settle every currently decidable declared join
+and reference-only coordinate aggregation in one transaction. It derives stable
+event identities from the run and selected Plan facts, reloads the journal after
+each append, and stops when no further deterministic coordination fact is ready;
+the renderer supplies only the run to advance.
 
 ## Schedules And Commands
 
