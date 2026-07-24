@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -81,6 +81,8 @@ const runtimeMocks = vi.hoisted(() => ({
     devices: []
   } as AccountWorkspaceStatus
 }));
+const defaultIdentityStatus = structuredClone(runtimeMocks.identityStatus);
+const defaultAccountStatus = structuredClone(runtimeMocks.accountStatus);
 
 vi.mock("./lib/cited-brief-mission", () => ({
   isCitedBriefMissionPrompt: (value: string) => /connected work sources?/i.test(value) && /(?:cited|trustworthy)/i.test(value) && /brief/i.test(value),
@@ -209,6 +211,21 @@ const connectedCodex: BackendProvider = {
 vi.mock("./runtime", () => ({
   recoverRuntimeInterruptedCitedMissions: vi.fn(async () => null),
   recoverRuntimeCompletedParallelApproaches: vi.fn(async () => null),
+  loadRuntimeExecutionControl: vi.fn(async () => ({
+    paused: false,
+    revision: 0,
+    changedAt: ""
+  })),
+  pauseRuntimeExecution: vi.fn(async () => ({
+    paused: true,
+    revision: 1,
+    changedAt: "2026-07-24T09:00:00.000Z"
+  })),
+  resumeRuntimeExecution: vi.fn(async () => ({
+    paused: false,
+    revision: 2,
+    changedAt: "2026-07-24T09:01:00.000Z"
+  })),
   createRuntimeConversationThread: vi.fn(async (input: { title?: string }) => {
     const thread = {
       id: "test-durable-thread",
@@ -528,6 +545,8 @@ async function renderWorkspace() {
 describe("Fable home", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    runtimeMocks.identityStatus = structuredClone(defaultIdentityStatus);
+    runtimeMocks.accountStatus = structuredClone(defaultAccountStatus);
     runtimeMocks.snapshot = null;
     runtimeMocks.savedSnapshots = [];
     // Default to a connected backend so the onboarding gate is cleared for the
@@ -552,6 +571,8 @@ describe("Fable home", () => {
     connectRuntimeBackendSpy.mockClear();
     vi.mocked(listRuntimeConnectorStatuses).mockReset();
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(null);
+    vi.mocked(prepareRuntimeConnectorAction).mockReset();
+    vi.mocked(prepareRuntimeConnectorAction).mockResolvedValue(null);
     vi.mocked(listRuntimeThreadArtifacts).mockReset();
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
     vi.mocked(listRuntimePendingCitedApprovals).mockReset();
@@ -930,6 +951,7 @@ describe("Fable home", () => {
 
     await user.click(within(gmailCard as HTMLElement).getByText("Gmail"));
     await user.click(screen.getByRole("button", { name: /prepare create draft/i }));
+    await waitFor(() => expect(prepareRuntimeConnectorAction).toHaveBeenCalledOnce());
 
     // Return to the chat view, where the approval queue now renders inline.
     await user.click(screen.getByRole("button", { name: /new chat/i }));
