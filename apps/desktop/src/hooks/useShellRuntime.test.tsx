@@ -39,6 +39,7 @@ vi.mock("../runtime", async (importOriginal) => {
     createRuntimeRoutine: vi.fn(async () => null),
     getRuntimeRoutineSchedulerStatus: vi.fn(async () => null),
     exportRuntimeMemoryState: vi.fn(async () => null),
+    deleteRuntimeConnectorKnowledgeSource: vi.fn(async () => null),
     importRuntimeConnectorItem: vi.fn(async () => null),
     importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
     listRuntimeBackends: vi.fn(async () => null),
@@ -46,6 +47,7 @@ vi.mock("../runtime", async (importOriginal) => {
     listRuntimeBackendModels: vi.fn(async () => null),
     listRuntimeConnectorStatuses: vi.fn(async () => null),
     listRuntimeConnectorAccounts: vi.fn(async () => null),
+    listRuntimeConnectorKnowledgeSources: vi.fn(async () => null),
     listRuntimeSchedulerJobs: vi.fn(async () => null),
     listRuntimeSchedulerQueue: vi.fn(async () => null),
     listRuntimeWorkflowDefinitions: vi.fn(async () => null),
@@ -90,6 +92,7 @@ vi.mock("../runtime", async (importOriginal) => {
     saveRuntimeSnapshot: vi.fn(async () => null),
     searchRuntimeConnector: vi.fn(async () => null),
     searchRuntimeKnowledgeSources: vi.fn(async () => null),
+    setRuntimeConnectorKnowledgeSourceDisabled: vi.fn(async () => null),
     selectRuntimeAccountWorkspace: vi.fn(async () => null),
     signOutRuntimeIdentity: vi.fn(async () => null),
     startRuntimeConnectorAuth: vi.fn(async () => null)
@@ -127,6 +130,40 @@ describe("useShellRuntime — Connection hydration", () => {
     const { result } = renderHook(() => useShellRuntime());
     await waitFor(() => expect(result.current.connectorAccounts.gmail?.[0]?.connectionId).toBe("connection_safe"));
     expect(runtime.listRuntimeConnectorAccounts).toHaveBeenCalledWith("gmail");
+  });
+
+  it("restores durable connector knowledge separately from local-file sources", async () => {
+    vi.mocked(runtime.listRuntimeConnectorKnowledgeSources).mockResolvedValueOnce([{
+      workspaceId: "default",
+      authorityScope: {
+        authority: "local",
+        visibility: "member-private",
+        ownerInternalUserId: "preview-user" as never
+      },
+      id: "connector-github-issue-1",
+      title: "Launch issue",
+      kind: "document",
+      connectorId: "github",
+      connectionId: "connection-github",
+      provenance: "Connector: github",
+      freshness: "Imported now",
+      pinned: false,
+      trust: "untrusted",
+      contentPreview: "Launch checklist",
+      importedAt: "2026-07-24T10:00:00.000Z",
+      origin: "connector-import",
+      scope: { level: "global" },
+      status: "ok"
+    }]);
+
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() =>
+      expect(result.current.connectorImportedSources[0]?.connectionId)
+        .toBe("connection-github")
+    );
+    expect(result.current.workspaceKnowledgeSources.map((source) => source.id)).toEqual([
+      "connector-github-issue-1"
+    ]);
   });
 });
 
@@ -1488,6 +1525,37 @@ describe("useShellRuntime — search excludes disabled sources", () => {
     const citedIds = result.current.knowledgeCitations.map((c) => c.sourceId);
     expect(citedIds).toContain("match");
     expect(citedIds).not.toContain("disabled-match");
+  });
+
+  it("keeps fixture connector results bound to their exact preview Connection", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      await result.current.searchConnector({
+        connectorId: "github",
+        query: "fable",
+        limit: 5
+      });
+    });
+    const item = result.current.connectorSearchResult?.items[0];
+    expect(item?.connectionId).toBe("fixture-preview:github");
+
+    await act(async () => {
+      await result.current.importConnectorItem(item!);
+    });
+    await waitFor(() =>
+      expect(result.current.connectorImportedSources[0]?.connectionId)
+        .toBe("fixture-preview:github")
+    );
+    await act(async () => {
+      await result.current.searchKnowledge(item!.title);
+    });
+
+    expect(result.current.knowledgeCitations[0]).toEqual(expect.objectContaining({
+      sourceId: result.current.connectorImportedSources[0].id,
+      connectionId: "fixture-preview:github"
+    }));
   });
 });
 

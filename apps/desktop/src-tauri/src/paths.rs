@@ -31,6 +31,10 @@ pub fn imported_knowledge_path(app: &tauri::AppHandle) -> Result<PathBuf, String
     app_data_file_path(app, "imported-knowledge.json")
 }
 
+pub fn connector_knowledge_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    app_data_file_path(app, "connector-knowledge.json")
+}
+
 pub fn memory_state_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     app_data_file_path(app, "memory-state.json")
 }

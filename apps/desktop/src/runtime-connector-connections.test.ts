@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listRuntimeConnectorAccounts, switchRuntimeConnectorAccount } from "./runtime";
+import {
+  deleteRuntimeConnectorKnowledgeSource,
+  listRuntimeConnectorAccounts,
+  listRuntimeConnectorKnowledgeSources,
+  setRuntimeConnectorKnowledgeSourceDisabled,
+  switchRuntimeConnectorAccount
+} from "./runtime";
 import { setActiveRuntimeDataScope } from "./runtime-scope";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -41,6 +47,36 @@ describe("connector Connection runtime boundary", () => {
         connectorId: "gmail",
         connectionId: "connection-safe",
         workspaceId: "default"
+      }]
+    ]);
+  });
+
+  it("scopes durable connector knowledge lifecycle calls to the active workspace", async () => {
+    setNative(true);
+    mocks.invoke
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce({ id: "source-1", disabled: true })
+      .mockResolvedValueOnce({ id: "source-1", deletedAt: "now" });
+
+    await listRuntimeConnectorKnowledgeSources();
+    await setRuntimeConnectorKnowledgeSourceDisabled("source-1", true);
+    await deleteRuntimeConnectorKnowledgeSource("source-1");
+
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["list_connector_knowledge_sources", {
+        workspaceId: "default",
+        projectId: null
+      }],
+      ["set_connector_knowledge_source_disabled", {
+        sourceId: "source-1",
+        disabled: true,
+        workspaceId: "default",
+        projectId: null
+      }],
+      ["delete_connector_knowledge_source", {
+        sourceId: "source-1",
+        workspaceId: "default",
+        projectId: null
       }]
     ]);
   });

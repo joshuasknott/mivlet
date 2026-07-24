@@ -239,6 +239,7 @@ fn notion_item(value: &Value) -> Option<ConnectorSearchItem> {
     Some(ConnectorSearchItem {
         id,
         connector_id: "notion".into(),
+        connection_id: None,
         title,
         kind: object.clone(),
         summary: format!("{object} explicitly shared with the Fable integration"),
@@ -365,6 +366,7 @@ fn slack_item(value: &Value) -> Option<ConnectorSearchItem> {
     Some(ConnectorSearchItem {
         id,
         connector_id: "slack".into(),
+        connection_id: None,
         title: if is_message {
             format!("#{name} message")
         } else {

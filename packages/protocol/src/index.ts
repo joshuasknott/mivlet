@@ -37,6 +37,8 @@ export type MemoryApprovalState = "approved" | "suggested" | "rejected";
 export interface MemoryProvenance {
   origin: "chat" | "source" | "artifact" | "run" | "manual";
   sourceId?: string;
+  /** Exact Fable Connection inherited from a connector-backed source. */
+  connectionId?: string;
   runId?: string;
   artifactId?: string;
   note: string;
@@ -362,6 +364,12 @@ export interface ConnectorSearchRequest {
 export interface ConnectorSearchItem {
   id: string;
   connectorId: FirstWaveConnectorId;
+  /**
+   * Exact Fable Connection that produced this result. Native search stamps this
+   * value from authenticated selection evidence; imports reject a changed or
+   * missing selection rather than guessing from the provider family.
+   */
+  connectionId?: string;
   title: string;
   kind: ConnectorItemKind;
   summary: string;
@@ -872,6 +880,8 @@ export interface KnowledgeCitation {
   chunkId?: string;
   /** Connector account the source came from, when applicable. */
   account?: string;
+  /** Exact Fable Connection that authorized the cited source. */
+  connectionId?: string;
   /** The basis for the citation's score — never hidden from the user. */
   ranking?: CitationRanking;
   /** Original path of the cited source, when known (provenance metadata). */

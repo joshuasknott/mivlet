@@ -615,6 +615,7 @@ fn drive_item(value: &Value) -> Result<ConnectorSearchItem, ConnectorCommandErro
     Ok(ConnectorSearchItem {
         id,
         connector_id: "google-drive".to_string(),
+        connection_id: None,
         title: name,
         kind: kind.to_string(),
         summary: if mime == "application/vnd.google-apps.folder" {
@@ -663,6 +664,7 @@ fn gmail_item(value: &Value) -> Result<ConnectorSearchItem, ConnectorCommandErro
     Ok(ConnectorSearchItem {
         id,
         connector_id: "gmail".to_string(),
+        connection_id: None,
         title: subject,
         kind: "message".to_string(),
         summary: format!("Message from {from}"),
@@ -721,6 +723,7 @@ fn calendar_item(
     Ok(ConnectorSearchItem {
         id,
         connector_id: "google-calendar".to_string(),
+        connection_id: None,
         title,
         kind: if is_calendar { "calendar" } else { "event" }.to_string(),
         summary: string(value, "description").unwrap_or_else(|| {
@@ -898,6 +901,7 @@ fn unreadable_message_item(id: &str) -> ConnectorSearchItem {
     ConnectorSearchItem {
         id: id.to_string(),
         connector_id: "gmail".to_string(),
+        connection_id: None,
         title: "(message unavailable)".to_string(),
         kind: "message".to_string(),
         summary: "This message could not be read from Gmail.".to_string(),
@@ -984,6 +988,9 @@ pub(crate) async fn import(
         }
     };
     let source = ConnectorKnowledgeSource {
+        workspace_id: None,
+        authority_scope: None,
+        scope: None,
         id: format!("connector-{}-{}", connector_id, request.item.id),
         title: request.item.title,
         kind: if request.item.kind == "event" || request.item.kind == "calendar" {
@@ -992,6 +999,7 @@ pub(crate) async fn import(
             "document".to_string()
         },
         connector_id,
+        connection_id: None,
         provenance: request.item.provenance,
         freshness: request.item.freshness,
         pinned: false,
@@ -1000,6 +1008,10 @@ pub(crate) async fn import(
         imported_at: request.imported_at,
         origin: "connector-import".to_string(),
         provider_metadata: request.item.provider_metadata,
+        disabled: false,
+        deleted_at: None,
+        status: Some("ok".to_string()),
+        status_message: None,
     };
     Ok(ConnectorImportResult {
         source,

@@ -408,6 +408,7 @@ fn normalize_item(connector_id: &str, value: Value) -> Option<ConnectorSearchIte
     Some(ConnectorSearchItem {
         id,
         connector_id: connector_id.to_string(),
+        connection_id: None,
         title,
         kind: kind.to_string(),
         summary: truncate_characters(&normalize_spaces(&summary), 500),

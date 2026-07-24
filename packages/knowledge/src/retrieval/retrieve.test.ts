@@ -499,12 +499,13 @@ describe("retrieve — content-hash dedup", () => {
 });
 
 describe("retrieve — citation enrichment", () => {
-  it("carries sourcePath, mediaType, and scope on citations", async () => {
+  it("carries exact Connection, sourcePath, mediaType, and scope on citations", async () => {
     const sources = [
       src(
         makeSource({
           id: "s1",
           title: "alpha",
+          connectionId: "connection-alpha",
           sourcePath: "docs/alpha.md",
           mediaType: "text/markdown",
           scope: { level: "project", projectId: "p1" }
@@ -516,6 +517,7 @@ describe("retrieve — citation enrichment", () => {
       query: "alpha",
       scope: { level: "project", projectId: "p1" }
     });
+    expect(result.citations[0].connectionId).toBe("connection-alpha");
     expect(result.citations[0].sourcePath).toBe("docs/alpha.md");
     expect(result.citations[0].mediaType).toBe("text/markdown");
     expect(result.citations[0].scope).toEqual({ level: "project", projectId: "p1" });

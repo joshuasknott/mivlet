@@ -48,18 +48,21 @@ are also fully persisted in the SQLite vault.
 
 - Local file and recursive folder imports are bounded, typed, fingerprinted,
   structurally chunked (for Markdown, JSON, CSV, YAML), sanitized with path-escape guards,
-  and classified as untrusted knowledge. Provider imports retain their
-  connector/account provenance and remain authorized only while that connector
-  is connected.
+  and classified as untrusted knowledge. Provider imports are stamped by native
+  code with the exact authenticated Fable Connection and selection revision,
+  stored as encrypted member-private workspace data, and remain usable only
+  while that exact Connection is still authorized, credential-backed, and
+  healthy enough.
 - Retrieval is scoped to global, project, or thread context. Deleted (tombstoned), disabled,
   stale, error, indexing, disconnected, or out-of-scope sources are excluded before
   context assembly. Hybrid retrieval uses Reciprocal-Rank Fusion (RRF, k=60) to combine
   lexical and semantic scores.
 - Connector-ingested sources may retain the exact authorizing Fable Connection
-  separately from connector family and account. An exact-Connection query
-  filters that identity before corpus statistics, lexical scoring, semantic
-  scoring, fusion, or truncation. Department filtering remains closed until
-  Departments exist.
+  separately from connector family and account. Missing provenance fails
+  closed. Every retrieval and context assembly filters that exact identity
+  before corpus statistics, lexical scoring, semantic scoring, fusion,
+  truncation, or receipt persistence. Department filtering remains closed
+  until Departments exist.
 - Deleting a private Project is one native transaction. Workspace-owned context
   is detached, canonical Routine and trigger ciphertext is rewritten without a
   project identity, immutable Routine versions and occurrence history remain,

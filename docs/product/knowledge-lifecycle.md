@@ -11,8 +11,8 @@ All user-owned knowledge and memory records are strictly compartmentalized acros
 *   **Workspace Boundary**: The absolute partition of user data. Workspaces are top-level silos. Production Tauri databases use composite primary keys `(workspace_id, id)` on the `knowledge_source`, `memory_record`, `knowledge_chunk`, `pinned_context`, and tombstone tables. Active operations enforce SQL query predicates filtering on `workspace_id` to prevent cross-workspace leakage.
 *   **Project Boundary**: A project belongs to a single workspace. Records can carry an optional `project_id`. Workspace-level queries exclude project-scoped records; callers must explicitly specify the project context.
 *   **Thread Boundary**: Message histories and active agent runs belong strictly to a project and thread. Pinned context can be scoped to the thread level to constrain retrieval.
-*   **Connector Boundary**: Connector configuration (`connector_account`) is workspace-scoped. Derived knowledge sources retain their `connector_id` and are valid only while the connector remains connected and authorized.
-*   **Account Boundary**: Provenance metadata includes the source connector account (e.g., account email or ID) to distinguish sources imported from different accounts on the same provider.
+*   **Connector Boundary**: Connection configuration is workspace-scoped. Derived sources retain the exact opaque `connectionId` stamped by authenticated native search; connector family or provider account alone never authorizes retrieval.
+*   **Account Boundary**: A workspace can retain multiple authorized Connections for one provider. The exact Fable Connection distinguishes their sources without exposing provider credentials or relying on a renderer-supplied account ID.
 
 ---
 
@@ -23,6 +23,7 @@ To ensure security and traceability, knowledge sources and citations carry verif
 *   `provenance`: A user-facing origin string (e.g., `"Local file - 1.2 KB"` or `"Connector: github"`).
 *   `freshness`: A relative timestamp string (e.g., `"just now"`, `"10 min ago"`, `"2 h ago"`, or `"3 d ago"`) computed dynamically from content modifications (`modifiedAt`) or ingestion time (`fetchedAt`).
 *   `account`: The email or username representing the source account.
+*   `connectionId`: The opaque Fable Connection that authorized a connector-backed source. Native code derives it; React cannot mint or replace it.
 *   `sourcePath`: The sanitized, boundary-relative path (e.g., `docs/architecture.md`) of the file within its import root, preserving directory structure.
 *   `mediaType`: The verified media/MIME type (e.g., `text/markdown`, `application/json`, `text/csv`, `application/yaml`).
 *   `scope`: The bounding `KnowledgeScope` (global, project, or thread).
@@ -55,6 +56,7 @@ Ingestion is bounded and fails closed. If a candidate file fails validation (e.g
 ### Deduplication and Re-indexing
 *   **Deduplication**: Ingestion uses the SHA-256 fingerprint of the normalized text to compute a stable source ID: `source-${connectorId}-${slug(hash).slice(0,12)}`. If a file is re-imported or synced with identical content (even under a different path or filename), it is recognized as `unchanged`. Its provenance path and title are refreshed in-place (`repathSource`), but chunk indexes are preserved.
 *   **Updates**: If a candidate matches an existing source's filename/path but has different content, it is ingested as an `updated` outcome. The existing stable ID and user-configured states (such as pins) are preserved, but the chunks and content fingerprint are updated.
+*   **Connector refresh**: A first-wave Connector source is refreshed only by explicitly re-importing the live result under the same current Connection. The desktop does not claim a local reindex fetched provider content.
 
 ---
 
@@ -89,7 +91,7 @@ The retrieval pipeline (`packages/knowledge/src/retrieval/retrieve.ts`) filters 
 1.  **Disabled**: `source.disabled === true` or `memory.disabled === true`.
 2.  **Forgotten**: `memory.forgottenAt` is not null.
 3.  **Excluded Statuses**: Source status is `"error"`, `"stale"`, or `"indexing"`.
-4.  **Connector Authorization**: The source belongs to a disconnected or unauthorized connector.
+4.  **Connection Authorization**: The exact `connectionId` is missing, revoked, unavailable, credential-inaccessible, unhealthy, or offline. Provider-family or account matches cannot substitute.
 5.  **Scope Mismatch**: The record scope does not satisfy the active scope filter (e.g., thread-scoped queries cannot read project-scoped records from a different project).
 
 ---
@@ -118,15 +120,15 @@ The export action format is plaintext and strictly **secret-free**:
 
 ## 9. Connector Boundary Interactions
 
-*   **OAuth Disconnection/Revocation**: Disconnecting a connector account or revoking credentials instantly invalidates all derived sources.
+*   **OAuth Disconnection/Revocation**: Disconnecting or revoking one Connection invalidates only sources bound to that exact Connection before ranking and context assembly.
 *   **Gated Actions**: Un-authorized sources are excluded from retrieval, cannot be pinned, and cannot be promoted to memory. Re-authorizing the connector restores access to the sources without duplicating records.
 
 ---
 
 ## 10. Migration and Backward Compatibility
 
-*   **Schema version v5 Migration**: The v5 migration converts `knowledge_source` and `memory_record` to use composite primary keys `(workspace_id, id)`. It creates `knowledge_chunk`, `pinned_context`, and tombstone tables.
-*   **Preservation of Legacy Data**: Migration is transaction-safe. Existing records are mapped to the `default` workspace, and legacy payloads are decrypted and re-sealed using workspace-bound AAD.
+*   **Owner-qualified migration**: Schema v15 qualifies Knowledge, Memory, chunks, pins, tombstones, private document keys, and encryption binding by a proven hosted member or legacy local user.
+*   **Preservation of Legacy Data**: Migration is transaction-safe. Records without provable ownership are quarantined rather than assigned to the currently active account.
 *   **JSON file migration**: A 6-phase idempotent pipeline reads legacy JSON configs, logs parse errors, upserts records inside a database transaction, and rolls back on failure. Legacy JSON files are never deleted on disk.
 
 ---
@@ -134,4 +136,4 @@ The export action format is plaintext and strictly **secret-free**:
 ## 11. Browser-Preview vs. Tauri Production Path
 
 *   **Browser Preview Mode**: Synthetic, fixture-backed runtime. Credentials, connector search, and import use simulated responses. States are persisted via `localStorage` instead of SQLite.
-*   **Production Tauri Path**: Persists data inside `fable-vault.db` (encrypted using AES-256-GCM via a keyring-stored master key). Secrets are isolated in the platform secure store and never enter the database.
+*   **Production Tauri Path**: Persists local and Connector Knowledge inside `fable-vault.db` (encrypted using AES-256-GCM via a keyring-stored master key). Connector content is additionally bounded and secret-redacted before persistence; credentials remain isolated in the platform secure store.

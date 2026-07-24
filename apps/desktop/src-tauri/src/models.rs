@@ -656,6 +656,8 @@ pub struct ConnectorSearchRequest {
 pub struct ConnectorSearchItem {
     pub id: String,
     pub connector_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
     pub title: String,
     pub kind: String,
     pub summary: String,
@@ -710,10 +712,18 @@ pub struct ConnectorImportRequest {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorKnowledgeSource {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_scope: Option<ContextRecordAuthorityScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<serde_json::Value>,
     pub id: String,
     pub title: String,
     pub kind: String,
     pub connector_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
     pub provenance: String,
     pub freshness: String,
     pub pinned: bool,
@@ -722,6 +732,14 @@ pub struct ConnectorKnowledgeSource {
     pub imported_at: String,
     pub origin: String,
     pub provider_metadata: BTreeMap<String, String>,
+    #[serde(default)]
+    pub disabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_message: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

@@ -69,11 +69,15 @@ export interface AssembledContext extends PreparedRunContext {
 
 export interface ContextAuthorizationRules {
   /**
-   * Predicate over a connector id + account. Return false to exclude that
-   * connector/account's sources from the run (e.g. a revoked account). Defaults
-   * to allow-all.
+   * Predicate over a connector, optional account, and exact Fable Connection.
+   * Return false to exclude that source before it enters the run (for example,
+   * after revocation or selection change). Defaults to allow-all.
    */
-  isSourceAuthorized?: (connectorId: string, account?: string) => boolean;
+  isSourceAuthorized?: (
+    connectorId: string,
+    account?: string,
+    connectionId?: string
+  ) => boolean;
 }
 
 export interface AssembleContextInput {
@@ -221,7 +225,9 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   let excerptUsed = excerptHeader.length;
   for (const citation of input.citations) {
     // Authorization gate: connector/account must be authorized.
-    if (!isAuthorized(citationConnector(citation), citation.account)) continue;
+    if (!isAuthorized(citationConnector(citation), citation.account, citation.connectionId)) {
+      continue;
+    }
     if (!authorityScopeAllowsAudience(citation.authorityScope, input.audience)) continue;
     if (usedLength + excerptUsed + citation.snippet.length > budget) break;
     const excerpt = truncate(citation.snippet, MAX_EXCERPT_CHARS);
@@ -302,7 +308,7 @@ function immutableReceipt(receipt: RunContextReceipt): RunContextReceipt {
 /** A memory is authorized when its provenance source (if any) is authorized. */
 function isMemoryAuthorized(
   record: MemoryRecord,
-  isAuthorized: (connectorId: string, account?: string) => boolean
+  isAuthorized: (connectorId: string, account?: string, connectionId?: string) => boolean
 ): boolean {
   // Memory from a connector source inherits that source's authorization, which
   // is resolved at the store level (disabled sources are already excluded). For
@@ -314,7 +320,7 @@ function isMemoryAuthorized(
   const connector = sourceId.startsWith("source-")
     ? sourceId.slice("source-".length).split("-")[0]
     : "local-files";
-  return isAuthorized(connector, undefined);
+  return isAuthorized(connector, undefined, record.provenance?.connectionId);
 }
 
 function citationConnector(citation: AuthorityScopedKnowledgeCitation): string {

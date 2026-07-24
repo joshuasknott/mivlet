@@ -91,6 +91,7 @@ export function importConnectorSearchItem(
     title: request.item.title,
     kind: toKnowledgeSourceKind(request.item.kind),
     connectorId: request.connectorId,
+    ...(request.item.connectionId ? { connectionId: request.item.connectionId } : {}),
     provenance: request.item.provenance,
     freshness: request.item.freshness,
     pinned: false,

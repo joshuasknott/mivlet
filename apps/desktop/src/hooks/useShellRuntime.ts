@@ -129,11 +129,13 @@ import {
   detectRuntimeLocalModel,
   detectRuntimeAcpCli,
   exportRuntimeMemoryState,
+  deleteRuntimeConnectorKnowledgeSource,
   importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorStatuses,
   listRuntimeConnectorSyncStates,
   listRuntimeConnectorAccounts,
+  listRuntimeConnectorKnowledgeSources,
   listRuntimeBackends,
   listRuntimeBackendModels,
   listRuntimeWorkflowRuns,
@@ -177,6 +179,7 @@ import {
   saveRuntimeSnapshot,
   searchRuntimeConnector,
   searchRuntimeKnowledgeSources,
+  setRuntimeConnectorKnowledgeSourceDisabled,
   switchRuntimeConnectorAccount,
   syncRuntimeConnector,
   refreshRuntimeIdentity,
@@ -1215,6 +1218,30 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   useEffect(() => {
     let active = true;
 
+    void listRuntimeConnectorKnowledgeSources()
+      .then((sources) => {
+        if (active && sources) {
+          setConnectorImportedSources(sources);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setImportStatus(
+            error instanceof Error
+              ? error.message
+              : "Fable could not load connector knowledge."
+          );
+        }
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [workspaceScopeGeneration]);
+
+  useEffect(() => {
+    let active = true;
+
     void loadRuntimeMemoryState().then((state) => {
       if (!active || !state || (!state.disabled && state.records.length === 0)) {
         return;
@@ -1580,16 +1607,33 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     );
   };
 
+  const connectionIsAuthorized = (
+    connectorId: string,
+    _account?: string,
+    connectionId?: string
+  ) => {
+    if (connectorId === "local-files") return true;
+    if (!connectionId) return false;
+    if (!hasTauriRuntime()) {
+      return ALLOW_PREVIEW_FALLBACKS
+        && connectionId === `fixture-preview:${connectorId}`;
+    }
+    const connection = connectorAccounts[connectorId]?.find(
+      (candidate) => candidate.connectionId === connectionId
+    );
+    return Boolean(
+      connection
+      && connection.lifecycle === "authorized"
+      && connection.authorizationState === "authorized"
+      && connection.credentialState === "available"
+      && connection.healthState !== "unhealthy"
+      && connection.healthState !== "offline"
+    );
+  };
+
   const sourceIsAuthorized = (source: KnowledgeSource) => {
     if (source.disabled || source.deletedAt || source.status === "stale" || source.status === "error") return false;
-    if (source.connectorId === "local-files") return true;
-    return connectorManifests.some(
-      (connector) =>
-        connector.id === source.connectorId &&
-        connector.status === "connected" &&
-        connector.health?.state !== "error" &&
-        (!source.account || connector.account?.id === source.account)
-    );
+    return connectionIsAuthorized(source.connectorId, source.account, source.connectionId);
   };
 
   const knowledgeRetrievalSources = (sources: readonly KnowledgeSource[] = workspaceKnowledgeSources) =>
@@ -1648,15 +1692,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memory: memoryDisabled ? [] : visibleMemory,
       citations: result.citations,
       authorization: {
-        isSourceAuthorized: (connectorId: string, account?: string) =>
-          connectorId === "local-files" ||
-          connectorManifests.some(
-            (connector) =>
-              connector.id === connectorId &&
-              connector.status === "connected" &&
-              connector.health?.state !== "error" &&
-              (!account || connector.account?.id === account)
-          )
+        isSourceAuthorized: connectionIsAuthorized
       }
     });
     return Object.freeze({
@@ -1713,23 +1749,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
     }
 
-    const refreshedAt = new Date().toISOString();
-    const refresh = <T extends KnowledgeSource>(sources: T[]) =>
-      sources.map((source) =>
-        source.id === sourceId
-          ? {
-              ...source,
-              status: "ok" as const,
-              statusMessage: undefined,
-              freshness: "Reindexed just now",
-              importedAt: refreshedAt
-            }
-          : source
-      );
-    const local = refresh(importedKnowledgeSources);
-    persistLocalKnowledgeSources(local);
-    setConnectorImportedSources((current) => refresh(current));
-    setLastAction("Knowledge source reindexed");
+    const connectorTarget = connectorImportedSources.find((source) => source.id === sourceId);
+    if (connectorTarget) {
+      const message = `Open Connections and import ${connectorTarget.title} again to refresh it.`;
+      setImportStatus(message);
+      setLastAction(message);
+      return;
+    }
+    throw new Error("That knowledge source is no longer available.");
   };
 
   const toggleKnowledgeSourceDisabled = (sourceId: string) => {
@@ -1739,8 +1766,26 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       sources.map((source) =>
         source.id === sourceId ? { ...source, disabled: !source.disabled } : source
       );
-    persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
-    setConnectorImportedSources((current) => toggle(current));
+    if (importedKnowledgeSources.some((source) => source.id === sourceId)) {
+      persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
+    } else if (connectorImportedSources.some((source) => source.id === sourceId)) {
+      const previous = connectorImportedSources;
+      setConnectorImportedSources(toggle(previous));
+      void setRuntimeConnectorKnowledgeSourceDisabled(sourceId, becomingDisabled)
+        .then((saved) => {
+          if (saved) {
+            setConnectorImportedSources((current) =>
+              current.map((source) => source.id === sourceId ? saved : source)
+            );
+          }
+        })
+        .catch((error) => {
+          setConnectorImportedSources(previous);
+          setImportStatus(
+            error instanceof Error ? error.message : "Fable could not save that source change."
+          );
+        });
+    }
     // A disabled source cannot remain pinned: drop the pin so disabled material
     // can never enter a run via the pinned-context path.
     if (becomingDisabled) {
@@ -1754,20 +1799,26 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     // Permanently remove the source from search, citations, pins, and context.
     // Pins for the deleted source are cleared so they cannot resolve to a
     // missing source or bypass the removal via pinned context.
-    persistLocalKnowledgeSources(
-      importedKnowledgeSources.map((source) =>
-        source.id === sourceId
-          ? { ...source, pinned: false, disabled: true, deletedAt }
-          : source
-      )
-    );
-    setConnectorImportedSources((current) =>
-      current.map((source) =>
-        source.id === sourceId
-          ? { ...source, pinned: false, disabled: true, deletedAt }
-          : source
-      )
-    );
+    if (importedKnowledgeSources.some((source) => source.id === sourceId)) {
+      persistLocalKnowledgeSources(
+        importedKnowledgeSources.map((source) =>
+          source.id === sourceId
+            ? { ...source, pinned: false, disabled: true, deletedAt }
+            : source
+        )
+      );
+    } else if (connectorImportedSources.some((source) => source.id === sourceId)) {
+      const previous = connectorImportedSources;
+      setConnectorImportedSources((current) =>
+        current.filter((source) => source.id !== sourceId)
+      );
+      void deleteRuntimeConnectorKnowledgeSource(sourceId).catch((error) => {
+        setConnectorImportedSources(previous);
+        setImportStatus(
+          error instanceof Error ? error.message : "Fable could not delete that source."
+        );
+      });
+    }
     setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
     setLastAction("Knowledge source deleted");
   };
@@ -2200,7 +2251,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         if (!sessionGate.ok) {
           throw new Error(sessionGate.result.message);
         }
-        return labelFixtureSearchResult(searchFixtureConnector(request));
+        const result = labelFixtureSearchResult(searchFixtureConnector(request));
+        return {
+          ...result,
+          items: result.items.map((item) => ({
+            ...item,
+            connectionId: `fixture-preview:${item.connectorId}`
+          }))
+        };
       })();
       setConnectorSearchResult(result);
       setConnectorStatus(

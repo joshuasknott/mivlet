@@ -409,11 +409,14 @@ vi.mock("./runtime", () => ({
   beginRuntimeIdentitySignIn: vi.fn(async () => null),
   exportRuntimeMemoryState: vi.fn(async () => null),
   getRuntimeRemoteControlStatus: vi.fn(async () => null),
+  deleteRuntimeConnectorKnowledgeSource: vi.fn(async () => null),
   importRuntimeConnectorItem: vi.fn(async () => null),
   importRuntimeLocalKnowledgeSource: vi.fn(async () => null),
   listRuntimeConnectorStatuses: vi.fn(async () => null),
   listRuntimeConnectorAccounts: vi.fn(async () => null),
+  listRuntimeConnectorKnowledgeSources: vi.fn(async () => null),
   listRuntimeConnectorSyncStates: vi.fn(async () => null),
+  setRuntimeConnectorKnowledgeSourceDisabled: vi.fn(async () => null),
   listRuntimeSchedulerJobs: vi.fn(async () =>
     runtimeMocks.savedScheduledJobs.length ? [...runtimeMocks.savedScheduledJobs] : null
   ),
@@ -2662,6 +2665,9 @@ describe("Fable home", () => {
       models: [{ id: "gpt-5", label: "GPT-5", available: true }]
     }];
     await renderWorkspace();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select model")).toHaveTextContent("GPT-5");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Launch readiness" }));
     const composer = screen.getByLabelText(/universal composer/i);
@@ -2712,6 +2718,9 @@ describe("Fable home", () => {
       models: [{ id: "gpt-5", label: "GPT-5", available: true }]
     }];
     await renderWorkspace();
+    await waitFor(() => {
+      expect(screen.getByLabelText("Select model")).toHaveTextContent("GPT-5");
+    });
     fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Launch chain" }));
     const composer = screen.getByLabelText(/universal composer/i);

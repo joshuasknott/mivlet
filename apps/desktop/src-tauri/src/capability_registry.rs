@@ -1071,6 +1071,7 @@ mod tests {
                 items: vec![ConnectorSearchItem {
                     id: "doc-1".into(),
                     connector_id: "notion".into(),
+                    connection_id: None,
                     title: "Launch review".into(),
                     kind: "page".into(),
                     summary: "The support plan needs an owner.".into(),

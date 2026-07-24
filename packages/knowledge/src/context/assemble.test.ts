@@ -145,6 +145,56 @@ describe("assembleContext — exclusion", () => {
     expect(assembled.citations).toHaveLength(0);
     expect(assembled.systemPrefix).not.toContain("github");
   });
+
+  it("binds connector citations and promoted memory to the exact Connection", () => {
+    const allowedConnection = "connection-current";
+    const citations = [
+      makeCitation({
+        sourceId: "source-github-current",
+        provenance: "Connector: github",
+        connectionId: allowedConnection
+      }),
+      makeCitation({
+        sourceId: "source-github-revoked",
+        provenance: "Connector: github",
+        connectionId: "connection-revoked"
+      })
+    ];
+    const memory = [
+      makeMemory({
+        id: "memory-current",
+        provenance: {
+          origin: "source",
+          sourceId: "source-github-current",
+          connectionId: allowedConnection,
+          note: "Imported from GitHub"
+        }
+      }),
+      makeMemory({
+        id: "memory-unbound",
+        provenance: {
+          origin: "source",
+          sourceId: "source-github-legacy",
+          note: "Legacy connector memory"
+        }
+      })
+    ];
+    const assembled = assembleContext({
+      runId: "run-connection-bound",
+      memory,
+      citations,
+      authorization: {
+        isSourceAuthorized: (connectorId, _account, connectionId) =>
+          connectorId === "local-files" || connectionId === allowedConnection
+      }
+    });
+
+    expect(assembled.citations.map((citation) => citation.sourceId)).toEqual([
+      "source-github-current"
+    ]);
+    expect(assembled.usage.map((entry) => entry.id)).toContain("memory-current");
+    expect(assembled.usage.map((entry) => entry.id)).not.toContain("memory-unbound");
+  });
 });
 
 describe("assembleContext — citations + usage", () => {

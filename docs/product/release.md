@@ -102,6 +102,14 @@ stored in React state, snapshots, logs, or JSON metadata.
   execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
+- First-wave Connector search/import now binds each result to the exact
+  authenticated Fable Connection and rejects selection changes before import.
+  Imported connector Knowledge is encrypted under the private workspace owner,
+  secret-redacted before persistence, restored after restart, and supports
+  durable disable/re-enable and tombstone delete. Retrieval rechecks that exact
+  Connection before ranking and context assembly. Live credential-backed
+  observation, background synchronization, provider crawling, and
+  project-scoped Connector ingestion remain release gates.
 - Project detail includes a bounded, read-only Activity summary for exact active
   Project conversation Mission runs, canonical project Routines, current
   project Artifacts, and workspace Connections referenced by those Routine

@@ -142,6 +142,7 @@ describe("provider normalizers", () => {
       query: "",
       limit: 5
     }).items[0];
+    item.connectionId = "fixture-preview:google-drive";
     const imported = importFixtureConnectorItem({
       connectorId: "google-drive",
       item,
@@ -152,7 +153,8 @@ describe("provider normalizers", () => {
       connectorId: "google-drive",
       origin: "connector-import",
       trust: "untrusted",
-      pinned: false
+      pinned: false,
+      connectionId: "fixture-preview:google-drive"
     });
     expect(imported.source.providerMetadata?.selected).toBe("true");
   });

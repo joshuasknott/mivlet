@@ -430,6 +430,7 @@ function toCitation(scored: ScoredChunk, snippet: string): AuthorityScopedKnowle
   };
   if (scored.source.authorityScope) citation.authorityScope = { ...scored.source.authorityScope };
   if (scored.source.account) citation.account = scored.source.account;
+  if (scored.source.connectionId) citation.connectionId = scored.source.connectionId;
   if (scored.source.sourcePath) citation.sourcePath = scored.source.sourcePath;
   if (scored.source.mediaType) citation.mediaType = scored.source.mediaType;
   return citation;

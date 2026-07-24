@@ -2612,6 +2612,47 @@ export async function importRuntimeConnectorItem(request: ConnectorImportRequest
   }
 }
 
+async function invokeConnectorKnowledge<T>(
+  command: string,
+  args: Record<string, unknown> = {}
+): Promise<T | null> {
+  if (!hasTauriRuntime()) {
+    return null;
+  }
+  const scope = activeDataScope();
+  if (!scope) return null;
+  try {
+    return await invoke<T>(command, {
+      ...args,
+      workspaceId: scope.workspaceId,
+      projectId: null
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export function listRuntimeConnectorKnowledgeSources() {
+  return invokeConnectorKnowledge<KnowledgeSource[]>("list_connector_knowledge_sources");
+}
+
+export async function setRuntimeConnectorKnowledgeSourceDisabled(
+  sourceId: string,
+  disabled: boolean
+) {
+  return invokeConnectorKnowledge<KnowledgeSource>(
+    "set_connector_knowledge_source_disabled",
+    { sourceId, disabled }
+  );
+}
+
+export function deleteRuntimeConnectorKnowledgeSource(sourceId: string) {
+  return invokeConnectorKnowledge<KnowledgeSource>(
+    "delete_connector_knowledge_source",
+    { sourceId }
+  );
+}
+
 export async function prepareRuntimeConnectorAction(request: ConnectorActionRequest) {
   if (!hasTauriRuntime()) {
     return null;

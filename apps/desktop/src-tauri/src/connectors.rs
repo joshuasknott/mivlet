@@ -29,8 +29,8 @@ use crate::models::{
 };
 use crate::oauth_loopback;
 use crate::paths::{
-    connector_approval_records_path, connector_connections_path, execution_approvals_path,
-    normalize_spaces, truncate_characters,
+    connector_approval_records_path, connector_connections_path, connector_knowledge_path,
+    execution_approvals_path, normalize_spaces, truncate_characters,
 };
 
 pub(crate) trait ConnectorCredentialBoundary {
@@ -1443,6 +1443,238 @@ fn require_selectable_canonical_connection(
     Ok(record)
 }
 
+fn selected_connection_evidence(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+) -> Result<crate::store::repos::connection_selection::ConnectionSelection, ConnectorCommandError> {
+    let selection = store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, scope, connector_id))
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+        .ok_or_else(|| {
+            command_error(
+                "needs-auth",
+                connector_id,
+                "Choose an authorized Connection before searching or importing.",
+                false,
+            )
+        })?;
+    require_selectable_canonical_connection(store, scope, connector_id, &selection.connection_id)?;
+    Ok(selection)
+}
+
+fn require_unchanged_connection_evidence(
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    expected: &crate::store::repos::connection_selection::ConnectionSelection,
+) -> Result<(), ConnectorCommandError> {
+    let current = selected_connection_evidence(store, scope, connector_id)?;
+    if current.connection_id != expected.connection_id || current.revision != expected.revision {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "The active Connection changed during this request. Search again before importing.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
+fn bind_search_result_to_connection(
+    mut result: ConnectorSearchResult,
+    connection_id: &str,
+) -> ConnectorSearchResult {
+    for item in &mut result.items {
+        item.connection_id = Some(connection_id.to_string());
+    }
+    result
+}
+
+fn bind_source_to_private_connection(
+    mut result: ConnectorImportResult,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connection_id: &str,
+) -> ConnectorImportResult {
+    result.source.workspace_id = Some(scope.data.workspace_id().to_string());
+    result.source.authority_scope = Some(crate::models::ContextRecordAuthorityScope {
+        authority: "local".to_string(),
+        visibility: "member-private".to_string(),
+        owner_member_id: scope.private.owner_member_id().map(str::to_string),
+        owner_internal_user_id: scope.private.owner_internal_user_id().map(str::to_string),
+    });
+    result.source.scope = Some(serde_json::json!({"level":"global"}));
+    result.source.connection_id = Some(connection_id.to_string());
+    result
+}
+
+const MAX_CONNECTOR_KNOWLEDGE_SOURCES: usize = 200;
+const MAX_CONNECTOR_SOURCE_ID_CHARACTERS: usize = 240;
+const MAX_CONNECTOR_SOURCE_TITLE_CHARACTERS: usize = 300;
+const MAX_CONNECTOR_SOURCE_PREVIEW_CHARACTERS: usize = 40_000;
+const MAX_CONNECTOR_SOURCE_PROVENANCE_CHARACTERS: usize = 1_000;
+const MAX_CONNECTOR_SOURCE_METADATA_FIELDS: usize = 40;
+const MAX_CONNECTOR_SOURCE_METADATA_CHARACTERS: usize = 1_000;
+
+fn normalize_connector_knowledge_source(
+    mut source: ConnectorKnowledgeSource,
+    scope: &crate::store::repos::scope::PrivateDataScope,
+) -> Result<ConnectorKnowledgeSource, String> {
+    source.id = normalize_spaces(&source.id);
+    source.connector_id = normalize_spaces(&source.connector_id);
+    source.connection_id = source.connection_id.map(|value| normalize_spaces(&value));
+    source.title = truncate_characters(
+        &normalize_spaces(&source.title),
+        MAX_CONNECTOR_SOURCE_TITLE_CHARACTERS,
+    );
+    source.provenance = truncate_characters(
+        &normalize_spaces(&source.provenance),
+        MAX_CONNECTOR_SOURCE_PROVENANCE_CHARACTERS,
+    );
+    source.freshness = truncate_characters(&normalize_spaces(&source.freshness), 240);
+    source.content_preview = source
+        .content_preview
+        .map(|value| truncate_characters(value.trim(), MAX_CONNECTOR_SOURCE_PREVIEW_CHARACTERS));
+    source.imported_at = normalize_spaces(&source.imported_at);
+    source.provider_metadata = source
+        .provider_metadata
+        .into_iter()
+        .take(MAX_CONNECTOR_SOURCE_METADATA_FIELDS)
+        .map(|(key, value)| {
+            (
+                truncate_characters(&normalize_spaces(&key), 120),
+                truncate_characters(
+                    &normalize_spaces(&value),
+                    MAX_CONNECTOR_SOURCE_METADATA_CHARACTERS,
+                ),
+            )
+        })
+        .filter(|(key, _)| !key.is_empty())
+        .collect();
+    let connection_id = source
+        .connection_id
+        .as_deref()
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "Connector knowledge requires exact Connection provenance.".to_string())?
+        .to_string();
+    if source.id.is_empty()
+        || source.id.chars().count() > MAX_CONNECTOR_SOURCE_ID_CHARACTERS
+        || source.title.is_empty()
+        || source.connector_id.is_empty()
+        || source.kind.trim().is_empty()
+        || source.trust != "untrusted"
+        || source.origin != "connector-import"
+        || source.imported_at.is_empty()
+    {
+        return Err("Connector knowledge metadata is invalid.".to_string());
+    }
+    let value = serde_json::to_value(source)
+        .map_err(|_| "Fable could not encode connector knowledge.".to_string())?;
+    let safe = crate::store::repos::connector_cache::redact_value(&value);
+    let mut source: ConnectorKnowledgeSource = serde_json::from_value(safe)
+        .map_err(|_| "Fable could not normalize connector knowledge.".to_string())?;
+    source.workspace_id = Some(scope.workspace_id().to_string());
+    source.authority_scope = Some(crate::models::ContextRecordAuthorityScope {
+        authority: "local".to_string(),
+        visibility: "member-private".to_string(),
+        owner_member_id: scope.owner_member_id().map(str::to_string),
+        owner_internal_user_id: scope.owner_internal_user_id().map(str::to_string),
+    });
+    source.scope = Some(match scope.project_id() {
+        Some(project_id) => serde_json::json!({"level":"project","projectId":project_id}),
+        None => serde_json::json!({"level":"global"}),
+    });
+    source.connection_id = Some(connection_id);
+    Ok(source)
+}
+
+fn read_connector_knowledge_sources(
+    app: &tauri::AppHandle,
+    scope: &crate::store::repos::scope::PrivateDataScope,
+) -> Result<Vec<ConnectorKnowledgeSource>, String> {
+    let path = connector_knowledge_path(app)?;
+    let sources: Vec<ConnectorKnowledgeSource> =
+        crate::store::read_private_workspace_document(&path, scope)?.unwrap_or_default();
+    sources
+        .into_iter()
+        .map(|source| normalize_connector_knowledge_source(source, scope))
+        .collect()
+}
+
+fn persist_connector_knowledge_source(
+    app: &tauri::AppHandle,
+    scope: &crate::store::repos::scope::PrivateDataScope,
+    source: ConnectorKnowledgeSource,
+) -> Result<ConnectorKnowledgeSource, String> {
+    let source = normalize_connector_knowledge_source(source, scope)?;
+    let path = connector_knowledge_path(app)?;
+    crate::store::update_private_workspace_document(
+        &path,
+        scope,
+        move |current: Option<Vec<ConnectorKnowledgeSource>>| {
+            let sources =
+                merge_connector_knowledge_source(current.unwrap_or_default(), source.clone())?;
+            Ok((Some(sources), source))
+        },
+    )
+}
+
+fn merge_connector_knowledge_source(
+    mut sources: Vec<ConnectorKnowledgeSource>,
+    source: ConnectorKnowledgeSource,
+) -> Result<Vec<ConnectorKnowledgeSource>, String> {
+    if sources
+        .iter()
+        .any(|existing| existing.id == source.id && existing.deleted_at.is_some())
+    {
+        return Err(
+            "Deleted connector knowledge cannot be restored by routine import.".to_string(),
+        );
+    }
+    sources.retain(|existing| existing.id != source.id);
+    sources.insert(0, source);
+    sources.truncate(MAX_CONNECTOR_KNOWLEDGE_SOURCES);
+    Ok(sources)
+}
+
+fn update_connector_knowledge_source(
+    app: &tauri::AppHandle,
+    scope: &crate::store::repos::scope::PrivateDataScope,
+    source_id: &str,
+    disabled: Option<bool>,
+    deleted_at: Option<String>,
+) -> Result<ConnectorKnowledgeSource, String> {
+    let source_id = normalize_spaces(source_id);
+    if source_id.is_empty() || source_id.chars().count() > MAX_CONNECTOR_SOURCE_ID_CHARACTERS {
+        return Err("Connector knowledge source id is invalid.".to_string());
+    }
+    let path = connector_knowledge_path(app)?;
+    crate::store::update_private_workspace_document(
+        &path,
+        scope,
+        move |current: Option<Vec<ConnectorKnowledgeSource>>| {
+            let mut sources = current.unwrap_or_default();
+            let source = sources
+                .iter_mut()
+                .find(|source| source.id == source_id)
+                .ok_or_else(|| "That connector knowledge source is unavailable.".to_string())?;
+            if source.deleted_at.is_some() {
+                return Err("Deleted connector knowledge cannot be changed.".to_string());
+            }
+            if let Some(disabled) = disabled {
+                source.disabled = disabled;
+            }
+            if let Some(deleted_at) = deleted_at {
+                source.disabled = true;
+                source.pinned = false;
+                source.deleted_at = Some(deleted_at);
+            }
+            let updated = source.clone();
+            Ok((Some(sources), updated))
+        },
+    )
+}
+
 fn reconcile_canonical_connector_accounts(
     store: &crate::store::Store,
     scope: &crate::authorized_scope::AuthorizedCommandScope,
@@ -1696,8 +1928,17 @@ pub async fn search_connector(
     request: ConnectorSearchRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            entry.id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    let connection = selected_connection_evidence(durable_store, &scope, entry.id)?;
     if request.query.chars().count() > MAX_CONNECTOR_QUERY_CHARACTERS
         || !(1..=MAX_CONNECTOR_RESULT_LIMIT).contains(&request.limit.unwrap_or(20))
     {
@@ -1708,16 +1949,22 @@ pub async fn search_connector(
             false,
         ));
     }
-    if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
-        return crate::google::search(&app, request).await;
-    }
-    if matches!(entry.id, "github" | "vercel" | "linear") {
-        return connector_api::search(&app, request).await;
-    }
-    if matches!(entry.id, "notion" | "slack") {
-        return collaboration_connectors::search(&app, request).await;
-    }
-    Err(configuration_required(entry.id))
+    let result = if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
+        crate::google::search(&app, request).await
+    } else if matches!(entry.id, "github" | "vercel" | "linear") {
+        connector_api::search(&app, request).await
+    } else if matches!(entry.id, "notion" | "slack") {
+        collaboration_connectors::search(&app, request).await
+    } else {
+        Err(configuration_required(entry.id))
+    }?;
+    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
+    Ok(bind_search_result_to_connection(
+        result,
+        &connection.connection_id,
+    ))
 }
 
 #[tauri::command]
@@ -1735,13 +1982,83 @@ pub async fn read_connector_capability(
 }
 
 #[tauri::command]
+pub fn list_connector_knowledge_sources(
+    app: tauri::AppHandle,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<Vec<ConnectorKnowledgeSource>, ConnectorCommandError> {
+    let scope = crate::authorized_scope::command_scope(
+        workspace_id,
+        project_id,
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map_err(|message| command_error("invalid-request", "knowledge", &message, false))?;
+    let sources = read_connector_knowledge_sources(&app, &scope.private)
+        .map_err(|message| command_error("unknown", "knowledge", &message, false))?;
+    Ok(sources
+        .into_iter()
+        .filter(|source| source.deleted_at.is_none())
+        .collect())
+}
+
+#[tauri::command]
+pub fn set_connector_knowledge_source_disabled(
+    app: tauri::AppHandle,
+    source_id: String,
+    disabled: bool,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<ConnectorKnowledgeSource, ConnectorCommandError> {
+    let scope = crate::authorized_scope::command_scope(
+        workspace_id,
+        project_id,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| command_error("invalid-request", "knowledge", &message, false))?;
+    update_connector_knowledge_source(&app, &scope.private, &source_id, Some(disabled), None)
+        .map_err(|message| command_error("unknown", "knowledge", &message, false))
+}
+
+#[tauri::command]
+pub fn delete_connector_knowledge_source(
+    app: tauri::AppHandle,
+    source_id: String,
+    workspace_id: Option<String>,
+    project_id: Option<String>,
+) -> Result<ConnectorKnowledgeSource, ConnectorCommandError> {
+    let scope = crate::authorized_scope::command_scope(
+        workspace_id,
+        project_id,
+        crate::authorized_scope::ScopeAccess::Write,
+    )
+    .map_err(|message| command_error("invalid-request", "knowledge", &message, false))?;
+    update_connector_knowledge_source(
+        &app,
+        &scope.private,
+        &source_id,
+        None,
+        Some(chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+    )
+    .map_err(|message| command_error("unknown", "knowledge", &message, false))
+}
+
+#[tauri::command]
 pub async fn import_connector_item(
     app: tauri::AppHandle,
     request: ConnectorImportRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorImportResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            entry.id,
+            "Fable's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    let connection = selected_connection_evidence(durable_store, &scope, entry.id)?;
     if request.item.connector_id != entry.id || request.imported_at.trim().is_empty() {
         return Err(command_error(
             "invalid-request",
@@ -1750,35 +2067,63 @@ pub async fn import_connector_item(
             false,
         ));
     }
-    if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
-        return crate::google::import(&app, request).await;
+    if request.item.connection_id.as_deref() != Some(connection.connection_id.as_str()) {
+        return Err(command_error(
+            "conflict",
+            entry.id,
+            "This result belongs to a different or expired Connection. Search again before importing.",
+            true,
+        ));
     }
-    if !matches!(
+    let result = if matches!(entry.id, "google-drive" | "gmail" | "google-calendar") {
+        crate::google::import(&app, request).await
+    } else if !matches!(
         entry.id,
         "github" | "vercel" | "linear" | "notion" | "slack"
     ) {
-        return Err(configuration_required(entry.id));
-    }
-    let kind = match request.item.kind.as_str() {
-        "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => "folder",
-        "deployment" => "web",
-        _ => "document",
-    };
+        Err(configuration_required(entry.id))
+    } else {
+        let kind = match request.item.kind.as_str() {
+            "repository" | "branch" | "project" | "database" | "conversation" | "calendar" => {
+                "folder"
+            }
+            "deployment" => "web",
+            _ => "document",
+        };
+        Ok(ConnectorImportResult {
+            source: ConnectorKnowledgeSource {
+                workspace_id: None,
+                authority_scope: None,
+                scope: None,
+                id: format!("connector-{}-{}", entry.id, request.item.id),
+                title: request.item.title,
+                kind: kind.to_string(),
+                connector_id: entry.id.to_string(),
+                connection_id: None,
+                provenance: request.item.provenance,
+                freshness: request.item.freshness,
+                pinned: false,
+                trust: "untrusted".to_string(),
+                content_preview: request.item.content_preview.or(Some(request.item.summary)),
+                imported_at: request.imported_at,
+                origin: "connector-import".to_string(),
+                provider_metadata: request.item.provider_metadata,
+                disabled: false,
+                deleted_at: None,
+                status: Some("ok".to_string()),
+                status_message: None,
+            },
+            imported: true,
+        })
+    }?;
+    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
+        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
+    require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
+    let bound = bind_source_to_private_connection(result, &scope, &connection.connection_id);
+    let source = persist_connector_knowledge_source(&app, &scope.private, bound.source)
+        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(ConnectorImportResult {
-        source: ConnectorKnowledgeSource {
-            id: format!("connector-{}-{}", entry.id, request.item.id),
-            title: request.item.title,
-            kind: kind.to_string(),
-            connector_id: entry.id.to_string(),
-            provenance: request.item.provenance,
-            freshness: request.item.freshness,
-            pinned: false,
-            trust: "untrusted".to_string(),
-            content_preview: request.item.content_preview.or(Some(request.item.summary)),
-            imported_at: request.imported_at,
-            origin: "connector-import".to_string(),
-            provider_metadata: request.item.provider_metadata,
-        },
+        source,
         imported: true,
     })
 }
@@ -2174,6 +2519,101 @@ mod workspace_scope_tests {
             require_selectable_canonical_connection(&store, &scope_a, "gmail", &records[0].id,)
                 .is_ok()
         );
+        let selected = selected_connection_evidence(&store, &scope_a, "gmail").unwrap();
+        assert_eq!(selected.connection_id, records[0].id);
+        let stamped = bind_search_result_to_connection(
+            ConnectorSearchResult {
+                connector_id: "gmail".into(),
+                query: "launch".into(),
+                items: vec![crate::models::ConnectorSearchItem {
+                    id: "message-1".into(),
+                    connector_id: "gmail".into(),
+                    connection_id: None,
+                    title: "Launch".into(),
+                    kind: "message".into(),
+                    summary: "Summary".into(),
+                    provenance: "Connector: gmail".into(),
+                    freshness: "Now".into(),
+                    trust: "untrusted".into(),
+                    url: None,
+                    content_preview: None,
+                    provider_metadata: BTreeMap::new(),
+                }],
+                next_cursor: None,
+                source: "live".into(),
+                searched_at: "t".into(),
+            },
+            &selected.connection_id,
+        );
+        assert_eq!(
+            stamped.items[0].connection_id.as_deref(),
+            Some(selected.connection_id.as_str())
+        );
+        let bound = bind_source_to_private_connection(
+            ConnectorImportResult {
+                source: ConnectorKnowledgeSource {
+                    workspace_id: None,
+                    authority_scope: None,
+                    scope: None,
+                    id: "connector-gmail-message-1".into(),
+                    title: "Launch".into(),
+                    kind: "document".into(),
+                    connector_id: "gmail".into(),
+                    connection_id: None,
+                    provenance: "Connector: gmail".into(),
+                    freshness: "Now".into(),
+                    pinned: false,
+                    trust: "untrusted".into(),
+                    content_preview: Some("Summary".into()),
+                    imported_at: "t".into(),
+                    origin: "connector-import".into(),
+                    provider_metadata: BTreeMap::new(),
+                    disabled: false,
+                    deleted_at: None,
+                    status: Some("ok".into()),
+                    status_message: None,
+                },
+                imported: true,
+            },
+            &scope_a,
+            &selected.connection_id,
+        );
+        assert_eq!(
+            bound.source.connection_id.as_deref(),
+            Some(selected.connection_id.as_str())
+        );
+        assert_eq!(
+            bound.source.workspace_id.as_deref(),
+            Some(scope_a.data.workspace_id())
+        );
+        assert_eq!(
+            bound
+                .source
+                .authority_scope
+                .as_ref()
+                .and_then(|authority| authority.owner_member_id.as_deref()),
+            Some("member-a")
+        );
+        let mut unsafe_source = bound.source.clone();
+        unsafe_source.content_preview = Some("Bearer ghp_supersecretvalue".into());
+        unsafe_source
+            .provider_metadata
+            .insert("access_token".into(), "provider-secret".into());
+        let normalized =
+            normalize_connector_knowledge_source(unsafe_source, &scope_a.private).unwrap();
+        let encoded = serde_json::to_string(&normalized).unwrap();
+        assert!(!encoded.contains("ghp_supersecretvalue"));
+        assert!(!encoded.contains("provider-secret"));
+        assert!(encoded.contains("[redacted connector data]"));
+        let first = merge_connector_knowledge_source(Vec::new(), bound.source.clone()).unwrap();
+        let mut replacement = bound.source.clone();
+        replacement.title = "Updated launch".into();
+        let replaced = merge_connector_knowledge_source(first, replacement).unwrap();
+        assert_eq!(replaced.len(), 1);
+        assert_eq!(replaced[0].title, "Updated launch");
+        let mut tombstone = replaced[0].clone();
+        tombstone.deleted_at = Some("later".into());
+        assert!(merge_connector_knowledge_source(vec![tombstone], bound.source.clone()).is_err());
         assert!(!serde_json::to_string(&records)
             .unwrap()
             .contains("provider-account-secret"));
