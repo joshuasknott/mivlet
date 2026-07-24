@@ -379,6 +379,30 @@ describe("retrieve — filters", () => {
     expect(result.citations.map((c) => c.sourceId)).toEqual(["remote"]);
   });
 
+  it("filters by exact Connection before ranking", async () => {
+    const sources = [
+      src(makeSource({
+        id: "connection-a",
+        title: "alpha strongest",
+        connectorId: "github",
+        connectionId: "connection-a"
+      }), [makeChunk("connection-a", 0, "alpha alpha alpha")]),
+      src(makeSource({
+        id: "connection-b",
+        title: "alpha",
+        connectorId: "github",
+        connectionId: "connection-b"
+      }), [makeChunk("connection-b", 0, "alpha")])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      connectionId: "connection-b"
+    });
+    expect(result.citations.map((citation) => citation.sourceId)).toEqual([
+      "connection-b"
+    ]);
+  });
+
   it("filters by account", async () => {
     const sources = [
       src(makeSource({ id: "a1", title: "alpha", account: "acct-a" }), [

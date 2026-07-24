@@ -55,6 +55,11 @@ are also fully persisted in the SQLite vault.
   stale, error, indexing, disconnected, or out-of-scope sources are excluded before
   context assembly. Hybrid retrieval uses Reciprocal-Rank Fusion (RRF, k=60) to combine
   lexical and semantic scores.
+- Connector-ingested sources may retain the exact authorizing Fable Connection
+  separately from connector family and account. An exact-Connection query
+  filters that identity before corpus statistics, lexical scoring, semantic
+  scoring, fusion, or truncation. Department filtering remains closed until
+  Departments exist.
 - Deleting a private Project is one native transaction. Workspace-owned context
   is detached, canonical Routine and trigger ciphertext is rewritten without a
   project identity, immutable Routine versions and occurrence history remain,

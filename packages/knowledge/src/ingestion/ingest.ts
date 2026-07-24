@@ -108,6 +108,7 @@ function buildSource(
   if (candidate.modifiedAt) source.modifiedAt = candidate.modifiedAt;
   if (candidate.sourcePath) source.sourcePath = candidate.sourcePath;
   if (candidate.account) source.account = candidate.account;
+  if (candidate.connectionId) source.connectionId = candidate.connectionId;
   if (candidate.providerMetadata) source.providerMetadata = candidate.providerMetadata;
   return source;
 }

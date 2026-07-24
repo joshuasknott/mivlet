@@ -812,6 +812,8 @@ export interface KnowledgeSource {
   scope?: KnowledgeScope;
   /** Connector account provenance, when the source came from a connected account. */
   account?: string;
+  /** Exact Fable Connection that authorized this source, when applicable. */
+  connectionId?: string;
   /** True once chunks have been produced (and, when configured, embedded). */
   embeddingReady?: boolean;
   /** 0..1 connector/local trust weight used in retrieval ranking. */
@@ -1047,6 +1049,8 @@ export interface ConnectorSourceCandidate {
   sizeBytes: number;
   fetchedAt: string;
   account?: string;
+  /** Exact Fable Connection that authorized the candidate. */
+  connectionId?: string;
   providerMetadata?: Record<string, string>;
   /**
    * Boundary-relative path within the connector/import root. Local-files sets

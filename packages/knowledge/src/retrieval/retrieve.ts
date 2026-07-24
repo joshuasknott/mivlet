@@ -82,6 +82,8 @@ export interface RetrieveOptions {
   connectorId?: string;
   /** Restrict to sources from this account. Undefined = no restriction. */
   account?: string;
+  /** Restrict to one exact authorized Fable Connection before scoring. */
+  connectionId?: string;
   /** Restrict to these source ids. Undefined = no restriction. */
   sourceIds?: string[];
   /**
@@ -124,6 +126,7 @@ export interface RetrievalFilterOptions {
   scope?: KnowledgeScope;
   connectorId?: string;
   account?: string;
+  connectionId?: string;
   sourceIds?: string[];
   userSelectedSourceIds?: string[];
   isAuthorized?: (source: KnowledgeSource) => boolean;
@@ -148,6 +151,7 @@ export function filterRetrievable(
 ): RetrievalSource[] {
   const connectorId = filters.connectorId;
   const account = filters.account;
+  const connectionId = filters.connectionId;
   const sourceIdSet = filters.sourceIds ? new Set(filters.sourceIds) : undefined;
   const userSelectedSet = filters.userSelectedSourceIds
     ? new Set(filters.userSelectedSourceIds)
@@ -162,6 +166,7 @@ export function filterRetrievable(
     if (!scopeSatisfies(sourceScope, scope)) return false;
     if (connectorId && source.connectorId !== connectorId) return false;
     if (account && source.account !== account) return false;
+    if (connectionId && source.connectionId !== connectionId) return false;
     if (sourceIdSet && !sourceIdSet.has(source.id)) return false;
     if (userSelectedSet && !userSelectedSet.has(source.id)) return false;
     if (isAuthorized && !isAuthorized(source)) return false;
@@ -206,6 +211,7 @@ export async function retrieve(
   const retrievable = filterRetrievable(sources, scope, {
     connectorId: options.connectorId,
     account: options.account,
+    connectionId: options.connectionId,
     sourceIds: options.sourceIds,
     userSelectedSourceIds: options.userSelectedSourceIds,
     isAuthorized: options.isAuthorized,

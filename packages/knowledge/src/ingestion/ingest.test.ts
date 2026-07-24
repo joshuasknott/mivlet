@@ -79,11 +79,14 @@ describe("ingestCandidate: created", () => {
   });
 
   it("sets connector-import origin + authority for non-local connectors", () => {
-    const outcome = ingestCandidate(candidate(), { connectorId: "github" });
+    const outcome = ingestCandidate(candidate({
+      connectionId: "connection-github-member-a"
+    }), { connectorId: "github" });
     if (outcome.kind !== "created") throw new Error("expected created");
     expect(outcome.source.origin).toBe("connector-import");
     expect(outcome.source.authority).toBe(0.7);
     expect(outcome.source.provenance).toBe("Connector: github");
+    expect(outcome.source.connectionId).toBe("connection-github-member-a");
   });
 });
 
