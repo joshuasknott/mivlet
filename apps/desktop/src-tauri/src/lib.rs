@@ -44,6 +44,7 @@ mod knowledge;
 mod local_model;
 mod mcp_process;
 mod memory;
+mod mission_approvals;
 mod mission_artifact_revision_brief;
 mod mission_continuations;
 mod mission_coordination;
@@ -210,6 +211,9 @@ pub fn run() {
             mission_coordination::mission_coordination_progress_read,
             mission_coordination::mission_coordination_advance,
             mission_coordination::mission_coordination_finalize,
+            mission_approvals::mission_approval_request,
+            mission_approvals::mission_approval_pending_list,
+            mission_approvals::mission_approval_resolve,
             mission_human_input::mission_human_input_request,
             mission_human_input::mission_human_input_pending_list,
             mission_human_input::mission_human_input_receive,

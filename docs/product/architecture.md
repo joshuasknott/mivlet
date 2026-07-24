@@ -189,6 +189,14 @@ The provider-neutral graph runner nevertheless preserves durable worker waits:
 waiting human-input or approval work consumes no provider slot, independent work
 continues within the saved width, and later invocations resume from reloaded
 terminal facts rather than replaying completed workers.
+General consequential approval is a native journal boundary, separate from the
+fixed cited-artifact acceptance path. Rust binds one secret-safe action and
+effect summary, proposal hash, idempotency identity, optional exact live worker,
+selected Plan, and current Run head into an encrypted wait checkpoint before an
+identified internal user may approve or deny it. The resolution merely returns
+the Mission to running: it executes no effect and is not reusable authority. A
+native effect adapter must still validate and one-time-consume that exact
+approved proposal immediately before egress; that composition remains open.
 Bounded iterative work uses a provider-neutral continuation policy over
 contiguous durable facts. Saved execution budgets and explicit no-progress,
 deadline, cancellation, human-stop, policy-stop, and iteration limits determine

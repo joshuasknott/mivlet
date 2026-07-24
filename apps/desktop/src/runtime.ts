@@ -3068,7 +3068,7 @@ export type RuntimeGeneralMissionRestartRecovery =
       status: "waiting";
       runId: string;
       planRevisionId: string;
-      waitKind: "human-input";
+      waitKind: "human-input" | "approval";
       waitKey: string;
       expectedRunRevision: number;
       expectedLastSequence: number;
@@ -3521,6 +3521,137 @@ export async function readRuntimeCitedMissionPlanSummaries(threadId: string, mes
   try {
     return await invoke<RuntimeCitedMissionPlanSummaryProjection[]>("mission_plan_cited_summaries_read", {
       input: { threadId, messageIds }
+    });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export interface RuntimeMissionApprovalEffect {
+  effectKey: string;
+  idempotencyKey: string;
+  targetSummary: string;
+}
+
+export interface RuntimeMissionApprovalRequestInput {
+  runId: string;
+  workerId?: string;
+  requestKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+  actionSummary: string;
+  proposalHash: string;
+  effect: RuntimeMissionApprovalEffect;
+}
+
+export interface RuntimeMissionApproval {
+  runId: string;
+  missionId: string;
+  sourceThreadId: string;
+  planRevisionId: string;
+  workerId?: string;
+  waitKey: string;
+  requestKey: string;
+  actionSummary: string;
+  proposalHash: string;
+  effect: RuntimeMissionApprovalEffect;
+  requestedAt: string;
+  runRevision: number;
+  lastSequence: number;
+}
+
+export interface RuntimeMissionApprovalList {
+  approvals: RuntimeMissionApproval[];
+  unavailableCount: number;
+  truncated: boolean;
+}
+
+function isRuntimeMissionApprovalEffect(value: unknown): value is RuntimeMissionApprovalEffect {
+  return isRecord(value)
+    && Object.keys(value).length === 3
+    && ["effectKey", "idempotencyKey", "targetSummary"].every(
+      (key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0
+    );
+}
+
+function isRuntimeMissionApproval(value: unknown): value is RuntimeMissionApproval {
+  if (!isRecord(value)) return false;
+  const required = [
+    "runId", "missionId", "sourceThreadId", "planRevisionId", "waitKey", "requestKey",
+    "actionSummary", "proposalHash", "effect", "requestedAt",
+    "runRevision", "lastSequence"
+  ];
+  const allowed = [...required, "workerId"];
+  return required.every((key) => Object.hasOwn(value, key))
+    && Object.keys(value).every((key) => allowed.includes(key))
+    && [
+      "runId", "missionId", "sourceThreadId", "planRevisionId", "waitKey", "requestKey",
+      "actionSummary", "requestedAt"
+    ].every((key) => typeof value[key] === "string" && (value[key] as string).trim().length > 0)
+    && /^[0-9a-f]{64}$/i.test(String(value.proposalHash))
+    && (value.workerId === undefined
+      || (typeof value.workerId === "string" && value.workerId.trim().length > 0))
+    && isRuntimeMissionApprovalEffect(value.effect)
+    && Number.isInteger(value.runRevision) && (value.runRevision as number) > 0
+    && Number.isInteger(value.lastSequence) && (value.lastSequence as number) > 0;
+}
+
+export async function requestRuntimeMissionApproval(
+  input: RuntimeMissionApprovalRequestInput
+): Promise<RuntimeMissionApproval | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    const result = await invoke<unknown>("mission_approval_request", { input });
+    if (!isRuntimeMissionApproval(result)) {
+      throw new Error("Malformed Mission approval response.");
+    }
+    return result;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function listRuntimePendingMissionApprovals(
+  sourceThreadId: string,
+  limit = 50
+): Promise<RuntimeMissionApprovalList> {
+  if (!hasTauriRuntime()) return { approvals: [], unavailableCount: 0, truncated: false };
+  try {
+    const result = await invoke<unknown>("mission_approval_pending_list", {
+      input: { sourceThreadId, limit }
+    });
+    if (!isRecord(result)
+      || Object.keys(result).length !== 3
+      || !Array.isArray(result.approvals)
+      || !result.approvals.every(isRuntimeMissionApproval)
+      || !Number.isInteger(result.unavailableCount)
+      || (result.unavailableCount as number) < 0
+      || typeof result.truncated !== "boolean") {
+      throw new Error("Malformed Mission approval list.");
+    }
+    return result as unknown as RuntimeMissionApprovalList;
+  } catch (error) { throw toRuntimeError(error); }
+}
+
+export async function resolveRuntimeMissionApproval(
+  approval: RuntimeMissionApproval,
+  decision: "approved" | "denied"
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      runId: string;
+      waitKey: string;
+      decision: "approved" | "denied";
+      proposalHash: string;
+      effect: RuntimeMissionApprovalEffect;
+      decidedAt: string;
+      runRevision: number;
+      lastSequence: number;
+    }>("mission_approval_resolve", {
+      input: {
+        runId: approval.runId,
+        waitKey: approval.waitKey,
+        decision,
+        expectedRunRevision: approval.runRevision,
+        expectedLastSequence: approval.lastSequence
+      }
     });
   } catch (error) { throw toRuntimeError(error); }
 }

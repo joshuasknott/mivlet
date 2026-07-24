@@ -961,9 +961,19 @@ fn recover_interrupted_general_run(
                 expected_last_sequence: pending.last_sequence,
             }))
         }
-        "waiting-approval" => Err(crate::store::StoreError::Invalid(
-            "A non-cited approval wait has no authenticated recovery contract.".into(),
-        )),
+        "waiting-approval" => {
+            let pending = crate::mission_approvals::pending_for_run_in_tx(
+                tx, store, scope, member, &journal,
+            )?;
+            Ok(Some(GeneralMissionRestartRecovery::Waiting {
+                run_id: run_id.to_string(),
+                plan_revision_id,
+                wait_kind: "approval",
+                wait_key: pending.wait_key,
+                expected_run_revision: pending.run_revision,
+                expected_last_sequence: pending.last_sequence,
+            }))
+        }
         "created" | "planning" | "queued" | "paused" => {
             let action = if status == "paused" {
                 "remain-paused"
@@ -2541,14 +2551,17 @@ fn validate_live_head(current: &Value, revision: i64, sequence: i64) -> Result<(
     Ok(())
 }
 
-struct ReplayFacts {
-    completed_plan_step_keys: Vec<String>,
-    completed_worker_ids: Vec<String>,
-    committed_effect_keys: Vec<String>,
-    state: Value,
+pub(crate) struct ReplayFacts {
+    pub(crate) completed_plan_step_keys: Vec<String>,
+    pub(crate) completed_worker_ids: Vec<String>,
+    pub(crate) committed_effect_keys: Vec<String>,
+    pub(crate) state: Value,
 }
 
-fn derive_replay_facts(events: &[Value], durable_through: i64) -> Result<ReplayFacts, String> {
+pub(crate) fn derive_replay_facts(
+    events: &[Value],
+    durable_through: i64,
+) -> Result<ReplayFacts, String> {
     let mut worker_steps = BTreeMap::<String, String>::new();
     let mut active_workers = BTreeSet::<String>::new();
     let mut completed_workers = BTreeSet::<String>::new();
@@ -2648,7 +2661,7 @@ fn derive_replay_facts(events: &[Value], durable_through: i64) -> Result<ReplayF
     })
 }
 
-fn checkpoint_state_hash(
+pub(crate) fn checkpoint_state_hash(
     run_id: &str,
     event_id: &str,
     attempt: i64,
@@ -2661,7 +2674,7 @@ fn checkpoint_state_hash(
     Ok(format!("{:x}", Sha256::digest(&bytes)))
 }
 
-fn verify_checkpoint_state(
+pub(crate) fn verify_checkpoint_state(
     checkpoint: &mission_checkpoint::CheckpointStateRow,
     event: &Value,
 ) -> Result<(), String> {

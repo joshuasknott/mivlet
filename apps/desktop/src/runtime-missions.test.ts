@@ -14,6 +14,7 @@ import {
   latestRuntimeMissionHumanInput,
   latestRuntimePendingMissionWait,
   listRuntimePendingCitedApprovals,
+  listRuntimePendingMissionApprovals,
   listRuntimePendingMissionHumanInputs,
   listRuntimeNativeProviderRoutes,
   openRuntimeMissionJoin,
@@ -33,8 +34,10 @@ import {
   recoverRuntimeInterruptedCitedMissions,
   recoverRuntimeInterruptedGeneralMissions,
   requestRuntimeMissionRunCancellation,
+  requestRuntimeMissionApproval,
   requestRuntimeMissionHumanInput,
   resolveRuntimeMissionJoin,
+  resolveRuntimeMissionApproval,
   restoreRuntimeMissionCheckpoint,
   startRuntimeArtifactRevisionBrief,
   startRuntimeStructuredIntake,
@@ -95,6 +98,18 @@ describe("mission runtime boundary", () => {
     await expect(listRuntimePendingCitedApprovals("thread-1")).resolves.toEqual({
       approvals: [], unavailableCount: 0, truncated: false
     });
+    await expect(listRuntimePendingMissionApprovals("thread-1")).resolves.toEqual({
+      approvals: [], unavailableCount: 0, truncated: false
+    });
+    await expect(requestRuntimeMissionApproval({
+      runId: "run-1", requestKey: "publish-1",
+      expectedRunRevision: 4, expectedLastSequence: 3,
+      actionSummary: "Publish one reviewed update.", proposalHash: "a".repeat(64),
+      effect: {
+        effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+        targetSummary: "One reviewed update"
+      }
+    })).resolves.toBeNull();
     await expect(listRuntimePendingMissionHumanInputs("thread-1")).resolves.toEqual({
       requests: [], unavailableCount: 0, truncated: false
     });
@@ -261,6 +276,54 @@ describe("mission runtime boundary", () => {
       ["mission_cited_approval_pending_list", { threadId: "thread-1" }],
       ["mission_cited_approval_pending_list", { threadId: "thread-1" }]
     ]);
+  });
+
+  it("composes exact provider-neutral Mission approval waits", async () => {
+    setNative(true);
+    const effect = {
+      effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+      targetSummary: "One reviewed update"
+    };
+    const request = {
+      runId: "run-1", workerId: "worker-1", requestKey: "publish-1",
+      expectedRunRevision: 4, expectedLastSequence: 3,
+      actionSummary: "Publish one reviewed update.", proposalHash: "a".repeat(64), effect
+    };
+    const pending = {
+      runId: "run-1", missionId: "mission-1", sourceThreadId: "thread-1",
+      planRevisionId: "revision-1", workerId: "worker-1",
+      waitKey: `mission-approval-wait:v1:${"b".repeat(64)}`,
+      requestKey: "publish-1", actionSummary: request.actionSummary,
+      proposalHash: request.proposalHash, effect,
+      requestedAt: "2026-07-23T12:00:00.000Z",
+      runRevision: 6, lastSequence: 5
+    };
+    const receipt = {
+      runId: "run-1", waitKey: pending.waitKey, decision: "approved",
+      proposalHash: request.proposalHash, effect, decidedAt: "2026-07-23T12:01:00.000Z",
+      runRevision: 7, lastSequence: 6
+    };
+    mocks.invoke
+      .mockResolvedValueOnce(pending)
+      .mockResolvedValueOnce({ approvals: [pending], unavailableCount: 0, truncated: false })
+      .mockResolvedValueOnce(receipt);
+    await expect(requestRuntimeMissionApproval(request)).resolves.toEqual(pending);
+    await expect(listRuntimePendingMissionApprovals("thread-1", 20)).resolves.toEqual({
+      approvals: [pending], unavailableCount: 0, truncated: false
+    });
+    await expect(resolveRuntimeMissionApproval(pending, "approved")).resolves.toEqual(receipt);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["mission_approval_request", { input: request }],
+      ["mission_approval_pending_list", { input: { sourceThreadId: "thread-1", limit: 20 } }],
+      ["mission_approval_resolve", { input: {
+        runId: "run-1", waitKey: pending.waitKey, decision: "approved",
+        expectedRunRevision: 6, expectedLastSequence: 5
+      } }]
+    ]);
+
+    mocks.invoke.mockResolvedValueOnce({ ...pending, proposalHash: "renderer-claim" });
+    await expect(requestRuntimeMissionApproval(request))
+      .rejects.toThrow("Malformed Mission approval response");
   });
 
   it("composes and strictly validates the native human-input wait commands", async () => {

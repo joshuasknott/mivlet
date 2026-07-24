@@ -398,7 +398,8 @@ egress. The narrow native-provider path described above persists truthful produc
 receipt. Accepted cited output now has the exact artifact provenance described
 below. A separate authenticated general-recovery pass now excludes live native
 executions and the fixed cited shape, then replays an earlier-process journal
-against its selected Plan. It preserves exact validated human-input waits,
+against its selected Plan. It preserves exact validated human-input and general
+effect-approval waits,
 leaves paused and not-yet-started heads dormant, and returns a route-free resume
 descriptor only when the newest integrity-checked portable-redacted checkpoint
 is the exact run head, contains the same bounded worker/step/effect facts as
@@ -751,8 +752,28 @@ and hydrates completed drafts without cited-plan or provider-receipt UI.
 
 These are two fixed local producers, not general producer selection, arbitrary
 provider/tool continuations, general reference kinds, or multi-worker
-coordination. The Wave 4C
-human-input-and-approval checkbox therefore stays unchecked.
+coordination.
+
+A provider-neutral native approval kernel now covers arbitrary selected Mission
+Plans without borrowing the fixed cited-artifact acceptance shape. One exact
+running Run head can create one secret-safe consequential-effect proposal bound
+to an immutable proposal hash, optional exact live worker, action/effect keys,
+target summary, and idempotency key. Rust atomically stores an encrypted
+wait-boundary checkpoint plus `approval-requested`, moves the selected Mission
+to waiting, lists only exact owner/workspace/conversation records, and appends an
+identified internal-user approve/deny resolution before returning the Run and
+Mission to running. The checkpoint replays bounded active/completed
+worker/step/effect facts from the journal, concurrent waits fail closed, exact
+request/resolution replay is stable, changed scope/head/proposal fails, and the
+whole chain survives database reopen. General restart recovery now validates and
+preserves this approval shape alongside human input. Approval executes nothing,
+does not select a provider, and grants no policy, factual, acceptance,
+credential, placement, or reusable effect authority; a future native effect
+consumer must still recheck and one-time-consume the exact approved proposal
+immediately before egress. Automatic graph composition, effect consumption, and
+product UI remain open, so the Wave 4C human-input-and-approval checkbox stays
+unchecked.
+
 Conservative, explicit
 natural-language forms for goal, plan, schedule,
 and memory now reach the same structured durable command handlers; conversational
