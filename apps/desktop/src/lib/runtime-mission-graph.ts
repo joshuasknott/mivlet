@@ -68,6 +68,7 @@ export interface RuntimeMissionToolExecutionInput {
   worker: Spine.Missions.Worker;
   workspaceId: string;
   projectId?: string;
+  providerId: string;
   tool: "connection-read";
   argumentsJson: string;
   binding: MissionWorkerToolExecutionBinding;
@@ -293,6 +294,7 @@ class RuntimeProviderWorkerStarter {
             worker: item.worker,
             workspaceId: text(journal.run.workspaceId, "Mission workspace"),
             ...projectScope(journal.run),
+            providerId: item.route.providerFamily,
             tool: item.toolRequest.tool,
             argumentsJson: item.toolRequest.argumentsJson,
             binding: {

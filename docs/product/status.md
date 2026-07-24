@@ -221,7 +221,10 @@ Arbitrary grant creation, write tools, multiple tools per worker, other
 capability shapes, product UI for arbitrary Plan creation, and
 packaged/live-provider observation remain open. Exact post-checkpoint sibling
 usage/terminal pairs are replayed on restart, so already-settled workers are
-preserved and only the remaining active workers resume.
+preserved and only the remaining active workers resume. Startup resolves every
+active worker's saved provider independently from the current connected
+provider catalogue; neither general nor cited recovery depends on the model
+picker's active provider.
 
 ## Evidence Checked
 

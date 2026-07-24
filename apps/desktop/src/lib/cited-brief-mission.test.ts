@@ -284,9 +284,15 @@ describe("cited brief mission composition", () => {
       }] }
     }));
 
+    const resolveBackend = vi.fn(async (providerId: string) =>
+      providerId === "openai"
+        ? { providerId: "openai", backend: { backendType: "native-api" } } as never
+        : null
+    );
     await expect(resumeInterruptedCitedBriefMissions({
-      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never
+      resolveBackend
     })).resolves.toEqual({ resumed: 1, terminalized: 0, failed: 0 });
+    expect(resolveBackend).toHaveBeenCalledWith("openai");
 
     expect(mocks.restoreCheckpoint).toHaveBeenCalledWith({
       runId: "mission-run-4", eventId: "event-restore", idempotencyKey: "restart-restore-1",

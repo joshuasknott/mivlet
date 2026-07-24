@@ -1002,6 +1002,12 @@ coordination continues. Native grant composition, other tool shapes, and
 packaged restart observation remain open, so the Wave 4C checkboxes remain
 unchecked.
 
+Provider lookup during the startup pass is no longer tied to the model picker's
+active backend. General workers and cited descriptors independently resolve
+their exact saved provider from the current connected catalogue, enabling
+already-authorized multi-provider recovery without fallback or route
+substitution.
+
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently
 recomputed coordinate receipts. It requires outputs to match each worker's

@@ -232,6 +232,26 @@ describe("useNativeAgent", () => {
     expect(mocks.streamCalls).toBe(0);
   });
 
+  it("resolves an already-connected backend independently of the active picker", async () => {
+    const anthropic: BackendProvider = {
+      ...connectedOpenAiProvider(),
+      id: "anthropic",
+      label: "Anthropic",
+      description: "Anthropic API",
+      models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: true }]
+    };
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider(), anthropic],
+        activeProviderId: "openai"
+      })
+    );
+
+    await waitFor(() => expect(result.current.backend?.providerId).toBe("openai"));
+    expect(result.current.resolveBackend("anthropic")?.providerId).toBe("anthropic");
+    expect(result.current.resolveBackend("missing")).toBeNull();
+  });
+
   it("persists the immutable prepared receipt before egress and uses its canonical run id", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Done"), finishStop];

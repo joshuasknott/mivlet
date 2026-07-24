@@ -41,24 +41,21 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     citedRecoveryScopeRef.current = scopeKey;
     citedMissionRunningRef.current = true;
     setCitedMissionRunning(true);
-    const recoveryBackend = agent.backend;
     void (async () => {
       const cited = await Promise.allSettled([
         resumeInterruptedCitedBriefMissions({
-          backend: recoveryBackend,
+          resolveBackend: agent.resolveBackend,
           onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
         })
       ]);
       const general = await Promise.allSettled([
         resumeInterruptedRuntimeProviderMissions({
           resolveBackend: (route) =>
-            recoveryBackend.providerId === route.providerFamily
-              ? recoveryBackend
-              : null,
+            agent.resolveBackend(route.providerFamily),
           executeMissionTool: async (toolInput) => {
             const approval = {
               ...buildToolApproval(
-                recoveryBackend.providerId,
+                toolInput.providerId,
                 toolInput.tool,
                 toolInput.argumentsJson
               ),
@@ -103,7 +100,13 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       citedMissionCancelRef.current = null;
       await durableConversation.refresh();
     });
-  }, [activeWorkspaceId, agent.backend, agent.state.running, durableConversation.refresh]);
+  }, [
+    activeWorkspaceId,
+    agent.backend,
+    agent.resolveBackend,
+    agent.state.running,
+    durableConversation.refresh
+  ]);
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
   const voice = useVoice(voiceProvider, onDictation, { disabled: false, onCancel: onVoiceCancel });
   useEffect(() => { if (!runtime.isChatView) voice.reset(); }, [runtime.isChatView, voice.reset]);

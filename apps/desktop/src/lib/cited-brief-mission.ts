@@ -95,7 +95,10 @@ export interface CitedBriefMissionReceipt {
 }
 
 export interface CitedBriefMissionRecoveryInput {
-  backend: AgentBackend;
+  backend?: AgentBackend;
+  resolveBackend?(
+    providerId: string
+  ): AgentBackend | null | Promise<AgentBackend | null>;
   onCancellationReady?: (cancel: (() => Promise<void>) | null) => void;
 }
 
@@ -444,7 +447,7 @@ export function requiresCitedBriefHumanAcceptance(value: string): boolean {
 export async function resumeInterruptedCitedBriefMissions(
   input: CitedBriefMissionRecoveryInput
 ): Promise<CitedBriefMissionRecoveryResult> {
-  if (input.backend.backend.backendType !== "native-api") {
+  if (!input.backend && !input.resolveBackend) {
     return { resumed: 0, terminalized: 0, failed: 0 };
   }
   const recoveries = await recoverRuntimeInterruptedCitedMissions();
@@ -456,12 +459,20 @@ export async function resumeInterruptedCitedBriefMissions(
       result.terminalized += 1;
       continue;
     }
-    if (recovery.providerId !== input.backend.providerId) {
+    const backend = input.resolveBackend
+      ? await input.resolveBackend(recovery.providerId)
+      : input.backend?.providerId === recovery.providerId
+        ? input.backend
+        : null;
+    if (!backend || backend.backend.backendType !== "native-api") {
       result.failed += 1;
       continue;
     }
     try {
-      await resumeCitedBriefMission(recovery, input);
+      await resumeCitedBriefMission(recovery, {
+        backend,
+        onCancellationReady: input.onCancellationReady
+      });
       result.resumed += 1;
     } catch {
       // Native settlement owns the durable failure/cancellation transcript. A

@@ -219,6 +219,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       ),
     [options.providers, options.activeProviderId, deps]
   );
+  const resolveBackend = useCallback(
+    (providerId: string): AgentBackend | null =>
+      resolveAgentBackend(
+        options.providers.find(
+          (provider) =>
+            provider.id === providerId
+            && provider.authState === "connected"
+            && provider.capabilities.includes("streaming")
+        ),
+        deps
+      ),
+    [options.providers, deps]
+  );
 
   const run = useCallback(
     async (
@@ -716,5 +729,5 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     }));
   }, []);
 
-  return { state, run, retry, cancel, reportError, backend };
+  return { state, run, retry, cancel, reportError, backend, resolveBackend };
 }
