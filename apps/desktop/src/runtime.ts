@@ -3054,6 +3054,44 @@ export type RuntimeCitedMissionRestartRecovery =
     }
   | { status: "terminalized"; journal: Record<string, unknown> };
 
+export type RuntimeGeneralMissionRestartRecovery =
+  | {
+      status: "dormant";
+      runId: string;
+      planRevisionId: string;
+      runStatus: "created" | "planning" | "queued" | "paused";
+      action: "continue-from-durable-head" | "remain-paused";
+      expectedRunRevision: number;
+      expectedLastSequence: number;
+    }
+  | {
+      status: "waiting";
+      runId: string;
+      planRevisionId: string;
+      waitKind: "human-input";
+      waitKey: string;
+      expectedRunRevision: number;
+      expectedLastSequence: number;
+    }
+  | {
+      status: "resumable";
+      runId: string;
+      planRevisionId: string;
+      checkpointEventId: string;
+      restoreEventId: string;
+      restoreIdempotencyKey: string;
+      activeWorkerIds: string[];
+      activePlanStepKeys: string[];
+      completedWorkerIds: string[];
+      completedPlanStepKeys: string[];
+      committedEffectKeys: string[];
+      expectedRunRevision: number;
+      expectedLastSequence: number;
+      newAttemptNumber: number;
+      requiresFreshRouteSelection: true;
+    }
+  | { status: "terminalized"; journal: Record<string, unknown> };
+
 export interface RuntimeMissionWorkerCreateInput {
   runId: string;
   eventId: string;
@@ -3225,6 +3263,12 @@ export async function createRuntimeMissionWorker(input: RuntimeMissionWorkerCrea
 export async function startRuntimeMissionWorker(input: RuntimeMissionWorkerStartInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_worker_start", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function recoverRuntimeInterruptedGeneralMissions(): Promise<RuntimeGeneralMissionRestartRecovery[] | null> {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<RuntimeGeneralMissionRestartRecovery[]>("mission_run_recover_interrupted_general"); }
   catch (error) { throw toRuntimeError(error); }
 }
 

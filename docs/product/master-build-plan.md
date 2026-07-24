@@ -379,8 +379,7 @@ restores the checkpoint as attempt two, and returns the run to `running`; an app
 restart discovers and validates the same chain. Policy, budget, cancellation,
 request-rejection, invalid-output, pre-checkpoint, and attempt-two failures never
 enter this retry. Terminal receipts select attempt-two usage and cannot mistake a
-duration-only attempt-one record for final token usage. General checkpoint-driven
-resume and multi-worker recovery remain open. Schema v26 adds
+duration-only attempt-one record for final token usage. Schema v26 adds
 owner-qualified encrypted checkpoint state linked by composite foreign key to
 the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits
@@ -397,9 +396,21 @@ neither an arbitrary later checkpoint nor renderer-declared state can authorize
 egress. The narrow native-provider path described above persists truthful production
 `worker-completed` and `worker-failed` events plus one atomic encrypted Markdown
 receipt. Accepted cited output now has the exact artifact provenance described
-below, but general worker execution events, other mission artifact shapes, and
-general/multi-worker checkpoint resume are still open, so the durable-run box remains
-unchecked.
+below. A separate authenticated general-recovery pass now excludes live native
+executions and the fixed cited shape, then replays an earlier-process journal
+against its selected Plan. It preserves exact validated human-input waits,
+leaves paused and not-yet-started heads dormant, and returns a route-free resume
+descriptor only when the newest integrity-checked portable-redacted checkpoint
+is the exact run head, contains the same bounded worker/step/effect facts as
+journal replay, conceals no wait, and has one saved attempt left. The descriptor
+requires fresh route selection rather than reusing provider, credential,
+placement, grant, or approval authority. A changed, missing, corrupt,
+attempt-exhausted, or otherwise unreplayable running graph is atomically failed;
+an exact interrupted cancellation is atomically cancelled. Both the encrypted
+Run and selected Mission retain the same explicit terminal result. Automatic
+general checkpoint restoration, worker recreation/dispatch, renderer
+composition, other mission artifact shapes, and packaged restart observation
+remain open, so the durable-run box remains unchecked.
 
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.

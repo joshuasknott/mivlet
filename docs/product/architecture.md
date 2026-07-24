@@ -155,7 +155,16 @@ currently decidable declared join and reference-only coordinate aggregation in
 one transaction. It derives stable event identities from the run and selected
 Plan facts, reloads the journal after each append, and stops when no further
 deterministic coordination fact is ready; the renderer supplies only the run to
-advance. Native product composition, restart dispatch, and artifact
+advance. A separate native restart classifier scans only journals older than the
+process epoch and excludes active native executions. It preserves authenticated
+human-input waits and dormant heads, or derives a provider-neutral resume
+descriptor only from the exact newest encrypted checkpoint at the run head.
+Durable journal replay must reproduce its bounded worker, step, wait, and
+committed-effect facts; a hidden wait, changed head, exhausted attempt budget, or
+failed integrity check cannot resume. The descriptor deliberately requires fresh
+route selection. Unreplayable active graphs are terminalized with the same
+explicit Run and Mission result instead of remaining falsely active. Native
+product composition, automatic restore/worker dispatch, and artifact
 orchestration for arbitrary graphs remain open. Once graph workers are terminal,
 a separate portable aggregator can derive one Mission result from their exact
 durable Run results and independently recomputed coordinate receipts. It binds
