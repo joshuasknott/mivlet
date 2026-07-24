@@ -138,6 +138,7 @@ describe("LocalMcpSettings", () => {
 
     const dialog = await screen.findByRole("dialog", { name: "Allow Local files to run?" });
     const save = within(dialog).getByRole("button", { name: "Save server" });
+    await waitFor(() => expect(within(dialog).getByLabelText(/Type/)).toHaveFocus());
     expect(save).toBeDisabled();
     fireEvent.change(within(dialog).getByLabelText(/Type/), { target: { value: "configure local-files" } });
     fireEvent.click(save);

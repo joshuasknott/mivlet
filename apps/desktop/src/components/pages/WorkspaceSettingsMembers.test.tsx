@@ -275,7 +275,9 @@ describe("workspace member roster", () => {
     expect(dialog).toHaveTextContent(/permanently removes their workspace access/i);
     expect(dialog).toHaveTextContent(/revokes linked devices/i);
     expect(dialog).toHaveTextContent(/can’t be undone/i);
-    expect(screen.getByRole("button", { name: "Keep access" })).toHaveFocus();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Keep access" })).toHaveFocus()
+    );
     fireEvent.click(screen.getByRole("button", { name: "Keep access" }));
     expect(mocks.changeMember).not.toHaveBeenCalled();
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   ConnectorAccountOption,
   ConnectorActionKind,
@@ -6,6 +6,7 @@ import type {
 } from "@fable/protocol";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 /**
  * Icon-first connector cards with one expanded detail panel. Keep the cards
@@ -35,25 +36,19 @@ export function PluginPanel({
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
     null
   );
+  const detailModalRef = useRef<HTMLDivElement>(null);
+  const detailCloseRef = useRef<HTMLButtonElement>(null);
   const selectedConnector = useMemo(
     () => manifests.find((connector) => connector.id === selectedConnectorId) ?? null,
     [manifests, selectedConnectorId]
   );
 
-  useEffect(() => {
-    if (!selectedConnectorId) {
-      return;
-    }
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setSelectedConnectorId(null);
-      }
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedConnectorId]);
+  useModalFocusTrap({
+    active: selectedConnector !== null,
+    containerRef: detailModalRef,
+    initialFocusRef: detailCloseRef,
+    onClose: () => setSelectedConnectorId(null)
+  });
 
   return (
     <section className="context-panel connectors-panel" aria-label="Connectors">
@@ -116,10 +111,12 @@ export function PluginPanel({
 
       {selectedConnector ? (
         <div
+          ref={detailModalRef}
           className="connector-detail-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby={`connector-detail-${selectedConnector.id}`}
+          tabIndex={-1}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
               setSelectedConnectorId(null);
@@ -128,6 +125,7 @@ export function PluginPanel({
         >
           <div className="connector-detail-modal__panel" onMouseDown={(event) => event.stopPropagation()}>
             <button
+              ref={detailCloseRef}
               type="button"
               className="connector-detail-modal__close"
               aria-label="Close connector setup"

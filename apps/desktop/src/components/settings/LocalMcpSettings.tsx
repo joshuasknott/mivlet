@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { McpClient } from "@fable/connectors";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
@@ -18,6 +18,7 @@ import {
   createDesktopMcpTransport,
   createDesktopRemoteMcpTransport
 } from "../../lib/mcp-transport";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 interface PendingConfiguration {
   configuration: RuntimeMcpServerConfiguration;
@@ -41,6 +42,8 @@ export function LocalMcpSettings({
   const [endpoint, setEndpoint] = useState("");
   const [pending, setPending] = useState<PendingConfiguration | null>(null);
   const [confirmation, setConfirmation] = useState("");
+  const confirmationModalRef = useRef<HTMLElement>(null);
+  const confirmationInputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
@@ -50,6 +53,15 @@ export function LocalMcpSettings({
     resources: string[];
     knowledgeSearchTool: string;
   }>>({});
+
+  useModalFocusTrap({
+    active: pending !== null,
+    containerRef: confirmationModalRef,
+    initialFocusRef: confirmationInputRef,
+    onClose: () => {
+      if (!busy) void decide("deny");
+    }
+  });
 
   const refresh = async () => {
     const loaded = await listRuntimeMcpServerConfigurations(workspaceId);
@@ -406,7 +418,14 @@ export function LocalMcpSettings({
       </div>
 
       {pending ? (
-        <section className="settings-confirmation" role="dialog" aria-modal="true" aria-labelledby="mcp-confirm-title">
+        <section
+          ref={confirmationModalRef}
+          className="settings-confirmation"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="mcp-confirm-title"
+          tabIndex={-1}
+        >
           <strong id="mcp-confirm-title">
             {pending.configuration.transport === "stdio"
               ? `Allow ${pending.configuration.displayName} to run?`
@@ -416,7 +435,7 @@ export function LocalMcpSettings({
           <p>No tools or resources will be enabled by saving it.</p>
           <label className="settings-field">
             <span>Type “{pending.approval.confirmationPhrase}” to continue</span>
-            <input autoFocus value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
+            <input ref={confirmationInputRef} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
           </label>
           <div className="profile-action-row">
             <button type="button" className="button button--secondary" disabled={busy} onClick={() => void decide("deny")}>Cancel</button>

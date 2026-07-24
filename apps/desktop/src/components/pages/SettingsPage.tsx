@@ -46,6 +46,7 @@ import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useWorkspaceMembers } from "../../hooks/useWorkspaceMembers";
 import { LocalMcpSettings } from "../settings/LocalMcpSettings";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 // Re-export the eager-loadable tab metadata so the lazy-loaded page module
 // remains the single source of truth for existing direct importers. The
@@ -161,12 +162,23 @@ function IdentitySettingsView({
   const display = authentication?.verifiedDisplayAttributes;
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null);
   const [deviceToRevoke, setDeviceToRevoke] = useState<string | null>(null);
+  const deviceConfirmationRef = useRef<HTMLElement>(null);
+  const keepDeviceRef = useRef<HTMLButtonElement>(null);
   const identityState = runtime.identityStatus.state;
   const workspaceState = runtime.accountWorkspaceStatus.state;
   const needsRecovery = identityState === "expired" || identityState === "revoked" || workspaceState === "expired" || workspaceState === "revoked";
   const canSignIn = runtime.identityStatus.enabled && !authentication && !needsRecovery;
   const canRefresh = runtime.identityStatus.enabled && identityState !== "disabled";
   const accountMessage = runtime.accountWorkspaceStatus.message || runtime.identityStatus.message;
+
+  useModalFocusTrap({
+    active: deviceToRevoke !== null,
+    containerRef: deviceConfirmationRef,
+    initialFocusRef: keepDeviceRef,
+    onClose: () => {
+      if (revokingDeviceId === null) setDeviceToRevoke(null);
+    }
+  });
 
   const accountStateLabel = (() => {
     if (!runtime.identityStatus.enabled || !runtime.accountWorkspaceStatus.configured) return "Configuration required";
@@ -301,11 +313,18 @@ function IdentitySettingsView({
         {deviceToRevoke ? (() => {
           const device = runtime.accountWorkspaceStatus.devices.find((candidate) => candidate.deviceId === deviceToRevoke);
           return device ? (
-            <section className="settings-confirmation" role="dialog" aria-modal="true" aria-labelledby="remove-device-title">
+            <section
+              ref={deviceConfirmationRef}
+              className="settings-confirmation"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="remove-device-title"
+              tabIndex={-1}
+            >
               <strong id="remove-device-title">Remove {device.label}?</strong>
               <p>This device will lose access to Fable. Removed devices stay removed; reconnect from a new device if needed.</p>
               <div className="profile-action-row">
-                <button type="button" className="button button--secondary" autoFocus onClick={() => setDeviceToRevoke(null)}>Keep device</button>
+                <button ref={keepDeviceRef} type="button" className="button button--secondary" onClick={() => setDeviceToRevoke(null)}>Keep device</button>
                 <button type="button" className="button button--destructive" disabled={revokingDeviceId === device.deviceId} onClick={() => void confirmDeviceRemoval()}>
                   {revokingDeviceId === device.deviceId ? "Removing…" : "Remove device"}
                 </button>
@@ -1490,12 +1509,23 @@ export function WorkspaceSettingsView({
     contextKey: string;
     member: AccountWorkspaceMemberSummary;
   } | null>(null);
+  const memberConfirmationRef = useRef<HTMLElement>(null);
+  const keepMemberRef = useRef<HTMLButtonElement>(null);
   const [memberMessage, setMemberMessage] = useState<{ contextKey: string; text: string } | null>(null);
   const memberFeedbackRef = useRef<HTMLParagraphElement>(null);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<WorkspaceRole>("editor");
   const [inviteMessage, setInviteMessage] = useState<{ contextKey: string; text: string } | null>(null);
   const inviteFeedbackRef = useRef<HTMLParagraphElement>(null);
+
+  useModalFocusTrap({
+    active: removeConfirmation?.contextKey === memberContextKey,
+    containerRef: memberConfirmationRef,
+    initialFocusRef: keepMemberRef,
+    onClose: () => {
+      if (members.pendingAction === null) setRemoveConfirmation(null);
+    }
+  });
 
   const loadInvitations = async () => {
     setInvitationState("loading");
@@ -1899,11 +1929,18 @@ export function WorkspaceSettingsView({
               </div>
             ) : null}
             {removeConfirmation?.contextKey === memberContextKey ? (
-              <section className="workspace-member-confirmation" role="dialog" aria-modal="true" aria-labelledby="remove-workspace-member-title">
+              <section
+                ref={memberConfirmationRef}
+                className="workspace-member-confirmation"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="remove-workspace-member-title"
+                tabIndex={-1}
+              >
                 <strong id="remove-workspace-member-title">Remove {removeConfirmation.member.displayName?.trim() || "this workspace member"} from {workspaceName}?</strong>
                 <p>This permanently removes their workspace access and revokes linked devices. It can’t be undone.</p>
                 <div className="profile-action-row">
-                  <button type="button" className="button button--secondary" autoFocus onClick={() => setRemoveConfirmation(null)}>Keep access</button>
+                  <button ref={keepMemberRef} type="button" className="button button--secondary" onClick={() => setRemoveConfirmation(null)}>Keep access</button>
                   <button
                     type="button"
                     className="button button--destructive"

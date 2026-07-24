@@ -214,6 +214,9 @@ export function ChatWorkspace() {
   const settingsSearchRef = useRef<HTMLInputElement>(null);
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [workspaceSettingsStatus, setWorkspaceSettingsStatus] = useState("");
+  const workspaceSettingsModalRef = useRef<HTMLElement>(null);
+  const workspaceSettingsCloseRef = useRef<HTMLButtonElement>(null);
+  const workspaceSelectorButtonRef = useRef<HTMLButtonElement>(null);
   const navigationHistory = useRef([runtime.activeItem]);
   const navigationTarget = useRef<string | null>(null);
   const [navigationIndex, setNavigationIndex] = useState(0);
@@ -237,6 +240,17 @@ export function ChatWorkspace() {
     containerRef: settingsModalRef,
     initialFocusRef: settingsSearchRef,
     onClose: closeSettingsModal
+  });
+  const closeWorkspaceSettings = () => {
+    setWorkspaceSettingsOpen(false);
+    setWorkspaceSettingsStatus("");
+  };
+  useModalFocusTrap({
+    active: workspaceSettingsOpen,
+    containerRef: workspaceSettingsModalRef,
+    initialFocusRef: workspaceSettingsCloseRef,
+    returnFocusRef: workspaceSelectorButtonRef,
+    onClose: closeWorkspaceSettings
   });
 
   useEffect(() => {
@@ -1906,6 +1920,7 @@ export function ChatWorkspace() {
         accountWorkspaces={runtime.accountWorkspaceStatus.workspaces}
         activeAccountWorkspaceId={runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId}
         workspacePending={runtime.accountWorkspacePending}
+        workspaceSelectorButtonRef={workspaceSelectorButtonRef}
         onSelectAccountWorkspace={async (fableWorkspaceId) => {
           await runtime.selectAccountWorkspace(fableWorkspaceId);
           runtime.setLastAction("Workspace switched");
@@ -2122,20 +2137,20 @@ export function ChatWorkspace() {
       {workspaceSettingsOpen ? (
         <div className="settings-modal-backdrop" role="presentation">
           <section
+            ref={workspaceSettingsModalRef}
             className="settings-modal settings-modal--workspace"
             role="dialog"
             aria-modal="true"
             aria-labelledby="workspace-settings-modal-title"
+            tabIndex={-1}
           >
             <div className="settings-modal__content">
               <button
+                ref={workspaceSettingsCloseRef}
                 type="button"
                 className="settings-modal__close"
                 aria-label="Close workspace settings"
-                onClick={() => {
-                  setWorkspaceSettingsOpen(false);
-                  setWorkspaceSettingsStatus("");
-                }}
+                onClick={closeWorkspaceSettings}
               >
                 <X size={17} />
               </button>

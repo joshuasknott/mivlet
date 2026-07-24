@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, RefObject } from "react";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -23,6 +23,7 @@ import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { Icon } from "@phosphor-icons/react/dist/lib/types";
 import type { AccountWorkspaceSummary, ThreadSummary } from "@fable/protocol";
 import type { SettingsTab } from "./pages/settings-tabs";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 /**
  * Workspace sidebar / shell navigation.
@@ -99,7 +100,8 @@ export function WorkspaceSidebar({
   activeAccountWorkspaceId,
   workspacePending = false,
   onSelectAccountWorkspace,
-  onCreateAccountWorkspace
+  onCreateAccountWorkspace,
+  workspaceSelectorButtonRef
 }: {
   workspaceName: string;
   utilityItems: readonly UtilityNavItem[];
@@ -151,6 +153,7 @@ export function WorkspaceSidebar({
   workspacePending?: boolean;
   onSelectAccountWorkspace?: (fableWorkspaceId: string) => void | Promise<void>;
   onCreateAccountWorkspace?: (name: string) => void | Promise<void>;
+  workspaceSelectorButtonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const [workspaceDropdownOpen, setWorkspaceDropdownOpen] = useState(false);
   const [workspaceCreateOpen, setWorkspaceCreateOpen] = useState(false);
@@ -165,6 +168,9 @@ export function WorkspaceSidebar({
   const [chatFlyoutOpen, setChatFlyoutOpen] = useState(false);
   const [chatHistoryModalOpen, setChatHistoryModalOpen] = useState(false);
   const [chatHistorySearch, setChatHistorySearch] = useState("");
+  const chatHistoryModalRef = useRef<HTMLDivElement>(null);
+  const chatHistorySearchRef = useRef<HTMLInputElement>(null);
+  const chatDockButtonRef = useRef<HTMLButtonElement>(null);
   const [settingsSearch, setSettingsSearch] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
   const chatFlyoutRef = useRef<HTMLDivElement>(null);
@@ -191,6 +197,14 @@ export function WorkspaceSidebar({
     () => accountWorkspaces.filter((workspace) => workspace.workspaceStatus === "active" && workspace.membershipStatus === "active"),
     [accountWorkspaces]
   );
+
+  useModalFocusTrap({
+    active: chatHistoryModalOpen,
+    containerRef: chatHistoryModalRef,
+    initialFocusRef: chatHistorySearchRef,
+    returnFocusRef: chatDockButtonRef,
+    onClose: () => setChatHistoryModalOpen(false)
+  });
 
   const runProjectAction = async (action: () => void | Promise<void>) => {
     setProjectActionError("");
@@ -357,6 +371,7 @@ export function WorkspaceSidebar({
               ref={dropdownRef}
             >
               <button
+                ref={workspaceSelectorButtonRef}
                 type="button"
                 className="workspace-switcher workspace-switcher--workspace"
                 aria-label="Select workspace"
@@ -738,6 +753,7 @@ export function WorkspaceSidebar({
           <div className="sidebar-chat-dock" ref={chatFlyoutRef}>
             <div className="sidebar-chat-dock__row">
               <button
+                ref={chatDockButtonRef}
                 type="button"
                 className="sidebar-action-card sidebar-chat-dock__toggle"
                 aria-expanded={chatFlyoutOpen}
@@ -998,7 +1014,14 @@ export function WorkspaceSidebar({
       ) : null}
 
       {chatHistoryModalOpen ? (
-        <div className="chat-history-modal" role="dialog" aria-modal="true" aria-labelledby="chat-history-title">
+        <div
+          ref={chatHistoryModalRef}
+          className="chat-history-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="chat-history-title"
+          tabIndex={-1}
+        >
           <div className="chat-history-modal__panel">
             <div className="chat-history-modal__header">
               <div>
@@ -1018,6 +1041,7 @@ export function WorkspaceSidebar({
               <MagnifyingGlass size={15} aria-hidden="true" />
               <span className="sr-only">Search chats</span>
               <input
+                ref={chatHistorySearchRef}
                 type="search"
                 placeholder="Search chats"
                 value={chatHistorySearch}

@@ -133,6 +133,7 @@ describe("Settings -> General identity", () => {
     expect(screen.getByText("Ari's laptop")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Remove device" }));
     expect(screen.getByRole("dialog", { name: "Remove Ari's laptop?" })).toBeTruthy();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Keep device" })).toHaveFocus());
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Remove device" }));
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("device-1"));
   });

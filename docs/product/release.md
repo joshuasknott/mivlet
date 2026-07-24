@@ -100,9 +100,11 @@ stored in React state, snapshots, logs, or JSON metadata.
   preview data.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
-  work. Settings and Scheduled Task modals now have tested initial focus,
-  keyboard containment, Escape close, and opener restoration. This is not a
-  claim of complete packaged-WebView or assistive-technology validation.
+  work. Every current modal entry point now has initial focus, keyboard
+  containment, safe Escape close, and restoration to the opener or an explicit
+  stable invoking control through the shared focus scope or the provider
+  catalogue's equivalent dedicated trap. This is not a claim of complete
+  packaged-WebView or assistive-technology validation.
 - Native API providers use bounded dynamic model discovery. Live availability
   and entitlements still depend on each provider account and are not proven by
   fixture tests.

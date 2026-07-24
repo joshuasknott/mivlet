@@ -29,11 +29,13 @@ export function useModalFocusTrap({
   active,
   containerRef,
   initialFocusRef,
+  returnFocusRef,
   onClose
 }: {
   active: boolean;
   containerRef: RefObject<HTMLElement | null>;
   initialFocusRef?: RefObject<HTMLElement | null>;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onClose?: () => void;
 }) {
   const onCloseRef = useRef(onClose);
@@ -45,7 +47,7 @@ export function useModalFocusTrap({
     const container = containerRef.current;
     if (!container) return;
 
-    const returnFocus =
+    const inferredReturnFocus =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusInitial = () => {
       const target = initialFocusRef?.current ?? focusableElements(container)[0] ?? container;
@@ -90,9 +92,10 @@ export function useModalFocusTrap({
     return () => {
       window.cancelAnimationFrame(frame);
       document.removeEventListener("keydown", handleKeyDown);
+      const returnFocus = returnFocusRef?.current ?? inferredReturnFocus;
       if (returnFocus?.isConnected) {
         returnFocus.focus();
       }
     };
-  }, [active, containerRef, initialFocusRef]);
+  }, [active, containerRef, initialFocusRef, returnFocusRef]);
 }
