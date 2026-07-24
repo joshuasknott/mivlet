@@ -1558,6 +1558,11 @@ fn next_automatic_join_resolution(
             .get("allowFailedWorkers")
             .and_then(Value::as_bool)
             .ok_or_else(|| "Stored Mission join failure policy is invalid.".to_string())?;
+        let target_step_key = join
+            .get("targetStepKey")
+            .and_then(Value::as_str)
+            .map(|value| bounded(value, "Mission join target", 160))
+            .transpose()?;
         let deadline = join.get("deadline").filter(|value| !value.is_null());
         let deadline_elapsed = deadline
             .and_then(Value::as_str)
@@ -1598,6 +1603,7 @@ fn next_automatic_join_resolution(
             join_key.clone(),
             json!({
                 "joinKey":join_key,
+                "targetStepKey":target_step_key,
                 "status":status,
                 "strategy":strategy,
                 "workerIds":worker_ids,
@@ -3309,6 +3315,10 @@ pub fn mission_coordination_join_open(
                         .and_then(Value::as_str)
                         == Some(expected_join_key.as_str())
                     && join
+                        .and_then(|value| value.get("targetStepKey"))
+                        .and_then(Value::as_str)
+                        == Some(input.target_step_key.as_str())
+                    && join
                         .and_then(|value| value.get("strategy"))
                         .and_then(Value::as_str)
                         == Some(input.strategy.as_str())
@@ -3420,7 +3430,8 @@ pub fn mission_coordination_join_open(
                 "join-opened",
                 &event_key,
                 json!({"join":{
-                    "joinKey":join_key,"status":"open","strategy":input.strategy,
+                    "joinKey":join_key,"targetStepKey":input.target_step_key,
+                    "status":"open","strategy":input.strategy,
                     "workerIds":worker_ids,"quorum":input.quorum,
                     "allowFailedWorkers":input.allow_failed_workers,"deadline":input.deadline,
                     "satisfiedWorkerIds":[],"failedWorkerIds":[]
@@ -3576,7 +3587,9 @@ pub fn mission_coordination_join_resolve(
                 "join-resolved",
                 &event_key,
                 json!({"join":{
-                    "joinKey":input.join_key,"status":status,"strategy":strategy,
+                    "joinKey":input.join_key,
+                    "targetStepKey":join.get("targetStepKey"),
+                    "status":status,"strategy":strategy,
                     "workerIds":worker_ids,"quorum":quorum,
                     "allowFailedWorkers":allow_failed,"deadline":join.get("deadline"),
                     "satisfiedWorkerIds":satisfied,"failedWorkerIds":failed

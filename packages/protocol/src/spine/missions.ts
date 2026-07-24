@@ -671,6 +671,8 @@ export interface RunCheckpoint {
 
 export interface WorkerJoin {
   joinKey: string;
+  /** Present on current native facts; omitted only by pre-1.6 compatibility rows. */
+  targetStepKey?: string;
   status: JoinStatus;
   strategy: JoinStrategy;
   workerIds: readonly WorkerId[];

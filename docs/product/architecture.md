@@ -150,7 +150,15 @@ reacts to individual worker completion, preserves exact tool assignments, and
 persists cancellation before aborting active egress. Join settlement,
 provider/tool execution, and reference-only aggregation remain owned by their
 authenticated runtime callbacks, and a worker callback cannot finish without a
-durable terminal fact. A native-owned bounded advance command can settle every
+durable terminal fact. The desktop's authenticated adapter now reconstructs
+that graph and its current state from the encrypted journal and selected Plan,
+recompiles it through the portable validator, reloads after every transition,
+and delegates deterministic joins/aggregation back to native. Product Spine
+contract 1.6 adds the exact target Plan step to new join facts; older rows are
+accepted only when their ordered dependency workers resolve to one unambiguous
+target. The adapter still injects provider execution and therefore gains no
+route, credential, grant, approval, placement, tool, or evaluator authority.
+A native-owned bounded advance command can settle every
 currently decidable declared join and reference-only coordinate aggregation in
 one transaction. It derives stable event identities from the run and selected
 Plan facts, reloads the journal after each append, and stops when no further
@@ -163,16 +171,17 @@ Durable journal replay must reproduce its bounded worker, step, wait, and
 committed-effect facts; a hidden wait, changed head, exhausted attempt budget, or
 failed integrity check cannot resume. The descriptor deliberately requires fresh
 route selection. Unreplayable active graphs are terminalized with the same
-explicit Run and Mission result instead of remaining falsely active. Native
-product composition, automatic restore/worker dispatch, and artifact
+explicit Run and Mission result instead of remaining falsely active. Automatic
+route selection, worker start/egress, restore dispatch, and artifact
 orchestration for arbitrary graphs remain open. Once graph workers are terminal,
 a separate portable aggregator can derive one Mission result from their exact
 durable Run results and independently recomputed coordinate receipts. It binds
 every worker and usage record to the selected graph, verifies output contracts
 and receipt inputs, and requires an explicit one-to-one deliverable selection.
-Acceptance is derived conservatively from declared policy, identified human, or
-exact graph-worker evaluations; model completion and unattested external claims
-carry no acceptance authority. Missing or conflicting evidence produces partial
+Acceptance is derived conservatively from declared policy and identified human
+facts. Exact graph-worker evaluations retain advisory evidence but cannot make a
+criterion fully met; model completion and unattested external claims carry no
+acceptance authority. Missing or conflicting evidence produces partial
 or failed truth, while cancellation and recoverable work remain explicit. The
 native finalizer derives this boundary again from the encrypted selected Plan
 and journal. It accepts only a run id, requires every worker terminal and no

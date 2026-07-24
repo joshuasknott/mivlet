@@ -869,8 +869,9 @@ join is satisfied. It records complete or partial truth and missing required key
 but copies no referenced output body and grants no policy, acceptance, or artifact
 authority. The portable journal independently rejects substituted workers,
 outputs, order, status, and duplicate aggregation. General automatic graph
-advancement, provider routing across arbitrary workers, artifact materialization
-from the general manifest, and restart recovery remain open.
+advancement is now native-owned as described below. Provider routing across
+arbitrary workers, artifact materialization from the general manifest, and
+product restart dispatch remain open.
 
 An authenticated native progress projection now reads any selected general Plan
 and its encrypted journal without accepting renderer state. It derives bounded
@@ -929,9 +930,24 @@ execution, tool assignment preservation, early `any` continuation, cancellation
 ordering, and failure handling. The runner also preserves the protocol's durable
 worker `waiting` state: a human-input or approval wait consumes no provider
 execution slot, unrelated ready work can continue, and a later invocation resumes
-from reloaded facts without replaying terminal workers. The native product composer is not yet wired to
-construct and restart arbitrary Plans through this runner, so the Wave 4C
-checkboxes remain unchecked.
+from reloaded facts without replaying terminal workers.
+
+The desktop now supplies the authenticated product adapter for that runner.
+Given only a Run id, it reloads the encrypted journal and selected Plan through
+native commands, reconstructs the exact Plan-bound workers, immutable join
+declarations/resolutions, coordinate steps, worker state transitions, waits,
+terminal facts, aggregations, and cancellation state, then compiles that state
+again through the portable graph validator. Every runner transition reloads
+native facts; join settlement and coordinate recording call the bounded
+native-owned advance command; external cancellation is persisted through the
+native Run boundary before the runner aborts egress. Current join facts now also
+retain their exact target Plan step; pre-contract-1.6 rows are reconstructed
+only when the ordered dependency workers identify one unambiguous target.
+Changed targets, worker order, declarations, event order, and browser-only
+execution fail closed. Provider execution remains an injected worker callback,
+so the adapter chooses no route, credential, grant, approval, placement, tool,
+or evaluator. Automatic route selection/worker start and restart dispatch still
+need product composition, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently
