@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   journal: null as Record<string, unknown> | null,
   advance: vi.fn(),
   cancel: vi.fn(),
+  createCheckpoint: vi.fn(),
   listRoutes: vi.fn(),
   startWorker: vi.fn()
 }));
@@ -18,6 +19,7 @@ vi.mock("../runtime", () => ({
   getRuntimeMissionRun: vi.fn(async () => mocks.journal),
   getRuntimeMissionPlan: vi.fn(async () => mocks.lifecycle),
   advanceRuntimeMissionCoordination: mocks.advance,
+  createRuntimeMissionCheckpoint: mocks.createCheckpoint,
   requestRuntimeMissionRunCancellation: mocks.cancel,
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
   startRuntimeMissionWorker: mocks.startWorker
@@ -271,6 +273,36 @@ describe("authenticated runtime Mission graph composition", () => {
       return mocks.journal;
     });
     mocks.listRoutes.mockResolvedValue([providerRoute]);
+    mocks.createCheckpoint.mockImplementation(async (input: Record<string, unknown>) => {
+      const journal = mocks.journal as {
+        run: Record<string, unknown>;
+        events: Array<Record<string, unknown>>;
+      };
+      const run = journal.run;
+      const head = run.eventHead as Record<string, unknown>;
+      const sequence = Number(head.lastSequence) + 1;
+      const revision = Number(run.revision) + 1;
+      journal.events.push({
+        id: input.eventId,
+        type: "checkpoint-created",
+        sequence,
+        previousEventId: input.resumeAfterEventId,
+        payload: {
+          checkpoint: {
+            attemptNumber: input.attemptNumber,
+            stateStorage: "portable-redacted",
+            executionNodeId: "local-desktop",
+            replayBoundary: {
+              durableThroughSequence: input.durableThroughSequence,
+              resumeAfterEventId: input.resumeAfterEventId
+            }
+          }
+        }
+      });
+      run.revision = revision;
+      run.eventHead = { lastSequence: sequence, lastEventId: input.eventId };
+      return journal;
+    });
     mocks.startWorker.mockImplementation(async (input: Record<string, unknown>) => {
       const journal = mocks.journal as {
         run: Record<string, unknown>;
@@ -402,16 +434,26 @@ describe("authenticated runtime Mission graph composition", () => {
     expect(backendRun.mock.calls[0]?.[0]).toMatchObject({
       model: "gpt-5",
       missionWorkerExecution: {
-        expectedRunRevision: 5,
-        expectedLastSequence: 7
+        expectedRunRevision: 6,
+        expectedLastSequence: 8,
+        checkpointEventId: expect.stringMatching(/^mission-general-checkpoint-/)
       }
     });
     expect(backendRun.mock.calls[1]?.[0]).toMatchObject({
       missionWorkerExecution: {
-        expectedRunRevision: 5,
-        expectedLastSequence: 7
+        expectedRunRevision: 6,
+        expectedLastSequence: 8,
+        checkpointEventId: expect.stringMatching(/^mission-general-checkpoint-/)
       }
     });
+    expect(mocks.createCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mocks.createCheckpoint).toHaveBeenCalledWith(expect.objectContaining({
+      runId: "run-1",
+      expectedRunRevision: 5,
+      expectedLastSequence: 7,
+      attemptNumber: 1,
+      durableThroughSequence: 7
+    }));
   });
 
   it("does not advance the durable graph until every provider sibling settles", async () => {

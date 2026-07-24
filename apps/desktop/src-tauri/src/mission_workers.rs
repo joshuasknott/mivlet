@@ -5204,7 +5204,6 @@ fn is_general_concurrent_provider_run(
     output: Option<&NativeWorkerOutputSpec>,
 ) -> bool {
     if binding.tool_evidence.is_some()
-        || binding.checkpoint_event_id.is_some()
         || binding.checkpoint_restore_event_id.is_some()
         || output.is_some_and(|spec| spec.include_evidence)
         || lifecycle
@@ -5764,13 +5763,6 @@ fn validate_native_completion_head(
                 "Native worker checkpoint and execution event ids must be distinct.".into(),
             );
         }
-        let replay_base = native_pre_checkpoint_base_event(binding);
-        let replay_sequence = journal
-            .events
-            .iter()
-            .find(|event| event.get("id").and_then(Value::as_str) == Some(replay_base))
-            .and_then(|event| event.get("sequence"))
-            .and_then(Value::as_i64);
         let checkpoint = journal
             .events
             .iter()
@@ -5788,24 +5780,93 @@ fn validate_native_completion_head(
         } else {
             current_attempt
         };
-        if replay_sequence.is_none()
-            || checkpoint.is_none_or(|event| {
-                event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
-                    || event.get("previousEventId").and_then(Value::as_str) != Some(replay_base)
-                    || event
+        let exact_checkpoint = checkpoint.is_some_and(|event| {
+            if event.get("type").and_then(Value::as_str) != Some("checkpoint-created")
+                || event
+                    .pointer("/payload/checkpoint/attemptNumber")
+                    .and_then(Value::as_i64)
+                    != Some(expected_checkpoint_attempt)
+            {
+                return false;
+            }
+            if general_concurrent_provider {
+                let resume_after = event
+                    .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
+                    .and_then(Value::as_str);
+                let durable_through = event
+                    .pointer("/payload/checkpoint/replayBoundary/durableThroughSequence")
+                    .and_then(Value::as_i64);
+                let exact_resume = resume_after.zip(durable_through).is_some_and(
+                    |(resume_after, durable_through)| {
+                        journal.events.iter().any(|candidate| {
+                            candidate.get("id").and_then(Value::as_str) == Some(resume_after)
+                                && candidate.get("sequence").and_then(Value::as_i64)
+                                    == Some(durable_through)
+                        }) && event.get("previousEventId").and_then(Value::as_str)
+                            == Some(resume_after)
+                            && event.get("sequence").and_then(Value::as_i64)
+                                == Some(durable_through + 1)
+                    },
+                );
+                let worker_was_active = journal.events.iter().any(|candidate| {
+                    candidate.get("id").and_then(Value::as_str)
+                        == Some(binding.worker_started_event_id.as_str())
+                        && candidate.get("type").and_then(Value::as_str) == Some("worker-started")
+                        && candidate
+                            .pointer("/payload/workerId")
+                            .and_then(Value::as_str)
+                            == Some(binding.worker_id.as_str())
+                        && candidate
+                            .get("sequence")
+                            .and_then(Value::as_i64)
+                            .zip(durable_through)
+                            .is_some_and(|(started, durable)| started <= durable)
+                }) && !journal.events.iter().any(|candidate| {
+                    matches!(
+                        candidate.get("type").and_then(Value::as_str),
+                        Some("worker-completed" | "worker-failed" | "run-cancelled")
+                    ) && candidate
+                        .pointer("/payload/workerId")
+                        .and_then(Value::as_str)
+                        == Some(binding.worker_id.as_str())
+                        && candidate
+                            .get("sequence")
+                            .and_then(Value::as_i64)
+                            .zip(durable_through)
+                            .is_some_and(|(terminal, durable)| terminal <= durable)
+                });
+                exact_resume
+                    && worker_was_active
+                    && event
+                        .pointer("/payload/checkpoint/stateStorage")
+                        .and_then(Value::as_str)
+                        == Some("portable-redacted")
+                    && event
+                        .pointer("/payload/checkpoint/executionNodeId")
+                        .and_then(Value::as_str)
+                        == Some("local-desktop")
+            } else {
+                let replay_base = native_pre_checkpoint_base_event(binding);
+                let replay_sequence = journal
+                    .events
+                    .iter()
+                    .find(|candidate| {
+                        candidate.get("id").and_then(Value::as_str) == Some(replay_base)
+                    })
+                    .and_then(|candidate| candidate.get("sequence"))
+                    .and_then(Value::as_i64);
+                event.get("previousEventId").and_then(Value::as_str) == Some(replay_base)
+                    && event
                         .pointer("/payload/checkpoint/replayBoundary/resumeAfterEventId")
                         .and_then(Value::as_str)
-                        != Some(replay_base)
-                    || event
+                        == Some(replay_base)
+                    && event
                         .pointer("/payload/checkpoint/replayBoundary/durableThroughSequence")
                         .and_then(Value::as_i64)
-                        != replay_sequence
-                    || event
-                        .pointer("/payload/checkpoint/attemptNumber")
-                        .and_then(Value::as_i64)
-                        != Some(expected_checkpoint_attempt)
-            })
-        {
+                        == replay_sequence
+            }
+        });
+        if !exact_checkpoint {
             return Err(
                 "Native worker checkpoint does not bind the durable execution boundary.".into(),
             );
@@ -10260,9 +10321,9 @@ mod tests {
             result_event_id: "result-a".into(),
             failure_event_id: "failure-a".into(),
             idempotency_key: "terminal-a".into(),
-            expected_run_revision: 7,
-            expected_last_sequence: 6,
-            checkpoint_event_id: None,
+            expected_run_revision: 8,
+            expected_last_sequence: 7,
+            checkpoint_event_id: Some("checkpoint-general".into()),
             checkpoint_restore_event_id: None,
             tool_evidence: None,
         };
@@ -10291,22 +10352,28 @@ mod tests {
             json!({"id":"route-b","runId":"run-general","type":"route-selected",
                 "sequence":6,"previousEventId":"start-b",
                 "payload":{"workerId":"worker-b"}}),
+            json!({"id":"checkpoint-general","runId":"run-general",
+                "type":"checkpoint-created","sequence":7,"previousEventId":"route-b",
+                "payload":{"checkpoint":{"attemptNumber":1,
+                    "stateStorage":"portable-redacted","executionNodeId":"local-desktop",
+                    "replayBoundary":{"durableThroughSequence":6,
+                        "resumeAfterEventId":"route-b"}}}}),
             json!({"id":"usage-b","runId":"run-general","type":"usage-recorded",
-                "sequence":7,"previousEventId":"route-b",
+                "sequence":8,"previousEventId":"checkpoint-general",
                 "payload":{"usage":{"workerId":"worker-b"}}}),
             json!({"id":"complete-b","runId":"run-general","type":"worker-completed",
-                "sequence":8,"previousEventId":"usage-b",
+                "sequence":9,"previousEventId":"usage-b",
                 "payload":{"workerId":"worker-b"}}),
         ];
         let journal = mission_run::MissionRunJournalRow {
-            run: json!({"status":"running","revision":9,
-                "eventHead":{"lastSequence":8,"lastEventId":"complete-b"}}),
+            run: json!({"status":"running","revision":10,"currentAttemptNumber":1,
+                "eventHead":{"lastSequence":9,"lastEventId":"complete-b"}}),
             events,
         };
         assert!(validate_native_completion_head(&journal, &binding, false, true).is_ok());
 
         let mut substituted = journal;
-        substituted.events[6]["payload"]["usage"]["workerId"] = json!("worker-a");
+        substituted.events[7]["payload"]["usage"]["workerId"] = json!("worker-a");
         assert!(validate_native_completion_head(&substituted, &binding, false, true).is_err());
     }
 

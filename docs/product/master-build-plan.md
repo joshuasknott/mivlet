@@ -958,17 +958,25 @@ compare routes spanning different provider, billing, privacy, or placement
 boundaries; health, capability, tools, context, budget, cost, quality, and speed
 still pass through the portable selector. The provider-only graph composition
 preflights an entire ready batch before mutation, serializes native start and
-route facts against the journal head, then gives every worker the final shared
-head before provider egress runs in parallel. Rust independently rechecks the
-saved route and placement policy. Native settlement accepts journal advancement
+route facts against the journal head, then creates one native-derived
+portable-redacted checkpoint over the exact active-worker batch before any
+provider egress. The renderer supplies only the current head and event
+identities; Rust derives and seals active/completed worker, Plan-step, wait, and
+committed-effect facts from the encrypted journal. Every worker receives that
+same checkpoint head before provider egress runs in parallel. Rust independently
+rechecks the saved route, placement policy, checkpoint attempt, replay boundary,
+active worker identity, local execution node, and exact durable predecessor.
+Native settlement accepts journal advancement
 only from exact usage-plus-terminal facts for other known provider-only
 siblings; unknown workers, self-substitution, gaps, and unrelated event kinds
 fail closed. Each terminal append uses the latest validated head, and the
 desktop does not return any member of the ready batch to graph coordination
 until every sibling has a native terminal fact. This keeps provider work
 parallel without allowing a fast `any` join to race unfinished native
-settlement. Tool-bearing native grant composition and
-general restart dispatch remain open, so the Wave 4C checkboxes remain unchecked.
+settlement while ensuring an interrupted batch can qualify for the existing
+native recovery descriptor. Tool-bearing native grant composition, checkpoint
+restoration/worker redispatch, and automatic startup consumption of that
+descriptor remain open, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently

@@ -13,6 +13,7 @@ import {
 import type { Spine } from "@fable/protocol";
 import {
   advanceRuntimeMissionCoordination,
+  createRuntimeMissionCheckpoint,
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
   requestRuntimeMissionRunCancellation,
@@ -198,9 +199,37 @@ class RuntimeProviderWorkerStarter {
         const binding = workerStartBinding(journal, item.worker.id);
         started.push({ ...item, ...binding });
       }
+      const checkpointBase = runHead(journal);
+      const checkpointEventId = runtimeIdentity("mission-general-checkpoint");
+      const checkpointed = await createRuntimeMissionCheckpoint({
+        runId: this.input.runId,
+        eventId: checkpointEventId,
+        idempotencyKey: runtimeIdentity("mission-general-checkpoint-key"),
+        expectedRunRevision: checkpointBase.revision,
+        expectedLastSequence: checkpointBase.lastSequence,
+        attemptNumber: integer(
+          journal.run.currentAttemptNumber,
+          "Mission run attempt"
+        ),
+        durableThroughSequence: checkpointBase.lastSequence,
+        resumeAfterEventId: checkpointBase.lastEventId
+      });
+      if (!checkpointed) {
+        throw new Error("Mission checkpoint creation is available only in the desktop app.");
+      }
+      journal = missionJournal(checkpointed);
       const executionHead = runHead(journal);
+      if (
+        executionHead.revision !== checkpointBase.revision + 1
+        || executionHead.lastSequence !== checkpointBase.lastSequence + 1
+        || executionHead.lastEventId !== checkpointEventId
+      ) {
+        throw new Error("The native Mission checkpoint did not become the exact execution head.");
+      }
       const results = await Promise.allSettled(
-        started.map((item) => this.executeStarted(item, executionHead))
+        started.map((item) =>
+          this.executeStarted(item, executionHead, checkpointEventId)
+        )
       );
       for (const [index, item] of started.entries()) {
         const result = results[index];
@@ -229,7 +258,8 @@ class RuntimeProviderWorkerStarter {
 
   private async executeStarted(
     item: StartedProviderWorker,
-    executionHead: { revision: number; lastSequence: number }
+    executionHead: { revision: number; lastSequence: number },
+    checkpointEventId: string
   ): Promise<void> {
     await executeLocalWorker({
       worker: item.worker,
@@ -253,7 +283,8 @@ class RuntimeProviderWorkerStarter {
         failureEventId: runtimeIdentity("mission-failure"),
         idempotencyKey: runtimeIdentity("mission-worker-terminal"),
         expectedRunRevision: executionHead.revision,
-        expectedLastSequence: executionHead.lastSequence
+        expectedLastSequence: executionHead.lastSequence,
+        checkpointEventId
       }
     });
   }
@@ -559,11 +590,14 @@ function sameJoin(
     && left.sourceStepKeys.every((key, index) => right.sourceStepKeys[index] === key);
 }
 
-function runHead(journal: MissionJournal): { revision: number; lastSequence: number } {
+function runHead(
+  journal: MissionJournal
+): { revision: number; lastSequence: number; lastEventId: string } {
   const head = record(journal.run.eventHead, "Mission run event head");
   return {
     revision: integer(journal.run.revision, "Mission run revision"),
-    lastSequence: integer(head.lastSequence, "Mission run sequence")
+    lastSequence: integer(head.lastSequence, "Mission run sequence"),
+    lastEventId: text(head.lastEventId, "Mission run event")
   };
 }
 
