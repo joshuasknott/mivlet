@@ -386,8 +386,9 @@ the exact immutable checkpoint event. Authenticated create/restore commands
 derive completed workers, plan steps, committed effects, active work, and waits
 only from the durable journal; persist only the closed portable replay shape;
 bind its hash to run, event, attempt, and reference; select the newest checkpoint
-by event sequence; restore into exactly the next attempt; and make an exact
-restore replay stable even after a newer checkpoint exists. The cited desktop
+by event sequence; restore into exactly the next attempt without exceeding the
+Run's saved `maxAttempts`; and make an exact restore replay stable even after a
+newer checkpoint exists. The cited desktop
 journey now creates that checkpoint immediately after the attested connected-source
 tool receipt and before provider egress. The final provider request carries its
 exact checkpoint event identity, and Rust accepts it only when that event is the

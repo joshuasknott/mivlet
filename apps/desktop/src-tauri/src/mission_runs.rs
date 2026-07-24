@@ -1967,10 +1967,19 @@ fn build_checkpoint_restore(
         .get("currentAttemptNumber")
         .and_then(Value::as_i64)
         .unwrap_or(1);
+    let max_attempts = current
+        .pointer("/budget/maxAttempts")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .ok_or_else(|| "Mission run attempt budget is invalid.".to_string())?;
     if input.new_attempt_number != current_attempt + 1
         || input.new_attempt_number <= checkpoint.attempt_number
+        || input.new_attempt_number > max_attempts
     {
-        return Err("Checkpoint restore must advance exactly one run attempt.".into());
+        return Err(
+            "Checkpoint restore must advance exactly one run attempt within its saved budget."
+                .into(),
+        );
     }
     let workspace = current
         .get("workspaceId")
@@ -2636,7 +2645,9 @@ mod tests {
 
     #[test]
     fn checkpoint_creation_and_restore_bind_hash_boundary_and_attempt() {
-        let current = json!({"id":"run-1","workspaceId":"workspace-1","status":"running","revision":6,"currentAttemptNumber":1,"eventHead":{"lastSequence":5,"lastEventId":"event-5"}});
+        let current = json!({"id":"run-1","workspaceId":"workspace-1","status":"running","revision":6,
+            "currentAttemptNumber":1,"budget":{"maxAttempts":2},
+            "eventHead":{"lastSequence":5,"lastEventId":"event-5"}});
         let journal = mission_run::MissionRunJournalRow {
             run: current,
             events: vec![
@@ -2725,6 +2736,22 @@ mod tests {
         assert_eq!(restored["status"], "running");
         assert_eq!(restored["currentAttemptNumber"], 2);
         assert_eq!(restore_event["payload"]["checkpointEventId"], "event-6");
+        let exhausted = MissionCheckpointRestoreInput {
+            new_attempt_number: 3,
+            expected_run_revision: 8,
+            expected_last_sequence: 7,
+            ..restore
+        };
+        assert!(build_checkpoint_restore(
+            &restored,
+            &exhausted,
+            &checkpoint,
+            "user-real",
+            "member-real",
+            "t8",
+        )
+        .unwrap_err()
+        .contains("saved budget"));
     }
 
     #[test]
