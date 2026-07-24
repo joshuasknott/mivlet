@@ -143,13 +143,20 @@ and acceptance state from the same selected Plan and encrypted journal. It
 rejects unknown workers, duplicate terminal facts, work outside the selected
 Plan, malformed usage, and ambiguous evaluations. The parallel desktop journey
 publishes that projection after its durable join, worker settlement, reviewer,
-and terminal boundaries; browser preview invents no progress. Arbitrary graph
-worker execution and artifact orchestration remain open. A native-owned bounded
-advance command can, however, settle every currently decidable declared join
-and reference-only coordinate aggregation in one transaction. It derives stable
-event identities from the run and selected Plan facts, reloads the journal after
-each append, and stops when no further deterministic coordination fact is ready;
-the renderer supplies only the run to advance.
+and terminal boundaries; browser preview invents no progress. A portable graph
+runner can drive an arbitrary compiled graph through provider-neutral callbacks:
+it reloads durable state at each boundary, enforces the saved parallel width,
+reacts to individual worker completion, preserves exact tool assignments, and
+persists cancellation before aborting active egress. Join settlement,
+provider/tool execution, and reference-only aggregation remain owned by their
+authenticated runtime callbacks, and a worker callback cannot finish without a
+durable terminal fact. A native-owned bounded advance command can settle every
+currently decidable declared join and reference-only coordinate aggregation in
+one transaction. It derives stable event identities from the run and selected
+Plan facts, reloads the journal after each append, and stops when no further
+deterministic coordination fact is ready; the renderer supplies only the run to
+advance. Native product composition, restart dispatch, and artifact
+orchestration for arbitrary graphs remain open.
 
 ## Schedules And Commands
 

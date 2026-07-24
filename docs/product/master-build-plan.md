@@ -831,6 +831,21 @@ output crosses the boundary. The loop is capped at sixty-four facts and rolls
 back on malformed or over-limit state. Starting/routing arbitrary ready workers,
 terminal result aggregation, and general restart dispatch remain open.
 
+A provider-neutral portable graph runner now drives arbitrary compiled worker
+graphs through replay-safe callbacks rather than assuming either benchmark
+shape. It reloads durable state after every boundary, obeys the saved parallel
+width, reacts to each completed worker so an explicit `any` join need not wait
+for unrelated siblings, passes exact tool-bearing worker assignments to the
+runtime boundary, and delegates declared joins and reference-only aggregation
+without gaining provider, credential, grant, approval, or acceptance authority.
+Cancellation is persisted before active worker egress is aborted. A callback
+that returns or fails without a durable terminal worker fact is rejected, as is
+substituted graph state. Focused portable coverage proves bounded parallel
+execution, tool assignment preservation, early `any` continuation, cancellation
+ordering, and failure handling. The native product composer is not yet wired to
+construct and restart arbitrary Plans through this runner, so the Wave 4C
+checkboxes remain unchecked.
+
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
 hash-verifies both immutable receipts, derives the bounded reviewer prompt and
