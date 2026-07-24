@@ -877,7 +877,10 @@ canonical occurrences into the exact unchanged legacy schedule history, advances
 the legacy cursor to prevent duplicate firing, and fences the writer twice before
 restoring it. Canonical-only or edited Routines, ambiguous/currently changed
 migration mappings, in-flight work, and another private owner's state fail closed
-instead of being stranded or guessed. Event triggers, general recurrence,
+instead of being stranded or guessed. The native driver additionally supports
+bounded five-field cron recurrence with timezone/DST, named month/weekday,
+range/list/step, cutoff, missed-run, deduplication, and restart semantics;
+malformed or unsupported cron syntax fails closed. Event triggers,
 workspace-shared writes, packaged restart observation, and live provider
 validation remain open, so the broader migration and experience checkboxes stay
 unchecked.
@@ -893,7 +896,10 @@ unchecked.
 Repo-local evidence: canonical time triggers now cover timezone/DST calculation,
 bounded missed-run policy, exact occurrence deduplication, fenced leases, crash
 recovery, retry, restart cursors, immutable history, and matching one-time,
-daily, weekly, and monthly form/command editing. Signed webhooks,
+daily, weekly, and monthly form/command editing. The native contract also accepts
+bounded five-field cron expressions with numeric or named fields, lists, ranges,
+and steps while rejecting unsupported extensions. The calm form has no expert
+cron editor. Signed webhooks,
 Connection events, thresholds, monitoring/follow-up inputs, and their untrusted
 payload normalization remain open; therefore the aggregate checkboxes stay open.
 

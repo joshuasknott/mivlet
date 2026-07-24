@@ -169,6 +169,15 @@ the legacy job path. The Routine editor round-trips those same recurrence
 details, and a successful ordinary chat response can open a transient Routine
 draft without persisting it before explicit save.
 
+The canonical native driver also evaluates bounded five-field cron recurrence
+in the Routine timezone. Numeric fields, lists, ranges, steps, month/weekday
+aliases, standard day-of-month/weekday matching, cutoffs, missed-run policy, and
+DST all reuse the same encrypted cursor, occurrence deduplication, lease, and
+writer-fence path. Unsupported extensions or malformed fields fail closed. The
+calm Scheduled Task form intentionally remains on one-time, daily, weekly, and
+monthly choices; cron is currently an expert/native contract rather than a
+second scheduling UI.
+
 For records created after this boundary, native commands overwrite renderer
 identity and stamp the authenticated workspace, project, member, and creator on
 the schedule and immutable workflow version. Queue occurrences and workflow runs

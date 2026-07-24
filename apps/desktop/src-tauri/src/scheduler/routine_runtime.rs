@@ -10,6 +10,7 @@ use chrono_tz::Tz;
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use tauri::{AppHandle, Emitter};
 
 use crate::models::RUNNING_LEASE_MS;
@@ -31,11 +32,32 @@ struct LiteRecurrence {
 }
 
 #[derive(Clone, Debug)]
+struct CronField {
+    values: BTreeSet<u32>,
+    wildcard: bool,
+}
+
+#[derive(Clone, Debug)]
+struct CronRecurrence {
+    minute: CronField,
+    hour: CronField,
+    day_of_month: CronField,
+    month: CronField,
+    day_of_week: CronField,
+}
+
+#[derive(Clone, Debug)]
+enum RecurrenceRule {
+    LegacyLite(LiteRecurrence),
+    Cron(CronRecurrence),
+}
+
+#[derive(Clone, Debug)]
 enum TimeSpec {
     Once(DateTime<Utc>),
     Recurring {
         timezone: Tz,
-        rule: LiteRecurrence,
+        rule: RecurrenceRule,
         until: Option<DateTime<Utc>>,
         missed_policy: String,
     },
@@ -63,14 +85,30 @@ fn parse_time_spec(trigger: &Value) -> Result<TimeSpec, String> {
                 .ok_or_else(|| "Recurring Routine timezone is missing.".to_string())?
                 .parse::<Tz>()
                 .map_err(|_| "Recurring Routine timezone is invalid.".to_string())?;
+            let frequency = spec
+                .pointer("/recurrence/frequency")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Recurring Routine frequency is missing.".to_string())?;
             let expression = spec
                 .pointer("/recurrence/expression")
                 .and_then(Value::as_str)
-                .and_then(|value| value.strip_prefix("legacy-rrule-lite:v1:"))
                 .ok_or_else(|| "Recurring Routine expression is unsupported.".to_string())?;
-            let rule: LiteRecurrence = serde_json::from_str(expression)
-                .map_err(|_| "Recurring Routine expression is invalid.".to_string())?;
-            validate_rule(&rule)?;
+            let rule = if frequency == "cron" {
+                RecurrenceRule::Cron(parse_cron(expression)?)
+            } else {
+                let encoded = expression
+                    .strip_prefix("legacy-rrule-lite:v1:")
+                    .ok_or_else(|| "Recurring Routine expression is unsupported.".to_string())?;
+                let rule: LiteRecurrence = serde_json::from_str(encoded)
+                    .map_err(|_| "Recurring Routine expression is invalid.".to_string())?;
+                validate_rule(&rule)?;
+                if rule.frequency != frequency {
+                    return Err(
+                        "Recurring Routine frequency does not match its expression.".to_string()
+                    );
+                }
+                RecurrenceRule::LegacyLite(rule)
+            };
             let until = spec
                 .pointer("/recurrence/until")
                 .and_then(Value::as_str)
@@ -98,6 +136,116 @@ fn parse_time_spec(trigger: &Value) -> Result<TimeSpec, String> {
         }
         _ => Err("Routine trigger is not time-based.".to_string()),
     }
+}
+
+fn cron_alias(value: &str, aliases: &[(&str, u32)]) -> Option<u32> {
+    aliases
+        .iter()
+        .find_map(|(name, number)| value.eq_ignore_ascii_case(name).then_some(*number))
+}
+
+fn cron_value(value: &str, min: u32, max: u32, aliases: &[(&str, u32)]) -> Result<u32, String> {
+    let parsed = cron_alias(value, aliases)
+        .or_else(|| value.parse::<u32>().ok())
+        .ok_or_else(|| "Recurring Routine cron value is invalid.".to_string())?;
+    if !(min..=max).contains(&parsed) {
+        return Err("Recurring Routine cron value is out of range.".to_string());
+    }
+    Ok(parsed)
+}
+
+fn parse_cron_field(
+    expression: &str,
+    min: u32,
+    max: u32,
+    aliases: &[(&str, u32)],
+    sunday_alias: bool,
+) -> Result<CronField, String> {
+    if expression.is_empty() || expression.contains('?') {
+        return Err("Recurring Routine cron field is unsupported.".to_string());
+    }
+    let wildcard = expression.starts_with('*');
+    let mut values = BTreeSet::new();
+    for component in expression.split(',') {
+        if component.is_empty() {
+            return Err("Recurring Routine cron field is invalid.".to_string());
+        }
+        let mut step_parts = component.split('/');
+        let range = step_parts.next().unwrap_or_default();
+        let step_text = step_parts.next();
+        let step = step_text
+            .map(|value| value.parse::<u32>())
+            .transpose()
+            .map_err(|_| "Recurring Routine cron step is invalid.".to_string())?
+            .unwrap_or(1);
+        if step_parts.next().is_some()
+            || step == 0
+            || (step_text.is_some() && range != "*" && !range.contains('-'))
+        {
+            return Err("Recurring Routine cron step is invalid.".to_string());
+        }
+        let (start, end) = if range == "*" {
+            (min, max)
+        } else if let Some((start, end)) = range.split_once('-') {
+            (
+                cron_value(start, min, max, aliases)?,
+                cron_value(end, min, max, aliases)?,
+            )
+        } else {
+            let value = cron_value(range, min, max, aliases)?;
+            (value, value)
+        };
+        if start > end {
+            return Err("Recurring Routine cron range is invalid.".to_string());
+        }
+        for value in (start..=end).step_by(step as usize) {
+            values.insert(if sunday_alias && value == 7 { 0 } else { value });
+        }
+    }
+    if values.is_empty() {
+        return Err("Recurring Routine cron field is empty.".to_string());
+    }
+    Ok(CronField { values, wildcard })
+}
+
+fn parse_cron(expression: &str) -> Result<CronRecurrence, String> {
+    const MONTHS: &[(&str, u32)] = &[
+        ("JAN", 1),
+        ("FEB", 2),
+        ("MAR", 3),
+        ("APR", 4),
+        ("MAY", 5),
+        ("JUN", 6),
+        ("JUL", 7),
+        ("AUG", 8),
+        ("SEP", 9),
+        ("OCT", 10),
+        ("NOV", 11),
+        ("DEC", 12),
+    ];
+    const WEEKDAYS: &[(&str, u32)] = &[
+        ("SUN", 0),
+        ("MON", 1),
+        ("TUE", 2),
+        ("WED", 3),
+        ("THU", 4),
+        ("FRI", 5),
+        ("SAT", 6),
+    ];
+    let fields = expression.split_whitespace().collect::<Vec<_>>();
+    if fields.len() != 5 {
+        return Err(
+            "Recurring Routine cron expressions require five fields (minute through weekday)."
+                .to_string(),
+        );
+    }
+    Ok(CronRecurrence {
+        minute: parse_cron_field(fields[0], 0, 59, &[], false)?,
+        hour: parse_cron_field(fields[1], 0, 23, &[], false)?,
+        day_of_month: parse_cron_field(fields[2], 1, 31, &[], false)?,
+        month: parse_cron_field(fields[3], 1, 12, MONTHS, false)?,
+        day_of_week: parse_cron_field(fields[4], 0, 7, WEEKDAYS, true)?,
+    })
 }
 
 fn validate_rule(rule: &LiteRecurrence) -> Result<(), String> {
@@ -162,6 +310,27 @@ fn matches_rule(candidate: DateTime<Utc>, timezone: Tz, rule: &LiteRecurrence) -
     }
 }
 
+fn matches_cron(candidate: DateTime<Utc>, timezone: Tz, rule: &CronRecurrence) -> bool {
+    let local = candidate.with_timezone(&timezone);
+    if !rule.minute.values.contains(&local.minute())
+        || !rule.hour.values.contains(&local.hour())
+        || !rule.month.values.contains(&local.month())
+    {
+        return false;
+    }
+    let day_of_month = rule.day_of_month.values.contains(&local.day());
+    let day_of_week = rule
+        .day_of_week
+        .values
+        .contains(&local.weekday().num_days_from_sunday());
+    match (rule.day_of_month.wildcard, rule.day_of_week.wildcard) {
+        (true, true) => true,
+        (true, false) => day_of_week,
+        (false, true) => day_of_month,
+        (false, false) => day_of_month || day_of_week,
+    }
+}
+
 fn next_occurrence(spec: &TimeSpec, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
     match spec {
         TimeSpec::Once(at) => (*at > after).then_some(*at),
@@ -181,7 +350,11 @@ fn next_occurrence(spec: &TimeSpec, after: DateTime<Utc>) -> Option<DateTime<Utc
                 if until.is_some_and(|cutoff| candidate > cutoff) {
                     return None;
                 }
-                if matches_rule(candidate, *timezone, rule) {
+                let matches = match rule {
+                    RecurrenceRule::LegacyLite(rule) => matches_rule(candidate, *timezone, rule),
+                    RecurrenceRule::Cron(rule) => matches_cron(candidate, *timezone, rule),
+                };
+                if matches {
                     let local = candidate.with_timezone(timezone);
                     if (
                         local.year(),
@@ -530,6 +703,20 @@ mod tests {
         })
     }
 
+    fn cron(timezone: &str, expression: &str, policy: &str) -> Value {
+        serde_json::json!({
+            "spec":{
+                "kind":"time-recurring",
+                "timezone":timezone,
+                "recurrence":{
+                    "frequency":"cron",
+                    "expression":expression
+                },
+                "missedRunPolicy":policy
+            }
+        })
+    }
+
     #[test]
     fn recurrence_matches_legacy_daily_and_dst_semantics() {
         let trigger = recurring(
@@ -580,6 +767,66 @@ mod tests {
     }
 
     #[test]
+    fn cron_supports_bounded_fields_aliases_steps_and_standard_day_matching() {
+        let weekdays = parse_time_spec(&cron(
+            "Europe/London",
+            "*/15 9-10 * JAN,MAR MON-FRI",
+            "run-all",
+        ))
+        .unwrap();
+        let friday = DateTime::parse_from_rfc3339("2026-01-02T08:59:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            iso(next_occurrence(&weekdays, friday).unwrap()),
+            "2026-01-02T09:00:00.000Z"
+        );
+        assert_eq!(
+            iso(next_occurrence(
+                &weekdays,
+                DateTime::parse_from_rfc3339("2026-01-02T09:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+            .unwrap()),
+            "2026-01-02T09:15:00.000Z"
+        );
+
+        // Standard cron treats restricted day-of-month and weekday fields as
+        // an OR. Sunday may be written as either zero or seven.
+        let either_day = parse_time_spec(&cron("UTC", "0 12 15 * 7", "run-all")).unwrap();
+        let saturday = DateTime::parse_from_rfc3339("2026-08-01T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            iso(next_occurrence(&either_day, saturday).unwrap()),
+            "2026-08-02T12:00:00.000Z"
+        );
+    }
+
+    #[test]
+    fn cron_preserves_timezone_dst_and_missed_run_policy() {
+        let trigger = parse_time_spec(&cron("Europe/London", "30 1 * * *", "run-once")).unwrap();
+        let before_fall_back = DateTime::parse_from_rfc3339("2026-10-24T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let after_fall_back = DateTime::parse_from_rfc3339("2026-10-26T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let occurrences = due_occurrences(&trigger, before_fall_back, after_fall_back);
+        assert_eq!(occurrences.len(), 1);
+        assert_eq!(iso(occurrences[0]), "2026-10-26T01:30:00.000Z");
+
+        let before_spring = DateTime::parse_from_rfc3339("2026-03-28T02:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            iso(next_occurrence(&trigger, before_spring).unwrap()),
+            "2026-03-30T00:30:00.000Z"
+        );
+    }
+
+    #[test]
     fn unsupported_or_invalid_rules_fail_closed() {
         let invalid = recurring(
             "Not/AZone",
@@ -594,6 +841,20 @@ mod tests {
             "spec":{"kind":"connection-event"}
         }))
         .is_err());
+        for expression in [
+            "* * * *",
+            "60 * * * *",
+            "*/0 * * * *",
+            "5/2 * * * *",
+            "10-2 * * * *",
+            "* * ? * *",
+            "* * * * MON#2",
+        ] {
+            assert!(
+                parse_time_spec(&cron("UTC", expression, "run-once")).is_err(),
+                "{expression}"
+            );
+        }
     }
 
     #[test]

@@ -69,7 +69,9 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store.
 - Canonical Routines can be created, edited, paused, resumed, deleted, listed,
   migrated, and executed locally with encrypted evidence, time-zone-aware
-  recurrence, restart cursors, leases, bounded retry, and exact settlement.
+  one-time/daily/weekly/monthly plus bounded five-field cron recurrence, restart
+  cursors, leases, bounded retry, and exact settlement. Unsupported cron
+  extensions fail closed, and the calm form does not expose expert cron editing.
   New schedules, immutable workflow versions, queue occurrences, and workflow
   runs carry native-authenticated owner evidence; renderer identity is ignored,
   and production workflow writes require encrypted SQLite. Reconciliation plus
