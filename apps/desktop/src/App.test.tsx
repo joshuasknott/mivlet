@@ -98,6 +98,16 @@ vi.mock("./lib/cited-brief-mission", () => ({
   })
 }));
 
+vi.mock("./lib/runtime-mission-graph", () => ({
+  resumeInterruptedRuntimeProviderMissions: vi.fn(async () => ({
+    resumed: 0,
+    dormant: 0,
+    waiting: 0,
+    terminalized: 0,
+    failed: 0
+  }))
+}));
+
 vi.mock("./lib/parallel-approaches-mission", () => ({
   isParallelApproachesMissionPrompt: (value: string) =>
     /generate two approaches/i.test(value) && /compare/i.test(value),

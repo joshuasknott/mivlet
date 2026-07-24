@@ -151,4 +151,35 @@ describe("portable local worker driver", () => {
     expect(runtime.request?.messages[0]?.content).toContain('"capabilityId":"knowledge.content.search"');
     expect(runtime.request?.messages[0]?.content).toContain("Never invent citations");
   });
+
+  it("allows only an exact native checkpoint restoration to resume a running worker", async () => {
+    const runtime = backend([{ type: "done", finishReason: "stop" }]);
+    const resumed = { ...worker(), status: "running" as const, tools: [] };
+    const missionWorkerExecution = {
+      runId: "run-1", workerId: "worker-1",
+      workerStartedEventId: "event-start", routeSelectedEventId: "event-route",
+      usageEventId: "event-usage", completionEventId: "event-completion",
+      evaluationEventId: "event-evaluation", resultEventId: "event-result",
+      failureEventId: "event-failure", idempotencyKey: "terminal-1",
+      expectedRunRevision: 8, expectedLastSequence: 7,
+      checkpointEventId: "event-checkpoint",
+      checkpointRestoreEventId: "event-restore"
+    };
+
+    await executeLocalWorker({
+      worker: resumed, backend: runtime.value, model: "model",
+      prompt: resumed.role.objective, toolSpecs: [], execute: vi.fn(),
+      missionWorkerExecution
+    });
+
+    expect(runtime.request?.missionWorkerExecution).toEqual(missionWorkerExecution);
+    await expect(executeLocalWorker({
+      worker: resumed, backend: runtime.value, model: "model",
+      prompt: resumed.role.objective, toolSpecs: [], execute: vi.fn(),
+      missionWorkerExecution: {
+        ...missionWorkerExecution,
+        checkpointRestoreEventId: undefined
+      }
+    })).rejects.toThrow("Only a proposed or queued worker");
+  });
 });

@@ -410,10 +410,17 @@ requires fresh route selection rather than reusing provider, credential,
 placement, grant, or approval authority. A changed, missing, corrupt,
 attempt-exhausted, or otherwise unreplayable running graph is atomically failed;
 an exact interrupted cancellation is atomically cancelled. Both the encrypted
-Run and selected Mission retain the same explicit terminal result. Automatic
-general checkpoint restoration, worker recreation/dispatch, renderer
-composition, other mission artifact shapes, and packaged restart observation
-remain open, so the durable-run box remains unchecked.
+Run and selected Mission retain the same explicit terminal result. The desktop
+startup pass now consumes an exact provider-only resume descriptor after cited
+recovery: it revalidates every active worker against the selected Plan, performs
+fresh route selection inside the immutable policy, refuses a changed route
+identity, restores the checkpoint once, and dispatches only the interrupted
+provider-writing turns from the shared restored head. Stop persists a cooperative
+cancellation before aborting resumed egress. Native settlement requires the
+same checkpoint/restore chain and exact sibling terminal advancement, then the
+portable graph runner continues later ready batches. Tool-bearing recovery,
+other mission artifact shapes, and packaged restart observation remain open, so
+the durable-run box remains unchecked.
 
 The native `/stop` path now includes these general effect-approval waits. Before
 stopping anything, the desktop verifies bounded native lists for cited approval,
@@ -906,8 +913,9 @@ grants, credentials, and approvals remain empty rather than being inferred. Each
 worker now retains an immutable no-fallback provider-route envelope from the
 Mission data boundary plus an exact local-desktop, no-transfer placement policy.
 A Mission that excludes local execution or repeats an authority identity fails
-before preparation. Starting arbitrary ready workers, native grant composition
-for tool-bearing steps, and general restart dispatch remain open.
+before preparation. Provider-only ready workers now have fresh dispatch and
+restart recovery; native grant composition and execution/recovery for
+tool-bearing steps remain open.
 
 The existing native worker-start boundary now selects cited-policy quality
 evidence only when the encrypted Mission, selected one-step Plan, capability,
@@ -974,9 +982,14 @@ desktop does not return any member of the ready batch to graph coordination
 until every sibling has a native terminal fact. This keeps provider work
 parallel without allowing a fast `any` join to race unfinished native
 settlement while ensuring an interrupted batch can qualify for the existing
-native recovery descriptor. Tool-bearing native grant composition, checkpoint
-restoration/worker redispatch, and automatic startup consumption of that
-descriptor remain open, so the Wave 4C checkboxes remain unchecked.
+native recovery descriptor. On startup, the desktop consumes that descriptor
+only for provider-only workers: it verifies the exact Plan and active set,
+freshly selects each current route inside saved policy, requires the same
+durable route identity, restores the checkpoint once, and resumes the active
+provider turns from one shared head. A cooperative stop is persisted before
+resumed egress is aborted; native terminal facts are required before graph
+coordination continues. Tool-bearing native grant composition and recovery
+remain open, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently

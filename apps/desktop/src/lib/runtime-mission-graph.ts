@@ -16,8 +16,11 @@ import {
   createRuntimeMissionCheckpoint,
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
+  recoverRuntimeInterruptedGeneralMissions,
   requestRuntimeMissionRunCancellation,
+  restoreRuntimeMissionCheckpoint,
   startRuntimeMissionWorker,
+  type RuntimeGeneralMissionRestartRecovery,
   type RuntimeNativeProviderRoute
 } from "../runtime";
 import { selectRuntimeMissionWorkerRoute } from "./provider-route-selection";
@@ -58,6 +61,20 @@ export interface ExecuteRuntimeProviderMissionGraphInput {
   signal?: AbortSignal;
 }
 
+export interface RuntimeProviderMissionRecoverySummary {
+  resumed: number;
+  dormant: number;
+  waiting: number;
+  terminalized: number;
+  failed: number;
+}
+
+export interface ResumeRuntimeProviderMissionsInput
+  extends Omit<ExecuteRuntimeProviderMissionGraphInput, "runId" | "signal"> {
+  signal?: AbortSignal;
+  onCancellationReady?(cancel: (() => Promise<void>) | null): void;
+}
+
 /**
  * Execute the provider-only portion of an authenticated general Mission graph.
  *
@@ -76,6 +93,52 @@ export async function executeRuntimeProviderMissionGraph(
     executeWorker: (worker, signal) => starter.execute(worker, signal),
     ...(input.signal ? { signal: input.signal } : {})
   });
+}
+
+/**
+ * Consume exact native restart descriptors for provider-only general Missions.
+ *
+ * The checkpoint is restored once, every active worker is freshly routed inside
+ * its immutable policy, and provider egress is permitted only when that fresh
+ * decision resolves to the same durable route identity. A route change fails
+ * closed rather than rewriting the interrupted attempt's authority.
+ */
+export async function resumeInterruptedRuntimeProviderMissions(
+  input: ResumeRuntimeProviderMissionsInput
+): Promise<RuntimeProviderMissionRecoverySummary> {
+  const summary: RuntimeProviderMissionRecoverySummary = {
+    resumed: 0,
+    dormant: 0,
+    waiting: 0,
+    terminalized: 0,
+    failed: 0
+  };
+  const recoveries = await recoverRuntimeInterruptedGeneralMissions();
+  if (!recoveries) return summary;
+  for (const recovery of recoveries) {
+    if (recovery.status === "dormant") {
+      summary.dormant += 1;
+      continue;
+    }
+    if (recovery.status === "waiting") {
+      summary.waiting += 1;
+      continue;
+    }
+    if (recovery.status === "terminalized") {
+      summary.terminalized += 1;
+      continue;
+    }
+    try {
+      await resumeRuntimeProviderMission(recovery, input);
+      summary.resumed += 1;
+    } catch {
+      // The second and final attempt remains native-owned. If egress did not
+      // settle, the next process-start recovery terminalizes it rather than
+      // repeating provider work from an ambiguous boundary.
+      summary.failed += 1;
+    }
+  }
+  return summary;
 }
 
 /**
@@ -288,6 +351,206 @@ class RuntimeProviderWorkerStarter {
       }
     });
   }
+}
+
+type RecoveredProviderWorker = {
+  worker: Spine.Missions.Worker;
+  backend: AgentBackend;
+  route: RuntimeNativeProviderRoute;
+  workerStartedEventId: string;
+  routeSelectedEventId: string;
+};
+
+async function resumeRuntimeProviderMission(
+  recovery: Extract<RuntimeGeneralMissionRestartRecovery, { status: "resumable" }>,
+  input: ResumeRuntimeProviderMissionsInput
+): Promise<void> {
+  if (!recovery.requiresFreshRouteSelection) {
+    throw new Error("General Mission recovery did not require fresh route selection.");
+  }
+  const state = await requireState(recovery.runId);
+  if (
+    state.journal.run.planRevisionId !== recovery.planRevisionId
+    || state.journal.run.eventHead.lastEventId !== recovery.checkpointEventId
+  ) {
+    throw new Error("General Mission recovery no longer matches its durable checkpoint.");
+  }
+  const activeWorkerIds = Object.entries(state.snapshot.workerStates)
+    .filter(([, status]) => status === "running")
+    .map(([workerId]) => workerId)
+    .sort();
+  const expectedWorkerIds = [...recovery.activeWorkerIds].sort();
+  if (
+    activeWorkerIds.length !== expectedWorkerIds.length
+    || activeWorkerIds.some((workerId, index) => workerId !== expectedWorkerIds[index])
+  ) {
+    throw new Error("General Mission recovery active workers changed.");
+  }
+
+  const prepared = await Promise.all(recovery.activeWorkerIds.map(async (workerId) => {
+    const worker = [...state.graph.workerByStepKey.values()].find(
+      (candidate) => candidate.id === workerId
+    );
+    if (!worker || !recovery.activePlanStepKeys.includes(worker.planStepKey ?? "")) {
+      throw new Error("General Mission recovery worker is not in the selected Plan.");
+    }
+    validateProviderOnlyWorker(worker);
+    const persisted = persistedWorkerRoute(state.journal, workerId);
+    const selected = await selectRuntimeMissionWorkerRoute(worker);
+    if (
+      selected.route.providerFamily !== persisted.providerId
+      || selected.route.modelOrRuntimeReference !== persisted.modelReference
+      || selected.execution.selection.providerRouteId !== persisted.providerRouteId
+    ) {
+      throw new Error("Fresh Mission routing changed the interrupted provider boundary.");
+    }
+    const backend = await input.resolveBackend(selected.route);
+    if (!backend || backend.providerId !== selected.route.providerFamily) {
+      throw new Error("The recovered Mission route has no matching provider runtime.");
+    }
+    return {
+      worker,
+      backend,
+      route: selected.route,
+      workerStartedEventId: persisted.workerStartedEventId,
+      routeSelectedEventId: persisted.routeSelectedEventId
+    };
+  }));
+
+  const restored = await restoreRuntimeMissionCheckpoint({
+    runId: recovery.runId,
+    eventId: recovery.restoreEventId,
+    idempotencyKey: recovery.restoreIdempotencyKey,
+    expectedRunRevision: recovery.expectedRunRevision,
+    expectedLastSequence: recovery.expectedLastSequence,
+    newAttemptNumber: recovery.newAttemptNumber
+  });
+  if (!restored) {
+    throw new Error("General Mission checkpoint restoration requires the desktop app.");
+  }
+  const restoredJournal = missionJournal(restored.journal);
+  const restoredHead = runHead(restoredJournal);
+  if (
+    restoredHead.revision !== recovery.expectedRunRevision + 1
+    || restoredHead.lastSequence !== recovery.expectedLastSequence + 1
+    || restoredHead.lastEventId !== recovery.restoreEventId
+    || restoredJournal.run.currentAttemptNumber !== recovery.newAttemptNumber
+  ) {
+    throw new Error("The restored general Mission head is invalid.");
+  }
+
+  const cancellation = new AbortController();
+  let cancellationPromise: Promise<void> | undefined;
+  const cancel = () => {
+    cancellationPromise ??= (async () => {
+      const current = await requireRuntimeJournal(recovery.runId);
+      const status = current.run.status;
+      if (["completed", "partially-completed", "failed", "cancelled"].includes(status)) return;
+      const head = runHead(current);
+      await requestRuntimeMissionRunCancellation({
+        runId: recovery.runId,
+        eventId: runtimeIdentity("mission-resume-stop"),
+        requestKey: runtimeIdentity("mission-resume-stop-key"),
+        expectedRunRevision: head.revision,
+        expectedLastSequence: head.lastSequence,
+        mode: "cooperative",
+        reason: "User requested stop."
+      });
+      cancellation.abort();
+      await Promise.allSettled(prepared.map((item) => item.backend.cancel(recovery.runId)));
+    })();
+    return cancellationPromise;
+  };
+  const relayAbort = () => { void cancel(); };
+  input.signal?.addEventListener("abort", relayAbort, { once: true });
+  input.onCancellationReady?.(cancel);
+  try {
+    if (input.signal?.aborted) await cancel();
+    const settled = await Promise.allSettled(prepared.map((item) =>
+      executeLocalWorker({
+        worker: { ...item.worker, status: "running" },
+        backend: item.backend,
+        model: item.route.modelOrRuntimeReference,
+        prompt: item.worker.role.objective,
+        toolSpecs: [],
+        execute: async () => {
+          throw new Error("Recovered provider-only Mission workers cannot call tools.");
+        },
+        signal: cancellation.signal,
+        missionWorkerExecution: {
+          runId: recovery.runId,
+          workerId: item.worker.id,
+          workerStartedEventId: item.workerStartedEventId,
+          routeSelectedEventId: item.routeSelectedEventId,
+          usageEventId: runtimeIdentity("mission-resume-usage"),
+          completionEventId: runtimeIdentity("mission-resume-completion"),
+          evaluationEventId: runtimeIdentity("mission-resume-evaluation"),
+          resultEventId: runtimeIdentity("mission-resume-result"),
+          failureEventId: runtimeIdentity("mission-resume-failure"),
+          idempotencyKey: runtimeIdentity("mission-resume-terminal"),
+          expectedRunRevision: restoredHead.revision,
+          expectedLastSequence: restoredHead.lastSequence,
+          checkpointEventId: recovery.checkpointEventId,
+          checkpointRestoreEventId: recovery.restoreEventId
+        }
+      })
+    ));
+    const after = await requireState(recovery.runId);
+    for (const [index, item] of prepared.entries()) {
+      const durable = after.snapshot.workerStates[item.worker.id];
+      if (!["completed", "failed", "cancelled"].includes(durable)) {
+        const reason = settled[index]?.status === "rejected"
+          ? "Provider execution failed without a durable terminal fact."
+          : "Provider execution returned without a durable terminal fact.";
+        throw new Error(reason);
+      }
+    }
+    await executeRuntimeProviderMissionGraph({
+      runId: recovery.runId,
+      resolveBackend: input.resolveBackend,
+      ...(input.signal ? { signal: input.signal } : {})
+    });
+  } finally {
+    input.signal?.removeEventListener("abort", relayAbort);
+    input.onCancellationReady?.(null);
+  }
+}
+
+function persistedWorkerRoute(
+  journal: MissionJournal,
+  workerId: string
+): {
+  workerStartedEventId: string;
+  routeSelectedEventId: string;
+  providerId: string;
+  modelReference: string;
+  providerRouteId: string;
+} {
+  const starts = journal.events.filter((event) =>
+    event.type === "worker-started"
+    && record(event.payload, "Mission worker start payload").workerId === workerId
+  );
+  const routes = journal.events.filter((event) =>
+    event.type === "route-selected"
+    && record(event.payload, "Mission route payload").workerId === workerId
+  );
+  if (starts.length !== 1 || routes.length !== 1) {
+    throw new Error("General Mission recovery route history is ambiguous.");
+  }
+  const start = starts[0]!;
+  const route = routes[0]!;
+  const payload = record(route.payload, "Mission route payload");
+  const selection = record(payload.selection, "Mission route selection");
+  if (route.previousEventId !== start.id) {
+    throw new Error("General Mission recovery route history is invalid.");
+  }
+  return {
+    workerStartedEventId: text(start.id, "Mission worker start event"),
+    routeSelectedEventId: text(route.id, "Mission route event"),
+    providerId: text(payload.providerId, "Mission route provider"),
+    modelReference: text(payload.modelReference, "Mission route model"),
+    providerRouteId: text(selection.providerRouteId, "Mission provider route")
+  };
 }
 
 function validateProviderOnlyWorker(worker: Spine.Missions.Worker): void {

@@ -5204,7 +5204,6 @@ fn is_general_concurrent_provider_run(
     output: Option<&NativeWorkerOutputSpec>,
 ) -> bool {
     if binding.tool_evidence.is_some()
-        || binding.checkpoint_restore_event_id.is_some()
         || output.is_some_and(|spec| spec.include_evidence)
         || lifecycle
             .mission
@@ -10371,6 +10370,22 @@ mod tests {
             events,
         };
         assert!(validate_native_completion_head(&journal, &binding, false, true).is_ok());
+
+        let mut restored_binding = binding.clone();
+        restored_binding.expected_run_revision = 9;
+        restored_binding.expected_last_sequence = 8;
+        restored_binding.checkpoint_restore_event_id = Some("restore-general".into());
+        let mut restored_events = journal.events[..7].to_vec();
+        restored_events.push(json!({"id":"restore-general","runId":"run-general",
+            "type":"checkpoint-restored","sequence":8,"previousEventId":"checkpoint-general",
+            "attemptNumber":2,"payload":{"checkpointEventId":"checkpoint-general",
+                "newAttemptNumber":2}}));
+        let restored = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":9,"currentAttemptNumber":2,
+                "eventHead":{"lastSequence":8,"lastEventId":"restore-general"}}),
+            events: restored_events,
+        };
+        assert!(validate_native_completion_head(&restored, &restored_binding, false, true).is_ok());
 
         let mut substituted = journal;
         substituted.events[7]["payload"]["usage"]["workerId"] = json!("worker-a");

@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Spine } from "@fable/protocol";
 import {
   executeRuntimeMissionGraph,
-  executeRuntimeProviderMissionGraph
+  executeRuntimeProviderMissionGraph,
+  resumeInterruptedRuntimeProviderMissions
 } from "./runtime-mission-graph";
 
 const mocks = vi.hoisted(() => ({
@@ -12,6 +13,8 @@ const mocks = vi.hoisted(() => ({
   cancel: vi.fn(),
   createCheckpoint: vi.fn(),
   listRoutes: vi.fn(),
+  recoverGeneral: vi.fn(),
+  restoreCheckpoint: vi.fn(),
   startWorker: vi.fn()
 }));
 
@@ -21,6 +24,8 @@ vi.mock("../runtime", () => ({
   advanceRuntimeMissionCoordination: mocks.advance,
   createRuntimeMissionCheckpoint: mocks.createCheckpoint,
   requestRuntimeMissionRunCancellation: mocks.cancel,
+  recoverRuntimeInterruptedGeneralMissions: mocks.recoverGeneral,
+  restoreRuntimeMissionCheckpoint: mocks.restoreCheckpoint,
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
   startRuntimeMissionWorker: mocks.startWorker
 }));
@@ -273,6 +278,7 @@ describe("authenticated runtime Mission graph composition", () => {
       return mocks.journal;
     });
     mocks.listRoutes.mockResolvedValue([providerRoute]);
+    mocks.recoverGeneral.mockResolvedValue([]);
     mocks.createCheckpoint.mockImplementation(async (input: Record<string, unknown>) => {
       const journal = mocks.journal as {
         run: Record<string, unknown>;
@@ -337,6 +343,30 @@ describe("authenticated runtime Mission graph composition", () => {
         lastEventId: input.routeSelectedEventId
       };
       return journal;
+    });
+    mocks.restoreCheckpoint.mockImplementation(async (input: Record<string, unknown>) => {
+      const journal = mocks.journal as {
+        run: Record<string, unknown>;
+        events: Array<Record<string, unknown>>;
+      };
+      const run = journal.run;
+      const sequence = Number(input.expectedLastSequence) + 1;
+      const revision = Number(input.expectedRunRevision) + 1;
+      journal.events.push({
+        id: input.eventId,
+        type: "checkpoint-restored",
+        sequence,
+        previousEventId: "checkpoint-general",
+        attemptNumber: input.newAttemptNumber,
+        payload: {
+          checkpointEventId: "checkpoint-general",
+          newAttemptNumber: input.newAttemptNumber
+        }
+      });
+      run.revision = revision;
+      run.currentAttemptNumber = input.newAttemptNumber;
+      run.eventHead = { lastSequence: sequence, lastEventId: input.eventId };
+      return { journal, checkpoint: {} };
     });
   });
 
@@ -518,6 +548,105 @@ describe("authenticated runtime Mission graph composition", () => {
     releaseWorkerB();
     await expect(execution).resolves.toMatchObject({ status: "complete" });
     expect(mocks.advance.mock.calls.length).toBeGreaterThan(advanceCountBeforeSettlement);
+  });
+
+  it("restores and freshly routes an exact interrupted provider batch", async () => {
+    const { workerA, workerB } = installFixture();
+    const routeSelection = {
+      providerRouteId: "provider-route-openai-gpt5",
+      selectedAt: "2026-07-23T10:00:00.000Z",
+      reason: "Selected the exact available route.",
+      boundaryPolicyRef: "boundary:test"
+    };
+    const journal = mocks.journal as {
+      run: Record<string, unknown>;
+      events: Array<Record<string, unknown>>;
+    };
+    journal.events.push(
+      { id: "start-a", type: "worker-started", sequence: 4, payload: { workerId: workerA.id } },
+      { id: "route-a", type: "route-selected", sequence: 5, previousEventId: "start-a",
+        payload: { workerId: workerA.id, providerId: "openai", modelReference: "gpt-5", selection: routeSelection } },
+      { id: "start-b", type: "worker-started", sequence: 6, payload: { workerId: workerB.id } },
+      { id: "route-b", type: "route-selected", sequence: 7, previousEventId: "start-b",
+        payload: { workerId: workerB.id, providerId: "openai", modelReference: "gpt-5", selection: routeSelection } },
+      { id: "checkpoint-general", type: "checkpoint-created", sequence: 8, previousEventId: "route-b",
+        payload: { checkpoint: { attemptNumber: 1, stateStorage: "portable-redacted",
+          executionNodeId: "local-desktop", replayBoundary: {
+            durableThroughSequence: 7, resumeAfterEventId: "route-b"
+          } } } }
+    );
+    journal.run.revision = 6;
+    journal.run.eventHead = { lastSequence: 8, lastEventId: "checkpoint-general" };
+    mocks.recoverGeneral.mockResolvedValue([{
+      status: "resumable",
+      runId: "run-1",
+      planRevisionId: "revision-1",
+      checkpointEventId: "checkpoint-general",
+      restoreEventId: "restore-general",
+      restoreIdempotencyKey: "restore-general-1",
+      activeWorkerIds: ["worker-a", "worker-b"],
+      activePlanStepKeys: ["a", "b"],
+      completedWorkerIds: [],
+      completedPlanStepKeys: [],
+      committedEffectKeys: [],
+      expectedRunRevision: 6,
+      expectedLastSequence: 8,
+      newAttemptNumber: 2,
+      requiresFreshRouteSelection: true
+    }]);
+    const backendRun = vi.fn((request: {
+      missionWorkerExecution?: { workerId: string };
+    }) => (async function* () {
+      const workerId = request.missionWorkerExecution!.workerId;
+      const stepKey = workerId === "worker-a" ? "a" : "b";
+      yield { type: "text-delta", text: `${stepKey} resumed` };
+      yield { type: "usage", inputTokens: 10, outputTokens: 3, costUsd: 0, costUnknown: true };
+      journal.events.push({
+        id: `${workerId}-completed`,
+        type: "worker-completed",
+        payload: { workerId, outputs: [{ key: stepKey, summary: `${stepKey} resumed`,
+          valueReference: `mission-output:${stepKey}` }] }
+      });
+      yield { type: "done", finishReason: "stop" };
+    })());
+    const backend = {
+      providerId: "openai",
+      backend: { backendType: "native-api" },
+      capabilities: [],
+      run: backendRun,
+      cancel: vi.fn(async () => {})
+    };
+
+    await expect(resumeInterruptedRuntimeProviderMissions({
+      resolveBackend: async () => backend as never
+    })).resolves.toEqual({
+      resumed: 1,
+      dormant: 0,
+      waiting: 0,
+      terminalized: 0,
+      failed: 0
+    });
+
+    expect(mocks.restoreCheckpoint).toHaveBeenCalledWith({
+      runId: "run-1",
+      eventId: "restore-general",
+      idempotencyKey: "restore-general-1",
+      expectedRunRevision: 6,
+      expectedLastSequence: 8,
+      newAttemptNumber: 2
+    });
+    expect(backendRun).toHaveBeenCalledTimes(2);
+    for (const [request] of backendRun.mock.calls) {
+      expect(request).toMatchObject({
+        missionWorkerExecution: {
+          expectedRunRevision: 7,
+          expectedLastSequence: 9,
+          checkpointEventId: "checkpoint-general",
+          checkpointRestoreEventId: "restore-general"
+        }
+      });
+    }
+    expect(mocks.startWorker).not.toHaveBeenCalled();
   });
 
   it("rejects tool-bearing general dispatch before any native start", async () => {

@@ -29,7 +29,15 @@ export interface LocalWorkerExecutionOutcome {
 /** Execute one already-authorized worker through the provider-neutral backend. */
 export async function executeLocalWorker(input: LocalWorkerExecutionInput): Promise<LocalWorkerExecutionOutcome> {
   const { worker } = input;
-  if (worker.status !== "proposed" && worker.status !== "queued" && !(worker.status === "running" && input.missionToolEvidence)) {
+  const resumesNativeCheckpoint =
+    worker.status === "running"
+    && Boolean(input.missionWorkerExecution?.checkpointRestoreEventId);
+  if (
+    worker.status !== "proposed"
+    && worker.status !== "queued"
+    && !(worker.status === "running" && input.missionToolEvidence)
+    && !resumesNativeCheckpoint
+  ) {
     throw new Error("Only a proposed or queued worker can start local execution.");
   }
   if (!input.prompt.trim()) throw new Error("Worker execution requires an explicit prompt.");

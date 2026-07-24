@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import { executeCitedBriefMission, resumeInterruptedCitedBriefMissions, type CitedBriefMissionPlanSummary } from "../lib/cited-brief-mission";
+import { resumeInterruptedRuntimeProviderMissions } from "../lib/runtime-mission-graph";
 import { useNativeAgent } from "../hooks/useNativeAgent";
 import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/useDurableConversation";
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
@@ -40,10 +41,26 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     citedRecoveryScopeRef.current = scopeKey;
     citedMissionRunningRef.current = true;
     setCitedMissionRunning(true);
-    void resumeInterruptedCitedBriefMissions({
-      backend: agent.backend,
-      onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
-    }).catch(() => {
+    const recoveryBackend = agent.backend;
+    void (async () => {
+      const cited = await Promise.allSettled([
+        resumeInterruptedCitedBriefMissions({
+          backend: recoveryBackend,
+          onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
+        })
+      ]);
+      const general = await Promise.allSettled([
+        resumeInterruptedRuntimeProviderMissions({
+          resolveBackend: (route) =>
+            recoveryBackend.providerId === route.providerFamily
+              ? recoveryBackend
+              : null,
+          onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
+        })
+      ]);
+      const failure = [...cited, ...general].find((result) => result.status === "rejected");
+      if (failure?.status === "rejected") throw failure.reason;
+    })().catch(() => {
       citedRecoveryScopeRef.current = null;
     }).finally(async () => {
       citedMissionRunningRef.current = false;
