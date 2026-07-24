@@ -98,6 +98,7 @@ function stubRuntime(overrides: Partial<ShellRuntime> = {}): ShellRuntime {
     retryWorkflowRun: vi.fn(async () => {}),
     cancelScheduledRun: vi.fn(async () => {}),
     createScheduleFromTrigger: vi.fn(),
+    createScheduledWork: vi.fn(async () => ({ id: "schedule-created", writer: "legacy" })),
     editScheduleFromTrigger: vi.fn(),
     toggleSchedule: vi.fn(),
     deleteSchedule: vi.fn(),
@@ -171,9 +172,9 @@ describe("Schedules Page & Runtime UI Integration", () => {
     // Submit form
     await user.click(screen.getByRole("button", { name: "Add Scheduled Task" }));
 
-    // Verifies onCreate (createScheduleFromTrigger) is called
-    expect(runtime.createScheduleFromTrigger).toHaveBeenCalledTimes(1);
-    expect(runtime.createScheduleFromTrigger).toHaveBeenCalledWith(expect.objectContaining({
+    // The form uses the fenced writer-aware creation path.
+    expect(runtime.createScheduledWork).toHaveBeenCalledTimes(1);
+    expect(runtime.createScheduledWork).toHaveBeenCalledWith(expect.objectContaining({
       name: "Integration Schedule",
       description: "Run system backup."
     }));
@@ -183,6 +184,26 @@ describe("Schedules Page & Runtime UI Integration", () => {
 
     // Focus is restored to the "New" button
     expect(newBtn).toHaveFocus();
+  });
+
+  it("keeps the create dialog open and explains a fenced-writer failure", async () => {
+    const user = userEvent.setup();
+    const runtime = stubRuntime({
+      createScheduledWork: vi.fn(async () => {
+        throw new Error("The background writer changed. Try again.");
+      })
+    });
+    render(<SchedulesPage runtime={runtime} />);
+
+    await user.click(screen.getByRole("button", { name: /^New$/i }));
+    await user.type(screen.getByLabelText(/^Name$/i), "Morning brief");
+    await user.type(screen.getByLabelText(/^Prompt$/i), "Summarize today.");
+    await user.click(screen.getByRole("button", { name: "Add Scheduled Task" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The background writer changed. Try again."
+    );
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 
   it("integrates RunHistoryPage navigation, viewing failed run detail, and triggering retry", async () => {

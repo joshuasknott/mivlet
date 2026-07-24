@@ -93,7 +93,7 @@ export function SchedulePanel({
     trigger: SchedulePanelTrigger;
     missedRunPolicy?: MissedRunPolicy;
     connectorIds?: string[];
-  }) => void;
+  }) => void | Promise<unknown>;
   onEdit: (input: {
     jobId: string;
     name: string;
@@ -111,6 +111,8 @@ export function SchedulePanel({
 }) {
   const [form, setForm] = useState<ScheduleFormValue>(CREATE_FORM_VALUE);
   const [submitted, setSubmitted] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -120,6 +122,8 @@ export function SchedulePanel({
   const resetForm = () => {
     setForm(CREATE_FORM_VALUE);
     setSubmitted(false);
+    setSubmitError(null);
+    setSaving(false);
   };
 
   useEffect(() => {
@@ -146,20 +150,29 @@ export function SchedulePanel({
     }
   };
 
-  const submit = (event: FormEvent) => {
+  const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSubmitted(true);
+    setSubmitError(null);
     if (!validation.valid || !draftTrigger) return;
-    onCreate({
-      name: form.name.trim(),
-      description: form.prompt.trim(),
-      trigger: draftTrigger,
-      missedRunPolicy: form.missedRunPolicy,
-      connectorIds: form.connectorIds
-    });
-    resetForm();
-    if (onRequestCloseCreateModal) {
-      onRequestCloseCreateModal();
+    setSaving(true);
+    try {
+      await onCreate({
+        name: form.name.trim(),
+        description: form.prompt.trim(),
+        trigger: draftTrigger,
+        missedRunPolicy: form.missedRunPolicy,
+        connectorIds: form.connectorIds
+      });
+      resetForm();
+      if (onRequestCloseCreateModal) {
+        onRequestCloseCreateModal();
+      }
+    } catch (reason) {
+      setSubmitError(
+        reason instanceof Error ? reason.message : "Scheduled work could not be saved."
+      );
+      setSaving(false);
     }
   };
 
@@ -223,7 +236,7 @@ export function SchedulePanel({
               </button>
             </div>
 
-            <form onSubmit={submit} className="schedule-modal__form">
+            <form onSubmit={(event) => void submit(event)} className="schedule-modal__form">
               <div className="schedule-modal__row">
                 <label htmlFor="schedule-name" className="schedule-modal__label">Name</label>
                 <input
@@ -270,12 +283,17 @@ export function SchedulePanel({
               </div>
 
               <div className="schedule-modal__actions">
+                {submitError ? (
+                  <span className="schedule-modal__error" role="alert">
+                    {submitError}
+                  </span>
+                ) : null}
                 <button
                   type="submit"
                   className="button button--primary schedule-modal__submit"
-                  disabled={!validation.valid}
+                  disabled={!validation.valid || saving}
                 >
-                  Add Scheduled Task
+                  {saving ? "Savingâ€¦" : "Add Scheduled Task"}
                 </button>
               </div>
             </form>

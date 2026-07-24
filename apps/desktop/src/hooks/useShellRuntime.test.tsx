@@ -690,6 +690,8 @@ describe("useShellRuntime — durable schedule contracts", () => {
     vi.mocked(runtime.listRuntimeWorkflowDefinitions).mockResolvedValue(null);
     vi.mocked(runtime.listRuntimeWorkflowRuns).mockResolvedValue(null);
     vi.mocked(runtime.cancelRuntimeJobRun).mockResolvedValue(null);
+    vi.mocked(runtime.getRuntimeRoutineSchedulerStatus).mockResolvedValue(null);
+    vi.mocked(runtime.createRuntimeRoutine).mockResolvedValue(null);
   });
 
   it("composes connector-first schedules through the searchable connector boundary", async () => {
@@ -744,6 +746,72 @@ describe("useShellRuntime — durable schedule contracts", () => {
     await waitFor(() => expect(runtime.saveRuntimeScheduledJob).toHaveBeenCalledOnce());
     expect(vi.mocked(runtime.saveRuntimeWorkflowDefinition).mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(runtime.saveRuntimeScheduledJob).mock.invocationCallOrder[0]);
+  });
+
+  it("routes the schedule form through the canonical writer after cutover", async () => {
+    vi.mocked(runtime.getRuntimeRoutineSchedulerStatus).mockResolvedValue({
+      authority: {
+        workspaceId: "workspace-1",
+        writer: "routine",
+        phase: "routine",
+        epoch: 3,
+        fenceToken: "fence",
+        updatedAt: "2026-07-01T00:00:00.000Z"
+      },
+      readyForCutover: true,
+      blockers: [],
+      activeLegacyJobs: 0,
+      mappedLegacyJobs: 0,
+      futureLegacyOccurrences: 0,
+      terminalLegacyOccurrences: 0,
+      routineDriverOccurrences: 0
+    });
+    vi.mocked(runtime.createRuntimeRoutine).mockResolvedValue({
+      routine: { id: "routine-1" },
+      currentVersion: {},
+      triggers: []
+    } as never);
+    const changed = vi.fn();
+    window.addEventListener("fable:routines-changed", changed);
+    const { result } = renderHook(() => useShellRuntime());
+
+    const created = await act(() =>
+      result.current.createScheduledWork({
+        name: "Weekly digest",
+        description: "Summarize work.",
+        trigger: {
+          kind: "recurring",
+          rule: {
+            frequency: "weekly",
+            interval: 1,
+            byWeekday: ["Fri"],
+            hour: 9,
+            minute: 30,
+            timezone: "Europe/London"
+          }
+        },
+        missedRunPolicy: "skip"
+      })
+    );
+
+    expect(created).toEqual({ id: "routine-1", writer: "routine" });
+    expect(runtime.createRuntimeRoutine).toHaveBeenCalledWith({
+      title: "Weekly digest",
+      instruction: "Summarize work.",
+      trigger: {
+        kind: "time-recurring",
+        timezone: "Europe/London",
+        recurrence: {
+          frequency: "weekly",
+          expression:
+            'legacy-rrule-lite:v1:{"frequency":"weekly","interval":1,"byWeekday":["Fri"],"byMonthDay":null,"hour":9,"minute":30}'
+        },
+        missedRunPolicy: "skip"
+      }
+    });
+    expect(runtime.saveRuntimeScheduledJob).not.toHaveBeenCalled();
+    expect(changed).toHaveBeenCalledOnce();
+    window.removeEventListener("fable:routines-changed", changed);
   });
 
   it("persists a cancelled workflow run with terminal timestamps", async () => {

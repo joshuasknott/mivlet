@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import type { ScheduleWeekday } from "@fable/protocol";
 import {
   beginRuntimeRoutineSchedulerShadow,
   createRuntimeRoutine,
@@ -30,14 +31,90 @@ function describeTrigger(trigger: RuntimeRoutineBundle["triggers"][number] | und
   return spec.kind.replaceAll("-", " ");
 }
 
-function timeTrigger(cadence: "once" | "daily", localTime: string): RuntimeRoutineTriggerSpec {
+const ROUTINE_WEEKDAYS: ScheduleWeekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+type RoutineCadence = "once" | "daily" | "weekly" | "monthly";
+
+interface RoutineTimeDraft {
+  cadence: RoutineCadence;
+  time: string;
+  onceAt: string;
+  weekday: ScheduleWeekday;
+  monthDay: number;
+}
+
+function localDateTimeValue(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
+
+function routineTimeDraft(
+  trigger: RuntimeRoutineBundle["triggers"][number] | undefined
+): RoutineTimeDraft | null {
+  if (!trigger) return null;
+  if (trigger.spec.kind === "time-once") {
+    return {
+      cadence: "once",
+      time: "09:00",
+      onceAt: localDateTimeValue(trigger.spec.at),
+      weekday: "Mon",
+      monthDay: 1
+    };
+  }
+  if (trigger.spec.kind !== "time-recurring") return null;
+  const prefix = "legacy-rrule-lite:v1:";
+  if (!trigger.spec.recurrence.expression.startsWith(prefix)) return null;
+  try {
+    const rule = JSON.parse(trigger.spec.recurrence.expression.slice(prefix.length)) as {
+      frequency?: unknown;
+      interval?: unknown;
+      byWeekday?: unknown;
+      byMonthDay?: unknown;
+      hour?: unknown;
+      minute?: unknown;
+    };
+    if (
+      !["daily", "weekly", "monthly"].includes(String(rule.frequency)) ||
+      rule.interval !== 1 ||
+      !Number.isInteger(rule.hour) ||
+      !Number.isInteger(rule.minute)
+    ) {
+      return null;
+    }
+    const ruleWeekdays = Array.isArray(rule.byWeekday) ? rule.byWeekday : [];
+    const weekday = ROUTINE_WEEKDAYS.find((day) => ruleWeekdays.includes(day)) ?? "Mon";
+    const monthDay =
+      Number.isInteger(rule.byMonthDay) &&
+      Number(rule.byMonthDay) >= 1 &&
+      Number(rule.byMonthDay) <= 31
+        ? Number(rule.byMonthDay)
+        : 1;
+    return {
+      cadence: rule.frequency as Exclude<RoutineCadence, "once">,
+      time: `${String(Number(rule.hour)).padStart(2, "0")}:${String(Number(rule.minute)).padStart(2, "0")}`,
+      onceAt: "",
+      weekday,
+      monthDay
+    };
+  } catch {
+    return null;
+  }
+}
+
+function routineDraftKey(draft: RoutineTimeDraft) {
+  return JSON.stringify(draft);
+}
+
+function routineTimeTrigger(draft: RoutineTimeDraft): RuntimeRoutineTriggerSpec {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  if (cadence === "once") {
-    const at = new Date(localTime);
+  if (draft.cadence === "once") {
+    const at = new Date(draft.onceAt);
     if (Number.isNaN(at.valueOf())) throw new Error("Choose a valid date and time.");
     return { kind: "time-once", at: at.toISOString(), timezone };
   }
-  const [hour, minute] = localTime.split(":").map(Number);
+  const [hour, minute] = draft.time.split(":").map(Number);
   if (
     !Number.isInteger(hour) ||
     !Number.isInteger(minute) ||
@@ -46,18 +123,21 @@ function timeTrigger(cadence: "once" | "daily", localTime: string): RuntimeRouti
     minute < 0 ||
     minute > 59
   ) {
-    throw new Error("Choose a valid daily time.");
+    throw new Error("Choose a valid time.");
+  }
+  if (draft.cadence === "monthly" && (draft.monthDay < 1 || draft.monthDay > 31)) {
+    throw new Error("Choose a day from 1 to 31.");
   }
   return {
     kind: "time-recurring",
     timezone,
     recurrence: {
-      frequency: "daily",
+      frequency: draft.cadence,
       expression: `legacy-rrule-lite:v1:${JSON.stringify({
-        frequency: "daily",
+        frequency: draft.cadence,
         interval: 1,
-        byWeekday: [],
-        byMonthDay: null,
+        byWeekday: draft.cadence === "weekly" ? [draft.weekday] : [],
+        byMonthDay: draft.cadence === "monthly" ? draft.monthDay : null,
         hour,
         minute
       })}`
@@ -66,7 +146,15 @@ function timeTrigger(cadence: "once" | "daily", localTime: string): RuntimeRouti
   };
 }
 
-export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }) {
+export function RoutinePanel({
+  onRun,
+  draft,
+  onDraftConsumed
+}: {
+  onRun: (instruction: string) => void;
+  draft?: { title: string; instruction: string } | null;
+  onDraftConsumed?: () => void;
+}) {
   const [routines, setRoutines] = useState<RuntimeRoutineBundle[]>([]);
   const [nativeAvailable, setNativeAvailable] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
@@ -76,9 +164,13 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
   const [editing, setEditing] = useState<RuntimeRoutineBundle | null>(null);
   const [title, setTitle] = useState("");
   const [instruction, setInstruction] = useState("");
-  const [cadence, setCadence] = useState<"once" | "daily">("daily");
+  const [cadence, setCadence] = useState<RoutineCadence>("daily");
   const [time, setTime] = useState("09:00");
   const [onceAt, setOnceAt] = useState("");
+  const [weekday, setWeekday] = useState<ScheduleWeekday>("Mon");
+  const [monthDay, setMonthDay] = useState(1);
+  const [originalTimeDraft, setOriginalTimeDraft] = useState<string | null>(null);
+  const [triggerEditable, setTriggerEditable] = useState(true);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [history, setHistory] = useState<RuntimeRoutineOccurrence[]>([]);
   const [schedulerStatus, setSchedulerStatus] =
@@ -110,7 +202,27 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
 
   useEffect(() => {
     void refresh();
+    const handleChange = () => void refresh();
+    window.addEventListener("fable:routines-changed", handleChange);
+    return () => window.removeEventListener("fable:routines-changed", handleChange);
   }, []);
+
+  useEffect(() => {
+    if (!draft) return;
+    setEditing(null);
+    setCreating(true);
+    setTitle(draft.title);
+    setInstruction(draft.instruction);
+    setCadence("daily");
+    setTime("09:00");
+    setOnceAt("");
+    setWeekday("Mon");
+    setMonthDay(1);
+    setOriginalTimeDraft(null);
+    setTriggerEditable(true);
+    setNotice("Choose when this should run, then save it.");
+    onDraftConsumed?.();
+  }, [draft, onDraftConsumed]);
 
   const closeEditor = () => {
     setCreating(false);
@@ -120,6 +232,10 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
     setCadence("daily");
     setTime("09:00");
     setOnceAt("");
+    setWeekday("Mon");
+    setMonthDay(1);
+    setOriginalTimeDraft(null);
+    setTriggerEditable(true);
   };
 
   const submit = async (event: FormEvent) => {
@@ -127,12 +243,18 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
     setError(null);
     setNotice(null);
     try {
+      const draft = { cadence, time, onceAt, weekday, monthDay };
       if (editing) {
+        const trigger =
+          triggerEditable && originalTimeDraft !== routineDraftKey(draft)
+            ? routineTimeTrigger(draft)
+            : undefined;
         const updated = await editRuntimeRoutine({
           routineId: editing.routine.id,
           expectedRevision: editing.routine.revision,
           title,
-          instruction
+          instruction,
+          ...(trigger ? { trigger } : {})
         });
         if (updated) {
           setRoutines((items) =>
@@ -141,7 +263,7 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
         }
         setNotice("Routine updated.");
       } else {
-        const trigger = timeTrigger(cadence, cadence === "once" ? onceAt : time);
+        const trigger = routineTimeTrigger(draft);
         const created = await createRuntimeRoutine({ title, instruction, trigger });
         if (created) setRoutines((items) => [created, ...items]);
         setNotice("Routine saved locally.");
@@ -317,31 +439,69 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
               onChange={(event) => setInstruction(event.target.value)}
             />
           </label>
-          {!editing ? (
+          {!editing || triggerEditable ? (
             <div className="routine-editor__time">
               <label>
                 When
                 <select
                   value={cadence}
-                  onChange={(event) => setCadence(event.target.value as "once" | "daily")}
+                  onChange={(event) => setCadence(event.target.value as RoutineCadence)}
+                  aria-label="Routine frequency"
                 >
                   <option value="daily">Every day</option>
+                  <option value="weekly">Every week</option>
+                  <option value="monthly">Every month</option>
                   <option value="once">Once</option>
                 </select>
               </label>
+              {cadence === "weekly" ? (
+                <label>
+                  Day
+                  <select
+                    value={weekday}
+                    onChange={(event) => setWeekday(event.target.value as ScheduleWeekday)}
+                    aria-label="Routine weekday"
+                  >
+                    {ROUTINE_WEEKDAYS.map((day) => (
+                      <option key={day} value={day}>
+                        {day}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
+              {cadence === "monthly" ? (
+                <label>
+                  Day of month
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    max={31}
+                    value={monthDay}
+                    onChange={(event) => setMonthDay(Number(event.target.value))}
+                    aria-label="Routine day of month"
+                  />
+                </label>
+              ) : null}
               <label>
-                {cadence === "daily" ? "Time" : "Date and time"}
+                {cadence === "once" ? "Date and time" : "Time"}
                 <input
                   required
-                  type={cadence === "daily" ? "time" : "datetime-local"}
-                  value={cadence === "daily" ? time : onceAt}
+                  type={cadence === "once" ? "datetime-local" : "time"}
+                  value={cadence === "once" ? onceAt : time}
                   onChange={(event) =>
-                    cadence === "daily" ? setTime(event.target.value) : setOnceAt(event.target.value)
+                    cadence === "once" ? setOnceAt(event.target.value) : setTime(event.target.value)
                   }
+                  aria-label={cadence === "once" ? "Routine date and time" : "Routine time"}
                 />
               </label>
             </div>
-          ) : null}
+          ) : (
+            <p className="routine-preview-note" role="note">
+              This trigger type is preserved as-is and cannot be edited here yet.
+            </p>
+          )}
           <div className="routine-editor__actions">
             <button type="button" className="secondary-button" onClick={closeEditor}>
               Cancel
@@ -387,9 +547,23 @@ export function RoutinePanel({ onRun }: { onRun: (instruction: string) => void }
               <button
                 type="button"
                 onClick={() => {
+                  const draft = routineTimeDraft(
+                    bundle.triggers.find((trigger) => trigger.status === "active")
+                  );
                   setEditing(bundle);
                   setTitle(bundle.routine.title);
                   setInstruction(bundle.currentVersion.action.instruction);
+                  setTriggerEditable(draft !== null);
+                  if (draft) {
+                    setCadence(draft.cadence);
+                    setTime(draft.time);
+                    setOnceAt(draft.onceAt);
+                    setWeekday(draft.weekday);
+                    setMonthDay(draft.monthDay);
+                    setOriginalTimeDraft(routineDraftKey(draft));
+                  } else {
+                    setOriginalTimeDraft(null);
+                  }
                 }}
               >
                 Edit

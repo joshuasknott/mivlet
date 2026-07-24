@@ -476,6 +476,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       };
     }>
   >([]);
+  const [pendingRoutineDraft, setPendingRoutineDraft] = useState<{
+    title: string;
+    instruction: string;
+  } | null>(null);
   const queueRoutineWorkflowRunRef = useRef<
     (event: RuntimeRoutineRunRequest) => void
   >(() => undefined);
@@ -2953,6 +2957,67 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return job;
   };
 
+  const createScheduledWork = async (input: {
+    name: string;
+    description: string;
+    trigger: ScheduleTrigger;
+    missedRunPolicy?: MissedRunPolicy;
+    connectorIds?: string[];
+  }): Promise<{ id: string; writer: "legacy" | "routine" }> => {
+    const schedulerStatus = await getRuntimeRoutineSchedulerStatus();
+    if (schedulerStatus?.authority.writer !== "routine") {
+      return { id: createScheduleFromTrigger(input).id, writer: "legacy" };
+    }
+    if (input.connectorIds?.length) {
+      throw new Error(
+        "Selected source bindings are not yet supported by Routines. Remove them before saving."
+      );
+    }
+    const trigger =
+      input.trigger.kind === "once"
+        ? {
+            kind: "time-once" as const,
+            at: new Date(input.trigger.at).toISOString(),
+            timezone: "UTC"
+          }
+        : {
+            kind: "time-recurring" as const,
+            timezone: input.trigger.rule.timezone ?? "UTC",
+            recurrence: {
+              frequency: input.trigger.rule.frequency,
+              expression: `legacy-rrule-lite:v1:${JSON.stringify({
+                frequency: input.trigger.rule.frequency,
+                interval: input.trigger.rule.interval,
+                byWeekday: input.trigger.rule.byWeekday ?? [],
+                byMonthDay: input.trigger.rule.byMonthDay ?? null,
+                hour: input.trigger.rule.hour,
+                minute: input.trigger.rule.minute
+              })}`,
+              ...(input.trigger.rule.until ? { until: input.trigger.rule.until } : {})
+            },
+            missedRunPolicy: input.missedRunPolicy ?? "run-once"
+          };
+    const routine = await createRuntimeRoutine({
+      title: input.name,
+      instruction: input.description,
+      trigger
+    });
+    if (!routine) throw new Error("Routines require the Fable desktop app.");
+    window.dispatchEvent(new Event("fable:routines-changed"));
+    setLastAction(`Routine created: ${input.name}`);
+    return { id: routine.routine.id, writer: "routine" };
+  };
+
+  const openRoutineDraft = (draft: { title: string; instruction: string }) => {
+    setPendingRoutineDraft({
+      title: draft.title.trim().slice(0, 160),
+      instruction: draft.instruction.trim().slice(0, 8_000)
+    });
+    setActiveItem("Schedules");
+  };
+
+  const clearRoutineDraft = () => setPendingRoutineDraft(null);
+
   /**
    * Create a structured workspace goal (/goal). Non-secret by construction —
    * only a title, the user's statement, and lifecycle bookkeeping. Surfaced
@@ -3055,41 +3120,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const commandRuntime: CommandRuntime = {
     createMemory: (input) => Promise.resolve(createMemoryFromCommand(input)),
     createSchedule: async (input) => {
-      const schedulerStatus = await getRuntimeRoutineSchedulerStatus();
-      if (schedulerStatus?.authority.writer === "routine") {
-        const trigger =
-          input.trigger.kind === "once"
-            ? {
-                kind: "time-once" as const,
-                at: new Date(input.trigger.at).toISOString(),
-                timezone: "UTC"
-              }
-            : {
-                kind: "time-recurring" as const,
-                timezone: input.trigger.rule.timezone ?? "UTC",
-                recurrence: {
-                  frequency: input.trigger.rule.frequency,
-                  expression: `legacy-rrule-lite:v1:${JSON.stringify({
-                    frequency: input.trigger.rule.frequency,
-                    interval: input.trigger.rule.interval,
-                    byWeekday: input.trigger.rule.byWeekday ?? [],
-                    byMonthDay: input.trigger.rule.byMonthDay ?? null,
-                    hour: input.trigger.rule.hour,
-                    minute: input.trigger.rule.minute
-                  })}`,
-                  ...(input.trigger.rule.until ? { until: input.trigger.rule.until } : {})
-                },
-                missedRunPolicy: "run-once" as const
-              };
-        const routine = await createRuntimeRoutine({
-          title: input.name,
-          instruction: input.description,
-          trigger
-        });
-        if (!routine) throw new Error("Routines require the Fable desktop app.");
-        return { id: routine.routine.id };
-      }
-      return createScheduleFromTrigger(input);
+      const created = await createScheduledWork(input);
+      return { id: created.id };
     },
     createGoal,
     createPlan: (input) => Promise.resolve(createPlan(input)),
@@ -3847,6 +3879,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     schedules,
     createSchedule,
     createScheduleFromTrigger,
+    createScheduledWork,
+    pendingRoutineDraft,
+    openRoutineDraft,
+    clearRoutineDraft,
     editScheduleFromTrigger,
     toggleSchedule,
     deleteSchedule,

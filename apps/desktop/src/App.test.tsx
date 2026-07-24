@@ -337,6 +337,8 @@ vi.mock("./runtime", () => ({
   reconcileRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   createRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   createRuntimeRoutine: vi.fn(async () => null),
+  listRuntimeRoutines: vi.fn(async () => []),
+  listRuntimeRoutineHistory: vi.fn(async () => []),
   getRuntimeRoutineSchedulerStatus: vi.fn(async () => null),
   selectRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   revokeRuntimeAccountDevice: vi.fn(async () => runtimeMocks.accountStatus),
@@ -2512,6 +2514,39 @@ describe("Fable home", () => {
       expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
+  });
+
+  it("turns a completed request into an editable Routine draft without auto-saving it", async () => {
+    installDesktopRuntime();
+    runtimeMocks.backends = [
+      {
+        id: "openai",
+        backendType: "native-api",
+        label: "OpenAI",
+        description: "OpenAI native",
+        authState: "connected",
+        capabilities: ["authentication", "threads", "streaming"],
+        models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+      }
+    ];
+    runtimeMocks.lines = [
+      'data: {"choices":[{"delta":{"content":"Weekly summary ready."}}]}',
+      'data: {"choices":[{"finish_reason":"stop"}]}'
+    ];
+    const user = userEvent.setup();
+    render(<App />);
+
+    const composer = await screen.findByLabelText(/universal composer/i);
+    await user.type(composer, "Summarize the project every Friday.");
+    await user.click(screen.getByRole("button", { name: /send prompt/i }));
+    await screen.findByText("Weekly summary ready.");
+    await user.click(await screen.findByRole("button", { name: "Run this again later" }));
+
+    expect(await screen.findByRole("heading", { name: "New routine" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Summarize the project every Friday");
+    expect(screen.getByLabelText("What should Fable do?")).toHaveValue(
+      "Summarize the project every Friday."
+    );
   });
 
   it("drives a cooperative cancel from the Fable stop command while work is running", async () => {

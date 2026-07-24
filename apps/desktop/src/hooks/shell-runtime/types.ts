@@ -162,6 +162,22 @@ export interface ShellRuntime {
     connectorIds?: string[];
   }) => ScheduledJob;
   /**
+   * Create scheduled work through the currently fenced writer. Before cutover
+   * this creates a legacy schedule; after cutover it creates a canonical
+   * Routine with the same time semantics.
+   */
+  createScheduledWork: (input: {
+    name: string;
+    description: string;
+    trigger: ScheduleTrigger;
+    missedRunPolicy?: MissedRunPolicy;
+    connectorIds?: string[];
+  }) => Promise<{ id: string; writer: "legacy" | "routine" }>;
+  /** Transient chat-to-Routine draft; never persisted until the user saves. */
+  pendingRoutineDraft: { title: string; instruction: string } | null;
+  openRoutineDraft: (draft: { title: string; instruction: string }) => void;
+  clearRoutineDraft: () => void;
+  /**
    * Edit an existing job's name/prompt/trigger in place. Reuses the durable
    * store path and re-enqueues the next occurrence. The Schedules UI uses this
    * so edits can change the recurrence frequency, not just the weekday.

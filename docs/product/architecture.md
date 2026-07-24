@@ -141,6 +141,13 @@ scheduler and Routine scheduler from both writing. Legacy records without exact
 persisted member ownership quarantine instead of inheriting the active session
 identity.
 
+The `/schedule` command and visible Scheduled Task form resolve that same writer
+before creation. After cutover they translate one-time, daily, weekly, or
+monthly input into the canonical time-trigger contract; before cutover they use
+the legacy job path. The Routine editor round-trips those same recurrence
+details, and a successful ordinary chat response can open a transient Routine
+draft without persisting it before explicit save.
+
 For records created after this boundary, native commands overwrite renderer
 identity and stamp the authenticated workspace, project, member, and creator on
 the schedule and immutable workflow version. Queue occurrences and workflow runs

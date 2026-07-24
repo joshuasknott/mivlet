@@ -53,7 +53,7 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         loading={!runtime.schedulesReady && runtime.scheduledJobs.length === 0}
         loadError={runtime.scheduleLoadError}
         onRetryLoad={runtime.retryScheduleLoad}
-        onCreate={runtime.createScheduleFromTrigger}
+        onCreate={runtime.createScheduledWork}
         onEdit={runtime.editScheduleFromTrigger}
         onToggle={runtime.toggleSchedule}
         onDelete={runtime.deleteSchedule}
@@ -63,7 +63,11 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
         isCreateModalOpen={isCreateModalOpen}
         onRequestCloseCreateModal={handleCloseCreateModal}
       />
-      <RoutinePanel onRun={(instruction) => runtime.submitPrompt(instruction)} />
+      <RoutinePanel
+        onRun={(instruction) => runtime.submitPrompt(instruction)}
+        draft={runtime.pendingRoutineDraft}
+        onDraftConsumed={runtime.clearRoutineDraft}
+      />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">
           <summary>Notification history</summary>

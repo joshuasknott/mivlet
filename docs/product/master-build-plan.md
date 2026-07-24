@@ -845,8 +845,15 @@ saved policy at run time; a deliberate route pin without exact native binding fa
 closed instead of being guessed.
 
 The calm local Routine surface supports create, edit, pause, resume, delete,
-history, run-in-chat, and compatible migration; browser preview labels encrypted
-durability unavailable instead of using fixtures. Forward ownership capture is
+history, run-in-chat, and compatible migration. Its editor now preserves and
+changes one-time, daily, weekly, and monthly timing instead of silently reducing
+everything to daily. The existing Scheduled Task form and `/schedule` resolve
+the same fenced writer, so both create canonical Routines after cutover and
+legacy jobs before it; rejected writes remain visible in the open form. A
+completed ordinary chat response offers `Run this again later`, which opens a
+transient prefilled Routine draft and persists nothing until the user chooses a
+time and saves. Browser preview labels encrypted durability unavailable instead
+of using fixtures. Forward ownership capture is
 implemented, while attribution of already-ambiguous legacy rows remains
 deliberately impossible. Rollback after canonical execution, event triggers, general recurrence,
 workspace-shared writes, packaged restart observation, and live provider validation
@@ -862,7 +869,8 @@ remain open, so the broader migration and experience checkboxes stay unchecked.
 
 Repo-local evidence: canonical time triggers now cover timezone/DST calculation,
 bounded missed-run policy, exact occurrence deduplication, fenced leases, crash
-recovery, retry, restart cursors, and immutable history. Signed webhooks,
+recovery, retry, restart cursors, immutable history, and matching one-time,
+daily, weekly, and monthly form/command editing. Signed webhooks,
 Connection events, thresholds, monitoring/follow-up inputs, and their untrusted
 payload normalization remain open; therefore the aggregate checkboxes stay open.
 

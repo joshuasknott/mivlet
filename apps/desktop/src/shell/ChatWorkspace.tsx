@@ -867,7 +867,7 @@ export function ChatWorkspace() {
       && pendingMissionInputs.length === 0 && !approvalListWarning && !missionInputListWarning) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
-        {conversationMessages.map((message) => {
+        {conversationMessages.map((message, messageIndex) => {
           const citedApproval = message.approvalRunId
             ? pendingCitedApprovals.find((approval) => approval.runId === message.approvalRunId)
             : undefined;
@@ -887,6 +887,16 @@ export function ChatWorkspace() {
               || message.missionOutcome === "cancelled");
           const newMissionBusy = citedMissionRunning || parallelMissionRunning || agent.state.running || Boolean(pendingPrompt)
             || newMissionSourceMessageId !== null;
+          const sourceRequest = [...conversationMessages.slice(0, messageIndex)]
+            .reverse()
+            .find((candidate) => candidate.role === "user");
+          const canCreateRoutine =
+            message.role === "assistant" &&
+            Boolean(message.runId) &&
+            Boolean(sourceRequest?.content.trim()) &&
+            !message.missionOutcome &&
+            !agent.state.recoverableRuns.some((run) => run.id === message.runId) &&
+            !(agent.state.running && agent.state.currentRunId === message.runId);
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
@@ -922,6 +932,22 @@ export function ChatWorkspace() {
                     newMissionSourceMessageId: message.id
                   })}
                 />
+              ) : null}
+              {canCreateRoutine && sourceRequest ? (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    runtime.openRoutineDraft({
+                      title:
+                        sourceRequest.content.trim().split(/[.!?\n]/)[0]?.slice(0, 160) ||
+                        "Saved routine",
+                      instruction: sourceRequest.content
+                    })
+                  }
+                >
+                  Run this again later
+                </button>
               ) : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
                 <ProviderRouteSummary
