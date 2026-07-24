@@ -62,7 +62,9 @@ export interface ExecuteRuntimeProviderMissionGraphInput {
  *
  * Route selection is fresh but remains inside each worker's immutable policy.
  * All ready workers are preflighted and durably started in one serialized batch
- * before their provider egress can run in parallel.
+ * before their provider egress can run in parallel. The graph observes the
+ * ready batch only after every native worker has reached a terminal fact, so a
+ * fast `any` join cannot race a still-settling sibling.
  */
 export async function executeRuntimeProviderMissionGraph(
   input: ExecuteRuntimeProviderMissionGraphInput
@@ -197,8 +199,13 @@ class RuntimeProviderWorkerStarter {
         started.push({ ...item, ...binding });
       }
       const executionHead = runHead(journal);
-      for (const item of started) {
-        void this.executeStarted(item, executionHead).then(item.resolve, item.reject);
+      const results = await Promise.allSettled(
+        started.map((item) => this.executeStarted(item, executionHead))
+      );
+      for (const [index, item] of started.entries()) {
+        const result = results[index];
+        if (result?.status === "rejected") item.reject(result.reason);
+        else item.resolve();
       }
     } catch (error) {
       for (const item of batch) item.reject(error);

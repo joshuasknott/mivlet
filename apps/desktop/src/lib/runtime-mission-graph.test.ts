@@ -414,6 +414,70 @@ describe("authenticated runtime Mission graph composition", () => {
     });
   });
 
+  it("does not advance the durable graph until every provider sibling settles", async () => {
+    installFixture();
+    let releaseWorkerA!: () => void;
+    let releaseWorkerB!: () => void;
+    let workerACompleted!: () => void;
+    let bothStarted!: () => void;
+    const workerAGate = new Promise<void>((resolve) => { releaseWorkerA = resolve; });
+    const workerBGate = new Promise<void>((resolve) => { releaseWorkerB = resolve; });
+    const workerACompletion = new Promise<void>((resolve) => { workerACompleted = resolve; });
+    const bothStartedPromise = new Promise<void>((resolve) => { bothStarted = resolve; });
+    let startedCount = 0;
+    const backend = {
+      providerId: "openai",
+      backend: { backendType: "native-api" },
+      capabilities: [],
+      run: vi.fn((request: {
+        missionWorkerExecution?: { workerId: string };
+      }) => (async function* () {
+        startedCount += 1;
+        if (startedCount === 2) bothStarted();
+        const workerId = request.missionWorkerExecution!.workerId;
+        await (workerId === "worker-a" ? workerAGate : workerBGate);
+        const stepKey = workerId === "worker-a" ? "a" : "b";
+        yield { type: "text-delta", text: `${stepKey} output` };
+        yield {
+          type: "usage",
+          inputTokens: 20,
+          outputTokens: 4,
+          costUsd: 0,
+          costUnknown: true
+        };
+        (mocks.journal!.events as Array<Record<string, unknown>>).push({
+          id: `${workerId}-completed`,
+          type: "worker-completed",
+          payload: {
+            workerId,
+            outputs: [{
+              key: stepKey,
+              summary: `${stepKey} output`,
+              valueReference: `mission-output:${stepKey}`
+            }]
+          }
+        });
+        if (workerId === "worker-a") workerACompleted();
+        yield { type: "done", finishReason: "stop" };
+      })()),
+      cancel: vi.fn(async () => {})
+    };
+    const execution = executeRuntimeProviderMissionGraph({
+      runId: "run-1",
+      resolveBackend: async () => backend as never
+    });
+    await bothStartedPromise;
+    const advanceCountBeforeSettlement = mocks.advance.mock.calls.length;
+    releaseWorkerA();
+    await workerACompletion;
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mocks.advance).toHaveBeenCalledTimes(advanceCountBeforeSettlement);
+    releaseWorkerB();
+    await expect(execution).resolves.toMatchObject({ status: "complete" });
+    expect(mocks.advance.mock.calls.length).toBeGreaterThan(advanceCountBeforeSettlement);
+  });
+
   it("rejects tool-bearing general dispatch before any native start", async () => {
     installFixture();
     const created = (mocks.journal!.events as Array<Record<string, unknown>>)

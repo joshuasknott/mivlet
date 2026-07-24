@@ -180,8 +180,10 @@ already-authorized backend, serializes all native starts in the ready batch, and
 only then permits their provider egress to run in parallel against one shared
 durable head. Rust rechecks the saved worker policy before appending route facts;
 concurrent settlement advances only across exact usage and terminal facts for
-other known provider-only siblings. The graph cannot advance until native
-settlement exposes a terminal worker fact.
+other known provider-only siblings. Provider egress remains concurrent, but the
+desktop releases the ready batch back to graph coordination only after every
+sibling has settled to a native terminal fact. A fast `any` outcome therefore
+cannot append coordination facts across a still-settling sibling.
 Tool-bearing composition and general restart dispatch remain separate boundaries.
 A native-owned bounded advance command can settle every
 currently decidable declared join and reference-only coordinate aggregation in

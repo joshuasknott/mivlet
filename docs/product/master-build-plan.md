@@ -961,8 +961,11 @@ head before provider egress runs in parallel. Rust independently rechecks the
 saved route and placement policy. Native settlement accepts journal advancement
 only from exact usage-plus-terminal facts for other known provider-only
 siblings; unknown workers, self-substitution, gaps, and unrelated event kinds
-fail closed. Each terminal append uses the latest validated head before the
-graph advances. Tool-bearing native grant composition and
+fail closed. Each terminal append uses the latest validated head, and the
+desktop does not return any member of the ready batch to graph coordination
+until every sibling has a native terminal fact. This keeps provider work
+parallel without allowing a fast `any` join to race unfinished native
+settlement. Tool-bearing native grant composition and
 general restart dispatch remain open, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
