@@ -429,3 +429,16 @@ linking, idempotency keys, revision cursors, deterministic conflict handling,
 and tombstones. Connector OAuth remains separate from Clerk identity and the
 confidential auth broker remains limited to authorize, callback, handoff,
 refresh, and revoke.
+
+## General Mission Progress Projection
+
+The renderer never lists or decrypts Mission journals directly. The native
+`mission_coordination_progress_list` boundary resolves the active account,
+workspace, and private member, reads a bounded newest-first set of encrypted
+Run journals, filters each journal to the exact source conversation, revalidates
+its selected Plan revision and owner scope, and only then emits the existing
+secret-safe progress projection. Invalid entries are counted, not reconstructed.
+The projection contains readable step state, aggregate usage, declared budgets,
+acceptance status, human-review coordinates, and a next action; it excludes
+prompts, worker context, credentials, grants, Connection internals, provider
+responses, hidden reasoning, and artifact content.

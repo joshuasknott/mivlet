@@ -18,6 +18,7 @@ import {
   listRuntimePendingCitedApprovals,
   listRuntimePendingMissionApprovals,
   listRuntimePendingMissionHumanInputs,
+  listRuntimeThreadMissionProgress,
   listRuntimeNativeProviderRoutes,
   openRuntimeMissionJoin,
   openRuntimeParallelApproachesJoin,
@@ -73,6 +74,9 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionReceipts("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(readRuntimeMissionProgress("run-1")).resolves.toBeNull();
+    await expect(listRuntimeThreadMissionProgress("thread-1")).resolves.toEqual({
+      progress: [], unavailableCount: 0, truncated: false
+    });
     await expect(recordRuntimeMissionHumanEvaluation({
       runId: "run-1", criterionKey: "review", passed: true,
       expectedRunRevision: 4, expectedLastSequence: 3
@@ -296,6 +300,45 @@ describe("mission runtime boundary", () => {
       { status: "fulfilled", value: inputList },
       { status: "rejected", reason: new Error("offline") }
     )).toThrow("nothing was stopped");
+  });
+
+  it("lists secret-safe Mission progress for one conversation", async () => {
+    setNative(true);
+    mocks.invoke.mockResolvedValueOnce({
+      progress: [{
+        runId: "run-1",
+        progress: {
+          version: 1,
+          state: "running",
+          summary: "Mission work is progressing within its declared limits.",
+          runStatus: "running",
+          completedSteps: 0,
+          totalSteps: 1,
+          runningWorkers: 1,
+          readyWorkers: 0,
+          waitingSteps: 0,
+          blockedSteps: 0,
+          steps: [],
+          usage: {
+            records: 0, inputTokens: 0, outputTokens: 0,
+            toolCalls: 0, durationMs: 0, costObservations: []
+          },
+          budget: { maxWorkers: 1 },
+          acceptance: [],
+          nextAction: "Wait for current bounded work to settle."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
+
+    await expect(listRuntimeThreadMissionProgress("thread-1", 12)).resolves.toEqual(
+      expect.objectContaining({ unavailableCount: 0, truncated: false })
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      "mission_coordination_progress_list",
+      { input: { sourceThreadId: "thread-1", limit: 12 } }
+    );
   });
 
   it("rejects malformed general Mission approval identities before cancellation", async () => {

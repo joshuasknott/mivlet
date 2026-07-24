@@ -239,6 +239,20 @@ remains deduplicated by the canonical occurrence key. Other provider event
 adapters, signed webhooks, thresholds/monitoring/follow-up triggers, packaged
 restart observation, and live event validation remain open.
 
+## General Mission Inspectability Update (2026-07-24)
+
+This update supersedes the earlier statement that general and multi-worker
+inspectable plans are wholly open. The native desktop now lists a bounded set of
+the active private member's recent Mission Runs, decrypts and filters them to the
+exact conversation inside Rust, and projects the existing secret-safe step,
+progress, usage, budget, acceptance, human-review, and next-action receipt. The
+conversation rehydrates that receipt after reopen even when the Mission has no
+pending input or approval and no fixed benchmark component retained in renderer
+state. Cross-thread Runs are excluded before projection; changed or unreadable
+records are not inferred and produce a calm incomplete-activity warning.
+Arbitrary Plan creation through the normal composer, every route/cost evidence
+shape, and packaged-app accessibility observation remain open.
+
 ## Evidence Checked
 
 - `docs/product/vision.md`

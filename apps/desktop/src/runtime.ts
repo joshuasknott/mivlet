@@ -3398,6 +3398,17 @@ export interface RuntimeMissionProgress {
   nextAction: string;
 }
 
+export interface RuntimeThreadMissionProgress {
+  runId: string;
+  progress: RuntimeMissionProgress;
+}
+
+export interface RuntimeThreadMissionProgressList {
+  progress: RuntimeThreadMissionProgress[];
+  unavailableCount: number;
+  truncated: boolean;
+}
+
 export async function createRuntimeMissionPlan(input: RuntimeMissionPlanCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_plan_create", { input }); }
@@ -3504,6 +3515,23 @@ export async function readRuntimeMissionProgress(runId: string): Promise<Runtime
   if (!hasTauriRuntime()) return null;
   try { return await invoke<RuntimeMissionProgress>("mission_coordination_progress_read", { runId }); }
   catch (error) { throw toRuntimeError(error); }
+}
+
+export async function listRuntimeThreadMissionProgress(
+  sourceThreadId: string,
+  limit?: number
+): Promise<RuntimeThreadMissionProgressList> {
+  if (!hasTauriRuntime()) {
+    return { progress: [], unavailableCount: 0, truncated: false };
+  }
+  try {
+    return await invoke<RuntimeThreadMissionProgressList>(
+      "mission_coordination_progress_list",
+      { input: { sourceThreadId, ...(limit === undefined ? {} : { limit }) } }
+    );
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
 }
 
 export async function recordRuntimeMissionHumanEvaluation(

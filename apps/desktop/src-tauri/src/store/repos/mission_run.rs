@@ -242,6 +242,32 @@ pub fn list_nonterminal_ids(
     Ok(ids)
 }
 
+pub fn list_recent_ids(
+    tx: &Connection,
+    scope: &DataScope,
+    owner_member_id: &str,
+    limit: i64,
+) -> Result<Vec<String>> {
+    scope.ensure_exists(tx)?;
+    let owner = normalize_id(owner_member_id, "Member")?;
+    if !(1..=101).contains(&limit) {
+        return Err(StoreError::Invalid(
+            "Mission progress query limit is invalid.".into(),
+        ));
+    }
+    let mut statement = tx.prepare(
+        "SELECT id FROM mission_run_record WHERE workspace_id=?1 AND owner_member_id=?2 ORDER BY updated_at DESC,id DESC LIMIT ?3;",
+    )?;
+    let ids = statement
+        .query_map(
+            rusqlite::params![scope.workspace_id(), owner, limit],
+            |row| row.get(0),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(StoreError::from)?;
+    Ok(ids)
+}
+
 pub fn list_waiting_approval_ids(
     tx: &Connection,
     scope: &DataScope,

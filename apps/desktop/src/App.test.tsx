@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -342,6 +342,9 @@ vi.mock("./runtime", () => ({
   readRuntimeCitedMissionPlanSummaries: vi.fn(async (_threadId: string, messageIds: string[]) =>
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
   readRuntimeMissionProgress: vi.fn(async () => null),
+  listRuntimeThreadMissionProgress: vi.fn(async () => ({
+    progress: [], unavailableCount: 0, truncated: false
+  })),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
     return null;
@@ -593,6 +596,10 @@ describe("Fable home", () => {
     vi.mocked(resolveRuntimeMissionApproval).mockResolvedValue(null);
     vi.mocked(listRuntimePendingMissionHumanInputs).mockReset();
     vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({ requests: [], unavailableCount: 0, truncated: false });
+    vi.mocked(listRuntimeThreadMissionProgress).mockReset();
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [], unavailableCount: 0, truncated: false
+    });
     vi.mocked(receiveRuntimeMissionHumanInput).mockReset();
     vi.mocked(receiveRuntimeMissionHumanInput).mockResolvedValue(null);
     vi.mocked(startRuntimeStructuredIntake).mockReset();
@@ -2681,6 +2688,69 @@ describe("Fable home", () => {
       expect(resolveRuntimeMissionApproval).toHaveBeenCalledWith(approval, "approved")
     );
     expect(screen.queryByLabelText("Mission action approval")).not.toBeInTheDocument();
+  });
+
+  it("rehydrates inspectable Mission progress without a pending wait", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-progress", projectId: null, title: "Research plan",
+      lifecycle: "active", updatedAt: "2026-07-23T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [{
+        runId: "run-general-progress",
+        progress: {
+          version: 1,
+          state: "running",
+          summary: "Mission work is progressing within its declared limits.",
+          runStatus: "running",
+          completedSteps: 1,
+          totalSteps: 3,
+          runningWorkers: 2,
+          readyWorkers: 0,
+          waitingSteps: 0,
+          blockedSteps: 0,
+          steps: [{
+            stepKey: "research",
+            title: "Research",
+            kind: "produce",
+            state: "completed",
+            detail: "The research output is durable."
+          }, {
+            stepKey: "draft-a",
+            title: "Draft approach A",
+            kind: "produce",
+            state: "running",
+            detail: "Working within the declared route and budget."
+          }, {
+            stepKey: "draft-b",
+            title: "Draft approach B",
+            kind: "produce",
+            state: "running",
+            detail: "Working within the declared route and budget."
+          }],
+          usage: {
+            records: 1, inputTokens: 120, outputTokens: 40,
+            toolCalls: 1, durationMs: 800, costObservations: []
+          },
+          budget: { maxWorkers: 3 },
+          acceptance: [],
+          nextAction: "Wait for current bounded work to settle."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Research plan" }));
+
+    expect(await screen.findByText("Mission activity")).toBeInTheDocument();
+    const progress = await screen.findByLabelText("Mission progress");
+    expect(progress).toHaveTextContent("1 of 3 steps");
+    expect(progress).toHaveTextContent("Draft approach A");
+    expect(progress).toHaveTextContent("1 connected action");
+    expect(listRuntimeThreadMissionProgress).toHaveBeenCalledWith("thread-general-progress");
   });
 
   it("turns a completed request into an editable Routine draft without auto-saving it", async () => {

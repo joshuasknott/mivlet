@@ -18,7 +18,7 @@ import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, is
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
+import { finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -124,6 +124,8 @@ export function ChatWorkspace() {
     progress?: RuntimeMissionProgress;
     error?: string;
   }>>({});
+  const [threadMissionProgress, setThreadMissionProgress] = useState<RuntimeThreadMissionProgress[]>([]);
+  const [threadMissionProgressWarning, setThreadMissionProgressWarning] = useState<string | null>(null);
   const [missionReviewState, setMissionReviewState] = useState<Record<string, {
     busyCriterion?: string;
     error?: string;
@@ -804,6 +806,30 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     let active = true;
+    setThreadMissionProgress([]);
+    setThreadMissionProgressWarning(null);
+    if (!selectedConversationThreadId) return () => { active = false; };
+    const sourceThreadId = selectedConversationThreadId;
+    void listRuntimeThreadMissionProgress(sourceThreadId)
+      .then((result) => {
+        if (!active || selectedConversationThreadIdRef.current !== sourceThreadId) return;
+        setThreadMissionProgress(result.progress);
+        setThreadMissionProgressWarning(result.unavailableCount > 0 || result.truncated
+          ? "Some Mission activity could not be shown. Fable left its durable records unchanged."
+          : null);
+      })
+      .catch(() => {
+        if (!active || selectedConversationThreadIdRef.current !== sourceThreadId) return;
+        setThreadMissionProgress([]);
+        setThreadMissionProgressWarning(
+          "Mission activity is temporarily unavailable. Fable left its durable records unchanged."
+        );
+      });
+    return () => { active = false; };
+  }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
+
+  useEffect(() => {
+    let active = true;
     setPendingMissionInputs((current) => current.filter((request) =>
       optimisticMissionInputRunIds.current.has(request.runId)
         && request.sourceThreadId === selectedConversationThreadId
@@ -1078,7 +1104,17 @@ export function ChatWorkspace() {
   const renderConversation = () => {
     if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0
       && pendingMissionApprovals.length === 0 && pendingMissionInputs.length === 0
-      && !approvalListWarning && !missionApprovalListWarning && !missionInputListWarning) return null;
+      && threadMissionProgress.length === 0
+      && !approvalListWarning && !missionApprovalListWarning && !missionInputListWarning
+      && !threadMissionProgressWarning) return null;
+    const linkedMissionRunIds = new Set([
+      ...conversationMessages.flatMap((message) => message.runId ? [message.runId] : []),
+      ...pendingMissionInputs.map((request) => request.runId),
+      ...pendingMissionApprovals.map((approval) => approval.runId)
+    ]);
+    const unlinkedMissionProgress = threadMissionProgress.filter(
+      (entry) => !linkedMissionRunIds.has(entry.runId)
+    );
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message, messageIndex) => {
@@ -1116,6 +1152,10 @@ export function ChatWorkspace() {
             || entry.artifact.id === message.missionArtifactId
             || (message.missionOutcome === "accepted" && entry.artifact.producingRunId === message.runId)
           );
+          const durableMissionProgress = message.runId
+            ? threadMissionProgress.find((entry) => entry.runId === message.runId)?.progress
+            : undefined;
+          const visibleMissionProgress = message.missionProgress ?? durableMissionProgress;
           return (
             <article
               key={message.id}
@@ -1126,17 +1166,17 @@ export function ChatWorkspace() {
               {message.role === "assistant" && message.parallelMissionPlan
                 ? <ParallelMissionPlanSummary plan={message.parallelMissionPlan} />
                 : null}
-              {message.role === "assistant" && message.missionProgress
+              {message.role === "assistant" && visibleMissionProgress
                 ? <MissionProgressSummary
-                    progress={message.missionProgress}
-                    reviewBusyCriterion={message.missionProgress.humanReview
-                      ? missionReviewState[message.missionProgress.humanReview.runId]?.busyCriterion
+                    progress={visibleMissionProgress}
+                    reviewBusyCriterion={visibleMissionProgress.humanReview
+                      ? missionReviewState[visibleMissionProgress.humanReview.runId]?.busyCriterion
                       : undefined}
-                    reviewError={message.missionProgress.humanReview
-                      ? missionReviewState[message.missionProgress.humanReview.runId]?.error
+                    reviewError={visibleMissionProgress.humanReview
+                      ? missionReviewState[visibleMissionProgress.humanReview.runId]?.error
                       : undefined}
                     onReview={(criterionKey, passed) =>
-                      void recordMissionReview(message.missionProgress!, criterionKey, passed)}
+                      void recordMissionReview(visibleMissionProgress, criterionKey, passed)}
                   />
                 : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
@@ -1245,6 +1285,22 @@ export function ChatWorkspace() {
             {renderPendingMissionProgress(approval.runId)}
           </article>
         ))}
+        {unlinkedMissionProgress.map((entry) => (
+          <article key={entry.runId} className="conversation-message conversation-message--assistant">
+            <p>Mission activity</p>
+            <MissionProgressSummary
+              progress={entry.progress}
+              reviewBusyCriterion={entry.progress.humanReview
+                ? missionReviewState[entry.progress.humanReview.runId]?.busyCriterion
+                : undefined}
+              reviewError={entry.progress.humanReview
+                ? missionReviewState[entry.progress.humanReview.runId]?.error
+                : undefined}
+              onReview={(criterionKey, passed) =>
+                void recordMissionReview(entry.progress, criterionKey, passed)}
+            />
+          </article>
+        ))}
         {approvalListWarning ? (
           <p className="conversation-feed__notice" role="status">{approvalListWarning}</p>
         ) : null}
@@ -1253,6 +1309,9 @@ export function ChatWorkspace() {
         ) : null}
         {missionInputListWarning ? (
           <p className="conversation-feed__notice" role="status">{missionInputListWarning}</p>
+        ) : null}
+        {threadMissionProgressWarning ? (
+          <p className="conversation-feed__notice" role="status">{threadMissionProgressWarning}</p>
         ) : null}
       </section>
     );

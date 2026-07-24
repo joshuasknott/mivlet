@@ -2987,6 +2987,97 @@ pub fn mission_coordination_progress_read(run_id: String) -> Result<Value, Strin
         .map_err(|error| error.to_string())
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MissionProgressListInput {
+    source_thread_id: String,
+    limit: Option<usize>,
+}
+
+fn thread_progress_list_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    member: &str,
+    source_thread_id: &str,
+    limit: usize,
+) -> crate::store::Result<Value> {
+    let ids = mission_run::list_recent_ids(tx, scope, member, 101)?;
+    let mut truncated = ids.len() > 100;
+    let mut progress = Vec::new();
+    let mut unavailable_count = 0usize;
+    for run_id in ids.into_iter().take(100) {
+        let Some(journal) = mission_run::get(tx, store, scope, member, &run_id)? else {
+            unavailable_count += 1;
+            continue;
+        };
+        if journal.run.get("sourceThreadId").and_then(Value::as_str) != Some(source_thread_id) {
+            continue;
+        }
+        let Some(mission_id) = journal
+            .run
+            .pointer("/initiator/missionId")
+            .and_then(Value::as_str)
+        else {
+            unavailable_count += 1;
+            continue;
+        };
+        let Some(lifecycle) = mission_plan::get(tx, store, scope, member, mission_id)? else {
+            unavailable_count += 1;
+            continue;
+        };
+        if journal.run.get("planRevisionId") != lifecycle.current_revision.get("id")
+            || journal.run.get("workspaceId") != lifecycle.mission.get("workspaceId")
+            || journal.run.get("ownerMemberId") != lifecycle.mission.get("ownerMemberId")
+        {
+            unavailable_count += 1;
+            continue;
+        }
+        match mission_progress_projection(&lifecycle, &journal) {
+            Ok(projection) if progress.len() < limit => progress.push(json!({
+                "runId":run_id,
+                "progress":projection
+            })),
+            Ok(_) => {
+                truncated = true;
+                break;
+            }
+            Err(_) => unavailable_count += 1,
+        }
+    }
+    Ok(json!({
+        "progress":progress,
+        "unavailableCount":unavailable_count,
+        "truncated":truncated
+    }))
+}
+
+#[tauri::command]
+pub fn mission_coordination_progress_list(
+    input: MissionProgressListInput,
+) -> Result<Value, String> {
+    let source_thread_id = bounded(&input.source_thread_id, "Conversation", 160)?;
+    let limit = input.limit.unwrap_or(24);
+    if !(1..=100).contains(&limit) {
+        return Err("Mission progress list limit is invalid.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(tx)?;
+            let member = context.member_id.ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "An active workspace membership is required for Mission progress.".into(),
+                )
+            })?;
+            let scope = DataScope::workspace(context.active_workspace.local_workspace_id)?;
+            thread_progress_list_in_tx(tx, store, &scope, &member, &source_thread_id, limit)
+        })
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 pub fn mission_coordination_human_evaluation_record(
     input: MissionHumanEvaluationInput,
@@ -4535,6 +4626,7 @@ mod tests {
                         "status":"running","executionDepth":"delegated",
                         "initiator":{"kind":"mission","missionId":"mission-general-store"},
                         "parentage":{"kind":"root"},"departmentIds":[],
+                        "sourceThreadId":"thread-general-store",
                         "planRevisionId":"revision-general-store",
                         "budget":{"maxWorkers":1,"maxAttempts":1},
                         "currentAttemptNumber":1,
@@ -4661,6 +4753,31 @@ mod tests {
                     assert_eq!(
                         review_progress["humanReview"]["criteria"][0]["criterionKey"],
                         "grounded"
+                    );
+                    let listed = thread_progress_list_in_tx(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "thread-general-store",
+                        24,
+                    )?;
+                    assert_eq!(listed["progress"][0]["runId"], "run-general-store");
+                    assert_eq!(
+                        listed["progress"][0]["progress"]["steps"][0]["title"],
+                        "Final brief"
+                    );
+                    assert_eq!(listed["unavailableCount"], 0);
+                    assert_eq!(
+                        thread_progress_list_in_tx(
+                            tx,
+                            &store,
+                            &scope,
+                            "member-1",
+                            "thread-other",
+                            24,
+                        )?["progress"],
+                        json!([])
                     );
                     let expected_revision = journal.run["revision"].as_i64().unwrap();
                     let expected_sequence = journal.run["eventHead"]["lastSequence"]

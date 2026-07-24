@@ -692,6 +692,22 @@ is now a Fable-owned command with exact natural-language parity, remains
 submittable while work is running, drives the existing cooperative native-agent
 cancel path, and persists the durable cancellation request plus terminal cancelled
 run and mission state for the active cited journey.
+
+General inspectability now crosses the product boundary for every selected
+provider-neutral Plan shape already represented in the encrypted Mission journal.
+An authenticated native list reads only the active member's bounded recent Runs,
+decrypts them inside Rust, filters the exact source conversation before projection,
+and returns the same compact step state, usage, budget, acceptance, human-review,
+and next-action receipt used by live coordination. The desktop rehydrates those
+receipts beside their durable conversation message or as calm standalone Mission
+activity when no terminal message exists. Cross-thread and cross-member Runs never
+cross the boundary; invalid projections remain untouched and are counted as
+unavailable instead of inferred. This supersedes the earlier sentence that general
+and multi-worker plan views were wholly open. Arbitrary Plan creation in the
+ordinary composer, richer route/cost evidence for every shape, and packaged
+assistive-technology observation remain open, so the combined Wave 4B checkbox
+stays unchecked.
+
 The same narrow cited journey now supports a durable human-acceptance wait when
 the user explicitly asks to approve before saving. Rust persists a wait-boundary
 checkpoint whose encrypted state binds the exact plan revision, worker start,
