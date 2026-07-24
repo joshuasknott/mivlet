@@ -170,6 +170,9 @@ describe("mission runtime boundary", () => {
 
     mocks.invoke.mockResolvedValueOnce({ ...preparation, providerId: "anthropic" });
     await expect(prepareRuntimeParallelApproachesReviewer("run-1"))
+      .resolves.toEqual({ ...preparation, providerId: "anthropic" });
+    mocks.invoke.mockResolvedValueOnce({ ...preparation, providerId: "unknown/provider" });
+    await expect(prepareRuntimeParallelApproachesReviewer("run-1"))
       .rejects.toThrow("Malformed parallel reviewer preparation response");
   });
 

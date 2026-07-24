@@ -97,7 +97,7 @@ describe("cited brief mission composition", () => {
     const gate = { register: vi.fn().mockReturnValue(true), waitForDecision: vi.fn() } as never;
     const result = await executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: gate,
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5", approvalGate: gate,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
       onCancellationReady: (cancel) => { cancelMission = cancel; }
     });
@@ -163,7 +163,7 @@ describe("cited brief mission composition", () => {
     const result = await executeCitedBriefMission({
       query: "Search my connected work sources for a cited brief and ask me to approve before saving.",
       workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5",
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5",
       approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     });
@@ -224,7 +224,7 @@ describe("cited brief mission composition", () => {
 
     const result = await executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     });
 
@@ -285,7 +285,7 @@ describe("cited brief mission composition", () => {
     }));
 
     await expect(resumeInterruptedCitedBriefMissions({
-      backend: { providerId: "openai" } as never
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never
     })).resolves.toEqual({ resumed: 1, terminalized: 0, failed: 0 });
 
     expect(mocks.restoreCheckpoint).toHaveBeenCalledWith({
@@ -347,7 +347,7 @@ describe("cited brief mission composition", () => {
     });
 
     await expect(resumeInterruptedCitedBriefMissions({
-      backend: { providerId: "openai", cancel: backendCancel } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" }, cancel: backendCancel } as never,
       onCancellationReady: (value) => { cancel = value; }
     })).resolves.toEqual({ resumed: 1, terminalized: 0, failed: 0 });
 
@@ -395,7 +395,7 @@ describe("cited brief mission composition", () => {
       ], { status: "partially-completed", currentAttemptNumber: 2 }));
     const result = await executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     });
 
@@ -421,7 +421,7 @@ describe("cited brief mission composition", () => {
 
     await expect(executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5", approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`
     })).rejects.toThrow("The native provider rejected the request.");
     expect(mocks.readOutput).not.toHaveBeenCalled();
@@ -453,7 +453,7 @@ describe("cited brief mission composition", () => {
 
     await expect(executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
+      backend: { providerId: "openai", backend: { backendType: "native-api" }, cancel: backendCancel } as never, model: "gpt-5",
       approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
       onCancellationReady: (cancel) => { cancelMission = cancel; }
@@ -490,7 +490,7 @@ describe("cited brief mission composition", () => {
 
     await expect(executeCitedBriefMission({
       query: "What changed?", workspaceId: "local-workspace", missionScopeWorkspaceId: "hosted-workspace", sourceThreadId: "thread-1",
-      backend: { providerId: "openai", cancel: backendCancel } as never, model: "gpt-5",
+      backend: { providerId: "openai", backend: { backendType: "native-api" }, cancel: backendCancel } as never, model: "gpt-5",
       approvalGate: { register: vi.fn(), waitForDecision: vi.fn() } as never,
       queueApproval: vi.fn(), createId: (prefix) => `${prefix}-${++counter}`,
       onCancellationReady: (cancel) => { cancelMission = cancel; }

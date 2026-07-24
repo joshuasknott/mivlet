@@ -358,14 +358,22 @@ pub fn extra_headers(provider_id: &str) -> Vec<(String, String)> {
     }
 }
 
-/// Strip the SSE `data:` prefix; return None for blank lines, comments, [DONE].
-/// Case-insensitive on the data: prefix; drops empty post-strip payloads (e.g. "data: ").
+/// Strip the SSE `data:` prefix; return None for blank lines, comments,
+/// control fields, and `[DONE]`. Provider event labels are control-plane
+/// metadata; only the bounded `data:` JSON may reach parsers or the renderer.
 pub fn normalize_sse_line(line: &str) -> Option<String> {
     let trimmed = line.trim();
     if trimmed.is_empty() || trimmed.starts_with(':') {
         return None;
     }
-    let payload = if trimmed.to_ascii_lowercase().starts_with("data:") {
+    let lower = trimmed.to_ascii_lowercase();
+    if ["event:", "id:", "retry:"]
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
+        return None;
+    }
+    let payload = if lower.starts_with("data:") {
         trimmed[5..].trim().to_string()
     } else {
         trimmed.to_string()
@@ -446,12 +454,15 @@ struct OpenAiCompatibleTerminalObservation {
     output: String,
     output_overflow: bool,
     usage: Option<(i64, i64)>,
+    cumulative_output: bool,
+    cumulative_snapshot: String,
 }
 
 impl OpenAiCompatibleTerminalObservation {
-    fn new(capture_output: bool) -> Self {
+    fn new_for_provider(provider_id: &str, capture_output: bool) -> Self {
         Self {
             capture_output,
+            cumulative_output: provider_id == "minimax",
             ..Self::default()
         }
     }
@@ -516,12 +527,10 @@ impl OpenAiCompatibleTerminalObservation {
         }
         if self.capture_output {
             if let Some(content) = content {
-                if self.output.len().saturating_add(content.len()) > 65_536 {
-                    self.output_overflow = true;
-                } else if !self.output_overflow {
-                    self.output.push_str(content);
-                }
+                self.append_output(content);
             }
+        } else if let Some(content) = content {
+            self.validate_cumulative_content(content);
         }
         if let Some(reason) = value
             .pointer("/choices/0/finish_reason")
@@ -541,6 +550,423 @@ impl OpenAiCompatibleTerminalObservation {
             && self.finish_reason.as_deref() == Some("stop")
             && self.usage.is_some()
             && (!self.capture_output || (!self.output.trim().is_empty() && !self.output_overflow))
+    }
+
+    fn append_output(&mut self, content: &str) {
+        let delta = if self.cumulative_output {
+            if content.starts_with(&self.cumulative_snapshot) {
+                let delta = content[self.cumulative_snapshot.len()..].to_string();
+                self.cumulative_snapshot = content.to_string();
+                delta
+            } else if self.cumulative_snapshot.starts_with(content) {
+                String::new()
+            } else {
+                self.provider_error = true;
+                return;
+            }
+        } else {
+            content.to_string()
+        };
+        if self.output.len().saturating_add(delta.len()) > 65_536 {
+            self.output_overflow = true;
+        } else if !self.output_overflow {
+            self.output.push_str(&delta);
+        }
+    }
+
+    fn validate_cumulative_content(&mut self, content: &str) {
+        if !self.cumulative_output {
+            return;
+        }
+        if content.starts_with(&self.cumulative_snapshot) {
+            self.cumulative_snapshot = content.to_string();
+        } else if !self.cumulative_snapshot.starts_with(content) {
+            self.provider_error = true;
+        }
+    }
+}
+
+#[derive(Default)]
+struct AnthropicTerminalObservation {
+    saw_payload: bool,
+    message_started: bool,
+    message_stopped: bool,
+    active_content_block: Option<i64>,
+    finish_reason: Option<String>,
+    provider_error: bool,
+    capture_output: bool,
+    output: String,
+    output_overflow: bool,
+    input_tokens: Option<i64>,
+    usage: Option<(i64, i64)>,
+}
+
+impl AnthropicTerminalObservation {
+    fn new(capture_output: bool) -> Self {
+        Self {
+            capture_output,
+            ..Self::default()
+        }
+    }
+
+    fn observe(&mut self, payload: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            self.provider_error = true;
+            return;
+        };
+        self.saw_payload = true;
+        if value.get("error").is_some_and(|error| !error.is_null()) {
+            self.provider_error = true;
+            return;
+        }
+        let Some(event_type) = value.get("type").and_then(serde_json::Value::as_str) else {
+            self.provider_error = true;
+            return;
+        };
+        if self.message_stopped && event_type != "ping" {
+            self.provider_error = true;
+            return;
+        }
+        match event_type {
+            "message_start" => {
+                let input_tokens = value
+                    .pointer("/message/usage/input_tokens")
+                    .and_then(serde_json::Value::as_i64);
+                if self.message_started
+                    || self.finish_reason.is_some()
+                    || input_tokens.is_none_or(|tokens| tokens < 0)
+                {
+                    self.provider_error = true;
+                } else {
+                    self.message_started = true;
+                    self.input_tokens = input_tokens;
+                }
+            }
+            "content_block_start" => {
+                let index = value.get("index").and_then(serde_json::Value::as_i64);
+                let initial_text = value
+                    .pointer("/content_block/text")
+                    .and_then(serde_json::Value::as_str);
+                if !self.message_started
+                    || self.finish_reason.is_some()
+                    || self.active_content_block.is_some()
+                    || index.is_none_or(|index| index < 0)
+                    || value
+                        .pointer("/content_block/type")
+                        .and_then(serde_json::Value::as_str)
+                        != Some("text")
+                    || initial_text.is_none()
+                {
+                    self.provider_error = true;
+                } else {
+                    self.active_content_block = index;
+                    if self.capture_output {
+                        self.append_output(initial_text.unwrap_or_default());
+                    }
+                }
+            }
+            "content_block_delta" => {
+                let index = value.get("index").and_then(serde_json::Value::as_i64);
+                let delta_type = value
+                    .pointer("/delta/type")
+                    .and_then(serde_json::Value::as_str);
+                let text = value
+                    .pointer("/delta/text")
+                    .and_then(serde_json::Value::as_str);
+                if !self.message_started
+                    || self.finish_reason.is_some()
+                    || index != self.active_content_block
+                    || delta_type != Some("text_delta")
+                    || text.is_none()
+                {
+                    self.provider_error = true;
+                } else if self.capture_output {
+                    self.append_output(text.unwrap_or_default());
+                }
+            }
+            "content_block_stop" => {
+                let index = value.get("index").and_then(serde_json::Value::as_i64);
+                if !self.message_started
+                    || self.finish_reason.is_some()
+                    || index != self.active_content_block
+                {
+                    self.provider_error = true;
+                } else {
+                    self.active_content_block = None;
+                }
+            }
+            "message_delta" => {
+                let reason = value
+                    .pointer("/delta/stop_reason")
+                    .and_then(serde_json::Value::as_str);
+                let output_tokens = value
+                    .pointer("/usage/output_tokens")
+                    .and_then(serde_json::Value::as_i64);
+                if !self.message_started
+                    || self.finish_reason.is_some()
+                    || self.active_content_block.is_some()
+                    || reason.is_none()
+                    || output_tokens.is_none_or(|tokens| tokens < 0)
+                    || self.input_tokens.is_none()
+                {
+                    self.provider_error = true;
+                } else {
+                    self.finish_reason = Some(
+                        match reason.unwrap_or_default() {
+                            "end_turn" | "stop_sequence" => "stop",
+                            "max_tokens" => "length",
+                            "tool_use" => "tool-calls",
+                            other => other,
+                        }
+                        .to_string(),
+                    );
+                    self.usage = self
+                        .input_tokens
+                        .zip(output_tokens)
+                        .filter(|(input, output)| *input >= 0 && *output >= 0);
+                }
+            }
+            "message_stop" => {
+                if !self.message_started
+                    || self.message_stopped
+                    || self.finish_reason.is_none()
+                    || self.usage.is_none()
+                {
+                    self.provider_error = true;
+                } else {
+                    self.message_stopped = true;
+                }
+            }
+            "ping" => {}
+            _ => self.provider_error = true,
+        }
+    }
+
+    fn append_output(&mut self, text: &str) {
+        if self.output.len().saturating_add(text.len()) > 65_536 {
+            self.output_overflow = true;
+        } else if !self.output_overflow {
+            self.output.push_str(text);
+        }
+    }
+
+    fn clean_stop(&self) -> bool {
+        self.saw_payload
+            && self.message_started
+            && self.message_stopped
+            && !self.provider_error
+            && self.finish_reason.as_deref() == Some("stop")
+            && self.usage.is_some()
+            && (!self.capture_output || (!self.output.trim().is_empty() && !self.output_overflow))
+    }
+}
+
+#[derive(Default)]
+struct GeminiTerminalObservation {
+    saw_payload: bool,
+    finish_reason: Option<String>,
+    provider_error: bool,
+    capture_output: bool,
+    output: String,
+    output_overflow: bool,
+    usage: Option<(i64, i64)>,
+}
+
+impl GeminiTerminalObservation {
+    fn new(capture_output: bool) -> Self {
+        Self {
+            capture_output,
+            ..Self::default()
+        }
+    }
+
+    fn observe(&mut self, payload: &str) {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(payload) else {
+            self.provider_error = true;
+            return;
+        };
+        self.saw_payload = true;
+        if value.get("error").is_some_and(|error| !error.is_null()) {
+            self.provider_error = true;
+            return;
+        }
+        let candidates = value
+            .get("candidates")
+            .and_then(serde_json::Value::as_array);
+        let has_usage = value
+            .get("usageMetadata")
+            .is_some_and(|usage| !usage.is_null());
+        if candidates.is_none() && !has_usage {
+            self.provider_error = true;
+            return;
+        }
+        if candidates.is_some_and(|candidates| candidates.len() > 1) {
+            self.provider_error = true;
+            return;
+        }
+        let candidate = candidates.and_then(|candidates| candidates.first());
+        if self.finish_reason.is_some() && candidate.is_some() {
+            self.provider_error = true;
+            return;
+        }
+        if let Some(parts) = candidate
+            .and_then(|candidate| candidate.pointer("/content/parts"))
+            .and_then(serde_json::Value::as_array)
+        {
+            for part in parts {
+                let Some(part) = part.as_object() else {
+                    self.provider_error = true;
+                    continue;
+                };
+                if part.contains_key("functionCall")
+                    || part.contains_key("function_call")
+                    || part.keys().any(|key| key != "text")
+                {
+                    self.provider_error = true;
+                    continue;
+                }
+                let Some(text) = part.get("text").and_then(serde_json::Value::as_str) else {
+                    self.provider_error = true;
+                    continue;
+                };
+                if self.capture_output {
+                    self.append_output(text);
+                }
+            }
+        }
+        if let Some(reason) = candidate
+            .and_then(|candidate| candidate.get("finishReason"))
+            .and_then(serde_json::Value::as_str)
+        {
+            if self.finish_reason.is_some() {
+                self.provider_error = true;
+            } else {
+                self.finish_reason = Some(
+                    match reason {
+                        "STOP" => "stop",
+                        "MAX_TOKENS" => "length",
+                        other => other,
+                    }
+                    .to_string(),
+                );
+            }
+        }
+        if let Some(usage) = value.get("usageMetadata").filter(|usage| !usage.is_null()) {
+            let parsed = usage.as_object().and_then(|usage| {
+                Some((
+                    usage.get("promptTokenCount")?.as_i64()?,
+                    usage.get("candidatesTokenCount")?.as_i64()?,
+                ))
+            });
+            if self.usage.is_some()
+                || self.finish_reason.is_none()
+                || parsed.is_none_or(|(input, output)| input < 0 || output < 0)
+            {
+                self.provider_error = true;
+            } else {
+                self.usage = parsed;
+            }
+        }
+    }
+
+    fn append_output(&mut self, text: &str) {
+        if self.output.len().saturating_add(text.len()) > 65_536 {
+            self.output_overflow = true;
+        } else if !self.output_overflow {
+            self.output.push_str(text);
+        }
+    }
+
+    fn clean_stop(&self) -> bool {
+        self.saw_payload
+            && !self.provider_error
+            && self.finish_reason.as_deref() == Some("stop")
+            && self.usage.is_some()
+            && (!self.capture_output || (!self.output.trim().is_empty() && !self.output_overflow))
+    }
+}
+
+enum MissionTerminalObservation {
+    OpenAiCompatible(OpenAiCompatibleTerminalObservation),
+    Anthropic(AnthropicTerminalObservation),
+    Gemini(GeminiTerminalObservation),
+}
+
+impl MissionTerminalObservation {
+    fn new(provider_id: &str, capture_output: bool) -> Self {
+        match provider_kind(provider_id) {
+            ProviderKind::OpenAiCompat => Self::OpenAiCompatible(
+                OpenAiCompatibleTerminalObservation::new_for_provider(provider_id, capture_output),
+            ),
+            ProviderKind::Anthropic => {
+                Self::Anthropic(AnthropicTerminalObservation::new(capture_output))
+            }
+            ProviderKind::Gemini => Self::Gemini(GeminiTerminalObservation::new(capture_output)),
+        }
+    }
+
+    fn observe(&mut self, payload: &str) {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.observe(payload),
+            Self::Anthropic(observation) => observation.observe(payload),
+            Self::Gemini(observation) => observation.observe(payload),
+        }
+    }
+
+    fn provider_error(&self) -> bool {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.provider_error,
+            Self::Anthropic(observation) => observation.provider_error,
+            Self::Gemini(observation) => observation.provider_error,
+        }
+    }
+
+    fn output_overflow(&self) -> bool {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.output_overflow,
+            Self::Anthropic(observation) => observation.output_overflow,
+            Self::Gemini(observation) => observation.output_overflow,
+        }
+    }
+
+    fn finish_reason(&self) -> Option<&str> {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.finish_reason.as_deref(),
+            Self::Anthropic(observation) => observation.finish_reason.as_deref(),
+            Self::Gemini(observation) => observation.finish_reason.as_deref(),
+        }
+    }
+
+    fn clean_stop(&self) -> bool {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.clean_stop(),
+            Self::Anthropic(observation) => observation.clean_stop(),
+            Self::Gemini(observation) => observation.clean_stop(),
+        }
+    }
+
+    fn usage(&self) -> Option<(i64, i64)> {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.usage,
+            Self::Anthropic(observation) => observation.usage,
+            Self::Gemini(observation) => observation.usage,
+        }
+    }
+
+    fn captures_output(&self) -> bool {
+        match self {
+            Self::OpenAiCompatible(observation) => observation.capture_output,
+            Self::Anthropic(observation) => observation.capture_output,
+            Self::Gemini(observation) => observation.capture_output,
+        }
+    }
+
+    fn output(&self) -> &str {
+        match self {
+            Self::OpenAiCompatible(observation) => &observation.output,
+            Self::Anthropic(observation) => &observation.output,
+            Self::Gemini(observation) => &observation.output,
+        }
     }
 }
 
@@ -648,9 +1074,8 @@ const NATIVE_PROVIDER_IDS: [&str; 22] = [
     "custom",
 ];
 
-pub(crate) fn supports_openai_compatible_mission(provider_id: &str) -> bool {
+pub(crate) fn supports_native_mission_provider(provider_id: &str) -> bool {
     NATIVE_PROVIDER_IDS.contains(&provider_id)
-        && provider_kind(provider_id) == ProviderKind::OpenAiCompat
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -880,7 +1305,8 @@ pub async fn stream_backend_completion(
     let mut completed = false;
     let mut transport_failed = false;
     let mut duration_budget_exceeded = false;
-    let mut terminal_observation = OpenAiCompatibleTerminalObservation::new(
+    let mut terminal_observation = MissionTerminalObservation::new(
+        &request.provider_id,
         mission_authority
             .as_ref()
             .is_some_and(|authority| authority.expects_output()),
@@ -1241,19 +1667,19 @@ pub async fn stream_backend_completion(
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
     let _ = app.emit(&channel, terminal);
     if mission_authority.is_some() && !cancelled && completed && mission_failure.is_none() {
-        mission_failure = if terminal_observation.provider_error {
+        mission_failure = if terminal_observation.provider_error() {
             Some(MissionProviderFailure {
                 code: "native-provider-payload-error",
                 message: "The native provider returned an error payload.",
                 retryable: false,
             })
-        } else if terminal_observation.output_overflow {
+        } else if terminal_observation.output_overflow() {
             Some(MissionProviderFailure {
                 code: "native-provider-output-too-large",
                 message: "The native provider output exceeded Fable's mission receipt limit.",
                 retryable: false,
             })
-        } else if terminal_observation.finish_reason.as_deref() == Some("length") {
+        } else if terminal_observation.finish_reason() == Some("length") {
             Some(MissionProviderFailure {
                 code: "native-provider-output-limit",
                 message: "The native provider reached the worker output limit.",
@@ -1271,7 +1697,7 @@ pub async fn stream_backend_completion(
     }
     if !cancelled && mission_failure.is_none() {
         if let (Some(authority), Some((input_tokens, output_tokens))) =
-            (mission_authority.as_ref(), terminal_observation.usage)
+            (mission_authority.as_ref(), terminal_observation.usage())
         {
             if authority.usage_exceeds_budget(input_tokens, output_tokens) {
                 mission_failure = Some(MissionProviderFailure {
@@ -1295,14 +1721,14 @@ pub async fn stream_backend_completion(
             Some(
                 crate::mission_workers::NativeWorkerTerminalOutcome::Completed {
                     text: terminal_observation
-                        .capture_output
-                        .then(|| terminal_observation.output.clone()),
+                        .captures_output()
+                        .then(|| terminal_observation.output().to_string()),
                     input_tokens: terminal_observation
-                        .usage
+                        .usage()
                         .map(|usage| usage.0)
                         .unwrap_or_default(),
                     output_tokens: terminal_observation
-                        .usage
+                        .usage()
                         .map(|usage| usage.1)
                         .unwrap_or_default(),
                     duration_ms,
@@ -1315,7 +1741,7 @@ pub async fn stream_backend_completion(
                     code: failure.code,
                     message: failure.message,
                     retryable: failure.retryable,
-                    usage: terminal_observation.usage,
+                    usage: terminal_observation.usage(),
                     duration_ms,
                     attempt_number,
                 }
@@ -1358,8 +1784,7 @@ pub async fn stream_backend_completion(
         return Err("Provider request ended without a terminal state.".to_string());
     }
     mission_settlement?;
-    if request.provider_id == "openai"
-        && !cancelled
+    if !cancelled
         && completed
         && !transport_failed
         && mission_failure.is_none()
@@ -1376,7 +1801,7 @@ pub async fn stream_backend_completion(
                 authority.provider_route_id(),
                 &request.request_id,
                 latency_ms,
-                terminal_observation.usage,
+                terminal_observation.usage(),
                 &observed_at,
             );
         } else if let Some(binding) = request.provider_route.as_ref() {
@@ -1386,7 +1811,7 @@ pub async fn stream_backend_completion(
                 binding,
                 &request.request_id,
                 latency_ms,
-                terminal_observation.usage,
+                terminal_observation.usage(),
                 &observed_at,
             );
         }
@@ -1852,12 +2277,14 @@ mod transport_policy_tests {
         assert!(observation.clean_stop());
         observation.observe(r#"{"error":{"message":"late failure"}}"#);
         assert!(!observation.clean_stop());
-        let mut late_content = OpenAiCompatibleTerminalObservation::new(false);
+        let mut late_content =
+            OpenAiCompatibleTerminalObservation::new_for_provider("openai", false);
         late_content.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         late_content.observe(r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1}}"#);
         late_content.observe(r#"{"choices":[{"delta":{"content":"late"}}]}"#);
         assert!(!late_content.clean_stop());
-        let mut early_usage = OpenAiCompatibleTerminalObservation::new(false);
+        let mut early_usage =
+            OpenAiCompatibleTerminalObservation::new_for_provider("openai", false);
         early_usage.observe(r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#);
         early_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         assert!(!early_usage.clean_stop());
@@ -1865,17 +2292,101 @@ mod transport_policy_tests {
 
     #[test]
     fn mission_terminal_observation_captures_one_bounded_native_text_output() {
-        let mut observation = OpenAiCompatibleTerminalObservation::new(true);
+        let mut observation = OpenAiCompatibleTerminalObservation::new_for_provider("openai", true);
         observation.observe(r#"{"choices":[{"delta":{"content":"Hello "}}]}"#);
         observation
             .observe(r#"{"choices":[{"delta":{"content":"world"},"finish_reason":"stop"}]}"#);
         observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#);
         assert!(observation.clean_stop());
         assert_eq!(observation.output, "Hello world");
-        let mut empty = OpenAiCompatibleTerminalObservation::new(true);
+        let mut empty = OpenAiCompatibleTerminalObservation::new_for_provider("openai", true);
         empty.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         empty.observe(r#"{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":0}}"#);
         assert!(!empty.clean_stop());
+    }
+
+    #[test]
+    fn minimax_mission_terminal_deduplicates_cumulative_content() {
+        let mut observation =
+            OpenAiCompatibleTerminalObservation::new_for_provider("minimax", true);
+        observation.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        observation
+            .observe(r#"{"choices":[{"delta":{"content":"Hello world"},"finish_reason":null}]}"#);
+        observation.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        observation.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#);
+        assert!(observation.clean_stop());
+        assert_eq!(observation.output, "Hello world");
+
+        let mut divergent = OpenAiCompatibleTerminalObservation::new_for_provider("minimax", true);
+        divergent.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        divergent
+            .observe(r#"{"choices":[{"delta":{"content":"Different"},"finish_reason":null}]}"#);
+        assert!(!divergent.clean_stop());
+    }
+
+    #[test]
+    fn anthropic_mission_terminal_requires_start_delta_usage_and_stop() {
+        let mut observation = AnthropicTerminalObservation::new(true);
+        observation.observe(r#"{"type":"message_start","message":{"usage":{"input_tokens":7}}}"#);
+        observation.observe(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#,
+        );
+        observation.observe(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}"#,
+        );
+        observation.observe(r#"{"type":"content_block_stop","index":0}"#);
+        observation.observe(
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":2}}"#,
+        );
+        observation.observe(r#"{"type":"message_stop"}"#);
+        assert!(observation.clean_stop());
+        assert_eq!(observation.output, "Hello");
+        assert_eq!(observation.usage, Some((7, 2)));
+
+        let mut tool = AnthropicTerminalObservation::new(false);
+        tool.observe(r#"{"type":"message_start","message":{"usage":{"input_tokens":1}}}"#);
+        tool.observe(
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"call","name":"write"}}"#,
+        );
+        tool.observe(
+            r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":1}}"#,
+        );
+        tool.observe(r#"{"type":"message_stop"}"#);
+        assert!(!tool.clean_stop());
+
+        let mut unordered = AnthropicTerminalObservation::new(true);
+        unordered.observe(r#"{"type":"message_start","message":{"usage":{"input_tokens":1}}}"#);
+        unordered.observe(
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Skipped start"}}"#,
+        );
+        unordered.observe(
+            r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":1}}"#,
+        );
+        unordered.observe(r#"{"type":"message_stop"}"#);
+        assert!(!unordered.clean_stop());
+    }
+
+    #[test]
+    fn gemini_mission_terminal_requires_exact_stop_and_final_usage() {
+        let mut observation = GeminiTerminalObservation::new(true);
+        observation.observe(r#"{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#);
+        observation.observe(
+            r#"{"candidates":[{"content":{"parts":[{"text":" world"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":2}}"#,
+        );
+        assert!(observation.clean_stop());
+        assert_eq!(observation.output, "Hello world");
+        assert_eq!(observation.usage, Some((7, 2)));
+
+        let mut tool = GeminiTerminalObservation::new(false);
+        tool.observe(
+            r#"{"candidates":[{"content":{"parts":[{"functionCall":{"name":"write","args":{}}}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1}}"#,
+        );
+        assert!(!tool.clean_stop());
+
+        let mut unknown = GeminiTerminalObservation::new(false);
+        unknown.observe(r#"{"modelVersion":"gemini-test"}"#);
+        assert!(!unknown.clean_stop());
     }
 
     #[test]
@@ -2076,10 +2587,15 @@ mod transport_policy_tests {
     #[test]
     fn mission_provider_family_is_registered_and_fail_closed() {
         for provider_id in ["openai", "xai", "openrouter", "deepseek", "zai", "custom"] {
-            assert!(supports_openai_compatible_mission(provider_id));
+            assert!(supports_native_mission_provider(provider_id));
+            assert_eq!(provider_kind(provider_id), ProviderKind::OpenAiCompat);
         }
-        for provider_id in ["anthropic", "gemini", "unknown", ""] {
-            assert!(!supports_openai_compatible_mission(provider_id));
+        for provider_id in ["anthropic", "gemini"] {
+            assert!(supports_native_mission_provider(provider_id));
+            assert_ne!(provider_kind(provider_id), ProviderKind::OpenAiCompat);
+        }
+        for provider_id in ["unknown", ""] {
+            assert!(!supports_native_mission_provider(provider_id));
         }
     }
 
@@ -2311,10 +2827,13 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn normalize_sse_line_drops_comments_blanks_done_and_variants() {
+    fn normalize_sse_line_drops_control_fields_comments_blanks_and_done() {
         assert!(normalize_sse_line("").is_none());
         assert!(normalize_sse_line("   ").is_none());
         assert!(normalize_sse_line(": comment heartbeat").is_none());
+        assert!(normalize_sse_line("event: message_start").is_none());
+        assert!(normalize_sse_line("id: event-1").is_none());
+        assert!(normalize_sse_line("retry: 1000").is_none());
         assert!(normalize_sse_line("data: [DONE]").is_none());
         assert!(normalize_sse_line("data:[DONE]").is_none());
         assert!(normalize_sse_line("DATA:  foo ").is_some());

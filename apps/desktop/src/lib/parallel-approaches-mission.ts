@@ -83,8 +83,8 @@ export function isParallelApproachesPlanSummary(value: unknown): value is Parall
 export async function executeParallelApproachesMission(
   input: ParallelApproachesMissionInput
 ): Promise<ParallelApproachesMissionResult> {
-  if (input.backend.providerId !== "openai") {
-    throw new Error("Parallel approach missions currently require the connected OpenAI API provider.");
+  if (input.backend.backend.backendType !== "native-api") {
+    throw new Error("Parallel approach missions require a connected native model provider.");
   }
   const topic = input.prompt.trim();
   if (!topic || topic.length > 2_000) throw new Error("Parallel approach missions need a concise request.");
@@ -333,7 +333,7 @@ export async function resumeReviewedParallelApproachesMissions(input: {
   backend: AgentBackend;
   onCancellationReady?: (cancel: (() => Promise<void>) | null) => void;
 }): Promise<ReviewedParallelRecoverySummary> {
-  if (input.backend.providerId !== "openai") return { resumed: 0, finalized: 0 };
+  if (input.backend.backend.backendType !== "native-api") return { resumed: 0, finalized: 0 };
   const preparations = await recoverRuntimeParallelApproachesReviewers();
   if (!preparations?.length) return { resumed: 0, finalized: 0 };
   let resumed = 0;

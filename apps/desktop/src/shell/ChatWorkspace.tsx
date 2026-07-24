@@ -241,10 +241,13 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     const recoveryBackend = agent.backend;
-    if (!boundWorkspaceId || recoveryBackend?.providerId !== "openai"
-      || parallelRecoveryWorkspaceRef.current === boundWorkspaceId
-      || parallelRecoveryWorkspaceRef.current === `pending:${boundWorkspaceId}`) return;
-    const pendingKey = `pending:${boundWorkspaceId}`;
+    const recoveryKey = boundWorkspaceId && recoveryBackend
+      ? `${boundWorkspaceId}:${recoveryBackend.providerId}`
+      : null;
+    if (!recoveryKey || !recoveryBackend || recoveryBackend.backend.backendType !== "native-api"
+      || parallelRecoveryWorkspaceRef.current === recoveryKey
+      || parallelRecoveryWorkspaceRef.current === `pending:${recoveryKey}`) return;
+    const pendingKey = `pending:${recoveryKey}`;
     parallelRecoveryWorkspaceRef.current = pendingKey;
     const sourceThreadId = selectedConversationThreadIdRef.current;
     let active = true;
@@ -270,7 +273,7 @@ export function ChatWorkspace() {
     };
     void recover().then(async ({ changed }) => {
       if (!active) return;
-      parallelRecoveryWorkspaceRef.current = boundWorkspaceId;
+      parallelRecoveryWorkspaceRef.current = recoveryKey;
       parallelMissionCancellationRef.current = null;
       setParallelMissionRunning(false);
       if (!changed || !sourceThreadId || selectedConversationThreadIdRef.current !== sourceThreadId) return;
@@ -1326,10 +1329,12 @@ export function ChatWorkspace() {
       finishNewMissionLaunch();
       return;
     }
-    const nativeConnected = runtime.connectedAgentBackend;
+    const nativeConnected = runtime.connectedAgentBackend?.backendType === "native-api"
+      ? runtime.connectedAgentBackend
+      : undefined;
     if (!nativeConnected) {
       if (options.forceCitedMission) {
-        const error = "Starting a new cited mission requires a connected OpenAI API provider.";
+        const error = "Starting a new cited mission requires a connected native model provider.";
         agent.reportError(error);
         appendConversationMessage("assistant", error);
         finishNewMissionLaunch();

@@ -1967,10 +1967,8 @@ pub(crate) fn preflight_native_worker_completion(
     model: &str,
     body: &Value,
 ) -> Result<NativeWorkerCompletionPreflight, String> {
-    if !crate::native_api::supports_openai_compatible_mission(provider_id) {
-        return Err(
-            "Native mission completion currently supports only OpenAI-compatible routes.".into(),
-        );
+    if !crate::native_api::supports_native_mission_provider(provider_id) {
+        return Err("Native mission completion requires a registered native provider.".into());
     }
     let identity = crate::clerk_identity::native_identity_generation_snapshot()?;
     let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)?;
@@ -2126,8 +2124,18 @@ pub(crate) fn preflight_native_worker_completion(
                 evidence.as_ref(),
                 reviewed_parallel_context.as_ref(),
             );
-            validate_openai_compatible_worker_body(body, model, &prompt, max_tokens)
-                .map_err(crate::store::StoreError::Invalid)?;
+            match crate::native_api::provider_kind(provider_id) {
+                crate::native_api::ProviderKind::OpenAiCompat => {
+                    validate_openai_compatible_worker_body(body, model, &prompt, max_tokens)
+                }
+                crate::native_api::ProviderKind::Anthropic => {
+                    validate_anthropic_worker_body(body, model, &prompt, max_tokens)
+                }
+                crate::native_api::ProviderKind::Gemini => {
+                    validate_gemini_worker_body(body, &prompt, max_tokens)
+                }
+            }
+            .map_err(crate::store::StoreError::Invalid)?;
             for event_key in native_terminal_event_keys(binding)
                 .map_err(crate::store::StoreError::Invalid)?
             {
@@ -5978,6 +5986,67 @@ fn validate_openai_compatible_worker_body(
     Ok(())
 }
 
+fn validate_anthropic_worker_body(
+    body: &Value,
+    model: &str,
+    objective: &str,
+    max_tokens: i64,
+) -> Result<(), String> {
+    let request = object(body, "Anthropic worker request")?;
+    exact_keys(request, &["model", "max_tokens", "stream", "messages"])?;
+    let messages = request
+        .get("messages")
+        .and_then(Value::as_array)
+        .filter(|messages| messages.len() == 1)
+        .ok_or_else(|| "Anthropic worker request requires one objective message.".to_string())?;
+    let message = object(&messages[0], "Anthropic worker objective message")?;
+    exact_keys(message, &["role", "content"])?;
+    if request.get("model").and_then(Value::as_str) != Some(model)
+        || request.get("max_tokens").and_then(Value::as_i64) != Some(max_tokens)
+        || request.get("stream").and_then(Value::as_bool) != Some(true)
+        || message.get("role").and_then(Value::as_str) != Some("user")
+        || message.get("content").and_then(Value::as_str) != Some(objective)
+    {
+        return Err("Anthropic worker request does not match its native assignment.".into());
+    }
+    Ok(())
+}
+
+fn validate_gemini_worker_body(
+    body: &Value,
+    objective: &str,
+    max_tokens: i64,
+) -> Result<(), String> {
+    let request = object(body, "Gemini worker request")?;
+    exact_keys(request, &["contents", "generationConfig"])?;
+    let contents = request
+        .get("contents")
+        .and_then(Value::as_array)
+        .filter(|contents| contents.len() == 1)
+        .ok_or_else(|| "Gemini worker request requires one objective content.".to_string())?;
+    let content = object(&contents[0], "Gemini worker objective content")?;
+    exact_keys(content, &["role", "parts"])?;
+    let parts = content
+        .get("parts")
+        .and_then(Value::as_array)
+        .filter(|parts| parts.len() == 1)
+        .ok_or_else(|| "Gemini worker request requires one objective part.".to_string())?;
+    let part = object(&parts[0], "Gemini worker objective part")?;
+    exact_keys(part, &["text"])?;
+    let generation = request
+        .get("generationConfig")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Gemini worker generation config is invalid.".to_string())?;
+    exact_keys(generation, &["maxOutputTokens"])?;
+    if content.get("role").and_then(Value::as_str) != Some("user")
+        || part.get("text").and_then(Value::as_str) != Some(objective)
+        || generation.get("maxOutputTokens").and_then(Value::as_i64) != Some(max_tokens)
+    {
+        return Err("Gemini worker request does not match its native assignment.".into());
+    }
+    Ok(())
+}
+
 fn validate_native_cancellation_head<'a>(
     journal: &'a mission_run::MissionRunJournalRow,
     binding: &NativeWorkerExecutionBinding,
@@ -9187,6 +9256,39 @@ mod tests {
             validate_openai_compatible_worker_body(&widened, "gpt-5", "Inspect health", 50)
                 .is_err()
         );
+    }
+
+    #[test]
+    fn anthropic_and_gemini_worker_requests_are_exact_and_tool_free() {
+        let anthropic = json!({
+            "model":"claude-sonnet-4-5","max_tokens":50,"stream":true,
+            "messages":[{"role":"user","content":"Inspect health"}]
+        });
+        assert!(validate_anthropic_worker_body(
+            &anthropic,
+            "claude-sonnet-4-5",
+            "Inspect health",
+            50
+        )
+        .is_ok());
+        let mut anthropic_with_tool = anthropic;
+        anthropic_with_tool["tools"] = json!([]);
+        assert!(validate_anthropic_worker_body(
+            &anthropic_with_tool,
+            "claude-sonnet-4-5",
+            "Inspect health",
+            50
+        )
+        .is_err());
+
+        let gemini = json!({
+            "contents":[{"role":"user","parts":[{"text":"Inspect health"}]}],
+            "generationConfig":{"maxOutputTokens":50}
+        });
+        assert!(validate_gemini_worker_body(&gemini, "Inspect health", 50).is_ok());
+        let mut gemini_with_tool = gemini;
+        gemini_with_tool["tools"] = json!([]);
+        assert!(validate_gemini_worker_body(&gemini_with_tool, "Inspect health", 50).is_err());
     }
 
     #[test]

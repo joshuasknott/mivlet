@@ -247,7 +247,7 @@ appends `worker-started` only for an exact unstarted assignment after reloading
 the selected step and rechecking every active read grant; scope, actor, time,
 status, sequence, and both events are native-built, and the transaction exposes
 no intermediate running-without-worker state. One deliberately narrow native
-completion path now binds an already-started, objective-only OpenAI-compatible worker to
+completion path now binds an already-started, objective-only native-provider worker to
 the current run revision and journal head before provider egress. It permits no
 tools, context, capabilities, grants, or expected outputs; Rust validates the
 exact request shape, observes a clean provider `stop`, rechecks account and
@@ -264,10 +264,10 @@ same transaction to terminal `run-failed`, projects the run and selected mission
 to `failed`, and retains a failure `MissionResult` with every unevaluated
 criterion explicit. Token-limit failures use the canonical `budget-exceeded`
 category; provider failures remain provider failures. This does not claim semantic output evidence: tool-bearing workers,
-durable output receipts and provenance, Anthropic/Gemini and non-HTTP runtimes, live grant
+durable output receipts and provenance, non-HTTP runtimes, live grant
 consumption at tool use, handoffs, and the desktop experience remain open.
 
-The cited OpenAI-compatible worker boundary now also derives its duration ceiling and current
+The cited native-provider worker boundary now also derives its duration ceiling and current
 attempt from the authenticated selected worker before egress. One monotonic native
 deadline spans request send, internal transport retries, retry backoff, and stream
 consumption; renderer state cannot reset it. Cancellation retains priority. Reaching
@@ -276,14 +276,18 @@ attempt as a static non-retryable `budget-exceeded` failure. Every non-cancelled
 provider attempt records its bounded native-observed duration and exact journal
 attempt before completion or failure, even when a failed provider turn has no final
 token pair. Replay requires the same attempt and, for a duration failure, the exact
-authenticated ceiling. General runtimes and multi-worker duration aggregation remain
+authenticated ceiling. Non-HTTP runtimes and multi-worker duration aggregation remain
 open, so the Wave 4A boxes stay unchecked.
 
-The same OpenAI-compatible boundary now has one deliberately constrained semantic
+The same provider-specific native boundary now has one deliberately constrained semantic
 output path. A worker with exactly one required, evidence-free Markdown
 run-result slot receives a native-reconstructed prompt containing its persisted
 objective, output key, description, format, and uncertainty requirement. Rust strictly frames UTF-8 SSE
-bytes, rejects multiple choices, tool calls, late terminal content, invalid or
+bytes. OpenAI-compatible providers require one choice, one finish reason, and
+one post-finish usage frame; Anthropic requires an initial input count, text-only
+content blocks, one terminal message delta with output usage, and `message_stop`;
+Gemini requires text-only candidate parts and final usage with the candidate
+finish reason. Every family rejects tool calls, duplicate or late terminal facts, invalid or
 oversized text, and whitespace-only results, then hashes the exact bounded text.
 Schema v27 atomically links the `worker-completed` event's domain-separated
 value reference to an immutable owner-qualified encrypted receipt containing
@@ -294,10 +298,10 @@ restart. This is durable provider-generated text, not an artifact, cited brief,
 accepted mission result, canonical provider-route observation, or evidence for
 tool/context-bearing workers, so the Wave 4A boxes remain unchecked.
 
-Native OpenAI-compatible mission settlement now atomically appends one `usage-recorded`
+Native mission settlement now atomically appends one `usage-recorded`
 event before every non-cancelled completion or failure. A completed turn requires
-exactly one nonnegative final token pair after its finish reason; Rust rejects
-early, duplicate, stale, or post-usage choice frames. A failed turn retains that
+exactly one nonnegative final token pair at the legal provider-specific terminal
+position; Rust rejects early, duplicate, stale, or post-usage content frames. A failed turn retains that
 pair only when provider finality was actually observed. The event binds the
 worker, requested model, immutable selected route, exact prior tool count,
 native-observed provider duration, and journal attempt. Exact `gpt-5` token pairs
@@ -326,7 +330,7 @@ journey described below; by itself it does not claim provider output or acceptan
 The same worker can now continue from that exact encrypted tool receipt without
 another tool call. The portable driver canonicalizes only the Rust-attested result
 into the native-reconstructed final prompt; Rust independently reloads the receipt,
-worker, grant, Connection scope, and current tool-event head before compatible-provider egress.
+worker, grant, Connection scope, and current tool-event head before native-provider egress.
 The final Markdown must cite only available `[source-N]` ids, include a Sources
 mapping with each used title and URI, and explicitly disclose empty or degraded
 evidence. Unknown or unmapped citations fail closed. Usage records one prior tool
@@ -389,7 +393,7 @@ tool receipt and before provider egress. The final provider request carries its
 exact checkpoint event identity, and Rust accepts it only when that event is the
 current head and immediately binds the same tool event, sequence, and attempt;
 neither an arbitrary later checkpoint nor renderer-declared state can authorize
-egress. The narrow OpenAI-compatible path described above persists truthful production
+egress. The narrow native-provider path described above persists truthful production
 `worker-completed` and `worker-failed` events plus one atomic encrypted Markdown
 receipt. Accepted cited output now has the exact artifact provenance described
 below, but general worker execution events, other mission artifact shapes, and
@@ -521,7 +525,7 @@ boundaries, placement kinds, risk, request and route budgets, currency, and
 require/exclude preferences before scoring quality, estimated cost, and speed.
 Preferred fallback must be explicit and cannot cross a boundary; decisions retain
 the rejected reasons, selected score/explanation, fallback source, and stable
-boundary reference. The native OpenAI-compatible mission path now derives a stable private
+boundary reference. The native mission path now derives a stable private
 account route only from current account-owned provider metadata and an exact
 catalogue model. The desktop passes the complete immutable selection into the
 native worker start; Rust independently re-derives its current route, latency,
@@ -563,7 +567,7 @@ attribution transition, rejects running, changed, removed, fallback, non-schedul
 or secret-bearing route claims, and the run-detail surface reuses the same
 secret-safe explanation.
 Schema v29 adds bounded encrypted account-owned provider-route observations.
-After an exact OpenAI-compatible route finishes with one clean stop and final usage, Rust
+After an exact native-provider route finishes with one clean stop and final usage, Rust
 records the monotonic egress latency plus token counts under an idempotent
 request-derived observation id. Changed replay, unconnected providers,
 cross-account reads, malformed values, and more than fifty retained samples per
@@ -753,7 +757,7 @@ remains visible.
 Repository evidence now includes one deliberately narrow production parallel
 mission. An explicit request to generate two approaches and compare them creates
 one exact three-step Plan with two independent Markdown workers and one
-deterministic synthesis step. Both workers share the pinned OpenAI route and run
+deterministic synthesis step. Both workers share the pinned native-provider route and run
 concurrently through distinct native execution identities. The portable journal
 enforces bounded multi-worker state, exact worker membership, one replay-safe
 `all` join, canonical terminal sets, deadlines, cancellation, and failure

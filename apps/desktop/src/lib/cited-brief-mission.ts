@@ -162,8 +162,8 @@ export function isCitedBriefMissionPrompt(value: string): boolean {
 
 /** Compose the approved one-step cited-brief benchmark through real Tauri boundaries. */
 export async function executeCitedBriefMission(input: CitedBriefMissionInput): Promise<CitedBriefMissionResult> {
-  if (input.backend.providerId !== "openai") {
-    throw new Error("Cited connected-source missions currently require the connected OpenAI API provider.");
+  if (input.backend.backend.backendType !== "native-api") {
+    throw new Error("Cited connected-source missions require a connected native model provider.");
   }
   const query = input.query.trim();
   if (!query || query.length > 2_000) throw new Error("Connected-source research needs a concise question.");
@@ -444,6 +444,9 @@ export function requiresCitedBriefHumanAcceptance(value: string): boolean {
 export async function resumeInterruptedCitedBriefMissions(
   input: CitedBriefMissionRecoveryInput
 ): Promise<CitedBriefMissionRecoveryResult> {
+  if (input.backend.backend.backendType !== "native-api") {
+    return { resumed: 0, terminalized: 0, failed: 0 };
+  }
   const recoveries = await recoverRuntimeInterruptedCitedMissions();
   const result: CitedBriefMissionRecoveryResult = { resumed: 0, terminalized: 0, failed: 0 };
   if (!recoveries) return result;

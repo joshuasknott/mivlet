@@ -23,9 +23,9 @@ import {
 
 vi.mock("@fable/connectors", () => ({
   catalogueCapabilities: vi.fn(() => ({ tools: true, contextWindow: 128_000 })),
-  selectMissionProviderRoute: vi.fn(() => ({
+  selectMissionProviderRoute: vi.fn((_request: unknown, candidates: Array<{ route: { id: string } }>) => ({
     selection: {
-      providerRouteId: "route-openai",
+      providerRouteId: candidates[0].route.id,
       selectedAt: "2026-07-13T10:00:00Z",
       reason: "Pinned route",
       fallbackUsed: false,
@@ -151,7 +151,7 @@ describe("parallel approaches mission", () => {
       prompt: "Generate two independent approaches for onboarding and compare the trade-offs",
       workspaceId: "workspace-1",
       sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never,
       model: "gpt-5",
       createId: (prefix) => `${prefix}-${++counter}`
     });
@@ -165,6 +165,43 @@ describe("parallel approaches mission", () => {
     expect(planInput).toMatchObject({ executionDepth: "multi-worker", budget: { maxWorkers: 2 } });
     expect((planInput.steps as Array<{ key: string }>).map((step) => step.key))
       .toEqual(["approach-a", "approach-b", "compare"]);
+  });
+
+  it("keeps a non-OpenAI native provider pinned through both workers", async () => {
+    vi.mocked(listRuntimeNativeProviderRoutes).mockResolvedValue([{
+      id: "route-anthropic",
+      workspaceId: "workspace-1",
+      providerFamily: "anthropic",
+      modelOrRuntimeReference: "claude-sonnet-4-5",
+      boundaries: {},
+      state: "available",
+      health: "healthy"
+    } as never]);
+    vi.mocked(executeLocalWorker).mockResolvedValue({
+      status: "completed", text: "Approach", events: [],
+      usage: { inputTokens: 1, outputTokens: 1, toolCalls: 0, costUsd: 0, costUnknown: true },
+      retryable: false
+    });
+    let counter = 0;
+    await executeParallelApproachesMission({
+      prompt: "Generate two independent approaches for onboarding and compare the trade-offs",
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend: {
+        providerId: "anthropic",
+        backend: { backendType: "native-api" }
+      } as never,
+      model: "claude-sonnet-4-5",
+      createId: (prefix) => `${prefix}-${++counter}`
+    });
+    expect(vi.mocked(startRuntimeMissionWorker).mock.calls).toHaveLength(2);
+    for (const [input] of vi.mocked(startRuntimeMissionWorker).mock.calls) {
+      expect(input).toMatchObject({
+        providerId: "anthropic",
+        modelReference: "claude-sonnet-4-5",
+        routeSelection: { providerRouteId: "route-anthropic" }
+      });
+    }
   });
 
   it("creates a native-derived reviewer only for an explicit reviewed comparison", async () => {
@@ -200,7 +237,7 @@ describe("parallel approaches mission", () => {
     const result = await executeParallelApproachesMission({
       prompt: "Generate two independent approaches, compare them, then have an independent reviewer assess them",
       workspaceId: "workspace-1", sourceThreadId: "thread-1",
-      backend: { providerId: "openai" } as never, model: "gpt-5",
+      backend: { providerId: "openai", backend: { backendType: "native-api" } } as never, model: "gpt-5",
       createId: (prefix) => `${prefix}-${++counter}`
     });
 
@@ -249,7 +286,7 @@ describe("parallel approaches mission", () => {
     }] as never);
 
     await expect(resumeReviewedParallelApproachesMissions({
-      backend: { providerId: "openai", cancel: vi.fn() } as never
+      backend: { providerId: "openai", backend: { backendType: "native-api" }, cancel: vi.fn() } as never
     })).resolves.toEqual({ resumed: 1, finalized: 1 });
     expect(executeLocalWorker).toHaveBeenCalledOnce();
     expect(finalizeRuntimeParallelApproaches).toHaveBeenCalledWith("run-reviewed");
@@ -294,7 +331,7 @@ describe("parallel approaches mission", () => {
       prompt: "Generate two independent approaches for onboarding and compare the trade-offs",
       workspaceId: "workspace-1",
       sourceThreadId: "thread-1",
-      backend: { providerId: "openai", cancel: backendCancel } as never,
+      backend: { providerId: "openai", backend: { backendType: "native-api" }, cancel: backendCancel } as never,
       model: "gpt-5",
       createId: (prefix) => `${prefix}-${++counter}`,
       onCancellationReady: (callback) => { cancel = callback; ready(); }

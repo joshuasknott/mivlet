@@ -33,7 +33,8 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const durableConversation = useDurableConversation({ workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId, threadId });
   const agent = useNativeAgent({ providers: runtime.backendProviders, activeProviderId: runtime.connectedAgentBackend?.id, models: runtime.selectableModels, threadId, createDurableRunWriter: createDesktopDurableRunWriter, execute: executor, shouldCancel: () => cancelRequestedRef.current, onCancel: () => { cancelRequestedRef.current = true; cancelApprovals(); }, onToolCall: queueToolApproval });
   useEffect(() => {
-    if (!activeWorkspaceId || !agent.backend || agent.backend.providerId !== "openai" || agent.state.running) return;
+    if (!activeWorkspaceId || !agent.backend
+      || agent.backend.backend.backendType !== "native-api" || agent.state.running) return;
     const scopeKey = `${activeWorkspaceId}:${agent.backend.providerId}`;
     if (citedRecoveryScopeRef.current === scopeKey || citedMissionRunningRef.current) return;
     citedRecoveryScopeRef.current = scopeKey;
@@ -61,8 +62,9 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       throw new Error("Wait for the current work to finish before starting connected-source research.");
     }
     const workspace = runtime.accountWorkspaceStatus.activeWorkspace;
-    if (!agent.backend || !workspace?.localWorkspaceId || !threadId) {
-      throw new Error("Connected-source research requires the desktop runtime and a connected OpenAI API provider.");
+    if (!agent.backend || agent.backend.backend.backendType !== "native-api"
+      || !workspace?.localWorkspaceId || !threadId) {
+      throw new Error("Connected-source research requires the desktop runtime and a connected native model provider.");
     }
     citedMissionRunningRef.current = true;
     setCitedMissionRunning(true);

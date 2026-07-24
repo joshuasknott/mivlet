@@ -3221,7 +3221,7 @@ export interface RuntimeParallelReviewerPreparation {
   missionId: string;
   runId: string;
   workerId: string;
-  providerId: "openai";
+  providerId: string;
   modelReference: string;
   prompt: string;
   maxOutputTokens: number;
@@ -3283,7 +3283,7 @@ function parseRuntimeParallelReviewerPreparation(value: unknown): RuntimeParalle
     || typeof value.missionId !== "string" || !value.missionId || value.missionId.length > 200
     || typeof value.runId !== "string" || !value.runId || value.runId.length > 200
     || typeof value.workerId !== "string" || !value.workerId || value.workerId.length > 200
-    || value.providerId !== "openai"
+    || typeof value.providerId !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(value.providerId)
     || typeof value.modelReference !== "string" || !value.modelReference || value.modelReference.length > 200
     || typeof value.prompt !== "string" || !value.prompt.trim() || value.prompt.length > 131_072
     || value.maxOutputTokens !== 2_048 || typeof value.alreadyCompleted !== "boolean") {
@@ -3305,7 +3305,7 @@ function parseRuntimeParallelReviewerPreparation(value: unknown): RuntimeParalle
     missionId: value.missionId,
     runId: value.runId,
     workerId: value.workerId,
-    providerId: "openai",
+    providerId: value.providerId,
     modelReference: value.modelReference,
     prompt: value.prompt,
     maxOutputTokens: value.maxOutputTokens,
