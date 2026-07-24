@@ -37,6 +37,7 @@ mod connector_cache;
 mod connector_sync;
 mod connectors;
 mod conversations;
+mod diagnostics;
 mod execution_approvals;
 mod goals;
 mod google;
@@ -363,6 +364,7 @@ pub fn run() {
             store::backup_local_data,
             store::prepare_local_data_restore,
             store::delete_local_data,
+            diagnostics::local_diagnostics,
             portable::export_workspace_archive,
             portable::import_workspace_archive,
             portable::portable_format_version,

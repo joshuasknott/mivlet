@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeLocalBackup,
+  loadRuntimeLocalDiagnostics,
   prepareRuntimeLocalRestore
 } from "./runtime";
 
@@ -26,6 +27,7 @@ describe("local recovery runtime boundary", () => {
     await expect(
       prepareRuntimeLocalRestore("C:\\backup.db", "restore local data")
     ).resolves.toBeNull();
+    await expect(loadRuntimeLocalDiagnostics("workspace-1")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -57,5 +59,25 @@ describe("local recovery runtime boundary", () => {
         confirmation: "restore local data"
       }]
     ]);
+  });
+
+  it("loads the count-only native support snapshot", async () => {
+    setNative(true);
+    const snapshot = {
+      generatedAt: "2026-07-23T09:00:00Z",
+      schemaVersion: 35,
+      categories: [{
+        id: "storage",
+        label: "Local storage",
+        status: "healthy",
+        summary: "The encrypted database passed its integrity check.",
+        metrics: { databaseBytes: 4096, restorePending: 0 }
+      }]
+    };
+    mocks.invoke.mockResolvedValueOnce(snapshot);
+    await expect(loadRuntimeLocalDiagnostics("workspace-1")).resolves.toEqual(snapshot);
+    expect(mocks.invoke).toHaveBeenCalledWith("local_diagnostics", {
+      workspaceId: "workspace-1"
+    });
   });
 });

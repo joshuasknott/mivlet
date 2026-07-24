@@ -137,6 +137,20 @@ export interface RuntimeLocalRestorePreparation {
   credentialsIncluded: false;
 }
 
+export interface RuntimeLocalDiagnosticCategory {
+  id: "storage" | "providers" | "connections" | "mcp" | "runs" | "routines" | "queues" | "migrations" | "sync";
+  label: string;
+  status: "healthy" | "attention" | "unavailable";
+  summary: string;
+  metrics: Record<string, number>;
+}
+
+export interface RuntimeLocalDiagnosticsSnapshot {
+  generatedAt: string;
+  schemaVersion: number;
+  categories: RuntimeLocalDiagnosticCategory[];
+}
+
 export async function createRuntimeLocalBackup(
   destination: string
 ): Promise<RuntimeLocalBackupReceipt | null> {
@@ -158,6 +172,17 @@ export async function prepareRuntimeLocalRestore(
       source,
       confirmation
     });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function loadRuntimeLocalDiagnostics(
+  workspaceId: string
+): Promise<RuntimeLocalDiagnosticsSnapshot | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeLocalDiagnosticsSnapshot>("local_diagnostics", { workspaceId });
   } catch (error) {
     throw toRuntimeError(error);
   }

@@ -403,6 +403,11 @@ describe("Settings → Privacy UX states", () => {
       fireEvent.click(screen.getByRole("button", { name: "Create verified backup" }));
     });
     expect(await screen.findByText("Encrypted recovery backups are available only in the Fable desktop app.")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Run local health check" }));
+    });
+    expect(await screen.findByText("Local health checks are available only in the Fable desktop app.")).toBeTruthy();
   });
 
   it("handles bulk disconnect of all connectors", async () => {

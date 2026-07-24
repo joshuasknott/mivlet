@@ -32,8 +32,10 @@ import {
   acceptRuntimePendingInvitation,
   createRuntimeLocalBackup,
   getRuntimeRemoteControlStatus,
+  loadRuntimeLocalDiagnostics,
   loadRuntimePendingInvitations,
-  prepareRuntimeLocalRestore
+  prepareRuntimeLocalRestore,
+  type RuntimeLocalDiagnosticsSnapshot
 } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
@@ -385,6 +387,8 @@ function PrivacySettingsView({
   const [restorePath, setRestorePath] = useState("");
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
   const [recoveryAction, setRecoveryAction] = useState<"backup" | "restore" | null>(null);
+  const [diagnostics, setDiagnostics] = useState<RuntimeLocalDiagnosticsSnapshot | null>(null);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
 
   const connectedConnectors = useMemo(() => {
     return runtime.connectorManifests.filter(
@@ -478,6 +482,24 @@ function PrivacySettingsView({
       onStatus(error instanceof Error ? error.message : "Fable could not prepare that restore.");
     } finally {
       setRecoveryAction(null);
+    }
+  };
+
+  const handleDiagnostics = async () => {
+    setDiagnosticsLoading(true);
+    try {
+      const snapshot = await loadRuntimeLocalDiagnostics(
+        runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
+      );
+      setDiagnostics(snapshot);
+      onStatus(snapshot
+        ? "Local health check complete. The report contains statuses and counts only."
+        : "Local health checks are available only in the Fable desktop app.");
+    } catch (error) {
+      setDiagnostics(null);
+      onStatus(error instanceof Error ? error.message : "Fable could not run the local health check.");
+    } finally {
+      setDiagnosticsLoading(false);
     }
   };
 
@@ -712,6 +734,53 @@ function PrivacySettingsView({
                   </button>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="support-diagnostics-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <ShieldCheck size={19} />
+              </span>
+              <span>
+                <strong id="support-diagnostics-title">Local health check</strong>
+                <small>Review storage and execution health without exposing your content or credentials.</small>
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "12px", marginTop: "16px" }}>
+              <div>
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void handleDiagnostics()}
+                  disabled={diagnosticsLoading}
+                >
+                  {diagnosticsLoading ? <Spinner size={14} /> : null}
+                  <span>{diagnostics ? "Run again" : "Run local health check"}</span>
+                </button>
+              </div>
+              {diagnostics ? (
+                <div className="provider-access-list" aria-label="Local health check results">
+                  {diagnostics.categories.map((entry) => (
+                    <div className="provider-access-row" key={entry.id}>
+                      <span>
+                        <strong>{entry.label}</strong>
+                        <small>{entry.summary}</small>
+                      </span>
+                      <span className={`status-pill status-pill--${entry.status}`}>
+                        {entry.status === "healthy"
+                          ? "Ready"
+                          : entry.status === "attention"
+                            ? "Needs attention"
+                            : "Not configured"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <small>
+                This check returns bounded counts and health states only. It does not read saved prompts, artifacts, citations, provider responses, file paths, account identifiers, or secrets.
+              </small>
             </div>
           </section>
         </div>

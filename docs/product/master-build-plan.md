@@ -1320,6 +1320,7 @@ validation remain open; therefore the aggregate checkboxes stay open.
 - [ ] Review identity, workspace authorization, Connections, OAuth, MCP, and capabilities.
 - [ ] Review missions, approvals, routines, hosted execution, browser, computer use, mobile, and voice.
 - [ ] Add provider, Connection, node, run, queue, storage, and sync diagnostics.
+  - Repo-local progress: an authenticated native support snapshot now covers encrypted storage integrity/size/pending restore, connected provider records and route observations, canonical Connection blocking states, MCP configuration/enablement, nonterminal or failed Mission runs, active/failed/quarantined Routines, active/failed scheduler queue entries, migration failures/unattributed records, and hosted sync links/pending work/conflicts. Every query is fenced to the active account and workspace where applicable and reads plaintext control columns only. The result contains bounded category labels, healthy/attention/not-configured state, plain summaries, and counts; it cannot contain decrypted payloads, prompts, artifacts, citations, provider responses, credentials, paths, workspace/member/user ids, or external account ids. Privacy settings render the calm report and explain that boundary. Node/runtime-process telemetry and deployed monitoring remain open, so the full item stays unchecked.
 - [ ] Add cost visibility, budgets, cancellation, kill switches, and incident audit.
 
 ### Wave 10C - Product quality
