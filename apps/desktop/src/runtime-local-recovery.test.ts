@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeLocalBackup,
+  loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
-  prepareRuntimeLocalRestore
+  pauseRuntimeExecution,
+  prepareRuntimeLocalRestore,
+  resumeRuntimeExecution
 } from "./runtime";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -28,6 +31,9 @@ describe("local recovery runtime boundary", () => {
       prepareRuntimeLocalRestore("C:\\backup.db", "restore local data")
     ).resolves.toBeNull();
     await expect(loadRuntimeLocalDiagnostics("workspace-1")).resolves.toBeNull();
+    await expect(loadRuntimeExecutionControl("workspace-1")).resolves.toBeNull();
+    await expect(pauseRuntimeExecution("workspace-1", "pause all execution")).resolves.toBeNull();
+    await expect(resumeRuntimeExecution("workspace-1", 1, "resume execution")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -79,5 +85,31 @@ describe("local recovery runtime boundary", () => {
     expect(mocks.invoke).toHaveBeenCalledWith("local_diagnostics", {
       workspaceId: "workspace-1"
     });
+  });
+
+  it("uses exact confirmations and optimistic revision for execution control", async () => {
+    setNative(true);
+    const active = { paused: false, revision: 0, changedAt: "" };
+    const paused = { paused: true, revision: 1, changedAt: "2026-07-24T09:00:00Z" };
+    const resumed = { paused: false, revision: 2, changedAt: "2026-07-24T09:01:00Z" };
+    mocks.invoke
+      .mockResolvedValueOnce(active)
+      .mockResolvedValueOnce(paused)
+      .mockResolvedValueOnce(resumed);
+    await expect(loadRuntimeExecutionControl("workspace-1")).resolves.toEqual(active);
+    await expect(pauseRuntimeExecution("workspace-1", "pause all execution")).resolves.toEqual(paused);
+    await expect(resumeRuntimeExecution("workspace-1", 1, "resume execution")).resolves.toEqual(resumed);
+    expect(mocks.invoke.mock.calls).toEqual([
+      ["execution_control_get", { workspaceId: "workspace-1" }],
+      ["execution_control_pause", {
+        workspaceId: "workspace-1",
+        confirmation: "pause all execution"
+      }],
+      ["execution_control_resume", {
+        workspaceId: "workspace-1",
+        baseRevision: 1,
+        confirmation: "resume execution"
+      }]
+    ]);
   });
 });

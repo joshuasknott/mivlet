@@ -32,9 +32,13 @@ import {
   acceptRuntimePendingInvitation,
   createRuntimeLocalBackup,
   getRuntimeRemoteControlStatus,
+  loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
   loadRuntimePendingInvitations,
+  pauseRuntimeExecution,
   prepareRuntimeLocalRestore,
+  resumeRuntimeExecution,
+  type RuntimeExecutionControlState,
   type RuntimeLocalDiagnosticsSnapshot
 } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
@@ -389,6 +393,26 @@ function PrivacySettingsView({
   const [recoveryAction, setRecoveryAction] = useState<"backup" | "restore" | null>(null);
   const [diagnostics, setDiagnostics] = useState<RuntimeLocalDiagnosticsSnapshot | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [executionControl, setExecutionControl] = useState<RuntimeExecutionControlState | null>(null);
+  const [executionConfirmation, setExecutionConfirmation] = useState("");
+  const [executionControlLoading, setExecutionControlLoading] = useState(false);
+  const workspaceId = runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
+
+  useEffect(() => {
+    let current = true;
+    setExecutionControl(null);
+    setExecutionConfirmation("");
+    void loadRuntimeExecutionControl(workspaceId)
+      .then((state) => {
+        if (current) setExecutionControl(state);
+      })
+      .catch(() => {
+        if (current) setExecutionControl(null);
+      });
+    return () => {
+      current = false;
+    };
+  }, [workspaceId]);
 
   const connectedConnectors = useMemo(() => {
     return runtime.connectorManifests.filter(
@@ -500,6 +524,29 @@ function PrivacySettingsView({
       onStatus(error instanceof Error ? error.message : "Fable could not run the local health check.");
     } finally {
       setDiagnosticsLoading(false);
+    }
+  };
+
+  const handleExecutionControl = async () => {
+    if (!executionControl) return;
+    const expected = executionControl.paused ? "resume execution" : "pause all execution";
+    if (executionConfirmation !== expected) return;
+    setExecutionControlLoading(true);
+    try {
+      const next = executionControl.paused
+        ? await resumeRuntimeExecution(workspaceId, executionControl.revision, "resume execution")
+        : await pauseRuntimeExecution(workspaceId, "pause all execution");
+      setExecutionControl(next);
+      setExecutionConfirmation("");
+      onStatus(next?.paused
+        ? "New provider, tool, Mission, and scheduled execution is paused for this workspace."
+        : next
+          ? "New execution is available again. Existing approval and budget boundaries still apply."
+          : "Workspace execution control is available only in the Fable desktop app.");
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not change execution control.");
+    } finally {
+      setExecutionControlLoading(false);
     }
   };
 
@@ -734,6 +781,66 @@ function PrivacySettingsView({
                   </button>
                 </div>
               </div>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="execution-control-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <ShieldCheck size={19} />
+              </span>
+              <span>
+                <strong id="execution-control-title">Pause new execution</strong>
+                <small>Stop Fable from starting more provider, tool, Mission, Routine, or scheduled work in this workspace.</small>
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "10px", marginTop: "16px" }}>
+              {executionControl ? (
+                <>
+                  <div className="provider-access-row">
+                    <span>
+                      <strong>{executionControl.paused ? "Execution paused" : "Execution available"}</strong>
+                      <small>
+                        {executionControl.paused
+                          ? "New work and scheduler leases are blocked. Already accepted external effects cannot be undone here."
+                          : "Normal approvals, grants, budgets, and cancellation rules still apply."}
+                      </small>
+                    </span>
+                    <span className={`status-pill status-pill--${executionControl.paused ? "attention" : "healthy"}`}>
+                      {executionControl.paused ? "Paused" : "Ready"}
+                    </span>
+                  </div>
+                  <label htmlFor="execution-control-confirmation">
+                    Type <strong>{executionControl.paused ? "resume execution" : "pause all execution"}</strong> to confirm
+                  </label>
+                  <input
+                    id="execution-control-confirmation"
+                    className="input"
+                    value={executionConfirmation}
+                    onChange={(event) => setExecutionConfirmation(event.target.value)}
+                    spellCheck={false}
+                    autoComplete="off"
+                  />
+                  <div>
+                    <button
+                      type="button"
+                      className={executionControl.paused ? "button button--secondary" : "button button--destructive"}
+                      onClick={() => void handleExecutionControl()}
+                      disabled={
+                        executionControlLoading
+                        || executionConfirmation !== (executionControl.paused
+                          ? "resume execution"
+                          : "pause all execution")
+                      }
+                    >
+                      {executionControlLoading ? <Spinner size={14} /> : null}
+                      <span>{executionControl.paused ? "Resume new execution" : "Pause new execution"}</span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <small>This control is available only in the signed-in Fable desktop runtime.</small>
+              )}
             </div>
           </section>
 

@@ -1414,6 +1414,7 @@ pub fn authorize_mcp_tool_call(
 pub async fn execute_approved_mcp_tool_call(
     request: ExecuteMcpToolCallRequest,
 ) -> Result<Vec<String>, String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     if !valid_request_id(&request.request_id) {
         return Err("The MCP request id is invalid.".into());
     }

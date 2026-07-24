@@ -711,6 +711,9 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
 
     let mut newly_leased = Vec::new();
     for workspace_id in workspaces {
+        if crate::execution_control::workspace_is_paused(&workspace_id)? {
+            continue;
+        }
         if !legacy_writer_allowed(&workspace_id)? {
             continue;
         }

@@ -1206,6 +1206,7 @@ pub async fn stream_backend_completion(
     app: AppHandle,
     request: BackendStreamRequest,
 ) -> Result<(), String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     if !NATIVE_PROVIDER_IDS.contains(&request.provider_id.as_str()) {
         return Err("Provider is not registered for native API egress.".to_string());
     }

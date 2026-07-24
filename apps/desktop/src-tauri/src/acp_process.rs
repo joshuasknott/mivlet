@@ -256,6 +256,7 @@ pub async fn spawn_acp_process(
     app: AppHandle,
     request: SpawnAcpProcessRequest,
 ) -> Result<SpawnedAcpProcess, String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     let spec = acp_executable_for(&request.provider_id)
         .ok_or_else(|| format!("{} is not a registered ACP provider.", request.provider_id))?;
 

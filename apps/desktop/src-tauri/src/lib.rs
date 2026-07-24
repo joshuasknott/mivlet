@@ -39,6 +39,7 @@ mod connectors;
 mod conversations;
 mod diagnostics;
 mod execution_approvals;
+mod execution_control;
 mod goals;
 mod google;
 mod knowledge;
@@ -365,6 +366,9 @@ pub fn run() {
             store::prepare_local_data_restore,
             store::delete_local_data,
             diagnostics::local_diagnostics,
+            execution_control::execution_control_get,
+            execution_control::execution_control_pause,
+            execution_control::execution_control_resume,
             portable::export_workspace_archive,
             portable::import_workspace_archive,
             portable::portable_format_version,

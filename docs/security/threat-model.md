@@ -71,6 +71,14 @@
 - Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
 - Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.
 - Action history provides an inspectable local record of Fable's past actions (such as model calls, connector actions, shell commands, web queries, approvals, schedules, and policy blocks). This log is saved locally in the encrypted SQLite `audit_event` table. For security and privacy, all secrets, keys, credentials, full file/email content, and environment variables are redacted at the storage boundary and never persisted. Action history only observes activity; it does not grant execution authority and does not bypass any security checks.
+- A workspace-wide encrypted execution control blocks new native-provider,
+  local-model, ACP, Codex app-server, approved MCP-tool, legacy scheduler, and
+  canonical Routine leases before their execution boundary. Pause and resume
+  require exact typed confirmation; resume is optimistic-revision fenced, and
+  both changes enter secret-safe action history. Missing state defaults active,
+  but corrupt state fails closed. This control does not claim to undo an effect
+  already accepted externally, and runtime-specific cancellation remains
+  separate.
 - Optional cloud/team sync uses Clerk identity and Convex only for explicitly
   shared workspaces. Solo encrypted SQLite remains authoritative for local
   workspaces. Cloud sync must use explicit record allowlists, workspace-scoped

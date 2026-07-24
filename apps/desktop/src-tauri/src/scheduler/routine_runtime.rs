@@ -908,6 +908,9 @@ pub(super) fn run_tick(app: &AppHandle) -> Result<usize, String> {
     let mut leased = Vec::new();
 
     for workspace_id in workspaces {
+        if crate::execution_control::workspace_is_paused(&workspace_id)? {
+            continue;
+        }
         let workspace_leases = store
             .transaction(|tx| {
                 let authority = routine::scheduler_authority(tx, store, &workspace_id, &now_iso)?;

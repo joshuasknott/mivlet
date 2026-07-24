@@ -151,6 +151,55 @@ export interface RuntimeLocalDiagnosticsSnapshot {
   categories: RuntimeLocalDiagnosticCategory[];
 }
 
+export interface RuntimeExecutionControlState {
+  paused: boolean;
+  revision: number;
+  changedAt: string;
+}
+
+export async function loadRuntimeExecutionControl(
+  workspaceId: string
+): Promise<RuntimeExecutionControlState | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeExecutionControlState>("execution_control_get", { workspaceId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function pauseRuntimeExecution(
+  workspaceId: string,
+  confirmation: "pause all execution"
+): Promise<RuntimeExecutionControlState | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeExecutionControlState>("execution_control_pause", {
+      workspaceId,
+      confirmation
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function resumeRuntimeExecution(
+  workspaceId: string,
+  baseRevision: number,
+  confirmation: "resume execution"
+): Promise<RuntimeExecutionControlState | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeExecutionControlState>("execution_control_resume", {
+      workspaceId,
+      baseRevision,
+      confirmation
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export async function createRuntimeLocalBackup(
   destination: string
 ): Promise<RuntimeLocalBackupReceipt | null> {

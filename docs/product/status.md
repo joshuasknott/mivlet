@@ -141,6 +141,8 @@ Performance regression gates are repository-local and current as of 24 July 2026
 
 Unsigned Windows distribution has a repository-owned private artifact lane. Manual dispatch builds MSI and NSIS after the full gate, records exact checksums and explicit unsigned/unpublished state in a deterministic private/internal/preview manifest, generates matching release notes, and rehearses clean NSIS install, same-version repair, uninstall registration, and local-data preservation on a disposable runner. The manifest refuses `public`; no release, updater, signing, or download hosting is created. A real previous-version upgrade/rollback, packaged first launch, vault/keyring continuity, signing, and private soak remain manual gates.
 
+Workspace execution can be paused from Privacy settings with an encrypted native control and exact typed confirmation. New native-provider, local-model, ACP, Codex app-server, approved MCP-tool, legacy Schedule, and canonical Routine execution is denied or not leased while paused; malformed state fails closed, resume is revision-fenced, and both transitions enter secret-safe action history. This is a new-start kill switch, not a claim that Fable can undo an external effect already accepted or synchronously terminate every owning runtime; per-run cancellation remains the in-flight control.
+
 ## Partially Implemented Or Preview-Only
 
 - Browser preview uses an explicit synthetic identity/workspace fixture. The Tauri path requires a Fable account and then one provider; it no longer offers a local profile, password, or skip route.

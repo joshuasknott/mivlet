@@ -233,6 +233,7 @@ pub fn start_codex_app_server_turn(
     app: AppHandle,
     request: CodexTurnStartRequest,
 ) -> Result<(), String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     if request.provider_id != "codex" {
         return Err("Codex app-server can only run the Codex provider.".to_string());
     }

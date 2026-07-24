@@ -450,6 +450,7 @@ pub async fn stream_local_model_completion(
     app: AppHandle,
     request: LocalModelStreamRequest,
 ) -> Result<(), String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     validate_stream_request(&request)?;
     let url = endpoint("/api/chat")?;
     let channel = format!("{LOCAL_CHANNEL_PREFIX}{}", request.request_id);
