@@ -415,9 +415,12 @@ transaction, Rust reloads the selected plan and exact worker step, evaluates onl
 its policy-owned criteria, and appends `evaluation-recorded`. Pass/fail and
 evidence references come only from the attested receipt, retained citation ids,
 and any exact required evidence; renderer assertions cannot create acceptance.
-Human, worker, and external evaluators, multi-output and mission-level result
-aggregation, general terminal result persistence, and inspectable plans for other mission shapes remain
-open, so the acceptance/evaluation box stays unchecked.
+The general finalizer can now consume authenticated human and graph-worker
+evaluation facts, multiple uniquely produced outputs, and mission-level
+acceptance, while external evaluation remains unattested. General production of
+those evaluator facts, ambiguous output-selection policy, and inspectable plans
+for other mission shapes remain open, so the acceptance/evaluation box stays
+unchecked.
 
 For the deliberately narrow single-step cited-brief shape, policy evaluation
 now always continues in that transaction to a terminal run outcome.
@@ -429,8 +432,9 @@ error and a recoverable `PartialOutcome` that preserves the exact output,
 per-criterion acceptance, remaining work, and a stop recommendation; it projects
 the run to `partially-completed` without blaming the provider. Exact settlement
 replay requires the original evaluation and its matching accepted or partial
-terminal fact. Multi-step aggregation, other evaluator kinds, general mission-
-level aggregation, and other product journeys remain open.
+terminal fact. The general finalizer adds multi-step aggregation and declared
+evaluator consumption, but automatic graph composition, evaluator production,
+artifact materialization, and other product journeys remain open.
 
 The authenticated lifecycle now also projects those journal facts back to the
 selected mission. Creating the first run atomically advances the exact
@@ -829,7 +833,7 @@ Event and idempotency identities are derived from the run, event kind, and exact
 join or step reference; no renderer-selected head, status, worker set, time, or
 output crosses the boundary. The loop is capped at sixty-four facts and rolls
 back on malformed or over-limit state. Starting/routing arbitrary ready workers,
-native terminal result persistence, and general restart dispatch remain open.
+and general restart dispatch remain open.
 
 A provider-neutral portable graph runner now drives arbitrary compiled worker
 graphs through replay-safe callbacks rather than assuming either benchmark
@@ -857,8 +861,23 @@ claims remain unattested, and a failed or partial source cannot be promoted to
 Mission success merely because it returned prose. Successful, partial, failed,
 and cancelled results retain producing run ids, completed outputs, remaining
 work, acceptance, recovery guidance, and human-review gates without copying
-usage or content into a new authority layer. Native arbitrary-graph terminal
-event persistence and product composition remain open.
+usage or content into a new authority layer. Native product composition remains
+open.
+
+An authenticated native finalizer now performs that terminal boundary again
+from the encrypted selected Plan and journal without accepting a renderer
+manifest. It requires every graph worker to have one terminal fact and no
+runnable or waiting step, derives each deliverable from exactly one
+Plan-declared producing step, recomputes coordinate receipts, verifies durable
+output references, and combines policy, identified internal-user, or exact
+reviewer-worker evaluations only when the immutable event actor matches the
+declared evaluator. It appends a stable terminal fact, writes the exact Run
+result, and projects the matching Mission result in one transaction. Successful,
+recoverable partial, failed, and cancelled paths are covered, including
+encrypted reopen. Plans with ambiguous deliverable producers fail closed until
+a future immutable output-selection contract exists. Automatic worker
+creation/routing, general evaluator production and waits, restart dispatch, and
+arbitrary artifact materialization remain open.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and

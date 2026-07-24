@@ -3269,6 +3269,25 @@ export async function advanceRuntimeMissionCoordination(runId: string): Promise<
   }
 }
 
+export async function finalizeRuntimeMissionCoordination(runId: string): Promise<{
+  journal: Record<string, unknown>;
+  missionResult: Record<string, unknown>;
+  progress: RuntimeMissionProgress;
+  terminalEventId: string;
+} | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      journal: Record<string, unknown>;
+      missionResult: Record<string, unknown>;
+      progress: RuntimeMissionProgress;
+      terminalEventId: string;
+    }>("mission_coordination_finalize", { runId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export interface RuntimeParallelApproachesResult {
   missionId: string;
   runId: string;

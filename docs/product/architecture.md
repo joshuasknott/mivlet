@@ -164,8 +164,18 @@ and receipt inputs, and requires an explicit one-to-one deliverable selection.
 Acceptance is derived conservatively from declared policy, identified human, or
 exact graph-worker evaluations; model completion and unattested external claims
 carry no acceptance authority. Missing or conflicting evidence produces partial
-or failed truth, while cancellation and recoverable work remain explicit. Native
-arbitrary-graph terminal event persistence is not yet wired.
+or failed truth, while cancellation and recoverable work remain explicit. The
+native finalizer derives this boundary again from the encrypted selected Plan
+and journal. It accepts only a run id, requires every worker terminal and no
+runnable or waiting step, recomputes coordinate receipts, and permits exactly
+one Plan-declared producing step per deliverable. Evaluation authority must
+match the immutable event actor: system for policy, identified internal user for
+human, or an exact graph worker for reviewer evaluation; external evaluation
+remains unattested. The stable terminal event, encrypted Run result, and matching
+Mission lifecycle projection commit atomically and survive reopen. Ambiguous
+output producers, missing durable references, forged evaluator authority, and
+changed replay fail closed. Automatic worker dispatch, general evaluation/wait
+production, restart orchestration, and artifact materialization remain open.
 
 ## Schedules And Commands
 

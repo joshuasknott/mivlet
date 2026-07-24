@@ -6,6 +6,7 @@ import {
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
   createRuntimeMissionWorker,
+  finalizeRuntimeMissionCoordination,
   getRuntimeMissionPlan,
   getRuntimeCitedMissionPlanSummary,
   getRuntimeMissionRun,
@@ -65,6 +66,7 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(readRuntimeMissionProgress("run-1")).resolves.toBeNull();
     await expect(advanceRuntimeMissionCoordination("run-1")).resolves.toBeNull();
+    await expect(finalizeRuntimeMissionCoordination("run-1")).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
     await expect(openRuntimeMissionJoin({
@@ -431,6 +433,7 @@ describe("mission runtime boundary", () => {
     await recordRuntimeMissionAggregation(aggregation);
     await readRuntimeMissionProgress("run-1");
     await advanceRuntimeMissionCoordination("run-1");
+    await finalizeRuntimeMissionCoordination("run-1");
     await getRuntimeMissionPlan("mission-1");
     await getRuntimeCitedMissionPlanSummary("mission-1");
     await getRuntimeMissionRun("run-1");
@@ -464,6 +467,7 @@ describe("mission runtime boundary", () => {
       ["mission_coordination_aggregation_record", { input: aggregation }],
       ["mission_coordination_progress_read", { runId: "run-1" }],
       ["mission_coordination_advance", { runId: "run-1" }],
+      ["mission_coordination_finalize", { runId: "run-1" }],
       ["mission_plan_get", { missionId: "mission-1" }],
       ["mission_plan_cited_summary_get", { missionId: "mission-1" }],
       ["mission_run_get", { runId: "run-1" }],
