@@ -137,8 +137,14 @@ outputs and saved output contracts, while the portable journal revalidates worke
 scope, plan revision, terminal facts, output declarations, order, missing keys,
 and replay. The event carries no referenced output body and grants no acceptance or
 artifact authority. The current desktop parallel journey remains a fixed native
-composition while arbitrary graph advancement and artifact orchestration are
-completed.
+composition. An authenticated read projection now derives compact per-step
+progress, bounded parallel readiness, durable usage totals, cost observations,
+and acceptance state from the same selected Plan and encrypted journal. It
+rejects unknown workers, duplicate terminal facts, work outside the selected
+Plan, malformed usage, and ambiguous evaluations. The parallel desktop journey
+publishes that projection after its durable join, worker settlement, reviewer,
+and terminal boundaries; browser preview invents no progress. Arbitrary graph
+advancement and artifact orchestration remain open.
 
 ## Schedules And Commands
 

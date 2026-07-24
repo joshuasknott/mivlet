@@ -124,6 +124,29 @@ vi.mock("./lib/parallel-approaches-mission", () => ({
       budget: { maxWorkers: reviewed ? 3 : 2, maxDurationMs: 90_000, maxOutputTokens: 2_048, maxAttempts: 1 }
     };
     (input.onPlanReady as ((plan: unknown) => void) | undefined)?.(plan);
+    (input.onProgress as ((progress: unknown) => void) | undefined)?.({
+      version: 1,
+      state: "running",
+      summary: "Mission work is progressing within its declared limits.",
+      runStatus: "running",
+      completedSteps: 1,
+      totalSteps: plan.steps.length,
+      runningWorkers: 1,
+      readyWorkers: 0,
+      waitingSteps: 1,
+      blockedSteps: 0,
+      steps: plan.steps.map((step, index) => ({
+        stepKey: `step-${index + 1}`,
+        title: step.title,
+        kind: index === plan.steps.length - 1 ? "coordinate" : "produce",
+        state: index === 0 ? "completed" : index === 1 ? "running" : "waiting",
+        detail: index === 0 ? "The durable output is complete." : index === 1 ? "Work is in progress." : "Waiting for its declared dependencies."
+      })),
+      usage: { records: 1, inputTokens: 10, outputTokens: 5, toolCalls: 0, durationMs: 500, costObservations: [] },
+      budget: { maxWorkers: reviewed ? 3 : 2 },
+      acceptance: [],
+      nextAction: "Wait for current bounded work to settle."
+    });
     return {
       missionId: "parallel-mission-ui", runId: "parallel-run-ui", outcome: "completed",
       text: reviewed

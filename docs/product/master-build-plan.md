@@ -806,8 +806,19 @@ but copies no referenced output body and grants no policy, acceptance, or artifa
 authority. The portable journal independently rejects substituted workers,
 outputs, order, status, and duplicate aggregation. General automatic graph
 advancement, provider routing across arbitrary workers, artifact materialization
-from the general manifest, restart recovery, and the calm product surface remain
-open.
+from the general manifest, and restart recovery remain open.
+
+An authenticated native progress projection now reads any selected general Plan
+and its encrypted journal without accepting renderer state. It derives bounded
+ready/running/waiting/blocked work in Plan order, applies the saved parallel
+limit, totals only durable usage records, retains exact cost observations, and
+projects policy/human/worker acceptance as evaluated or explicitly unevaluated.
+Unknown workers, duplicate terminal facts, out-of-Plan work, malformed usage,
+ambiguous evaluation, and unavailable dependencies fail closed. The current
+parallel desktop journey publishes this compact calm receipt after the durable
+join, worker settlement, optional reviewer, and terminal boundaries. Browser
+preview returns no synthetic progress. This is inspectability, not automatic
+execution authority.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and

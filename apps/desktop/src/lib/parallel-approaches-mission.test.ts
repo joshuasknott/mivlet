@@ -10,6 +10,7 @@ import {
   listRuntimeNativeProviderRoutes,
   openRuntimeParallelApproachesJoin,
   prepareRuntimeParallelApproachesReviewer,
+  readRuntimeMissionProgress,
   recoverRuntimeParallelApproachesReviewers,
   requestRuntimeMissionRunCancellation,
   startRuntimeMissionWorker
@@ -45,6 +46,7 @@ vi.mock("../runtime", () => ({
   listRuntimeNativeProviderRoutes: vi.fn(),
   openRuntimeParallelApproachesJoin: vi.fn(),
   prepareRuntimeParallelApproachesReviewer: vi.fn(),
+  readRuntimeMissionProgress: vi.fn(),
   recoverRuntimeParallelApproachesReviewers: vi.fn(),
   requestRuntimeMissionRunCancellation: vi.fn(),
   startRuntimeMissionWorker: vi.fn()
@@ -112,6 +114,23 @@ describe("parallel approaches mission", () => {
       artifactVersionId: "version-1",
       journal: journal()
     });
+    vi.mocked(readRuntimeMissionProgress).mockResolvedValue({
+      version: 1,
+      state: "running",
+      summary: "Mission work is progressing within its declared limits.",
+      runStatus: "running",
+      completedSteps: 0,
+      totalSteps: 3,
+      runningWorkers: 2,
+      readyWorkers: 0,
+      waitingSteps: 1,
+      blockedSteps: 0,
+      steps: [],
+      usage: { records: 0, inputTokens: 0, outputTokens: 0, toolCalls: 0, durationMs: 0, costObservations: [] },
+      budget: { maxWorkers: 2 },
+      acceptance: [],
+      nextAction: "Wait for current bounded work to settle."
+    });
   });
 
   it("recognizes only an explicit two-approach comparison request", () => {
@@ -147,13 +166,15 @@ describe("parallel approaches mission", () => {
       return { status: "completed", text: "Approach", events: [], usage: { inputTokens: 1, outputTokens: 1, toolCalls: 0, costUsd: 0, costUnknown: true }, retryable: false };
     });
     let counter = 0;
+    const onProgress = vi.fn();
     const result = await executeParallelApproachesMission({
       prompt: "Generate two independent approaches for onboarding and compare the trade-offs",
       workspaceId: "workspace-1",
       sourceThreadId: "thread-1",
       backend: { providerId: "openai", backend: { backendType: "native-api" } } as never,
       model: "gpt-5",
-      createId: (prefix) => `${prefix}-${++counter}`
+      createId: (prefix) => `${prefix}-${++counter}`,
+      onProgress
     });
 
     expect(result).toMatchObject({ outcome: "completed", artifactId: "artifact-1" });
@@ -161,6 +182,8 @@ describe("parallel approaches mission", () => {
     expect(executeLocalWorker).toHaveBeenCalledTimes(2);
     expect(maximumActive).toBe(2);
     expect(finalizeRuntimeParallelApproaches).toHaveBeenCalledOnce();
+    expect(readRuntimeMissionProgress).toHaveBeenCalledTimes(3);
+    expect(onProgress).toHaveBeenCalledTimes(3);
     const planInput = vi.mocked(createRuntimeMissionPlan).mock.calls[0][0];
     expect(planInput).toMatchObject({ executionDepth: "multi-worker", budget: { maxWorkers: 2 } });
     expect((planInput.steps as Array<{ key: string }>).map((step) => step.key))

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -202,6 +202,45 @@ describe("RunContextSummary", () => {
     expect(plan).toHaveTextContent("Join both exact outputs.");
     expect(plan).toHaveTextContent("2 workers total");
     expect(plan).not.toHaveTextContent("mission-");
+  });
+
+  it("shows durable multi-worker progress without exposing worker authority ids", () => {
+    render(<MissionProgressSummary progress={{
+      version: 1,
+      state: "running",
+      summary: "Mission work is progressing within its declared limits.",
+      runStatus: "running",
+      completedSteps: 1,
+      totalSteps: 3,
+      runningWorkers: 1,
+      readyWorkers: 0,
+      waitingSteps: 1,
+      blockedSteps: 0,
+      steps: [
+        { stepKey: "approach-a", title: "Practical approach", kind: "produce", state: "completed", detail: "The durable output is complete." },
+        { stepKey: "approach-b", title: "Alternative approach", kind: "produce", state: "running", detail: "Work is in progress." },
+        { stepKey: "combine", title: "Compare", kind: "coordinate", state: "waiting", detail: "Waiting for its declared dependencies." }
+      ],
+      usage: { records: 1, inputTokens: 120, outputTokens: 80, toolCalls: 0, durationMs: 1250, costObservations: [] },
+      budget: { maxWorkers: 2, maxInputTokens: 32_000, maxOutputTokens: 4_096, maxToolCalls: 0, maxDurationMs: 180_000, maxAttempts: 1 },
+      acceptance: [{
+        criterionKey: "both-approaches",
+        description: "Both approaches reach the comparison.",
+        required: true,
+        evaluator: "policy",
+        status: "not-evaluated",
+        evidenceCount: 0
+      }],
+      nextAction: "Wait for current bounded work to settle."
+    }} />);
+    const progress = screen.getByLabelText("Mission progress");
+    expect(progress).toHaveTextContent("1 of 3 steps · In progress");
+    expect(progress).toHaveTextContent("Practical approachComplete");
+    expect(progress).toHaveTextContent("200 tokens observed");
+    expect(progress).toHaveTextContent("0 connected actions");
+    expect(progress).toHaveTextContent("Not evaluated: Both approaches reach the comparison.");
+    expect(progress).not.toHaveTextContent("worker-");
+    expect(progress).not.toHaveTextContent("approach-a");
   });
 
   it("makes the fresh-authority boundary explicit before starting another mission", () => {

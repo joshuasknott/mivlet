@@ -176,6 +176,61 @@ export function ParallelMissionPlanSummary({ plan }: { plan: {
   );
 }
 
+export function MissionProgressSummary({ progress }: {
+  progress: import("../runtime").RuntimeMissionProgress;
+}) {
+  const stateLabel = progress.state === "complete"
+    ? "Finished"
+    : progress.state === "cancelled"
+      ? "Stopped"
+      : progress.state === "blocked"
+        ? "Needs attention"
+        : progress.state === "running"
+          ? "In progress"
+          : progress.state === "ready"
+            ? "Ready"
+            : "Waiting";
+  return (
+    <details className="run-context-summary" aria-label="Mission progress">
+      <summary>
+        <strong>Progress</strong>
+        <span>{progress.completedSteps} of {progress.totalSteps} steps · {stateLabel}</span>
+      </summary>
+      <p className="run-context-summary__audience">
+        <strong>Status</strong><span>{progress.summary}</span>
+      </p>
+      <ol className="run-context-summary__sources" aria-label="Mission step progress">
+        {progress.steps.map((step) => (
+          <li key={step.stepKey}>
+            <strong>{step.title}</strong>
+            <span>{missionStepStateLabel(step.state)}</span>
+            <p>{step.detail}</p>
+          </li>
+        ))}
+      </ol>
+      <ul className="run-context-summary__reasons" aria-label="Mission usage and acceptance">
+        <li>{progress.usage.inputTokens + progress.usage.outputTokens} tokens observed</li>
+        <li>{progress.usage.toolCalls} connected {progress.usage.toolCalls === 1 ? "action" : "actions"}</li>
+        <li>{Math.round(progress.usage.durationMs / 1000)} seconds of provider time</li>
+        {progress.acceptance.map((criterion) => (
+          <li key={criterion.criterionKey}>
+            {criterion.status === "met" ? "Met" : criterion.status === "not-met" ? "Not met" : criterion.status === "partially-met" ? "Partly met" : "Not evaluated"}: {criterion.description}
+          </li>
+        ))}
+        <li>{progress.nextAction}</li>
+      </ul>
+    </details>
+  );
+}
+
+function missionStepStateLabel(state: import("../runtime").RuntimeMissionProgress["steps"][number]["state"]) {
+  if (state === "completed") return "Complete";
+  if (state === "partial") return "Partial";
+  if (state === "blocked") return "Needs attention";
+  if (state === "cancelled") return "Stopped";
+  return state.charAt(0).toUpperCase() + state.slice(1);
+}
+
 export function MissionPlanUnavailable() {
   return (
     <p className="run-context-summary__audience" aria-label="Mission plan unavailable">

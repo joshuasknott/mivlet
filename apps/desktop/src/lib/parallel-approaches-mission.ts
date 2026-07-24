@@ -11,9 +11,11 @@ import {
   listRuntimeNativeProviderRoutes,
   openRuntimeParallelApproachesJoin,
   prepareRuntimeParallelApproachesReviewer,
+  readRuntimeMissionProgress,
   recoverRuntimeParallelApproachesReviewers,
   requestRuntimeMissionRunCancellation,
   startRuntimeMissionWorker,
+  type RuntimeMissionProgress,
   type RuntimeParallelApproachesResult
 } from "../runtime";
 
@@ -27,6 +29,7 @@ export interface ParallelApproachesMissionInput {
   createId?: (prefix: string) => string;
   onCancellationReady?: (cancel: () => Promise<void>) => void;
   onPlanReady?: (plan: ParallelApproachesPlanSummary) => void;
+  onProgress?: (progress: RuntimeMissionProgress) => void;
 }
 
 export interface ParallelApproachesPlanSummary {
@@ -262,6 +265,7 @@ export async function executeParallelApproachesMission(
   }));
   const workerBStart = workerStartBinding(journal, workerBId);
   journal = requireJournal(await openRuntimeParallelApproachesJoin({ runId, ...head(journal) }));
+  await publishProgress(input, runId);
   const executionHead = head(journal);
 
   const cancellation = new AbortController();
@@ -294,6 +298,7 @@ export async function executeParallelApproachesMission(
     }
   });
   const settled = await Promise.allSettled([execute(workerA, workerAStart), execute(workerB, workerBStart)]);
+  await publishProgress(input, runId);
   if (cancellation.signal.aborted) {
     await cancellationPromise;
     throw new Error("The parallel approaches mission was cancelled.");
@@ -313,6 +318,7 @@ export async function executeParallelApproachesMission(
         reviewerRejected = error;
       }
     }
+    await publishProgress(input, runId);
     if (cancellation.signal.aborted) {
       await cancellationPromise;
       throw new Error("The reviewed parallel approaches mission was cancelled.");
@@ -321,11 +327,23 @@ export async function executeParallelApproachesMission(
   try {
     const result = await finalizeRuntimeParallelApproaches(runId);
     if (!result) throw new Error("Parallel mission settlement requires the desktop runtime.");
+    await publishProgress(input, runId);
     return { ...result, plan };
   } catch (error) {
     if (rejected) throw rejected.reason;
     if (reviewerRejected) throw reviewerRejected;
     throw error;
+  }
+}
+
+async function publishProgress(input: ParallelApproachesMissionInput, runId: string) {
+  if (!input.onProgress) return;
+  try {
+    const progress = await readRuntimeMissionProgress(runId);
+    if (progress) input.onProgress(progress);
+  } catch {
+    // Progress is a read-only convenience surface. Durable execution remains
+    // authoritative and the UI must not invent a fallback projection.
   }
 }
 

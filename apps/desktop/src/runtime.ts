@@ -3111,6 +3111,45 @@ export interface RuntimeMissionAggregationRecordInput {
   expectedLastSequence: number;
 }
 
+export interface RuntimeMissionProgress {
+  version: 1;
+  state: "ready" | "running" | "waiting" | "blocked" | "complete" | "cancelled";
+  summary: string;
+  runStatus: Spine.Missions.RunStatus;
+  completedSteps: number;
+  totalSteps: number;
+  runningWorkers: number;
+  readyWorkers: number;
+  waitingSteps: number;
+  blockedSteps: number;
+  steps: Array<{
+    stepKey: string;
+    title: string;
+    kind: Spine.Missions.PlanStepKind;
+    state: "pending" | "ready" | "running" | "waiting" | "completed" | "partial" | "failed" | "blocked" | "cancelled";
+    detail: string;
+  }>;
+  usage: {
+    records: number;
+    inputTokens: number;
+    outputTokens: number;
+    toolCalls: number;
+    durationMs: number;
+    costObservations: unknown[];
+  };
+  budget: Spine.Missions.ExecutionBudget;
+  acceptance: Array<{
+    criterionKey: string;
+    description: string;
+    required: boolean;
+    evaluator: string;
+    status: "met" | "partially-met" | "not-met" | "not-evaluated";
+    evidenceCount: number;
+    summary?: string;
+  }>;
+  nextAction: string;
+}
+
 export async function createRuntimeMissionPlan(input: RuntimeMissionPlanCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_plan_create", { input }); }
@@ -3204,6 +3243,12 @@ export async function resolveRuntimeMissionJoin(input: RuntimeMissionJoinResolve
 export async function recordRuntimeMissionAggregation(input: RuntimeMissionAggregationRecordInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_coordination_aggregation_record", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function readRuntimeMissionProgress(runId: string): Promise<RuntimeMissionProgress | null> {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<RuntimeMissionProgress>("mission_coordination_progress_read", { runId }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

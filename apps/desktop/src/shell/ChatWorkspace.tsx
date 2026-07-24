@@ -18,9 +18,9 @@ import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, is
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -40,6 +40,7 @@ type ConversationMessage = {
   missionReceipt?: CitedBriefMissionReceipt;
   missionPlan?: CitedBriefMissionPlanSummary;
   parallelMissionPlan?: ParallelApproachesPlanSummary;
+  missionProgress?: RuntimeMissionProgress;
   missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief" | "parallel-approaches";
   missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval";
   missionArtifactId?: string;
@@ -915,6 +916,9 @@ export function ChatWorkspace() {
               {message.role === "assistant" && message.parallelMissionPlan
                 ? <ParallelMissionPlanSummary plan={message.parallelMissionPlan} />
                 : null}
+              {message.role === "assistant" && message.missionProgress
+                ? <MissionProgressSummary progress={message.missionProgress} />
+                : null}
               {message.role === "assistant" && missionPlanUnavailable ? <MissionPlanUnavailable /> : null}
               {message.role === "assistant" && missionReceipt ? <MissionRunReceipt receipt={missionReceipt} /> : null}
               {message.role === "assistant" && citedApproval ? (
@@ -1379,6 +1383,12 @@ export function ChatWorkspace() {
         onPlanReady: (parallelMissionPlan) => {
           setConversationMessages((current) => current.map((entry) =>
             entry.id === assistantMessageId ? { ...entry, parallelMissionPlan } : entry
+          ));
+        },
+        onProgress: (missionProgress) => {
+          if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId ? { ...entry, missionProgress } : entry
           ));
         }
       }).then((result) => {
