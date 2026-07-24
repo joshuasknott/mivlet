@@ -168,7 +168,9 @@ The provider-only product composition preflights each ready worker, resolves its
 already-authorized backend, serializes all native starts in the ready batch, and
 only then permits their provider egress to run in parallel against one shared
 durable head. Rust rechecks the saved worker policy before appending route facts;
-the graph cannot advance until native settlement exposes a terminal worker fact.
+concurrent settlement advances only across exact usage and terminal facts for
+other known provider-only siblings. The graph cannot advance until native
+settlement exposes a terminal worker fact.
 Tool-bearing composition and general restart dispatch remain separate boundaries.
 A native-owned bounded advance command can settle every
 currently decidable declared join and reference-only coordinate aggregation in

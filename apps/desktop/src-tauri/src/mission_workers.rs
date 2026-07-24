@@ -104,6 +104,7 @@ pub(crate) struct NativeWorkerCompletionAuthority {
     evidence: Option<Value>,
     cited_policy_shape: bool,
     parallel_evidence_free: bool,
+    general_concurrent_provider: bool,
     reviewed_parallel_context: Option<crate::mission_parallel_approaches::ReviewedWorkerContext>,
 }
 
@@ -2111,6 +2112,12 @@ pub(crate) fn preflight_native_worker_completion(
                 worker,
                 output.as_ref(),
             ) || reviewed_parallel_context.is_some();
+            let general_concurrent_provider = is_general_concurrent_provider_run(
+                &journal,
+                &lifecycle,
+                binding,
+                output.as_ref(),
+            );
             let max_attempts = lifecycle
                 .mission
                 .pointer("/budget/maxAttempts")
@@ -2205,7 +2212,12 @@ pub(crate) fn preflight_native_worker_completion(
                 .map_err(crate::store::StoreError::Invalid)?;
                 return Ok(NativeWorkerCompletionPreflight::AlreadyCompleted);
             }
-            validate_native_completion_head(&journal, binding, parallel_evidence_free)
+            validate_native_completion_head(
+                &journal,
+                binding,
+                parallel_evidence_free,
+                general_concurrent_provider,
+            )
                 .map_err(crate::store::StoreError::Invalid)?;
             Ok(NativeWorkerCompletionPreflight::Execute(NativeWorkerCompletionAuthority {
                 binding: binding.clone(),
@@ -2225,6 +2237,7 @@ pub(crate) fn preflight_native_worker_completion(
                 evidence,
                 cited_policy_shape,
                 parallel_evidence_free,
+                general_concurrent_provider,
                 reviewed_parallel_context,
             }))
         })
@@ -2520,6 +2533,7 @@ pub(crate) fn settle_native_worker_completion(
                 &journal,
                 &authority.binding,
                 authority.parallel_evidence_free,
+                authority.general_concurrent_provider,
             )
                 .map_err(crate::store::StoreError::Invalid)?;
             let at = now();
@@ -2669,7 +2683,7 @@ pub(crate) fn settle_native_worker_completion(
                 NativeWorkerTerminalOutcome::Cancelled => unreachable!(),
             };
             let (mut terminal_expected_revision, mut terminal_expected_sequence, mut terminal_previous_event) =
-                if authority.parallel_evidence_free {
+                if authority.parallel_evidence_free || authority.general_concurrent_provider {
                     let revision = journal.run.get("revision").and_then(Value::as_i64).ok_or_else(|| {
                         crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
                     })?;
@@ -5183,6 +5197,70 @@ fn is_parallel_evidence_free_markdown_run(
     })
 }
 
+fn is_general_concurrent_provider_run(
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    binding: &NativeWorkerExecutionBinding,
+    output: Option<&NativeWorkerOutputSpec>,
+) -> bool {
+    if binding.tool_evidence.is_some()
+        || binding.checkpoint_event_id.is_some()
+        || binding.checkpoint_restore_event_id.is_some()
+        || output.is_some_and(|spec| spec.include_evidence)
+        || lifecycle
+            .mission
+            .get("executionDepth")
+            .and_then(Value::as_str)
+            != Some("multi-worker")
+    {
+        return false;
+    }
+    let workers = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .filter_map(|event| event.pointer("/payload/worker"))
+        .collect::<Vec<_>>();
+    (2..=64).contains(&workers.len())
+        && workers.iter().any(|worker| {
+            worker.get("id").and_then(Value::as_str) == Some(binding.worker_id.as_str())
+        })
+        && workers.iter().all(|worker| {
+            ["tools", "capabilityIds", "capabilityGrantIds"]
+                .iter()
+                .all(|key| {
+                    worker
+                        .get(*key)
+                        .and_then(Value::as_array)
+                        .is_some_and(Vec::is_empty)
+                })
+                && worker
+                    .pointer("/routePreference/allowFallback")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+                && worker
+                    .pointer("/placementPreference/policy")
+                    .and_then(Value::as_str)
+                    == Some("require")
+                && worker
+                    .pointer("/placementPreference/locality")
+                    .and_then(Value::as_str)
+                    == Some("local")
+                && worker
+                    .pointer("/placementPreference/allowTransfer")
+                    .and_then(Value::as_bool)
+                    == Some(false)
+                && worker
+                    .pointer("/placementPreference/executionNodeIds")
+                    .and_then(Value::as_array)
+                    .is_some_and(|nodes| {
+                        nodes.len() == 1 && nodes[0].as_str() == Some("local-desktop")
+                    })
+                && native_output_spec(worker)
+                    .is_ok_and(|spec| spec.is_none_or(|spec| !spec.include_evidence))
+        })
+}
+
 fn validate_parallel_evidence_free_authority(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -5517,10 +5595,115 @@ fn validate_parallel_sibling_advancement(
     Ok(())
 }
 
+fn validate_general_sibling_terminal_advancement(
+    journal: &mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Result<(), String> {
+    let current_revision = journal
+        .run
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mission run revision is invalid.".to_string())?;
+    let current_sequence = journal
+        .run
+        .pointer("/eventHead/lastSequence")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| "Mission run event head is invalid.".to_string())?;
+    if current_sequence < binding.expected_last_sequence
+        || current_revision < binding.expected_run_revision
+        || current_revision - binding.expected_run_revision
+            != current_sequence - binding.expected_last_sequence
+    {
+        return Err("General Mission concurrent head is invalid.".into());
+    }
+    let known_workers = journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .filter_map(|event| event.pointer("/payload/worker/id").and_then(Value::as_str))
+        .collect::<BTreeSet<_>>();
+    let mut previous = journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("sequence").and_then(Value::as_i64) == Some(binding.expected_last_sequence)
+        })
+        .and_then(|event| event.get("id"))
+        .and_then(Value::as_str)
+        .filter(|event_id| !event_id.is_empty())
+        .ok_or_else(|| "General Mission concurrent base event is unavailable.".to_string())?
+        .to_string();
+    for sequence in binding.expected_last_sequence + 1..=current_sequence {
+        let event = journal
+            .events
+            .iter()
+            .find(|event| event.get("sequence").and_then(Value::as_i64) == Some(sequence))
+            .ok_or_else(|| "General Mission concurrent event chain has a gap.".to_string())?;
+        let worker_id = parallel_event_worker_id(event)
+            .filter(|worker_id| {
+                *worker_id != binding.worker_id && known_workers.contains(worker_id)
+            })
+            .ok_or_else(|| {
+                "General Mission concurrent head contains a non-sibling fact.".to_string()
+            })?;
+        if event.get("runId").and_then(Value::as_str) != Some(binding.run_id.as_str())
+            || event.get("previousEventId").and_then(Value::as_str) != Some(previous.as_str())
+        {
+            return Err("General Mission concurrent event chain is invalid.".into());
+        }
+        match event.get("type").and_then(Value::as_str) {
+            Some("usage-recorded") => {
+                if journal
+                    .events
+                    .iter()
+                    .filter(|candidate| {
+                        candidate.get("type").and_then(Value::as_str) == Some("usage-recorded")
+                            && parallel_event_worker_id(candidate) == Some(worker_id)
+                    })
+                    .count()
+                    != 1
+                {
+                    return Err("General Mission sibling usage fact is ambiguous.".into());
+                }
+            }
+            Some("worker-completed" | "worker-failed") => {
+                let previous_event = journal.events.iter().find(|candidate| {
+                    candidate.get("id").and_then(Value::as_str) == Some(previous.as_str())
+                });
+                if previous_event.is_none_or(|candidate| {
+                    candidate.get("type").and_then(Value::as_str) != Some("usage-recorded")
+                        || parallel_event_worker_id(candidate) != Some(worker_id)
+                }) {
+                    return Err("General Mission sibling terminal fact is invalid.".into());
+                }
+            }
+            _ => {
+                return Err("General Mission concurrent head contains an unsupported fact.".into())
+            }
+        }
+        previous = event
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "General Mission concurrent event identity is invalid.".to_string())?
+            .to_string();
+    }
+    if current_sequence > binding.expected_last_sequence
+        && journal
+            .run
+            .pointer("/eventHead/lastEventId")
+            .and_then(Value::as_str)
+            != Some(previous.as_str())
+    {
+        return Err("General Mission concurrent event head does not match its journal.".into());
+    }
+    Ok(())
+}
+
 fn validate_native_completion_head(
     journal: &mission_run::MissionRunJournalRow,
     binding: &NativeWorkerExecutionBinding,
     parallel_evidence_free: bool,
+    general_concurrent_provider: bool,
 ) -> Result<(), String> {
     for value in [
         &binding.run_id,
@@ -5727,6 +5910,11 @@ fn validate_native_completion_head(
                 .ok_or_else(|| "Mission run event head is invalid.".to_string())?,
             parallel_base,
         )?;
+    } else if general_concurrent_provider {
+        if journal.run.get("status").and_then(Value::as_str) != Some("running") {
+            return Err("General Mission run is not executing.".into());
+        }
+        validate_general_sibling_terminal_advancement(journal, binding)?;
     } else if journal.run.get("status").and_then(Value::as_str) != Some("running")
         || journal.run.get("revision").and_then(Value::as_i64)
             != Some(binding.expected_run_revision)
@@ -9759,10 +9947,10 @@ mod tests {
                 json!({"id":"event-route","type":"route-selected","previousEventId":"event-3","payload":{"workerId":"worker-1"}}),
             ],
         };
-        assert!(validate_native_completion_head(&live, &binding, false).is_ok());
+        assert!(validate_native_completion_head(&live, &binding, false, false).is_ok());
         let mut colliding = binding.clone();
         colliding.evaluation_event_id = colliding.completion_event_id.clone();
-        assert!(validate_native_completion_head(&live, &colliding, false).is_err());
+        assert!(validate_native_completion_head(&live, &colliding, false, false).is_err());
     }
 
     #[test]
@@ -9912,8 +10100,8 @@ mod tests {
                 "eventHead":{"lastSequence":6,"lastEventId":"route-b"}}),
             events: prefix.clone(),
         };
-        assert!(validate_native_completion_head(&live, &binding, true).is_ok());
-        assert!(validate_native_completion_head(&live, &binding, false).is_err());
+        assert!(validate_native_completion_head(&live, &binding, true, false).is_ok());
+        assert!(validate_native_completion_head(&live, &binding, false, false).is_err());
         let mut join_binding = binding.clone();
         join_binding.expected_run_revision = 8;
         join_binding.expected_last_sequence = 7;
@@ -9931,7 +10119,7 @@ mod tests {
                 "eventHead":{"lastSequence":7,"lastEventId":"join-open"}}),
             events: join_events,
         };
-        assert!(validate_native_completion_head(&joined, &join_binding, true).is_ok());
+        assert!(validate_native_completion_head(&joined, &join_binding, true, false).is_ok());
         let joined_usage = json!({"id":"usage-a","runId":"run-parallel","type":"usage-recorded",
             "sequence":8,"previousEventId":"join-open","idempotencyKey":"worker-usage:terminal-a",
             "payload":{"usage":{"runId":"run-parallel","workerId":"worker-a"}}});
@@ -10004,7 +10192,7 @@ mod tests {
         };
         colliding.events[4]["id"] = json!("failure-a");
         colliding.run["eventHead"]["lastEventId"] = json!("failure-a");
-        assert!(validate_native_completion_head(&colliding, &binding, true).is_err());
+        assert!(validate_native_completion_head(&colliding, &binding, true, false).is_err());
         let mut cancelled = settled;
         cancelled.run["status"] = json!("cancelling");
         assert!(exact_native_terminal_replay_with_mode(
@@ -10057,6 +10245,69 @@ mod tests {
             true,
         )
         .is_err());
+    }
+
+    #[test]
+    fn general_provider_workers_accept_only_terminal_sibling_advancement() {
+        let binding = NativeWorkerExecutionBinding {
+            run_id: "run-general".into(),
+            worker_id: "worker-a".into(),
+            worker_started_event_id: "start-a".into(),
+            route_selected_event_id: "route-a".into(),
+            usage_event_id: "usage-a".into(),
+            completion_event_id: "complete-a".into(),
+            evaluation_event_id: "evaluation-a".into(),
+            result_event_id: "result-a".into(),
+            failure_event_id: "failure-a".into(),
+            idempotency_key: "terminal-a".into(),
+            expected_run_revision: 7,
+            expected_last_sequence: 6,
+            checkpoint_event_id: None,
+            checkpoint_restore_event_id: None,
+            tool_evidence: None,
+        };
+        let worker = |id: &str| {
+            json!({"id":id,"tools":[],"capabilityIds":[],"capabilityGrantIds":[],
+                "routePreference":{"policy":"automatic","providerRouteIds":[],
+                    "allowFallback":false},
+                "placementPreference":{"policy":"require",
+                    "executionNodeIds":["local-desktop"],"locality":"local",
+                    "allowTransfer":false},
+                "outputContract":{"slots":[],"includeEvidence":false,
+                    "includeUncertainty":true,"delivery":"run-result"}})
+        };
+        let events = vec![
+            json!({"type":"worker-created","payload":{"worker":worker("worker-a")}}),
+            json!({"type":"worker-created","payload":{"worker":worker("worker-b")}}),
+            json!({"id":"start-a","runId":"run-general","type":"worker-started",
+                "sequence":3,"previousEventId":"created-b",
+                "payload":{"workerId":"worker-a"}}),
+            json!({"id":"route-a","runId":"run-general","type":"route-selected",
+                "sequence":4,"previousEventId":"start-a",
+                "payload":{"workerId":"worker-a"}}),
+            json!({"id":"start-b","runId":"run-general","type":"worker-started",
+                "sequence":5,"previousEventId":"route-a",
+                "payload":{"workerId":"worker-b"}}),
+            json!({"id":"route-b","runId":"run-general","type":"route-selected",
+                "sequence":6,"previousEventId":"start-b",
+                "payload":{"workerId":"worker-b"}}),
+            json!({"id":"usage-b","runId":"run-general","type":"usage-recorded",
+                "sequence":7,"previousEventId":"route-b",
+                "payload":{"usage":{"workerId":"worker-b"}}}),
+            json!({"id":"complete-b","runId":"run-general","type":"worker-completed",
+                "sequence":8,"previousEventId":"usage-b",
+                "payload":{"workerId":"worker-b"}}),
+        ];
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({"status":"running","revision":9,
+                "eventHead":{"lastSequence":8,"lastEventId":"complete-b"}}),
+            events,
+        };
+        assert!(validate_native_completion_head(&journal, &binding, false, true).is_ok());
+
+        let mut substituted = journal;
+        substituted.events[6]["payload"]["usage"]["workerId"] = json!("worker-a");
+        assert!(validate_native_completion_head(&substituted, &binding, false, true).is_err());
     }
 
     #[test]
@@ -10229,7 +10480,7 @@ mod tests {
                     "replayBoundary":{"durableThroughSequence":4,"resumeAfterEventId":"event-tool"}}}}),
             ],
         };
-        assert!(validate_native_completion_head(&journal, &binding, false).is_ok());
+        assert!(validate_native_completion_head(&journal, &binding, false, false).is_ok());
         let mut restored_binding = binding.clone();
         restored_binding.expected_run_revision = 7;
         restored_binding.expected_last_sequence = 6;
@@ -10245,13 +10496,17 @@ mod tests {
             .push(json!({"id":"event-restore","type":"checkpoint-restored",
             "sequence":6,"previousEventId":"event-checkpoint","attemptNumber":2,
             "payload":{"checkpointEventId":"event-checkpoint","newAttemptNumber":2}}));
-        assert!(validate_native_completion_head(&restored, &restored_binding, false).is_ok());
+        assert!(
+            validate_native_completion_head(&restored, &restored_binding, false, false).is_ok()
+        );
         restored.events[4]["payload"]["checkpointEventId"] = json!("event-other");
-        assert!(validate_native_completion_head(&restored, &restored_binding, false).is_err());
+        assert!(
+            validate_native_completion_head(&restored, &restored_binding, false, false).is_err()
+        );
         let mut changed = journal;
         changed.events[3]["payload"]["checkpoint"]["replayBoundary"]["durableThroughSequence"] =
             json!(3);
-        assert!(validate_native_completion_head(&changed, &binding, false).is_err());
+        assert!(validate_native_completion_head(&changed, &binding, false, false).is_err());
     }
 
     #[test]
