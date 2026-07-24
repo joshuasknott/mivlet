@@ -261,6 +261,28 @@ records are not inferred and produce a calm incomplete-activity warning.
 Arbitrary Plan creation through the normal composer, every route/cost evidence
 shape, and packaged-app accessibility observation remain open.
 
+## Routine MCP Event Correction (2026-07-24)
+
+This correction supersedes the stale sentence in the original Routine
+foundation paragraph that says no MCP adapter calls the native event intake.
+Native local-STDIO and remote-HTTP MCP tool/resource-list change notifications
+now call that intake with the exact active private owner, Connection revision,
+transport, and native receipt time. The local editor offers only those two
+implemented event kinds and only ready MCP Connections owned by the active
+private member. Native create/edit revalidates that authority and rejects
+project-scoped event Routines, arbitrary renderer filters, and unsupported
+event names. Non-MCP provider events, signed webhooks, shared Routine writes,
+packaged restart observation, and live provider validation remain open.
+
+## Repository Verification (2026-07-24)
+
+The complete repository-local gate is green on this Windows checkout:
+`pnpm check`, `pnpm lint`, `cargo fmt --check`, `cargo test`, and
+`cargo clippy --all-targets -- -D warnings`. The native suite reports 800
+passing tests. Its one ignored test is the deliberately opt-in live Google
+contract and still requires `FABLE_GOOGLE_LIVE_TEST` plus real external
+configuration; it is not counted as repository-local validation.
+
 ## Evidence Checked
 
 - `docs/product/vision.md`

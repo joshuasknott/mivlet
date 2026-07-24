@@ -93,10 +93,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   copies terminal occurrence references into the exact legacy history and
   advances the legacy cursor before the fenced writer restore. Canonical-only,
   edited, ambiguous, in-flight, or cross-owner state remains blocked rather than
-  guessed. A tested native-only Connection-event intake exists, but no provider
-  or MCP adapter yet supplies authenticated events to it; event-trigger support
-  is therefore not release-ready. Packaged-app restart observation and live
-  provider execution remain release blockers.
+  guessed. Native local-STDIO and remote-HTTP MCP tool/resource-list change
+  notifications now supply authenticated events to the intake, and the local
+  editor exposes only those exact implemented event kinds for ready MCP
+  Connections owned by the active private member. Other provider events,
+  signed webhooks, packaged-app restart observation, and live provider
+  execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
