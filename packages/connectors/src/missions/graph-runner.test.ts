@@ -301,4 +301,47 @@ describe("general mission graph runner", () => {
       }
     })).rejects.toBeInstanceOf(MissionGraphRunnerError);
   });
+
+  it("resumes after a durable wait without replaying already terminal workers", async () => {
+    const state = initialSnapshot();
+    (state.workerStates as Record<string, Spine.Missions.WorkerStatus>)["worker-a"] = "waiting";
+    (state.workerStates as Record<string, Spine.Missions.WorkerStatus>)["worker-b"] = "completed";
+    (state.workerStates as Record<string, Spine.Missions.WorkerStatus>)["worker-c"] = "completed";
+    const executed: string[] = [];
+    const callbacks = {
+      loadSnapshot: async () => structuredClone(state),
+      settleJoin: async (join: { joinKey: string }) => {
+        if (join.joinKey === "review-any") return "satisfied" as const;
+        return state.workerStates["worker-a"] === "completed"
+          ? "satisfied" as const
+          : "waiting" as const;
+      },
+      executeWorker: async (assigned: Spine.Missions.Worker) => {
+        executed.push(assigned.id);
+        (state.workerStates as Record<string, Spine.Missions.WorkerStatus>)[assigned.id] =
+          "completed";
+      },
+      recordAggregation: async (stepKey: string) => {
+        (state.completedAggregationStepKeys as string[]).push(stepKey);
+      },
+      requestCancellation: async () => {
+        state.cancellationRequested = true;
+      }
+    };
+
+    await expect(runMissionGraph({ graph: graph(), callbacks })).resolves.toMatchObject({
+      status: "waiting",
+      launchedWorkerIds: ["worker-review"]
+    });
+    expect(executed).toEqual(["worker-review"]);
+
+    (state.workerStates as Record<string, Spine.Missions.WorkerStatus>)["worker-a"] =
+      "completed";
+    await expect(runMissionGraph({ graph: graph(), callbacks })).resolves.toMatchObject({
+      status: "complete",
+      launchedWorkerIds: [],
+      recordedAggregationStepKeys: ["aggregate"]
+    });
+    expect(executed).toEqual(["worker-review"]);
+  });
 });

@@ -176,6 +176,10 @@ Mission lifecycle projection commit atomically and survive reopen. Ambiguous
 output producers, missing durable references, forged evaluator authority, and
 changed replay fail closed. Automatic worker dispatch, general evaluation/wait
 production, restart orchestration, and artifact materialization remain open.
+The provider-neutral graph runner nevertheless preserves durable worker waits:
+waiting human-input or approval work consumes no provider slot, independent work
+continues within the saved width, and later invocations resume from reloaded
+terminal facts rather than replaying completed workers.
 
 ## Schedules And Commands
 

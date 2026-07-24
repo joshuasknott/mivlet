@@ -272,6 +272,25 @@ describe("general mission coordination", () => {
     ]);
   });
 
+  it("preserves a durable worker wait without consuming parallel execution width", () => {
+    const decision = evaluateMissionCoordination({
+      graph: graph(),
+      workerStates: {
+        "worker-source-a": "waiting",
+        "worker-source-b": "pending",
+        "worker-source-c": "pending",
+        "worker-review": "pending"
+      }
+    });
+    expect(decision).toMatchObject({
+      readyWorkerIds: ["worker-source-b", "worker-source-c"],
+      runningWorkerIds: [],
+      waitingStepKeys: ["source-a", "review", "aggregate"],
+      blocked: [],
+      complete: false
+    });
+  });
+
   it("aggregates only exact ordered worker outputs without inventing acceptance", () => {
     const receipt = aggregateMissionOutputs(graph(), "aggregate", [
       {

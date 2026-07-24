@@ -218,10 +218,11 @@ function validateSnapshot(
   if (
     stateKeys.length !== knownWorkerIds.size ||
     stateKeys.some((workerId) => !knownWorkerIds.has(workerId as Spine.Primitives.WorkerId)) ||
-    stateKeys.some((workerId) =>
-      !["pending", "running", "completed", "failed", "cancelled"].includes(
-        snapshot.workerStates[workerId]
-      )
+    stateKeys.some(
+      (workerId) =>
+        !["pending", "running", "waiting", "completed", "failed", "cancelled"].includes(
+          snapshot.workerStates[workerId]
+        )
     )
   ) {
     throw new MissionGraphRunnerError(

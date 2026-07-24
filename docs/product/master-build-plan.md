@@ -846,7 +846,10 @@ Cancellation is persisted before active worker egress is aborted. A callback
 that returns or fails without a durable terminal worker fact is rejected, as is
 substituted graph state. Focused portable coverage proves bounded parallel
 execution, tool assignment preservation, early `any` continuation, cancellation
-ordering, and failure handling. The native product composer is not yet wired to
+ordering, and failure handling. The runner also preserves the protocol's durable
+worker `waiting` state: a human-input or approval wait consumes no provider
+execution slot, unrelated ready work can continue, and a later invocation resumes
+from reloaded facts without replaying terminal workers. The native product composer is not yet wired to
 construct and restart arbitrary Plans through this runner, so the Wave 4C
 checkboxes remain unchecked.
 

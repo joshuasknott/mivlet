@@ -5,6 +5,7 @@ const MAX_COORDINATED_WORKERS = 32;
 export type CoordinationWorkerState =
   | "pending"
   | "running"
+  | "waiting"
   | "completed"
   | "failed"
   | "cancelled";
@@ -235,6 +236,10 @@ export function evaluateMissionCoordination(
     const worker = input.graph.workerByStepKey.get(stepKey);
     if (state === "running" && worker) {
       runningWorkerIds.push(worker.id);
+      continue;
+    }
+    if (state === "waiting") {
+      waitingStepKeys.push(stepKey);
       continue;
     }
     if (state !== "pending") continue;
