@@ -1870,6 +1870,10 @@ fn exact_evaluations_and_acceptance(
             .get(key)
             .cloned()
             .unwrap_or_else(|| (false, false, BTreeSet::new(), Vec::new()));
+        let evaluator = criterion
+            .get("evaluator")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission acceptance evaluator is invalid.".to_string())?;
         let required_evidence = criterion
             .get("evidenceRequired")
             .and_then(Value::as_array)
@@ -1892,7 +1896,7 @@ fn exact_evaluations_and_acceptance(
         let evidence_complete = required_evidence
             .iter()
             .all(|reference| evidence.contains(reference));
-        let status = if has_pass && has_fail {
+        let evaluated_status = if has_pass && has_fail {
             "partially-met"
         } else if has_fail {
             "not-met"
@@ -1903,19 +1907,33 @@ fn exact_evaluations_and_acceptance(
         } else {
             "not-evaluated"
         };
+        let status = if evaluator == "worker" && evaluated_status == "met" {
+            "partially-met"
+        } else {
+            evaluated_status
+        };
         let required = criterion
             .get("required")
             .and_then(Value::as_bool)
             .unwrap_or(false);
         required_met &= !required || status == "met";
         met_count += usize::from(status == "met");
-        human_met |=
-            criterion.get("evaluator").and_then(Value::as_str) == Some("human") && status == "met";
+        human_met |= evaluator == "human" && status == "met";
+        let summary = if evaluator == "worker" && has_pass && !has_fail && evidence_complete {
+            Some(
+                "The declared worker review passed this criterion, but model opinion remains advisory."
+                    .to_string(),
+            )
+        } else if summaries.is_empty() {
+            None
+        } else {
+            Some(summaries.join(" "))
+        };
         acceptance.push(json!({
             "criterionKey":key,
             "status":status,
             "evidenceRefs":evidence.into_iter().collect::<Vec<_>>(),
-            "summary":if summaries.is_empty() {None} else {Some(summaries.join(" "))}
+            "summary":summary
         }));
     }
     let minimum = lifecycle
@@ -2742,11 +2760,21 @@ fn mission_progress_projection(
                 entry.get("criterionKey").and_then(Value::as_str) == Some(key.as_str())
             })
         });
-        let status = terminal
+        let evaluator = criterion
+            .get("evaluator")
+            .and_then(Value::as_str)
+            .filter(|evaluator| matches!(*evaluator, "policy" | "human" | "worker" | "external"))
+            .ok_or_else(|| "Mission acceptance evaluator is invalid.".to_string())?;
+        let evaluated_status = terminal
             .and_then(|entry| entry.get("status"))
             .and_then(Value::as_str)
             .or_else(|| evaluations.get(&key).map(|(status, _, _)| *status))
             .unwrap_or("not-evaluated");
+        let status = if evaluator == "worker" && evaluated_status == "met" {
+            "partially-met"
+        } else {
+            evaluated_status
+        };
         if !matches!(
             status,
             "met" | "partially-met" | "not-met" | "not-evaluated"
@@ -2762,17 +2790,19 @@ fn mission_progress_projection(
         if evidence_count > 128 {
             return Err("Mission acceptance evidence exceeds safe bounds.".into());
         }
-        let summary = terminal
-            .and_then(|entry| entry.get("summary"))
-            .and_then(Value::as_str)
-            .or_else(|| evaluations.get(&key).and_then(|(_, _, summary)| *summary))
-            .map(|summary| bounded(summary, "Mission acceptance summary", 2_000))
-            .transpose()?;
-        let evaluator = criterion
-            .get("evaluator")
-            .and_then(Value::as_str)
-            .filter(|evaluator| matches!(*evaluator, "policy" | "human" | "worker" | "external"))
-            .ok_or_else(|| "Mission acceptance evaluator is invalid.".to_string())?;
+        let summary = if evaluator == "worker" && evaluated_status == "met" {
+            Some(
+                "The declared worker review passed this criterion, but model opinion remains advisory."
+                    .to_string(),
+            )
+        } else {
+            terminal
+                .and_then(|entry| entry.get("summary"))
+                .and_then(Value::as_str)
+                .or_else(|| evaluations.get(&key).and_then(|(_, _, summary)| *summary))
+                .map(|summary| bounded(summary, "Mission acceptance summary", 2_000))
+                .transpose()?
+        };
         projected_acceptance.push(json!({
             "criterionKey":key,
             "description":description,
@@ -4192,6 +4222,30 @@ mod tests {
                 .unwrap_err()
                 .contains("declared authority")
         );
+    }
+
+    #[test]
+    fn general_terminal_result_keeps_worker_review_advisory() {
+        let (mut lifecycle, mut journal) = general_terminal_fixture(true);
+        lifecycle.mission["acceptance"]["criteria"][0]["evaluator"] = json!("worker");
+        lifecycle.mission["acceptance"]["criteria"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("evidenceRequired");
+        journal.events[2]["actor"] = json!({"kind":"worker","workerId":"worker-final"});
+        journal.events[2]["payload"]["evaluation"]["reviewerWorkerId"] = json!("worker-final");
+        journal.events[2]["payload"]["evaluation"]["criteria"][0]["evidenceRefs"] = json!([]);
+        let terminal =
+            derive_general_terminal(&lifecycle, &journal, "2026-07-23T10:01:00.000Z").unwrap();
+        assert_eq!(terminal.outcome, "partial");
+        assert_eq!(
+            terminal.run_result["acceptance"][0]["status"],
+            "partially-met"
+        );
+        assert!(terminal.run_result["acceptance"][0]["summary"]
+            .as_str()
+            .unwrap()
+            .contains("model opinion remains advisory"));
     }
 
     #[test]

@@ -129,7 +129,7 @@ function assessCriterion(
   const hasPass = results.some((result) => result.passed === true);
   const hasFail = results.some((result) => result.passed === false);
   const hasRequiredEvidence = (criterion.evidenceRequired ?? []).every((reference) => evidence.includes(reference));
-  const status: AcceptanceResult["status"] = hasPass && hasFail
+  const evaluatedStatus: AcceptanceResult["status"] = hasPass && hasFail
     ? "partially-met"
     : hasFail
       ? "not-met"
@@ -138,13 +138,19 @@ function assessCriterion(
         : hasPass
           ? "partially-met"
           : "not-evaluated";
+  const status: AcceptanceResult["status"] =
+    criterion.evaluator === "worker" && evaluatedStatus === "met"
+      ? "partially-met"
+      : evaluatedStatus;
   return {
     criterionKey: criterion.key,
     status,
     evidenceRefs: evidence,
-    summary: status === "partially-met" && !hasRequiredEvidence
-      ? "The evaluator passed this criterion, but required evidence is missing."
-      : results.map((result) => result.summary).filter(Boolean).join(" ") || undefined
+    summary: criterion.evaluator === "worker" && hasPass && hasRequiredEvidence && !hasFail
+      ? "The declared worker review passed this criterion, but model opinion remains advisory."
+      : status === "partially-met" && !hasRequiredEvidence
+        ? "The evaluator passed this criterion, but required evidence is missing."
+        : results.map((result) => result.summary).filter(Boolean).join(" ") || undefined
   };
 }
 

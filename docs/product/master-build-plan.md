@@ -941,11 +941,15 @@ explicit unique mapping from exact worker/coordinate outputs to Mission
 deliverables. Policy, identified human, and exact graph-reviewer evaluations are
 combined conservatively; conflicting or missing evidence cannot pass, external
 claims remain unattested, and a failed or partial source cannot be promoted to
-Mission success merely because it returned prose. Successful, partial, failed,
-and cancelled results retain producing run ids, completed outputs, remaining
-work, acceptance, recovery guidance, and human-review gates without copying
-usage or content into a new authority layer. Native product composition remains
-open.
+Mission success merely because it returned prose. A declared reviewer worker can
+contribute an identified pass/fail and evidence, but even a clean pass remains
+`partially-met`; only policy or identified-human acceptance can close the
+criterion. The same rule is enforced in the single-worker portable evaluator,
+the native general finalizer, and the progress projection. Successful, partial,
+failed, and cancelled results retain producing run ids, completed outputs,
+remaining work, acceptance, recovery guidance, and human-review gates without
+copying usage or content into a new authority layer. Native product composition
+remains open.
 
 An authenticated native finalizer now performs that terminal boundary again
 from the encrypted selected Plan and journal without accepting a renderer

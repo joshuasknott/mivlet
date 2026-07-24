@@ -73,6 +73,45 @@ describe("mission acceptance and partial outcomes", () => {
       .toThrow(MissionEvaluationError);
   });
 
+  it("keeps an identified worker review advisory even when it passes", () => {
+    const workerMission = mission({ acceptance: {
+      requiresHumanAcceptance: false,
+      criteria: [{
+        key: "reviewed",
+        description: "A declared worker reviews the result.",
+        required: true,
+        evaluator: "worker"
+      }]
+    } });
+    const result = finalizeLocalWorkerResult({
+      mission: workerMission,
+      worker: worker(),
+      execution: complete,
+      outputs: [output],
+      evaluations: [{
+        ...evaluation,
+        reviewerWorkerId: "worker-1" as never,
+        criteria: [{
+          criterionKey: "reviewed",
+          passed: true,
+          summary: "The reviewer recommends acceptance.",
+          evidenceRefs: []
+        }]
+      }],
+      usageKey: "usage-1",
+      completedAt: "t2"
+    });
+    expect(result).toMatchObject({
+      outcome: "partial",
+      acceptance: [{
+        criterionKey: "reviewed",
+        status: "partially-met",
+        summary: expect.stringContaining("model opinion remains advisory")
+      }],
+      partial: { recommendedNextAction: "revise-plan" }
+    });
+  });
+
   it("rejects undeclared outputs, foreign targets, and unattested external evaluation", () => {
     expect(() => finalizeLocalWorkerResult({ mission: mission(), worker: worker(), execution: complete,
       outputs: [{ key: "other", summary: "Other" }], evaluations: [], usageKey: "usage-1", completedAt: "t2" }))

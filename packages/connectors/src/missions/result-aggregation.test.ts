@@ -472,6 +472,39 @@ describe("general mission result aggregation", () => {
         ...results[2]!.result,
         evaluations: [{
           ...results[2]!.result.evaluations[0]!,
+          reviewerWorkerId: "worker-review" as never
+        }]
+      }
+    };
+    const advisory = finalizeMissionGraphResult({
+      mission: selectedMission,
+      graph,
+      workerResults: results,
+      outputSelections: [{
+        deliverableKey: "final",
+        source: {
+          kind: "worker",
+          workerId: "worker-review" as never,
+          outputKey: "final"
+        }
+      }],
+      completedAt: "2026-07-23T10:02:00.000Z"
+    });
+    expect(advisory).toMatchObject({
+      outcome: "partial",
+      acceptance: [{
+        criterionKey: "grounded",
+        status: "partially-met",
+        summary: expect.stringContaining("model opinion remains advisory")
+      }],
+      partial: { recommendedNextAction: "revise-plan" }
+    });
+    results[2] = {
+      ...results[2]!,
+      result: {
+        ...results[2]!.result,
+        evaluations: [{
+          ...results[2]!.result.evaluations[0]!,
           reviewerWorkerId: "worker-foreign" as never
         }]
       }
