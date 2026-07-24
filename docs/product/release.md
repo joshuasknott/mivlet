@@ -106,8 +106,10 @@ stored in React state, snapshots, logs, or JSON metadata.
   background branches inert for keyboard and assistive-technology navigation
   while the modal is active, including nested confirmations. The final desktop
   style layer applies an operating-system reduced-motion preference globally to
-  scrolling, transitions, and animations. This is not a claim of complete
-  packaged-WebView or assistive-technology validation.
+  scrolling, transitions, and animations. Shared secondary/status text tokens
+  are regression-tested at WCAG AA 4.5:1 or better on their supported light and
+  dark backgrounds. This is not a claim of complete packaged-WebView or
+  assistive-technology validation.
 - Native API providers use bounded dynamic model discovery. Live availability
   and entitlements still depend on each provider account and are not proven by
   fixture tests.
