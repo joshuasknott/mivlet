@@ -900,6 +900,13 @@ grants, routes, credentials, approvals, and placement remain empty rather than
 being inferred. Starting/routing arbitrary ready workers, native grant composition
 for tool-bearing steps, and general restart dispatch remain open.
 
+The existing native worker-start boundary now selects cited-policy quality
+evidence only when the encrypted Mission, selected one-step Plan, capability,
+output contract, acceptance, and worker facts match the exact cited-brief shape.
+General workers stay quality-unobserved instead of inheriting an unrelated
+benchmark cohort; persisted egress revalidates the exact policy reference, if
+any, that the native start transaction accepted.
+
 A provider-neutral portable graph runner now drives arbitrary compiled worker
 graphs through replay-safe callbacks rather than assuming either benchmark
 shape. It reloads durable state after every boundary, obeys the saved parallel

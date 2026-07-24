@@ -4682,6 +4682,14 @@ fn is_cited_terminal_status_shape(
         })
 }
 
+fn worker_route_quality_policy_ref(
+    journal: &mission_run::MissionRunJournalRow,
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+) -> Option<&'static str> {
+    is_cited_terminal_status_shape(journal, lifecycle)
+        .then_some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION)
+}
+
 fn native_terminal_event_keys(
     binding: &NativeWorkerExecutionBinding,
 ) -> Result<[String; 3], String> {
@@ -5746,11 +5754,15 @@ fn validate_selected_provider_route(
     let selection =
         serde_json::from_value::<crate::models::ProviderRouteSelection>(selection.clone())
             .map_err(|_| "Mission provider route selection is invalid.".to_string())?;
+    let quality_policy_ref = selection
+        .quality
+        .as_ref()
+        .map(|quality| quality.policy_revision_ref.as_str());
     crate::backends::validate_persisted_native_provider_route_selection_for_policy(
         provider_id,
         model,
         &expected,
-        Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION),
+        quality_policy_ref,
         &selection,
     )?;
     if event.get("type").and_then(Value::as_str) != Some("route-selected")
@@ -7725,7 +7737,7 @@ pub fn mission_worker_start(
                 &input.provider_id,
                 &input.model_reference,
                 &provider_route_id,
-                Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION),
+                worker_route_quality_policy_ref(&journal, &lifecycle),
                 &input.route_selection,
             )
             .map_err(crate::store::StoreError::Invalid)?;
@@ -8796,6 +8808,44 @@ mod tests {
     use super::*;
 
     const VALID_REVIEW_OUTPUT: &str = "Recommendation: Combine\n\n## Fit with the requested outcome\nUse the practical base with a bounded alternative trial.\n\n## Feasibility and material trade-offs\nThis preserves speed while adding measured exploration.\n\n## Reversibility and material risk\nStart with a reversible pilot before committing broadly.\n\n## Uncertainty and remaining human judgement\nA human still needs to choose the acceptable rollout risk.";
+
+    #[test]
+    fn provider_route_quality_is_bound_only_to_the_exact_cited_shape() {
+        let cited = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({
+                "scope":{"sourceThreadId":"thread-1"},
+                "acceptance":{"requiresHumanAcceptance":false,
+                    "criteria":[{"evaluator":"policy"}]}
+            }),
+            plan: json!({}),
+            current_revision: json!({
+                "summary":"Create a cited brief.",
+                "steps":[{"key":"research","requiredCapabilities":["knowledge.content.search"],
+                    "expectedOutputs":[{"format":"text/markdown"}]}]
+            }),
+        };
+        let journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![json!({"type":"worker-created","payload":{"worker":{
+                "id":"worker-1","planStepKey":"research"
+            }}})],
+        };
+        assert_eq!(
+            worker_route_quality_policy_ref(&journal, &cited),
+            Some(crate::backends::NATIVE_CITED_BRIEF_POLICY_REVISION)
+        );
+
+        let general = mission_plan::MissionPlanLifecycleRow {
+            mission: cited.mission,
+            plan: cited.plan,
+            current_revision: json!({
+                "summary":"Create a general brief.",
+                "steps":[{"key":"research","requiredCapabilities":[],
+                    "expectedOutputs":[{"format":"text/markdown"}]}]
+            }),
+        };
+        assert_eq!(worker_route_quality_policy_ref(&journal, &general), None);
+    }
 
     #[test]
     fn reviewed_parallel_prompt_attests_the_exact_native_wrapper() {
