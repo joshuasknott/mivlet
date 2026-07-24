@@ -98,6 +98,11 @@ stored in React state, snapshots, logs, or JSON metadata.
   provider execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
+- Browser-preview schedules are explicitly labeled `Preview only` and state
+  that their synthetic records stay in the browser and cannot run provider
+  work. Settings and Scheduled Task modals now have tested initial focus,
+  keyboard containment, Escape close, and opener restoration. This is not a
+  claim of complete packaged-WebView or assistive-technology validation.
 - Native API providers use bounded dynamic model discovery. Live availability
   and entitlements still depend on each provider account and are not proven by
   fixture tests.

@@ -32,6 +32,7 @@ import {
   classifySchedule,
   attentionRuns
 } from "../lib/schedule-client";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 const WEEKDAYS: ScheduleWeekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 const TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
@@ -114,6 +115,7 @@ export function SchedulePanel({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+  const modalRef = useRef<HTMLDivElement>(null);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   const validation = useMemo(() => validateForm(form), [form]);
@@ -129,20 +131,15 @@ export function SchedulePanel({
   useEffect(() => {
     if (isCreateModalOpen) {
       resetForm();
-      window.setTimeout(() => nameInputRef.current?.focus(), 0);
     }
   }, [isCreateModalOpen]);
 
-  useEffect(() => {
-    if (!isCreateModalOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && onRequestCloseCreateModal) {
-        onRequestCloseCreateModal();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isCreateModalOpen, onRequestCloseCreateModal]);
+  useModalFocusTrap({
+    active: isCreateModalOpen,
+    containerRef: modalRef,
+    initialFocusRef: nameInputRef,
+    onClose: onRequestCloseCreateModal
+  });
 
   const handleBackdropClick = (event: React.MouseEvent) => {
     if (event.target === event.currentTarget && onRequestCloseCreateModal) {
@@ -217,10 +214,12 @@ export function SchedulePanel({
           data-testid="schedule-modal-overlay"
         >
           <div
+            ref={modalRef}
             className="schedule-modal"
             role="dialog"
             aria-modal="true"
             aria-labelledby="new-schedule-title"
+            tabIndex={-1}
           >
             <div className="schedule-modal__header">
               <h2 id="new-schedule-title" className="schedule-modal__title">
@@ -293,7 +292,7 @@ export function SchedulePanel({
                   className="button button--primary schedule-modal__submit"
                   disabled={!validation.valid || saving}
                 >
-                  {saving ? "Savingâ€¦" : "Add Scheduled Task"}
+                  {saving ? "Saving..." : "Add Scheduled Task"}
                 </button>
               </div>
             </form>

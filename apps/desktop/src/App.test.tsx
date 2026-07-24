@@ -1012,7 +1012,12 @@ describe("Fable home", () => {
     const addMenu = screen.getByRole("menu", { name: /add to prompt/i });
 
     expect(within(addMenu).queryByRole("menuitem", { name: /^schedules/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
+    const schedulesButton = screen.getByRole("button", { name: /^schedules$/i });
+    expect(schedulesButton).toBeInTheDocument();
+    await user.click(schedulesButton);
+    expect(
+      await screen.findByText(/synthetic preview schedules stay in this browser/i)
+    ).toBeInTheDocument();
   });
 
   it("opens the interactive knowledge workspace", async () => {
@@ -2571,6 +2576,19 @@ describe("Fable home", () => {
       expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps settings keyboard focus inside the modal and restores its opener", async () => {
+    const user = await renderWorkspace();
+    const settingsButton = screen.getByRole("button", { name: "Settings" });
+
+    await user.click(settingsButton);
+    const search = await screen.findByRole("searchbox", { name: "Search settings" });
+    await waitFor(() => expect(search).toHaveFocus());
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "General" })).not.toBeInTheDocument();
+    await waitFor(() => expect(settingsButton).toHaveFocus());
   });
 
   it("rehydrates and resolves an exact general Mission action approval", async () => {

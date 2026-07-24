@@ -31,6 +31,7 @@ import { invitationAccountContextKey } from "../lib/invitation-account-context";
 import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView, type ProjectMemoryView } from "../components/pages/ProjectPage";
 import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 import { useProjectMemory } from "../hooks/useProjectMemory";
+import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 type ConversationMessage = {
   id: string;
@@ -209,11 +210,34 @@ export function ChatWorkspace() {
   const [previousActiveItem, setPreviousActiveItem] = useState("new-chat");
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
   const [settingsModalSearch, setSettingsModalSearch] = useState("");
+  const settingsModalRef = useRef<HTMLElement>(null);
+  const settingsSearchRef = useRef<HTMLInputElement>(null);
   const [workspaceSettingsOpen, setWorkspaceSettingsOpen] = useState(false);
   const [workspaceSettingsStatus, setWorkspaceSettingsStatus] = useState("");
   const navigationHistory = useRef([runtime.activeItem]);
   const navigationTarget = useRef<string | null>(null);
   const [navigationIndex, setNavigationIndex] = useState(0);
+  const isSettingsActive = runtime.activePage === "Settings" || runtime.activePage === "Profile";
+  const closeSettingsModal = () => {
+    if (navigationIndex > 0) {
+      const nextIndex = navigationIndex - 1;
+      const target = navigationHistory.current[nextIndex];
+      if (target) {
+        navigationTarget.current = target;
+        setNavigationIndex(nextIndex);
+        runtime.setActiveItem(target);
+      }
+    } else {
+      runtime.setActiveItem(previousActiveItem);
+    }
+  };
+
+  useModalFocusTrap({
+    active: isSettingsActive,
+    containerRef: settingsModalRef,
+    initialFocusRef: settingsSearchRef,
+    onClose: closeSettingsModal
+  });
 
   useEffect(() => {
     if (boundWorkspaceId === null) {
@@ -1777,19 +1801,9 @@ export function ChatWorkspace() {
     );
   }
 
-  const isSettingsActive = runtime.activePage === "Settings" || runtime.activePage === "Profile";
-
   const handleSelectSettingsTab = (tab: SettingsTab) => {
     setActiveSettingsTab(tab);
     runtime.setActiveItem("Settings");
-  };
-
-  const closeSettingsModal = () => {
-    if (navigationIndex > 0) {
-      navigateHistory(-1);
-    } else {
-      runtime.setActiveItem(previousActiveItem);
-    }
   };
 
   const navigateHistory = (offset: -1 | 1) => {
@@ -2044,12 +2058,20 @@ export function ChatWorkspace() {
 
       {isSettingsActive ? (
         <div className="settings-modal-backdrop" role="presentation">
-          <section className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+          <section
+            ref={settingsModalRef}
+            className="settings-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="settings-modal-title"
+            tabIndex={-1}
+          >
             <aside className="settings-modal__nav" aria-label="Settings sections">
               <label className="settings-modal__search">
                 <MagnifyingGlass size={15} aria-hidden="true" />
                 <span className="sr-only">Search settings</span>
                 <input
+                  ref={settingsSearchRef}
                   type="search"
                   placeholder="Search settings"
                   value={settingsModalSearch}

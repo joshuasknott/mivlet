@@ -1,6 +1,6 @@
 # Fable Status
 
-Last audited: 2026-07-23.
+Last audited: 2026-07-24.
 
 This is the factual state of the repo, not the product pitch. Claims below were checked against current files in this checkout.
 
@@ -142,6 +142,8 @@ Performance regression gates are repository-local and current as of 24 July 2026
 Unsigned Windows distribution has a repository-owned private artifact lane. Manual dispatch builds MSI and NSIS after the full gate, records exact checksums and explicit unsigned/unpublished state in a deterministic private/internal/preview manifest, generates matching release notes, and rehearses clean NSIS install, same-version repair, uninstall registration, and local-data preservation on a disposable runner. The manifest refuses `public`; no release, updater, signing, or download hosting is created. A real previous-version upgrade/rollback, packaged first launch, vault/keyring continuity, signing, and private soak remain manual gates.
 
 Workspace execution can be paused from Privacy settings with an encrypted native control and exact typed confirmation. New native-provider, local-model, ACP, Codex app-server, approved MCP-tool, legacy Schedule, and canonical Routine execution is denied or not leased while paused; malformed state fails closed, resume is revision-fenced, and both transitions enter secret-safe action history. This is a new-start kill switch, not a claim that Fable can undo an external effect already accepted or synchronously terminate every owning runtime; per-run cancellation remains the in-flight control.
+
+The first repository-local accessibility repair slice is implemented for Settings and Scheduled Task creation. Both modals move focus inside on open, fence Tab and Shift+Tab within the top-most dialog, close on Escape, and restore the exact opening control; focused unit and full-shell tests cover the behavior. The browser-preview Schedules page now also labels its records as synthetic, browser-only, and unable to run provider work. A complete dialog inventory, packaged-WebView assistive-technology pass, contrast/motion/caption review, and native voice accessibility are still open.
 
 ## Partially Implemented Or Preview-Only
 

@@ -341,7 +341,7 @@ describe("RunContextSummary", () => {
     expect(card).toHaveTextContent("Fable will recheck this exact action before it can run.");
     expect(card).not.toHaveTextContent("completed");
     fireEvent.click(screen.getByRole("button", { name: "Approve action" }));
-    fireEvent.click(screen.getByRole("button", { name: "Donâ€™t approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Don't approve" }));
     expect(onApprove).toHaveBeenCalledOnce();
     expect(onDeny).toHaveBeenCalledOnce();
   });

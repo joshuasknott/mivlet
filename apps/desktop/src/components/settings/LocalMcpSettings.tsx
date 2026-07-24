@@ -205,7 +205,7 @@ export function LocalMcpSettings({
       if (!result) throw new Error("Remote tool-server sign-in requires the desktop app.");
       onStatus(`${server.displayName} account connected. Check the server before enabling any access.`);
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : `${server.displayName} sign-in didnâ€™t finish.`);
+      onStatus(error instanceof Error ? error.message : `${server.displayName} sign-in didn't finish.`);
     } finally {
       setAuthorizingId(null);
     }
@@ -306,7 +306,7 @@ export function LocalMcpSettings({
                               disabled={authorizingId === server.id || server.disabled}
                               onClick={() => void authorize(server)}
                             >
-                              {authorizingId === server.id ? "Workingâ€¦" : "Connect account"}
+                              {authorizingId === server.id ? "Working..." : "Connect account"}
                             </button>
                             <button
                               type="button"

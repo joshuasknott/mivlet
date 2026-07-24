@@ -342,10 +342,10 @@ export function MissionEffectApprovalCard({
       </div>
       <div className="mission-approval-card__actions">
         <button type="button" className="button button--primary" disabled={busy} onClick={onApprove}>
-          {busy ? "Saving decisionâ€¦" : "Approve action"}
+          {busy ? "Saving decision..." : "Approve action"}
         </button>
         <button type="button" className="button button--secondary" disabled={busy} onClick={onDeny}>
-          Donâ€™t approve
+          Don't approve
         </button>
       </div>
       <small>Requested {new Date(requestedAt).toLocaleString()}</small>

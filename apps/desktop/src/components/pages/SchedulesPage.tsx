@@ -21,6 +21,7 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
 export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const newButtonRef = useRef<HTMLButtonElement>(null);
+  const isPreview = runtime.browserSession?.source === "fixture-preview";
 
   const handleCloseCreateModal = () => {
     setIsCreateModalOpen(false);
@@ -31,6 +32,12 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
     <>
       <PageHeader
         title="Schedules"
+        description={
+          isPreview
+            ? "Synthetic preview schedules stay in this browser and cannot run provider work."
+            : undefined
+        }
+        meta={isPreview ? "Preview only" : undefined}
         actions={
           <button
             ref={newButtonRef}
