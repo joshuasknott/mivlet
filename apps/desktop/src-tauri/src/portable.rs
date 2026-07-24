@@ -79,6 +79,7 @@ fn omitted_summary() -> Value {
         "transient": [
             "run_state is exported (user-recoverable), but documented here as recoverable state",
             "scheduler_queue_entry is execution state and is rebuilt; it is never imported as live authority",
+            "routine scheduler authority, leases, cursors, retry state, and legacy-migration rollback evidence are node-local and never imported",
             "cloud_workspace_link, cloud_sync_cursor, cloud_mutation_outbox, cloud_record_shadow, and cloud_conflict are local shared-workspace sync state and are never imported as solo authority"
         ],
         "bookkeeping": [
@@ -135,6 +136,7 @@ pub struct Sections {
     pub knowledge_sources: Vec<KnowledgeSourceRecord>,
     pub memory_records: Vec<MemoryRecord>,
     pub schedules: Vec<ScheduleRecord>,
+    pub routines: Vec<PortableRoutineRecord>,
     pub scheduled_jobs: Vec<ScheduledJobRecord>,
     pub workflow_definitions: Vec<WorkflowDefinitionRecord>,
     pub workflow_runs: Vec<WorkflowRunRecord>,
@@ -351,6 +353,18 @@ record!(ScheduleRecord {
     created_at: String,
     payload: Value,
 });
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PortableRoutineRecord {
+    pub source_workspace_id: String,
+    pub owner_subject: String,
+    pub owner_member_id: String,
+    pub routine: Value,
+    pub versions: Vec<Value>,
+    pub triggers: Vec<Value>,
+    pub occurrences: Vec<Value>,
+}
 
 record!(ScheduledJobRecord {
     id: String,
@@ -1052,6 +1066,11 @@ fn read_sections(
     .map(|v| record_from::<ScheduleRecord>(v, "schedule"))
     .collect::<Result<_>>()?;
 
+    let routines = artifact_owner
+        .map(|owner| read_portable_routines(conn, store, workspace_id, owner))
+        .transpose()?
+        .unwrap_or_default();
+
     let scheduled_jobs = read_rows(
         conn,
         store,
@@ -1143,6 +1162,7 @@ fn read_sections(
         knowledge_sources,
         memory_records,
         schedules,
+        routines,
         scheduled_jobs,
         workflow_definitions,
         workflow_runs,
@@ -1150,6 +1170,124 @@ fn read_sections(
         drafts,
         run_states,
     })
+}
+
+fn read_portable_routines(
+    conn: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    owner: &crate::store::repos::scope::PrivateDataScope,
+) -> Result<Vec<PortableRoutineRecord>> {
+    let Some(owner_member_id) = owner.owner_member_id() else {
+        return Ok(Vec::new());
+    };
+    let mut routine_stmt = conn.prepare(
+        "SELECT id,payload,payload_nonce FROM routine_record
+         WHERE workspace_id=?1 AND owner_subject=?2 ORDER BY created_at,id;",
+    )?;
+    let routine_rows = routine_stmt
+        .query_map(
+            rusqlite::params![workspace_id, owner.owner_subject()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    Sealed {
+                        ciphertext: row.get(1)?,
+                        nonce: row.get(2)?,
+                    },
+                ))
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut records = Vec::with_capacity(routine_rows.len());
+    for (routine_id, sealed) in routine_rows {
+        let routine = open_json_value(
+            store,
+            &sealed,
+            &format!(
+                "routine:{workspace_id}:{}:{routine_id}",
+                owner.owner_subject()
+            ),
+        )?;
+        let versions = read_routine_values(
+            conn,
+            store,
+            "SELECT version,payload,payload_nonce FROM routine_version
+             WHERE workspace_id=?1 AND owner_subject=?2 AND routine_id=?3 ORDER BY version;",
+            rusqlite::params![workspace_id, owner.owner_subject(), routine_id],
+            |version: &i64| {
+                format!(
+                    "routine_version:{workspace_id}:{}:{routine_id}:{version}",
+                    owner.owner_subject()
+                )
+            },
+        )?;
+        let triggers = read_routine_values(
+            conn,
+            store,
+            "SELECT id,payload,payload_nonce FROM routine_trigger
+             WHERE workspace_id=?1 AND owner_subject=?2 AND routine_id=?3 ORDER BY created_at,id;",
+            rusqlite::params![workspace_id, owner.owner_subject(), routine_id],
+            |trigger_id: &String| {
+                format!(
+                    "routine_trigger:{workspace_id}:{}:{trigger_id}",
+                    owner.owner_subject()
+                )
+            },
+        )?;
+        let occurrences = read_routine_values(
+            conn,
+            store,
+            "SELECT id,payload,payload_nonce FROM routine_occurrence
+             WHERE workspace_id=?1 AND owner_subject=?2 AND routine_id=?3 ORDER BY observed_at,id;",
+            rusqlite::params![workspace_id, owner.owner_subject(), routine_id],
+            |occurrence_id: &String| {
+                format!(
+                    "routine_occurrence:{workspace_id}:{}:{occurrence_id}",
+                    owner.owner_subject()
+                )
+            },
+        )?;
+        records.push(PortableRoutineRecord {
+            source_workspace_id: workspace_id.to_string(),
+            owner_subject: owner.owner_subject().to_string(),
+            owner_member_id: owner_member_id.to_string(),
+            routine,
+            versions,
+            triggers,
+            occurrences,
+        });
+    }
+    Ok(records)
+}
+
+fn read_routine_values<T, P, A>(
+    conn: &Connection,
+    store: &Store,
+    sql: &str,
+    params: P,
+    aad: A,
+) -> Result<Vec<Value>>
+where
+    T: rusqlite::types::FromSql + std::fmt::Display,
+    P: rusqlite::Params,
+    A: Fn(&T) -> String,
+{
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt
+        .query_map(params, |row| {
+            Ok((
+                row.get::<_, T>(0)?,
+                Sealed {
+                    ciphertext: row.get(1)?,
+                    nonce: row.get(2)?,
+                },
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|(key, sealed)| open_json_value(store, &sealed, &aad(&key)))
+        .collect()
 }
 
 fn read_profile(conn: &Connection, store: &Store) -> Result<Option<ProfileRecord>> {
@@ -1202,6 +1340,92 @@ fn validate_integrity(s: &Sections) -> Result<()> {
     }
     if has_dup(&s.runs, |r| &r.id) {
         errors.push("Duplicate run ids.".into());
+    }
+    let mut routine_ids = std::collections::HashSet::new();
+    for record in &s.routines {
+        let routine_id = portable_text(&record.routine, "id").unwrap_or_default();
+        if routine_id.is_empty() || !routine_ids.insert(routine_id.to_string()) {
+            errors.push("Portable Routine ids must be present and unique.".into());
+            continue;
+        }
+        if record.owner_subject != format!("member:{}", record.owner_member_id)
+            || portable_text(&record.routine, "workspaceId")
+                != Some(record.source_workspace_id.as_str())
+            || portable_text(&record.routine, "ownerMemberId")
+                != Some(record.owner_member_id.as_str())
+        {
+            errors.push(format!(
+                "Routine {routine_id} has invalid portable owner authority."
+            ));
+        }
+        if record
+            .routine
+            .get("projectId")
+            .and_then(Value::as_str)
+            .is_some_and(|project_id| !project_ids.contains(project_id))
+        {
+            errors.push(format!(
+                "Routine {routine_id} references an unknown project."
+            ));
+        }
+        let current_version = record
+            .routine
+            .get("currentVersion")
+            .and_then(Value::as_i64)
+            .unwrap_or_default();
+        if current_version < 1 || record.versions.len() != current_version as usize {
+            errors.push(format!(
+                "Routine {routine_id} does not contain its complete immutable version history."
+            ));
+        }
+        let trigger_ids = record
+            .triggers
+            .iter()
+            .filter_map(|trigger| portable_text(trigger, "id"))
+            .collect::<std::collections::HashSet<_>>();
+        if trigger_ids.len() != record.triggers.len()
+            || record.triggers.iter().any(|trigger| {
+                portable_text(trigger, "routineId") != Some(routine_id)
+                    || portable_text(trigger, "workspaceId")
+                        != Some(record.source_workspace_id.as_str())
+            })
+        {
+            errors.push(format!(
+                "Routine {routine_id} has invalid or duplicate triggers."
+            ));
+        }
+        for (index, version) in record.versions.iter().enumerate() {
+            let expected = index as i64 + 1;
+            let valid_ids = version
+                .get("triggerIds")
+                .and_then(Value::as_array)
+                .is_some_and(|ids| {
+                    !ids.is_empty()
+                        && ids
+                            .iter()
+                            .all(|id| id.as_str().is_some_and(|id| trigger_ids.contains(id)))
+                });
+            if portable_text(version, "routineId") != Some(routine_id)
+                || version.get("version").and_then(Value::as_i64) != Some(expected)
+                || !valid_ids
+            {
+                errors.push(format!(
+                    "Routine {routine_id} has an invalid immutable version {expected}."
+                ));
+            }
+        }
+        if record.occurrences.iter().any(|occurrence| {
+            portable_text(occurrence, "routineId") != Some(routine_id)
+                || portable_text(occurrence, "triggerId").is_none_or(|id| !trigger_ids.contains(id))
+                || occurrence
+                    .get("routineVersion")
+                    .and_then(Value::as_i64)
+                    .is_none_or(|version| version < 1 || version > current_version)
+        }) {
+            errors.push(format!(
+                "Routine {routine_id} has invalid occurrence history."
+            ));
+        }
     }
 
     // thread -> project
@@ -1374,6 +1598,25 @@ fn has_dup<T, F: Fn(&T) -> &String>(v: &[T], key: F) -> bool {
         }
     }
     false
+}
+
+fn portable_text<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+}
+
+fn portable_required_text<'a>(value: &'a Value, key: &str, label: &str) -> Result<&'a str> {
+    portable_text(value, key).ok_or_else(|| StoreError::Invalid(format!("{label} is required.")))
+}
+
+fn portable_i64(value: &Value, key: &str, label: &str) -> Result<i64> {
+    value
+        .get(key)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| StoreError::Invalid(format!("{label} is invalid.")))
 }
 
 fn record_from<T: for<'de> Deserialize<'de>>(value: Value, table: &str) -> Result<T> {
@@ -2173,6 +2416,268 @@ fn validate_portable_artifact(
     validate_portable_reviews(r, acting_internal_user_id, owner.owner_member_id())
 }
 
+fn pause_imported_routine(value: &mut Value, actor: &str, at: &str) -> Result<()> {
+    if portable_text(value, "status") != Some("active") {
+        return Ok(());
+    }
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Invalid("Portable Routine content is invalid.".into()))?;
+    object.insert("status".into(), Value::String("paused".into()));
+    object.insert("updatedAt".into(), Value::String(at.into()));
+    let revision = object
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| StoreError::Invalid("Portable Routine revision is invalid.".into()))?;
+    object.insert("revision".into(), Value::Number((revision + 1).into()));
+    object.insert(
+        "pause".into(),
+        serde_json::json!({
+            "pausedAt": at,
+            "pausedByInternalUserId": actor,
+            "reason": "Imported workspace copies never activate execution."
+        }),
+    );
+    Ok(())
+}
+
+fn pause_imported_trigger(value: &mut Value, at: &str) -> Result<()> {
+    if portable_text(value, "status") != Some("active") {
+        return Ok(());
+    }
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| StoreError::Invalid("Portable Routine trigger is invalid.".into()))?;
+    object.insert("status".into(), Value::String("paused".into()));
+    object.insert("updatedAt".into(), Value::String(at.into()));
+    let revision = object
+        .get("revision")
+        .and_then(Value::as_i64)
+        .ok_or_else(|| StoreError::Invalid("Portable trigger revision is invalid.".into()))?;
+    object.insert("revision".into(), Value::Number((revision + 1).into()));
+    Ok(())
+}
+
+fn apply_portable_routines(
+    tx: &Connection,
+    store: &Store,
+    workspace_id: &str,
+    records: &[PortableRoutineRecord],
+    report: &mut ImportReport,
+    at: &str,
+) -> Result<()> {
+    if records.is_empty() {
+        return Ok(());
+    }
+    let context =
+        crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(
+            tx,
+        )?;
+    if context.active_workspace.local_workspace_id != workspace_id {
+        return Err(StoreError::Invalid(
+            "Routine import requires the active authenticated workspace.".into(),
+        ));
+    }
+    let member_id = context
+        .member_id
+        .as_deref()
+        .ok_or_else(|| StoreError::Invalid("Routine import requires an active member.".into()))?;
+    let mut inserted_count = 0usize;
+
+    for record in records {
+        if record.source_workspace_id != workspace_id
+            || record.owner_member_id != member_id
+            || record.owner_subject != format!("member:{member_id}")
+        {
+            return Err(StoreError::Invalid(
+                "Portable Routine owner does not match the active authenticated workspace.".into(),
+            ));
+        }
+        let routine_id = crate::store::repos::scope::normalize_id(
+            portable_text(&record.routine, "id")
+                .ok_or_else(|| StoreError::Invalid("Portable Routine id is required.".into()))?,
+            "Routine",
+        )?;
+        let exists: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM routine_record
+             WHERE workspace_id=?1 AND owner_subject=?2 AND id=?3);",
+            rusqlite::params![workspace_id, record.owner_subject, routine_id],
+            |row| row.get(0),
+        )?;
+        if exists {
+            report.inc_skipped("routines");
+            continue;
+        }
+
+        let project_id = record
+            .routine
+            .get("projectId")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        ensure_target_project(tx, workspace_id, project_id.as_deref())?;
+        let scope = crate::store::repos::scope::DataScope::new(
+            workspace_id.to_string(),
+            project_id.clone(),
+        )?;
+        let owner = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            scope.clone(),
+            &context.internal_user_id,
+            Some(member_id),
+        )?;
+
+        let mut routine = record.routine.clone();
+        let (_, _, current_version) = crate::store::repos::routine::validate_routine(
+            &scope,
+            &owner,
+            &context.internal_user_id,
+            &routine,
+        )?;
+        if current_version as usize != record.versions.len() {
+            return Err(StoreError::Invalid(
+                "Portable Routine immutable version history is incomplete.".into(),
+            ));
+        }
+        for (index, version) in record.versions.iter().enumerate() {
+            crate::store::repos::routine::validate_version(
+                &context.internal_user_id,
+                &routine_id,
+                version,
+                index as i64 + 1,
+            )?;
+        }
+        for trigger in &record.triggers {
+            crate::store::repos::routine::validate_trigger(
+                &scope,
+                &owner,
+                &context.internal_user_id,
+                &routine_id,
+                trigger,
+            )?;
+        }
+
+        pause_imported_routine(&mut routine, &context.internal_user_id, at)?;
+        let (_, status, current_version) = crate::store::repos::routine::validate_routine(
+            &scope,
+            &owner,
+            &context.internal_user_id,
+            &routine,
+        )?;
+        let routine_sealed = store.seal_json_owned(
+            &routine,
+            &format!(
+                "routine:{workspace_id}:{}:{routine_id}",
+                owner.owner_subject()
+            ),
+        )?;
+        tx.execute(
+            "INSERT INTO routine_record(
+               workspace_id,owner_subject,id,project_id,visibility,owner_member_id,status,
+               current_version,revision,created_by_internal_user_id,created_at,updated_at,
+               deleted_at,payload,payload_nonce
+             ) VALUES (?1,?2,?3,?4,'member-private',?5,?6,?7,?8,?9,?10,?11,?12,?13,?14);",
+            rusqlite::params![
+                workspace_id,
+                owner.owner_subject(),
+                routine_id,
+                project_id,
+                member_id,
+                status,
+                current_version,
+                portable_i64(&routine, "revision", "Portable Routine revision")?,
+                context.internal_user_id,
+                portable_required_text(&routine, "createdAt", "Portable Routine created time")?,
+                portable_required_text(&routine, "updatedAt", "Portable Routine updated time")?,
+                portable_text(&routine, "deletedAt"),
+                routine_sealed.ciphertext,
+                routine_sealed.nonce
+            ],
+        )?;
+
+        for (index, version) in record.versions.iter().enumerate() {
+            let version_number = index as i64 + 1;
+            let sealed = store.seal_json_owned(
+                version,
+                &format!(
+                    "routine_version:{workspace_id}:{}:{routine_id}:{version_number}",
+                    owner.owner_subject()
+                ),
+            )?;
+            tx.execute(
+                "INSERT INTO routine_version(
+                   workspace_id,owner_subject,routine_id,version,
+                   created_by_internal_user_id,created_at,payload,payload_nonce
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8);",
+                rusqlite::params![
+                    workspace_id,
+                    owner.owner_subject(),
+                    routine_id,
+                    version_number,
+                    context.internal_user_id,
+                    portable_required_text(
+                        version,
+                        "createdAt",
+                        "Portable Routine version created time"
+                    )?,
+                    sealed.ciphertext,
+                    sealed.nonce
+                ],
+            )?;
+        }
+
+        for original in &record.triggers {
+            let mut trigger = original.clone();
+            pause_imported_trigger(&mut trigger, at)?;
+            let (trigger_id, trigger_status, kind) =
+                crate::store::repos::routine::validate_trigger(
+                    &scope,
+                    &owner,
+                    &context.internal_user_id,
+                    &routine_id,
+                    &trigger,
+                )?;
+            let sealed = store.seal_json_owned(
+                &trigger,
+                &format!(
+                    "routine_trigger:{workspace_id}:{}:{trigger_id}",
+                    owner.owner_subject()
+                ),
+            )?;
+            tx.execute(
+                "INSERT INTO routine_trigger(
+                   workspace_id,owner_subject,id,routine_id,project_id,status,kind,revision,
+                   created_at,updated_at,deleted_at,payload,payload_nonce
+                 ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13);",
+                rusqlite::params![
+                    workspace_id,
+                    owner.owner_subject(),
+                    trigger_id,
+                    routine_id,
+                    project_id,
+                    trigger_status,
+                    kind,
+                    portable_i64(&trigger, "revision", "Portable trigger revision")?,
+                    portable_required_text(&trigger, "createdAt", "Portable trigger created time")?,
+                    portable_required_text(&trigger, "updatedAt", "Portable trigger updated time")?,
+                    portable_text(&trigger, "deletedAt"),
+                    sealed.ciphertext,
+                    sealed.nonce
+                ],
+            )?;
+        }
+        for occurrence in &record.occurrences {
+            crate::store::repos::routine::append_occurrence(tx, store, &scope, &owner, occurrence)?;
+        }
+        report.inc_inserted("routines");
+        inserted_count += 1;
+    }
+    if inserted_count > 0 {
+        report.warnings.push(format!(
+            "{inserted_count} canonical Routine(s) imported paused; scheduler authority and node-local driver state were not imported."
+        ));
+    }
+    Ok(())
+}
+
 fn plan_and_apply(
     tx: &Connection,
     store: &Store,
@@ -2722,6 +3227,15 @@ fn plan_and_apply(
             )?;
             Ok(())
         },
+    )?;
+
+    apply_portable_routines(
+        tx,
+        store,
+        workspace_id,
+        &manifest.sections.routines,
+        report,
+        &now,
     )?;
 
     for record in &manifest.sections.workflow_definitions {
@@ -3417,6 +3931,168 @@ mod tests {
             tx.execute("INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES ('user-local','active',1,'t')",[])?;
             crate::store::repos::workspace_directory::set_current_internal_user(tx,"user-local","t")
         }).unwrap();
+    }
+
+    fn bind_member_owner(store: &Store) {
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO fable_workspace_mirror(
+                       fable_workspace_id,local_workspace_id,status,revision,policy_revision,updated_at
+                     ) VALUES ('shared','default','active',1,1,'t')",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT INTO fable_internal_user_mirror(
+                       internal_user_id,status,revision,updated_at
+                     ) VALUES ('user-a','active',1,'t')",
+                    [],
+                )?;
+                tx.execute(
+                    "INSERT INTO fable_membership_mirror(
+                       fable_workspace_id,member_id,internal_user_id,role,status,revision,updated_at
+                     ) VALUES ('shared','member-a','user-a','owner','active',1,'t')",
+                    [],
+                )?;
+                crate::store::repos::workspace_directory::set_current_internal_user(
+                    tx, "user-a", "t",
+                )?;
+                crate::store::repos::workspace_directory::select_active_workspace(
+                    tx, "user-a", "shared", "t",
+                )
+            })
+            .unwrap();
+    }
+
+    fn seed_portable_routine(store: &Store) {
+        let scope = crate::store::repos::scope::DataScope::workspace("default").unwrap();
+        let owner = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+            scope.clone(),
+            "user-a",
+            Some("member-a"),
+        )
+        .unwrap();
+        let routine = serde_json::json!({
+            "id":"portable-routine","status":"active","title":"Daily brief",
+            "currentVersion":1,"scope":{},"authorityPolicy":"no-expansion",
+            "workspaceId":"default","authority":"local","schemaVersion":1,"revision":1,
+            "visibility":"member-private","ownerMemberId":"member-a",
+            "createdByInternalUserId":"user-a","createdAt":"2026-01-01T00:00:00Z",
+            "updatedAt":"2026-01-01T00:00:00Z"
+        });
+        let version = serde_json::json!({
+            "routineId":"portable-routine","version":1,
+            "createdAt":"2026-01-01T00:00:00Z","createdByInternalUserId":"user-a",
+            "action":{"kind":"direct-request","title":"Brief","instruction":"Summarize."},
+            "scope":{},"routePolicy":{"kind":"resolve-at-run"},
+            "placementPolicy":{"kind":"resolve-at-run"},
+            "budgets":{"capabilityGrantIds":[]},"triggerIds":["portable-trigger"]
+        });
+        let trigger = serde_json::json!({
+            "id":"portable-trigger","routineId":"portable-routine","status":"active",
+            "spec":{"kind":"time-recurring","timezone":"Europe/London",
+                "recurrence":{"frequency":"daily","expression":"0 9 * * *"},
+                "missedRunPolicy":"run-latest"},
+            "deduplication":{"strategy":"per-trigger-event"},
+            "workspaceId":"default","authority":"local","schemaVersion":1,"revision":1,
+            "visibility":"member-private","ownerMemberId":"member-a",
+            "createdByInternalUserId":"user-a","createdAt":"2026-01-01T00:00:00Z",
+            "updatedAt":"2026-01-01T00:00:00Z"
+        });
+        let occurrence = serde_json::json!({
+            "id":"portable-occurrence","routineId":"portable-routine",
+            "triggerId":"portable-trigger","routineVersion":1,"status":"completed",
+            "scheduledFor":"2026-01-02T09:00:00Z","observedAt":"2026-01-02T09:01:00Z",
+            "deduplicationKey":"portable-trigger:2026-01-02T09:00:00Z"
+        });
+        store
+            .transaction(|tx| {
+                crate::store::repos::routine::create(
+                    tx,
+                    store,
+                    &scope,
+                    &owner,
+                    "user-a",
+                    &routine,
+                    &version,
+                    &[trigger],
+                )?;
+                crate::store::repos::routine::append_occurrence(
+                    tx,
+                    store,
+                    &scope,
+                    &owner,
+                    &occurrence,
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn canonical_routines_round_trip_paused_without_node_authority() {
+        let source = store();
+        bind_member_owner(&source);
+        seed_portable_routine(&source);
+        let manifest = export_workspace(&source).unwrap();
+        assert_eq!(manifest.sections.routines.len(), 1);
+        assert_eq!(manifest.sections.routines[0].versions.len(), 1);
+        assert_eq!(manifest.sections.routines[0].occurrences.len(), 1);
+
+        let destination = store();
+        bind_member_owner(&destination);
+        let json = serde_json::to_string(&manifest).unwrap();
+        let report = import_workspace(&destination, &json, ImportOptions::default()).unwrap();
+        assert_eq!(report.inserted.get("routines"), Some(&1));
+        let status: String = destination
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT status FROM routine_record WHERE id='portable-routine'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(status, "paused");
+        assert_eq!(count(&destination, "routine_version"), 1);
+        assert_eq!(count(&destination, "routine_trigger"), 1);
+        assert_eq!(count(&destination, "routine_occurrence"), 1);
+        assert_eq!(count(&destination, "routine_driver_occurrence"), 0);
+        assert_eq!(count(&destination, "routine_trigger_cursor"), 0);
+        assert_eq!(count(&destination, "routine_scheduler_authority"), 0);
+
+        let second = import_workspace(&destination, &json, ImportOptions::default()).unwrap();
+        assert_eq!(second.skipped.get("routines"), Some(&1));
+        assert_eq!(count(&destination, "routine_occurrence"), 1);
+    }
+
+    #[test]
+    fn portable_routines_reject_owner_substitution_and_incomplete_history() {
+        let source = store();
+        bind_member_owner(&source);
+        seed_portable_routine(&source);
+        let manifest = export_workspace(&source).unwrap();
+
+        let destination = store();
+        bind_member_owner(&destination);
+        let mut substituted = manifest.clone();
+        let record = &mut substituted.sections.routines[0];
+        record.owner_member_id = "member-b".into();
+        record.owner_subject = "member:member-b".into();
+        record.routine["ownerMemberId"] = Value::String("member-b".into());
+        for trigger in &mut record.triggers {
+            trigger["ownerMemberId"] = Value::String("member-b".into());
+        }
+        let json = serde_json::to_string(&substituted).unwrap();
+        assert!(import_workspace(&destination, &json, ImportOptions::default()).is_err());
+        assert_eq!(count(&destination, "routine_record"), 0);
+
+        let mut incomplete = manifest;
+        incomplete.sections.routines[0].versions.clear();
+        let json = serde_json::to_string(&incomplete).unwrap();
+        assert!(import_workspace(&destination, &json, ImportOptions::default()).is_err());
+        assert_eq!(count(&destination, "routine_record"), 0);
     }
 
     fn seed_native_artifact_source(store: &Store) {

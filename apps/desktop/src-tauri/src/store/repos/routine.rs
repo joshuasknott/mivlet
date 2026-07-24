@@ -119,7 +119,7 @@ fn owner_subject(private: &PrivateDataScope) -> String {
     private.owner_subject().to_string()
 }
 
-fn validate_routine(
+pub(crate) fn validate_routine(
     scope: &DataScope,
     private: &PrivateDataScope,
     internal_user_id: &str,
@@ -163,7 +163,7 @@ fn validate_routine(
     Ok((id, status.to_string(), current_version))
 }
 
-fn validate_version(
+pub(crate) fn validate_version(
     internal_user_id: &str,
     routine_id: &str,
     version: &Value,
@@ -218,7 +218,7 @@ fn validate_version(
     Ok(())
 }
 
-fn validate_trigger(
+pub(crate) fn validate_trigger(
     scope: &DataScope,
     private: &PrivateDataScope,
     internal_user_id: &str,

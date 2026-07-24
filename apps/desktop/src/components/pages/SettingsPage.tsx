@@ -787,7 +787,7 @@ function PrivacySettingsView({
               </span>
               <span>
                 <strong id="portable-export-title">Portable workspace copy</strong>
-                <small>Save supported projects, conversations, artifacts, schedules, and other workspace data as plain JSON.</small>
+                <small>Save supported projects, conversations, artifacts, routines, schedules, and other workspace data as plain JSON.</small>
               </span>
             </div>
             <div style={{ display: "grid", gap: "8px", marginTop: "16px" }}>
