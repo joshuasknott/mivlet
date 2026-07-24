@@ -265,7 +265,10 @@ one explicitly declared `all:` or `any:` fan-in, and following sequential
 `then:` stages inside the same six-step bound. A final explicit `review:` plus
 `revise:` pair can add one advisory reviewer and exactly one revision pass; the
 revision receives both exact encrypted draft and review receipts through a
-second predeclared `all` join, and final acceptance remains human. Arbitrary
+second predeclared `all` join, and final acceptance remains human. Up to four
+final `accept:` lines replace the generic review placeholder with exact
+human-authored required criteria bound to immutable required-output receipts.
+Duplicate, misordered, empty, and oversized criteria fail closed. Arbitrary
 branching Plan
 authoring, every route/cost evidence shape, and packaged-app accessibility
 observation remain open.
@@ -279,7 +282,10 @@ sequential chain while keeping the Plan within the same six-worker bound. A
 final `review: …` plus `revise: …` pair adds one advisory reviewer and one
 revision pass; Rust binds the revision to the exact draft and review receipts
 through a second declared `all` join, while model review remains unable to
-accept the work. It
+accept the work. Up to four final `accept: …` lines carry exact human-authored
+criteria into the encrypted Mission and selected Plan without consuming worker
+slots. All are required, only required final outputs provide their evidence,
+and identified-human evaluation remains mandatory. It
 creates one authenticated encrypted Plan, pins the selected authorized
 provider/model route without fallback, persists every multi-source join before any worker
 outcome, runs ready workers through the existing general graph adapter, and

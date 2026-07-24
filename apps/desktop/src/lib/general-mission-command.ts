@@ -1,10 +1,13 @@
 const MAX_TASKS = 6;
 const MAX_TITLE_LENGTH = 160;
 const MAX_TASK_LENGTH = 1_000;
+const MAX_ACCEPTANCE_CRITERIA = 4;
+const MAX_ACCEPTANCE_CRITERION_LENGTH = 500;
 
 export interface GeneralMissionDraft {
   title: string;
   tasks: string[];
+  acceptanceCriteria?: string[];
   join?: {
     strategy: "all" | "any";
     task: string;
@@ -24,8 +27,9 @@ export interface GeneralMissionDraft {
  * declares one bounded continuation that receives the immutable task outputs.
  * Following `then:` lines may declare a short sequential chain. An optional
  * final `review:` plus `revise:` pair declares exactly one advisory review and
- * one revision pass. No dependency or synthesis authority is inferred from
- * ordinary bullets.
+ * one revision pass. Final `accept:` lines can declare up to four exact
+ * human-evaluated acceptance criteria. No dependency, synthesis, or acceptance
+ * authority is inferred from ordinary bullets.
  */
 export function parseGeneralMissionDraft(value: string): GeneralMissionDraft | null {
   const lines = value
@@ -36,16 +40,30 @@ export function parseGeneralMissionDraft(value: string): GeneralMissionDraft | n
   if (lines.length < 3) return null;
   const title = lines[0]!;
   if (!title || title.length > MAX_TITLE_LENGTH) return null;
-  const continuationLines: RegExpExecArray[] = [];
+  const declarationLines: RegExpExecArray[] = [];
   let taskBoundary = lines.length;
   while (taskBoundary > 1) {
-    const declared = /^(all|any|then|review|revise):\s+(.+)$/i.exec(
+    const declared = /^(all|any|then|review|revise|accept):\s+(.+)$/i.exec(
       lines[taskBoundary - 1] ?? ""
     );
     if (!declared) break;
-    continuationLines.unshift(declared);
+    declarationLines.unshift(declared);
     taskBoundary -= 1;
   }
+  const declarationKinds = declarationLines.map(
+    (line) => line[1]!.toLocaleLowerCase()
+  );
+  const acceptanceIndex = declarationKinds.indexOf("accept");
+  const validAcceptanceSuffix =
+    acceptanceIndex === -1
+    || declarationKinds.slice(acceptanceIndex).every((kind) => kind === "accept");
+  const continuationLines = declarationLines.slice(
+    0,
+    acceptanceIndex === -1 ? declarationLines.length : acceptanceIndex
+  );
+  const acceptanceLines = acceptanceIndex === -1
+    ? []
+    : declarationLines.slice(acceptanceIndex);
   const firstContinuation = continuationLines[0];
   const continuationKinds = continuationLines.map(
     (line) => line[1]!.toLocaleLowerCase()
@@ -75,20 +93,29 @@ export function parseGeneralMissionDraft(value: string): GeneralMissionDraft | n
     return match?.[1]?.trim() ?? "";
   });
   const continuationTasks = continuationLines.map((line) => line[2]?.trim() ?? "");
+  const acceptanceCriteria = acceptanceLines.map((line) => line[2]?.trim() ?? "");
   const allObjectives = [...tasks, ...continuationTasks];
   if (
-    !validContinuationChain
+    !validAcceptanceSuffix
+    || !validContinuationChain
     || tasks.length < 2
     || allObjectives.length > MAX_TASKS
     || tasks.some((task) => !task || task.length > MAX_TASK_LENGTH)
     || continuationTasks.some((task) => !task || task.length > MAX_TASK_LENGTH)
     || new Set(allObjectives.map((task) => task.toLocaleLowerCase())).size !== allObjectives.length
+    || acceptanceCriteria.length > MAX_ACCEPTANCE_CRITERIA
+    || acceptanceCriteria.some(
+      (criterion) => !criterion || criterion.length > MAX_ACCEPTANCE_CRITERION_LENGTH
+    )
+    || new Set(acceptanceCriteria.map((criterion) => criterion.toLocaleLowerCase())).size
+      !== acceptanceCriteria.length
   ) {
     return null;
   }
   return {
     title,
     tasks,
+    ...(acceptanceCriteria.length > 0 ? { acceptanceCriteria } : {}),
     ...(firstContinuation
       ? {
           join: {

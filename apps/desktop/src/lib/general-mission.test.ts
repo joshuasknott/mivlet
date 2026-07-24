@@ -269,6 +269,64 @@ describe("parseGeneralMissionDraft", () => {
       }
     });
   });
+
+  it("accepts only a final bounded set of exact human acceptance criteria", () => {
+    expect(parseGeneralMissionDraft([
+      "Independent review",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "accept: Each result separates evidence from assumptions"
+    ].join("\n"))).toEqual({
+      title: "Independent review",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      acceptanceCriteria: ["Each result separates evidence from assumptions"]
+    });
+    expect(parseGeneralMissionDraft([
+      "Launch readiness",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "review: Check the recommendation",
+      "revise: Apply the review once",
+      "accept: Names an owner for every next step",
+      "accept: Distinguishes evidence from assumptions"
+    ].join("\n"))).toEqual({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      acceptanceCriteria: [
+        "Names an owner for every next step",
+        "Distinguishes evidence from assumptions"
+      ],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step",
+        review: {
+          task: "Check the recommendation",
+          revise: "Apply the review once"
+        }
+      }
+    });
+    expect(parseGeneralMissionDraft([
+      "Invalid order",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "accept: Uses both drafts",
+      "all: Recommend the next step"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Duplicate criteria",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "accept: Uses both drafts",
+      "accept: uses both drafts"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Too many criteria",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      ...Array.from({ length: 5 }, (_, index) => `accept: Criterion ${index + 1}`)
+    ].join("\n"))).toBeNull();
+  });
 });
 
 describe("executeGeneralMission", () => {
@@ -543,6 +601,10 @@ describe("executeGeneralMission", () => {
           revise: "Apply the review once and produce the final recommendation."
         }
       },
+      acceptanceCriteria: [
+        "Names an owner for every next step.",
+        "Distinguishes evidence from assumptions."
+      ],
       workspaceId: "workspace-1",
       sourceThreadId: "thread-1",
       backend,
@@ -565,20 +627,48 @@ describe("executeGeneralMission", () => {
           expect.objectContaining({ key: "revised-result", required: true })
         ])
       }),
+      acceptance: {
+        requiresHumanAcceptance: true,
+        minimumRequiredCriteria: 2,
+        criteria: [{
+          key: "human-acceptance-1",
+          description: "Names an owner for every next step.",
+          required: true,
+          evaluator: "human",
+          evidenceRequired: [],
+          evidenceFromStepOutputs: true
+        }, {
+          key: "human-acceptance-2",
+          description: "Distinguishes evidence from assumptions.",
+          required: true,
+          evaluator: "human",
+          evidenceRequired: [],
+          evidenceFromStepOutputs: true
+        }]
+      },
       steps: [
-        expect.objectContaining({ key: "task-1", kind: "produce", dependsOnStepKeys: [] }),
-        expect.objectContaining({ key: "task-2", kind: "produce", dependsOnStepKeys: [] }),
+        expect.objectContaining({
+          key: "task-1", kind: "produce", dependsOnStepKeys: [],
+          acceptanceCriterionKeys: []
+        }),
+        expect.objectContaining({
+          key: "task-2", kind: "produce", dependsOnStepKeys: [],
+          acceptanceCriterionKeys: []
+        }),
         expect.objectContaining({
           key: "joined-result", kind: "produce",
-          dependsOnStepKeys: ["task-1", "task-2"]
+          dependsOnStepKeys: ["task-1", "task-2"],
+          acceptanceCriterionKeys: []
         }),
         expect.objectContaining({
           key: "review-result", kind: "review",
-          dependsOnStepKeys: ["joined-result"]
+          dependsOnStepKeys: ["joined-result"],
+          acceptanceCriterionKeys: []
         }),
         expect.objectContaining({
           key: "revised-result", kind: "produce",
-          dependsOnStepKeys: ["joined-result", "review-result"]
+          dependsOnStepKeys: ["joined-result", "review-result"],
+          acceptanceCriterionKeys: ["human-acceptance-1", "human-acceptance-2"]
         })
       ]
     }));

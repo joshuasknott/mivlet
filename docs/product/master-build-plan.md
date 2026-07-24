@@ -709,7 +709,10 @@ the bounded independent-worker `/mission` shape, one explicitly declared
 `then:` stages inside the same six-step bound. A final explicit `review:` plus
 `revise:` pair can add one advisory reviewer and exactly one revision pass;
 the revised worker receives both exact encrypted predecessor receipts, while
-only the identified human can accept the result. Arbitrary branching graph
+only the identified human can accept the result. Up to four final `accept:`
+lines can replace the generic review placeholder with exact human-authored
+criteria, all bound to required output receipts and all requiring identified
+human evidence. Arbitrary branching graph
 authoring, richer route/cost evidence for every shape, and packaged
 assistive-technology observation remain open, so the combined Wave 4B checkbox
 stays unchecked.
@@ -1120,7 +1123,11 @@ chain while keeping the full Plan at two to six workers. A final explicit
 revision pass. The reviewer is a Plan-bound reviewer worker but receives no
 acceptance authority; the revision step has an explicit second `all` join over
 the exact draft and review receipts, and identified-human acceptance remains
-required for the final deliverable. Fable persists one
+required for the final deliverable. Up to four final `accept: …` lines declare
+exact human acceptance criteria. They do not consume worker slots, every
+criterion is required, and only required final outputs are bound as their
+immutable evidence. With no explicit criteria, Fable retains the existing
+generic human-review fallback. Fable persists one
 encrypted selected Plan, pins the currently selected authorized provider/model
 route with no fallback, declares every multi-source join before any worker
 outcome exists,
@@ -1154,6 +1161,17 @@ escalation. The pair is fixed before execution, predecessor text stays
 provider-generated and untrusted, and the six-worker ceiling remains enforced.
 General iterative Plan revision, automatic escalation, and arbitrary feedback
 graphs remain open, so the Wave 4C iteration checkbox stays unchecked.
+
+The bounded `/mission` path now carries exact human-authored acceptance
+criteria from the composer into the encrypted Mission and selected Plan. The
+parser accepts at most four unique final `accept:` declarations, rejects
+misordered or duplicate criteria, and does not count criteria as worker steps.
+The native progress/review projection therefore presents the author's wording,
+and terminal settlement still requires identified-human evidence for every
+required criterion. Worker or reviewer opinion cannot satisfy these human
+criteria. Policy-authored criteria and general worker-evaluated criteria remain
+available in the portable/native foundations but are not inferred by this calm
+composer grammar.
 
 A provider-neutral continuation policy now supplies the bounded decision layer
 for iterative workers. It accepts at most sixty-four contiguous durable

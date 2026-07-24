@@ -2764,7 +2764,9 @@ describe("Fable home", () => {
           "- Identify the risks",
           "all: Recommend next steps",
           "review: Check the recommendation against both drafts",
-          "revise: Apply the review once"
+          "revise: Apply the review once",
+          "accept: Names an owner for every next step",
+          "accept: Distinguishes evidence from assumptions"
         ].join("\n")
       }
     });
@@ -2781,7 +2783,11 @@ describe("Fable home", () => {
           task: "Check the recommendation against both drafts",
           revise: "Apply the review once"
         }
-      }
+      },
+      acceptanceCriteria: [
+        "Names an owner for every next step",
+        "Distinguishes evidence from assumptions"
+      ]
     });
     expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
       expect.objectContaining({
