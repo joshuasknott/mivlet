@@ -706,7 +706,10 @@ unavailable instead of inferred. This supersedes the earlier sentence that gener
 and multi-worker plan views were wholly open. The ordinary composer now creates
 the bounded independent-worker `/mission` shape, one explicitly declared
 `all:` or `any:` fan-in over immutable outputs, and following sequential
-`then:` stages inside the same six-step bound. Arbitrary branching graph
+`then:` stages inside the same six-step bound. A final explicit `review:` plus
+`revise:` pair can add one advisory reviewer and exactly one revision pass;
+the revised worker receives both exact encrypted predecessor receipts, while
+only the identified human can accept the result. Arbitrary branching graph
 authoring, richer route/cost evidence for every shape, and packaged
 assistive-technology observation remain open, so the combined Wave 4B checkbox
 stays unchecked.
@@ -1104,7 +1107,7 @@ none, and restart coverage reopens and validates the Artifact and its immutable
 input/decision receipt. The conversation refreshes and exposes every Artifact
 produced by the Run rather than showing only the first result. This closes
 general-manifest Artifact materialization for the bounded `/mission` shape; it
-does not implement arbitrary cross-Mission handoff, iterative revision, or
+does not implement arbitrary cross-Mission handoff, repeated iterative revision, or
 branching graph authoring, so the broader replay-safe handoff checkbox remains
 unchecked.
 
@@ -1112,9 +1115,15 @@ The normal desktop composer now owns one explicit bounded general-Mission entry
 point. `/mission` accepts a short title followed by at least two distinct bullet
 tasks within a six-step ceiling. An explicit `all: …` or `any: …` line may
 declare a fan-in, and following `then: …` lines may declare a short sequential
-chain while keeping the full Plan at two to six workers. Fable persists one
+chain while keeping the full Plan at two to six workers. A final explicit
+`review: …` and `revise: …` pair declares one advisory review and exactly one
+revision pass. The reviewer is a Plan-bound reviewer worker but receives no
+acceptance authority; the revision step has an explicit second `all` join over
+the exact draft and review receipts, and identified-human acceptance remains
+required for the final deliverable. Fable persists one
 encrypted selected Plan, pins the currently selected authorized provider/model
-route with no fallback, declares the multi-source join before any worker outcome exists,
+route with no fallback, declares every multi-source join before any worker
+outcome exists,
 prepares every worker through the native derivation boundary, executes ready
 work through the reusable provider-neutral graph runner, and writes the submitted
 command plus the review bundle to the durable source conversation. Rust derives
@@ -1138,6 +1147,14 @@ graph authoring, quorum joins, dynamic tool/grant composition,
 arbitrary cross-Mission handoff/iteration, and packaged/live-provider observation
 remain open.
 
+The explicit review/revision pair closes one useful bounded iteration shape
+without claiming a general loop. There is no automatic self-critique,
+model-authoritative acceptance, retry after the revision pass, or provider
+escalation. The pair is fixed before execution, predecessor text stays
+provider-generated and untrusted, and the six-worker ceiling remains enforced.
+General iterative Plan revision, automatic escalation, and arbitrary feedback
+graphs remain open, so the Wave 4C iteration checkbox stays unchecked.
+
 A provider-neutral continuation policy now supplies the bounded decision layer
 for iterative workers. It accepts at most sixty-four contiguous durable
 iteration facts; enforces the worker's duration, token, tool, attempt,
@@ -1149,7 +1166,8 @@ close the work. Retry requires the exact retained retryable error and remaining
 saved attempt budget. Retry and escalation are marked as requiring fresh
 authorization, so this layer cannot silently reuse a provider, credential,
 grant, approval, placement, or billing boundary. Native journal production and
-product composition of these general iteration facts remain open.
+automatic product composition of these general continuation facts remain open;
+the declared one-pass review/revision shape above does not manufacture them.
 
 A portable reviewer-decision boundary now rejects decorative or ambiguous
 reviewers. It requires the exact selected Mission/Plan scope and one immutable

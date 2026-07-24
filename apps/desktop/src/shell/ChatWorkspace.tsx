@@ -1598,7 +1598,7 @@ export function ChatWorkspace() {
     if (!draft) {
       appendConversationMessage(
         "assistant",
-        "Use /mission with a short title, then two to six total steps. Start with at least two bullet tasks, optionally add “all: …” or “any: …”, then add short “then: …” stages."
+        "Use /mission with a short title, then two to six total steps. Start with at least two bullet tasks, optionally add “all: …” or “any: …”, add short “then: …” stages, or finish with one “review: …” and “revise: …” pair."
       );
       return;
     }
@@ -1628,7 +1628,9 @@ export function ChatWorkspace() {
 
     const sourceThreadId = selectedConversationThreadId;
     const declaredStepCount = draft.tasks.length
-      + (draft.join ? 1 + (draft.join.then?.length ?? 0) : 0);
+      + (draft.join
+        ? 1 + (draft.join.then?.length ?? 0) + (draft.join.review ? 2 : 0)
+        : 0);
     const preparationLabel = draft.join
       ? `Preparing ${declaredStepCount} declared Mission steps...`
       : `Preparing ${draft.tasks.length} independent tasks...`;

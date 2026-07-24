@@ -2742,6 +2742,57 @@ describe("Fable home", () => {
     );
   });
 
+  it("passes one explicit advisory review and revision to the native graph path", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-review", projectId: null, title: "Launch review",
+      lifecycle: "active", updatedAt: "2026-07-24T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch review" }));
+    const composer = screen.getByLabelText(/universal composer/i);
+    fireEvent.change(composer, {
+      target: {
+        value: [
+          "/mission Launch readiness",
+          "- Prepare the brief",
+          "- Identify the risks",
+          "all: Recommend next steps",
+          "review: Check the recommendation against both drafts",
+          "revise: Apply the review once"
+        ].join("\n")
+      }
+    });
+    fireEvent.keyDown(composer, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Launch readiness",
+      tasks: ["Prepare the brief", "Identify the risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend next steps",
+        review: {
+          task: "Check the recommendation against both drafts",
+          revise: "Apply the review once"
+        }
+      }
+    });
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "assistant",
+        initialRevision: expect.objectContaining({
+          content: "Preparing 5 declared Mission steps..."
+        })
+      })
+    );
+  });
+
   it("keeps settings keyboard focus inside the modal and restores its opener", async () => {
     const user = await renderWorkspace();
     const settingsButton = screen.getByRole("button", { name: "Settings" });

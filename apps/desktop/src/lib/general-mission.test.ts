@@ -212,6 +212,63 @@ describe("parseGeneralMissionDraft", () => {
       "any: Replace the declared continuation"
     ].join("\n"))).toBeNull();
   });
+
+  it("accepts exactly one declared advisory review and revision pass", () => {
+    expect(parseGeneralMissionDraft([
+      "Launch readiness",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "review: Check the recommendation against both drafts",
+      "revise: Apply the review once and produce the final recommendation"
+    ].join("\n"))).toEqual({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step",
+        review: {
+          task: "Check the recommendation against both drafts",
+          revise: "Apply the review once and produce the final recommendation"
+        }
+      }
+    });
+    expect(parseGeneralMissionDraft([
+      "Missing revision",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "review: Check the recommendation"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Missing review",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "revise: Revise the recommendation"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Review after a declared chain",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "then: Turn the recommendation into a checklist",
+      "review: Check the checklist",
+      "revise: Apply the review once"
+    ].join("\n"))).toEqual({
+      title: "Review after a declared chain",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step",
+        then: ["Turn the recommendation into a checklist"],
+        review: {
+          task: "Check the checklist",
+          revise: "Apply the review once"
+        }
+      }
+    });
+  });
 });
 
 describe("executeGeneralMission", () => {
@@ -440,6 +497,107 @@ describe("executeGeneralMission", () => {
     expect(mocks.openJoin).toHaveBeenCalledTimes(1);
     expect(result).toMatchObject({ outcome: "awaiting-review" });
     expect(result.text).toContain("## Turn the recommendation into a checklist");
+  });
+
+  it("runs one declared advisory review and one revision with explicit joins", async () => {
+    const ids = [
+      "mission-1",
+      "plan-2",
+      "plan-revision-3",
+      "mission-run-4",
+      "event-5",
+      "run-create-6",
+      "join-open-7",
+      "join-open-key-8",
+      "join-open-9",
+      "join-open-key-10"
+    ];
+    mocks.openJoin
+      .mockResolvedValueOnce({
+        run: { revision: 6, eventHead: { lastSequence: 6, lastEventId: "join-open-7" } },
+        events: []
+      })
+      .mockResolvedValueOnce({
+        run: { revision: 7, eventHead: { lastSequence: 7, lastEventId: "join-open-9" } },
+        events: []
+      });
+    mocks.getRun.mockResolvedValue({
+      run: { id: "mission-run-4" },
+      events: [
+        completion("task-1", "output-1"),
+        completion("task-2", "output-2"),
+        completion("joined-result", "output-draft"),
+        completion("review-result", "output-review"),
+        completion("revised-result", "output-final")
+      ]
+    });
+
+    const result = await executeGeneralMission({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief.", "Identify the main risks."],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step from both drafts.",
+        review: {
+          task: "Check the recommendation against both drafts.",
+          revise: "Apply the review once and produce the final recommendation."
+        }
+      },
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend,
+      model: "gpt-5",
+      resolveBackend: async () => backend,
+      createId: () => ids.shift()!
+    });
+
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      budget: expect.objectContaining({ maxWorkers: 5 }),
+      bounds: expect.objectContaining({
+        maxSteps: 5,
+        maxDependenciesPerStep: 2,
+        maxParallelSteps: 2
+      }),
+      outcome: expect.objectContaining({
+        deliverables: expect.arrayContaining([
+          expect.objectContaining({ key: "joined-result", required: false }),
+          expect.objectContaining({ key: "review-result", required: false }),
+          expect.objectContaining({ key: "revised-result", required: true })
+        ])
+      }),
+      steps: [
+        expect.objectContaining({ key: "task-1", kind: "produce", dependsOnStepKeys: [] }),
+        expect.objectContaining({ key: "task-2", kind: "produce", dependsOnStepKeys: [] }),
+        expect.objectContaining({
+          key: "joined-result", kind: "produce",
+          dependsOnStepKeys: ["task-1", "task-2"]
+        }),
+        expect.objectContaining({
+          key: "review-result", kind: "review",
+          dependsOnStepKeys: ["joined-result"]
+        }),
+        expect.objectContaining({
+          key: "revised-result", kind: "produce",
+          dependsOnStepKeys: ["joined-result", "review-result"]
+        })
+      ]
+    }));
+    expect(mocks.openJoin).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      targetStepKey: "joined-result",
+      strategy: "all",
+      expectedRunRevision: 5,
+      expectedLastSequence: 5
+    }));
+    expect(mocks.openJoin).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      targetStepKey: "revised-result",
+      strategy: "all",
+      expectedRunRevision: 6,
+      expectedLastSequence: 6
+    }));
+    expect(result).toMatchObject({ outcome: "awaiting-review" });
+    expect(result.text).toContain(
+      "## Apply the review once and produce the final recommendation"
+    );
   });
 });
 
