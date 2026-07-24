@@ -16,8 +16,8 @@
 //!   the DB), not encrypted-away.
 //! - Not a backup: `backup_local_data` (`VACUUM INTO`) is the raw-DB backup.
 //!   This is the portable, forward-compatible, re-importable surface.
-//! - Export is wired to Privacy settings through an atomic new-file command.
-//!   Import remains a validated native seam without a product UI.
+//! - Export and import are wired to Privacy settings through native file
+//!   commands, so workspace content never enters renderer state.
 //!
 //! ## Local-first guarantees
 //! - No network, no telemetry, no connector activation, no schedule activation.
@@ -57,6 +57,8 @@ pub const PORTABLE_FORMAT_NAME: &str = "fable.portable-workspace";
 
 /// The `producedBy` prefix.
 const PRODUCED_BY: &str = "fable-desktop/0.1.0";
+const MAX_PORTABLE_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
+const IMPORT_CONFIRMATION: &str = "import workspace copy";
 
 /// Categories deliberately omitted from every export, with the reason. Imports
 /// surface these as warnings so the user knows what needs reconfiguration.
@@ -3103,22 +3105,6 @@ fn authorized_workspace_id(
         .map_err(|error| error.to_string())
 }
 
-/// Export the workspace as a pretty-printed portable manifest string. Secrets
-/// are structurally absent; the artifact never touches the network or keyring.
-#[tauri::command]
-pub fn export_workspace_archive(
-    workspace_id: Option<String>,
-) -> std::result::Result<String, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    // Kept in the wire shape for compatibility, but never trusted as
-    // authorization input. The authenticated native binding owns the scope.
-    let workspace_id = authorized_workspace_id(store, workspace_id)?;
-    let manifest = export_workspace_for(store, &workspace_id).map_err(|e| e.to_string())?;
-    serde_json::to_string_pretty(&manifest)
-        .map_err(|_| "Fable could not encode the workspace archive.".into())
-}
-
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PortableExportReceipt {
@@ -3194,26 +3180,61 @@ pub fn export_workspace_archive_to_file(
     write_workspace_archive_file(store, &workspace_id, &target)
 }
 
-/// Import a portable manifest string. Validates before writing; applies inside
-/// a single transaction that rolls back on any failure. Never overwrites
-/// existing rows (skip-on-conflict). Imported connectors/schedules are disabled.
+fn read_workspace_archive_file(
+    store: &Store,
+    workspace_id: &str,
+    source: &Path,
+    confirmation: &str,
+) -> std::result::Result<ImportReport, String> {
+    if confirmation != IMPORT_CONFIRMATION {
+        return Err("Type “import workspace copy” to confirm.".into());
+    }
+    if crate::paths::contains_symlink(source) {
+        return Err("The workspace-copy file cannot contain links.".into());
+    }
+    let canonical = source
+        .canonicalize()
+        .map_err(|_| "Choose an existing workspace-copy file.".to_string())?;
+    let metadata = canonical
+        .metadata()
+        .map_err(|_| "Fable could not inspect the workspace-copy file.".to_string())?;
+    if !metadata.is_file() {
+        return Err("Choose a regular workspace-copy file.".into());
+    }
+    if metadata.len() > MAX_PORTABLE_ARCHIVE_BYTES {
+        return Err("That workspace copy is too large to import safely.".into());
+    }
+    if !canonical
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+    {
+        return Err("Choose a .json workspace-copy file.".into());
+    }
+    let manifest_json = std::fs::read_to_string(&canonical)
+        .map_err(|_| "Fable could not read that workspace-copy file as JSON.".to_string())?;
+    import_workspace_for(
+        store,
+        workspace_id,
+        &manifest_json,
+        ImportOptions::default(),
+    )
+    .map_err(|error| error.to_string())
+}
+
+/// Read, validate, and transactionally import a portable workspace copy
+/// entirely inside the native boundary. Existing records are never
+/// overwritten; imported Connections and schedules remain disabled.
 #[tauri::command]
-pub fn import_workspace_archive(
-    manifest_json: String,
+pub fn import_workspace_archive_from_file(
+    source: String,
+    confirmation: String,
     workspace_id: Option<String>,
 ) -> std::result::Result<ImportReport, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    // A caller-provided workspace id is deliberately ignored. This prevents a
-    // forged IPC request from importing into another locally mirrored tenant.
     let workspace_id = authorized_workspace_id(store, workspace_id)?;
-    import_workspace_for(
-        store,
-        &workspace_id,
-        &manifest_json,
-        ImportOptions::default(),
-    )
-    .map_err(|e| e.to_string())
+    read_workspace_archive_file(store, &workspace_id, &PathBuf::from(source), &confirmation)
 }
 
 /// The manifest format version this build understands (for UI pre-checks).
@@ -4089,6 +4110,79 @@ mod tests {
             &directory.path().join("workspace-copy.JSON"),
         )
         .is_ok());
+    }
+
+    #[test]
+    fn portable_file_import_is_confirmed_bounded_and_transactional() {
+        let source_store = store();
+        seed(&source_store);
+        let destination_store = store();
+        let directory = tempfile::TempDir::new().unwrap();
+        let source = directory.path().join("workspace-copy.json");
+        write_workspace_archive_file(
+            &source_store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &source,
+        )
+        .unwrap();
+
+        assert!(read_workspace_archive_file(
+            &destination_store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &source,
+            "anything else",
+        )
+        .unwrap_err()
+        .contains(IMPORT_CONFIRMATION));
+        assert_eq!(count(&destination_store, "project"), 0);
+
+        let report = read_workspace_archive_file(
+            &destination_store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &source,
+            IMPORT_CONFIRMATION,
+        )
+        .unwrap();
+        assert!(report.errors.is_empty());
+        assert_eq!(count(&destination_store, "project"), 1);
+        assert_eq!(count(&destination_store, "schedule"), 1);
+        let schedule_enabled: i64 = destination_store
+            .with_conn(|conn| {
+                conn.query_row("SELECT enabled FROM schedule LIMIT 1;", [], |row| {
+                    row.get(0)
+                })
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(schedule_enabled, 0);
+    }
+
+    #[test]
+    fn portable_file_import_rejects_non_json_and_oversized_files() {
+        let store = store();
+        let directory = tempfile::TempDir::new().unwrap();
+        let wrong_extension = directory.path().join("workspace-copy.txt");
+        std::fs::write(&wrong_extension, "{}").unwrap();
+        assert!(read_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &wrong_extension,
+            IMPORT_CONFIRMATION,
+        )
+        .unwrap_err()
+        .contains(".json"));
+
+        let oversized = directory.path().join("oversized.json");
+        let file = std::fs::File::create(&oversized).unwrap();
+        file.set_len(MAX_PORTABLE_ARCHIVE_BYTES + 1).unwrap();
+        assert!(read_workspace_archive_file(
+            &store,
+            crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            &oversized,
+            IMPORT_CONFIRMATION,
+        )
+        .unwrap_err()
+        .contains("too large"));
     }
 
     #[test]

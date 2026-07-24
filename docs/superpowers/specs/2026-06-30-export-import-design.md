@@ -57,8 +57,10 @@ uses. It never touches the vault, keyring, or network directly.
                  store + repos (encrypted SQLite, unchanged)
 ```
 
-Three Tauri commands expose it: `export_workspace_archive`,
-`import_workspace_archive`, `portable_format_version`.
+Three Tauri commands expose it: `export_workspace_archive_to_file`,
+`import_workspace_archive_from_file`, `portable_format_version`. Export and
+import content stays inside the native file boundary rather than crossing the
+renderer IPC contract as a manifest string.
 
 ## 1. Export format
 
@@ -207,7 +209,7 @@ conflict mid-import and asserts no rows were added.
 ## 5. Interfaces and tests
 
 - The format is plain JSON over typed Rust structs — no DB internals leak.
-- Tauri commands: `export_workspace_archive`, `import_workspace_archive`,
+- Tauri commands: `export_workspace_archive_to_file`, `import_workspace_archive_from_file`,
   `portable_format_version`.
 - Focused Rust unit tests (`#[cfg(test)] mod tests` in `portable.rs`):
   1. round trip (export → import into a fresh store → re-export → equal manifests)

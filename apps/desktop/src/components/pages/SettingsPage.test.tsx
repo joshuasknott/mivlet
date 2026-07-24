@@ -397,6 +397,20 @@ describe("Settings → Privacy UX states", () => {
       await screen.findByText("Portable workspace export is available only in the Fable desktop app.")
     ).toBeTruthy();
 
+    const portableImportPath = screen.getByLabelText("Import workspace-copy file");
+    const portableConfirmation = screen.getByLabelText(/Type import workspace copy to confirm/i);
+    const portableImport = screen.getByRole("button", { name: "Import workspace copy" });
+    expect(portableImport).toBeDisabled();
+    fireEvent.change(portableImportPath, { target: { value: "C:\\Backups\\workspace.json" } });
+    fireEvent.change(portableConfirmation, { target: { value: "import workspace copy" } });
+    expect(portableImport).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(portableImport);
+    });
+    expect(
+      await screen.findByText("Portable workspace import is available only in the Fable desktop app.")
+    ).toBeTruthy();
+
     const backupPath = screen.getByLabelText("New backup file");
     const restorePath = screen.getByLabelText("Restore from backup");
     const confirmation = screen.getByLabelText(/Type restore local data to confirm/i);

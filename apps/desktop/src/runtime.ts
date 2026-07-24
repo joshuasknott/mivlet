@@ -146,6 +146,13 @@ export interface RuntimePortableExportReceipt {
   credentialsIncluded: false;
 }
 
+export interface RuntimePortableImportReport {
+  inserted: Record<string, number>;
+  skipped: Record<string, number>;
+  warnings: string[];
+  errors: string[];
+}
+
 export interface RuntimeLocalDiagnosticCategory {
   id: "storage" | "providers" | "connections" | "mcp" | "runs" | "routines" | "queues" | "migrations" | "sync";
   label: string;
@@ -229,6 +236,23 @@ export async function exportRuntimeWorkspaceArchive(
     return await invoke<RuntimePortableExportReceipt>("export_workspace_archive_to_file", {
       destination,
       workspaceId
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function importRuntimeWorkspaceArchive(
+  source: string,
+  workspaceId: string,
+  confirmation: "import workspace copy"
+): Promise<RuntimePortableImportReport | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimePortableImportReport>("import_workspace_archive_from_file", {
+      source,
+      workspaceId,
+      confirmation
     });
   } catch (error) {
     throw toRuntimeError(error);

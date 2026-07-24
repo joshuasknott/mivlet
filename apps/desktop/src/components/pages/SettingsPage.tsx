@@ -33,6 +33,7 @@ import {
   createRuntimeLocalBackup,
   exportRuntimeWorkspaceArchive,
   getRuntimeRemoteControlStatus,
+  importRuntimeWorkspaceArchive,
   loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
   loadRuntimePendingInvitations,
@@ -408,7 +409,9 @@ function PrivacySettingsView({
   const [isBulkDisconnecting, setIsBulkDisconnecting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [portableExportPath, setPortableExportPath] = useState("");
-  const [portableExporting, setPortableExporting] = useState(false);
+  const [portableImportPath, setPortableImportPath] = useState("");
+  const [portableImportConfirmation, setPortableImportConfirmation] = useState("");
+  const [portableAction, setPortableAction] = useState<"export" | "import" | null>(null);
   const [backupPath, setBackupPath] = useState("");
   const [restorePath, setRestorePath] = useState("");
   const [restoreConfirmation, setRestoreConfirmation] = useState("");
@@ -425,6 +428,8 @@ function PrivacySettingsView({
     setExecutionControl(null);
     setExecutionConfirmation("");
     setPortableExportPath("");
+    setPortableImportPath("");
+    setPortableImportConfirmation("");
     void loadRuntimeExecutionControl(workspaceId)
       .then((state) => {
         if (current) setExecutionControl(state);
@@ -513,7 +518,7 @@ function PrivacySettingsView({
 
   const handlePortableExport = async () => {
     if (!portableExportPath.trim()) return;
-    setPortableExporting(true);
+    setPortableAction("export");
     try {
       const receipt = await exportRuntimeWorkspaceArchive(
         portableExportPath.trim(),
@@ -528,7 +533,35 @@ function PrivacySettingsView({
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Fable could not export this workspace.");
     } finally {
-      setPortableExporting(false);
+      setPortableAction(null);
+    }
+  };
+
+  const handlePortableImport = async () => {
+    if (
+      !portableImportPath.trim() ||
+      portableImportConfirmation !== "import workspace copy"
+    ) return;
+    setPortableAction("import");
+    try {
+      const report = await importRuntimeWorkspaceArchive(
+        portableImportPath.trim(),
+        workspaceId,
+        "import workspace copy"
+      );
+      if (report) {
+        const inserted = Object.values(report.inserted).reduce((sum, count) => sum + count, 0);
+        const skipped = Object.values(report.skipped).reduce((sum, count) => sum + count, 0);
+        setPortableImportPath("");
+        setPortableImportConfirmation("");
+        onStatus(`Workspace copy imported: ${inserted} added, ${skipped} already present. Connections and schedules remain off.`);
+      } else {
+        onStatus("Portable workspace import is available only in the Fable desktop app.");
+      }
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not import this workspace copy.");
+    } finally {
+      setPortableAction(null);
     }
   };
 
@@ -754,7 +787,7 @@ function PrivacySettingsView({
               </span>
               <span>
                 <strong id="portable-export-title">Portable workspace copy</strong>
-                <small>Save projects, conversations, artifacts, routines, and other workspace data as plain JSON.</small>
+                <small>Save supported projects, conversations, artifacts, schedules, and other workspace data as plain JSON.</small>
               </span>
             </div>
             <div style={{ display: "grid", gap: "8px", marginTop: "16px" }}>
@@ -776,11 +809,52 @@ function PrivacySettingsView({
                   type="button"
                   className="button button--secondary"
                   onClick={() => void handlePortableExport()}
-                  disabled={!portableExportPath.trim() || portableExporting}
+                  disabled={!portableExportPath.trim() || portableAction !== null}
                 >
-                  {portableExporting ? <Spinner size={14} /> : null}
+                  {portableAction === "export" ? <Spinner size={14} /> : null}
                   <span>Export workspace copy</span>
                 </button>
+              </div>
+              <div style={{ display: "grid", gap: "8px", marginTop: "12px" }}>
+                <label htmlFor="portable-import-path"><strong>Import workspace-copy file</strong></label>
+                <input
+                  id="portable-import-path"
+                  className="input"
+                  value={portableImportPath}
+                  onChange={(event) => setPortableImportPath(event.target.value)}
+                  placeholder="Choose an existing .json file path"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <label htmlFor="portable-import-confirmation">
+                  <strong>Type import workspace copy to confirm</strong>
+                </label>
+                <input
+                  id="portable-import-confirmation"
+                  className="input"
+                  value={portableImportConfirmation}
+                  onChange={(event) => setPortableImportConfirmation(event.target.value)}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <small>
+                  Existing records are kept. Imported Connections and schedules stay off until you review them.
+                </small>
+                <div>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => void handlePortableImport()}
+                    disabled={
+                      !portableImportPath.trim() ||
+                      portableImportConfirmation !== "import workspace copy" ||
+                      portableAction !== null
+                    }
+                  >
+                    {portableAction === "import" ? <Spinner size={14} /> : null}
+                    <span>Import workspace copy</span>
+                  </button>
+                </div>
               </div>
             </div>
           </section>
