@@ -8183,6 +8183,11 @@ fn validate_worker_slot(
     input: &MissionWorkerCreateInput,
 ) -> Result<(), String> {
     let step = object(step, "Plan step")?;
+    if step.get("kind").and_then(Value::as_str) == Some("coordinate") {
+        return Err(
+            "Coordinate steps require deterministic aggregation rather than a model worker.".into(),
+        );
+    }
     let mut worker_steps = BTreeMap::<String, String>::new();
     let mut completed_workers = BTreeSet::<String>::new();
     let mut failed_workers = BTreeSet::<String>::new();
@@ -8226,12 +8231,44 @@ fn validate_worker_slot(
         .get("dependsOnStepKeys")
         .and_then(Value::as_array)
         .ok_or_else(|| "Plan step dependencies are invalid.".to_string())?;
-    if dependencies.iter().any(|dependency| {
-        dependency
-            .as_str()
-            .is_none_or(|key| !completed_steps.contains(key))
-    }) {
-        return Err("Plan step dependencies are not durably complete.".into());
+    let dependency_keys = dependencies
+        .iter()
+        .map(|dependency| {
+            dependency
+                .as_str()
+                .ok_or_else(|| "Plan step dependency is invalid.".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if dependency_keys.len() > 1 {
+        let dependency_worker_ids = dependency_keys
+            .iter()
+            .map(|dependency| {
+                worker_steps
+                    .iter()
+                    .find_map(|(worker, step)| {
+                        (step.as_str() == *dependency).then(|| worker.clone())
+                    })
+                    .ok_or_else(|| {
+                        "Every joined dependency requires one durable worker.".to_string()
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let revision_id = required(revision, "id")?;
+        if !crate::mission_coordination::has_satisfied_dependency_join(
+            journal,
+            &revision_id,
+            &input.step_key,
+            &dependency_worker_ids,
+        ) {
+            return Err(
+                "Multi-source plan dependencies require their exact satisfied durable join.".into(),
+            );
+        }
+    } else if dependency_keys
+        .iter()
+        .any(|key| !completed_steps.contains(*key))
+    {
+        return Err("Plan step dependency is not durably complete.".into());
     }
     let depth = required(mission, "executionDepth")?;
     let mission_limit = mission
@@ -8959,6 +8996,83 @@ mod tests {
             mission.as_object().unwrap(),
             revision.as_object().unwrap(),
             &step,
+            &input
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn worker_slot_requires_the_exact_satisfied_join_for_multiple_dependencies() {
+        let mission = json!({"executionDepth":"multi-worker","budget":{"maxWorkers":4}});
+        let revision = json!({"id":"revision-join","bounds":{"maxSteps":4,"maxParallelSteps":3}});
+        let step = json!({
+            "key":"combine",
+            "kind":"compose",
+            "dependsOnStepKeys":["search","draft"]
+        });
+        let input = MissionWorkerCreateInput {
+            run_id: "run-join".into(),
+            event_id: "event-combine".into(),
+            idempotency_key: "combine".into(),
+            expected_run_revision: 6,
+            expected_last_sequence: 5,
+            worker_id: "worker-combine".into(),
+            step_key: "combine".into(),
+            context: vec![],
+            grants: vec![],
+        };
+        let mut journal = mission_run::MissionRunJournalRow {
+            run: json!({}),
+            events: vec![
+                json!({"type":"worker-created","payload":{"worker":{"id":"worker-search","planStepKey":"search"}}}),
+                json!({"type":"worker-created","payload":{"worker":{"id":"worker-draft","planStepKey":"draft"}}}),
+                json!({"type":"worker-completed","payload":{"workerId":"worker-search"}}),
+            ],
+        };
+        assert!(validate_worker_slot(
+            &journal,
+            mission.as_object().unwrap(),
+            revision.as_object().unwrap(),
+            &step,
+            &input
+        )
+        .is_err());
+
+        let join_key =
+            crate::mission_coordination::coordination_join_key("revision-join", "combine");
+        journal
+            .events
+            .push(json!({"type":"join-resolved","payload":{"join":{
+                "joinKey":join_key,"status":"satisfied",
+                "workerIds":["worker-draft","worker-search"]
+            }}}));
+        assert!(validate_worker_slot(
+            &journal,
+            mission.as_object().unwrap(),
+            revision.as_object().unwrap(),
+            &step,
+            &input
+        )
+        .is_err());
+
+        journal.events.last_mut().unwrap()["payload"]["join"]["workerIds"] =
+            json!(["worker-search", "worker-draft"]);
+        assert!(validate_worker_slot(
+            &journal,
+            mission.as_object().unwrap(),
+            revision.as_object().unwrap(),
+            &step,
+            &input
+        )
+        .is_ok());
+
+        let coordinate_step =
+            json!({"key":"coordinate","kind":"coordinate","dependsOnStepKeys":[]});
+        assert!(validate_worker_slot(
+            &journal,
+            mission.as_object().unwrap(),
+            revision.as_object().unwrap(),
+            &coordinate_step,
             &input
         )
         .is_err());

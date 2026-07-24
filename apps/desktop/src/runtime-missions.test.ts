@@ -14,6 +14,7 @@ import {
   listRuntimePendingCitedApprovals,
   listRuntimePendingMissionHumanInputs,
   listRuntimeNativeProviderRoutes,
+  openRuntimeMissionJoin,
   openRuntimeParallelApproachesJoin,
   prepareRuntimeParallelApproachesReviewer,
   recoverRuntimeParallelApproachesReviewers,
@@ -28,6 +29,7 @@ import {
   recoverRuntimeInterruptedCitedMissions,
   requestRuntimeMissionRunCancellation,
   requestRuntimeMissionHumanInput,
+  resolveRuntimeMissionJoin,
   restoreRuntimeMissionCheckpoint,
   startRuntimeArtifactRevisionBrief,
   startRuntimeStructuredIntake,
@@ -60,6 +62,15 @@ describe("mission runtime boundary", () => {
     await expect(readRuntimeCitedMissionPlanSummaries("thread-1", ["message-1"])).resolves.toBeNull();
     await expect(listRuntimeNativeProviderRoutes()).resolves.toBeNull();
     await expect(recoverRuntimeInterruptedCitedMissions()).resolves.toBeNull();
+    await expect(openRuntimeMissionJoin({
+      runId: "run-1", targetStepKey: "combine", strategy: "all",
+      allowFailedWorkers: false, eventId: "event-join-open", idempotencyKey: "join-open-1",
+      expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toBeNull();
+    await expect(resolveRuntimeMissionJoin({
+      runId: "run-1", joinKey: "mission_join_1", eventId: "event-join-resolve",
+      idempotencyKey: "join-resolve-1", expectedRunRevision: 4, expectedLastSequence: 3
+    })).resolves.toBeNull();
     await expect(openRuntimeParallelApproachesJoin({
       runId: "run-1", expectedRunRevision: 4, expectedLastSequence: 3
     })).resolves.toBeNull();
@@ -384,11 +395,23 @@ describe("mission runtime boundary", () => {
     const run = { missionId: "mission-1", runId: "run-1", eventId: "event-create", idempotencyKey: "create-1" };
     const worker = { runId: "run-1", eventId: "event-worker", idempotencyKey: "worker-1", expectedRunRevision: 2, expectedLastSequence: 1, workerId: "worker-1", stepKey: "search", context: [], grants: [{ capabilityId: "knowledge.content.search", capabilityGrantId: "grant-1" }] };
     const start = { runId: "run-1", workerId: "worker-1", runStartEventId: "event-run-start", workerStartedEventId: "event-worker-start", routeSelectedEventId: "event-route", providerId: "openai", modelReference: "gpt-5", routeSelection: { providerRouteId: "route-1" as never, selectedAt: "2026-07-13T00:00:00Z", reason: "Selected route.", boundaryPolicyRef: "boundary:test" }, idempotencyKey: "start-1", expectedRunRevision: 3, expectedLastSequence: 2 };
+    const join = {
+      runId: "run-1", targetStepKey: "combine", strategy: "quorum" as const, quorum: 2,
+      allowFailedWorkers: true, deadline: "2026-07-14T00:00:00Z",
+      eventId: "event-join-open", idempotencyKey: "join-open-1",
+      expectedRunRevision: 4, expectedLastSequence: 3
+    };
+    const resolveJoin = {
+      runId: "run-1", joinKey: "mission_join_1", eventId: "event-join-resolve",
+      idempotencyKey: "join-resolve-1", expectedRunRevision: 5, expectedLastSequence: 4
+    };
 
     await createRuntimeMissionPlan(plan);
     await createRuntimeMissionRun(run);
     await createRuntimeMissionWorker(worker);
     await startRuntimeMissionWorker(start);
+    await openRuntimeMissionJoin(join);
+    await resolveRuntimeMissionJoin(resolveJoin);
     await getRuntimeMissionPlan("mission-1");
     await getRuntimeCitedMissionPlanSummary("mission-1");
     await getRuntimeMissionRun("run-1");
@@ -417,6 +440,8 @@ describe("mission runtime boundary", () => {
       ["mission_run_create", { input: run }],
       ["mission_worker_create", { input: worker }],
       ["mission_worker_start", { input: start }],
+      ["mission_coordination_join_open", { input: join }],
+      ["mission_coordination_join_resolve", { input: resolveJoin }],
       ["mission_plan_get", { missionId: "mission-1" }],
       ["mission_plan_cited_summary_get", { missionId: "mission-1" }],
       ["mission_run_get", { runId: "run-1" }],

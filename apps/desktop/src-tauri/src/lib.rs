@@ -46,6 +46,7 @@ mod mcp_process;
 mod memory;
 mod mission_artifact_revision_brief;
 mod mission_continuations;
+mod mission_coordination;
 mod mission_human_input;
 mod mission_parallel_approaches;
 mod mission_plans;
@@ -202,6 +203,8 @@ pub fn run() {
             mission_runs::mission_run_prepare_cited_retry,
             mission_runs::mission_run_create_checkpoint,
             mission_runs::mission_run_restore_checkpoint,
+            mission_coordination::mission_coordination_join_open,
+            mission_coordination::mission_coordination_join_resolve,
             mission_human_input::mission_human_input_request,
             mission_human_input::mission_human_input_pending_list,
             mission_human_input::mission_human_input_receive,

@@ -3080,6 +3080,28 @@ export interface RuntimeMissionWorkerStartInput {
   expectedLastSequence: number;
 }
 
+export interface RuntimeMissionJoinOpenInput {
+  runId: string;
+  targetStepKey: string;
+  strategy: "all" | "any" | "quorum";
+  quorum?: number;
+  allowFailedWorkers: boolean;
+  deadline?: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
+export interface RuntimeMissionJoinResolveInput {
+  runId: string;
+  joinKey: string;
+  eventId: string;
+  idempotencyKey: string;
+  expectedRunRevision: number;
+  expectedLastSequence: number;
+}
+
 export async function createRuntimeMissionPlan(input: RuntimeMissionPlanCreateInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_plan_create", { input }); }
@@ -3155,6 +3177,18 @@ export async function createRuntimeMissionWorker(input: RuntimeMissionWorkerCrea
 export async function startRuntimeMissionWorker(input: RuntimeMissionWorkerStartInput) {
   if (!hasTauriRuntime()) return null;
   try { return await invoke<Record<string, unknown>>("mission_worker_start", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function openRuntimeMissionJoin(input: RuntimeMissionJoinOpenInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_coordination_join_open", { input }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
+export async function resolveRuntimeMissionJoin(input: RuntimeMissionJoinResolveInput) {
+  if (!hasTauriRuntime()) return null;
+  try { return await invoke<Record<string, unknown>>("mission_coordination_join_resolve", { input }); }
   catch (error) { throw toRuntimeError(error); }
 }
 

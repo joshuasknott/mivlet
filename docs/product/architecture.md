@@ -117,10 +117,16 @@ for every multi-source step, and clamps total and concurrent work to the saved
 budgets. A deterministic evaluator derives only which workers or reference-only
 aggregations are ready; it does not grant tools, select credentials, evaluate
 acceptance, or treat model output as authority. Native persistence and execution
-must still revalidate the exact route, grants, approvals, journal head, and owner
-before any worker or tool crosses a runtime boundary. The current desktop
-parallel journey remains a fixed native composition while that general native
-orchestrator is completed.
+revalidate the exact route, grants, approvals, journal head, and owner before any
+worker or tool crosses a runtime boundary. General dependency joins are declared
+before dependency outcomes exist and stored in the encrypted native run journal.
+Resolution derives only from immutable terminal worker facts and is fenced to the
+selected Plan revision, target step, ordered workers, strategy, quorum, deadline,
+owner, journal head, and exact replay identity. A later multi-source worker can
+start only after that exact join is satisfied; deterministic coordinate steps
+cannot be replaced by model workers. The current desktop parallel journey remains
+a fixed native composition while arbitrary worker and aggregation orchestration
+is completed.
 
 ## Schedules And Commands
 

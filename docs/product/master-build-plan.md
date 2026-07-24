@@ -785,9 +785,17 @@ references in Plan order, reports missing required outputs, and makes no policy,
 human-acceptance, or factual-correctness claim. Focused coverage includes
 arbitrary roots, mixed running/failed states, explicit joins, impossible joins,
 authority substitution, and partial deterministic aggregation. The existing
-native desktop journey still uses its fixed two-producer/reviewer composer; wiring
-this general coordinator through encrypted native persistence, provider routing,
-restart recovery, and the calm product surface remains open.
+native desktop journey still uses its fixed two-producer/reviewer composer.
+Authenticated native commands now predeclare a general Plan-bound `all`, `any`,
+or quorum join before any dependency worker settles, persist it in the encrypted
+run journal, and resolve it only from immutable worker completion/failure facts.
+The commands fence the active owner, selected revision, target step, ordered
+dependency workers, deadline, journal head, and exact replay. Creating a worker
+for a multi-source step requires that exact satisfied join, and a `coordinate`
+step cannot be substituted with a model worker. The desktop runtime exposes the
+boundary only under Tauri; browser preview creates no durable coordination state.
+General worker/aggregation orchestration, provider routing across those workers,
+restart recovery, and the calm product surface remain open.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
