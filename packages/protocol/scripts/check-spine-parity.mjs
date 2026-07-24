@@ -67,4 +67,16 @@ const actualSha256 = createHash("sha256").update(canonical).digest("hex");
 if (!/^[a-f0-9]{64}$/.test(manifest.expectedCanonicalSha256)) fail("expectedCanonicalSha256 must be a lowercase SHA-256 digest");
 if (actualSha256 !== manifest.expectedCanonicalSha256) fail("canonical vocabulary, version, or limits drifted from the manifest");
 
+const rustParitySource = await readFile(
+  path.resolve(packageRoot, "../../apps/desktop/src-tauri/src/product_spine_parity.rs"),
+  "utf8"
+);
+const rustMirror = rustParitySource.match(
+  /const RUST_CANONICAL_SHA256:\s*&str\s*=\s*"([a-f0-9]{64})"/
+);
+if (!rustMirror) fail("Rust canonical digest mirror is missing or malformed");
+if (rustMirror[1] !== manifest.expectedCanonicalSha256) {
+  fail("Rust canonical digest mirror differs from the manifest");
+}
+
 console.log(`Product-spine parity passed (${actualSha256}).`);
