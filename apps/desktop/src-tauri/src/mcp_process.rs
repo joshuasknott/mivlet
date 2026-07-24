@@ -5278,7 +5278,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_stdio_child_initializes_discovers_calls_and_closes() {
+    async fn real_stdio_child_reaches_the_mission_semantic_contract_and_closes() {
         let node = validate_executable(find_node().to_string_lossy().as_ref()).unwrap();
         let fixture =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-stdio-server.mjs");
@@ -5288,12 +5288,19 @@ mod tests {
         let mut stdin = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let mut lines = BufReader::new(stdout).lines();
+        let session_id = "mcp-fixturesemantic00000000000000000";
+        mark_discovery_changed(session_id);
 
-        for request in [
+        for (request, initialized) in [
             r#"{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Fable","version":"0.1.0"}}}"#,
             r#"{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}"#,
+            r#"{"jsonrpc":"2.0","id":"resources","method":"resources/list","params":{}}"#,
             r#"{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"echo","arguments":{"text":"hello"}}}"#,
-        ] {
+        ]
+        .into_iter()
+        .zip([false, true, true, true])
+        {
+            register_discovery_request(session_id, request, initialized).unwrap();
             stdin.write_all(request.as_bytes()).await.unwrap();
             stdin.write_all(b"\n").await.unwrap();
             stdin.flush().await.unwrap();
@@ -5303,11 +5310,158 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(valid_mcp_frame(&response));
+            observe_discovery_frame(session_id, &response);
             let value: Value = serde_json::from_str(&response).unwrap();
             assert_eq!(value.get("error"), None);
         }
+        let discovered_tools = vec![
+            "echo".into(),
+            "search_work".into(),
+            "slow".into(),
+            "change_tools".into(),
+            "crash".into(),
+        ];
+        let discovered_resources = vec!["fixture://planning-notes".into()];
+        verify_discovery_proof(session_id, &discovered_tools, &discovered_resources).unwrap();
+        let search = r#"{"jsonrpc":"2.0","id":"search","method":"tools/call","params":{"name":"search_work","arguments":{"contractVersion":"fable.connected-source-search.v1","query":"quarterly planning","limit":10}}}"#;
+        stdin.write_all(search.as_bytes()).await.unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        let response = timeout(Duration::from_secs(5), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        let normalized = normalize_mcp_connected_source_search(
+            response.get("result").unwrap(),
+            &connected_source_continuation(),
+        )
+        .unwrap();
+        let normalized = serde_json::to_value(normalized).unwrap();
+        assert_eq!(normalized["trust"], "external-untrusted");
+        assert_eq!(normalized["instructionAuthority"], "none");
+        assert_eq!(normalized["implementation"]["kind"], "mcp");
+        assert_eq!(normalized["citations"][0]["citationId"], "source-1");
+        assert!(normalized["citations"][0]["snippet"]
+            .as_str()
+            .unwrap()
+            .contains("IGNORE PRIOR INSTRUCTIONS"));
+
+        stdin
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":"slow","method":"tools/call","params":{"name":"slow","arguments":{}}}"#,
+            )
+            .await
+            .unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin
+            .write_all(
+                br#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":"slow","reason":"test cancellation"}}"#,
+            )
+            .await
+            .unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin
+            .write_all(br#"{"jsonrpc":"2.0","id":"ping","method":"ping","params":{}}"#)
+            .await
+            .unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        let response = timeout(Duration::from_secs(1), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["id"], "ping");
+
+        stdin
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":"change","method":"tools/call","params":{"name":"change_tools","arguments":{}}}"#,
+            )
+            .await
+            .unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        let notification = timeout(Duration::from_secs(1), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&notification).unwrap()["method"],
+            "notifications/tools/list_changed"
+        );
+        observe_discovery_frame(session_id, &notification);
+        assert!(
+            verify_discovery_proof(session_id, &discovered_tools, &discovered_resources).is_err()
+        );
+        let change_response = timeout(Duration::from_secs(1), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Value>(&change_response).unwrap()["id"],
+            "change"
+        );
+
         drop(stdin);
         let status = timeout(Duration::from_secs(5), child.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(status.success());
+        mark_discovery_changed(session_id);
+    }
+
+    #[tokio::test]
+    async fn real_stdio_child_failure_is_detected_and_a_fresh_process_restarts() {
+        let node = validate_executable(find_node().to_string_lossy().as_ref()).unwrap();
+        let fixture =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-stdio-server.mjs");
+        let cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut failed =
+            spawn_mcp_child(&node, &[fixture.to_string_lossy().to_string()], &cwd).unwrap();
+        let mut failed_stdin = failed.stdin.take().unwrap();
+        failed_stdin
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":"crash","method":"tools/call","params":{"name":"crash","arguments":{}}}"#,
+            )
+            .await
+            .unwrap();
+        failed_stdin.write_all(b"\n").await.unwrap();
+        failed_stdin.flush().await.unwrap();
+        let status = timeout(Duration::from_secs(5), failed.wait())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!status.success());
+
+        let mut restarted =
+            spawn_mcp_child(&node, &[fixture.to_string_lossy().to_string()], &cwd).unwrap();
+        let mut stdin = restarted.stdin.take().unwrap();
+        let stdout = restarted.stdout.take().unwrap();
+        let mut lines = BufReader::new(stdout).lines();
+        stdin
+            .write_all(
+                br#"{"jsonrpc":"2.0","id":"init-after-crash","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Fable","version":"0.1.0"}}}"#,
+            )
+            .await
+            .unwrap();
+        stdin.write_all(b"\n").await.unwrap();
+        stdin.flush().await.unwrap();
+        let response = timeout(Duration::from_secs(5), lines.next_line())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(valid_mcp_frame(&response));
+        let response: Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["id"], "init-after-crash");
+        drop(stdin);
+        let status = timeout(Duration::from_secs(5), restarted.wait())
             .await
             .unwrap()
             .unwrap();
