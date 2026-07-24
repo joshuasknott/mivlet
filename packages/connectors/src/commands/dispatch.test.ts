@@ -159,6 +159,20 @@ describe("executeCommand — /plan", () => {
   });
 });
 
+describe("executeCommand — /mission", () => {
+  it("keeps Mission execution at the authenticated desktop boundary", async () => {
+    const result = await executeCommand({
+      name: "mission",
+      args: "Launch readiness\n- Prepare the brief\n- Review the risks"
+    }, makeRuntime());
+    expect(result).toMatchObject({
+      name: "mission",
+      status: "validation"
+    });
+    expect(result.message).toContain("desktop Mission engine");
+  });
+});
+
 describe("executeCommand — /schedule", () => {
   it("creates a daily schedule from natural language", async () => {
     const calls: { trigger: unknown; description: string }[] = [];

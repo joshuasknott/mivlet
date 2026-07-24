@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { appendRuntimeConversationMessage, cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, reviseRuntimeConversationMessage, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -29,6 +29,7 @@ const runtimeMocks = vi.hoisted(() => ({
   structuredIntakeCalls: [] as Array<Record<string, unknown>>,
   artifactRevisionBriefCalls: [] as Array<Record<string, unknown>>,
   parallelApproachCalls: [] as Array<Record<string, unknown>>,
+  generalMissionCalls: [] as Array<Record<string, unknown>>,
   citedBriefGate: null as Promise<void> | null,
   // In-memory durable scheduler store so cross-session recovery tests exercise
   // the same Rust-store round-trip the shell uses in production.
@@ -169,6 +170,57 @@ vi.mock("./lib/parallel-approaches-mission", () => ({
     };
   })
 }));
+
+vi.mock("./lib/general-mission", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./lib/general-mission")>();
+  return {
+    ...actual,
+    executeGeneralMission: vi.fn(async (input: Record<string, unknown>) => {
+      runtimeMocks.generalMissionCalls.push(input);
+      const progress = {
+        version: 1,
+        state: "waiting",
+        summary: "Three independent drafts are ready for review.",
+        runStatus: "running",
+        completedSteps: 3,
+        totalSteps: 3,
+        runningWorkers: 0,
+        readyWorkers: 0,
+        waitingSteps: 0,
+        blockedSteps: 0,
+        steps: [
+          { stepKey: "task-1", title: "Prepare the brief", kind: "produce", state: "completed", detail: "The durable output is complete." },
+          { stepKey: "task-2", title: "Review the risks", kind: "produce", state: "completed", detail: "The durable output is complete." },
+          { stepKey: "task-3", title: "Recommend next steps", kind: "produce", state: "completed", detail: "The durable output is complete." }
+        ],
+        usage: { records: 3, inputTokens: 60, outputTokens: 30, toolCalls: 0, durationMs: 500, costObservations: [] },
+        budget: {
+          maxDurationMs: 180_000,
+          maxInputTokens: 64_000,
+          maxOutputTokens: 6_144,
+          maxToolCalls: 1,
+          maxWorkers: 3,
+          maxAttempts: 2
+        },
+        acceptance: [],
+        humanReview: null,
+        nextAction: "Review each result."
+      };
+      await (input.onRunReady as ((runId: string, value: unknown) => Promise<void>) | undefined)?.(
+        "general-run-ui",
+        progress
+      );
+      (input.onProgress as ((value: unknown) => void) | undefined)?.(progress);
+      return {
+        missionId: "general-mission-ui",
+        runId: "general-run-ui",
+        outcome: "awaiting-review",
+        text: "# Launch readiness\n\n## Prepare the brief\n\nBrief.\n\n## Review the risks\n\nRisks.\n\n## Recommend next steps\n\nRecommendation.",
+        progress
+      };
+    })
+  };
+});
 
 const testCitedPlan = {
   title: "Connected work brief", summary: "What changed?", executionLabel: "One focused research step",
@@ -579,6 +631,7 @@ describe("Fable home", () => {
     runtimeMocks.structuredIntakeCalls = [];
     runtimeMocks.artifactRevisionBriefCalls = [];
     runtimeMocks.parallelApproachCalls = [];
+    runtimeMocks.generalMissionCalls = [];
     runtimeMocks.citedBriefGate = null;
     runtimeMocks.savedScheduledJobs = [];
     runtimeMocks.savedWorkflowDefinitions = [];
@@ -1498,6 +1551,7 @@ describe("Fable home", () => {
 
     await user.click(screen.getByRole("button", { name: /add files and context/i }));
     fireEvent.mouseEnter(screen.getByRole("menuitem", { name: /commands/i }));
+    expect(screen.getByRole("menuitem", { name: "/mission" })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "/goal" }));
 
     const composer = screen.getByLabelText(/universal composer/i);
@@ -2595,6 +2649,52 @@ describe("Fable home", () => {
       expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
+  });
+
+  it("runs a bounded multiline Mission through the durable native graph path", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-ui", projectId: null, title: "Launch readiness",
+      lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch readiness" }));
+    const composer = screen.getByLabelText(/universal composer/i);
+    fireEvent.change(composer, {
+      target: {
+        value: "/mission Launch readiness\n- Prepare the brief\n- Review the risks\n- Recommend next steps"
+      }
+    });
+    fireEvent.keyDown(composer, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(await screen.findByText(/Three independent drafts are ready for review/)).toBeInTheDocument();
+    expect(screen.getByText(/Brief\./)).toBeInTheDocument();
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Launch readiness",
+      tasks: ["Prepare the brief", "Review the risks", "Recommend next steps"],
+      workspaceId: "preview-default",
+      sourceThreadId: "thread-general-ui",
+      model: "gpt-5"
+    });
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "user", runId: "general-run-ui" })
+    );
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "assistant", runId: "general-run-ui" })
+    );
+    expect(vi.mocked(reviseRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "general-run-ui",
+        state: "terminal",
+        content: expect.stringContaining("# Launch readiness")
+      })
+    );
   });
 
   it("keeps settings keyboard focus inside the modal and restores its opener", async () => {

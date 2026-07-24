@@ -229,6 +229,12 @@ export interface AcceptanceCriterion {
   required: boolean;
   evaluator: "human" | "worker" | "policy" | "external";
   evidenceRequired?: readonly string[];
+  /**
+   * Bind this criterion to the exact durable output references of every Plan
+   * step that names it. The native evaluator derives the references only after
+   * those steps settle; a renderer cannot supply or replace them.
+   */
+  evidenceFromStepOutputs?: boolean;
 }
 
 export interface MissionAcceptance {

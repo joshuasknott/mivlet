@@ -1078,6 +1078,166 @@ fn exact_durable_evidence_refs(
     Ok(references)
 }
 
+fn output_evidence_refs(outputs: &Value) -> Result<BTreeSet<String>, String> {
+    let outputs = outputs
+        .as_array()
+        .filter(|values| values.len() <= 128)
+        .ok_or_else(|| "Stored Mission output evidence is invalid.".to_string())?;
+    let mut references = BTreeSet::new();
+    for output in outputs {
+        for field in [
+            "valueReference",
+            "artifactId",
+            "artifactVersionId",
+            "handoffId",
+        ] {
+            if let Some(reference) = output.get(field).and_then(Value::as_str) {
+                references.insert(bounded(reference, "Mission output evidence", 512)?);
+            }
+        }
+    }
+    Ok(references)
+}
+
+fn criterion_required_evidence_refs(
+    lifecycle: &mission_plan::MissionPlanLifecycleRow,
+    journal: &mission_run::MissionRunJournalRow,
+    criterion: &Value,
+) -> Result<(BTreeSet<String>, bool), String> {
+    let mut references = criterion
+        .get("evidenceRequired")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    bounded(
+                        value
+                            .as_str()
+                            .ok_or_else(|| "Mission required evidence is invalid.".to_string())?,
+                        "Mission required evidence",
+                        512,
+                    )
+                })
+                .collect::<Result<BTreeSet<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    if criterion
+        .get("evidenceFromStepOutputs")
+        .and_then(Value::as_bool)
+        != Some(true)
+    {
+        return Ok((references, true));
+    }
+
+    let criterion_key = bounded(
+        criterion
+            .get("key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission acceptance criterion is invalid.".to_string())?,
+        "Mission acceptance criterion",
+        160,
+    )?;
+    let steps = lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| steps.len() <= 128)
+        .ok_or_else(|| "Selected Mission plan steps are invalid.".to_string())?;
+    let selected_steps = steps
+        .iter()
+        .filter(|step| {
+            step.get("acceptanceCriterionKeys")
+                .and_then(Value::as_array)
+                .is_some_and(|keys| {
+                    keys.iter()
+                        .any(|key| key.as_str() == Some(criterion_key.as_str()))
+                })
+        })
+        .collect::<Vec<_>>();
+    if selected_steps.is_empty() {
+        return Err("Output-bound Mission acceptance does not identify a producing step.".into());
+    }
+
+    let mut worker_by_step = BTreeMap::<String, String>::new();
+    for event in &journal.events {
+        if event.get("type").and_then(Value::as_str) != Some("worker-created") {
+            continue;
+        }
+        let worker = event
+            .pointer("/payload/worker")
+            .ok_or_else(|| "Stored Mission worker is invalid.".to_string())?;
+        let worker_id = bounded(
+            worker
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Stored Mission worker identity is invalid.".to_string())?,
+            "Mission worker",
+            160,
+        )?;
+        let step_key = bounded(
+            worker
+                .get("planStepKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Stored Mission worker step is invalid.".to_string())?,
+            "Mission Plan step",
+            160,
+        )?;
+        if worker_by_step.insert(step_key, worker_id).is_some() {
+            return Err("Stored Mission workers are ambiguous.".into());
+        }
+    }
+
+    let mut complete = true;
+    for step in selected_steps {
+        let step_key = bounded(
+            step.get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Selected Mission plan step is invalid.".to_string())?,
+            "Mission Plan step",
+            160,
+        )?;
+        let matching_outputs = if step.get("kind").and_then(Value::as_str) == Some("coordinate") {
+            journal
+                .events
+                .iter()
+                .filter(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("aggregation-recorded")
+                        && event
+                            .pointer("/payload/aggregation/stepKey")
+                            .and_then(Value::as_str)
+                            == Some(step_key.as_str())
+                })
+                .filter_map(|event| event.pointer("/payload/aggregation/producedOutputs"))
+                .collect::<Vec<_>>()
+        } else if let Some(worker_id) = worker_by_step.get(&step_key) {
+            journal
+                .events
+                .iter()
+                .filter(|event| {
+                    event.get("type").and_then(Value::as_str) == Some("worker-completed")
+                        && event.pointer("/payload/workerId").and_then(Value::as_str)
+                            == Some(worker_id.as_str())
+                })
+                .filter_map(|event| event.pointer("/payload/outputs"))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        if matching_outputs.len() != 1 {
+            complete = false;
+            continue;
+        }
+        let step_references = output_evidence_refs(matching_outputs[0])?;
+        if step_references.is_empty() {
+            complete = false;
+        }
+        references.extend(step_references);
+    }
+    Ok((references, complete))
+}
+
 fn human_evaluation_identity(run_id: &str, criterion_key: &str) -> (String, String, String) {
     let mut digest = Sha256::new();
     digest.update(b"fable.mission.human-evaluation.v1\0");
@@ -1123,6 +1283,40 @@ fn append_human_evaluation_in_tx(
     } else {
         "The signed-in member did not accept this criterion after reviewing the durable Mission evidence."
     };
+    let criteria = authorized
+        .lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .filter(|criteria| criteria.len() <= 128)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
+        })?;
+    let matching = criteria
+        .iter()
+        .filter(|criterion| {
+            criterion.get("key").and_then(Value::as_str) == Some(criterion_key.as_str())
+        })
+        .collect::<Vec<_>>();
+    if matching.len() != 1 || matching[0].get("evaluator").and_then(Value::as_str) != Some("human")
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission criterion is unavailable for human review.".into(),
+        ));
+    }
+    let available_evidence = exact_durable_evidence_refs(&authorized.journal)
+        .map_err(crate::store::StoreError::Invalid)?;
+    let (required_evidence, derived_evidence_complete) =
+        criterion_required_evidence_refs(&authorized.lifecycle, &authorized.journal, matching[0])
+            .map_err(crate::store::StoreError::Invalid)?;
+    let evidence_available = required_evidence
+        .iter()
+        .all(|reference| available_evidence.contains(reference));
+    let evidence = required_evidence
+        .iter()
+        .filter(|reference| available_evidence.contains(*reference))
+        .cloned()
+        .collect::<Vec<_>>();
     let matching_events = authorized
         .journal
         .events
@@ -1189,6 +1383,15 @@ fn append_human_evaluation_in_tx(
                         == Some(criterion_key.as_str())
                     && criteria[0].get("passed").and_then(Value::as_bool) == Some(passed)
                     && criteria[0].get("summary").and_then(Value::as_str) == Some(decision_summary)
+                    && criteria[0]
+                        .get("evidenceRefs")
+                        .and_then(Value::as_array)
+                        .is_some_and(|references| {
+                            references.len() == evidence.len()
+                                && references.iter().zip(&evidence).all(|(stored, expected)| {
+                                    stored.as_str() == Some(expected.as_str())
+                                })
+                        })
             });
         if exact_replay {
             return Ok(authorized.journal);
@@ -1199,27 +1402,6 @@ fn append_human_evaluation_in_tx(
     }
     validate_head(&authorized.journal, expected_revision, expected_sequence)
         .map_err(crate::store::StoreError::Invalid)?;
-    let criteria = authorized
-        .lifecycle
-        .mission
-        .pointer("/acceptance/criteria")
-        .and_then(Value::as_array)
-        .filter(|criteria| criteria.len() <= 128)
-        .ok_or_else(|| {
-            crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
-        })?;
-    let matching = criteria
-        .iter()
-        .filter(|criterion| {
-            criterion.get("key").and_then(Value::as_str) == Some(criterion_key.as_str())
-        })
-        .collect::<Vec<_>>();
-    if matching.len() != 1 || matching[0].get("evaluator").and_then(Value::as_str) != Some("human")
-    {
-        return Err(crate::store::StoreError::Invalid(
-            "Mission criterion is unavailable for human review.".into(),
-        ));
-    }
     let progress = mission_progress_projection(&authorized.lifecycle, &authorized.journal)
         .map_err(crate::store::StoreError::Invalid)?;
     if progress
@@ -1238,41 +1420,11 @@ fn append_human_evaluation_in_tx(
             "Mission work must settle before human acceptance review.".into(),
         ));
     }
-    let available_evidence = exact_durable_evidence_refs(&authorized.journal)
-        .map_err(crate::store::StoreError::Invalid)?;
-    let required_evidence = matching[0]
-        .get("evidenceRequired")
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .map(|value| {
-                    bounded(
-                        value
-                            .as_str()
-                            .ok_or_else(|| "Mission required evidence is invalid.".to_string())?,
-                        "Mission required evidence",
-                        512,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()
-        })
-        .transpose()
-        .map_err(crate::store::StoreError::Invalid)?
-        .unwrap_or_default();
-    if passed
-        && required_evidence
-            .iter()
-            .any(|reference| !available_evidence.contains(reference))
-    {
+    if passed && (!derived_evidence_complete || !evidence_available) {
         return Err(crate::store::StoreError::Invalid(
             "Required durable evidence is unavailable for this acceptance decision.".into(),
         ));
     }
-    let evidence = required_evidence
-        .into_iter()
-        .filter(|reference| available_evidence.contains(reference))
-        .collect::<Vec<_>>();
     let at = now();
     let revision = authorized
         .journal
@@ -1941,28 +2093,12 @@ fn exact_evaluations_and_acceptance(
             .get("evaluator")
             .and_then(Value::as_str)
             .ok_or_else(|| "Mission acceptance evaluator is invalid.".to_string())?;
-        let required_evidence = criterion
-            .get("evidenceRequired")
-            .and_then(Value::as_array)
-            .map(|values| {
-                values
-                    .iter()
-                    .map(|value| {
-                        bounded(
-                            value.as_str().ok_or_else(|| {
-                                "Mission required evidence is invalid.".to_string()
-                            })?,
-                            "Mission required evidence",
-                            512,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            })
-            .transpose()?
-            .unwrap_or_default();
-        let evidence_complete = required_evidence
-            .iter()
-            .all(|reference| evidence.contains(reference));
+        let (required_evidence, derived_evidence_complete) =
+            criterion_required_evidence_refs(lifecycle, journal, criterion)?;
+        let evidence_complete = derived_evidence_complete
+            && required_evidence
+                .iter()
+                .all(|reference| evidence.contains(reference));
         let evaluated_status = if has_pass && has_fail {
             "partially-met"
         } else if has_fail {
@@ -4572,7 +4708,8 @@ mod tests {
                         "acceptance":{"requiresHumanAcceptance":true,"criteria":[{
                             "key":"grounded","description":"The brief is grounded.",
                             "required":true,"evaluator":"human",
-                            "evidenceRequired":["mission-output:final"]
+                            "evidenceRequired":[],
+                            "evidenceFromStepOutputs":true
                         }]}
                     });
                     let plan = json!({

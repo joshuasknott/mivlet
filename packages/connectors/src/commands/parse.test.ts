@@ -32,6 +32,13 @@ describe("parseComposerText", () => {
       status: "command",
       request: { name: "plan", args: "break the migration into reviewable steps" }
     });
+    expect(parseComposerText("/mission Launch readiness\n- Prepare the brief\n- Review the risks")).toEqual({
+      status: "command",
+      request: {
+        name: "mission",
+        args: "Launch readiness\n- Prepare the brief\n- Review the risks"
+      }
+    });
     expect(parseComposerText("/schedule every day at 09:00")).toEqual({
       status: "command",
       request: { name: "schedule", args: "every day at 09:00" }

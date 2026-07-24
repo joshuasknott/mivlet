@@ -756,6 +756,9 @@ fn validate_generated_plan(
                 criterion.get("evaluator").and_then(Value::as_str),
                 Some("human" | "worker" | "policy" | "external")
             )
+            || criterion
+                .get("evidenceFromStepOutputs")
+                .is_some_and(|value| !value.is_boolean())
         {
             return Err("Mission acceptance criterion is invalid.".into());
         }
@@ -1135,6 +1138,14 @@ mod tests {
             build_initial_records(&unknown_criterion, "w", "m", "u", "now")
                 .unwrap_err()
                 .contains("unknown acceptance")
+        );
+        let mut invalid_evidence_binding = input();
+        invalid_evidence_binding.acceptance["criteria"][0]["evidenceFromStepOutputs"] =
+            json!("renderer-selected");
+        assert!(
+            build_initial_records(&invalid_evidence_binding, "w", "m", "u", "now")
+                .unwrap_err()
+                .contains("criterion is invalid")
         );
         let mut duplicate_capability = input();
         duplicate_capability.steps[0]["requiredCapabilities"] =

@@ -15,6 +15,8 @@ import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBrief
 import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
 import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
 import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, resumeReviewedParallelApproachesMissions, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
+import { parseGeneralMissionDraft } from "../lib/general-mission-command";
+import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
@@ -42,8 +44,8 @@ type ConversationMessage = {
   missionPlan?: CitedBriefMissionPlanSummary;
   parallelMissionPlan?: ParallelApproachesPlanSummary;
   missionProgress?: RuntimeMissionProgress;
-  missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief" | "parallel-approaches";
-  missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval";
+  missionKind?: "cited-brief" | "structured-intake" | "artifact-revision-brief" | "parallel-approaches" | "general";
+  missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval" | "awaiting-review";
   missionArtifactId?: string;
   approvalRunId?: string;
 };
@@ -134,6 +136,8 @@ export function ChatWorkspace() {
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
   const [parallelMissionRunning, setParallelMissionRunning] = useState(false);
   const parallelMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
+  const [generalMissionRunning, setGeneralMissionRunning] = useState(false);
+  const generalMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
@@ -1135,7 +1139,7 @@ export function ChatWorkspace() {
           const canStartNewMission = message.role === "assistant" && Boolean(missionPlan)
             && (message.missionOutcome === "partial" || message.missionOutcome === "failed"
               || message.missionOutcome === "cancelled");
-          const newMissionBusy = citedMissionRunning || parallelMissionRunning || agent.state.running || Boolean(pendingPrompt)
+          const newMissionBusy = citedMissionRunning || parallelMissionRunning || generalMissionRunning || agent.state.running || Boolean(pendingPrompt)
             || newMissionSourceMessageId !== null;
           const sourceRequest = [...conversationMessages.slice(0, messageIndex)]
             .reverse()
@@ -1470,7 +1474,7 @@ export function ChatWorkspace() {
     const submitted = rawText.trim();
     const parsed = parseComposerText(submitted);
     const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-    if (!submitted || ((agent.state.running || parallelMissionRunning || pendingPrompt) && !stopRequested)) return;
+    if (!submitted || ((agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) && !stopRequested)) return;
     if (!selectedConversationThreadId) {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
@@ -1497,6 +1501,10 @@ export function ChatWorkspace() {
     }
     const outcome = parseComposerText(submitted);
     if (outcome.status === "command") {
+      if (outcome.request.name === "mission") {
+        await runGeneralMissionCommand(submitted, outcome.request.args);
+        return;
+      }
       const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork: stopActiveWork });
       // Clear the composer so the command token doesn't also reach the model
       // as ordinary prompt text. A follow-up prompt (if any) is submitted
@@ -1512,12 +1520,125 @@ export function ChatWorkspace() {
   }
 
   async function stopActiveWork() {
+    const generalCancel = generalMissionCancellationRef.current;
+    if (generalCancel) {
+      await generalCancel();
+      return true;
+    }
     const parallelCancel = parallelMissionCancellationRef.current;
     if (parallelCancel) {
       await parallelCancel();
       return true;
     }
     return stopCurrentWork();
+  }
+
+  async function runGeneralMissionCommand(submitted: string, args: string) {
+    runtime.setComposerValue("");
+    const draft = parseGeneralMissionDraft(args);
+    if (!draft) {
+      appendConversationMessage(
+        "assistant",
+        "Use /mission with a short title, then two to six bullet tasks on separate lines."
+      );
+      return;
+    }
+    const nativeConnected = runtime.connectedAgentBackend?.backendType === "native-api"
+      ? runtime.connectedAgentBackend
+      : undefined;
+    const missionBackend = agent.backend;
+    if (!nativeConnected || !missionBackend || !boundWorkspaceId || !selectedConversationThreadId) {
+      appendConversationMessage(
+        "assistant",
+        "Missions require an active Fable workspace, conversation, and connected native model provider."
+      );
+      return;
+    }
+    const validation = validateModelSelection(
+      nativeConnected.id,
+      resolvedComposerModelId,
+      runtime.selectableModels,
+      2048
+    );
+    if (!validation.ok) {
+      const error = validation.error ?? "The selected model cannot run this Mission.";
+      agent.reportError(error);
+      appendConversationMessage("assistant", error);
+      return;
+    }
+
+    const sourceThreadId = selectedConversationThreadId;
+    const assistantMessageId = appendConversationMessage(
+      "assistant",
+      `Preparing ${draft.tasks.length} independent tasks...`
+    );
+    let checkpointAssistant: (content: string, terminal?: boolean) => Promise<void> =
+      async (_content: string, _terminal = true): Promise<void> => {
+      throw new Error("Fable could not open the durable Mission transcript.");
+      };
+    resetCancellation();
+    setGeneralMissionRunning(true);
+    try {
+      const { executeGeneralMission } = await import("../lib/general-mission");
+      const result = await executeGeneralMission({
+        ...draft,
+        workspaceId: boundWorkspaceId,
+        sourceThreadId,
+        ...(runProjectId ? { projectId: runProjectId } : {}),
+        backend: missionBackend,
+        model: resolvedComposerModelId,
+        resolveBackend: (route) => agent.resolveBackend(route.providerFamily),
+        onCancellationReady: (cancel) => { generalMissionCancellationRef.current = cancel; },
+        onRunReady: async (runId, missionProgress) => {
+          const writer = createDesktopDurableRunWriter(sourceThreadId, runId);
+          await writer.record({ kind: "user", content: submitted });
+          await writer.record({
+            kind: "assistant",
+            content: `Preparing ${draft.tasks.length} independent tasks...`,
+            state: "streaming"
+          });
+          checkpointAssistant = (content, terminal = true) =>
+            writer.checkpointAssistant(content, terminal);
+          if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId
+              ? { ...entry, runId, missionKind: "general", missionProgress }
+              : entry
+          ));
+        },
+        onProgress: (missionProgress) => {
+          if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
+          setConversationMessages((current) => current.map((entry) =>
+            entry.id === assistantMessageId ? { ...entry, missionProgress } : entry
+          ));
+        }
+      });
+      await checkpointAssistant(result.text, true);
+      if (selectedConversationThreadIdRef.current === sourceThreadId) {
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? {
+            ...entry,
+            content: result.text,
+            runId: result.runId,
+            missionKind: "general",
+            missionOutcome: result.outcome,
+            missionProgress: result.progress
+          } : entry
+        ));
+      }
+      await durableConversation.refresh();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Fable could not complete this Mission.";
+      await checkpointAssistant(message, true).catch(() => undefined);
+      if (selectedConversationThreadIdRef.current === sourceThreadId) {
+        setConversationMessages((current) => current.map((entry) =>
+          entry.id === assistantMessageId ? { ...entry, content: message } : entry
+        ));
+      }
+    } finally {
+      generalMissionCancellationRef.current = null;
+      setGeneralMissionRunning(false);
+    }
   }
 
   function focusComposerAfterVoice() {
@@ -1548,7 +1669,7 @@ export function ChatWorkspace() {
     const prompt = rawPrompt.trim();
     if (!prompt) return;
     const sourceMessageId = options.newMissionSourceMessageId;
-    if (sourceMessageId && (newMissionLaunchRef.current || citedMissionRunning || parallelMissionRunning || agent.state.running || pendingPrompt)) {
+    if (sourceMessageId && (newMissionLaunchRef.current || citedMissionRunning || parallelMissionRunning || generalMissionRunning || agent.state.running || pendingPrompt)) {
       return;
     }
     const finishNewMissionLaunch = () => {
@@ -2073,7 +2194,7 @@ export function ChatWorkspace() {
                 const text = runtime.composerValue;
                 const parsed = parseComposerText(text);
                 const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-                if (!text.trim() || ((agent.state.running || parallelMissionRunning || pendingPrompt) && !stopRequested)) return;
+                if (!text.trim() || ((agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) && !stopRequested)) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}

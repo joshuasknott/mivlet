@@ -334,6 +334,15 @@ export async function executeCommand(
       }
     }
 
+    case "mission": {
+      return {
+        name: "mission",
+        status: "validation",
+        message:
+          "/mission runs through the desktop Mission engine. Add a short title, then two to six bullet tasks on separate lines."
+      };
+    }
+
     case "schedule": {
       const description = request.args.trim();
       if (!description) {

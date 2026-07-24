@@ -91,7 +91,7 @@ export interface MemoryControlState {
 // Fable-owned slash commands.
 //
 // The composer recognizes a small set of Fable-owned commands (/goal, /plan,
-// /remember, /schedule). These are provider-neutral product features, not
+// /mission, /remember, /schedule). These are provider-neutral product features, not
 // composer-text inserts: they create structured Fable state and submit model
 // work through the resolved agent backend when required. Provider-specific
 // slash commands never replace these; unknown slashes fall through to ordinary
@@ -102,10 +102,10 @@ export interface MemoryControlState {
 // ---------------------------------------------------------------------------
 
 /** The Fable-owned commands. Provider-specific slashes never appear here. */
-export type FableCommandName = "goal" | "plan" | "remember" | "schedule" | "stop";
+export type FableCommandName = "goal" | "plan" | "mission" | "remember" | "schedule" | "stop";
 
 /** The canonical, slash-prefixed command tokens Fable owns. */
-export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/remember", "/schedule", "/stop"];
+export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/mission", "/remember", "/schedule", "/stop"];
 
 /** A parsed, validated command ready for execution. */
 export interface FableCommandRequest {
