@@ -421,6 +421,13 @@ For a general approval it records the same native `cancelled` resolution used by
 the run journal, then terminalizes from the returned durable head; it never
 approves or consumes the proposed effect.
 
+Pending typed-input and general effect-approval cards now also load the existing
+authenticated native progress projection for their exact Run. The compact view
+shows selected Plan steps, durable states, observed usage, saved budgets,
+acceptance, and the next action; an unavailable or corrupt projection is stated
+as unavailable and the Mission remains waiting rather than receiving inferred
+progress.
+
 The portable completion boundary now converts a bounded local-worker outcome
 into a `RunResult` without equating provider completion with mission success.
 It accepts only declared unique deliverables, matches evaluations to the exact

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -314,6 +314,7 @@ vi.mock("./runtime", () => ({
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
   readRuntimeCitedMissionPlanSummaries: vi.fn(async (_threadId: string, messageIds: string[]) =>
     messageIds.map((messageId) => ({ messageId, status: "unavailable" }))),
+  readRuntimeMissionProgress: vi.fn(async () => null),
   beginRuntimeConnectorOAuth: vi.fn(async (request: { connectorId: string }) => {
     runtimeMocks.connectorOAuthCalls.push(request.connectorId);
     return null;
@@ -610,6 +611,8 @@ describe("Fable home", () => {
     vi.mocked(readRuntimeCitedMissionPlanSummaries).mockReset();
     vi.mocked(readRuntimeCitedMissionPlanSummaries).mockImplementation(async (_threadId, messageIds) =>
       messageIds.map((messageId) => ({ messageId, status: "unavailable" as const })));
+    vi.mocked(readRuntimeMissionProgress).mockReset();
+    vi.mocked(readRuntimeMissionProgress).mockResolvedValue(null);
     removeDesktopRuntime();
   });
 
@@ -2568,6 +2571,49 @@ describe("Fable home", () => {
     vi.mocked(listRuntimePendingMissionApprovals).mockResolvedValue({
       approvals: [approval], unavailableCount: 0, truncated: false
     });
+    vi.mocked(readRuntimeMissionProgress).mockResolvedValue({
+      version: 1,
+      state: "waiting",
+      summary: "Waiting for approval before the publish step can continue.",
+      runStatus: "waiting-approval",
+      completedSteps: 1,
+      totalSteps: 2,
+      runningWorkers: 0,
+      readyWorkers: 0,
+      waitingSteps: 1,
+      blockedSteps: 0,
+      steps: [{
+        stepKey: "draft",
+        title: "Prepare update",
+        kind: "produce",
+        state: "completed",
+        detail: "The reviewed update is ready."
+      }, {
+        stepKey: "publish",
+        title: "Publish update",
+        kind: "act",
+        state: "waiting",
+        detail: "Waiting for your approval."
+      }],
+      usage: {
+        records: 1,
+        inputTokens: 120,
+        outputTokens: 40,
+        toolCalls: 0,
+        durationMs: 800,
+        costObservations: []
+      },
+      budget: { maxWorkers: 2 },
+      acceptance: [{
+        criterionKey: "reviewed",
+        description: "The update is reviewed.",
+        required: true,
+        evaluator: "policy",
+        status: "met",
+        evidenceCount: 1
+      }],
+      nextAction: "Approve or decline the exact publish action."
+    });
 
     await renderWorkspace();
     fireEvent.click(screen.getByRole("button", { name: "Chats" }));
@@ -2576,6 +2622,9 @@ describe("Fable home", () => {
     const card = await screen.findByLabelText("Mission action approval");
     expect(card).toHaveTextContent("Publish the reviewed update.");
     expect(card).toHaveTextContent("One reviewed update");
+    const progress = await screen.findByLabelText("Mission progress");
+    expect(progress).toHaveTextContent("1 of 2 steps");
+    expect(progress).toHaveTextContent("Waiting for approval");
     fireEvent.click(screen.getByRole("button", { name: "Approve action" }));
     await waitFor(() =>
       expect(resolveRuntimeMissionApproval).toHaveBeenCalledWith(approval, "approved")
