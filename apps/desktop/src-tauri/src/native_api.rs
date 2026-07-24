@@ -438,7 +438,7 @@ pub struct BackendStreamRequest {
 }
 
 #[derive(Default)]
-struct OpenAiTerminalObservation {
+struct OpenAiCompatibleTerminalObservation {
     saw_payload: bool,
     finish_reason: Option<String>,
     provider_error: bool,
@@ -448,7 +448,7 @@ struct OpenAiTerminalObservation {
     usage: Option<(i64, i64)>,
 }
 
-impl OpenAiTerminalObservation {
+impl OpenAiCompatibleTerminalObservation {
     fn new(capture_output: bool) -> Self {
         Self {
             capture_output,
@@ -647,6 +647,11 @@ const NATIVE_PROVIDER_IDS: [&str; 22] = [
     "cerebras",
     "custom",
 ];
+
+pub(crate) fn supports_openai_compatible_mission(provider_id: &str) -> bool {
+    NATIVE_PROVIDER_IDS.contains(&provider_id)
+        && provider_kind(provider_id) == ProviderKind::OpenAiCompat
+}
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -875,7 +880,7 @@ pub async fn stream_backend_completion(
     let mut completed = false;
     let mut transport_failed = false;
     let mut duration_budget_exceeded = false;
-    let mut terminal_observation = OpenAiTerminalObservation::new(
+    let mut terminal_observation = OpenAiCompatibleTerminalObservation::new(
         mission_authority
             .as_ref()
             .is_some_and(|authority| authority.expects_output()),
@@ -1838,8 +1843,8 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn mission_terminal_observation_requires_one_clean_openai_stop() {
-        let mut observation = OpenAiTerminalObservation::default();
+    fn mission_terminal_observation_requires_one_clean_compatible_stop() {
+        let mut observation = OpenAiCompatibleTerminalObservation::default();
         observation.observe(r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#);
         assert!(!observation.clean_stop());
         observation.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
@@ -1847,12 +1852,12 @@ mod transport_policy_tests {
         assert!(observation.clean_stop());
         observation.observe(r#"{"error":{"message":"late failure"}}"#);
         assert!(!observation.clean_stop());
-        let mut late_content = OpenAiTerminalObservation::new(false);
+        let mut late_content = OpenAiCompatibleTerminalObservation::new(false);
         late_content.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         late_content.observe(r#"{"choices":[],"usage":{"prompt_tokens":4,"completion_tokens":1}}"#);
         late_content.observe(r#"{"choices":[{"delta":{"content":"late"}}]}"#);
         assert!(!late_content.clean_stop());
-        let mut early_usage = OpenAiTerminalObservation::new(false);
+        let mut early_usage = OpenAiCompatibleTerminalObservation::new(false);
         early_usage.observe(r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#);
         early_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         assert!(!early_usage.clean_stop());
@@ -1860,14 +1865,14 @@ mod transport_policy_tests {
 
     #[test]
     fn mission_terminal_observation_captures_one_bounded_native_text_output() {
-        let mut observation = OpenAiTerminalObservation::new(true);
+        let mut observation = OpenAiCompatibleTerminalObservation::new(true);
         observation.observe(r#"{"choices":[{"delta":{"content":"Hello "}}]}"#);
         observation
             .observe(r#"{"choices":[{"delta":{"content":"world"},"finish_reason":"stop"}]}"#);
         observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#);
         assert!(observation.clean_stop());
         assert_eq!(observation.output, "Hello world");
-        let mut empty = OpenAiTerminalObservation::new(true);
+        let mut empty = OpenAiCompatibleTerminalObservation::new(true);
         empty.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
         empty.observe(r#"{"choices":[],"usage":{"prompt_tokens":2,"completion_tokens":0}}"#);
         assert!(!empty.clean_stop());
@@ -2066,6 +2071,16 @@ mod transport_policy_tests {
             .filter(|id| !matches!(*id, "anthropic" | "gemini" | "custom"))
             .collect();
         assert_eq!(profiled, expected_profiled);
+    }
+
+    #[test]
+    fn mission_provider_family_is_registered_and_fail_closed() {
+        for provider_id in ["openai", "xai", "openrouter", "deepseek", "zai", "custom"] {
+            assert!(supports_openai_compatible_mission(provider_id));
+        }
+        for provider_id in ["anthropic", "gemini", "unknown", ""] {
+            assert!(!supports_openai_compatible_mission(provider_id));
+        }
     }
 
     #[test]

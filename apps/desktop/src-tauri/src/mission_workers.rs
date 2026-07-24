@@ -362,6 +362,7 @@ struct CitedApprovalFacts {
     usage_event_id: String,
     completion_event_id: String,
     evaluation_event_id: String,
+    provider_id: String,
     requested_model: String,
     provider_route_id: String,
     token_usage: (i64, i64),
@@ -575,6 +576,10 @@ fn cited_approval_facts(
         .and_then(|event| event.pointer("/payload/usage/modelReference"))
         .and_then(Value::as_str)
         .unwrap_or("");
+    let provider_id = route_event
+        .and_then(|event| event.pointer("/payload/providerId"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
     let provider_route_id = usage_event
         .and_then(|event| event.pointer("/payload/usage/providerRouteId"))
         .and_then(Value::as_str)
@@ -640,6 +645,7 @@ fn cited_approval_facts(
                 && event.get("previousEventId").and_then(Value::as_str)
                     == Some(worker_started_event_id)
                 && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(worker_id)
+                && event.pointer("/payload/providerId").and_then(Value::as_str) == Some(provider_id)
                 && event
                     .pointer("/payload/selection/providerRouteId")
                     .and_then(Value::as_str)
@@ -698,10 +704,16 @@ fn cited_approval_facts(
         && evaluation.get("recommendedAction").and_then(Value::as_str) == Some("accept")
         && criteria_match
         && !requested_model.is_empty()
+        && !provider_id.is_empty()
         && !provider_route_id.is_empty()
         && token_usage.0 >= 0
         && token_usage.1 >= 0
         && output.receipt.get("requestedModel").and_then(Value::as_str) == Some(requested_model)
+        && output
+            .receipt
+            .get("observedProvider")
+            .and_then(Value::as_str)
+            == Some(provider_id)
         && output
             .receipt
             .get("providerRouteId")
@@ -725,6 +737,7 @@ fn cited_approval_facts(
         usage_event_id: usage_event_id.to_string(),
         completion_event_id: completion_event_id.to_string(),
         evaluation_event_id: evaluation_event_id.to_string(),
+        provider_id: provider_id.to_string(),
         requested_model: requested_model.to_string(),
         provider_route_id: provider_route_id.to_string(),
         token_usage,
@@ -1072,8 +1085,9 @@ pub fn mission_cited_approval_resolve(
                 tx, store, &scope, &member, &context.internal_user_id, &resolved,
                 &binding, &settlement_lifecycle, worker, &facts.output.receipt,
                 &facts.output.value_reference, &facts.evaluation, Some(facts.token_usage),
-                &facts.requested_model, &facts.provider_route_id, input.expected_run_revision + 1,
-                sequence, &at, Some(input.decision == "approved"), Some(&resolved_event_id),
+                &facts.provider_id, &facts.requested_model, &facts.provider_route_id,
+                input.expected_run_revision + 1, sequence, &at,
+                Some(input.decision == "approved"), Some(&resolved_event_id),
             )?;
             mission_run::get(tx, store, &scope, &member, &input.run_id)?
                 .ok_or_else(|| crate::store::StoreError::Invalid("Cited approval settlement is unavailable.".into()))
@@ -1953,8 +1967,10 @@ pub(crate) fn preflight_native_worker_completion(
     model: &str,
     body: &Value,
 ) -> Result<NativeWorkerCompletionPreflight, String> {
-    if provider_id != "openai" {
-        return Err("Native mission completion currently supports only the OpenAI adapter.".into());
+    if !crate::native_api::supports_openai_compatible_mission(provider_id) {
+        return Err(
+            "Native mission completion currently supports only OpenAI-compatible routes.".into(),
+        );
     }
     let identity = crate::clerk_identity::native_identity_generation_snapshot()?;
     let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)?;
@@ -2110,7 +2126,7 @@ pub(crate) fn preflight_native_worker_completion(
                 evidence.as_ref(),
                 reviewed_parallel_context.as_ref(),
             );
-            validate_openai_worker_body(body, model, &prompt, max_tokens)
+            validate_openai_compatible_worker_body(body, model, &prompt, max_tokens)
                 .map_err(crate::store::StoreError::Invalid)?;
             for event_key in native_terminal_event_keys(binding)
                 .map_err(crate::store::StoreError::Invalid)?
@@ -2554,7 +2570,7 @@ pub(crate) fn settle_native_worker_completion(
                                 "outputKey":spec.key,"valueReference":value_reference,
                                 "contentHash":content_hash,"sizeBytes":size_bytes,"text":text,
                                 "mediaType":"text/markdown","encoding":"utf-8",
-                                "observedProvider":"openai","providerRouteId":authority.provider_route_id,"requestedModel":authority.requested_model,
+                                "observedProvider":authority.provider_id,"providerRouteId":authority.provider_route_id,"requestedModel":authority.requested_model,
                                 "trust":if authority.evidence.is_some(){"provider-generated-with-external-evidence"}else{"provider-generated"},
                                 "citations":citations,"createdAt":at
                             });
@@ -2651,7 +2667,12 @@ pub(crate) fn settle_native_worker_completion(
                 let costs = observed_usage
                     .tokens()
                     .map(|(input, output)| {
-                        exact_model_costs(&authority.requested_model, input, output)
+                        exact_model_costs(
+                            &authority.provider_id,
+                            &authority.requested_model,
+                            input,
+                            output,
+                        )
                     })
                     .unwrap_or_default();
                 let usage_sequence = terminal_expected_sequence + 1;
@@ -3173,6 +3194,7 @@ fn append_native_policy_evaluation(
         output_reference,
         &evaluation,
         usage,
+        provider_id,
         requested_model,
         provider_route_id,
         expected_revision + 1,
@@ -3775,6 +3797,7 @@ fn append_single_worker_run_result(
     output_reference: &str,
     evaluation: &Value,
     usage: Option<(i64, i64)>,
+    provider_id: &str,
     requested_model: &str,
     provider_route_id: &str,
     expected_revision: i64,
@@ -3866,7 +3889,7 @@ fn append_single_worker_run_result(
                 })
         })
         .collect::<Vec<_>>();
-    let costs = exact_model_costs(requested_model, input_tokens, output_tokens);
+    let costs = exact_model_costs(provider_id, requested_model, input_tokens, output_tokens);
     let usage_value = json!({"usageKey":format!("native-usage:{}",binding.usage_event_id),"runId":binding.run_id,
         "workerId":binding.worker_id,"providerRouteId":provider_route_id,"modelReference":requested_model,"inputTokens":input_tokens,"outputTokens":output_tokens,
         "toolCalls":1,"costs":costs,"measuredAt":at});
@@ -5727,6 +5750,11 @@ fn validate_selected_provider_route(
             != Some(binding.worker_started_event_id.as_str())
         || event.pointer("/payload/workerId").and_then(Value::as_str)
             != Some(binding.worker_id.as_str())
+        || event.pointer("/payload/providerId").and_then(Value::as_str) != Some(provider_id)
+        || event
+            .pointer("/payload/modelReference")
+            .and_then(Value::as_str)
+            != Some(model)
     {
         return Err("Mission provider egress does not match its selected route.".into());
     }
@@ -5898,13 +5926,13 @@ fn validate_cited_brief(text: &str, evidence: &Value) -> Result<Vec<Value>, Stri
     Ok(retained)
 }
 
-fn validate_openai_worker_body(
+fn validate_openai_compatible_worker_body(
     body: &Value,
     model: &str,
     objective: &str,
     max_tokens: i64,
 ) -> Result<(), String> {
-    let request_object = object(body, "OpenAI worker request")?;
+    let request_object = object(body, "OpenAI-compatible worker request")?;
     exact_keys(
         request_object,
         &[
@@ -5943,7 +5971,9 @@ fn validate_openai_worker_body(
         || request_object.contains_key("max_tokens")
             == request_object.contains_key("max_completion_tokens")
     {
-        return Err("OpenAI worker request does not match its native assignment.".into());
+        return Err(
+            "OpenAI-compatible worker request does not match its native assignment.".into(),
+        );
     }
     Ok(())
 }
@@ -6939,6 +6969,21 @@ fn journal_provider_route_id<'a>(
         .and_then(Value::as_str)
 }
 
+fn journal_provider_id<'a>(
+    journal: &'a mission_run::MissionRunJournalRow,
+    binding: &NativeWorkerExecutionBinding,
+) -> Option<&'a str> {
+    journal
+        .events
+        .iter()
+        .find(|event| {
+            event.get("id").and_then(Value::as_str)
+                == Some(binding.route_selected_event_id.as_str())
+        })
+        .and_then(|event| event.pointer("/payload/providerId"))
+        .and_then(Value::as_str)
+}
+
 fn validate_usage_replay_with_mode(
     journal: &mission_run::MissionRunJournalRow,
     terminal: &Value,
@@ -7007,7 +7052,14 @@ fn validate_usage_replay_with_mode(
     let expected_costs = Value::Array(
         input_tokens
             .zip(output_tokens)
-            .map(|(input, output)| exact_model_costs(model, input, output))
+            .map(|(input, output)| {
+                exact_model_costs(
+                    journal_provider_id(journal, binding).unwrap_or(""),
+                    model,
+                    input,
+                    output,
+                )
+            })
             .unwrap_or_default(),
     );
     let expected_key = native_usage_event_key(binding)?;
@@ -7198,8 +7250,13 @@ fn validate_native_retry_replay(
     Ok(())
 }
 
-fn exact_model_costs(model: &str, input_tokens: i64, output_tokens: i64) -> Vec<Value> {
-    let Some(pricing) = crate::backends::exact_model_pricing_evidence("openai", model) else {
+fn exact_model_costs(
+    provider_id: &str,
+    model: &str,
+    input_tokens: i64,
+    output_tokens: i64,
+) -> Vec<Value> {
+    let Some(pricing) = crate::backends::exact_model_pricing_evidence(provider_id, model) else {
         return Vec::new();
     };
     if input_tokens < 0 || output_tokens < 0 {
@@ -9121,10 +9178,15 @@ mod tests {
             "model":"gpt-5","messages":[{"role":"user","content":"Inspect health"}],
             "max_completion_tokens":50,"stream":true,"stream_options":{"include_usage":true}
         });
-        assert!(validate_openai_worker_body(&body, "gpt-5", "Inspect health", 50).is_ok());
+        assert!(
+            validate_openai_compatible_worker_body(&body, "gpt-5", "Inspect health", 50).is_ok()
+        );
         let mut widened = body;
         widened["tools"] = json!([]);
-        assert!(validate_openai_worker_body(&widened, "gpt-5", "Inspect health", 50).is_err());
+        assert!(
+            validate_openai_compatible_worker_body(&widened, "gpt-5", "Inspect health", 50)
+                .is_err()
+        );
     }
 
     #[test]
@@ -9269,7 +9331,7 @@ mod tests {
         let journal = mission_run::MissionRunJournalRow {
             run: json!({}),
             events: vec![
-                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                json!({"id":"event-route","type":"route-selected","payload":{"providerId":"openai","selection":{"providerRouteId":"provider-route-1"}}}),
                 usage.clone(),
                 terminal.clone(),
             ],
@@ -9281,7 +9343,7 @@ mod tests {
         let wrong_timing_journal = mission_run::MissionRunJournalRow {
             run: json!({}),
             events: vec![
-                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                json!({"id":"event-route","type":"route-selected","payload":{"providerId":"openai","selection":{"providerRouteId":"provider-route-1"}}}),
                 wrong_timing,
                 terminal.clone(),
             ],
@@ -9296,10 +9358,11 @@ mod tests {
         )
         .is_err());
         assert_eq!(
-            exact_model_costs("gpt-5", 12, 3)[0]["amount"]["amount"],
+            exact_model_costs("openai", "gpt-5", 12, 3)[0]["amount"]["amount"],
             "0.000045"
         );
-        assert!(exact_model_costs("gpt-5.2", 12, 3).is_empty());
+        assert!(exact_model_costs("openai", "gpt-5.2", 12, 3).is_empty());
+        assert!(exact_model_costs("xai", "gpt-5", 12, 3).is_empty());
         let budget_failure = json!({
             "id":"event-5","runId":"run-1","type":"worker-failed","sequence":5,
             "previousEventId":"event-usage","idempotencyKey":"worker-fail:terminal-1",
@@ -9313,7 +9376,7 @@ mod tests {
         let failed_journal = mission_run::MissionRunJournalRow {
             run: json!({}),
             events: vec![
-                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                json!({"id":"event-route","type":"route-selected","payload":{"providerId":"openai","selection":{"providerRouteId":"provider-route-1"}}}),
                 usage.clone(),
                 budget_failure.clone(),
             ],
@@ -9340,7 +9403,7 @@ mod tests {
         let duration_failed_journal = mission_run::MissionRunJournalRow {
             run: json!({}),
             events: vec![
-                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                json!({"id":"event-route","type":"route-selected","payload":{"providerId":"openai","selection":{"providerRouteId":"provider-route-1"}}}),
                 duration_usage.clone(),
                 duration_failure.clone(),
             ],
@@ -9359,7 +9422,7 @@ mod tests {
         let early_duration_failure_journal = mission_run::MissionRunJournalRow {
             run: json!({}),
             events: vec![
-                json!({"id":"event-route","type":"route-selected","payload":{"selection":{"providerRouteId":"provider-route-1"}}}),
+                json!({"id":"event-route","type":"route-selected","payload":{"providerId":"openai","selection":{"providerRouteId":"provider-route-1"}}}),
                 duration_usage,
                 duration_failure.clone(),
             ],
@@ -10413,7 +10476,8 @@ mod tests {
                         "event-route",
                         "route-selected",
                         "route-approval",
-                        json!({"workerId":"worker-approval","selection":{
+                        json!({"workerId":"worker-approval","providerId":"openai",
+                            "modelReference":"gpt-5","selection":{
                             "providerRouteId":"route-openai","reason":"Selected OpenAI GPT-5 for model.generate."}}),
                         at,
                     )?;

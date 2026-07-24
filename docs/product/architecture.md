@@ -84,6 +84,11 @@ Fable owns the native API agent loop while preserving provider-specific wire for
   in-flight cancellation. Once submitted, stored provider keys are never
   returned from Rust to JavaScript. Custom endpoints require HTTPS except for
   HTTP on a loopback host.
+- Durable native mission completion is currently enabled only for the registered
+  OpenAI-compatible wire family. Rust binds provider, model, immutable route,
+  journal head, output receipt, and provider-specific pricing evidence before
+  accepting terminal output. Anthropic and Gemini remain closed at this mission
+  boundary until their distinct stream contracts have equivalent validation.
 - Each run is journaled in `agent-runs.json` without credentials. Checkpoints
   include the active thread plus bounded user, assistant, and tool exchanges.
   Interrupted runs surface in chat and can be explicitly retried from the

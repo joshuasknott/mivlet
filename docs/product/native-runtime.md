@@ -155,6 +155,7 @@ and mocks; they do not validate provider account entitlements or live billing.
 1. **No Multimodal payload / Attachments**: The native agent loop does not support uploading file or image attachments to LLM completions. The composer's file import feature works exclusively by parsing, chunking, and querying files locally via Fable's lexical retrieval engine.
 2. **Curated Model Fallbacks**: If model discovery fails due to an offline, unsupported, or server error state, Fable retains its curated fallback catalog rather than falling back to an empty selection. Compatible discovered generation models need not already exist in the curated catalogue.
 3. **Usage Costs**: Metrics use Fable's reviewed rate table only where one exists. Other providers show token counts with cost marked unknown instead of a fabricated zero.
+4. **Mission wire families**: Durable native mission completion currently supports registered OpenAI-compatible routes, including a validated Custom endpoint. It binds the exact provider, model, route, journal head, output receipt, and provider-specific pricing evidence before accepting a result. Anthropic and Gemini mission completion remains unavailable until their distinct terminal stream contracts receive equivalent native validation and deterministic coverage.
 
 ## Failure States & Error Handling
 

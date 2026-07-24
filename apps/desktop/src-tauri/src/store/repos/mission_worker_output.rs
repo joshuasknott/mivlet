@@ -261,6 +261,10 @@ fn validate_receipt(
         .get("requestedModel")
         .and_then(Value::as_str)
         .unwrap_or_default();
+    let provider = receipt
+        .get("observedProvider")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let computed_hash = format!("{:x}", Sha256::digest(text.as_bytes()));
     let version = receipt
         .get("version")
@@ -293,7 +297,7 @@ fn validate_receipt(
         || receipt.get("sizeBytes").and_then(Value::as_i64) != Some(size)
         || receipt.get("mediaType").and_then(Value::as_str) != Some("text/markdown")
         || receipt.get("encoding").and_then(Value::as_str) != Some("utf-8")
-        || receipt.get("observedProvider").and_then(Value::as_str) != Some("openai")
+        || crate::store::repos::scope::normalize_id(provider, "Observed provider").is_err()
         || route.is_some_and(|value| value.is_empty() || value.len() > 200)
         || model.is_empty()
         || model.len() > 200
@@ -474,7 +478,7 @@ mod tests {
             "version":2,"workspaceId":"w1","ownerMemberId":"member-1","runId":"run-1","workerId":"worker-1",
             "completionEventId":"event-5","outputKey":"brief","valueReference":reference,"contentHash":hash,
             "sizeBytes":text.len(),"text":text,"mediaType":"text/markdown","encoding":"utf-8",
-            "observedProvider":"openai","requestedModel":"gpt-5","trust":"provider-generated-with-external-evidence",
+            "observedProvider":"xai","requestedModel":"grok-4","trust":"provider-generated-with-external-evidence",
             "citations":[{"citationId":"source-1","sourceId":"doc-1","title":"Launch plan","snippet":"Q3",
                 "uri":"https://example.com/launch","provenance":"Notion","freshness":"2026-07-11T20:00:00Z","trust":"external-untrusted"}],
             "createdAt":"t"
@@ -493,6 +497,22 @@ mod tests {
             "t",
         )
         .unwrap();
+        let mut invented = receipt.clone();
+        invented["observedProvider"] = json!("unknown/provider");
+        assert!(validate_receipt(
+            &invented,
+            "w1",
+            "member-1",
+            "run-1",
+            "worker-1",
+            "event-5",
+            "brief",
+            &reference,
+            &hash,
+            text.len() as i64,
+            "t"
+        )
+        .is_err());
         let mut forged = receipt;
         forged["citations"][0]["trust"] = json!("trusted");
         assert!(validate_receipt(
