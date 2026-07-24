@@ -156,7 +156,16 @@ one transaction. It derives stable event identities from the run and selected
 Plan facts, reloads the journal after each append, and stops when no further
 deterministic coordination fact is ready; the renderer supplies only the run to
 advance. Native product composition, restart dispatch, and artifact
-orchestration for arbitrary graphs remain open.
+orchestration for arbitrary graphs remain open. Once graph workers are terminal,
+a separate portable aggregator can derive one Mission result from their exact
+durable Run results and independently recomputed coordinate receipts. It binds
+every worker and usage record to the selected graph, verifies output contracts
+and receipt inputs, and requires an explicit one-to-one deliverable selection.
+Acceptance is derived conservatively from declared policy, identified human, or
+exact graph-worker evaluations; model completion and unattested external claims
+carry no acceptance authority. Missing or conflicting evidence produces partial
+or failed truth, while cancellation and recoverable work remain explicit. Native
+arbitrary-graph terminal event persistence is not yet wired.
 
 ## Schedules And Commands
 

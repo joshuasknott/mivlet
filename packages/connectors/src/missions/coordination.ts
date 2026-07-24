@@ -34,6 +34,8 @@ export interface CompileMissionCoordinationInput {
 }
 
 export interface MissionCoordinationGraph {
+  missionId: Spine.Primitives.MissionId;
+  planRevisionId: Spine.Primitives.PlanRevisionId;
   workerByStepKey: ReadonlyMap<string, Spine.Missions.Worker>;
   joinByTargetStepKey: ReadonlyMap<string, DeclaredStepJoin>;
   aggregationByStepKey: ReadonlyMap<string, DeclaredAggregation>;
@@ -187,6 +189,8 @@ export function compileMissionCoordination(
   }
 
   return {
+    missionId: mission.id,
+    planRevisionId: planRevision.id,
     workerByStepKey,
     joinByTargetStepKey,
     aggregationByStepKey,

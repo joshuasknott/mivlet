@@ -829,7 +829,7 @@ Event and idempotency identities are derived from the run, event kind, and exact
 join or step reference; no renderer-selected head, status, worker set, time, or
 output crosses the boundary. The loop is capped at sixty-four facts and rolls
 back on malformed or over-limit state. Starting/routing arbitrary ready workers,
-terminal result aggregation, and general restart dispatch remain open.
+native terminal result persistence, and general restart dispatch remain open.
 
 A provider-neutral portable graph runner now drives arbitrary compiled worker
 graphs through replay-safe callbacks rather than assuming either benchmark
@@ -845,6 +845,20 @@ execution, tool assignment preservation, early `any` continuation, cancellation
 ordering, and failure handling. The native product composer is not yet wired to
 construct and restart arbitrary Plans through this runner, so the Wave 4C
 checkboxes remain unchecked.
+
+A deterministic portable mission-result aggregator now consumes one exact
+terminal result for every worker in the selected graph plus any independently
+recomputed coordinate receipts. It requires outputs to match each worker's
+declared contract, aggregation inputs to equal those durable results, and an
+explicit unique mapping from exact worker/coordinate outputs to Mission
+deliverables. Policy, identified human, and exact graph-reviewer evaluations are
+combined conservatively; conflicting or missing evidence cannot pass, external
+claims remain unattested, and a failed or partial source cannot be promoted to
+Mission success merely because it returned prose. Successful, partial, failed,
+and cancelled results retain producing run ids, completed outputs, remaining
+work, acceptance, recovery guidance, and human-review gates without copying
+usage or content into a new authority layer. Native arbitrary-graph terminal
+event persistence and product composition remain open.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
