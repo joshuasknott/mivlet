@@ -1,6 +1,8 @@
 import {
   compileMissionCoordination,
+  executeLocalWorker,
   runMissionGraph,
+  type AgentBackend,
   type CoordinationWorkerState,
   type DeclaredAggregation,
   type DeclaredStepJoin,
@@ -13,8 +15,11 @@ import {
   advanceRuntimeMissionCoordination,
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
-  requestRuntimeMissionRunCancellation
+  requestRuntimeMissionRunCancellation,
+  startRuntimeMissionWorker,
+  type RuntimeNativeProviderRoute
 } from "../runtime";
+import { selectRuntimeMissionWorkerRoute } from "./provider-route-selection";
 
 type MissionPlanLifecycle = {
   mission: Spine.Missions.Mission;
@@ -42,6 +47,32 @@ export interface ExecuteRuntimeMissionGraphInput {
     signal: AbortSignal
   ): Promise<void>;
   signal?: AbortSignal;
+}
+
+export interface ExecuteRuntimeProviderMissionGraphInput {
+  runId: string;
+  resolveBackend(
+    route: RuntimeNativeProviderRoute
+  ): AgentBackend | null | Promise<AgentBackend | null>;
+  signal?: AbortSignal;
+}
+
+/**
+ * Execute the provider-only portion of an authenticated general Mission graph.
+ *
+ * Route selection is fresh but remains inside each worker's immutable policy.
+ * All ready workers are preflighted and durably started in one serialized batch
+ * before their provider egress can run in parallel.
+ */
+export async function executeRuntimeProviderMissionGraph(
+  input: ExecuteRuntimeProviderMissionGraphInput
+): Promise<MissionGraphRunReceipt | null> {
+  const starter = new RuntimeProviderWorkerStarter(input);
+  return executeRuntimeMissionGraph({
+    runId: input.runId,
+    executeWorker: (worker, signal) => starter.execute(worker, signal),
+    ...(input.signal ? { signal: input.signal } : {})
+  });
 }
 
 /**
@@ -93,6 +124,189 @@ export async function executeRuntimeMissionGraph(
       }
     }
   });
+}
+
+type PendingProviderWorker = {
+  worker: Spine.Missions.Worker;
+  signal: AbortSignal;
+  resolve(): void;
+  reject(error: unknown): void;
+};
+
+type PreparedProviderWorker = PendingProviderWorker & {
+  backend: AgentBackend;
+  route: RuntimeNativeProviderRoute;
+  routeSelection: Spine.Missions.ProviderRouteSelection;
+};
+
+type StartedProviderWorker = PreparedProviderWorker & {
+  workerStartedEventId: string;
+  routeSelectedEventId: string;
+};
+
+class RuntimeProviderWorkerStarter {
+  private pending: PendingProviderWorker[] = [];
+  private scheduled = false;
+  private startBoundary: Promise<void> = Promise.resolve();
+
+  constructor(private readonly input: ExecuteRuntimeProviderMissionGraphInput) {}
+
+  execute(worker: Spine.Missions.Worker, signal: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      this.pending.push({ worker, signal, resolve, reject });
+      if (this.scheduled) return;
+      this.scheduled = true;
+      queueMicrotask(() => {
+        this.scheduled = false;
+        const batch = this.pending.splice(0);
+        this.startBoundary = this.startBoundary.then(
+          () => this.startBatch(batch),
+          () => this.startBatch(batch)
+        );
+      });
+    });
+  }
+
+  private async startBatch(batch: PendingProviderWorker[]): Promise<void> {
+    if (batch.length === 0) return;
+    try {
+      const prepared = await Promise.all(batch.map((item) => this.prepare(item)));
+      let journal = await requireRuntimeJournal(this.input.runId);
+      const started: StartedProviderWorker[] = [];
+      for (const item of prepared) {
+        const { revision, lastSequence } = runHead(journal);
+        const running = journal.run.status === "running";
+        const startedJournal = await startRuntimeMissionWorker({
+          runId: this.input.runId,
+          workerId: item.worker.id,
+          ...(!running ? { runStartEventId: runtimeIdentity("mission-run-start") } : {}),
+          workerStartedEventId: runtimeIdentity("mission-worker-start"),
+          routeSelectedEventId: runtimeIdentity("mission-route"),
+          providerId: item.route.providerFamily,
+          modelReference: item.route.modelOrRuntimeReference,
+          routeSelection: item.routeSelection,
+          idempotencyKey: runtimeIdentity("mission-worker-start-key"),
+          expectedRunRevision: revision,
+          expectedLastSequence: lastSequence
+        });
+        if (!startedJournal) {
+          throw new Error("Mission worker start is available only in the desktop app.");
+        }
+        journal = missionJournal(startedJournal);
+        const binding = workerStartBinding(journal, item.worker.id);
+        started.push({ ...item, ...binding });
+      }
+      const executionHead = runHead(journal);
+      for (const item of started) {
+        void this.executeStarted(item, executionHead).then(item.resolve, item.reject);
+      }
+    } catch (error) {
+      for (const item of batch) item.reject(error);
+    }
+  }
+
+  private async prepare(item: PendingProviderWorker): Promise<PreparedProviderWorker> {
+    validateProviderOnlyWorker(item.worker);
+    const selected = await selectRuntimeMissionWorkerRoute(item.worker);
+    const backend = await this.input.resolveBackend(selected.route);
+    if (!backend || backend.providerId !== selected.route.providerFamily) {
+      throw new Error("The selected Mission route has no matching provider runtime.");
+    }
+    return {
+      ...item,
+      backend,
+      route: selected.route,
+      routeSelection: selected.execution.selection
+    };
+  }
+
+  private async executeStarted(
+    item: StartedProviderWorker,
+    executionHead: { revision: number; lastSequence: number }
+  ): Promise<void> {
+    await executeLocalWorker({
+      worker: item.worker,
+      backend: item.backend,
+      model: item.route.modelOrRuntimeReference,
+      prompt: item.worker.role.objective,
+      toolSpecs: [],
+      execute: async () => {
+        throw new Error("Provider-only Mission workers cannot call tools.");
+      },
+      signal: item.signal,
+      missionWorkerExecution: {
+        runId: this.input.runId,
+        workerId: item.worker.id,
+        workerStartedEventId: item.workerStartedEventId,
+        routeSelectedEventId: item.routeSelectedEventId,
+        usageEventId: runtimeIdentity("mission-usage"),
+        completionEventId: runtimeIdentity("mission-completion"),
+        evaluationEventId: runtimeIdentity("mission-evaluation"),
+        resultEventId: runtimeIdentity("mission-result"),
+        failureEventId: runtimeIdentity("mission-failure"),
+        idempotencyKey: runtimeIdentity("mission-worker-terminal"),
+        expectedRunRevision: executionHead.revision,
+        expectedLastSequence: executionHead.lastSequence
+      }
+    });
+  }
+}
+
+function validateProviderOnlyWorker(worker: Spine.Missions.Worker): void {
+  if (
+    worker.tools.length > 0
+    || worker.capabilityIds.length > 0
+    || worker.capabilityGrantIds.length > 0
+  ) {
+    throw new Error("General provider dispatch cannot infer tool or capability authority.");
+  }
+  const slots = worker.outputContract.slots;
+  if (
+    slots.length > 1
+    || (slots.length === 1 && (
+      !slots[0]?.required
+      || slots[0].format !== "text/markdown"
+      || worker.outputContract.includeEvidence
+      || worker.outputContract.delivery !== "run-result"
+    ))
+  ) {
+    throw new Error("General provider dispatch supports one evidence-free required Markdown output.");
+  }
+}
+
+async function requireRuntimeJournal(runId: string): Promise<MissionJournal> {
+  const journal = await getRuntimeMissionRun(runId);
+  if (!journal) {
+    throw new Error("Mission worker execution is available only in the desktop app.");
+  }
+  return missionJournal(journal);
+}
+
+function workerStartBinding(
+  journal: MissionJournal,
+  workerId: Spine.Primitives.WorkerId
+): { workerStartedEventId: string; routeSelectedEventId: string } {
+  const started = journal.events.find(
+    (event) => event.type === "worker-started"
+      && record(event.payload, "Mission worker start payload").workerId === workerId
+  );
+  const routed = journal.events.find(
+    (event) => event.type === "route-selected"
+      && record(event.payload, "Mission route payload").workerId === workerId
+  );
+  return {
+    workerStartedEventId: text(started?.id, "Mission worker start event"),
+    routeSelectedEventId: text(routed?.id, "Mission route event")
+  };
+}
+
+function runtimeIdentity(prefix: string): string {
+  const random = globalThis.crypto?.randomUUID?.();
+  if (random) return `${prefix}-${random}`;
+  const values = new Uint32Array(4);
+  globalThis.crypto?.getRandomValues?.(values);
+  return `${prefix}-${Array.from(values, (value) =>
+    value.toString(16).padStart(8, "0")).join("")}`;
 }
 
 async function requireAdvance(runId: string): Promise<void> {

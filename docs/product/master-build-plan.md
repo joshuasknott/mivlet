@@ -954,8 +954,13 @@ worker inside that saved policy. It filters to the exact workspace and required
 route identities, permits no fallback or placement transfer, and refuses to
 compare routes spanning different provider, billing, privacy, or placement
 boundaries; health, capability, tools, context, budget, cost, quality, and speed
-still pass through the portable selector. Worker start and restart dispatch still
-need product composition, so the Wave 4C checkboxes remain unchecked.
+still pass through the portable selector. The provider-only graph composition
+preflights an entire ready batch before mutation, serializes native start and
+route facts against the journal head, then gives every worker the final shared
+head before provider egress runs in parallel. Rust independently rechecks the
+saved route and placement policy. Native settlement must record each terminal
+fact before the graph advances. Tool-bearing native grant composition and
+general restart dispatch remain open, so the Wave 4C checkboxes remain unchecked.
 
 A deterministic portable mission-result aggregator now consumes one exact
 terminal result for every worker in the selected graph plus any independently

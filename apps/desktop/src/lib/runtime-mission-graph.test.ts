@@ -1,20 +1,63 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Spine } from "@fable/protocol";
-import { executeRuntimeMissionGraph } from "./runtime-mission-graph";
+import {
+  executeRuntimeMissionGraph,
+  executeRuntimeProviderMissionGraph
+} from "./runtime-mission-graph";
 
 const mocks = vi.hoisted(() => ({
   lifecycle: null as Record<string, unknown> | null,
   journal: null as Record<string, unknown> | null,
   advance: vi.fn(),
-  cancel: vi.fn()
+  cancel: vi.fn(),
+  listRoutes: vi.fn(),
+  startWorker: vi.fn()
 }));
 
 vi.mock("../runtime", () => ({
   getRuntimeMissionRun: vi.fn(async () => mocks.journal),
   getRuntimeMissionPlan: vi.fn(async () => mocks.lifecycle),
   advanceRuntimeMissionCoordination: mocks.advance,
-  requestRuntimeMissionRunCancellation: mocks.cancel
+  requestRuntimeMissionRunCancellation: mocks.cancel,
+  listRuntimeNativeProviderRoutes: mocks.listRoutes,
+  startRuntimeMissionWorker: mocks.startWorker
 }));
+
+const providerRoute = {
+  id: "provider-route-openai-gpt5",
+  recordType: "provider-route",
+  connectionId: "connection-openai",
+  kind: "api-model",
+  displayName: "OpenAI GPT-5",
+  providerFamily: "openai",
+  modelOrRuntimeReference: "gpt-5",
+  state: "available",
+  health: { state: "healthy" },
+  placement: {
+    allowedKinds: ["local-desktop"],
+    requiresCredentialHoldingNode: true
+  },
+  boundaries: {
+    privacyBoundary: "member-private",
+    billingBoundary: "account-owned-provider",
+    providerBoundary: "openai",
+    placementBoundary: "local-credential-egress"
+  },
+  credentialBinding: {
+    custody: "os-secure-store",
+    state: "available",
+    refreshSupported: false
+  },
+  workspaceId: "workspace-1",
+  visibility: "member-private",
+  ownerMemberId: "member-1",
+  authority: "local",
+  schemaVersion: 1,
+  revision: 1,
+  createdByInternalUserId: "user-1",
+  createdAt: "2026-07-23T10:00:00.000Z",
+  updatedAt: "2026-07-23T10:00:00.000Z"
+};
 
 function metadata() {
   return {
@@ -48,10 +91,32 @@ function worker(id: string, stepKey: string): Spine.Missions.Worker {
     capabilityIds: [],
     capabilityGrantIds: [],
     tools: [],
-    budget: { maxAttempts: 1 },
+    routePreference: {
+      policy: "require",
+      providerRouteIds: ["provider-route-openai-gpt5"],
+      allowFallback: false
+    },
+    placementPreference: {
+      policy: "require",
+      executionNodeIds: ["local-desktop"],
+      locality: "local",
+      allowTransfer: false
+    },
+    budget: {
+      maxDurationMs: 30_000,
+      maxInputTokens: 4_000,
+      maxOutputTokens: 1_024,
+      maxToolCalls: 1,
+      maxAttempts: 1
+    },
     stopConditions: [],
     outputContract: {
-      slots: [{ key: stepKey, description: stepKey, required: true }],
+      slots: [{
+        key: stepKey,
+        description: stepKey,
+        required: true,
+        format: "text/markdown"
+      }],
       includeEvidence: false,
       includeUncertainty: true,
       delivery: "run-result"
@@ -205,6 +270,42 @@ describe("authenticated runtime Mission graph composition", () => {
       (mocks.journal!.run as Record<string, unknown>).status = "cancelling";
       return mocks.journal;
     });
+    mocks.listRoutes.mockResolvedValue([providerRoute]);
+    mocks.startWorker.mockImplementation(async (input: Record<string, unknown>) => {
+      const journal = mocks.journal as {
+        run: Record<string, unknown>;
+        events: Array<Record<string, unknown>>;
+      };
+      const run = journal.run;
+      const head = run.eventHead as Record<string, unknown>;
+      let sequence = Number(head.lastSequence);
+      let revision = Number(run.revision);
+      if (typeof input.runStartEventId === "string") {
+        run.status = "running";
+        sequence += 1;
+        revision += 1;
+      }
+      sequence += 1;
+      revision += 1;
+      journal.events.push({
+        id: input.workerStartedEventId,
+        type: "worker-started",
+        payload: { workerId: input.workerId }
+      });
+      sequence += 1;
+      revision += 1;
+      journal.events.push({
+        id: input.routeSelectedEventId,
+        type: "route-selected",
+        payload: { workerId: input.workerId, selection: input.routeSelection }
+      });
+      run.revision = revision;
+      run.eventHead = {
+        lastSequence: sequence,
+        lastEventId: input.routeSelectedEventId
+      };
+      return journal;
+    });
   });
 
   it("does not simulate an authenticated graph outside the desktop runtime", async () => {
@@ -247,6 +348,89 @@ describe("authenticated runtime Mission graph composition", () => {
     expect(executeWorker).toHaveBeenCalledTimes(2);
     expect(mocks.advance).toHaveBeenCalled();
     expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+
+  it("starts a ready provider batch before parallel egress and settles through native facts", async () => {
+    installFixture();
+    const backendRun = vi.fn((request: {
+      missionWorkerExecution?: { workerId: string };
+    }) => (async function* () {
+      expect(mocks.startWorker).toHaveBeenCalledTimes(2);
+      const workerId = request.missionWorkerExecution!.workerId;
+      const stepKey = workerId === "worker-a" ? "a" : "b";
+      yield { type: "text-delta", text: `${stepKey} output` };
+      yield {
+        type: "usage",
+        inputTokens: 20,
+        outputTokens: 4,
+        costUsd: 0,
+        costUnknown: true
+      };
+      (mocks.journal!.events as Array<Record<string, unknown>>).push({
+        id: `${workerId}-completed`,
+        type: "worker-completed",
+        payload: {
+          workerId,
+          outputs: [{
+            key: stepKey,
+            summary: `${stepKey} output`,
+            valueReference: `mission-output:${stepKey}`
+          }]
+        }
+      });
+      yield { type: "done", finishReason: "stop" };
+    })());
+    const backend = {
+      providerId: "openai",
+      backend: { backendType: "native-api" },
+      capabilities: [],
+      run: backendRun,
+      cancel: vi.fn(async () => {})
+    };
+    const result = await executeRuntimeProviderMissionGraph({
+      runId: "run-1",
+      resolveBackend: async () => backend as never
+    });
+    expect(result).toMatchObject({
+      status: "complete",
+      launchedWorkerIds: ["worker-a", "worker-b"],
+      settledJoinKeys: ["join-combine"],
+      recordedAggregationStepKeys: ["combine"]
+    });
+    expect(mocks.startWorker).toHaveBeenCalledTimes(2);
+    expect(backendRun).toHaveBeenCalledTimes(2);
+    expect(backendRun.mock.calls[0]?.[0]).toMatchObject({
+      model: "gpt-5",
+      missionWorkerExecution: {
+        expectedRunRevision: 5,
+        expectedLastSequence: 7
+      }
+    });
+    expect(backendRun.mock.calls[1]?.[0]).toMatchObject({
+      missionWorkerExecution: {
+        expectedRunRevision: 5,
+        expectedLastSequence: 7
+      }
+    });
+  });
+
+  it("rejects tool-bearing general dispatch before any native start", async () => {
+    installFixture();
+    const created = (mocks.journal!.events as Array<Record<string, unknown>>)
+      .find((event) => event.type === "worker-created");
+    const assigned = (created!.payload as {
+      worker: Spine.Missions.Worker;
+    }).worker;
+    (assigned.tools as Array<unknown>).push({
+      toolName: "connection-read",
+      access: "read",
+      purpose: "Search"
+    });
+    await expect(executeRuntimeProviderMissionGraph({
+      runId: "run-1",
+      resolveBackend: vi.fn()
+    })).rejects.toThrow("failed without recording a durable terminal fact");
+    expect(mocks.startWorker).not.toHaveBeenCalled();
   });
 
   it("persists cancellation before it asks the worker callback to abort", async () => {

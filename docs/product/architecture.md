@@ -164,7 +164,12 @@ placement policy. The desktop's execution-time resolver considers only current
 routes inside that workspace and saved envelope, reuses the portable health,
 capability, context, tool, risk, budget, cost, quality, and speed selector, and
 fails if candidates cross provider, billing, privacy, or placement boundaries.
-It does not start a worker or grant provider authority by selecting that route.
+The provider-only product composition preflights each ready worker, resolves its
+already-authorized backend, serializes all native starts in the ready batch, and
+only then permits their provider egress to run in parallel against one shared
+durable head. Rust rechecks the saved worker policy before appending route facts;
+the graph cannot advance until native settlement exposes a terminal worker fact.
+Tool-bearing composition and general restart dispatch remain separate boundaries.
 A native-owned bounded advance command can settle every
 currently decidable declared join and reference-only coordinate aggregation in
 one transaction. It derives stable event identities from the run and selected

@@ -7756,6 +7756,8 @@ pub fn mission_worker_start(
                 &input.model_reference,
             )
             .map_err(crate::store::StoreError::Invalid)?;
+            validate_worker_execution_policy(worker, &provider_route_id, &input.route_selection)
+                .map_err(crate::store::StoreError::Invalid)?;
             crate::backends::validate_native_provider_route_selection_in_tx(
                 tx,
                 store,
@@ -7899,6 +7901,76 @@ fn worker_grant_mappings(worker: &Value) -> Result<Vec<WorkerGrantInput>, String
             })
         })
         .collect()
+}
+
+fn validate_worker_execution_policy(
+    worker: &Value,
+    provider_route_id: &str,
+    selection: &crate::models::ProviderRouteSelection,
+) -> Result<(), String> {
+    let route = worker.get("routePreference");
+    let placement = worker.get("placementPreference");
+    if route.is_none() && placement.is_none() {
+        // Compatibility for fixed-shape workers created before the saved-policy
+        // contract. Their exact route still passes the native account and
+        // no-fallback selection validation below.
+        return Ok(());
+    }
+    let route = route
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Worker route policy is invalid.".to_string())?;
+    let placement = placement
+        .and_then(Value::as_object)
+        .ok_or_else(|| "Worker placement policy is invalid.".to_string())?;
+    if route.get("allowFallback").and_then(Value::as_bool) != Some(false)
+        || selection.fallback_from_provider_route_id.is_some()
+    {
+        return Err("Worker route policy does not permit fallback.".into());
+    }
+    let route_ids = route
+        .get("providerRouteIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Worker route policy identities are invalid.".to_string())?;
+    if route_ids.len() > 64 {
+        return Err("Worker route policy exceeds its safe bound.".into());
+    }
+    let route_ids = route_ids
+        .iter()
+        .map(|value| {
+            bounded(
+                value
+                    .as_str()
+                    .ok_or_else(|| "Worker route policy identity is invalid.".to_string())?,
+                "Worker route policy identity",
+                200,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if route_ids.iter().collect::<BTreeSet<_>>().len() != route_ids.len() {
+        return Err("Worker route policy identities are ambiguous.".into());
+    }
+    match route.get("policy").and_then(Value::as_str) {
+        Some("automatic") if route_ids.is_empty() => {}
+        Some("require")
+            if !route_ids.is_empty()
+                && route_ids
+                    .iter()
+                    .any(|route_id| route_id == provider_route_id) => {}
+        _ => return Err("The selected provider route is outside the saved worker policy.".into()),
+    }
+    let execution_nodes = placement
+        .get("executionNodeIds")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Worker placement policy identities are invalid.".to_string())?;
+    if placement.get("policy").and_then(Value::as_str) != Some("require")
+        || placement.get("locality").and_then(Value::as_str) != Some("local")
+        || placement.get("allowTransfer").and_then(Value::as_bool) != Some(false)
+        || execution_nodes.len() != 1
+        || execution_nodes[0].as_str() != Some("local-desktop")
+    {
+        return Err("Worker placement policy does not permit this local execution.".into());
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -8834,6 +8906,55 @@ mod tests {
     use super::*;
 
     const VALID_REVIEW_OUTPUT: &str = "Recommendation: Combine\n\n## Fit with the requested outcome\nUse the practical base with a bounded alternative trial.\n\n## Feasibility and material trade-offs\nThis preserves speed while adding measured exploration.\n\n## Reversibility and material risk\nStart with a reversible pilot before committing broadly.\n\n## Uncertainty and remaining human judgement\nA human still needs to choose the acceptable rollout risk.";
+
+    #[test]
+    fn worker_execution_policy_rejects_route_and_placement_drift() {
+        let worker = json!({
+            "routePreference":{
+                "policy":"require",
+                "providerRouteIds":["route-1"],
+                "allowFallback":false
+            },
+            "placementPreference":{
+                "policy":"require",
+                "executionNodeIds":["local-desktop"],
+                "locality":"local",
+                "allowTransfer":false
+            }
+        });
+        let selection = crate::models::ProviderRouteSelection {
+            provider_route_id: "route-1".into(),
+            selected_at: "2026-07-23T10:00:00.000Z".into(),
+            reason: "Exact saved route.".into(),
+            fallback_from_provider_route_id: None,
+            boundary_policy_ref: Some("boundary-1".into()),
+            observation: None,
+            quality: None,
+            cost: None,
+        };
+        assert!(validate_worker_execution_policy(&worker, "route-1", &selection).is_ok());
+        assert!(
+            validate_worker_execution_policy(&worker, "route-2", &selection)
+                .unwrap_err()
+                .contains("outside the saved worker policy")
+        );
+
+        let mut transferred = worker.clone();
+        transferred["placementPreference"]["allowTransfer"] = json!(true);
+        assert!(
+            validate_worker_execution_policy(&transferred, "route-1", &selection)
+                .unwrap_err()
+                .contains("does not permit this local execution")
+        );
+
+        let mut fallback = selection;
+        fallback.fallback_from_provider_route_id = Some("route-0".into());
+        assert!(
+            validate_worker_execution_policy(&worker, "route-1", &fallback)
+                .unwrap_err()
+                .contains("does not permit fallback")
+        );
+    }
 
     #[test]
     fn provider_route_quality_is_bound_only_to_the_exact_cited_shape() {
