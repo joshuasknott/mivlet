@@ -16,6 +16,7 @@ import {
   createRuntimeMissionCheckpoint,
   getRuntimeMissionPlan,
   getRuntimeMissionRun,
+  getRuntimeMissionWorkerObjective,
   recoverRuntimeInterruptedGeneralMissions,
   requestRuntimeMissionRunCancellation,
   restoreRuntimeMissionCheckpoint,
@@ -216,6 +217,7 @@ type PreparedProviderWorker = PendingProviderWorker & {
   backend: AgentBackend;
   route: RuntimeNativeProviderRoute;
   routeSelection: Spine.Missions.ProviderRouteSelection;
+  nativeAttestedObjective: string;
   toolRequest: {
     tool: "connection-read";
     argumentsJson: string;
@@ -380,11 +382,19 @@ class RuntimeProviderWorkerStarter {
     if (!backend || backend.providerId !== selected.route.providerFamily) {
       throw new Error("The selected Mission route has no matching provider runtime.");
     }
+    const nativeAttestedObjective = await getRuntimeMissionWorkerObjective(
+      this.input.runId,
+      item.worker.id
+    );
+    if (!nativeAttestedObjective) {
+      throw new Error("The selected Mission worker objective is unavailable.");
+    }
     return {
       ...item,
       backend,
       route: selected.route,
       routeSelection: selected.execution.selection,
+      nativeAttestedObjective,
       toolRequest
     };
   }
@@ -401,6 +411,7 @@ class RuntimeProviderWorkerStarter {
       backend: item.backend,
       model: item.route.modelOrRuntimeReference,
       prompt: item.worker.role.objective,
+      nativeAttestedObjective: item.nativeAttestedObjective,
       toolSpecs: [],
       execute: async () => {
         throw new Error("Mission provider writing turns cannot call tools.");
@@ -443,6 +454,7 @@ type RecoveredProviderWorker = {
   route: RuntimeNativeProviderRoute;
   workerStartedEventId: string;
   routeSelectedEventId: string;
+  nativeAttestedObjective: string;
   missionToolEvidence?: unknown;
   toolEvidence?: {
     toolEventId: string;
@@ -506,13 +518,20 @@ async function resumeRuntimeProviderMission(
     if (!backend || backend.providerId !== selected.route.providerFamily) {
       throw new Error("The recovered Mission route has no matching provider runtime.");
     }
+    const nativeAttestedObjective = await getRuntimeMissionWorkerObjective(
+      recovery.runId,
+      worker.id
+    );
+    if (!nativeAttestedObjective) {
+      throw new Error("The recovered Mission worker objective is unavailable.");
+    }
     return {
       worker,
       backend,
       route: selected.route,
       workerStartedEventId: persisted.workerStartedEventId,
-      routeSelectedEventId: persisted.routeSelectedEventId
-      ,
+      routeSelectedEventId: persisted.routeSelectedEventId,
+      nativeAttestedObjective,
       ...(recoveredTool ? {
         missionToolEvidence: recoveredTool.evidence,
         toolEvidence: {
@@ -578,6 +597,7 @@ async function resumeRuntimeProviderMission(
         backend: item.backend,
         model: item.route.modelOrRuntimeReference,
         prompt: item.worker.role.objective,
+        nativeAttestedObjective: item.nativeAttestedObjective,
         toolSpecs: [],
         execute: async () => {
           throw new Error("Recovered Mission provider writing turns cannot call tools.");

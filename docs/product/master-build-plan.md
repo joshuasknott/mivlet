@@ -704,8 +704,9 @@ activity when no terminal message exists. Cross-thread and cross-member Runs nev
 cross the boundary; invalid projections remain untouched and are counted as
 unavailable instead of inferred. This supersedes the earlier sentence that general
 and multi-worker plan views were wholly open. The ordinary composer now creates
-the bounded independent-worker `/mission` shape; dependency/join-bearing Plan
-authoring, richer route/cost evidence for every shape, and packaged
+the bounded independent-worker `/mission` shape and one explicitly declared
+`all:` or `any:` continuation over its immutable outputs. Arbitrary multi-stage
+graph authoring, richer route/cost evidence for every shape, and packaged
 assistive-technology observation remain open, so the combined Wave 4B checkbox
 stays unchecked.
 
@@ -862,10 +863,11 @@ replay are durable, while the desktop exposes the compact plan, live stop path,
 recovered result, and artifact action without overflow at desktop or mobile sizes.
 Focused portable, native, runtime, provider-cancellation, renderer, and responsive
 evidence covers this fixed benchmark. The later bounded `/mission` composition
-described below establishes user-declared independent worker counts, but not
-user-authored dependency graphs, joins, multiple providers, tool-bearing parallel
-steps, bounded iteration, escalation, or live packaged-app/provider validation,
-so the Wave 4C checkbox remains unchecked.
+described below establishes user-declared worker counts plus one explicit
+all-source or any-source continuation, but not arbitrary multi-stage or branching
+graphs, quorum composition, multiple providers, tool-bearing parallel steps,
+bounded iteration, escalation, or live packaged-app/provider validation, so the
+Wave 4C checkbox remains unchecked.
 
 The provider-neutral coordination layer is no longer limited to that benchmark's
 two hard-coded producers. A reusable compiler now binds up to thirty-two worker
@@ -1070,29 +1072,37 @@ refused when declared durable evidence is absent. Exact replay returns the
 original decision, a changed replay fails, and after the final human criterion
 the desktop invokes the existing native finalizer so rejected work becomes an
 explicit partial result rather than success. General policy/worker evaluator
-production, user-authored dependency/join composition, and arbitrary artifact
+production, arbitrary multi-stage dependency composition, and arbitrary artifact
 materialization remain open.
 
 The normal desktop composer now owns one explicit bounded general-Mission entry
 point. `/mission` accepts a short title followed by two to six distinct bullet
-tasks. Fable persists one encrypted selected Plan with one independent
-provider-only worker per declared task, pins the currently selected authorized
-provider/model route with no fallback, prepares the workers through the existing
-native derivation boundary, executes them through the reusable provider-neutral
-graph runner, and writes the submitted command plus the review bundle to the
-durable source conversation. Each task remains independent: this command does
-not infer synthesis, dependencies, joins, tools, effects, grants, or handoff
-authority. Stop/cancellation uses the same native run boundary, restart recovery
-uses the existing general-worker descriptor, and reopen reattaches the native
-progress receipt by Run id. Human review is required for every declared task.
+tasks. The final line may instead be an explicit `all: …` or `any: …`
+continuation, keeping the full Plan at two to six workers. Fable persists one
+encrypted selected Plan, pins the currently selected authorized provider/model
+route with no fallback, declares the join before any worker outcome exists,
+prepares every worker through the native derivation boundary, executes ready
+work through the reusable provider-neutral graph runner, and writes the submitted
+command plus the review bundle to the durable source conversation. Rust derives
+the continuation objective from exact encrypted predecessor completion receipts,
+preserving plan order, content hashes, output references, failed-source truth,
+and the provider-generated untrusted boundary; the provider request must match
+that native reconstruction exactly. Ordinary bullets remain independent, and
+the command does not infer additional dependencies, tools, effects, grants, or
+handoff authority. Stop/cancellation uses the same native run boundary, restart
+recovery re-derives the same objective from the durable checkpoint and receipts,
+and reopen reattaches the native progress receipt by Run id. Human review is
+required for every final deliverable, with intermediate criteria retained as
+non-authoritative review evidence.
 Each criterion sets a native-only output-binding rule; Rust derives the exact
 durable output references from the immutable Plan steps and terminal worker
 facts, refuses a passing decision when any bound output is absent, stores those
 references in the evaluation, and verifies them on exact replay. Parser,
 dispatcher, composition, renderer, transcript, native validation, evidence,
-replay, and encrypted-reopen coverage are repository-local. User-authored graph
-dependencies/joins, dynamic tool/grant composition, arbitrary artifact
-materialization, and packaged/live-provider observation remain open.
+replay, and encrypted-reopen coverage are repository-local. Arbitrary multi-stage
+or branching graph authoring, quorum joins, dynamic tool/grant composition,
+arbitrary artifact materialization, and packaged/live-provider observation
+remain open.
 
 A provider-neutral continuation policy now supplies the bounded decision layer
 for iterative workers. It accepts at most sixty-four contiguous durable

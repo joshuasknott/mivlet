@@ -191,7 +191,7 @@ export function Composer({
         label: command,
         description:
           command === "/mission"
-            ? "Run 2–6 independent tasks"
+            ? "Run 2–6 tasks, with an optional all/any continuation"
             : command === "/goal"
             ? "Create a goal"
             : command === "/schedule"

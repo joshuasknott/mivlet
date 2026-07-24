@@ -2651,7 +2651,7 @@ describe("Fable home", () => {
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
   });
 
-  it("runs a bounded multiline Mission through the durable native graph path", async () => {
+  it("runs a bounded multiline Mission with an explicit continuation through the native graph path", async () => {
     runtimeMocks.conversationThreads = [{
       id: "thread-general-ui", projectId: null, title: "Launch readiness",
       lifecycle: "active", updatedAt: "2026-07-13T12:00:00Z", messageHead: { lastSequence: 0 }
@@ -2667,7 +2667,7 @@ describe("Fable home", () => {
     const composer = screen.getByLabelText(/universal composer/i);
     fireEvent.change(composer, {
       target: {
-        value: "/mission Launch readiness\n- Prepare the brief\n- Review the risks\n- Recommend next steps"
+        value: "/mission Launch readiness\n- Prepare the brief\n- Review the risks\nall: Recommend next steps"
       }
     });
     fireEvent.keyDown(composer, { key: "Enter", code: "Enter" });
@@ -2677,7 +2677,11 @@ describe("Fable home", () => {
     expect(screen.getByText(/Brief\./)).toBeInTheDocument();
     expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
       title: "Launch readiness",
-      tasks: ["Prepare the brief", "Review the risks", "Recommend next steps"],
+      tasks: ["Prepare the brief", "Review the risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend next steps"
+      },
       workspaceId: "preview-default",
       sourceThreadId: "thread-general-ui",
       model: "gpt-5"

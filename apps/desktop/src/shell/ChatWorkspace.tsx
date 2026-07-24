@@ -1539,7 +1539,7 @@ export function ChatWorkspace() {
     if (!draft) {
       appendConversationMessage(
         "assistant",
-        "Use /mission with a short title, then two to six bullet tasks on separate lines."
+        "Use /mission with a short title, then two to six bullet tasks. Optionally finish with “all: …” or “any: …” to declare one continuation."
       );
       return;
     }
@@ -1568,9 +1568,13 @@ export function ChatWorkspace() {
     }
 
     const sourceThreadId = selectedConversationThreadId;
+    const declaredStepCount = draft.tasks.length + (draft.join ? 1 : 0);
+    const preparationLabel = draft.join
+      ? `Preparing ${declaredStepCount} declared Mission steps...`
+      : `Preparing ${draft.tasks.length} independent tasks...`;
     const assistantMessageId = appendConversationMessage(
       "assistant",
-      `Preparing ${draft.tasks.length} independent tasks...`
+      preparationLabel
     );
     let checkpointAssistant: (content: string, terminal?: boolean) => Promise<void> =
       async (_content: string, _terminal = true): Promise<void> => {
@@ -1594,7 +1598,7 @@ export function ChatWorkspace() {
           await writer.record({ kind: "user", content: submitted });
           await writer.record({
             kind: "assistant",
-            content: `Preparing ${draft.tasks.length} independent tasks...`,
+            content: preparationLabel,
             state: "streaming"
           });
           checkpointAssistant = (content, terminal = true) =>

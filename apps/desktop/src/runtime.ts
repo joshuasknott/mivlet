@@ -3555,6 +3555,15 @@ export async function prepareRuntimeMissionWorkers(runId: string) {
   } catch (error) { throw toRuntimeError(error); }
 }
 
+export async function getRuntimeMissionWorkerObjective(runId: string, workerId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<string>("mission_coordination_worker_objective", {
+      input: { runId, workerId }
+    });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 export async function advanceRuntimeMissionCoordination(runId: string): Promise<{
   journal: Record<string, unknown>;
   progress: RuntimeMissionProgress;

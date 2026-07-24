@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   createPlan: vi.fn(),
   createRun: vi.fn(),
   prepareWorkers: vi.fn(),
+  openJoin: vi.fn(),
   listRoutes: vi.fn(),
   readProgress: vi.fn(),
   advance: vi.fn(),
@@ -17,6 +18,7 @@ vi.mock("../runtime", () => ({
   createRuntimeMissionPlan: mocks.createPlan,
   createRuntimeMissionRun: mocks.createRun,
   prepareRuntimeMissionWorkers: mocks.prepareWorkers,
+  openRuntimeMissionJoin: mocks.openJoin,
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
   readRuntimeMissionProgress: mocks.readProgress,
   advanceRuntimeMissionCoordination: mocks.advance,
@@ -97,7 +99,14 @@ beforeEach(() => {
   mocks.listRoutes.mockResolvedValue([route]);
   mocks.createPlan.mockResolvedValue({ mission: { id: "mission-1" } });
   mocks.createRun.mockResolvedValue({ run: { id: "mission-run-4" }, events: [] });
-  mocks.prepareWorkers.mockResolvedValue({});
+  mocks.prepareWorkers.mockResolvedValue({
+    run: { revision: 5, eventHead: { lastSequence: 5, lastEventId: "worker-created-3" } },
+    events: []
+  });
+  mocks.openJoin.mockResolvedValue({
+    run: { revision: 6, eventHead: { lastSequence: 6, lastEventId: "join-open" } },
+    events: []
+  });
   mocks.readProgress.mockResolvedValue(progress);
   mocks.executeGraph.mockResolvedValue({
     status: "complete",
@@ -143,6 +152,33 @@ describe("parseGeneralMissionDraft", () => {
     expect(parseGeneralMissionDraft([
       "Title",
       ...Array.from({ length: 7 }, (_, index) => `- Task ${index + 1}`)
+    ].join("\n"))).toBeNull();
+  });
+
+  it("accepts one explicit bounded all or any continuation", () => {
+    expect(parseGeneralMissionDraft([
+      "Launch readiness",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step"
+    ].join("\n"))).toEqual({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step"
+      }
+    });
+    expect(parseGeneralMissionDraft([
+      "Fallback brief",
+      "- Check source A",
+      "- Check source B",
+      "any: Write from the available evidence"
+    ].join("\n"))?.join?.strategy).toBe("any");
+    expect(parseGeneralMissionDraft([
+      "Too large",
+      ...Array.from({ length: 6 }, (_, index) => `- Task ${index + 1}`),
+      "all: Combine"
     ].join("\n"))).toBeNull();
   });
 });
@@ -239,6 +275,74 @@ describe("executeGeneralMission", () => {
       resolveBackend: async () => backend
     })).rejects.toThrow("authorized Mission route");
     expect(mocks.createPlan).not.toHaveBeenCalled();
+  });
+
+  it("opens an explicit dependency join before provider execution", async () => {
+    const ids = [
+      "mission-1",
+      "plan-2",
+      "plan-revision-3",
+      "mission-run-4",
+      "event-5",
+      "run-create-6",
+      "join-open-7",
+      "join-open-key-8"
+    ];
+    mocks.getRun.mockResolvedValue({
+      run: { id: "mission-run-4" },
+      events: [
+        completion("task-1", "output-1"),
+        completion("task-2", "output-2"),
+        completion("joined-result", "output-final")
+      ]
+    });
+    const result = await executeGeneralMission({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief.", "Identify the main risks."],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step from both drafts."
+      },
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend,
+      model: "gpt-5",
+      resolveBackend: async () => backend,
+      createId: () => ids.shift()!
+    });
+
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      constraints: [expect.objectContaining({
+        key: "native:general-declared-graph:v1"
+      })],
+      bounds: expect.objectContaining({
+        maxSteps: 3,
+        maxDependenciesPerStep: 2,
+        maxParallelSteps: 2
+      }),
+      steps: [
+        expect.objectContaining({ key: "task-1", dependsOnStepKeys: [] }),
+        expect.objectContaining({ key: "task-2", dependsOnStepKeys: [] }),
+        expect.objectContaining({
+          key: "joined-result",
+          dependsOnStepKeys: ["task-1", "task-2"]
+        })
+      ]
+    }));
+    expect(mocks.openJoin).toHaveBeenCalledWith({
+      runId: "mission-run-4",
+      targetStepKey: "joined-result",
+      strategy: "all",
+      allowFailedWorkers: false,
+      eventId: "join-open-7",
+      idempotencyKey: "join-open-key-8",
+      expectedRunRevision: 5,
+      expectedLastSequence: 5
+    });
+    expect(mocks.openJoin.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.executeGraph.mock.invocationCallOrder[0]!);
+    expect(result).toMatchObject({ outcome: "awaiting-review" });
+    expect(result.text).toContain("## Recommend the next step from both drafts");
   });
 });
 
