@@ -3296,6 +3296,13 @@ export async function readRuntimeMissionProgress(runId: string): Promise<Runtime
   catch (error) { throw toRuntimeError(error); }
 }
 
+export async function prepareRuntimeMissionWorkers(runId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<Record<string, unknown>>("mission_coordination_prepare_workers", { runId });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 export async function advanceRuntimeMissionCoordination(runId: string): Promise<{
   journal: Record<string, unknown>;
   progress: RuntimeMissionProgress;

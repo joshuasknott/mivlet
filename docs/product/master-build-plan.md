@@ -889,8 +889,16 @@ records every now-ready reference-only coordinate aggregation in Plan order.
 Event and idempotency identities are derived from the run, event kind, and exact
 join or step reference; no renderer-selected head, status, worker set, time, or
 output crosses the boundary. The loop is capped at sixty-four facts and rolls
-back on malformed or over-limit state. Starting/routing arbitrary ready workers,
-and general restart dispatch remain open.
+back on malformed or over-limit state. A separate authenticated native preparation
+command can now derive every executable provider-only worker from the same selected
+Plan using only a Run id. Worker and event identities, role, objective, output
+contract, evidence requirement, stop conditions, and the minimum of saved Run,
+Mission, Plan-step, and conservative default budgets are native-derived. Exact
+replay is idempotent; partial or changed preparation, worker-budget overflow, and
+capability-bearing steps fail the transaction before any append. Context, tools,
+grants, routes, credentials, approvals, and placement remain empty rather than
+being inferred. Starting/routing arbitrary ready workers, native grant composition
+for tool-bearing steps, and general restart dispatch remain open.
 
 A provider-neutral portable graph runner now drives arbitrary compiled worker
 graphs through replay-safe callbacks rather than assuming either benchmark

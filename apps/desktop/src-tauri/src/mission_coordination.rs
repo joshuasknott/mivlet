@@ -223,6 +223,376 @@ fn terminal_workers(
     (completed, failed)
 }
 
+fn deterministic_worker_id(run_id: &str, plan_revision_id: &str, step_key: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.mission.worker.v1\0");
+    digest.update(run_id.as_bytes());
+    digest.update(b"\0");
+    digest.update(plan_revision_id.as_bytes());
+    digest.update(b"\0");
+    digest.update(step_key.as_bytes());
+    format!("mission_worker_{:x}", digest.finalize())
+}
+
+fn bounded_worker_budget(run: &Value, mission: &Value, step: &Value) -> Result<Value, String> {
+    let defaults = [
+        ("maxDurationMs", 600_000_i64),
+        ("maxInputTokens", 32_000_i64),
+        ("maxOutputTokens", 8_000_i64),
+        ("maxToolCalls", 20_i64),
+        ("maxAttempts", 1_i64),
+    ];
+    let sources = [
+        run.get("budget"),
+        mission.get("budget"),
+        step.get("estimatedBudget"),
+    ];
+    let mut budget = serde_json::Map::new();
+    for (key, default) in defaults {
+        let mut value = default;
+        for source in sources.iter().flatten() {
+            let Some(candidate) = source.get(key) else {
+                continue;
+            };
+            let candidate = candidate
+                .as_i64()
+                .filter(|candidate| *candidate > 0)
+                .ok_or_else(|| format!("Mission worker {key} is invalid."))?;
+            value = value.min(candidate);
+        }
+        budget.insert(key.into(), json!(value));
+    }
+    if let Some(cost) = sources
+        .iter()
+        .flatten()
+        .find_map(|source| source.get("maxCost"))
+    {
+        let amount = bounded(
+            cost.get("amount")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Mission worker maximum cost is invalid.".to_string())?,
+            "Mission worker maximum cost",
+            80,
+        )?;
+        let currency = bounded(
+            cost.get("currencyCode")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Mission worker maximum cost currency is invalid.".to_string())?,
+            "Mission worker maximum cost currency",
+            12,
+        )?;
+        budget.insert(
+            "maxCost".into(),
+            json!({"amount":amount,"currencyCode":currency}),
+        );
+    }
+    Ok(Value::Object(budget))
+}
+
+fn derived_provider_worker(
+    authorized: &AuthorizedRun,
+    step: &Value,
+    at: &str,
+) -> Result<Value, String> {
+    let run_id = bounded(
+        authorized
+            .journal
+            .run
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission run identity is invalid.".to_string())?,
+        "Mission run",
+        200,
+    )?;
+    let revision_id = bounded(
+        authorized
+            .lifecycle
+            .current_revision
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Selected plan revision is invalid.".to_string())?,
+        "Selected plan revision",
+        200,
+    )?;
+    let step_key = bounded(
+        step.get("key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission step identity is invalid.".to_string())?,
+        "Mission step",
+        160,
+    )?;
+    let kind = step
+        .get("kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "Mission step kind is invalid.".to_string())?;
+    let role_kind = match kind {
+        "investigate" | "produce" => "specialist",
+        "act" => "executor",
+        "review" => "reviewer",
+        "coordinate" => {
+            return Err("A coordinate step cannot create a provider worker.".into());
+        }
+        _ => return Err("Mission step kind is unsupported.".into()),
+    };
+    let title = bounded(
+        step.get("title")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission step title is invalid.".to_string())?,
+        "Mission step title",
+        240,
+    )?;
+    let objective = bounded(
+        step.get("objective")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission step objective is invalid.".to_string())?,
+        "Mission step objective",
+        2_000,
+    )?;
+    let capabilities = step
+        .get("requiredCapabilities")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "Mission step capabilities are invalid.".to_string())?;
+    if !capabilities.is_empty() {
+        return Err(
+            "Capability-bearing Mission steps require explicit native grant composition.".into(),
+        );
+    }
+    let outputs = step
+        .get("expectedOutputs")
+        .and_then(Value::as_array)
+        .filter(|outputs| outputs.len() <= 32)
+        .ok_or_else(|| "Mission step outputs are invalid.".to_string())?;
+    let acceptance = step
+        .get("acceptanceCriterionKeys")
+        .and_then(Value::as_array)
+        .filter(|criteria| criteria.len() <= 32)
+        .ok_or_else(|| "Mission step acceptance is invalid.".to_string())?;
+    let mission = &authorized.lifecycle.mission;
+    let workspace_id = mission
+        .get("workspaceId")
+        .cloned()
+        .ok_or_else(|| "Mission workspace is invalid.".to_string())?;
+    let visibility = mission
+        .get("visibility")
+        .cloned()
+        .ok_or_else(|| "Mission visibility is invalid.".to_string())?;
+    let owner = mission
+        .get("ownerMemberId")
+        .cloned()
+        .ok_or_else(|| "Mission owner is invalid.".to_string())?;
+    let authority = mission
+        .get("authority")
+        .cloned()
+        .ok_or_else(|| "Mission authority is invalid.".to_string())?;
+    let schema_version = mission
+        .get("schemaVersion")
+        .cloned()
+        .ok_or_else(|| "Mission schema version is invalid.".to_string())?;
+    let creator = mission
+        .get("createdByInternalUserId")
+        .cloned()
+        .ok_or_else(|| "Mission creator is invalid.".to_string())?;
+    let budget = bounded_worker_budget(&authorized.journal.run, mission, step)?;
+    Ok(json!({
+        "workspaceId":workspace_id,"visibility":visibility,"ownerMemberId":owner,
+        "authority":authority,"schemaVersion":schema_version,"revision":1,
+        "createdByInternalUserId":creator,"createdAt":at,"updatedAt":at,
+        "id":deterministic_worker_id(&run_id, &revision_id, &step_key),
+        "runId":run_id,"status":"proposed",
+        "role":{"kind":role_kind,"title":title,"objective":objective,
+            "responsibilities":[objective]},
+        "planRevisionId":revision_id,"planStepKey":step_key,
+        "context":[],"capabilityIds":[],"capabilityGrantIds":[],"tools":[],
+        "budget":budget,
+        "stopConditions":[
+            {"kind":"objective-met","description":
+                "Stop when the assigned objective and required outputs are complete."},
+            {"kind":"budget-reached","description":"Stop before any worker budget is exceeded."},
+            {"kind":"no-progress","description":
+                "Stop after two iterations without useful progress.","threshold":2}
+        ],
+        "outputContract":{"slots":outputs,
+            "includeEvidence":!acceptance.is_empty(),"includeUncertainty":true,
+            "delivery":"run-result"}
+    }))
+}
+
+fn prepare_provider_workers_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    mut authorized: AuthorizedRun,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    if !matches!(
+        authorized.journal.run.get("status").and_then(Value::as_str),
+        Some("created" | "planning" | "queued" | "running")
+    ) {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission workers can be prepared only before a wait or terminal state.".into(),
+        ));
+    }
+    let steps = authorized
+        .lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| !steps.is_empty() && steps.len() <= 32)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Mission worker preparation requires one to thirty-two selected steps.".into(),
+            )
+        })?;
+    let executable = steps
+        .iter()
+        .filter(|step| step.get("kind").and_then(Value::as_str) != Some("coordinate"))
+        .collect::<Vec<_>>();
+    if executable.is_empty() {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission worker preparation requires an executable step.".into(),
+        ));
+    }
+    let max_workers = authorized
+        .journal
+        .run
+        .pointer("/budget/maxWorkers")
+        .and_then(Value::as_u64)
+        .unwrap_or(executable.len() as u64);
+    if executable.len() as u64 > max_workers {
+        return Err(crate::store::StoreError::Invalid(
+            "Selected Mission steps exceed the saved worker budget.".into(),
+        ));
+    }
+    let at = now();
+    let expected = executable
+        .iter()
+        .map(|step| derived_provider_worker(&authorized, step, &at))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(crate::store::StoreError::Invalid)?;
+    let existing = authorized
+        .journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .collect::<Vec<_>>();
+    if !existing.is_empty() {
+        if existing.len() != expected.len() {
+            return Err(crate::store::StoreError::Invalid(
+                "Stored Mission worker preparation is incomplete.".into(),
+            ));
+        }
+        for expected_worker in &expected {
+            let worker_id = expected_worker.get("id").and_then(Value::as_str);
+            let event = existing
+                .iter()
+                .find(|event| {
+                    event.pointer("/payload/worker/id").and_then(Value::as_str) == worker_id
+                })
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Stored Mission worker preparation changed.".into(),
+                    )
+                })?;
+            let created_at = event
+                .pointer("/payload/worker/createdAt")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Stored Mission worker preparation is invalid.".into(),
+                    )
+                })?;
+            let step_key = event
+                .pointer("/payload/worker/planStepKey")
+                .and_then(Value::as_str)
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Stored Mission worker preparation is invalid.".into(),
+                    )
+                })?;
+            let step = executable
+                .iter()
+                .find(|step| step.get("key").and_then(Value::as_str) == Some(step_key))
+                .ok_or_else(|| {
+                    crate::store::StoreError::Invalid(
+                        "Stored Mission worker preparation is out of Plan.".into(),
+                    )
+                })?;
+            let replay = derived_provider_worker(&authorized, step, created_at)
+                .map_err(crate::store::StoreError::Invalid)?;
+            if event.pointer("/payload/worker") != Some(&replay) {
+                return Err(crate::store::StoreError::Invalid(
+                    "Stored Mission worker preparation changed.".into(),
+                ));
+            }
+        }
+        return Ok(authorized.journal);
+    }
+    for worker in expected {
+        let worker_id = worker.get("id").and_then(Value::as_str).ok_or_else(|| {
+            crate::store::StoreError::Invalid("Derived Mission worker is invalid.".into())
+        })?;
+        let revision = authorized
+            .journal
+            .run
+            .get("revision")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run revision is invalid.".into())
+            })?;
+        let last_sequence = authorized
+            .journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission run event head is invalid.".into())
+            })?;
+        let sequence = last_sequence + 1;
+        let event_id = format!(
+            "mission-worker-created-{}",
+            &worker_id["mission_worker_".len()..]
+        );
+        let idempotency_key = format!("mission-worker-create:v1:{worker_id}");
+        let event = json!({
+            "id":event_id,"runId":authorized.journal.run.get("id"),
+            "type":"worker-created","sequence":sequence,
+            "previousEventId":authorized.journal.run.pointer("/eventHead/lastEventId"),
+            "attemptNumber":authorized.journal.run.get("currentAttemptNumber")
+                .and_then(Value::as_i64).unwrap_or(1),
+            "occurredAt":at,"actor":{"kind":"system"},
+            "idempotencyKey":idempotency_key,"payload":{"worker":worker}
+        });
+        let mut projected = authorized.journal.run.as_object().cloned().ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run record is invalid.".into())
+        })?;
+        projected.insert("revision".into(), json!(revision + 1));
+        projected.insert("updatedAt".into(), json!(at));
+        projected.insert(
+            "eventHead".into(),
+            json!({"lastSequence":sequence,"lastEventId":event_id}),
+        );
+        authorized.journal = mission_run::append(
+            tx,
+            store,
+            &authorized.scope,
+            &authorized.member,
+            authorized
+                .journal
+                .run
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default(),
+            revision,
+            last_sequence,
+            &event_id,
+            "worker-created",
+            &idempotency_key,
+            &event,
+            &Value::Object(projected),
+            &at,
+        )?;
+    }
+    Ok(authorized.journal)
+}
+
 fn strict_terminal_workers(
     journal: &mission_run::MissionRunJournalRow,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
@@ -2149,6 +2519,20 @@ pub fn mission_coordination_progress_read(run_id: String) -> Result<Value, Strin
 }
 
 #[tauri::command]
+pub fn mission_coordination_prepare_workers(
+    run_id: String,
+) -> Result<mission_run::MissionRunJournalRow, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .transaction(|tx| {
+            let authorized = authorized_run(tx, store, &run_id)?;
+            prepare_provider_workers_in_tx(tx, store, authorized)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn mission_coordination_advance(run_id: String) -> Result<Value, String> {
     let run_id = bounded(&run_id, "Mission run", 160)?;
     let store = crate::store::try_global()
@@ -2945,6 +3329,65 @@ mod tests {
     }
 
     #[test]
+    fn provider_worker_is_derived_from_the_selected_plan_without_authority() {
+        let scope = DataScope::workspace("workspace-1").unwrap();
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({
+                "id":"mission-1","workspaceId":"workspace-1","visibility":"member-private",
+                "ownerMemberId":"member-1","authority":"local","schemaVersion":1,
+                "createdByInternalUserId":"user-1",
+                "budget":{"maxOutputTokens":3000,"maxAttempts":2}
+            }),
+            plan: json!({}),
+            current_revision: json!({"id":"revision-1"}),
+        };
+        let authorized = AuthorizedRun {
+            scope,
+            member: "member-1".into(),
+            actor: "user-1".into(),
+            journal: mission_run::MissionRunJournalRow {
+                run: json!({
+                    "id":"run-1","budget":{"maxWorkers":2,"maxOutputTokens":5000,
+                        "maxCost":{"amount":"2.00","currencyCode":"USD"}}
+                }),
+                events: vec![],
+            },
+            lifecycle,
+        };
+        let step = json!({
+            "key":"draft","kind":"produce","title":"Prepare the draft",
+            "objective":"Prepare one bounded draft.","requiredCapabilities":[],
+            "expectedOutputs":[{"key":"draft","description":"The draft","required":true}],
+            "acceptanceCriterionKeys":["complete"],"estimatedBudget":{"maxOutputTokens":1000}
+        });
+        let worker =
+            derived_provider_worker(&authorized, &step, "2026-07-23T10:00:00.000Z").unwrap();
+        assert_eq!(
+            worker["id"],
+            deterministic_worker_id("run-1", "revision-1", "draft")
+        );
+        assert_eq!(worker["budget"]["maxOutputTokens"], 1000);
+        assert_eq!(worker["budget"]["maxAttempts"], 1);
+        assert_eq!(worker["budget"]["maxCost"]["amount"], "2.00");
+        assert_eq!(worker["role"]["kind"], "specialist");
+        assert_eq!(worker["capabilityIds"], json!([]));
+        assert_eq!(worker["capabilityGrantIds"], json!([]));
+        assert_eq!(worker["tools"], json!([]));
+        assert_eq!(worker["outputContract"]["includeEvidence"], true);
+
+        let capability_step = json!({
+            "key":"search","kind":"investigate","title":"Search","objective":"Search.",
+            "requiredCapabilities":["knowledge.content.search"],"expectedOutputs":[],
+            "acceptanceCriterionKeys":[]
+        });
+        assert!(
+            derived_provider_worker(&authorized, &capability_step, "2026-07-23T10:00:00.000Z")
+                .unwrap_err()
+                .contains("explicit native grant composition")
+        );
+    }
+
+    #[test]
     fn progress_projection_derives_ready_work_usage_and_terminal_acceptance() {
         let lifecycle = mission_plan::MissionPlanLifecycleRow {
             mission: json!({
@@ -3565,23 +4008,73 @@ mod tests {
                         &created,
                         at,
                     )?;
-                    append_general_store_event(
+                    let journal = mission_run::get(
                         tx,
                         &store,
                         &scope,
-                        &mut run,
-                        "event-worker",
-                        "worker-created",
-                        json!({"worker":{
-                            "id":"worker-final","runId":"run-general-store",
-                            "planRevisionId":"revision-general-store","planStepKey":"final",
-                            "outputContract":{"slots":[{
-                                "key":"final","description":"the final brief","required":true
-                            }]}
-                        }}),
-                        json!({"kind":"system"}),
-                        at,
+                        "member-1",
+                        "run-general-store",
+                    )?
+                    .unwrap();
+                    let lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-general-store",
+                    )?
+                    .unwrap();
+                    let prepared = prepare_provider_workers_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal,
+                            lifecycle,
+                        },
                     )?;
+                    assert_eq!(prepared.events.last().unwrap()["type"], "worker-created");
+                    assert_eq!(
+                        prepared.events.last().unwrap()["payload"]["worker"]["planStepKey"],
+                        "final"
+                    );
+                    let prepared_worker_id = prepared.events.last().unwrap()["payload"]["worker"]
+                        ["id"]
+                        .as_str()
+                        .unwrap()
+                        .to_string();
+                    let prepared_event_count = prepared.events.len();
+                    let replay_journal = mission_run::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-general-store",
+                    )?
+                    .unwrap();
+                    let replay_lifecycle = mission_plan::get(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "mission-general-store",
+                    )?
+                    .unwrap();
+                    let replayed = prepare_provider_workers_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal: replay_journal,
+                            lifecycle: replay_lifecycle,
+                        },
+                    )?;
+                    assert_eq!(replayed.events.len(), prepared_event_count);
+                    run = replayed.run;
                     append_general_store_event(
                         tx,
                         &store,
@@ -3589,7 +4082,8 @@ mod tests {
                         &mut run,
                         "event-completed",
                         "worker-completed",
-                        json!({"workerId":"worker-final","outputs":[{
+                        json!({"workerId":prepared_worker_id,
+                            "outputs":[{
                             "key":"final","summary":"Final cited brief.",
                             "valueReference":"mission-output:final"
                         }]}),
@@ -3605,7 +4099,7 @@ mod tests {
                         "evaluation-recorded",
                         json!({"evaluation":{
                             "evaluationKey":"policy-grounded",
-                            "target":{"kind":"worker","workerId":"worker-final"},
+                            "target":{"kind":"worker","workerId":prepared_worker_id},
                             "verdict":"pass","summary":"Policy passed.","evaluatedAt":at,
                             "criteria":[{"criterionKey":"grounded","passed":true,
                                 "summary":"Grounded.","evidenceRefs":["source-1"]}]

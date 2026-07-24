@@ -21,6 +21,7 @@ import {
   listRuntimeNativeProviderRoutes,
   openRuntimeMissionJoin,
   openRuntimeParallelApproachesJoin,
+  prepareRuntimeMissionWorkers,
   prepareRuntimeParallelApproachesReviewer,
   recoverRuntimeParallelApproachesReviewers,
   finalizeRuntimeParallelApproaches,
@@ -590,6 +591,7 @@ describe("mission runtime boundary", () => {
     await resolveRuntimeMissionJoin(resolveJoin);
     await recordRuntimeMissionAggregation(aggregation);
     await readRuntimeMissionProgress("run-1");
+    await prepareRuntimeMissionWorkers("run-1");
     await advanceRuntimeMissionCoordination("run-1");
     await finalizeRuntimeMissionCoordination("run-1");
     await getRuntimeMissionPlan("mission-1");
@@ -625,6 +627,7 @@ describe("mission runtime boundary", () => {
       ["mission_coordination_join_resolve", { input: resolveJoin }],
       ["mission_coordination_aggregation_record", { input: aggregation }],
       ["mission_coordination_progress_read", { runId: "run-1" }],
+      ["mission_coordination_prepare_workers", { runId: "run-1" }],
       ["mission_coordination_advance", { runId: "run-1" }],
       ["mission_coordination_finalize", { runId: "run-1" }],
       ["mission_plan_get", { missionId: "mission-1" }],
