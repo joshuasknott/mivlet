@@ -4,16 +4,18 @@
 //! side-effect proposal. It never executes the effect, selects a provider, or
 //! turns approval into policy, factual, credential, or acceptance authority.
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use crate::store::repos::{
-    mission_checkpoint, mission_plan, mission_run, scope::DataScope, workspace_directory,
+    mission_approval_consumption, mission_checkpoint, mission_plan, mission_run, scope::DataScope,
+    workspace_directory,
 };
 
 const MAX_PENDING_APPROVALS: i64 = 101;
+const APPROVED_EFFECT_FRESHNESS_SECONDS: i64 = 15 * 60;
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -95,6 +97,20 @@ pub struct MissionApprovalResolutionReceipt {
     decided_at: String,
     run_revision: i64,
     last_sequence: i64,
+}
+
+/// A stack-local proof returned only to a native effect adapter after the
+/// durable approval has been atomically consumed. It is deliberately neither
+/// serializable nor exposed as a Tauri command result.
+#[allow(dead_code)]
+#[derive(Debug)]
+pub(crate) struct MissionEffectPermit {
+    pub(crate) run_id: String,
+    pub(crate) wait_key: String,
+    pub(crate) resolution_event_id: String,
+    pub(crate) proposal_hash: String,
+    pub(crate) effect: MissionApprovalEffect,
+    pub(crate) consumed_at: String,
 }
 
 struct Authorized {
@@ -919,6 +935,194 @@ fn exact_resolution_replay(
     })
 }
 
+/// Native effect adapters call this inside their authenticated transaction
+/// immediately before egress. Consuming first gives at-most-once semantics:
+/// a crash can require a fresh approval, but can never silently replay an
+/// uncertain consequential effect.
+///
+/// No renderer command wraps this function. Until a concrete native effect
+/// adapter calls it, approved Mission waits execute nothing.
+#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn consume_approved_effect_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    wait_key: &str,
+    proposal_hash: &str,
+    effect: &MissionApprovalEffect,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+) -> crate::store::Result<MissionEffectPermit> {
+    consume_approved_effect_at(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        wait_key,
+        proposal_hash,
+        effect,
+        expected_run_revision,
+        expected_last_sequence,
+        &now(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn consume_approved_effect_at(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &DataScope,
+    owner_member_id: &str,
+    run_id: &str,
+    wait_key: &str,
+    proposal_hash: &str,
+    effect: &MissionApprovalEffect,
+    expected_run_revision: i64,
+    expected_last_sequence: i64,
+    consumed_at: &str,
+) -> crate::store::Result<MissionEffectPermit> {
+    validate_effect(effect).map_err(crate::store::StoreError::Invalid)?;
+    validate_hash(proposal_hash, "Mission approval proposal")
+        .map_err(crate::store::StoreError::Invalid)?;
+    let journal = mission_run::get(tx, store, scope, owner_member_id, run_id)?
+        .ok_or_else(|| crate::store::StoreError::Invalid("Mission run is unavailable.".into()))?;
+    if journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || journal.run.get("revision").and_then(Value::as_i64) != Some(expected_run_revision)
+        || journal
+            .run
+            .pointer("/eventHead/lastSequence")
+            .and_then(Value::as_i64)
+            != Some(expected_last_sequence)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "The Mission changed before its approved effect could run.".into(),
+        ));
+    }
+    let resolutions = journal
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("type").and_then(Value::as_str) == Some("approval-resolved")
+                && event
+                    .pointer("/payload/resolution/waitKey")
+                    .and_then(Value::as_str)
+                    == Some(wait_key)
+        })
+        .collect::<Vec<_>>();
+    if resolutions.len() != 1 {
+        return Err(crate::store::StoreError::Invalid(
+            "The approved Mission effect has no unique resolution.".into(),
+        ));
+    }
+    let resolution = resolutions[0];
+    let event_id = resolution
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission approval resolution is invalid.".into())
+        })?
+        .to_string();
+    let request_id = resolution
+        .get("previousEventId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission approval request link is invalid.".into())
+        })?;
+    let request = journal
+        .events
+        .iter()
+        .find(|event| event.get("id").and_then(Value::as_str) == Some(request_id))
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission approval request is unavailable.".into())
+        })?;
+    let resolved_effect = resolution
+        .pointer("/payload/resolution/effect")
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission approval effect is unavailable.".into())
+        })?;
+    let decided_at = resolution
+        .get("occurredAt")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission approval decision time is invalid.".into())
+        })?;
+    let approver = resolution
+        .pointer("/actor/internalUserId")
+        .and_then(Value::as_str);
+    if resolution
+        .pointer("/payload/resolution/decision")
+        .and_then(Value::as_str)
+        != Some("approved")
+        || resolution
+            .pointer("/payload/resolution/acceptedProposalHash")
+            .and_then(Value::as_str)
+            != Some(proposal_hash)
+        || resolved_effect != &json!(effect)
+        || resolution.pointer("/actor/kind").and_then(Value::as_str) != Some("internal-user")
+        || resolution
+            .pointer("/actor/memberId")
+            .and_then(Value::as_str)
+            != Some(owner_member_id)
+        || approver.is_none_or(str::is_empty)
+        || request.get("type").and_then(Value::as_str) != Some("approval-requested")
+        || request
+            .pointer("/payload/wait/proposalHash")
+            .and_then(Value::as_str)
+            != Some(proposal_hash)
+        || request.pointer("/payload/wait/effect") != Some(resolved_effect)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "The Mission effect does not match its exact approved proposal.".into(),
+        ));
+    }
+    let decided = DateTime::parse_from_rfc3339(decided_at).map_err(|_| {
+        crate::store::StoreError::Invalid("Mission approval decision time is invalid.".into())
+    })?;
+    let consumed = DateTime::parse_from_rfc3339(consumed_at)
+        .map_err(|_| crate::store::StoreError::Invalid("Mission effect time is invalid.".into()))?;
+    let age = consumed.signed_duration_since(decided).num_seconds();
+    if !(0..=APPROVED_EFFECT_FRESHNESS_SECONDS).contains(&age) {
+        return Err(crate::store::StoreError::Invalid(
+            "The Mission approval is stale; ask for a fresh decision.".into(),
+        ));
+    }
+    let receipt = json!({
+        "workspaceId":scope.workspace_id(),
+        "ownerMemberId":owner_member_id,
+        "runId":run_id,
+        "waitKey":wait_key,
+        "resolutionEventId":event_id,
+        "proposalHash":proposal_hash,
+        "effectKey":effect.effect_key,
+        "consumedAt":consumed_at
+    });
+    mission_approval_consumption::consume(
+        tx,
+        store,
+        scope,
+        owner_member_id,
+        run_id,
+        wait_key,
+        &event_id,
+        proposal_hash,
+        &effect.effect_key,
+        &receipt,
+        consumed_at,
+    )?;
+    Ok(MissionEffectPermit {
+        run_id: run_id.to_string(),
+        wait_key: wait_key.to_string(),
+        resolution_event_id: event_id,
+        proposal_hash: proposal_hash.to_string(),
+        effect: effect.clone(),
+        consumed_at: consumed_at.to_string(),
+    })
+}
+
 fn lifecycle_for_run(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -1070,6 +1274,13 @@ fn validate_effect(effect: &MissionApprovalEffect) -> Result<(), String> {
         200,
     )?;
     safe_summary(&effect.target_summary, "Approval target summary", 500)
+}
+
+fn validate_hash(value: &str, label: &str) -> Result<(), String> {
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(format!("{label} is invalid."));
+    }
+    Ok(())
 }
 
 fn safe_summary(value: &str, label: &str, max: usize) -> Result<(), String> {
@@ -1385,6 +1596,87 @@ mod tests {
                 .transaction(|tx| resolve_in_tx(tx, &store, &auth, &resolution))
                 .unwrap();
             assert_eq!(replayed_receipt.decision, "approved");
+            let changed_effect = MissionApprovalEffect {
+                target_summary: "A substituted target".into(),
+                ..request.effect.clone()
+            };
+            let changed_error = store
+                .transaction(|tx| {
+                    consume_approved_effect_at(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-1",
+                        &pending.wait_key,
+                        &request.proposal_hash,
+                        &changed_effect,
+                        6,
+                        5,
+                        &receipt.decided_at,
+                    )
+                })
+                .unwrap_err();
+            assert!(changed_error
+                .to_string()
+                .contains("exact approved proposal"));
+            let stale_at = (DateTime::parse_from_rfc3339(&receipt.decided_at).unwrap()
+                + chrono::Duration::seconds(APPROVED_EFFECT_FRESHNESS_SECONDS + 1))
+            .to_rfc3339_opts(SecondsFormat::Millis, true);
+            let stale_error = store
+                .transaction(|tx| {
+                    consume_approved_effect_at(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-1",
+                        &pending.wait_key,
+                        &request.proposal_hash,
+                        &request.effect,
+                        6,
+                        5,
+                        &stale_at,
+                    )
+                })
+                .unwrap_err();
+            assert!(stale_error.to_string().contains("approval is stale"));
+            let permit = store
+                .transaction(|tx| {
+                    consume_approved_effect_at(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-1",
+                        &pending.wait_key,
+                        &request.proposal_hash,
+                        &request.effect,
+                        6,
+                        5,
+                        &receipt.decided_at,
+                    )
+                })
+                .unwrap();
+            assert_eq!(permit.wait_key, pending.wait_key);
+            let replay_error = store
+                .transaction(|tx| {
+                    consume_approved_effect_at(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "run-1",
+                        &pending.wait_key,
+                        &request.proposal_hash,
+                        &request.effect,
+                        6,
+                        5,
+                        &receipt.decided_at,
+                    )
+                })
+                .unwrap_err();
+            assert!(replay_error.to_string().contains("already consumed"));
             let journal = store
                 .with_conn(|tx| {
                     mission_run::get(tx, &store, &scope, "member-1", "run-1")?
@@ -1426,5 +1718,22 @@ mod tests {
         assert_eq!(journal.run["status"], "running");
         assert_eq!(journal.events.last().unwrap()["type"], "approval-resolved");
         assert_eq!(lifecycle.mission["status"], "running");
+        let wait_key = journal.events.last().unwrap()["payload"]["resolution"]["waitKey"]
+            .as_str()
+            .unwrap();
+        let consumption = store
+            .with_conn(|tx| {
+                mission_approval_consumption::get(tx, &store, &scope, "member-1", wait_key)
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(consumption.run_id, "run-1");
+        assert_eq!(consumption.effect_key, "publish:update-1");
+        assert!(store
+            .with_conn(|tx| {
+                mission_approval_consumption::get(tx, &store, &scope, "member-2", wait_key)
+            })
+            .unwrap()
+            .is_none());
     }
 }

@@ -194,9 +194,13 @@ fixed cited-artifact acceptance path. Rust binds one secret-safe action and
 effect summary, proposal hash, idempotency identity, optional exact live worker,
 selected Plan, and current Run head into an encrypted wait checkpoint before an
 identified internal user may approve or deny it. The resolution merely returns
-the Mission to running: it executes no effect and is not reusable authority. A
-native effect adapter must still validate and one-time-consume that exact
-approved proposal immediately before egress; that composition remains open.
+the Mission to running: it executes no effect and is not reusable authority.
+Schema v35 adds an empty-by-migration encrypted consumption ledger. Its internal
+native pre-egress boundary revalidates the exact approved proposal, identified
+approver, current Run head, and fifteen-minute freshness window, then consumes it
+once before returning a stack-local, non-serializable permit. A crash after
+consumption fails closed and requires a fresh approval. Concrete effect adapters
+must still compose this internal boundary immediately before their egress.
 Bounded iterative work uses a provider-neutral continuation policy over
 contiguous durable facts. Saved execution budgets and explicit no-progress,
 deadline, cancellation, human-stop, policy-stop, and iteration limits determine

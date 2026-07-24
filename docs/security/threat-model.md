@@ -55,6 +55,12 @@
 - OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.
 - The auth broker is required only for confidential-client or provider-installation flows. It has no model endpoint and no authority to execute connector actions.
 - General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, fresh, unconsumed permit. Argument substitution, risk or mode downgrade, stale permits, and replay fail closed. High-risk tool calls and all connector writes require a fresh per-action decision.
+- General Mission approval resolution also executes nothing. Its separate
+  owner-qualified encrypted consumption ledger is empty on migration. A native
+  effect adapter must revalidate the exact proposal, identified approver,
+  current Run head, and fifteen-minute freshness before atomically consuming it
+  once; the resulting stack-local proof is not serializable or renderer-visible.
+  Crash after consumption fails closed and requires a fresh approval.
 - Native tools recheck the registered permission/risk policy, active profile,
   and exact argument preview. File operations remain workspace-confined.
 - Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code. Preparation and execution fail closed when the captured profile is read-only or otherwise does not allow connector writes.

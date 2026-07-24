@@ -9,7 +9,38 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 34;
+pub const CURRENT_SCHEMA_VERSION: u32 = 35;
+
+/// Forward schema step `v34 -> v35`: adds an encrypted, owner-qualified
+/// at-most-once consumption ledger for approved Mission effects.
+///
+/// Migration creates no permit or authority. A row is written only by the
+/// authenticated native pre-egress boundary after it revalidates the exact
+/// approval proposal and its freshness.
+pub const SCHEMA_V34_TO_V35: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS mission_approval_consumption (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  wait_key TEXT NOT NULL,
+  resolution_event_id TEXT NOT NULL,
+  proposal_hash TEXT NOT NULL,
+  effect_key TEXT NOT NULL,
+  consumed_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,wait_key),
+  UNIQUE(workspace_id,owner_member_id,resolution_event_id),
+  FOREIGN KEY(workspace_id,owner_member_id,run_id)
+    REFERENCES mission_run_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,resolution_event_id)
+    REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mission_approval_consumption_run
+  ON mission_approval_consumption(workspace_id,owner_member_id,run_id,consumed_at);
+"#;
 
 /// Forward schema step `v32 -> v33`: adds the canonical encrypted Routine
 /// repository, portable occurrence history, node-local driver state, reversible
@@ -1846,6 +1877,27 @@ CREATE TABLE IF NOT EXISTS mission_checkpoint_state (
 );
 CREATE INDEX IF NOT EXISTS idx_mission_checkpoint_run
   ON mission_checkpoint_state(workspace_id,owner_member_id,run_id,created_at);
+
+CREATE TABLE IF NOT EXISTS mission_approval_consumption (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_member_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  wait_key TEXT NOT NULL,
+  resolution_event_id TEXT NOT NULL,
+  proposal_hash TEXT NOT NULL,
+  effect_key TEXT NOT NULL,
+  consumed_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_member_id,wait_key),
+  UNIQUE(workspace_id,owner_member_id,resolution_event_id),
+  FOREIGN KEY(workspace_id,owner_member_id,run_id)
+    REFERENCES mission_run_record(workspace_id,owner_member_id,id) ON DELETE CASCADE,
+  FOREIGN KEY(workspace_id,owner_member_id,resolution_event_id)
+    REFERENCES mission_run_event(workspace_id,owner_member_id,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mission_approval_consumption_run
+  ON mission_approval_consumption(workspace_id,owner_member_id,run_id,consumed_at);
 
 CREATE TABLE IF NOT EXISTS mission_worker_output_receipt (
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,

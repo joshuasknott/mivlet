@@ -768,11 +768,16 @@ request/resolution replay is stable, changed scope/head/proposal fails, and the
 whole chain survives database reopen. General restart recovery now validates and
 preserves this approval shape alongside human input. Approval executes nothing,
 does not select a provider, and grants no policy, factual, acceptance,
-credential, placement, or reusable effect authority; a future native effect
-consumer must still recheck and one-time-consume the exact approved proposal
-immediately before egress. Automatic graph composition, effect consumption, and
-product UI remain open, so the Wave 4C human-input-and-approval checkbox stays
-unchecked.
+credential, placement, or reusable effect authority. Schema v35 adds an
+empty-by-migration, owner-qualified encrypted approval-consumption ledger, and an
+internal native boundary now requires the exact approved proposal, identified
+approver, current Run head, and a fifteen-minute freshness window before
+atomically consuming it once. It returns only a stack-local non-serializable
+permit; changed, denied, stale, cross-owner, or replayed consumption fails
+closed, and a crash after consumption requires fresh approval rather than risking
+duplicate egress. Concrete effect-adapter composition, automatic graph
+composition, and product UI remain open, so the Wave 4C
+human-input-and-approval checkbox stays unchecked.
 
 Conservative, explicit
 natural-language forms for goal, plan, schedule,

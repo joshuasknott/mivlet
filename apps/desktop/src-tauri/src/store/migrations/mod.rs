@@ -148,6 +148,9 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // selected writer initializes cursor evidence; migration does not
             // invent a last-evaluated instant.
             33 => conn.execute_batch(crate::store::schema::SCHEMA_V33_TO_V34)?,
+            // 34 -> 35: add an empty encrypted Mission approval-consumption
+            // ledger. Migration creates no approval or execution authority.
+            34 => conn.execute_batch(crate::store::schema::SCHEMA_V34_TO_V35)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -1595,9 +1598,23 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v34 is current; v34 -> v35 has no registered migration.
-        let err = apply(&conn, 34, 35).unwrap_err();
+        // v35 is current; v35 -> v36 has no registered migration.
+        let err = apply(&conn, 35, 36).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v34_to_v35_adds_an_empty_mission_approval_consumption_ledger() {
+        let conn = conn();
+        apply(&conn, 34, 35).unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM mission_approval_consumption",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
     }
 
     #[test]
