@@ -186,6 +186,12 @@ deadline, cancellation, human-stop, policy-stop, and iteration limits determine
 whether work may continue. Only policy or identified human acceptance can close
 the work; retry and escalation are recommendations requiring fresh native
 authorization rather than implicit provider or grant reuse.
+Dynamic review is similarly policy-bounded. A portable decision accepts the
+exact selected Mission and Plan plus an immutable native policy reference, then
+permits at most one review step when worker-owned acceptance criteria,
+high/critical policy risk, or bounded conflicting evidence justify it. Missing
+review structure requires a Plan revision; risk- or conflict-only reviews stay
+advisory and choose no provider or authority boundary.
 
 ## Schedules And Commands
 

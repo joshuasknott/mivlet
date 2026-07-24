@@ -896,6 +896,18 @@ authorization, so this layer cannot silently reuse a provider, credential,
 grant, approval, placement, or billing boundary. Native journal production and
 product composition of these general iteration facts remain open.
 
+A portable reviewer-decision boundary now rejects decorative or ambiguous
+reviewers. It requires the exact selected Mission/Plan scope and one immutable
+native policy reference, then justifies at most one review step from declared
+worker-evaluated acceptance criteria, high/critical policy risk, or bounded
+conflicting-evidence references. A missing step or assignment requests a Plan
+revision instead of inventing a reviewer. The chosen worker must be the one
+scope-matched reviewer assignment for that step, and its criterion keys must
+equal the Mission's worker-evaluated criteria. Risk- or conflict-only review is
+explicitly advisory. This boundary selects no provider and grants no policy,
+human, credential, approval, or factual authority. Native dynamic reviewer
+composition and execution remain open.
+
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
 hash-verifies both immutable receipts, derives the bounded reviewer prompt and
