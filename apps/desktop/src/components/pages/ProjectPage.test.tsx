@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectPage, type ProjectKnowledgeView, type ProjectMemoryView, type ProjectPageRecord } from "./ProjectPage";
+import type { ProjectActivityView } from "../../hooks/useProjectActivity";
 
 const project: ProjectPageRecord = {
   id: "project-1",
@@ -45,6 +46,38 @@ const emptyMemory: ProjectMemoryView = {
   toggleDisabled: async () => undefined,
   forget: async () => undefined,
   exportText: async () => "# Memory export"
+};
+
+const projectActivity: ProjectActivityView = {
+  missions: [{
+    runId: "run-1",
+    threadId: "thread-project",
+    title: "Prepare launch",
+    state: "Waiting",
+    detail: "2 of 3 steps · Review the final draft.",
+    conversation: "Release notes"
+  }],
+  routines: [{
+    id: "routine-1",
+    title: "Weekly launch check",
+    status: "Active",
+    detail: "Weekly schedule"
+  }],
+  artifacts: [{
+    id: "artifact-1",
+    title: "Launch brief",
+    status: "Accepted",
+    detail: "Document · Version 2"
+  }],
+  connections: [{
+    id: "connection-1",
+    name: "GitHub · work",
+    status: "Available"
+  }],
+  loading: false,
+  error: null,
+  truncated: false,
+  refresh: async () => undefined
 };
 
 describe("ProjectPage", () => {
@@ -119,6 +152,62 @@ describe("ProjectPage", () => {
     expect(screen.getByText("No conversations yet.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "New chat" }));
     expect(onNewChat).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows scoped project activity and opens a Mission's project conversation", async () => {
+    const user = userEvent.setup();
+    const onSelectThread = vi.fn();
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={projectActivity}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={onSelectThread}
+      />
+    );
+
+    expect(screen.getByRole("list", { name: "Project Mission runs" }))
+      .toHaveTextContent("Prepare launch");
+    expect(screen.getByRole("list", { name: "Project Routines" }))
+      .toHaveTextContent("Weekly launch check");
+    expect(screen.getByRole("list", { name: "Project Artifacts" }))
+      .toHaveTextContent("Launch brief");
+    expect(screen.getByRole("list", { name: "Connections used by this project" }))
+      .toHaveTextContent("GitHub · workAvailable");
+    await user.click(screen.getByRole("button", { name: /prepare launch/i }));
+    expect(onSelectThread).toHaveBeenCalledWith(project.threads[0]);
+  });
+
+  it("surfaces project activity failures and retries the exact read", async () => {
+    const user = userEvent.setup();
+    const refresh = vi.fn();
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={{
+          ...projectActivity,
+          missions: [],
+          routines: [],
+          artifacts: [],
+          connections: [],
+          error: "Project activity is unavailable.",
+          refresh
+        }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Project activity is unavailable.");
+    expect(screen.queryByText("No Mission runs yet.")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("shows only supplied project knowledge and imports a supported file", async () => {

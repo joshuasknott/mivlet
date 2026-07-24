@@ -102,6 +102,13 @@ stored in React state, snapshots, logs, or JSON metadata.
   execution remain release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
+- Project detail includes a bounded, read-only Activity summary for exact active
+  Project conversation Mission runs, canonical project Routines, current
+  project Artifacts, and workspace Connections referenced by those Routine
+  triggers or Artifact evidence. Connection labels come only from the current
+  native projection, and unavailable references are shown as needing attention.
+  Project-level Connection configuration, Activity mutation controls, archived
+  Mission history, and full Artifact detail remain open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

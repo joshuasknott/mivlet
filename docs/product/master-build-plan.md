@@ -98,6 +98,7 @@ The [Product Blueprint](vision.md) describes the Fable we are building. This doc
 - [x] Complete project create, rename, archive, restore, and delete behavior.
 - [x] Create threads inside projects or assign and remove them later.
 - [ ] Add optional project instructions, goals, knowledge, connections, missions, routines, artifacts, and activity.
+  - Repo-local evidence: the Project detail page now includes a bounded, read-only Activity summary for exact-project Mission runs, canonical Routines, current Artifacts, and the workspace-scoped Connections referenced by those Routines or Artifact evidence. Mission history is read only through the Project's exact active conversation IDs; Connection names and health come only from the current authenticated native projection, while missing or revoked references show `Needs attention`. Project-owned Connection configuration, mutation controls, archived-project Mission history, and a complete Artifact detail surface remain open.
 - [x] Keep standalone workspace threads first-class.
 - [x] Prove workspace and project scope isolation.
 

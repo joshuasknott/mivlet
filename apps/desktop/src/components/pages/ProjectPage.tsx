@@ -4,6 +4,7 @@ import { FilePlus } from "@phosphor-icons/react/dist/csr/FilePlus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import type { SourceStatus, ThreadSummary } from "@fable/protocol";
+import type { ProjectActivityView } from "../../hooks/useProjectActivity";
 import { PageHeader } from "../PageHeader";
 
 export interface ProjectPageRecord {
@@ -79,6 +80,17 @@ const EMPTY_PROJECT_MEMORY: ProjectMemoryView = {
   exportText: async () => "# Memory export\n\n(no live memories)"
 };
 
+const EMPTY_PROJECT_ACTIVITY: ProjectActivityView = {
+  missions: [],
+  routines: [],
+  artifacts: [],
+  connections: [],
+  loading: false,
+  error: null,
+  truncated: false,
+  refresh: async () => undefined
+};
+
 export function ProjectPage({
   project,
   onSaveGuidance,
@@ -86,7 +98,8 @@ export function ProjectPage({
   onNewChat,
   onSelectThread,
   knowledge,
-  memory = EMPTY_PROJECT_MEMORY
+  memory = EMPTY_PROJECT_MEMORY,
+  activity = EMPTY_PROJECT_ACTIVITY
 }: {
   project: ProjectPageRecord;
   onSaveGuidance: (input: { description: string | null; instructions: string | null }) => Promise<void>;
@@ -95,6 +108,7 @@ export function ProjectPage({
   onSelectThread: (thread: ThreadSummary) => void;
   knowledge: ProjectKnowledgeView;
   memory?: ProjectMemoryView;
+  activity?: ProjectActivityView;
 }) {
   const [editing, setEditing] = useState(false);
   const [description, setDescription] = useState(project.description);
@@ -286,6 +300,114 @@ export function ProjectPage({
             ))}
           </div>
         ) : <p className="project-page__empty">No conversations yet.</p>}
+      </section>
+
+      <section className="project-page__section project-activity" aria-labelledby="project-activity-heading">
+        <div className="project-page__section-heading">
+          <div>
+            <h2 id="project-activity-heading">Activity</h2>
+            <p>Runs, routines, saved work, and Connections used by this project.</p>
+          </div>
+          <button type="button" disabled={activity.loading} onClick={() => void activity.refresh()}>
+            {activity.loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+
+        {activity.error ? (
+          <div className="project-activity__state project-activity__state--error" role="alert">
+            <p>{activity.error}</p>
+            <button type="button" onClick={() => void activity.refresh()}>Try again</button>
+          </div>
+        ) : null}
+        {activity.loading ? <p className="project-activity__state" role="status">Loading project activity...</p> : null}
+        {!activity.loading && !activity.error ? (
+          <>
+            <ul className="project-activity__counts" aria-label="Project activity summary">
+              <li><strong>{activity.missions.length}</strong><span>Mission runs</span></li>
+              <li><strong>{activity.routines.length}</strong><span>Routines</span></li>
+              <li><strong>{activity.artifacts.length}</strong><span>Artifacts</span></li>
+            </ul>
+
+            <div className="project-activity__groups">
+              <div>
+                <h3>Missions</h3>
+                {activity.missions.length > 0 ? (
+                  <ul aria-label="Project Mission runs">
+                    {activity.missions.map((mission) => {
+                      const thread = project.threads.find((candidate) => candidate.id === mission.threadId);
+                      return (
+                        <li key={mission.runId}>
+                          {thread ? (
+                            <button type="button" onClick={() => onSelectThread(thread)}>
+                              <strong>{mission.title}</strong>
+                              <span>{mission.state} · {mission.detail}</span>
+                              <small>{mission.conversation}</small>
+                            </button>
+                          ) : (
+                            <div>
+                              <strong>{mission.title}</strong>
+                              <span>{mission.state} · {mission.detail}</span>
+                              <small>{mission.conversation}</small>
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : <p className="project-page__empty">No Mission runs yet.</p>}
+              </div>
+
+              <div>
+                <h3>Routines</h3>
+                {activity.routines.length > 0 ? (
+                  <ul aria-label="Project Routines">
+                    {activity.routines.map((routine) => (
+                      <li key={routine.id}>
+                        <div>
+                          <strong>{routine.title}</strong>
+                          <span>{routine.status} · {routine.detail}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="project-page__empty">No Routines yet.</p>}
+              </div>
+
+              <div>
+                <h3>Artifacts</h3>
+                {activity.artifacts.length > 0 ? (
+                  <ul aria-label="Project Artifacts">
+                    {activity.artifacts.map((artifact) => (
+                      <li key={artifact.id}>
+                        <div>
+                          <strong>{artifact.title}</strong>
+                          <span>{artifact.status} · {artifact.detail}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : <p className="project-page__empty">No Artifacts yet.</p>}
+              </div>
+            </div>
+
+            {activity.connections.length > 0 ? (
+              <div className="project-activity__connections">
+                <h3>Connections used here</h3>
+                <ul aria-label="Connections used by this project">
+                  {activity.connections.map((connection) => (
+                    <li key={connection.id}>
+                      <span>{connection.name}</span>
+                      <strong>{connection.status}</strong>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {activity.truncated ? (
+              <p className="project-activity__state">Showing the newest bounded activity. Older records remain stored.</p>
+            ) : null}
+          </>
+        ) : null}
       </section>
 
       <section className="project-page__section project-knowledge" aria-labelledby="project-knowledge-heading">

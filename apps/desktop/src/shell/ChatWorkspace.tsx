@@ -33,6 +33,7 @@ import { invitationAccountContextKey } from "../lib/invitation-account-context";
 import { ProjectPage, type ProjectKnowledgeSourceView, type ProjectKnowledgeView, type ProjectMemoryView } from "../components/pages/ProjectPage";
 import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 import { useProjectMemory } from "../hooks/useProjectMemory";
+import { useProjectActivity } from "../hooks/useProjectActivity";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 
 type ConversationMessage = {
@@ -537,6 +538,12 @@ export function ChatWorkspace() {
     forget: projectMemory.forget,
     exportText: projectMemory.exportText
   }), [projectKnowledge.liveSources, projectMemory.disabled, projectMemory.edit, projectMemory.error, projectMemory.exportText, projectMemory.forget, projectMemory.loading, projectMemory.promote, projectMemory.records, projectMemory.refresh, projectMemory.toggleDisabled, projectMemory.togglePin]);
+  const projectActivity = useProjectActivity({
+    workspaceId: boundWorkspaceId ?? "",
+    projectId: selectedProject?.id ?? "",
+    threads: selectedProject?.threads ?? [],
+    enabled: Boolean(boundWorkspaceId && selectedProject)
+  });
 
   useEffect(() => {
     if (selectedProjectId && !projectStore.loading && !selectedProject) {
@@ -2263,6 +2270,7 @@ export function ChatWorkspace() {
               project={selectedProject}
               knowledge={projectKnowledgeView}
               memory={projectMemoryView}
+              activity={projectActivity}
               onNewChat={() => startNewChat(selectedProject.id)}
               onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
               onReload={async () => { await projectStore.refresh(); }}
