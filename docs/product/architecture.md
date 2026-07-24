@@ -153,6 +153,15 @@ scheduler and Routine scheduler from both writing. Legacy records without exact
 persisted member ownership quarantine instead of inheriting the active session
 identity.
 
+Rollback after canonical execution is a data bridge, not just a writer toggle.
+Within one encrypted transaction Fable requires every active Routine to remain
+the exact unchanged result of one owner-qualified schedule migration, requires
+every driver occurrence to be terminal, writes a content-free terminal reference
+into that legacy job's history, and advances its last-run cursor. Only then does
+the monotonic scheduler epoch move through rollback to the restored legacy
+writer. Canonical-only, edited, ambiguous, in-flight, or cross-owner work blocks
+the transition.
+
 The `/schedule` command and visible Scheduled Task form resolve that same writer
 before creation. After cutover they translate one-time, daily, weekly, or
 monthly input into the canonical time-trigger contract; before cutover they use

@@ -154,4 +154,36 @@ describe("RoutinePanel", () => {
     expect(runtime.createRuntimeRoutine).not.toHaveBeenCalled();
     expect(consumed).toHaveBeenCalledOnce();
   });
+
+  it("offers the guarded rollback bridge after a Routine has executed", async () => {
+    const user = userEvent.setup();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(runtime.rollbackRuntimeRoutineScheduler).mockResolvedValue({
+      ...schedulerStatus,
+      authority: {
+        ...schedulerStatus.authority,
+        writer: "legacy",
+        phase: "legacy",
+        epoch: 4
+      }
+    });
+    render(<RoutinePanel onRun={vi.fn()} />);
+
+    const restore = await screen.findByRole("button", {
+      name: "Restore existing schedules"
+    });
+    expect(restore).toBeEnabled();
+    await user.click(restore);
+
+    await waitFor(() =>
+      expect(runtime.rollbackRuntimeRoutineScheduler).toHaveBeenCalledOnce()
+    );
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("preserve settled Routine history")
+    );
+    expect(
+      screen.getByText("The existing schedule runner was restored.")
+    ).toBeInTheDocument();
+    confirm.mockRestore();
+  });
 });

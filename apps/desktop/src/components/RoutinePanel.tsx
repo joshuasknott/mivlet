@@ -343,7 +343,7 @@ export function RoutinePanel({
     if (
       action === "rollback" &&
       !window.confirm(
-        "Restore the existing schedule runner? This is available only before a Routine has executed."
+        "Restore the existing schedule runner? Fable will first preserve settled Routine history and will stop if anything is still running or no longer matches its migrated schedule."
       )
     ) {
       return;
@@ -668,7 +668,6 @@ export function RoutinePanel({
               <button
                 type="button"
                 className="secondary-button"
-                disabled={schedulerStatus.routineDriverOccurrences > 0}
                 onClick={() => void changeScheduler("rollback")}
               >
                 Restore existing schedules

@@ -872,9 +872,15 @@ transient prefilled Routine draft and persists nothing until the user chooses a
 time and saves. Browser preview labels encrypted durability unavailable instead
 of using fixtures. Forward ownership capture is
 implemented, while attribution of already-ambiguous legacy rows remains
-deliberately impossible. Rollback after canonical execution, event triggers, general recurrence,
-workspace-shared writes, packaged restart observation, and live provider validation
-remain open, so the broader migration and experience checkboxes stay unchecked.
+deliberately impossible. Post-execution rollback now atomically bridges terminal
+canonical occurrences into the exact unchanged legacy schedule history, advances
+the legacy cursor to prevent duplicate firing, and fences the writer twice before
+restoring it. Canonical-only or edited Routines, ambiguous/currently changed
+migration mappings, in-flight work, and another private owner's state fail closed
+instead of being stranded or guessed. Event triggers, general recurrence,
+workspace-shared writes, packaged restart observation, and live provider
+validation remain open, so the broader migration and experience checkboxes stay
+unchecked.
 
 ### Wave 5B - Triggers and reliability
 

@@ -75,9 +75,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   and production workflow writes require encrypted SQLite. Reconciliation plus
   an explicit one-writer cutover is implemented, but legacy rows without exact
   persisted member ownership still quarantine rather than being backfilled.
-  Rollback after a
-  canonical occurrence, packaged-app restart observation, and live provider
-  execution remain release blockers.
+  Post-execution rollback is supported only for unchanged migrated Routines: it
+  copies terminal occurrence references into the exact legacy history and
+  advances the legacy cursor before the fenced writer restore. Canonical-only,
+  edited, ambiguous, in-flight, or cross-owner state remains blocked rather than
+  guessed. Packaged-app restart observation and live provider execution remain
+  release blockers.
 - Browser preview connector behavior is fixture-backed and must stay labeled as
   preview data.
 - Native API providers use bounded dynamic model discovery. Live availability

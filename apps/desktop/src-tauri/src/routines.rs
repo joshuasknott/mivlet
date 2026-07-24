@@ -780,6 +780,311 @@ pub fn routine_scheduler_cutover(
         .map_err(|error| error.to_string())
 }
 
+#[derive(Debug)]
+struct RollbackOccurrence {
+    occurrence_id: String,
+    routine_id: String,
+    driver_state: String,
+    occurrence_status: String,
+    scheduled_for: String,
+    observed_at: String,
+    run_id: String,
+    attempt_count: i64,
+}
+
+fn scheduled_job_source_id(source_key: &str) -> Option<&str> {
+    let mut parts = source_key.split('\0');
+    match (parts.next(), parts.next(), parts.next(), parts.next()) {
+        (Some("scheduled-job"), Some(id), Some(_schema_version), None) if !id.is_empty() => {
+            Some(id)
+        }
+        _ => None,
+    }
+}
+
+fn exact_legacy_job_for_routine(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    auth: &authorized_scope::AuthorizedCommandScope,
+    routine_id: &str,
+    jobs: &BTreeMap<String, Value>,
+) -> crate::store::Result<String> {
+    let mut stmt = tx.prepare(
+        "SELECT source.source_key,source.checksum
+         FROM routine_migration_source source
+         JOIN routine_migration_batch batch
+           ON batch.workspace_id=source.workspace_id
+          AND batch.owner_subject=source.owner_subject
+          AND batch.id=source.batch_id
+         WHERE source.workspace_id=?1 AND source.owner_subject=?2
+           AND source.canonical_routine_id=?3
+           AND source.disposition='candidate' AND batch.status='applied'
+         ORDER BY batch.applied_at DESC,source.source_key;",
+    )?;
+    let candidates = stmt
+        .query_map(
+            rusqlite::params![
+                auth.data.workspace_id(),
+                auth.private.owner_subject(),
+                routine_id
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut exact = Vec::new();
+    for (source_key, expected_checksum) in candidates {
+        let Some(job_id) = scheduled_job_source_id(&source_key) else {
+            continue;
+        };
+        let Some(job) = jobs.get(job_id) else {
+            continue;
+        };
+        let actual_checksum = checksum(job).map_err(crate::store::StoreError::Invalid)?;
+        if actual_checksum == expected_checksum {
+            exact.push(job_id.to_string());
+        }
+    }
+    exact.sort();
+    exact.dedup();
+    if exact.len() != 1 {
+        return Err(crate::store::StoreError::Invalid(format!(
+            "Routine {routine_id} does not have one exact unchanged legacy schedule for rollback."
+        )));
+    }
+    // Re-open through the encrypted repository boundary before returning the
+    // identity. The caller-provided map is only a transaction-local cache.
+    let exists = scheduled_job::list(tx, store, auth.data.workspace_id())?
+        .into_iter()
+        .any(|row| row.id == exact[0]);
+    if !exists {
+        return Err(crate::store::StoreError::Invalid(
+            "The rollback legacy schedule disappeared.".into(),
+        ));
+    }
+    Ok(exact.remove(0))
+}
+
+fn bridge_routine_execution_for_legacy_rollback(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    auth: &authorized_scope::AuthorizedCommandScope,
+    current: &routine::SchedulerAuthorityRow,
+    at: &str,
+) -> crate::store::Result<Value> {
+    let foreign_private_rows: bool = tx.query_row(
+        "SELECT EXISTS(
+           SELECT 1 FROM routine_record
+           WHERE workspace_id=?1 AND owner_subject<>?2 AND status IN ('active','paused')
+           UNION ALL
+           SELECT 1 FROM routine_driver_occurrence
+           WHERE workspace_id=?1 AND owner_subject<>?2 AND writer_epoch=?3
+         );",
+        rusqlite::params![
+            auth.data.workspace_id(),
+            auth.private.owner_subject(),
+            current.epoch
+        ],
+        |row| row.get(0),
+    )?;
+    if foreign_private_rows {
+        return Err(crate::store::StoreError::Invalid(
+            "Routine rollback cannot reconcile another private owner from the active member boundary."
+                .into(),
+        ));
+    }
+
+    let jobs = scheduled_job::list(tx, store, auth.data.workspace_id())?
+        .into_iter()
+        .map(|row| (row.id, row.value))
+        .collect::<BTreeMap<_, _>>();
+    let active_routines = {
+        let mut stmt = tx.prepare(
+            "SELECT id,revision,current_version FROM routine_record
+             WHERE workspace_id=?1 AND owner_subject=?2 AND status IN ('active','paused')
+             ORDER BY id;",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![auth.data.workspace_id(), auth.private.owner_subject()],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    let mut job_by_routine = BTreeMap::new();
+    for (routine_id, revision, version) in active_routines {
+        if revision != 1 || version != 1 {
+            return Err(crate::store::StoreError::Invalid(format!(
+                "Routine {routine_id} changed after migration and cannot be restored to an older legacy definition."
+            )));
+        }
+        let job_id = exact_legacy_job_for_routine(tx, store, auth, &routine_id, &jobs)?;
+        job_by_routine.insert(routine_id, job_id);
+    }
+
+    let occurrences = {
+        let mut stmt = tx.prepare(
+            "SELECT d.occurrence_id,o.routine_id,d.state,o.status,
+                    COALESCE(o.scheduled_for,''),o.observed_at,COALESCE(o.run_id,''),
+                    d.attempt_count
+             FROM routine_driver_occurrence d
+             JOIN routine_occurrence o
+               ON o.workspace_id=d.workspace_id
+              AND o.owner_subject=d.owner_subject
+              AND o.id=d.occurrence_id
+             WHERE d.workspace_id=?1 AND d.owner_subject=?2 AND d.writer_epoch=?3
+             ORDER BY o.scheduled_for,d.occurrence_id;",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![
+                auth.data.workspace_id(),
+                auth.private.owner_subject(),
+                current.epoch
+            ],
+            |row| {
+                Ok(RollbackOccurrence {
+                    occurrence_id: row.get(0)?,
+                    routine_id: row.get(1)?,
+                    driver_state: row.get(2)?,
+                    occurrence_status: row.get(3)?,
+                    scheduled_for: row.get(4)?,
+                    observed_at: row.get(5)?,
+                    run_id: row.get(6)?,
+                    attempt_count: row.get(7)?,
+                })
+            },
+        )?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+
+    let mut bridged = Vec::new();
+    let mut latest_by_job = BTreeMap::<String, (DateTime<Utc>, String, String)>::new();
+    for occurrence in occurrences {
+        let (queue_state, expected_occurrence_status) = match occurrence.driver_state.as_str() {
+            "done" => ("done", "completed"),
+            "dead" => ("dead", "failed"),
+            "cancelled" => ("cancelled", "cancelled"),
+            "blocked" => ("blocked-auth", "blocked"),
+            "queued" | "leased" | "running" => {
+                return Err(crate::store::StoreError::Invalid(format!(
+                    "Routine occurrence {} is still {} and must settle before rollback.",
+                    occurrence.occurrence_id, occurrence.driver_state
+                )));
+            }
+            _ => {
+                return Err(crate::store::StoreError::Invalid(
+                    "Routine rollback found an unsupported driver state.".into(),
+                ));
+            }
+        };
+        if occurrence.occurrence_status != expected_occurrence_status
+            || occurrence.run_id.is_empty()
+            || occurrence.scheduled_for.is_empty()
+        {
+            return Err(crate::store::StoreError::Invalid(format!(
+                "Routine occurrence {} has inconsistent terminal history.",
+                occurrence.occurrence_id
+            )));
+        }
+        let scheduled = DateTime::parse_from_rfc3339(&occurrence.scheduled_for)
+            .map_err(|_| {
+                crate::store::StoreError::Invalid(
+                    "Routine rollback found an invalid scheduled time.".into(),
+                )
+            })?
+            .with_timezone(&Utc);
+        let job_id = job_by_routine
+            .get(&occurrence.routine_id)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(format!(
+                    "Routine {} has no unchanged legacy schedule for its terminal occurrence.",
+                    occurrence.routine_id
+                ))
+            })?
+            .clone();
+        let job = jobs.get(&job_id).ok_or_else(|| {
+            crate::store::StoreError::Invalid("The rollback legacy schedule is unavailable.".into())
+        })?;
+        let queue = serde_json::json!({
+            "workspaceId":auth.data.workspace_id(),
+            "projectId":job.get("projectId").and_then(Value::as_str),
+            "authority":"local",
+            "visibility":"member-private",
+            "ownerMemberId":auth.member_id,
+            "createdByInternalUserId":auth.internal_user_id,
+            "jobId":job_id,
+            "runId":occurrence.run_id,
+            "scheduledAt":occurrence.scheduled_for,
+            "state":queue_state,
+            "leaseHolder":"",
+            "leaseExpiresAt":"",
+            "leaseToken":"",
+            "attempts":[],
+            "deduplicationKey":format!("routine-rollback:v1:{}",occurrence.occurrence_id),
+            "availableAt":occurrence.observed_at,
+            "routineRollback":{
+                "version":1,
+                "occurrenceId":occurrence.occurrence_id,
+                "routineId":occurrence.routine_id,
+                "writerEpoch":current.epoch,
+                "attemptCount":occurrence.attempt_count
+            }
+        });
+        let inserted =
+            scheduler_queue::upsert_entry(tx, store, auth.data.workspace_id(), &queue, at)?;
+        if inserted.is_none() {
+            return Err(crate::store::StoreError::Invalid(
+                "Routine rollback collided with existing legacy history.".into(),
+            ));
+        }
+        latest_by_job
+            .entry(job_id.clone())
+            .and_modify(|current_latest| {
+                if scheduled > current_latest.0 {
+                    *current_latest = (
+                        scheduled,
+                        occurrence.scheduled_for.clone(),
+                        occurrence.run_id.clone(),
+                    );
+                }
+            })
+            .or_insert((
+                scheduled,
+                occurrence.scheduled_for.clone(),
+                occurrence.run_id.clone(),
+            ));
+        bridged.push(serde_json::json!({
+            "occurrenceId":occurrence.occurrence_id,
+            "routineId":occurrence.routine_id,
+            "legacyJobId":job_id,
+            "runId":occurrence.run_id,
+            "state":queue_state
+        }));
+    }
+
+    for (job_id, (_, last_run_at, last_run_id)) in latest_by_job {
+        let mut job = jobs.get(&job_id).cloned().ok_or_else(|| {
+            crate::store::StoreError::Invalid("The rollback legacy schedule is unavailable.".into())
+        })?;
+        job["lastRunAt"] = Value::String(last_run_at);
+        job["lastRunId"] = Value::String(last_run_id);
+        job["nextRunAt"] = Value::String(String::new());
+        job["updatedAt"] = Value::String(at.to_string());
+        scheduled_job::upsert_from_value(tx, store, auth.data.workspace_id(), job, at)?;
+    }
+    Ok(serde_json::json!({
+        "workspaceId":auth.data.workspace_id(),
+        "ownerSubject":auth.private.owner_subject(),
+        "rolledBackAt":at,
+        "routineWriterEpoch":current.epoch,
+        "bridgedOccurrences":bridged
+    }))
+}
+
 #[tauri::command]
 pub fn routine_scheduler_rollback(
     input: RoutineSchedulerCommandInput,
@@ -790,34 +1095,16 @@ pub fn routine_scheduler_rollback(
         .transaction(|tx| {
             let auth = scope_for(tx, input.project_id.as_deref(), ScopeAccess::Write)?;
             let at = now();
-            let current =
-                routine::scheduler_authority(tx, store, auth.data.workspace_id(), &at)?;
+            let current = routine::scheduler_authority(tx, store, auth.data.workspace_id(), &at)?;
             if current.writer != "routine" || current.phase != "routine" {
                 return Err(crate::store::StoreError::Invalid(
                     "Routine rollback requires the Routine writer.".into(),
                 ));
             }
-            let driver_count: i64 = tx.query_row(
-                "SELECT COUNT(*) FROM routine_driver_occurrence
-                 WHERE workspace_id=?1 AND writer_epoch=?2;",
-                rusqlite::params![auth.data.workspace_id(), current.epoch],
-                |row| row.get(0),
-            )?;
-            if driver_count != 0 {
-                return Err(crate::store::StoreError::Invalid(
-                    "Routine rollback is blocked after canonical execution; reconcile those occurrences into the legacy ledger first.".into(),
-                ));
-            }
-            let evidence = serde_json::json!({
-                "workspaceId":auth.data.workspace_id(),
-                "rolledBackAt":at,
-                "routineWriterEpoch":current.epoch,
-                "routineDriverOccurrences":0
-            });
-            let proof =
-                checksum(&evidence).map_err(crate::store::StoreError::Invalid)?;
-            let fence =
-                secure_id("legacy_rollback").map_err(crate::store::StoreError::Invalid)?;
+            let evidence =
+                bridge_routine_execution_for_legacy_rollback(tx, store, &auth, &current, &at)?;
+            let proof = checksum(&evidence).map_err(crate::store::StoreError::Invalid)?;
+            let fence = secure_id("legacy_rollback").map_err(crate::store::StoreError::Invalid)?;
             let rollback_authority = routine::transition_scheduler_authority(
                 tx,
                 store,
@@ -917,6 +1204,7 @@ fn evidence_source(
 mod tests {
     use super::*;
     use crate::store::repos::scope::{DataScope, PrivateDataScope};
+    use crate::store::vault::{MasterKey, Vault};
 
     fn auth(project_id: Option<&str>) -> authorized_scope::AuthorizedCommandScope {
         let data = DataScope::new("w1", project_id.map(str::to_string)).unwrap();
@@ -931,6 +1219,11 @@ mod tests {
             internal_user_id: "user-1".into(),
             member_id: Some("member-1".into()),
         }
+    }
+
+    fn store() -> crate::store::Store {
+        crate::store::Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap())
+            .unwrap()
     }
 
     #[test]
@@ -986,6 +1279,208 @@ mod tests {
             let source = evidence_source(&auth, "scheduled-job", "job", record, None).unwrap();
             assert_eq!(source["ownership"]["status"], "unresolved", "{field}");
         }
+    }
+
+    #[test]
+    fn post_execution_rollback_bridges_terminal_history_and_legacy_cursor() {
+        let store = store();
+        store
+            .transaction(|tx| {
+                crate::store::repos::workspace::upsert(tx, "w1", "Workspace", "now")?;
+                let auth = auth(None);
+                let at = "2026-07-23T10:00:00.000Z";
+                let job = serde_json::json!({
+                    "id":"job-1",
+                    "schemaVersion":crate::models::SCHEDULER_STORE_VERSION,
+                    "workspaceId":"w1",
+                    "visibility":"member-private",
+                    "ownerMemberId":"member-1",
+                    "createdByInternalUserId":"user-1",
+                    "name":"Daily brief",
+                    "description":"Summarise the day",
+                    "workflowDefinitionId":"workflow-1",
+                    "trigger":{"kind":"recurring","rule":{
+                        "frequency":"daily","interval":1,"hour":9,"minute":0
+                    }},
+                    "missedRunPolicy":"run-once",
+                    "status":"active",
+                    "nextRunAt":"2026-07-24T09:00:00.000Z",
+                    "lastRunAt":"",
+                    "lastRunId":"",
+                    "createdAt":"2026-07-20T10:00:00.000Z",
+                    "updatedAt":"2026-07-20T10:00:00.000Z"
+                });
+                scheduled_job::upsert_from_value(tx, &store, "w1", job.clone(), at)?;
+
+                let routine_record = serde_json::json!({
+                    "id":"routine-1","workspaceId":"w1","authority":"local",
+                    "schemaVersion":1,"revision":1,"createdByInternalUserId":"user-1",
+                    "createdAt":"2026-07-20T10:00:00.000Z",
+                    "updatedAt":"2026-07-20T10:00:00.000Z",
+                    "visibility":"member-private","ownerMemberId":"member-1",
+                    "status":"active","title":"Daily brief","currentVersion":1,
+                    "scope":{},"authorityPolicy":"no-expansion"
+                });
+                let version = serde_json::json!({
+                    "routineId":"routine-1","version":1,
+                    "createdAt":"2026-07-20T10:00:00.000Z",
+                    "createdByInternalUserId":"user-1",
+                    "action":{"kind":"direct-request","title":"Daily brief",
+                              "instruction":"Summarise the day"},
+                    "scope":{},"routePolicy":{"kind":"resolve-at-run"},
+                    "placementPolicy":{"kind":"resolve-at-run"},
+                    "budgets":{"capabilityGrantIds":[]},"triggerIds":["trigger-1"]
+                });
+                let trigger = serde_json::json!({
+                    "id":"trigger-1","routineId":"routine-1","workspaceId":"w1",
+                    "authority":"local","schemaVersion":1,"revision":1,
+                    "createdByInternalUserId":"user-1",
+                    "createdAt":"2026-07-20T10:00:00.000Z",
+                    "updatedAt":"2026-07-20T10:00:00.000Z",
+                    "visibility":"member-private","ownerMemberId":"member-1",
+                    "status":"active","spec":{"kind":"time-recurring","timezone":"UTC",
+                    "recurrence":{"frequency":"daily","expression":
+                    "legacy-rrule-lite:v1:{\"frequency\":\"daily\",\"interval\":1,\"byWeekday\":[],\"byMonthDay\":null,\"hour\":9,\"minute\":0}"},
+                    "missedRunPolicy":"run-once"},
+                    "deduplication":{"strategy":"per-trigger-event"}
+                });
+                routine::create(
+                    tx,
+                    &store,
+                    &auth.data,
+                    &auth.private,
+                    &auth.internal_user_id,
+                    &routine_record,
+                    &version,
+                    &[trigger],
+                )?;
+
+                let source_key = format!(
+                    "scheduled-job\0job-1\0{}",
+                    crate::models::SCHEDULER_STORE_VERSION
+                );
+                let source_checksum =
+                    checksum(&job).map_err(crate::store::StoreError::Invalid)?;
+                tx.execute(
+                    "INSERT INTO routine_migration_batch
+                     (workspace_id,owner_subject,id,input_hash,planned_at,status,
+                      applied_at,payload,payload_nonce)
+                     VALUES ('w1',?1,'batch-1','sha256:batch','2026-07-20T10:00:00.000Z',
+                             'applied','2026-07-20T10:00:00.000Z',X'00',X'00');",
+                    [auth.private.owner_subject()],
+                )?;
+                tx.execute(
+                    "INSERT INTO routine_migration_source
+                     (workspace_id,owner_subject,batch_id,source_key,checksum,disposition,
+                      canonical_routine_id,payload,payload_nonce)
+                     VALUES ('w1',?1,'batch-1',?2,?3,'candidate','routine-1',X'00',X'00');",
+                    rusqlite::params![
+                        auth.private.owner_subject(),
+                        source_key,
+                        source_checksum
+                    ],
+                )?;
+
+                let legacy = routine::scheduler_authority(tx, &store, "w1", at)?;
+                let shadow = routine::transition_scheduler_authority(
+                    tx,
+                    &store,
+                    "w1",
+                    legacy.epoch,
+                    "legacy",
+                    "shadow",
+                    "shadow-test",
+                    None,
+                    &serde_json::json!({}),
+                    at,
+                )?;
+                let current = routine::transition_scheduler_authority(
+                    tx,
+                    &store,
+                    "w1",
+                    shadow.epoch,
+                    "routine",
+                    "routine",
+                    "routine-test",
+                    Some(&format!("sha256:{}", "0".repeat(64))),
+                    &serde_json::json!({}),
+                    at,
+                )?;
+
+                let occurrence = serde_json::json!({
+                    "id":"occurrence-1","routineId":"routine-1","triggerId":"trigger-1",
+                    "routineVersion":1,"status":"completed",
+                    "scheduledFor":"2026-07-23T09:00:00.000Z",
+                    "observedAt":"2026-07-23T09:00:05.000Z",
+                    "deduplicationKey":"routine-1:2026-07-23T09:00:00.000Z",
+                    "runId":"run-1"
+                });
+                routine::append_occurrence(tx, &store, &auth.data, &auth.private, &occurrence)?;
+                tx.execute(
+                    "INSERT INTO routine_driver_occurrence
+                     (workspace_id,owner_subject,occurrence_id,writer_epoch,state,
+                      available_at,attempt_count,updated_at,payload,payload_nonce)
+                     VALUES ('w1',?1,'occurrence-1',?2,'done',
+                             '2026-07-23T09:00:05.000Z',1,
+                             '2026-07-23T09:00:05.000Z',X'00',X'00');",
+                    rusqlite::params![auth.private.owner_subject(), current.epoch],
+                )?;
+
+                tx.execute(
+                    "UPDATE routine_driver_occurrence SET state='running'
+                     WHERE workspace_id='w1' AND occurrence_id='occurrence-1';",
+                    [],
+                )?;
+                let in_flight = bridge_routine_execution_for_legacy_rollback(
+                    tx, &store, &auth, &current, at,
+                )
+                .unwrap_err();
+                assert!(in_flight
+                    .to_string()
+                    .contains("must settle before rollback"));
+                tx.execute(
+                    "UPDATE routine_driver_occurrence SET state='done'
+                     WHERE workspace_id='w1' AND occurrence_id='occurrence-1';",
+                    [],
+                )?;
+
+                let evidence = bridge_routine_execution_for_legacy_rollback(
+                    tx, &store, &auth, &current, at,
+                )?;
+                assert_eq!(
+                    evidence["bridgedOccurrences"][0]["occurrenceId"],
+                    "occurrence-1"
+                );
+                let queue = scheduler_queue::list(tx, &store, "w1")?;
+                assert_eq!(queue.len(), 1);
+                assert_eq!(queue[0].value["state"], "done");
+                assert_eq!(
+                    queue[0].value["routineRollback"]["writerEpoch"],
+                    current.epoch
+                );
+                let jobs = scheduled_job::list(tx, &store, "w1")?;
+                assert_eq!(
+                    jobs[0].value["lastRunAt"],
+                    "2026-07-23T09:00:00.000Z"
+                );
+                assert_eq!(jobs[0].value["lastRunId"], "run-1");
+                assert_eq!(jobs[0].value["nextRunAt"], "");
+
+                tx.execute(
+                    "UPDATE routine_record SET revision=2
+                     WHERE workspace_id='w1' AND id='routine-1';",
+                    [],
+                )?;
+                let changed = bridge_routine_execution_for_legacy_rollback(
+                    tx, &store, &auth, &current, at,
+                )
+                .unwrap_err();
+                assert!(changed
+                    .to_string()
+                    .contains("changed after migration"));
+                Ok(())
+            })
+            .unwrap();
     }
 }
 
