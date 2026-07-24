@@ -361,6 +361,7 @@ pub fn run() {
             store::encrypted_store_status,
             store::export_local_data,
             store::backup_local_data,
+            store::prepare_local_data_restore,
             store::delete_local_data,
             portable::export_workspace_archive,
             portable::import_workspace_archive,

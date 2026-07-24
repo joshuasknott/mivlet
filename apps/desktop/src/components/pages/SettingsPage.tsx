@@ -28,7 +28,13 @@ import {
   customApprovalToggleLabel
 } from "../../lib/approval-copy";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
-import { acceptRuntimePendingInvitation, getRuntimeRemoteControlStatus, loadRuntimePendingInvitations } from "../../runtime";
+import {
+  acceptRuntimePendingInvitation,
+  createRuntimeLocalBackup,
+  getRuntimeRemoteControlStatus,
+  loadRuntimePendingInvitations,
+  prepareRuntimeLocalRestore
+} from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { RunHistoryPage } from "./RunHistoryPage";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
@@ -375,6 +381,10 @@ function PrivacySettingsView({
   const [disconnectingConnectorId, setDisconnectingConnectorId] = useState<string | null>(null);
   const [isBulkDisconnecting, setIsBulkDisconnecting] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [backupPath, setBackupPath] = useState("");
+  const [restorePath, setRestorePath] = useState("");
+  const [restoreConfirmation, setRestoreConfirmation] = useState("");
+  const [recoveryAction, setRecoveryAction] = useState<"backup" | "restore" | null>(null);
 
   const connectedConnectors = useMemo(() => {
     return runtime.connectorManifests.filter(
@@ -432,6 +442,42 @@ function PrivacySettingsView({
       onStatus("Failed to export memory.");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleBackup = async () => {
+    if (!backupPath.trim()) return;
+    setRecoveryAction("backup");
+    try {
+      const receipt = await createRuntimeLocalBackup(backupPath.trim());
+      onStatus(receipt
+        ? "Encrypted recovery backup created and verified. Keep it with this device's OS account key."
+        : "Encrypted recovery backups are available only in the Fable desktop app.");
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not create that backup.");
+    } finally {
+      setRecoveryAction(null);
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!restorePath.trim() || restoreConfirmation !== "restore local data") return;
+    setRecoveryAction("restore");
+    try {
+      const prepared = await prepareRuntimeLocalRestore(
+        restorePath.trim(),
+        "restore local data"
+      );
+      if (prepared) {
+        setRestoreConfirmation("");
+        onStatus("Backup verified. Restart Fable to apply it; the current database will be kept as a recovery point.");
+      } else {
+        onStatus("Local restore is available only in the Fable desktop app.");
+      }
+    } catch (error) {
+      onStatus(error instanceof Error ? error.message : "Fable could not prepare that restore.");
+    } finally {
+      setRecoveryAction(null);
     }
   };
 
@@ -584,6 +630,87 @@ function PrivacySettingsView({
                   {isExporting ? <Spinner size={14} /> : null}
                   <span>Export memory</span>
                 </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="profile-section" aria-labelledby="local-recovery-title">
+            <div className="profile-section__heading">
+              <span className="settings-panel__icon" aria-hidden="true">
+                <LockKey size={19} />
+              </span>
+              <span>
+                <strong id="local-recovery-title">Local recovery</strong>
+                <small>Create or restore a verified encrypted copy of Fable&rsquo;s local data.</small>
+              </span>
+            </div>
+            <div style={{ display: "grid", gap: "18px", marginTop: "16px" }}>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <label htmlFor="local-backup-path"><strong>New backup file</strong></label>
+                <input
+                  id="local-backup-path"
+                  className="input"
+                  value={backupPath}
+                  onChange={(event) => setBackupPath(event.target.value)}
+                  placeholder="Choose a new .db file path"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <small>
+                  The backup contains encrypted local data, artifacts, and settings. Provider credentials stay in the OS credential store and are not included.
+                </small>
+                <div>
+                  <button
+                    type="button"
+                    className="button button--secondary"
+                    onClick={() => void handleBackup()}
+                    disabled={!backupPath.trim() || recoveryAction !== null}
+                  >
+                    {recoveryAction === "backup" ? <Spinner size={14} /> : null}
+                    <span>Create verified backup</span>
+                  </button>
+                </div>
+              </div>
+              <div style={{ display: "grid", gap: "8px" }}>
+                <label htmlFor="local-restore-path"><strong>Restore from backup</strong></label>
+                <input
+                  id="local-restore-path"
+                  className="input"
+                  value={restorePath}
+                  onChange={(event) => setRestorePath(event.target.value)}
+                  placeholder="Existing Fable backup .db file"
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <label htmlFor="local-restore-confirmation">
+                  Type <strong>restore local data</strong> to confirm
+                </label>
+                <input
+                  id="local-restore-confirmation"
+                  className="input"
+                  value={restoreConfirmation}
+                  onChange={(event) => setRestoreConfirmation(event.target.value)}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <small>
+                  Fable verifies the database and matching OS-held key first. It applies only after restart and preserves the current database as a recovery point.
+                </small>
+                <div>
+                  <button
+                    type="button"
+                    className="button button--destructive"
+                    onClick={() => void handleRestore()}
+                    disabled={
+                      !restorePath.trim()
+                      || restoreConfirmation !== "restore local data"
+                      || recoveryAction !== null
+                    }
+                  >
+                    {recoveryAction === "restore" ? <Spinner size={14} /> : null}
+                    <span>Verify and prepare restore</span>
+                  </button>
+                </div>
               </div>
             </div>
           </section>

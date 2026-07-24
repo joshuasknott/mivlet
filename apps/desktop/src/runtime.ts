@@ -122,6 +122,47 @@ function activeDataScope() {
   return getActiveRuntimeDataScope();
 }
 
+export interface RuntimeLocalBackupReceipt {
+  path: string;
+  createdAt: string;
+  schemaVersion: number;
+  requiresMatchingOsVaultKey: boolean;
+  credentialsIncluded: false;
+}
+
+export interface RuntimeLocalRestorePreparation {
+  restartRequired: true;
+  backupCreatedAt: string;
+  schemaVersion: number;
+  credentialsIncluded: false;
+}
+
+export async function createRuntimeLocalBackup(
+  destination: string
+): Promise<RuntimeLocalBackupReceipt | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeLocalBackupReceipt>("backup_local_data", { destination });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function prepareRuntimeLocalRestore(
+  source: string,
+  confirmation: "restore local data"
+): Promise<RuntimeLocalRestorePreparation | null> {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeLocalRestorePreparation>("prepare_local_data_restore", {
+      source,
+      confirmation
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
 export interface RuntimeKnowledgeScopeOverride {
   workspaceId: string;
   projectId: string;

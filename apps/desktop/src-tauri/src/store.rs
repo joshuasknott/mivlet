@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
 
 use crate::store::schema::{CURRENT_SCHEMA_VERSION, SCHEMA_V1};
@@ -26,6 +26,10 @@ pub mod vault;
 
 /// Filename of the durable database inside the Tauri app-data dir.
 pub const DB_FILENAME: &str = "fable-vault.db";
+const BACKUP_FORMAT: &str = "fable.encrypted-sqlite-backup";
+const BACKUP_FORMAT_VERSION: u32 = 1;
+const BACKUP_MARKER_KEY: &str = "fable.backup.manifest";
+const RESTORE_PENDING_FILENAME: &str = "fable-vault.restore-pending.db";
 static GLOBAL_STORE: OnceLock<Store> = OnceLock::new();
 
 /// Errors surfaced by store operations. Mapped to user-facing strings at the
@@ -278,17 +282,196 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
         .map_err(|_| "Fable could not prepare the local data folder.".to_string())?;
     let db_path = app_data_dir.join(DB_FILENAME);
     let key_store = keys::NativeKeyStore::new()?;
-    let key = match keys::resolve_for_database(&key_store, Store::database_exists(&db_path))? {
+    let pending_restore = app_data_dir.join(RESTORE_PENDING_FILENAME);
+    let key = match keys::resolve_for_database(
+        &key_store,
+        Store::database_exists(&db_path) || pending_restore.exists(),
+    )? {
         keys::KeyResolution::Existing(key) | keys::KeyResolution::FreshlyCreated(key) => key,
     };
+    let recovery = apply_pending_restore(app_data_dir, &key)?;
     let vault = Vault::new(&key).map_err(|_| "Fable could not initialize local encryption.")?;
-    let store = Store::open(&db_path, vault).map_err(|error| error.to_string())?;
-    migrations::migrate_all(&store, app_data_dir).map_err(|error| error.to_string())?;
-    seed_legacy_documents(&store, app_data_dir)?;
-    migrate_legacy_workflows(&store, app_data_dir)?;
+    let store = match Store::open(&db_path, vault).and_then(|store| {
+        migrations::migrate_all(&store, app_data_dir)?;
+        Ok(store)
+    }) {
+        Ok(store) => store,
+        Err(error) => {
+            if let Some(recovery) = recovery.as_ref() {
+                return Err(rollback_applied_restore(
+                    app_data_dir,
+                    &db_path,
+                    recovery,
+                    &error.to_string(),
+                ));
+            }
+            return Err(error.to_string());
+        }
+    };
+    if let Err(error) = seed_legacy_documents(&store, app_data_dir)
+        .and_then(|_| migrate_legacy_workflows(&store, app_data_dir))
+    {
+        drop(store);
+        if let Some(recovery) = recovery.as_ref() {
+            return Err(rollback_applied_restore(
+                app_data_dir,
+                &db_path,
+                recovery,
+                &error,
+            ));
+        }
+        return Err(error);
+    }
     GLOBAL_STORE
         .set(store)
         .map_err(|_| "Fable's encrypted store was initialized twice.".to_string())
+}
+
+fn backup_manifest() -> serde_json::Value {
+    serde_json::json!({
+        "format": BACKUP_FORMAT,
+        "formatVersion": BACKUP_FORMAT_VERSION,
+        "schemaVersion": CURRENT_SCHEMA_VERSION,
+        "createdAt": timestamp(),
+        "requiresMatchingOsVaultKey": true,
+        "credentialsIncluded": false
+    })
+}
+
+fn write_backup_marker(store: &Store) -> Result<serde_json::Value> {
+    let manifest = backup_manifest();
+    store.transaction(|tx| {
+        repos::preferences::upsert(tx, store, BACKUP_MARKER_KEY, &manifest, &timestamp())
+    })?;
+    Ok(manifest)
+}
+
+fn validate_backup_candidate(path: &Path, vault: &Vault) -> Result<serde_json::Value> {
+    if !path.is_file() || crate::paths::contains_symlink(path) {
+        return Err(StoreError::Invalid(
+            "The selected backup must be a regular local file without links.".into(),
+        ));
+    }
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(StoreError::from)?;
+    Store::verify_integrity(&conn)?;
+    let version = read_schema_version(&conn)?;
+    if version > CURRENT_SCHEMA_VERSION {
+        return Err(StoreError::Invalid(
+            "This backup was created by a newer version of Fable.".into(),
+        ));
+    }
+    let sealed = conn
+        .query_row(
+            "SELECT payload, payload_nonce FROM preferences
+             WHERE workspace_id=?1 AND key=?2",
+            rusqlite::params![repos::scope::DEFAULT_WORKSPACE_ID, BACKUP_MARKER_KEY],
+            repos::payload_of,
+        )
+        .optional()?
+        .ok_or_else(|| {
+            StoreError::Invalid("This database is not a verified Fable recovery backup.".into())
+        })?;
+    let opened = vault.open(
+        &sealed,
+        format!(
+            "preferences:{}:{}",
+            repos::scope::DEFAULT_WORKSPACE_ID,
+            BACKUP_MARKER_KEY
+        )
+        .as_bytes(),
+    )?;
+    let manifest: serde_json::Value = serde_json::from_slice(&opened)
+        .map_err(|_| StoreError::Invalid("The encrypted backup marker is malformed.".into()))?;
+    if manifest.get("format").and_then(serde_json::Value::as_str) != Some(BACKUP_FORMAT)
+        || manifest
+            .get("formatVersion")
+            .and_then(serde_json::Value::as_u64)
+            != Some(BACKUP_FORMAT_VERSION as u64)
+        || manifest
+            .get("requiresMatchingOsVaultKey")
+            .and_then(serde_json::Value::as_bool)
+            != Some(true)
+        || manifest
+            .get("credentialsIncluded")
+            .and_then(serde_json::Value::as_bool)
+            != Some(false)
+    {
+        return Err(StoreError::Invalid(
+            "The encrypted backup marker is invalid.".into(),
+        ));
+    }
+    Ok(manifest)
+}
+
+fn unique_restore_path(app_data_dir: &Path, label: &str) -> PathBuf {
+    let timestamp = chrono::Utc::now().timestamp_millis();
+    for suffix in 0..1000 {
+        let path = app_data_dir.join(format!("{DB_FILENAME}.{label}-{timestamp}-{suffix}.db"));
+        if !path.exists() {
+            return path;
+        }
+    }
+    app_data_dir.join(format!("{DB_FILENAME}.{label}-{timestamp}.overflow.db"))
+}
+
+fn rollback_applied_restore(
+    app_data_dir: &Path,
+    database: &Path,
+    recovery: &Path,
+    error: &str,
+) -> String {
+    let failed = unique_restore_path(app_data_dir, "failed-restore");
+    let _ = std::fs::rename(database, &failed);
+    if std::fs::rename(recovery, database).is_err() {
+        return "The restored database could not open, and Fable could not put the prior database back. Both recovery files were preserved."
+            .into();
+    }
+    format!(
+        "The restored database could not open and the prior database was put back. Restart Fable to continue with the prior data. {error}"
+    )
+}
+
+fn apply_pending_restore(
+    app_data_dir: &Path,
+    key: &vault::MasterKey,
+) -> std::result::Result<Option<PathBuf>, String> {
+    let pending = app_data_dir.join(RESTORE_PENDING_FILENAME);
+    if !pending.exists() {
+        return Ok(None);
+    }
+    let validation_vault =
+        Vault::new(key).map_err(|_| "Fable could not validate the pending restore.")?;
+    validate_backup_candidate(&pending, &validation_vault).map_err(|error| error.to_string())?;
+    let current = app_data_dir.join(DB_FILENAME);
+    let recovery = if current.exists() {
+        let checkpoint_vault =
+            Vault::new(key).map_err(|_| "Fable could not prepare restore recovery.")?;
+        let current_store =
+            Store::open(&current, checkpoint_vault).map_err(|error| error.to_string())?;
+        current_store
+            .with_conn(|conn| {
+                conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")?;
+                Ok(())
+            })
+            .map_err(|error| error.to_string())?;
+        drop(current_store);
+        let recovery = unique_restore_path(app_data_dir, "pre-restore");
+        std::fs::rename(&current, &recovery)
+            .map_err(|_| "Fable could not preserve the current database before restore.")?;
+        Some(recovery)
+    } else {
+        None
+    };
+    if std::fs::rename(&pending, &current).is_err() {
+        if let Some(recovery) = recovery.as_ref() {
+            let _ = std::fs::rename(recovery, &current);
+        }
+        return Err(
+            "Fable could not activate the pending restore; the prior data was retained.".into(),
+        );
+    }
+    Ok(recovery)
 }
 
 fn document_key(path: &Path) -> std::result::Result<String, String> {
@@ -687,23 +870,138 @@ pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<St
     .map_err(|_| "Fable could not encode the local-data export.".to_string())
 }
 
-/// Create a consistent SQLite backup. The destination must not already exist,
-/// preventing an accidental overwrite of the user's previous recovery point.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalBackupReceipt {
+    path: String,
+    created_at: String,
+    schema_version: u32,
+    requires_matching_os_vault_key: bool,
+    credentials_included: bool,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalRestorePreparation {
+    restart_required: bool,
+    backup_created_at: String,
+    schema_version: u32,
+    credentials_included: bool,
+}
+
+/// Create and immediately verify a consistent encrypted SQLite backup. The
+/// destination must not already exist. Its encrypted marker proves that the
+/// current OS-held vault key can read it without exporting that key.
 #[tauri::command]
-pub fn backup_local_data(destination: String) -> std::result::Result<(), String> {
+pub fn backup_local_data(destination: String) -> std::result::Result<LocalBackupReceipt, String> {
     let target = PathBuf::from(destination);
     if target.exists() {
         return Err("Fable will not overwrite an existing backup.".to_string());
     }
+    let parent = target
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or_else(|| "Choose an existing folder for the backup.".to_string())?;
+    if crate::paths::contains_symlink(parent) {
+        return Err("The backup folder cannot contain links.".into());
+    }
     let store = GLOBAL_STORE
         .get()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
+    let manifest = write_backup_marker(store).map_err(|error| error.to_string())?;
+    let backup = store
         .with_conn(|conn| {
             conn.execute("VACUUM INTO ?1", [target.to_string_lossy().as_ref()])?;
             Ok(())
         })
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string());
+    if let Err(error) = backup {
+        let _ = std::fs::remove_file(&target);
+        return Err(error);
+    }
+    validate_backup_candidate(&target, &store.vault).map_err(|error| {
+        let _ = std::fs::remove_file(&target);
+        error.to_string()
+    })?;
+    Ok(LocalBackupReceipt {
+        path: target.to_string_lossy().to_string(),
+        created_at: manifest
+            .get("createdAt")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        schema_version: CURRENT_SCHEMA_VERSION,
+        requires_matching_os_vault_key: true,
+        credentials_included: false,
+    })
+}
+
+/// Validate and stage a backup for activation on the next clean app start.
+/// The live database is never replaced while its connection is open.
+#[tauri::command]
+pub fn prepare_local_data_restore(
+    app: tauri::AppHandle,
+    source: String,
+    confirmation: String,
+) -> std::result::Result<LocalRestorePreparation, String> {
+    if confirmation != "restore local data" {
+        return Err("Type \"restore local data\" to confirm the restore.".into());
+    }
+    let source = PathBuf::from(source);
+    let canonical = crate::paths::strict_canonicalize(&source)
+        .map_err(|_| "The selected backup is unavailable.".to_string())?;
+    if !canonical.is_file() || crate::paths::contains_symlink(&source) {
+        return Err("The selected backup must be a regular local file without links.".into());
+    }
+    let app_data_dir = crate::paths::app_data_dir(&app)?;
+    let current = app_data_dir.join(DB_FILENAME);
+    if current
+        .canonicalize()
+        .ok()
+        .is_some_and(|path| path == canonical)
+    {
+        return Err("Choose a backup file, not Fable's active database.".into());
+    }
+    let store = GLOBAL_STORE
+        .get()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let manifest =
+        validate_backup_candidate(&canonical, &store.vault).map_err(|error| error.to_string())?;
+    let pending = app_data_dir.join(RESTORE_PENDING_FILENAME);
+    if pending.exists() {
+        return Err(
+            "A verified restore is already waiting for restart. Restart Fable before choosing another backup."
+                .into(),
+        );
+    }
+    std::fs::copy(&canonical, &pending)
+        .map_err(|_| "Fable could not stage the selected backup.".to_string())?;
+    let staged = validate_backup_candidate(&pending, &store.vault);
+    if let Err(error) = staged {
+        let _ = std::fs::remove_file(&pending);
+        return Err(error.to_string());
+    }
+    let finalized = std::fs::OpenOptions::new()
+        .write(true)
+        .open(&pending)
+        .and_then(|file| file.sync_all());
+    if finalized.is_err() {
+        let _ = std::fs::remove_file(&pending);
+        return Err("Fable could not finalize the staged restore.".into());
+    }
+    Ok(LocalRestorePreparation {
+        restart_required: true,
+        backup_created_at: manifest
+            .get("createdAt")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        schema_version: manifest
+            .get("schemaVersion")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u32,
+        credentials_included: false,
+    })
 }
 
 /// Delete local database content after an exact destructive confirmation. The
@@ -1036,6 +1334,116 @@ mod tests {
         let db = dir.path().join(DB_FILENAME);
         std::fs::write(&db, b"not a sqlite database").unwrap();
         assert!(Store::open(&db, vault()).is_err());
+    }
+
+    #[test]
+    fn verified_backup_requires_the_matching_key_and_intact_marker() {
+        let directory = TempDir::new().unwrap();
+        let backup = directory.path().join("verified.db");
+        let key = vault::MasterKey::generate().unwrap();
+        let store = Store::open(&backup, Vault::new(&key).unwrap()).unwrap();
+        write_backup_marker(&store).unwrap();
+        store
+            .transaction(|tx| {
+                repos::preferences::upsert(
+                    tx,
+                    &store,
+                    "recovery-test",
+                    &serde_json::json!({"value":"restored"}),
+                    "now",
+                )
+            })
+            .unwrap();
+        drop(store);
+
+        let manifest = validate_backup_candidate(&backup, &Vault::new(&key).unwrap()).unwrap();
+        assert_eq!(manifest["format"], BACKUP_FORMAT);
+        let wrong = vault::MasterKey::generate().unwrap();
+        assert!(validate_backup_candidate(&backup, &Vault::new(&wrong).unwrap()).is_err());
+
+        let conn = Connection::open(&backup).unwrap();
+        conn.execute(
+            "UPDATE preferences SET payload=x'00' WHERE key=?1",
+            [BACKUP_MARKER_KEY],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(validate_backup_candidate(&backup, &Vault::new(&key).unwrap()).is_err());
+    }
+
+    #[test]
+    fn pending_restore_activates_on_restart_and_preserves_prior_database() {
+        let directory = TempDir::new().unwrap();
+        let key = vault::MasterKey::generate().unwrap();
+        let current = directory.path().join(DB_FILENAME);
+        let current_store = Store::open(&current, Vault::new(&key).unwrap()).unwrap();
+        current_store
+            .transaction(|tx| {
+                repos::preferences::upsert(
+                    tx,
+                    &current_store,
+                    "recovery-test",
+                    &serde_json::json!({"value":"current"}),
+                    "now",
+                )
+            })
+            .unwrap();
+        drop(current_store);
+
+        let source = directory.path().join("source-backup.db");
+        let source_store = Store::open(&source, Vault::new(&key).unwrap()).unwrap();
+        write_backup_marker(&source_store).unwrap();
+        source_store
+            .transaction(|tx| {
+                repos::preferences::upsert(
+                    tx,
+                    &source_store,
+                    "recovery-test",
+                    &serde_json::json!({"value":"restored"}),
+                    "now",
+                )
+            })
+            .unwrap();
+        drop(source_store);
+        std::fs::rename(&source, directory.path().join(RESTORE_PENDING_FILENAME)).unwrap();
+
+        let recovery = apply_pending_restore(directory.path(), &key)
+            .unwrap()
+            .expect("the prior database must be preserved");
+        let restored = Store::open(&current, Vault::new(&key).unwrap()).unwrap();
+        assert_eq!(
+            restored
+                .with_conn(|tx| repos::preferences::get(tx, &restored, "recovery-test"))
+                .unwrap()
+                .unwrap()["value"],
+            "restored"
+        );
+        let prior = Store::open(&recovery, Vault::new(&key).unwrap()).unwrap();
+        assert_eq!(
+            prior
+                .with_conn(|tx| repos::preferences::get(tx, &prior, "recovery-test"))
+                .unwrap()
+                .unwrap()["value"],
+            "current"
+        );
+    }
+
+    #[test]
+    fn wrong_key_pending_restore_leaves_current_database_untouched() {
+        let directory = TempDir::new().unwrap();
+        let current_key = vault::MasterKey::generate().unwrap();
+        let current = directory.path().join(DB_FILENAME);
+        drop(Store::open(&current, Vault::new(&current_key).unwrap()).unwrap());
+        let other_key = vault::MasterKey::generate().unwrap();
+        let pending = directory.path().join(RESTORE_PENDING_FILENAME);
+        let candidate = Store::open(&pending, Vault::new(&other_key).unwrap()).unwrap();
+        write_backup_marker(&candidate).unwrap();
+        drop(candidate);
+
+        assert!(apply_pending_restore(directory.path(), &current_key).is_err());
+        assert!(current.exists());
+        assert!(pending.exists());
+        assert!(Store::open(&current, Vault::new(&current_key).unwrap()).is_ok());
     }
 
     #[test]

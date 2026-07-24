@@ -381,6 +381,30 @@ describe("Settings → Privacy UX states", () => {
     expect(exportMemory).toHaveBeenCalled();
   });
 
+  it("keeps local restore explicit and truthful outside the desktop runtime", async () => {
+    renderPrivacy(stubRuntime());
+
+    const backupPath = screen.getByLabelText("New backup file");
+    const restorePath = screen.getByLabelText("Restore from backup");
+    const confirmation = screen.getByLabelText(/Type restore local data to confirm/i);
+    const restore = screen.getByRole("button", { name: "Verify and prepare restore" });
+    expect(restore).toBeDisabled();
+
+    fireEvent.change(restorePath, { target: { value: "C:\\Backups\\fable.db" } });
+    fireEvent.change(confirmation, { target: { value: "restore local data" } });
+    expect(restore).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(restore);
+    });
+    expect(await screen.findByText("Local restore is available only in the Fable desktop app.")).toBeTruthy();
+
+    fireEvent.change(backupPath, { target: { value: "C:\\Backups\\new-fable.db" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Create verified backup" }));
+    });
+    expect(await screen.findByText("Encrypted recovery backups are available only in the Fable desktop app.")).toBeTruthy();
+  });
+
   it("handles bulk disconnect of all connectors", async () => {
     const disconnect = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(window, "confirm").mockReturnValue(true);
