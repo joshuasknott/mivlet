@@ -1,4 +1,3 @@
-import { GitBranch } from "@phosphor-icons/react/dist/csr/GitBranch";
 import { Lightning } from "@phosphor-icons/react/dist/csr/Lightning";
 import { PuzzlePiece } from "@phosphor-icons/react/dist/csr/PuzzlePiece";
 import { Stack } from "@phosphor-icons/react/dist/csr/Stack";
@@ -39,7 +38,6 @@ export const ACCEPTED_COMPOSER_ATTACHMENTS = [
 ].join(",");
 
 export const utilityItems = [
-  { label: "Departments", icon: GitBranch },
   { label: "Connectors", icon: PuzzlePiece },
   { label: "Knowledge", icon: Stack },
   { label: "Schedules", icon: Lightning }

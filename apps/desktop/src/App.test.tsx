@@ -658,6 +658,7 @@ describe("Fable home", () => {
     expect(screen.getByRole("button", { name: /^connectors$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^knowledge$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^departments$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^home$/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^projects$/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^chats$/i })).toBeInTheDocument();

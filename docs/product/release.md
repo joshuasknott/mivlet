@@ -100,7 +100,8 @@ stored in React state, snapshots, logs, or JSON metadata.
   preview data.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
-  work. Every current modal entry point now has initial focus, keyboard
+  work. The unavailable Departments placeholder is not shown in primary
+  navigation. Every current modal entry point now has initial focus, keyboard
   containment, safe Escape close, and restoration to the opener or an explicit
   stable invoking control through one shared focus scope. It also makes
   background branches inert for keyboard and assistive-technology navigation
