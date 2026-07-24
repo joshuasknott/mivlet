@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { RunContextReceipt } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
-import { CitedApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
+import { CitedApprovalCard, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, runContextAudienceLabel } from "./workspace-cards";
 
 const receipt: RunContextReceipt = {
   version: 1,
@@ -271,6 +271,28 @@ describe("RunContextSummary", () => {
     fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
     expect(onApprove).toHaveBeenCalledOnce();
     expect(onKeepDraft).toHaveBeenCalledOnce();
+  });
+
+  it("shows an exact consequential action without claiming it already ran", () => {
+    const onApprove = vi.fn();
+    const onDeny = vi.fn();
+    render(<MissionEffectApprovalCard
+      actionSummary="Publish the reviewed update."
+      targetSummary="One reviewed update"
+      requestedAt="2026-07-23T10:00:00Z"
+      busy={false}
+      onApprove={onApprove}
+      onDeny={onDeny}
+    />);
+    const card = screen.getByLabelText("Mission action approval");
+    expect(card).toHaveTextContent("Publish the reviewed update.");
+    expect(card).toHaveTextContent("One reviewed update");
+    expect(card).toHaveTextContent("Fable will recheck this exact action before it can run.");
+    expect(card).not.toHaveTextContent("completed");
+    fireEvent.click(screen.getByRole("button", { name: "Approve action" }));
+    fireEvent.click(screen.getByRole("button", { name: "Donâ€™t approve" }));
+    expect(onApprove).toHaveBeenCalledOnce();
+    expect(onDeny).toHaveBeenCalledOnce();
   });
 
   it("collects bounded typed mission input in one accessible form", () => {

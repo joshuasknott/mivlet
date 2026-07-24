@@ -775,8 +775,12 @@ approver, current Run head, and a fifteen-minute freshness window before
 atomically consuming it once. It returns only a stack-local non-serializable
 permit; changed, denied, stale, cross-owner, or replayed consumption fails
 closed, and a crash after consumption requires fresh approval rather than risking
-duplicate egress. Concrete effect-adapter composition, automatic graph
-composition, and product UI remain open, so the Wave 4C
+duplicate egress. The conversation now discovers bounded pending general
+approvals after restart, shows only the secret-safe action and target in a calm
+keyboard-operable card, makes the pre-execution recheck explicit, and submits
+approve/deny through the strict runtime projection with busy, failure, and
+unavailable-list states. Concrete effect-adapter composition and automatic graph
+composition remain open, so the Wave 4C
 human-input-and-approval checkbox stays unchecked.
 
 Conservative, explicit

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { WorkspaceSidebar } from "./components/WorkspaceSidebar";
 import { resolveDetailedStatus } from "./components/PluginPanel";
-import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
+import { cancelRuntimeCitedApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
 import type { ThreadSummary } from "@fable/protocol";
 
@@ -267,8 +267,10 @@ vi.mock("./runtime", () => ({
   createRuntimeResponseArtifact: vi.fn(async () => null),
   listRuntimeThreadArtifacts: vi.fn(async () => []),
   listRuntimePendingCitedApprovals: vi.fn(async () => ({ approvals: [], unavailableCount: 0, truncated: false })),
+  listRuntimePendingMissionApprovals: vi.fn(async () => ({ approvals: [], unavailableCount: 0, truncated: false })),
   listRuntimePendingMissionHumanInputs: vi.fn(async () => ({ requests: [], unavailableCount: 0, truncated: false })),
   resolveRuntimeCitedApproval: vi.fn(async () => null),
+  resolveRuntimeMissionApproval: vi.fn(async () => null),
   cancelRuntimeCitedApproval: vi.fn(async () => null),
   receiveRuntimeMissionHumanInput: vi.fn(async () => null),
   startRuntimeStructuredIntake: vi.fn(async (input: Record<string, unknown>) => {
@@ -552,6 +554,10 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeThreadArtifacts).mockResolvedValue([]);
     vi.mocked(listRuntimePendingCitedApprovals).mockReset();
     vi.mocked(listRuntimePendingCitedApprovals).mockResolvedValue({ approvals: [], unavailableCount: 0, truncated: false });
+    vi.mocked(listRuntimePendingMissionApprovals).mockReset();
+    vi.mocked(listRuntimePendingMissionApprovals).mockResolvedValue({ approvals: [], unavailableCount: 0, truncated: false });
+    vi.mocked(resolveRuntimeMissionApproval).mockReset();
+    vi.mocked(resolveRuntimeMissionApproval).mockResolvedValue(null);
     vi.mocked(listRuntimePendingMissionHumanInputs).mockReset();
     vi.mocked(listRuntimePendingMissionHumanInputs).mockResolvedValue({ requests: [], unavailableCount: 0, truncated: false });
     vi.mocked(receiveRuntimeMissionHumanInput).mockReset();
@@ -2537,6 +2543,41 @@ describe("Fable home", () => {
       expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
     });
     expect(screen.queryByText(/native agent needs a connected desktop backend/i)).not.toBeInTheDocument();
+  });
+
+  it("rehydrates and resolves an exact general Mission action approval", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-approval", projectId: null, title: "Review action",
+      lifecycle: "active", updatedAt: "2026-07-23T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    const approval = {
+      runId: "run-general-approval", missionId: "mission-general-approval",
+      sourceThreadId: "thread-general-approval", planRevisionId: "revision-1",
+      waitKey: `mission-approval-wait:v1:${"a".repeat(64)}`,
+      requestKey: "publish-1", actionSummary: "Publish the reviewed update.",
+      proposalHash: "b".repeat(64),
+      effect: {
+        effectKey: "publish:update-1", idempotencyKey: "publish:update-1",
+        targetSummary: "One reviewed update"
+      },
+      requestedAt: "2026-07-23T12:00:00Z", runRevision: 6, lastSequence: 5
+    };
+    vi.mocked(listRuntimePendingMissionApprovals).mockResolvedValue({
+      approvals: [approval], unavailableCount: 0, truncated: false
+    });
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Review action" }));
+
+    const card = await screen.findByLabelText("Mission action approval");
+    expect(card).toHaveTextContent("Publish the reviewed update.");
+    expect(card).toHaveTextContent("One reviewed update");
+    fireEvent.click(screen.getByRole("button", { name: "Approve action" }));
+    await waitFor(() =>
+      expect(resolveRuntimeMissionApproval).toHaveBeenCalledWith(approval, "approved")
+    );
+    expect(screen.queryByLabelText("Mission action approval")).not.toBeInTheDocument();
   });
 
   it("turns a completed request into an editable Routine draft without auto-saving it", async () => {

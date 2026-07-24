@@ -18,9 +18,9 @@ import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, is
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
+import { getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, receiveRuntimeMissionHumanInput, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -105,6 +105,10 @@ export function ChatWorkspace() {
   const [approvalListWarning, setApprovalListWarning] = useState<string | null>(null);
   const [approvalBusyRunId, setApprovalBusyRunId] = useState<string | null>(null);
   const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
+  const [pendingMissionApprovals, setPendingMissionApprovals] = useState<RuntimeMissionApproval[]>([]);
+  const [missionApprovalListWarning, setMissionApprovalListWarning] = useState<string | null>(null);
+  const [missionApprovalBusyRunId, setMissionApprovalBusyRunId] = useState<string | null>(null);
+  const [missionApprovalErrors, setMissionApprovalErrors] = useState<Record<string, string>>({});
   const [pendingMissionInputs, setPendingMissionInputs] = useState<RuntimeMissionHumanInputRequest[]>([]);
   const [missionInputListWarning, setMissionInputListWarning] = useState<string | null>(null);
   const [missionInputBusyRunId, setMissionInputBusyRunId] = useState<string | null>(null);
@@ -658,6 +662,27 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     let active = true;
+    setPendingMissionApprovals([]);
+    setMissionApprovalListWarning(null);
+    if (!selectedConversationThreadId) return () => { active = false; };
+    void listRuntimePendingMissionApprovals(selectedConversationThreadId)
+      .then((result) => {
+        if (!active) return;
+        setPendingMissionApprovals(result.approvals);
+        setMissionApprovalListWarning(result.unavailableCount > 0 || result.truncated
+          ? "Some mission action approvals could not be shown. Fable left them untouched."
+          : null);
+      })
+      .catch(() => {
+        if (!active) return;
+        setPendingMissionApprovals([]);
+        setMissionApprovalListWarning("Mission action approvals are temporarily unavailable. Fable left them untouched.");
+      });
+    return () => { active = false; };
+  }, [boundWorkspaceId, hydratedConversation?.messages.length, selectedConversationThreadId]);
+
+  useEffect(() => {
+    let active = true;
     const requests = pendingMissionInputs.filter((request) =>
       request.sourceThreadId === selectedConversationThreadId
         && request.fields.some((field) => field.kind === "artifact")
@@ -866,9 +891,36 @@ export function ChatWorkspace() {
     }
   };
 
+  const resolveMissionApproval = async (
+    approval: RuntimeMissionApproval,
+    decision: "approved" | "denied"
+  ) => {
+    if (missionApprovalBusyRunId) return;
+    setMissionApprovalBusyRunId(approval.runId);
+    setMissionApprovalErrors((current) => {
+      const next = { ...current };
+      delete next[approval.runId];
+      return next;
+    });
+    try {
+      await resolveRuntimeMissionApproval(approval, decision);
+      setPendingMissionApprovals((current) =>
+        current.filter((entry) => entry.runId !== approval.runId));
+      await durableConversation.refresh();
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : "Fable could not save this Mission decision.";
+      setMissionApprovalErrors((current) => ({ ...current, [approval.runId]: message }));
+    } finally {
+      setMissionApprovalBusyRunId(null);
+    }
+  };
+
   const renderConversation = () => {
     if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0
-      && pendingMissionInputs.length === 0 && !approvalListWarning && !missionInputListWarning) return null;
+      && pendingMissionApprovals.length === 0 && pendingMissionInputs.length === 0
+      && !approvalListWarning && !missionApprovalListWarning && !missionInputListWarning) return null;
     return (
       <section className="conversation-feed" aria-label="Conversation">
         {conversationMessages.map((message, messageIndex) => {
@@ -1010,8 +1062,24 @@ export function ChatWorkspace() {
             />
           </article>
         ))}
+        {pendingMissionApprovals.map((approval) => (
+          <article key={approval.runId} className="conversation-message conversation-message--assistant">
+            <MissionEffectApprovalCard
+              actionSummary={approval.actionSummary}
+              targetSummary={approval.effect.targetSummary}
+              requestedAt={approval.requestedAt}
+              busy={missionApprovalBusyRunId === approval.runId}
+              error={missionApprovalErrors[approval.runId]}
+              onApprove={() => void resolveMissionApproval(approval, "approved")}
+              onDeny={() => void resolveMissionApproval(approval, "denied")}
+            />
+          </article>
+        ))}
         {approvalListWarning ? (
           <p className="conversation-feed__notice" role="status">{approvalListWarning}</p>
+        ) : null}
+        {missionApprovalListWarning ? (
+          <p className="conversation-feed__notice" role="status">{missionApprovalListWarning}</p>
         ) : null}
         {missionInputListWarning ? (
           <p className="conversation-feed__notice" role="status">{missionInputListWarning}</p>

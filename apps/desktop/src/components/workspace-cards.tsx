@@ -272,6 +272,45 @@ export function CitedApprovalCard({
   );
 }
 
+export function MissionEffectApprovalCard({
+  actionSummary,
+  targetSummary,
+  requestedAt,
+  busy,
+  error,
+  onApprove,
+  onDeny
+}: {
+  actionSummary: string;
+  targetSummary: string;
+  requestedAt: string;
+  busy: boolean;
+  error?: string;
+  onApprove: () => void;
+  onDeny: () => void;
+}) {
+  return (
+    <section className="mission-approval-card" aria-label="Mission action approval">
+      <div>
+        <strong>Review this action</strong>
+        <p>{actionSummary}</p>
+        <p><span className="sr-only">Target: </span>{targetSummary}</p>
+        <p>Approval lets the mission continue. Fable will recheck this exact action before it can run.</p>
+      </div>
+      <div className="mission-approval-card__actions">
+        <button type="button" className="button button--primary" disabled={busy} onClick={onApprove}>
+          {busy ? "Saving decisionâ€¦" : "Approve action"}
+        </button>
+        <button type="button" className="button button--secondary" disabled={busy} onClick={onDeny}>
+          Donâ€™t approve
+        </button>
+      </div>
+      <small>Requested {new Date(requestedAt).toLocaleString()}</small>
+      {error ? <p role="alert" className="mission-approval-card__error">{error}</p> : null}
+    </section>
+  );
+}
+
 export type MissionHumanInputField = {
   key: string;
   label: string;
