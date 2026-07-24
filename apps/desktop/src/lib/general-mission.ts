@@ -59,10 +59,17 @@ export async function executeGeneralMission(
   const draft = parseGeneralMissionDraft([
     input.title,
     ...input.tasks.map((task) => `- ${task}`),
-    ...(input.join ? [`${input.join.strategy}: ${input.join.task}`] : [])
+    ...(input.join
+      ? [
+          `${input.join.strategy}: ${input.join.task}`,
+          ...(input.join.then ?? []).map((task) => `then: ${task}`)
+        ]
+      : [])
   ].join("\n"));
   if (!draft) {
-    throw new Error("A mission needs a short title and two to six distinct bullet tasks.");
+    throw new Error(
+      "A mission needs a short title, at least two distinct bullet tasks, and no more than six total steps."
+    );
   }
 
   const routes = await listRuntimeNativeProviderRoutes();
@@ -89,18 +96,20 @@ export async function executeGeneralMission(
     requiredResult: draft.join === undefined,
     optionalStep: draft.join?.strategy === "any"
   }));
+  const continuationRecords = draft.join
+    ? [draft.join.task, ...(draft.join.then ?? [])].map((task, index, chain) => ({
+        key: index === 0 ? "joined-result" : `continued-result-${index}`,
+        title: taskTitle(task, sourceTasks.length + index),
+        objective: task,
+        dependsOnStepKeys: index === 0
+          ? sourceTasks.map((source) => source.key)
+          : [index === 1 ? "joined-result" : `continued-result-${index - 1}`],
+        requiredResult: index === chain.length - 1,
+        optionalStep: false
+      }))
+    : [];
   const taskRecords = draft.join
-    ? [
-        ...sourceTasks,
-        {
-          key: "joined-result",
-          title: taskTitle(draft.join.task, sourceTasks.length),
-          objective: draft.join.task,
-          dependsOnStepKeys: sourceTasks.map((task) => task.key),
-          requiredResult: true,
-          optionalStep: false
-        }
-      ]
+    ? [...sourceTasks, ...continuationRecords]
     : sourceTasks;
 
   const lifecycle = await createRuntimeMissionPlan({

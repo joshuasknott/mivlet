@@ -704,9 +704,10 @@ activity when no terminal message exists. Cross-thread and cross-member Runs nev
 cross the boundary; invalid projections remain untouched and are counted as
 unavailable instead of inferred. This supersedes the earlier sentence that general
 and multi-worker plan views were wholly open. The ordinary composer now creates
-the bounded independent-worker `/mission` shape and one explicitly declared
-`all:` or `any:` continuation over its immutable outputs. Arbitrary multi-stage
-graph authoring, richer route/cost evidence for every shape, and packaged
+the bounded independent-worker `/mission` shape, one explicitly declared
+`all:` or `any:` fan-in over immutable outputs, and following sequential
+`then:` stages inside the same six-step bound. Arbitrary branching graph
+authoring, richer route/cost evidence for every shape, and packaged
 assistive-technology observation remain open, so the combined Wave 4B checkbox
 stays unchecked.
 
@@ -1091,23 +1092,24 @@ input/decision receipt. The conversation refreshes and exposes every Artifact
 produced by the Run rather than showing only the first result. This closes
 general-manifest Artifact materialization for the bounded `/mission` shape; it
 does not implement arbitrary cross-Mission handoff, iterative revision, or
-multi-stage graph authoring, so the broader replay-safe handoff checkbox remains
+branching graph authoring, so the broader replay-safe handoff checkbox remains
 unchecked.
 
 The normal desktop composer now owns one explicit bounded general-Mission entry
-point. `/mission` accepts a short title followed by two to six distinct bullet
-tasks. The final line may instead be an explicit `all: …` or `any: …`
-continuation, keeping the full Plan at two to six workers. Fable persists one
+point. `/mission` accepts a short title followed by at least two distinct bullet
+tasks within a six-step ceiling. An explicit `all: …` or `any: …` line may
+declare a fan-in, and following `then: …` lines may declare a short sequential
+chain while keeping the full Plan at two to six workers. Fable persists one
 encrypted selected Plan, pins the currently selected authorized provider/model
-route with no fallback, declares the join before any worker outcome exists,
+route with no fallback, declares the multi-source join before any worker outcome exists,
 prepares every worker through the native derivation boundary, executes ready
 work through the reusable provider-neutral graph runner, and writes the submitted
 command plus the review bundle to the durable source conversation. Rust derives
-the continuation objective from exact encrypted predecessor completion receipts,
+every downstream objective from exact encrypted predecessor completion receipts,
 preserving plan order, content hashes, output references, failed-source truth,
 and the provider-generated untrusted boundary; the provider request must match
 that native reconstruction exactly. Ordinary bullets remain independent, and
-the command does not infer additional dependencies, tools, effects, grants, or
+the command does not infer branches, tools, effects, grants, or
 handoff authority. Stop/cancellation uses the same native run boundary, restart
 recovery re-derives the same objective from the durable checkpoint and receipts,
 and reopen reattaches the native progress receipt by Run id. Human review is
@@ -1118,8 +1120,8 @@ durable output references from the immutable Plan steps and terminal worker
 facts, refuses a passing decision when any bound output is absent, stores those
 references in the evaluation, and verifies them on exact replay. Parser,
 dispatcher, composition, renderer, transcript, native validation, evidence,
-replay, and encrypted-reopen coverage are repository-local. Arbitrary multi-stage
-or branching graph authoring, quorum joins, dynamic tool/grant composition,
+replay, and encrypted-reopen coverage are repository-local. Arbitrary branching
+graph authoring, quorum joins, dynamic tool/grant composition,
 arbitrary cross-Mission handoff/iteration, and packaged/live-provider observation
 remain open.
 

@@ -8,6 +8,7 @@ export interface GeneralMissionDraft {
   join?: {
     strategy: "all" | "any";
     task: string;
+    then?: string[];
   };
 }
 
@@ -15,8 +16,9 @@ export interface GeneralMissionDraft {
  * Parse the calm multiline `/mission` contract.
  *
  * The first line names the work. Every following non-empty line must be a
- * bullet or numbered task. An optional final `all:` or `any:` line explicitly
+ * bullet or numbered task. An optional `all:` or `any:` line explicitly
  * declares one bounded continuation that receives the immutable task outputs.
+ * Up to three following `then:` lines may declare a short sequential chain.
  * No dependency or synthesis authority is inferred from ordinary bullets.
  */
 export function parseGeneralMissionDraft(value: string): GeneralMissionDraft | null {
@@ -28,31 +30,48 @@ export function parseGeneralMissionDraft(value: string): GeneralMissionDraft | n
   if (lines.length < 3) return null;
   const title = lines[0]!;
   if (!title || title.length > MAX_TITLE_LENGTH) return null;
-  const declaredJoin = /^(all|any):\s+(.+)$/i.exec(lines.at(-1) ?? "");
-  const taskLines = lines.slice(1, declaredJoin ? -1 : undefined);
+  const continuationLines: RegExpExecArray[] = [];
+  let taskBoundary = lines.length;
+  while (taskBoundary > 1) {
+    const declared = /^(all|any|then):\s+(.+)$/i.exec(lines[taskBoundary - 1] ?? "");
+    if (!declared) break;
+    continuationLines.unshift(declared);
+    taskBoundary -= 1;
+  }
+  const firstContinuation = continuationLines[0];
+  const validContinuationChain = continuationLines.length === 0 || (
+    firstContinuation !== undefined
+    && /^(all|any)$/i.test(firstContinuation[1] ?? "")
+    && continuationLines.slice(1).every((line) => /^then$/i.test(line[1] ?? ""))
+  );
+  const taskLines = lines.slice(1, taskBoundary);
   const tasks = taskLines.map((line) => {
     const match = /^(?:[-*]|\d{1,2}[.)])\s+(.+)$/.exec(line);
     return match?.[1]?.trim() ?? "";
   });
-  const joinTask = declaredJoin?.[2]?.trim();
+  const continuationTasks = continuationLines.map((line) => line[2]?.trim() ?? "");
+  const allObjectives = [...tasks, ...continuationTasks];
   if (
-    tasks.length < 2
-    || tasks.length + (declaredJoin ? 1 : 0) > MAX_TASKS
+    !validContinuationChain
+    || tasks.length < 2
+    || allObjectives.length > MAX_TASKS
     || tasks.some((task) => !task || task.length > MAX_TASK_LENGTH)
-    || (declaredJoin && (!joinTask || joinTask.length > MAX_TASK_LENGTH))
-    || new Set(tasks.map((task) => task.toLocaleLowerCase())).size !== tasks.length
-    || (joinTask && tasks.some((task) => task.toLocaleLowerCase() === joinTask.toLocaleLowerCase()))
+    || continuationTasks.some((task) => !task || task.length > MAX_TASK_LENGTH)
+    || new Set(allObjectives.map((task) => task.toLocaleLowerCase())).size !== allObjectives.length
   ) {
     return null;
   }
   return {
     title,
     tasks,
-    ...(declaredJoin && joinTask
+    ...(firstContinuation
       ? {
           join: {
-            strategy: declaredJoin[1]!.toLocaleLowerCase() as "all" | "any",
-            task: joinTask
+            strategy: firstContinuation[1]!.toLocaleLowerCase() as "all" | "any",
+            task: continuationTasks[0]!,
+            ...(continuationTasks.length > 1
+              ? { then: continuationTasks.slice(1) }
+              : {})
           }
         }
       : {})

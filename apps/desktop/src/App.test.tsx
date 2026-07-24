@@ -2701,6 +2701,39 @@ describe("Fable home", () => {
     );
   });
 
+  it("passes an explicit multi-stage Mission chain to the native graph path", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-chain", projectId: null, title: "Launch chain",
+      lifecycle: "active", updatedAt: "2026-07-24T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch chain" }));
+    const composer = screen.getByLabelText(/universal composer/i);
+    fireEvent.change(composer, {
+      target: {
+        value: "/mission Launch readiness\n- Prepare the brief\n- Review the risks\nall: Recommend next steps\nthen: Make a checklist"
+      }
+    });
+    fireEvent.keyDown(composer, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Launch readiness",
+      tasks: ["Prepare the brief", "Review the risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend next steps",
+        then: ["Make a checklist"]
+      }
+    });
+  });
+
   it("keeps settings keyboard focus inside the modal and restores its opener", async () => {
     const user = await renderWorkspace();
     const settingsButton = screen.getByRole("button", { name: "Settings" });
@@ -3170,6 +3203,7 @@ describe("Fable home", () => {
 
   it("selecting a model in the picker drives the persisted model id for the next run", async () => {
     const user = userEvent.setup();
+    vi.mocked(runtimeModule.listRuntimeBackendModels).mockClear();
     runtimeMocks.backends = [
       {
         id: "openai",
@@ -3209,6 +3243,9 @@ describe("Fable home", () => {
     };
     render(<App />);
     await screen.findByLabelText(/universal composer/i);
+    await waitFor(() => {
+      expect(runtimeModule.listRuntimeBackendModels).toHaveBeenCalledTimes(1);
+    });
 
     // Default chip shows the first available model (gpt-5).
     expect(screen.getByRole("button", { name: /select model/i })).toHaveTextContent("GPT-5");
@@ -3223,6 +3260,7 @@ describe("Fable home", () => {
     await waitFor(() => {
       expect(runtimeMocks.savedSnapshots.at(-1)?.selectedModelId).toBe("openai::o3");
     });
+    expect(runtimeModule.listRuntimeBackendModels).toHaveBeenCalledTimes(1);
   });
 
   it("renders connector details for connected, configured, unconfigured, expired, syncing, failed, unavailable, and permission-limited states", async () => {

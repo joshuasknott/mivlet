@@ -11,7 +11,7 @@ import { SquaresFour } from "@phosphor-icons/react/dist/csr/SquaresFour";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   AccountPendingInvitation,
   AccountWorkspaceMemberAction,
@@ -1705,6 +1705,20 @@ export function WorkspaceSettingsView({
     () => JSON.stringify([accountContextKey, fableWorkspaceId]),
     [accountContextKey, fableWorkspaceId]
   );
+  const memberRosterKey = useMemo(
+    () => members.roster === null
+      ? members.state
+      : JSON.stringify([
+          members.roster.workspaceId,
+          members.roster.members.map((member) => [
+            member.memberActionRef,
+            member.revision,
+            member.role,
+            member.status
+          ])
+        ]),
+    [members.roster, members.state]
+  );
   const [roleDrafts, setRoleDrafts] = useState<Record<string, WorkspaceRole>>({});
   const [removeConfirmation, setRemoveConfirmation] = useState<{
     contextKey: string;
@@ -1777,10 +1791,12 @@ export function WorkspaceSettingsView({
     if (invitationMessage) feedbackRef.current?.focus();
   }, [invitationMessage]);
 
-  useEffect(() => {
+  // Reset stale controls before a newly loaded roster can paint. A passive
+  // reset could race a fast click on the freshly rendered Remove button.
+  useLayoutEffect(() => {
     setRoleDrafts({});
     setRemoveConfirmation(null);
-  }, [memberContextKey, members.roster]);
+  }, [memberContextKey, memberRosterKey]);
 
   useEffect(() => {
     setInviteEmail("");

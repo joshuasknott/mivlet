@@ -1320,12 +1320,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         [providerId]: "loading"
       }));
       const result = await listRuntimeBackendModels(providerId);
-      // null means preview/no desktop runtime. Reset to idle so the row does not
-      // sit on a phantom "loading" state; every desktop outcome is retained.
+      // null means preview/no desktop runtime. Mark this attempt unsupported so
+      // the automatic discovery effect cannot spin idle -> loading -> idle.
+      // A manual refresh can still call this entry point again.
       if (result === null) {
         setModelDiscoveryByProvider((current) => ({
           ...current,
-          [providerId]: "idle"
+          [providerId]: "unsupported"
         }));
         return;
       }

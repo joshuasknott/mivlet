@@ -1571,7 +1571,7 @@ export function ChatWorkspace() {
     if (!draft) {
       appendConversationMessage(
         "assistant",
-        "Use /mission with a short title, then two to six bullet tasks. Optionally finish with “all: …” or “any: …” to declare one continuation."
+        "Use /mission with a short title, then two to six total steps. Start with at least two bullet tasks, optionally add “all: …” or “any: …”, then add short “then: …” stages."
       );
       return;
     }

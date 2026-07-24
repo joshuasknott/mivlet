@@ -181,6 +181,37 @@ describe("parseGeneralMissionDraft", () => {
       "all: Combine"
     ].join("\n"))).toBeNull();
   });
+
+  it("accepts an explicit fan-in followed by a bounded sequential chain", () => {
+    expect(parseGeneralMissionDraft([
+      "Launch readiness",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "then: Turn the recommendation into a checklist"
+    ].join("\n"))).toEqual({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief", "Identify the main risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step",
+        then: ["Turn the recommendation into a checklist"]
+      }
+    });
+    expect(parseGeneralMissionDraft([
+      "Invalid chain",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "then: Recommend the next step"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Invalid branch",
+      "- Prepare the launch brief",
+      "- Identify the main risks",
+      "all: Recommend the next step",
+      "any: Replace the declared continuation"
+    ].join("\n"))).toBeNull();
+  });
 });
 
 describe("executeGeneralMission", () => {
@@ -343,6 +374,72 @@ describe("executeGeneralMission", () => {
       .toBeLessThan(mocks.executeGraph.mock.invocationCallOrder[0]!);
     expect(result).toMatchObject({ outcome: "awaiting-review" });
     expect(result.text).toContain("## Recommend the next step from both drafts");
+  });
+
+  it("composes a short multi-stage chain without inferring another join", async () => {
+    const ids = [
+      "mission-1",
+      "plan-2",
+      "plan-revision-3",
+      "mission-run-4",
+      "event-5",
+      "run-create-6",
+      "join-open-7",
+      "join-open-key-8"
+    ];
+    mocks.getRun.mockResolvedValue({
+      run: { id: "mission-run-4" },
+      events: [
+        completion("task-1", "output-1"),
+        completion("task-2", "output-2"),
+        completion("joined-result", "output-joined"),
+        completion("continued-result-1", "output-final")
+      ]
+    });
+    const result = await executeGeneralMission({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief.", "Identify the main risks."],
+      join: {
+        strategy: "all",
+        task: "Recommend the next step from both drafts.",
+        then: ["Turn the recommendation into a checklist."]
+      },
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend,
+      model: "gpt-5",
+      resolveBackend: async () => backend,
+      createId: () => ids.shift()!
+    });
+
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      bounds: expect.objectContaining({
+        maxSteps: 4,
+        maxDependenciesPerStep: 2,
+        maxParallelSteps: 2
+      }),
+      outcome: expect.objectContaining({
+        deliverables: expect.arrayContaining([
+          expect.objectContaining({ key: "joined-result", required: false }),
+          expect.objectContaining({ key: "continued-result-1", required: true })
+        ])
+      }),
+      steps: [
+        expect.objectContaining({ key: "task-1", dependsOnStepKeys: [] }),
+        expect.objectContaining({ key: "task-2", dependsOnStepKeys: [] }),
+        expect.objectContaining({
+          key: "joined-result",
+          dependsOnStepKeys: ["task-1", "task-2"]
+        }),
+        expect.objectContaining({
+          key: "continued-result-1",
+          dependsOnStepKeys: ["joined-result"]
+        })
+      ]
+    }));
+    expect(mocks.openJoin).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ outcome: "awaiting-review" });
+    expect(result.text).toContain("## Turn the recommendation into a checklist");
   });
 });
 
