@@ -2732,6 +2732,14 @@ describe("Fable home", () => {
         then: ["Make a checklist"]
       }
     });
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "assistant",
+        initialRevision: expect.objectContaining({
+          content: "Preparing 4 declared Mission steps..."
+        })
+      })
+    );
   });
 
   it("keeps settings keyboard focus inside the modal and restores its opener", async () => {
@@ -2889,6 +2897,129 @@ describe("Fable home", () => {
     expect(progress).toHaveTextContent("Draft approach A");
     expect(progress).toHaveTextContent("1 connected action");
     expect(listRuntimeThreadMissionProgress).toHaveBeenCalledWith("thread-general-progress");
+  });
+
+  it("starts a fresh general Mission from the exact durable terminal command", async () => {
+    const command = [
+      "/mission Launch recovery",
+      "- Prepare the brief",
+      "- Review the risks",
+      "all: Recommend next steps",
+      "then: Make a checklist"
+    ].join("\n");
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-rerun", projectId: null, title: "Launch recovery",
+      lifecycle: "active", updatedAt: "2026-07-24T12:00:00Z",
+      messageHead: { lastSequence: 2, lastMessageId: "message-general-partial" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-general-source", threadId: "thread-general-rerun",
+        kind: "user", sequence: 1, runId: "run-general-old",
+        currentRevisionId: "revision-general-source",
+        currentRevisionNumber: 1, currentRevisionState: "terminal"
+      },
+      currentRevision: {
+        id: "revision-general-source", threadId: "thread-general-rerun",
+        messageId: "message-general-source", messageRevisionNumber: 1,
+        state: "terminal", content: command
+      }
+    }, {
+      message: {
+        id: "message-general-partial", threadId: "thread-general-rerun",
+        kind: "assistant", sequence: 2, runId: "run-general-old",
+        currentRevisionId: "revision-general-partial",
+        currentRevisionNumber: 1, currentRevisionState: "terminal",
+        detail: {
+          type: "mission-result", missionKind: "general",
+          missionId: "mission-general-old", resultEventId: "event-general-old",
+          outcome: "partial"
+        }
+      },
+      currentRevision: {
+        id: "revision-general-partial", threadId: "thread-general-rerun",
+        messageId: "message-general-partial", messageRevisionNumber: 1,
+        state: "terminal", content: "Useful work is preserved, but review is still needed."
+      }
+    }];
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [{
+        runId: "run-general-old",
+        progress: {
+          version: 1, state: "complete",
+          summary: "Useful work is preserved, but review is still needed.",
+          runStatus: "partially-completed",
+          completedSteps: 3, totalSteps: 4,
+          runningWorkers: 0, readyWorkers: 0, waitingSteps: 0, blockedSteps: 1,
+          steps: [{
+            stepKey: "brief", title: "Prepare the brief", kind: "produce",
+            state: "completed", detail: "The durable output is complete."
+          }, {
+            stepKey: "risks", title: "Review the risks", kind: "produce",
+            state: "completed", detail: "The durable output is complete."
+          }, {
+            stepKey: "recommend", title: "Recommend next steps", kind: "produce",
+            state: "completed", detail: "The durable output is complete."
+          }, {
+            stepKey: "checklist", title: "Make a checklist", kind: "produce",
+            state: "blocked", detail: "The final continuation did not complete."
+          }],
+          usage: {
+            records: 3, inputTokens: 60, outputTokens: 30,
+            toolCalls: 0, durationMs: 500, costObservations: []
+          },
+          budget: { maxWorkers: 4 },
+          acceptance: [],
+          humanReview: null,
+          nextAction: "Start a new Mission if you want to try again."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    } as never);
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch recovery" }));
+
+    const rerun = await screen.findByRole("button", { name: "Run again as a new mission" });
+    expect(screen.getByLabelText("New mission option")).toHaveTextContent(
+      "Starts fresh with the current scope"
+    );
+    await user.click(rerun);
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Launch recovery",
+      tasks: ["Prepare the brief", "Review the risks"],
+      join: {
+        strategy: "all",
+        task: "Recommend next steps",
+        then: ["Make a checklist"]
+      },
+      workspaceId: "preview-default",
+      sourceThreadId: "thread-general-rerun",
+      model: "gpt-5"
+    });
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-general-rerun",
+        kind: "user",
+        runId: "general-run-ui",
+        initialRevision: expect.objectContaining({
+          content: command,
+          runId: "general-run-ui"
+        })
+      })
+    );
+    expect(vi.mocked(reviseRuntimeConversationMessage)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-general-partial" })
+    );
   });
 
   it("rehydrates every accepted Artifact produced by a completed general Mission", async () => {

@@ -711,6 +711,19 @@ authoring, richer route/cost evidence for every shape, and packaged
 assistive-technology observation remain open, so the combined Wave 4B checkbox
 stays unchecked.
 
+A partial, failed, or cancelled general `/mission` result now offers
+`Run again as a new mission` only when its exact durable preceding user command
+is still present and parses as the bounded general Mission grammar. The action
+replays no output, checkpoint, grant, approval, provider choice, or route fact:
+it submits that immutable command through the current conversation/project scope
+and currently selected authorized provider/model path, which creates a fresh
+Mission, Plan, selected revision, Run, workers, events, checkpoints, and
+idempotency identities. The terminal source result and its evidence remain
+unchanged. Completed results and terminal activity without an exact source
+command offer no action. This is a user-directed fresh Mission, not same-Run
+retry, automatic escalation, or cross-Mission handoff authority; those broader
+iteration outcomes remain open.
+
 The same narrow cited journey now supports a durable human-acceptance wait when
 the user explicitly asks to approve before saving. Rust persists a wait-boundary
 checkpoint whose encrypted state binds the exact plan revision, worker start,

@@ -53,6 +53,14 @@ type ConversationMessage = {
 function messageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+function matchesTerminalGeneralRetryStatus(
+  status: Spine.Missions.RunStatus
+): boolean {
+  return status === "partially-completed"
+    || status === "failed"
+    || status === "cancelled";
+}
 // Standalone pages are code-split: each is only rendered when navigated to, so
 // loading them lazily keeps the initial workspace bundle small. Named exports
 // are adapted to the lazy() default-export contract via `.then`. Suspense
@@ -1151,6 +1159,7 @@ export function ChatWorkspace() {
           const sourceRequest = [...conversationMessages.slice(0, messageIndex)]
             .reverse()
             .find((candidate) => candidate.role === "user");
+          const sourceCommand = sourceRequest ? parseComposerText(sourceRequest.content) : null;
           const canCreateRoutine =
             message.role === "assistant" &&
             Boolean(message.runId) &&
@@ -1167,6 +1176,14 @@ export function ChatWorkspace() {
             ? threadMissionProgress.find((entry) => entry.runId === message.runId)?.progress
             : undefined;
           const visibleMissionProgress = message.missionProgress ?? durableMissionProgress;
+          const canStartNewGeneralMission =
+            message.role === "assistant"
+            && message.missionKind === "general"
+            && sourceRequest !== undefined
+            && sourceCommand?.status === "command"
+            && sourceCommand.request.name === "mission"
+            && visibleMissionProgress !== undefined
+            && matchesTerminalGeneralRetryStatus(visibleMissionProgress.runStatus);
           const missionArtifacts = visibleMissionProgress && message.runId
             ? threadArtifacts.filter((entry) => entry.artifact.producingRunId === message.runId)
             : [];
@@ -1233,6 +1250,16 @@ export function ChatWorkspace() {
                     forceCitedMission: true,
                     newMissionSourceMessageId: message.id
                   })}
+                />
+              ) : null}
+              {canStartNewGeneralMission && sourceRequest ? (
+                <NewCitedMissionAction
+                  disabled={newMissionBusy}
+                  starting={newMissionSourceMessageId === message.id}
+                  onStart={() => void startFreshGeneralMission(
+                    sourceRequest.content,
+                    message.id
+                  )}
                 />
               ) : null}
               {canCreateRoutine && sourceRequest ? (
@@ -1600,7 +1627,8 @@ export function ChatWorkspace() {
     }
 
     const sourceThreadId = selectedConversationThreadId;
-    const declaredStepCount = draft.tasks.length + (draft.join ? 1 : 0);
+    const declaredStepCount = draft.tasks.length
+      + (draft.join ? 1 + (draft.join.then?.length ?? 0) : 0);
     const preparationLabel = draft.join
       ? `Preparing ${declaredStepCount} declared Mission steps...`
       : `Preparing ${draft.tasks.length} independent tasks...`;
@@ -1960,6 +1988,35 @@ export function ChatWorkspace() {
         ));
         activeAssistantMessageId.current = null;
       });
+  }
+
+  async function startFreshGeneralMission(
+    sourceCommand: string,
+    sourceMessageId: string
+  ) {
+    if (
+      newMissionLaunchRef.current
+      || citedMissionRunning
+      || parallelMissionRunning
+      || generalMissionRunning
+      || agent.state.running
+      || pendingPrompt
+    ) {
+      return;
+    }
+    const parsed = parseComposerText(sourceCommand);
+    if (parsed.status !== "command" || parsed.request.name !== "mission") return;
+    newMissionLaunchRef.current = sourceMessageId;
+    setNewMissionSourceMessageId(sourceMessageId);
+    appendConversationMessage("user", sourceCommand);
+    try {
+      await continueComposerSubmission(sourceCommand);
+    } finally {
+      if (newMissionLaunchRef.current === sourceMessageId) {
+        newMissionLaunchRef.current = null;
+        setNewMissionSourceMessageId(null);
+      }
+    }
   }
 
   // Subscribe the global shortcut listener once. The runtime object is not
