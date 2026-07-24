@@ -181,6 +181,7 @@ pub fn run() {
             routines::routine_delete,
             routines::routine_get,
             routines::routine_list,
+            routines::routine_connection_options,
             routines::routine_occurrence_append,
             routines::routine_occurrence_history,
             routines::routine_driver_renew,

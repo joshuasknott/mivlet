@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeRoutine,
   listenRuntimeRoutineRunRequest,
+  listRuntimeRoutineConnectionOptions,
   listRuntimeRoutines,
   migrateLegacyRoutines,
   pauseRuntimeRoutine,
@@ -100,6 +101,7 @@ describe("Routine runtime boundary", () => {
 
   it("does not simulate encrypted Routine durability in browser preview", async () => {
     await expect(listRuntimeRoutines()).resolves.toBeNull();
+    await expect(listRuntimeRoutineConnectionOptions()).resolves.toBeNull();
     await expect(
       createRuntimeRoutine({
         title: "Daily brief",
@@ -112,6 +114,22 @@ describe("Routine runtime boundary", () => {
       })
     ).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("lists safe tool-server options for Connection-event routines", async () => {
+    setNative(true);
+    mocks.invoke.mockResolvedValueOnce([{
+      connectionId: "connection-1",
+      displayName: "Local research tools",
+      healthState: "healthy"
+    }]);
+
+    await expect(listRuntimeRoutineConnectionOptions()).resolves.toEqual([{
+      connectionId: "connection-1",
+      displayName: "Local research tools",
+      healthState: "healthy"
+    }]);
+    expect(mocks.invoke).toHaveBeenCalledWith("routine_connection_options");
   });
 
   it("passes simple intent while native code owns ids and authenticated scope", async () => {

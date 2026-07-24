@@ -1214,7 +1214,11 @@ renderer command can forge this evidence. Native STDIO and remote MCP
 tool/resource-list change notifications now provide the first real adapter call:
 the session's exact workspace, private owner, Connection revision, transport,
 and native receipt time are revalidated, while raw notification payload is not
-stored. Other provider events, signed webhooks, thresholds,
+stored. The local editor now offers only those two implemented MCP changes,
+selects from the active private member's ready tool-server Connections, and
+revalidates exact owner/Connection authority in native code before saving.
+Project-scoped event triggers, arbitrary renderer filter fields, and unsupported
+event names fail closed. Other provider events, signed webhooks, thresholds,
 monitoring/follow-up inputs, and live event validation remain open; therefore
 the aggregate checkboxes stay open.
 

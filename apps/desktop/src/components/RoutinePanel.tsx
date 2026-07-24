@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { ScheduleWeekday } from "@fable/protocol";
+import type { ScheduleWeekday, Spine } from "@fable/protocol";
 import {
   beginRuntimeRoutineSchedulerShadow,
   createRuntimeRoutine,
@@ -7,6 +7,7 @@ import {
   deleteRuntimeRoutine,
   editRuntimeRoutine,
   getRuntimeRoutineSchedulerStatus,
+  listRuntimeRoutineConnectionOptions,
   listRuntimeRoutineHistory,
   listRuntimeRoutines,
   migrateLegacyRoutines,
@@ -14,6 +15,7 @@ import {
   rollbackRuntimeRoutineScheduler,
   resumeRuntimeRoutine,
   type RuntimeRoutineBundle,
+  type RuntimeRoutineConnectionOption,
   type RuntimeRoutineOccurrence,
   type RuntimeRoutineSchedulerStatus,
   type RuntimeRoutineTriggerSpec
@@ -28,11 +30,19 @@ function describeTrigger(trigger: RuntimeRoutineBundle["triggers"][number] | und
   if (spec.kind === "time-recurring") {
     return `${spec.recurrence.frequency[0]?.toUpperCase()}${spec.recurrence.frequency.slice(1)} · ${spec.timezone}`;
   }
+  if (spec.kind === "connection-event") {
+    return spec.eventType === "mcp.tools.list_changed"
+      ? "When available tools change"
+      : spec.eventType === "mcp.resources.list_changed"
+        ? "When available resources change"
+        : "When a Connection changes";
+  }
   return spec.kind.replaceAll("-", " ");
 }
 
 const ROUTINE_WEEKDAYS: ScheduleWeekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 type RoutineCadence = "once" | "daily" | "weekly" | "monthly";
+type RoutineTriggerMode = "time" | "mcp-tools" | "mcp-resources";
 
 interface RoutineTimeDraft {
   cadence: RoutineCadence;
@@ -103,10 +113,6 @@ function routineTimeDraft(
   }
 }
 
-function routineDraftKey(draft: RoutineTimeDraft) {
-  return JSON.stringify(draft);
-}
-
 function routineTimeTrigger(draft: RoutineTimeDraft): RuntimeRoutineTriggerSpec {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   if (draft.cadence === "once") {
@@ -146,6 +152,38 @@ function routineTimeTrigger(draft: RoutineTimeDraft): RuntimeRoutineTriggerSpec 
   };
 }
 
+function routineConnectionTrigger(
+  mode: Exclude<RoutineTriggerMode, "time">,
+  connectionId: string
+): RuntimeRoutineTriggerSpec {
+  if (!connectionId) throw new Error("Choose a tool server.");
+  return {
+    kind: "connection-event",
+    connectionId: connectionId as Spine.Primitives.ConnectionId,
+    eventType: mode === "mcp-tools"
+      ? "mcp.tools.list_changed"
+      : "mcp.resources.list_changed"
+  };
+}
+
+function editableConnectionTrigger(
+  trigger: RuntimeRoutineBundle["triggers"][number] | undefined
+) {
+  if (
+    trigger?.spec.kind !== "connection-event" ||
+    trigger.spec.eventFilter !== undefined ||
+    !["mcp.tools.list_changed", "mcp.resources.list_changed"].includes(trigger.spec.eventType)
+  ) {
+    return null;
+  }
+  return {
+    mode: trigger.spec.eventType === "mcp.tools.list_changed"
+      ? "mcp-tools" as const
+      : "mcp-resources" as const,
+    connectionId: trigger.spec.connectionId
+  };
+}
+
 export function RoutinePanel({
   onRun,
   draft,
@@ -175,6 +213,9 @@ export function RoutinePanel({
   const [history, setHistory] = useState<RuntimeRoutineOccurrence[]>([]);
   const [schedulerStatus, setSchedulerStatus] =
     useState<RuntimeRoutineSchedulerStatus | null>(null);
+  const [connectionOptions, setConnectionOptions] = useState<RuntimeRoutineConnectionOption[]>([]);
+  const [triggerMode, setTriggerMode] = useState<RoutineTriggerMode>("time");
+  const [connectionId, setConnectionId] = useState("");
 
   const active = useMemo(
     () => routines.filter((bundle) => bundle.routine.status !== "deleted"),
@@ -185,13 +226,15 @@ export function RoutinePanel({
     setLoading(true);
     setError(null);
     try {
-      const [result, status] = await Promise.all([
+      const [result, status, connections] = await Promise.all([
         listRuntimeRoutines(),
-        getRuntimeRoutineSchedulerStatus()
+        getRuntimeRoutineSchedulerStatus(),
+        listRuntimeRoutineConnectionOptions()
       ]);
       setNativeAvailable(result !== null);
       setRoutines(result ?? []);
       setSchedulerStatus(status);
+      setConnectionOptions(connections ?? []);
     } catch (reason) {
       setNativeAvailable(true);
       setError(reason instanceof Error ? reason.message : "Routines could not be loaded.");
@@ -218,6 +261,8 @@ export function RoutinePanel({
     setOnceAt("");
     setWeekday("Mon");
     setMonthDay(1);
+    setTriggerMode("time");
+    setConnectionId("");
     setOriginalTimeDraft(null);
     setTriggerEditable(true);
     setNotice("Choose when this should run, then save it.");
@@ -234,6 +279,8 @@ export function RoutinePanel({
     setOnceAt("");
     setWeekday("Mon");
     setMonthDay(1);
+    setTriggerMode("time");
+    setConnectionId("");
     setOriginalTimeDraft(null);
     setTriggerEditable(true);
   };
@@ -244,10 +291,13 @@ export function RoutinePanel({
     setNotice(null);
     try {
       const draft = { cadence, time, onceAt, weekday, monthDay };
+      const nextTrigger = triggerMode === "time"
+        ? routineTimeTrigger(draft)
+        : routineConnectionTrigger(triggerMode, connectionId);
       if (editing) {
         const trigger =
-          triggerEditable && originalTimeDraft !== routineDraftKey(draft)
-            ? routineTimeTrigger(draft)
+          triggerEditable && originalTimeDraft !== JSON.stringify(nextTrigger)
+            ? nextTrigger
             : undefined;
         const updated = await editRuntimeRoutine({
           routineId: editing.routine.id,
@@ -263,8 +313,7 @@ export function RoutinePanel({
         }
         setNotice("Routine updated.");
       } else {
-        const trigger = routineTimeTrigger(draft);
-        const created = await createRuntimeRoutine({ title, instruction, trigger });
+        const created = await createRuntimeRoutine({ title, instruction, trigger: nextTrigger });
         if (created) setRoutines((items) => [created, ...items]);
         setNotice("Routine saved locally.");
       }
@@ -440,63 +489,101 @@ export function RoutinePanel({
             />
           </label>
           {!editing || triggerEditable ? (
-            <div className="routine-editor__time">
+            <>
               <label>
-                When
+                Starts
                 <select
-                  value={cadence}
-                  onChange={(event) => setCadence(event.target.value as RoutineCadence)}
-                  aria-label="Routine frequency"
+                  value={triggerMode}
+                  onChange={(event) => setTriggerMode(event.target.value as RoutineTriggerMode)}
+                  aria-label="Routine trigger"
                 >
-                  <option value="daily">Every day</option>
-                  <option value="weekly">Every week</option>
-                  <option value="monthly">Every month</option>
-                  <option value="once">Once</option>
+                  <option value="time">On a schedule</option>
+                  <option value="mcp-tools">When a tool server's tools change</option>
+                  <option value="mcp-resources">When a tool server's resources change</option>
                 </select>
               </label>
-              {cadence === "weekly" ? (
+              {triggerMode === "time" ? (
+                <div className="routine-editor__time">
+                  <label>
+                    When
+                    <select
+                      value={cadence}
+                      onChange={(event) => setCadence(event.target.value as RoutineCadence)}
+                      aria-label="Routine frequency"
+                    >
+                      <option value="daily">Every day</option>
+                      <option value="weekly">Every week</option>
+                      <option value="monthly">Every month</option>
+                      <option value="once">Once</option>
+                    </select>
+                  </label>
+                  {cadence === "weekly" ? (
+                    <label>
+                      Day
+                      <select
+                        value={weekday}
+                        onChange={(event) => setWeekday(event.target.value as ScheduleWeekday)}
+                        aria-label="Routine weekday"
+                      >
+                        {ROUTINE_WEEKDAYS.map((day) => (
+                          <option key={day} value={day}>
+                            {day}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
+                  {cadence === "monthly" ? (
+                    <label>
+                      Day of month
+                      <input
+                        required
+                        type="number"
+                        min={1}
+                        max={31}
+                        value={monthDay}
+                        onChange={(event) => setMonthDay(Number(event.target.value))}
+                        aria-label="Routine day of month"
+                      />
+                    </label>
+                  ) : null}
+                  <label>
+                    {cadence === "once" ? "Date and time" : "Time"}
+                    <input
+                      required
+                      type={cadence === "once" ? "datetime-local" : "time"}
+                      value={cadence === "once" ? onceAt : time}
+                      onChange={(event) =>
+                        cadence === "once" ? setOnceAt(event.target.value) : setTime(event.target.value)
+                      }
+                      aria-label={cadence === "once" ? "Routine date and time" : "Routine time"}
+                    />
+                  </label>
+                </div>
+              ) : (
                 <label>
-                  Day
+                  Tool server
                   <select
-                    value={weekday}
-                    onChange={(event) => setWeekday(event.target.value as ScheduleWeekday)}
-                    aria-label="Routine weekday"
+                    required
+                    value={connectionId}
+                    onChange={(event) => setConnectionId(event.target.value)}
+                    aria-label="Routine tool server"
                   >
-                    {ROUTINE_WEEKDAYS.map((day) => (
-                      <option key={day} value={day}>
-                        {day}
+                    <option value="">Choose a tool server</option>
+                    {connectionOptions.map((connection) => (
+                      <option key={connection.connectionId} value={connection.connectionId}>
+                        {connection.displayName}
                       </option>
                     ))}
                   </select>
                 </label>
+              )}
+              {triggerMode !== "time" && connectionOptions.length === 0 ? (
+                <p className="routine-preview-note" role="note">
+                  Check and save a local or remote tool server before using this trigger.
+                </p>
               ) : null}
-              {cadence === "monthly" ? (
-                <label>
-                  Day of month
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    max={31}
-                    value={monthDay}
-                    onChange={(event) => setMonthDay(Number(event.target.value))}
-                    aria-label="Routine day of month"
-                  />
-                </label>
-              ) : null}
-              <label>
-                {cadence === "once" ? "Date and time" : "Time"}
-                <input
-                  required
-                  type={cadence === "once" ? "datetime-local" : "time"}
-                  value={cadence === "once" ? onceAt : time}
-                  onChange={(event) =>
-                    cadence === "once" ? setOnceAt(event.target.value) : setTime(event.target.value)
-                  }
-                  aria-label={cadence === "once" ? "Routine date and time" : "Routine time"}
-                />
-              </label>
-            </div>
+            </>
           ) : (
             <p className="routine-preview-note" role="note">
               This trigger type is preserved as-is and cannot be edited here yet.
@@ -547,20 +634,28 @@ export function RoutinePanel({
               <button
                 type="button"
                 onClick={() => {
-                  const draft = routineTimeDraft(
-                    bundle.triggers.find((trigger) => trigger.status === "active")
+                  const activeTrigger = bundle.triggers.find(
+                    (trigger) => trigger.status === "active"
                   );
+                  const draft = routineTimeDraft(activeTrigger);
+                  const connectionDraft = editableConnectionTrigger(activeTrigger);
                   setEditing(bundle);
                   setTitle(bundle.routine.title);
                   setInstruction(bundle.currentVersion.action.instruction);
-                  setTriggerEditable(draft !== null);
+                  setTriggerEditable(draft !== null || connectionDraft !== null);
                   if (draft) {
+                    setTriggerMode("time");
+                    setConnectionId("");
                     setCadence(draft.cadence);
                     setTime(draft.time);
                     setOnceAt(draft.onceAt);
                     setWeekday(draft.weekday);
                     setMonthDay(draft.monthDay);
-                    setOriginalTimeDraft(routineDraftKey(draft));
+                    setOriginalTimeDraft(JSON.stringify(activeTrigger?.spec));
+                  } else if (connectionDraft) {
+                    setTriggerMode(connectionDraft.mode);
+                    setConnectionId(connectionDraft.connectionId);
+                    setOriginalTimeDraft(JSON.stringify(activeTrigger?.spec));
                   } else {
                     setOriginalTimeDraft(null);
                   }

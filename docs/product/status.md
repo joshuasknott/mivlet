@@ -239,6 +239,14 @@ remains deduplicated by the canonical occurrence key. Other provider event
 adapters, signed webhooks, thresholds/monitoring/follow-up triggers, packaged
 restart observation, and live event validation remain open.
 
+The local Routine editor now creates and edits those two supported MCP event
+triggers using a plain tool-server selector. Its native option list is limited
+to the active private member's ready MCP Connections. Creation revalidates that
+exact private owner and current Connection authority, permits only
+`mcp.tools.list_changed` or `mcp.resources.list_changed`, rejects project scope
+and renderer-supplied filter fields, and exposes no raw notification payload.
+The editor does not offer other provider events or imply that they are live.
+
 ## General Mission Inspectability Update (2026-07-24)
 
 This update supersedes the earlier statement that general and multi-worker

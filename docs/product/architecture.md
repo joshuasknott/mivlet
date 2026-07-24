@@ -323,8 +323,10 @@ identity, or oversized/deep payloads fail closed. Native provider/MCP adapters
 must call this boundary with authenticated event evidence. Local STDIO and
 remote MCP sessions now do so for native `tools/list_changed` and
 `resources/list_changed` notifications, reusing their exact Connection revision
-and owner while retaining no raw notification content. Other provider events and
-signed webhooks remain unconnected.
+and owner while retaining no raw notification content. The Routine editor lists
+only the active private member's ready MCP Connections and offers only those two
+implemented events; native creation rechecks the same ownership and authority
+before saving. Other provider events and signed webhooks remain unconnected.
 
 For records created after this boundary, native commands overwrite renderer
 identity and stamp the authenticated workspace, project, member, and creator on

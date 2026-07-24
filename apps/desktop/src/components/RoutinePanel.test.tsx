@@ -11,6 +11,7 @@ vi.mock("../runtime", () => ({
   deleteRuntimeRoutine: vi.fn(),
   editRuntimeRoutine: vi.fn(),
   getRuntimeRoutineSchedulerStatus: vi.fn(),
+  listRuntimeRoutineConnectionOptions: vi.fn(),
   listRuntimeRoutineHistory: vi.fn(),
   listRuntimeRoutines: vi.fn(),
   migrateLegacyRoutines: vi.fn(),
@@ -76,6 +77,11 @@ describe("RoutinePanel", () => {
     vi.clearAllMocks();
     vi.mocked(runtime.listRuntimeRoutines).mockResolvedValue([weeklyRoutine()] as never);
     vi.mocked(runtime.getRuntimeRoutineSchedulerStatus).mockResolvedValue(schedulerStatus);
+    vi.mocked(runtime.listRuntimeRoutineConnectionOptions).mockResolvedValue([{
+      connectionId: "connection-tools",
+      displayName: "Local research tools",
+      healthState: "healthy"
+    }]);
     vi.mocked(runtime.editRuntimeRoutine).mockResolvedValue(null);
     vi.mocked(runtime.listRuntimeRoutineHistory).mockResolvedValue([]);
   });
@@ -153,6 +159,40 @@ describe("RoutinePanel", () => {
     );
     expect(runtime.createRuntimeRoutine).not.toHaveBeenCalled();
     expect(consumed).toHaveBeenCalledOnce();
+  });
+
+  it("creates an exact tool-server change Routine without exposing event internals", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runtime.createRuntimeRoutine).mockResolvedValue(null);
+    render(<RoutinePanel onRun={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "New routine" }));
+    await user.type(screen.getByLabelText("Name"), "Review tool changes");
+    await user.type(
+      screen.getByLabelText("What should Fable do?"),
+      "Summarize the available tools and flag meaningful changes."
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Routine trigger"),
+      "mcp-tools"
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Routine tool server"),
+      "connection-tools"
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(runtime.createRuntimeRoutine).toHaveBeenCalledWith({
+        title: "Review tool changes",
+        instruction: "Summarize the available tools and flag meaningful changes.",
+        trigger: {
+          kind: "connection-event",
+          connectionId: "connection-tools",
+          eventType: "mcp.tools.list_changed"
+        }
+      })
+    );
   });
 
   it("offers the guarded rollback bridge after a Routine has executed", async () => {

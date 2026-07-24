@@ -95,6 +95,14 @@ pub struct RoutineListInput {
     project_id: Option<String>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutineConnectionOption {
+    connection_id: String,
+    display_name: String,
+    health_state: String,
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutineOccurrenceInput {
@@ -175,6 +183,79 @@ pub struct RoutineSchedulerStatus {
     reconciliation_hash: Option<String>,
 }
 
+fn validate_trigger_authority(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    auth: &authorized_scope::AuthorizedCommandScope,
+    trigger: &Value,
+) -> crate::store::Result<()> {
+    if trigger.get("kind").and_then(Value::as_str) != Some("connection-event") {
+        return Ok(());
+    }
+    if auth.data.project_id().is_some() {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection-event Routines must use workspace scope.".into(),
+        ));
+    }
+    let object = trigger.as_object().ok_or_else(|| {
+        crate::store::StoreError::Invalid("Connection-event trigger is invalid.".into())
+    })?;
+    if object
+        .keys()
+        .any(|key| !matches!(key.as_str(), "kind" | "connectionId" | "eventType"))
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "Connection-event trigger contains unsupported fields.".into(),
+        ));
+    }
+    let connection_id = trigger
+        .get("connectionId")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Connection-event trigger requires one Connection.".into(),
+            )
+        })?;
+    let event_type = trigger
+        .get("eventType")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid(
+                "Connection-event trigger requires one event type.".into(),
+            )
+        })?;
+    if !matches!(
+        event_type,
+        "mcp.tools.list_changed" | "mcp.resources.list_changed"
+    ) {
+        return Err(crate::store::StoreError::Invalid(
+            "This Connection event is not supported by the local adapter.".into(),
+        ));
+    }
+    let connection =
+        crate::store::repos::connection_record::get_private_owned(tx, store, auth, connection_id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("The selected Connection is unavailable.".into())
+            })?;
+    if connection.kind != "mcp"
+        || connection.lifecycle != "authorized"
+        || !matches!(
+            connection.authorization_state.as_str(),
+            "authorized" | "not-required"
+        )
+        || !matches!(
+            connection.credential_state.as_str(),
+            "available" | "not-required"
+        )
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "The selected tool-server Connection is not ready.".into(),
+        ));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn routine_create(input: RoutineCreateInput) -> Result<RoutineBundleRow, String> {
     let store = crate::store::try_global()
@@ -187,6 +268,7 @@ pub fn routine_create(input: RoutineCreateInput) -> Result<RoutineBundleRow, Str
                     "An active member is required to create a Routine.".into(),
                 )
             })?;
+            validate_trigger_authority(tx, store, &auth, &input.trigger)?;
             let at = now();
             let routine_id = secure_id("routine").map_err(crate::store::StoreError::Invalid)?;
             let trigger_id = secure_id("trigger").map_err(crate::store::StoreError::Invalid)?;
@@ -288,6 +370,7 @@ pub fn routine_edit(input: RoutineEditInput) -> Result<RoutineBundleRow, String>
             version["action"]["instruction"] = Value::String(input.instruction);
             let mut new_triggers = Vec::new();
             if let Some(spec) = input.trigger {
+                validate_trigger_authority(tx, store, &auth, &spec)?;
                 let member_id = auth.member_id.as_deref().ok_or_else(|| {
                     crate::store::StoreError::Invalid(
                         "An active member is required to edit a Routine.".into(),
@@ -387,6 +470,39 @@ pub fn routine_list(input: RoutineListInput) -> Result<Vec<RoutineBundleRow>, St
         .with_conn(|tx| {
             let auth = scope_for(tx, input.project_id.as_deref(), ScopeAccess::Read)?;
             routine::list(tx, store, &auth.data, &auth.private)
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+pub fn routine_connection_options() -> Result<Vec<RoutineConnectionOption>, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            let auth = scope_for(tx, None, ScopeAccess::Read)?;
+            let options =
+                crate::store::repos::connection_record::list_private_owned(tx, store, &auth)?
+                    .into_iter()
+                    .filter(|connection| {
+                        connection.kind == "mcp"
+                            && connection.lifecycle == "authorized"
+                            && matches!(
+                                connection.authorization_state.as_str(),
+                                "authorized" | "not-required"
+                            )
+                            && matches!(
+                                connection.credential_state.as_str(),
+                                "available" | "not-required"
+                            )
+                    })
+                    .map(|connection| RoutineConnectionOption {
+                        connection_id: connection.id,
+                        display_name: connection.display_name,
+                        health_state: connection.health_state,
+                    })
+                    .collect();
+            Ok(options)
         })
         .map_err(|error| error.to_string())
 }
@@ -1204,6 +1320,10 @@ fn evidence_source(
 mod tests {
     use super::*;
     use crate::store::repos::scope::{DataScope, PrivateDataScope};
+    use crate::store::repos::workspace_directory::{
+        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
+        WorkspaceDirectoryUpsert,
+    };
     use crate::store::vault::{MasterKey, Vault};
 
     fn auth(project_id: Option<&str>) -> authorized_scope::AuthorizedCommandScope {
@@ -1224,6 +1344,134 @@ mod tests {
     fn store() -> crate::store::Store {
         crate::store::Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap())
             .unwrap()
+    }
+
+    fn summary(user: &str, member: &str) -> WorkspaceDirectoryUpsert {
+        WorkspaceDirectoryUpsert {
+            internal_user_id: user.into(),
+            fable_workspace_id: "workspace-1".into(),
+            name: "Workspace".into(),
+            workspace_status: "active".into(),
+            workspace_revision: 1,
+            policy_revision: 1,
+            member_id: member.into(),
+            role: "owner".into(),
+            membership_status: "active".into(),
+            membership_revision: 1,
+            updated_at: "2026-07-24T10:00:00.000Z".into(),
+        }
+    }
+
+    #[test]
+    fn connection_event_trigger_requires_one_ready_mcp_connection_and_supported_event() {
+        let store = store();
+        store
+            .transaction(|tx| {
+                let workspace = upsert_authoritative_summary(tx, &summary("user-1", "member-1"))?;
+                set_current_internal_user(tx, "user-1", "2026-07-24T10:00:00.000Z")?;
+                select_active_workspace(tx, "user-1", "workspace-1", "2026-07-24T10:00:00.000Z")?;
+                let command_scope = authorized_scope::resolve(
+                    tx,
+                    Some(&workspace.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )?;
+                let connection = crate::store::repos::connection_record::upsert_mcp_stdio(
+                    tx,
+                    &store,
+                    &command_scope,
+                    "fixture-tools",
+                    "Fixture tools",
+                    "2026-07-24T10:00:00.000Z",
+                )?;
+                upsert_authoritative_summary(tx, &summary("user-2", "member-2"))?;
+                set_current_internal_user(tx, "user-2", "2026-07-24T10:00:00.000Z")?;
+                select_active_workspace(tx, "user-2", "workspace-1", "2026-07-24T10:00:00.000Z")?;
+                let other_scope = authorized_scope::resolve(
+                    tx,
+                    Some(&workspace.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )?;
+                let other_connection = crate::store::repos::connection_record::upsert_mcp_stdio(
+                    tx,
+                    &store,
+                    &other_scope,
+                    "other-tools",
+                    "Other member tools",
+                    "2026-07-24T10:00:00.000Z",
+                )?;
+                set_current_internal_user(tx, "user-1", "2026-07-24T10:00:00.000Z")?;
+                select_active_workspace(tx, "user-1", "workspace-1", "2026-07-24T10:00:00.000Z")?;
+                assert_eq!(
+                    crate::store::repos::connection_record::list_private_owned(
+                        tx,
+                        &store,
+                        &command_scope,
+                    )?
+                    .len(),
+                    1
+                );
+                assert!(crate::store::repos::connection_record::get_private_owned(
+                    tx,
+                    &store,
+                    &command_scope,
+                    &other_connection.id,
+                )?
+                .is_none());
+                validate_trigger_authority(
+                    tx,
+                    &store,
+                    &command_scope,
+                    &serde_json::json!({
+                        "kind":"connection-event",
+                        "connectionId":connection.id,
+                        "eventType":"mcp.tools.list_changed"
+                    }),
+                )?;
+                assert!(validate_trigger_authority(
+                    tx,
+                    &store,
+                    &command_scope,
+                    &serde_json::json!({
+                        "kind":"connection-event",
+                        "connectionId":connection.id,
+                        "eventType":"provider.unknown"
+                    }),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("not supported"));
+                assert!(validate_trigger_authority(
+                    tx,
+                    &store,
+                    &command_scope,
+                    &serde_json::json!({
+                        "kind":"connection-event",
+                        "connectionId":connection.id,
+                        "eventType":"mcp.tools.list_changed",
+                        "eventFilter":{"hidden":"claim"}
+                    }),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("unsupported fields"));
+                assert!(validate_trigger_authority(
+                    tx,
+                    &store,
+                    &auth(Some("project-1")),
+                    &serde_json::json!({
+                        "kind":"connection-event",
+                        "connectionId":connection.id,
+                        "eventType":"mcp.tools.list_changed"
+                    }),
+                )
+                .unwrap_err()
+                .to_string()
+                .contains("workspace scope"));
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

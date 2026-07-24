@@ -1060,6 +1060,53 @@ pub fn list(
         .collect()
 }
 
+pub fn get_private_owned(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    id: &str,
+) -> Result<Option<SafeConnectionRecord>> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let owner_member_id = scope.member_id.as_deref().ok_or_else(|| {
+        StoreError::Invalid("A workspace membership is required for this Connection.".into())
+    })?;
+    let id = crate::store::repos::scope::normalize_id(id, "Connection")?;
+    let partial = tx
+        .query_row(
+            &format!(
+                "{SELECT} WHERE workspace_id=?1 AND owner_member_id=?2 AND id=?3 AND deleted_at IS NULL"
+            ),
+            rusqlite::params![scope.data.workspace_id(), owner_member_id, id],
+            read_partial,
+        )
+        .optional()?;
+    partial.map(|row| open_safe(store, row)).transpose()
+}
+
+pub fn list_private_owned(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+) -> Result<Vec<SafeConnectionRecord>> {
+    require_current_scope(tx, scope, ScopeAccess::Read)?;
+    let owner_member_id = scope.member_id.as_deref().ok_or_else(|| {
+        StoreError::Invalid("A workspace membership is required for Connections.".into())
+    })?;
+    let mut stmt = tx.prepare(&format!(
+        "{SELECT} WHERE workspace_id=?1 AND owner_member_id=?2 AND deleted_at IS NULL ORDER BY updated_at DESC,id"
+    ))?;
+    let partials = stmt
+        .query_map(
+            rusqlite::params![scope.data.workspace_id(), owner_member_id],
+            read_partial,
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    partials
+        .into_iter()
+        .map(|row| open_safe(store, row))
+        .collect()
+}
+
 const SELECT: &str = "SELECT id,workspace_id,kind,ownership,lifecycle,authorization_state,
   health_state,trust,credential_custody,credential_state,connector_definition_key,
   enabled_by_default,revision,created_by_internal_user_id,created_at,updated_at,payload,payload_nonce

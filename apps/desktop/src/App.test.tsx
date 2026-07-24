@@ -395,6 +395,7 @@ vi.mock("./runtime", () => ({
   createRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),
   createRuntimeRoutine: vi.fn(async () => null),
   listRuntimeRoutines: vi.fn(async () => []),
+  listRuntimeRoutineConnectionOptions: vi.fn(async () => []),
   listRuntimeRoutineHistory: vi.fn(async () => []),
   getRuntimeRoutineSchedulerStatus: vi.fn(async () => null),
   selectRuntimeAccountWorkspace: vi.fn(async () => runtimeMocks.accountStatus),

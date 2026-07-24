@@ -4912,12 +4912,27 @@ export interface RuntimeRoutineSchedulerStatus {
   reconciliationHash?: string;
 }
 
+export interface RuntimeRoutineConnectionOption {
+  connectionId: string;
+  displayName: string;
+  healthState: string;
+}
+
 export async function listRuntimeRoutines(projectId?: string) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<RuntimeRoutineBundle[]>("routine_list", {
       input: { projectId }
     });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listRuntimeRoutineConnectionOptions() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeRoutineConnectionOption[]>("routine_connection_options");
   } catch (error) {
     throw toRuntimeError(error);
   }
