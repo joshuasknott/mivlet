@@ -1198,7 +1198,15 @@ scope-matched reviewer assignment for that step, and its criterion keys must
 equal the Mission's worker-evaluated criteria. Risk- or conflict-only review is
 explicitly advisory. This boundary selects no provider and grants no policy,
 human, credential, approval, or factual authority. Native dynamic reviewer
-composition and execution remain open.
+composition now covers declared worker-evaluated acceptance in a general
+Mission graph. Product Spine contract 1.7 adds one immutable
+`reviewer-selected` fact after exact worker preparation and before reviewer
+execution. Rust derives the selection from the authenticated owner-scoped Run,
+selected Plan revision, exact reviewer assignment, and exact worker-evaluated
+criterion keys; replay re-derives the same receipt after reopen, and reviewer
+execution fails closed if the receipt is absent or changed. Native high-risk
+policy and conflicting-evidence inputs remain open rather than being inferred
+from model output or renderer state.
 
 An explicit opt-in variant now adds one independent reviewer after the same two
 producer outputs are durable. Rust alone resolves the producer join, reloads and
@@ -1213,10 +1221,10 @@ consumes the single attempt as a durable validation failure, and cancellation is
 persisted before provider abort with recovery for the producer-to-reviewer gap.
 Ordinary two-approach requests retain the v1 two-worker shape. Focused native,
 runtime, renderer, cancellation-race, restart, exact-replay, tamper, and responsive
-evidence covers this opt-in benchmark. General dynamic reviewer selection and
-justification, arbitrary criteria, reviewer providers, iteration, and live
-packaged-app/provider validation remain open, so the reviewer/judge checkbox also
-stays unchecked.
+evidence covers this opt-in benchmark. General declared worker-criteria reviewer
+selection is now native and durable, but arbitrary native policy/conflict
+justification, reviewer-provider policy, iteration, and live packaged-app/provider
+validation remain open, so the reviewer/judge checkbox also stays unchecked.
 
 **Phase 4 complete when:** a multi-provider mission plans, executes, pauses, recovers, and produces coherent artifacts within visible constraints while simple requests remain simple.
 

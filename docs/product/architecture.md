@@ -172,6 +172,13 @@ contract 1.6 adds the exact target Plan step to new join facts; older rows are
 accepted only when their ordered dependency workers resolve to one unambiguous
 target. The adapter still injects provider execution and therefore gains no
 route, credential, grant, approval, placement, tool, or evaluator authority.
+Product Spine contract 1.7 adds an immutable `reviewer-selected` fact for
+general graph review steps. Native code emits it only after exact worker
+preparation, only when the selected Mission declares worker-evaluated
+acceptance, and only when one scope-matched reviewer binds exactly those
+criteria. Reopen re-derives the receipt before accepting replay, and the
+reviewer's native objective cannot be obtained without the unchanged receipt.
+The fact chooses no provider and cannot confer policy or human acceptance.
 Provider-only workers nevertheless carry an immutable no-fallback route envelope
 derived from the Mission data boundary and an exact local-desktop, no-transfer
 placement policy. The desktop's execution-time resolver considers only current

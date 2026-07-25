@@ -33,6 +33,13 @@ const AGGREGATION_LIMITS = {
   maximumInputs: 32,
   maximumOutputs: 128
 } as const;
+const REVIEWER_SELECTION_LIMITS = {
+  stepKey: 160,
+  criterionKey: 160,
+  policyRef: 240,
+  maximumCriteria: 32,
+  maximumJustifications: 3
+} as const;
 const TRANSITIONS: Readonly<Record<RunStatus, readonly RunStatus[]>> = {
   created: ["planning", "queued", "running", "cancelling", "cancelled", "failed"],
   planning: ["queued", "running", "waiting-human-input", "cancelling", "cancelled", "failed"],
@@ -223,6 +230,9 @@ function validateEvent(current: RunJournalProjection, event: RunEvent): void {
   if (event.type === "join-resolved") validateJoinResolved(current, event.payload.join, event.occurredAt);
   if (event.type === "aggregation-recorded") {
     validateAggregationRecorded(current, event.payload.aggregation);
+  }
+  if (event.type === "reviewer-selected") {
+    validateReviewerSelected(current, event.payload.selection);
   }
   if (event.type === "run-completed" && event.payload.result.outcome !== "succeeded") {
     throw new RunJournalError("run-completed requires a succeeded result.");
@@ -550,6 +560,70 @@ function validateAggregationRecorded(
   ) {
     throw new RunJournalError(
       "Aggregation result must be derived exactly from its ordered immutable inputs."
+    );
+  }
+}
+
+function validateReviewerSelected(
+  current: RunJournalProjection,
+  selection: Spine.Missions.MissionReviewerSelection
+): void {
+  const justifications = [
+    "declared-worker-acceptance",
+    "high-risk-policy",
+    "conflicting-evidence"
+  ] as const;
+  const matchingWorkers = current.events
+    .flatMap((candidate) =>
+      candidate.type === "worker-created" &&
+      candidate.payload.worker.id === selection.reviewerWorkerId
+        ? [candidate.payload.worker]
+        : []
+    );
+  const selectedPlanRevisionId = current.events.reduce<
+    Spine.Primitives.PlanRevisionId | undefined
+  >(
+    (selected, candidate) =>
+      candidate.type === "plan-revision-selected"
+        ? candidate.payload.planRevisionId
+        : selected,
+    current.run.planRevisionId
+  );
+  if (
+    current.run.status !== "running" ||
+    current.run.executionDepth !== "multi-worker" ||
+    current.events.some((candidate) => candidate.type === "reviewer-selected") ||
+    current.events.some(
+      (candidate) =>
+        candidate.type === "worker-started" &&
+        candidate.payload.workerId === selection.reviewerWorkerId
+    ) ||
+    matchingWorkers.length !== 1 ||
+    matchingWorkers[0]!.runId !== current.run.id ||
+    matchingWorkers[0]!.planRevisionId !== selectedPlanRevisionId ||
+    matchingWorkers[0]!.planStepKey !== selection.reviewStepKey ||
+    matchingWorkers[0]!.role.kind !== "reviewer" ||
+    !sameWorkerScope(current.run, matchingWorkers[0]!) ||
+    !boundedString(selection.reviewStepKey, REVIEWER_SELECTION_LIMITS.stepKey) ||
+    !boundedString(selection.policyRef, REVIEWER_SELECTION_LIMITS.policyRef) ||
+    !selection.policyRef.startsWith("native-policy:") ||
+    selection.justification.length < 1 ||
+    selection.justification.length > REVIEWER_SELECTION_LIMITS.maximumJustifications ||
+    new Set(selection.justification).size !== selection.justification.length ||
+    selection.justification.some(
+      (justification) => !justifications.includes(justification)
+    ) ||
+    selection.criterionKeys.length > REVIEWER_SELECTION_LIMITS.maximumCriteria ||
+    new Set(selection.criterionKeys).size !== selection.criterionKeys.length ||
+    selection.criterionKeys.some(
+      (criterion) =>
+        !boundedString(criterion, REVIEWER_SELECTION_LIMITS.criterionKey)
+    ) ||
+    (selection.authority === "declared-worker-evaluator") !==
+      selection.justification.includes("declared-worker-acceptance")
+  ) {
+    throw new RunJournalError(
+      "Reviewer selection must bind one exact declared reviewer to bounded native justification."
     );
   }
 }

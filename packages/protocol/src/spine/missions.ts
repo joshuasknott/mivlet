@@ -765,6 +765,19 @@ export interface DeterministicAggregationReceipt {
   missingRequiredOutputKeys: readonly string[];
 }
 
+export interface MissionReviewerSelection {
+  reviewStepKey: string;
+  reviewerWorkerId: WorkerId;
+  justification: readonly (
+    | "declared-worker-acceptance"
+    | "high-risk-policy"
+    | "conflicting-evidence"
+  )[];
+  criterionKeys: readonly string[];
+  authority: "declared-worker-evaluator" | "advisory";
+  policyRef: string;
+}
+
 export interface AcceptanceResult {
   criterionKey: string;
   status: "met" | "partially-met" | "not-met" | "not-evaluated";
@@ -849,6 +862,7 @@ export const RUN_EVENT_TYPES = [
   "join-opened",
   "join-resolved",
   "aggregation-recorded",
+  "reviewer-selected",
   "evaluation-recorded",
   "artifact-produced",
   "usage-recorded",
@@ -918,6 +932,7 @@ export interface RunEventPayloadByType {
   "join-opened": { join: WorkerJoin };
   "join-resolved": { join: WorkerJoin };
   "aggregation-recorded": { aggregation: DeterministicAggregationReceipt };
+  "reviewer-selected": { selection: MissionReviewerSelection };
   "evaluation-recorded": { evaluation: EvaluationResult };
   "artifact-produced": { artifactId: ArtifactId; versionId?: ArtifactVersionId; workerId?: WorkerId };
   "usage-recorded": { usage: UsageMeasurement };

@@ -616,6 +616,82 @@ describe("durable run journal projection", () => {
     }, id<"run-event">("event-9")))).toThrow("satisfied dependency join");
   });
 
+  it("records one exact reviewer selection before reviewer execution", () => {
+    const producer = worker("worker-1");
+    const reviewer = worker("reviewer-1", {
+      planStepKey: "review",
+      role: {
+        kind: "reviewer",
+        title: "Reviewer",
+        objective: "Review the declared evidence.",
+        responsibilities: ["Review the declared evidence."]
+      }
+    });
+    const running = replayRunJournal([
+      event("run-created", 1, {
+        run: multiWorkerRun({ budget: { maxWorkers: 2, maxAttempts: 2 } })
+      }),
+      event(
+        "status-transitioned",
+        2,
+        { from: "created", to: "running" },
+        id<"run-event">("event-1")
+      ),
+      event("worker-created", 3, { worker: producer }, id<"run-event">("event-2")),
+      event("worker-created", 4, { worker: reviewer }, id<"run-event">("event-3"))
+    ]);
+    const selection: Spine.Missions.MissionReviewerSelection = {
+      reviewStepKey: "review",
+      reviewerWorkerId: reviewer.id,
+      justification: ["declared-worker-acceptance"],
+      criterionKeys: ["quality"],
+      authority: "declared-worker-evaluator",
+      policyRef: "native-policy:mission-review:v1"
+    };
+    const selected = appendRunEvent(
+      running,
+      event(
+        "reviewer-selected",
+        5,
+        { selection },
+        id<"run-event">("event-4")
+      )
+    );
+    expect(selected.events.at(-1)?.payload).toEqual({ selection });
+    expect(() =>
+      appendRunEvent(
+        selected,
+        event(
+          "reviewer-selected",
+          6,
+          { selection },
+          id<"run-event">("event-5")
+        )
+      )
+    ).toThrow("one exact declared reviewer");
+
+    const started = appendRunEvent(
+      running,
+      event(
+        "worker-started",
+        5,
+        { workerId: reviewer.id },
+        id<"run-event">("event-4")
+      )
+    );
+    expect(() =>
+      appendRunEvent(
+        started,
+        event(
+          "reviewer-selected",
+          6,
+          { selection },
+          id<"run-event">("event-5")
+        )
+      )
+    ).toThrow("one exact declared reviewer");
+  });
+
   it("can cancel the exact active join while its run is cancelling", () => {
     const join = openJoin();
     const opened = appendRunEvent(startedWorkers(), event("join-opened", 7, { join }, id<"run-event">("event-6")));

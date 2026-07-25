@@ -501,6 +501,236 @@ fn derived_provider_worker(
     }))
 }
 
+fn reviewer_selection_identity(run_id: &str) -> (String, String) {
+    let mut digest = Sha256::new();
+    digest.update(b"fable.mission.reviewer-selection.v1\0");
+    digest.update(run_id.as_bytes());
+    let digest = format!("{:x}", digest.finalize());
+    (
+        format!("mission_reviewer_selection_event_{digest}"),
+        format!("mission-reviewer-selection:v1:{digest}"),
+    )
+}
+
+fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>, String> {
+    if !declared_general_graph(&authorized.lifecycle) {
+        return Ok(None);
+    }
+    if authorized.journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || authorized
+            .journal
+            .run
+            .get("executionDepth")
+            .and_then(Value::as_str)
+            != Some("multi-worker")
+    {
+        return Err(
+            "Native Mission reviewer selection requires one running multi-worker Run.".into(),
+        );
+    }
+    let criteria = authorized
+        .lifecycle
+        .mission
+        .pointer("/acceptance/criteria")
+        .and_then(Value::as_array)
+        .filter(|criteria| criteria.len() <= 128)
+        .ok_or_else(|| "Mission acceptance criteria are invalid.".to_string())?;
+    let mut worker_criteria = Vec::new();
+    let mut seen_criteria = BTreeSet::new();
+    for criterion in criteria {
+        if criterion.get("evaluator").and_then(Value::as_str) != Some("worker") {
+            continue;
+        }
+        let key = bounded(
+            criterion
+                .get("key")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Worker-evaluated Mission criterion is invalid.".to_string())?,
+            "Worker-evaluated Mission criterion",
+            160,
+        )?;
+        if !seen_criteria.insert(key.clone()) || worker_criteria.len() >= 32 {
+            return Err("Worker-evaluated Mission criteria are ambiguous or unbounded.".into());
+        }
+        worker_criteria.push(key);
+    }
+    let steps = authorized
+        .lifecycle
+        .current_revision
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|steps| !steps.is_empty() && steps.len() <= 32)
+        .ok_or_else(|| "Selected Mission plan steps are invalid.".to_string())?;
+    let review_steps = steps
+        .iter()
+        .filter(|step| step.get("kind").and_then(Value::as_str) == Some("review"))
+        .collect::<Vec<_>>();
+    if review_steps.len() > 1 {
+        return Err(
+            "A selected Mission plan can declare at most one dynamically justified review step."
+                .into(),
+        );
+    }
+    if worker_criteria.is_empty() {
+        if !review_steps.is_empty() {
+            return Err(
+                "The selected review step has no declared worker-acceptance justification.".into(),
+            );
+        }
+        return Ok(None);
+    }
+    let review = review_steps.first().copied().ok_or_else(|| {
+        "Worker-evaluated acceptance requires a declared review step.".to_string()
+    })?;
+    let review_step_key = bounded(
+        review
+            .get("key")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Selected Mission review step is invalid.".to_string())?,
+        "Selected Mission review step",
+        160,
+    )?;
+    let declared_criteria = review
+        .get("acceptanceCriterionKeys")
+        .and_then(Value::as_array)
+        .filter(|keys| keys.len() <= 32)
+        .ok_or_else(|| "Selected Mission review criteria are invalid.".to_string())?
+        .iter()
+        .map(|key| {
+            bounded(
+                key.as_str()
+                    .ok_or_else(|| "Selected Mission review criterion is invalid.".to_string())?,
+                "Selected Mission review criterion",
+                160,
+            )
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if declared_criteria != worker_criteria
+        || declared_criteria.iter().collect::<BTreeSet<_>>().len() != declared_criteria.len()
+    {
+        return Err(
+            "The review step must bind exactly the Mission's worker-evaluated criteria.".into(),
+        );
+    }
+    let reviewers = authorized
+        .journal
+        .events
+        .iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("worker-created"))
+        .filter_map(|event| event.pointer("/payload/worker"))
+        .filter(|worker| {
+            worker.get("planStepKey").and_then(Value::as_str) == Some(review_step_key.as_str())
+        })
+        .collect::<Vec<_>>();
+    let reviewer = reviewers
+        .first()
+        .copied()
+        .filter(|_| reviewers.len() == 1)
+        .ok_or_else(|| "The review step requires one exact reviewer assignment.".to_string())?;
+    if reviewer.pointer("/role/kind").and_then(Value::as_str) != Some("reviewer")
+        || reviewer.get("runId") != authorized.journal.run.get("id")
+        || reviewer.get("planRevisionId") != authorized.lifecycle.current_revision.get("id")
+        || reviewer.get("workspaceId") != authorized.journal.run.get("workspaceId")
+        || reviewer.get("ownerMemberId") != authorized.journal.run.get("ownerMemberId")
+        || reviewer.get("authority") != authorized.journal.run.get("authority")
+    {
+        return Err(
+            "The selected reviewer must remain in the exact run, Plan, owner, and authority scope."
+                .into(),
+        );
+    }
+    let reviewer_worker_id = bounded(
+        reviewer
+            .get("id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Selected Mission reviewer identity is invalid.".to_string())?,
+        "Selected Mission reviewer",
+        200,
+    )?;
+    Ok(Some(json!({
+        "reviewStepKey":review_step_key,
+        "reviewerWorkerId":reviewer_worker_id,
+        "justification":["declared-worker-acceptance"],
+        "criterionKeys":worker_criteria,
+        "authority":"declared-worker-evaluator",
+        "policyRef":"native-policy:mission-review:v1"
+    })))
+}
+
+fn ensure_reviewer_selection_in_tx(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    authorized: AuthorizedRun,
+) -> crate::store::Result<mission_run::MissionRunJournalRow> {
+    let selection =
+        derive_reviewer_selection(&authorized).map_err(crate::store::StoreError::Invalid)?;
+    let Some(selection) = selection else {
+        return Ok(authorized.journal);
+    };
+    let run_id = authorized
+        .journal
+        .run
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission run identity is invalid.".into())
+        })?;
+    let (event_id, event_key) = reviewer_selection_identity(run_id);
+    let matches = authorized
+        .journal
+        .events
+        .iter()
+        .filter(|event| {
+            event.get("type").and_then(Value::as_str) == Some("reviewer-selected")
+                || event.get("id").and_then(Value::as_str) == Some(event_id.as_str())
+                || event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+        })
+        .collect::<Vec<_>>();
+    if matches.len() > 1 {
+        return Err(crate::store::StoreError::Invalid(
+            "Stored Mission reviewer selection is ambiguous.".into(),
+        ));
+    }
+    if let Some(event) = matches.first() {
+        if event.get("type").and_then(Value::as_str) == Some("reviewer-selected")
+            && event.get("id").and_then(Value::as_str) == Some(event_id.as_str())
+            && event.get("idempotencyKey").and_then(Value::as_str) == Some(event_key.as_str())
+            && event.pointer("/payload/selection") == Some(&selection)
+            && event.pointer("/actor/kind").and_then(Value::as_str) == Some("system")
+        {
+            return Ok(authorized.journal);
+        }
+        return Err(crate::store::StoreError::Invalid(
+            "Stored Mission reviewer selection changed from native policy evidence.".into(),
+        ));
+    }
+    let reviewer_id = selection
+        .get("reviewerWorkerId")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            crate::store::StoreError::Invalid("Mission reviewer selection is invalid.".into())
+        })?;
+    if authorized.journal.events.iter().any(|event| {
+        event.get("type").and_then(Value::as_str) == Some("worker-started")
+            && event.pointer("/payload/workerId").and_then(Value::as_str) == Some(reviewer_id)
+    }) {
+        return Err(crate::store::StoreError::Invalid(
+            "Mission reviewer selection must be durable before reviewer execution.".into(),
+        ));
+    }
+    let at = now();
+    append_event(
+        tx,
+        store,
+        &authorized,
+        &event_id,
+        "reviewer-selected",
+        &event_key,
+        json!({"selection":selection}),
+        &at,
+    )
+}
+
 fn prepare_provider_workers_in_tx(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -607,7 +837,7 @@ fn prepare_provider_workers_in_tx(
                 ));
             }
         }
-        return Ok(authorized.journal);
+        return ensure_reviewer_selection_in_tx(tx, store, authorized);
     }
     for worker in expected {
         let worker_id = worker.get("id").and_then(Value::as_str).ok_or_else(|| {
@@ -674,7 +904,7 @@ fn prepare_provider_workers_in_tx(
             &at,
         )?;
     }
-    Ok(authorized.journal)
+    ensure_reviewer_selection_in_tx(tx, store, authorized)
 }
 
 fn strict_terminal_workers(
@@ -968,6 +1198,63 @@ pub(crate) fn native_general_worker_objective_in_tx(
         return Err(crate::store::StoreError::Invalid(
             "Mission worker objective changed from the selected Plan.".into(),
         ));
+    }
+    if declared_general_graph(lifecycle)
+        && step.get("kind").and_then(Value::as_str) == Some("review")
+    {
+        let criteria = lifecycle
+            .mission
+            .pointer("/acceptance/criteria")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("Mission acceptance criteria are invalid.".into())
+            })?
+            .iter()
+            .filter(|criterion| {
+                criterion.get("evaluator").and_then(Value::as_str) == Some("worker")
+            })
+            .filter_map(|criterion| criterion.get("key").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        let selections = journal
+            .events
+            .iter()
+            .filter(|event| event.get("type").and_then(Value::as_str) == Some("reviewer-selected"))
+            .filter_map(|event| event.pointer("/payload/selection"))
+            .collect::<Vec<_>>();
+        let selection = selections
+            .first()
+            .copied()
+            .filter(|_| selections.len() == 1)
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid(
+                    "Mission reviewer execution requires one durable native selection.".into(),
+                )
+            })?;
+        let selection_criteria = selection
+            .get("criterionKeys")
+            .and_then(Value::as_array)
+            .map(|values| values.iter().filter_map(Value::as_str).collect::<Vec<_>>());
+        if selection.get("reviewStepKey").and_then(Value::as_str) != Some(step_key)
+            || selection.get("reviewerWorkerId").and_then(Value::as_str) != Some(worker_id)
+            || selection
+                .pointer("/justification/0")
+                .and_then(Value::as_str)
+                != Some("declared-worker-acceptance")
+            || selection
+                .get("justification")
+                .and_then(Value::as_array)
+                .is_none_or(|values| values.len() != 1)
+            || selection.get("authority").and_then(Value::as_str)
+                != Some("declared-worker-evaluator")
+            || selection.get("policyRef").and_then(Value::as_str)
+                != Some("native-policy:mission-review:v1")
+            || selection_criteria.as_deref() != Some(criteria.as_slice())
+        {
+            return Err(crate::store::StoreError::Invalid(
+                "Mission reviewer selection changed from the selected Plan and native policy."
+                    .into(),
+            ));
+        }
     }
     let dependencies = step
         .get("dependsOnStepKeys")
@@ -4775,6 +5062,76 @@ mod tests {
     }
 
     #[test]
+    fn reviewer_selection_is_derived_from_exact_plan_acceptance_and_assignment() {
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({
+                "id":"mission-1","workspaceId":"workspace-1","visibility":"member-private",
+                "ownerMemberId":"member-1","authority":"local","schemaVersion":1,
+                "constraints":[{
+                    "key":GENERAL_DECLARED_GRAPH_MARKER,
+                    "description":"Use the authenticated native general Mission graph.",
+                    "severity":"required","source":"user"
+                }],
+                "acceptance":{"requiresHumanAcceptance":false,"criteria":[{
+                    "key":"quality","description":"Review quality.","required":true,
+                    "evaluator":"worker"
+                }]}
+            }),
+            plan: json!({}),
+            current_revision: json!({
+                "id":"revision-1",
+                "steps":[
+                    {"key":"draft","kind":"produce","acceptanceCriterionKeys":[]},
+                    {"key":"review","kind":"review","acceptanceCriterionKeys":["quality"]}
+                ]
+            }),
+        };
+        let reviewer = json!({
+            "id":"worker-review","runId":"run-1","planRevisionId":"revision-1",
+            "planStepKey":"review","workspaceId":"workspace-1","ownerMemberId":"member-1",
+            "authority":"local","role":{"kind":"reviewer"}
+        });
+        let mut authorized = AuthorizedRun {
+            scope: DataScope::workspace("workspace-1").unwrap(),
+            member: "member-1".into(),
+            actor: "user-1".into(),
+            journal: mission_run::MissionRunJournalRow {
+                run: json!({
+                    "id":"run-1","workspaceId":"workspace-1",
+                    "ownerMemberId":"member-1","authority":"local",
+                    "status":"running","executionDepth":"multi-worker"
+                }),
+                events: vec![json!({
+                    "type":"worker-created","payload":{"worker":reviewer}
+                })],
+            },
+            lifecycle,
+        };
+        assert_eq!(
+            derive_reviewer_selection(&authorized).unwrap(),
+            Some(json!({
+                "reviewStepKey":"review",
+                "reviewerWorkerId":"worker-review",
+                "justification":["declared-worker-acceptance"],
+                "criterionKeys":["quality"],
+                "authority":"declared-worker-evaluator",
+                "policyRef":"native-policy:mission-review:v1"
+            }))
+        );
+
+        authorized.lifecycle.current_revision["steps"][1]["acceptanceCriterionKeys"] = json!([]);
+        assert!(derive_reviewer_selection(&authorized)
+            .unwrap_err()
+            .contains("bind exactly"));
+        authorized.lifecycle.current_revision["steps"][1]["acceptanceCriterionKeys"] =
+            json!(["quality"]);
+        authorized.journal.events.clear();
+        assert!(derive_reviewer_selection(&authorized)
+            .unwrap_err()
+            .contains("one exact reviewer"));
+    }
+
+    #[test]
     fn progress_projection_derives_ready_work_usage_and_terminal_acceptance() {
         let lifecycle = mission_plan::MissionPlanLifecycleRow {
             mission: json!({
@@ -5310,6 +5667,153 @@ mod tests {
             at,
         )?;
         Ok(())
+    }
+
+    #[test]
+    fn reviewer_selection_persists_idempotently_across_reopen() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("reviewer-selection.db");
+        let vault =
+            crate::store::vault::Vault::new(&crate::store::vault::MasterKey::generate().unwrap())
+                .unwrap();
+        let scope = DataScope::workspace("workspace-1").unwrap();
+        let at = "2026-07-23T10:00:00.000Z";
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({
+                "id":"mission-review","workspaceId":"workspace-1",
+                "visibility":"member-private","ownerMemberId":"member-1",
+                "authority":"local","schemaVersion":1,
+                "constraints":[{
+                    "key":GENERAL_DECLARED_GRAPH_MARKER,
+                    "description":"Use the authenticated native general Mission graph.",
+                    "severity":"required","source":"user"
+                }],
+                "acceptance":{"requiresHumanAcceptance":false,"criteria":[{
+                    "key":"quality","description":"Review quality.","required":true,
+                    "evaluator":"worker"
+                }]}
+            }),
+            plan: json!({}),
+            current_revision: json!({
+                "id":"revision-review",
+                "steps":[{
+                    "key":"review","kind":"review","acceptanceCriterionKeys":["quality"]
+                }]
+            }),
+        };
+        {
+            let store = crate::store::Store::open(&path, vault.clone()).unwrap();
+            store
+                .transaction(|tx| {
+                    tx.execute(
+                        "INSERT INTO workspace(id,name,created_at,updated_at)
+                         VALUES ('workspace-1','W',?1,?1)",
+                        [at],
+                    )?;
+                    let mut run = json!({
+                        "id":"run-general-store","workspaceId":"workspace-1",
+                        "visibility":"member-private","ownerMemberId":"member-1",
+                        "authority":"local","schemaVersion":1,"revision":1,
+                        "createdByInternalUserId":"user-1","createdAt":at,"updatedAt":at,
+                        "status":"running","executionDepth":"multi-worker",
+                        "initiator":{"kind":"mission","missionId":"mission-review"},
+                        "parentage":{"kind":"root"},"departmentIds":[],
+                        "planRevisionId":"revision-review",
+                        "budget":{"maxWorkers":1,"maxAttempts":1},
+                        "currentAttemptNumber":1,
+                        "eventHead":{"lastSequence":1,"lastEventId":"event-created"}
+                    });
+                    let created = json!({
+                        "id":"event-created","runId":"run-general-store","type":"run-created",
+                        "sequence":1,"attemptNumber":1,"idempotencyKey":"created-review",
+                        "payload":{"run":run}
+                    });
+                    mission_run::create(
+                        tx,
+                        &store,
+                        &scope,
+                        "member-1",
+                        "user-1",
+                        "run-general-store",
+                        "event-created",
+                        "created-review",
+                        &run,
+                        &created,
+                        at,
+                    )?;
+                    append_general_store_event(
+                        tx,
+                        &store,
+                        &scope,
+                        &mut run,
+                        "event-reviewer-created",
+                        "worker-created",
+                        json!({"worker":{
+                            "id":"worker-review","runId":"run-general-store",
+                            "planRevisionId":"revision-review","planStepKey":"review",
+                            "workspaceId":"workspace-1","ownerMemberId":"member-1",
+                            "authority":"local","role":{"kind":"reviewer"}
+                        }}),
+                        json!({"kind":"system"}),
+                        at,
+                    )?;
+                    let journal =
+                        mission_run::get(tx, &store, &scope, "member-1", "run-general-store")?
+                            .unwrap();
+                    let selected = ensure_reviewer_selection_in_tx(
+                        tx,
+                        &store,
+                        AuthorizedRun {
+                            scope: scope.clone(),
+                            member: "member-1".into(),
+                            actor: "user-1".into(),
+                            journal,
+                            lifecycle: lifecycle.clone(),
+                        },
+                    )?;
+                    assert_eq!(selected.events.last().unwrap()["type"], "reviewer-selected");
+                    Ok(())
+                })
+                .unwrap();
+        }
+        let reopened = crate::store::Store::open(&path, vault).unwrap();
+        reopened
+            .transaction(|tx| {
+                let journal =
+                    mission_run::get(tx, &reopened, &scope, "member-1", "run-general-store")?
+                        .unwrap();
+                let count = journal
+                    .events
+                    .iter()
+                    .filter(|event| {
+                        event.get("type").and_then(Value::as_str) == Some("reviewer-selected")
+                    })
+                    .count();
+                let replayed = ensure_reviewer_selection_in_tx(
+                    tx,
+                    &reopened,
+                    AuthorizedRun {
+                        scope: scope.clone(),
+                        member: "member-1".into(),
+                        actor: "user-1".into(),
+                        journal,
+                        lifecycle,
+                    },
+                )?;
+                assert_eq!(count, 1);
+                assert_eq!(
+                    replayed
+                        .events
+                        .iter()
+                        .filter(|event| {
+                            event.get("type").and_then(Value::as_str) == Some("reviewer-selected")
+                        })
+                        .count(),
+                    1
+                );
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]
