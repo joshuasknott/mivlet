@@ -1481,6 +1481,195 @@ fn require_unchanged_connection_evidence(
     Ok(())
 }
 
+struct ConnectorProjectTarget {
+    scope: crate::authorized_scope::AuthorizedCommandScope,
+    project_id: Option<String>,
+    connection_id: String,
+    project_revision: Option<i64>,
+}
+
+fn exact_project_connector_request(
+    connector_id: &str,
+    project_id: Option<String>,
+    requested_connection_id: Option<String>,
+    selected_connection_id: &str,
+) -> Result<Option<(String, String)>, ConnectorCommandError> {
+    match (project_id, requested_connection_id) {
+        (None, None) => Ok(None),
+        (Some(project_id), Some(connection_id)) => {
+            if connection_id.trim() != selected_connection_id {
+                return Err(command_error(
+                    "conflict",
+                    connector_id,
+                    "This Project search belongs to a different active Connection.",
+                    true,
+                ));
+            }
+            Ok(Some((project_id, connection_id)))
+        }
+        _ => Err(command_error(
+            "invalid-request",
+            connector_id,
+            "Project Connector requests require both an exact Project and Connection.",
+            false,
+        )),
+    }
+}
+
+fn project_contains_connection(
+    project: &crate::store::repos::project::ProjectRow,
+    connection_id: &str,
+) -> bool {
+    project
+        .connection_ids
+        .iter()
+        .any(|candidate| candidate == connection_id)
+}
+
+fn project_target_still_matches(
+    project: &crate::store::repos::project::ProjectRow,
+    expected_revision: i64,
+    connection_id: &str,
+) -> bool {
+    project.revision == expected_revision && project_contains_connection(project, connection_id)
+}
+
+fn connector_project_target(
+    store: &crate::store::Store,
+    workspace_scope: &crate::authorized_scope::AuthorizedCommandScope,
+    connector_id: &str,
+    project_id: Option<String>,
+    requested_connection_id: Option<String>,
+    selected_connection_id: &str,
+) -> Result<ConnectorProjectTarget, ConnectorCommandError> {
+    match exact_project_connector_request(
+        connector_id,
+        project_id,
+        requested_connection_id,
+        selected_connection_id,
+    )? {
+        None => Ok(ConnectorProjectTarget {
+            scope: workspace_scope.clone(),
+            project_id: None,
+            connection_id: selected_connection_id.to_string(),
+            project_revision: None,
+        }),
+        Some((project_id, connection_id)) => {
+            let target = crate::authorized_scope::command_scope(
+                Some(workspace_scope.data.workspace_id().to_string()),
+                Some(project_id.clone()),
+                crate::authorized_scope::ScopeAccess::Write,
+            )
+            .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
+            if target.internal_user_id != workspace_scope.internal_user_id
+                || target.member_id != workspace_scope.member_id
+            {
+                return Err(command_error(
+                    "conflict",
+                    connector_id,
+                    "The active account changed before Project search.",
+                    true,
+                ));
+            }
+            let owner_member_id = target.member_id.as_deref().ok_or_else(|| {
+                command_error(
+                    "needs-auth",
+                    connector_id,
+                    "An active Project membership is required.",
+                    false,
+                )
+            })?;
+            let project = store
+                .with_conn(|tx| {
+                    crate::store::repos::project::get(
+                        tx,
+                        store,
+                        &target.data,
+                        &project_id,
+                        owner_member_id,
+                    )
+                })
+                .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+                .ok_or_else(|| {
+                    command_error(
+                        "invalid-request",
+                        connector_id,
+                        "This Project is no longer available.",
+                        false,
+                    )
+                })?;
+            if !project_contains_connection(&project, selected_connection_id) {
+                return Err(command_error(
+                    "needs-auth",
+                    connector_id,
+                    "Choose this Connection for the Project before searching or importing.",
+                    false,
+                ));
+            }
+            Ok(ConnectorProjectTarget {
+                scope: target,
+                project_id: Some(project_id),
+                connection_id,
+                project_revision: Some(project.revision),
+            })
+        }
+    }
+}
+
+fn require_unchanged_project_target(
+    store: &crate::store::Store,
+    connector_id: &str,
+    target: &ConnectorProjectTarget,
+) -> Result<(), ConnectorCommandError> {
+    let Some(project_id) = target.project_id.as_deref() else {
+        return Ok(());
+    };
+    let owner_member_id = target.scope.member_id.as_deref().ok_or_else(|| {
+        command_error(
+            "needs-auth",
+            connector_id,
+            "An active Project membership is required.",
+            false,
+        )
+    })?;
+    let expected_revision = target.project_revision.ok_or_else(|| {
+        command_error(
+            "conflict",
+            connector_id,
+            "This Project changed during Connector access.",
+            true,
+        )
+    })?;
+    let project = store
+        .with_conn(|tx| {
+            crate::store::repos::project::get(
+                tx,
+                store,
+                &target.scope.data,
+                project_id,
+                owner_member_id,
+            )
+        })
+        .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
+        .ok_or_else(|| {
+            command_error(
+                "conflict",
+                connector_id,
+                "This Project changed during Connector access.",
+                true,
+            )
+        })?;
+    if !project_target_still_matches(&project, expected_revision, &target.connection_id) {
+        return Err(command_error(
+            "conflict",
+            connector_id,
+            "This Project's Connection selection changed. Search again before importing.",
+            true,
+        ));
+    }
+    Ok(())
+}
+
 fn bind_search_result_to_connection(
     mut result: ConnectorSearchResult,
     connection_id: &str,
@@ -1927,6 +2116,8 @@ pub async fn search_connector(
     app: tauri::AppHandle,
     request: ConnectorSearchRequest,
     workspace_id: Option<String>,
+    project_id: Option<String>,
+    connection_id: Option<String>,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
     let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
@@ -1939,6 +2130,14 @@ pub async fn search_connector(
         )
     })?;
     let connection = selected_connection_evidence(durable_store, &scope, entry.id)?;
+    let project_target = connector_project_target(
+        durable_store,
+        &scope,
+        entry.id,
+        project_id,
+        connection_id,
+        &connection.connection_id,
+    )?;
     if request.query.chars().count() > MAX_CONNECTOR_QUERY_CHARACTERS
         || !(1..=MAX_CONNECTOR_RESULT_LIMIT).contains(&request.limit.unwrap_or(20))
     {
@@ -1961,6 +2160,7 @@ pub async fn search_connector(
     let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
+    require_unchanged_project_target(durable_store, entry.id, &project_target)?;
     Ok(bind_search_result_to_connection(
         result,
         &connection.connection_id,
@@ -2047,6 +2247,8 @@ pub async fn import_connector_item(
     app: tauri::AppHandle,
     request: ConnectorImportRequest,
     workspace_id: Option<String>,
+    project_id: Option<String>,
+    connection_id: Option<String>,
 ) -> Result<ConnectorImportResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
     let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
@@ -2059,6 +2261,14 @@ pub async fn import_connector_item(
         )
     })?;
     let connection = selected_connection_evidence(durable_store, &scope, entry.id)?;
+    let project_target = connector_project_target(
+        durable_store,
+        &scope,
+        entry.id,
+        project_id,
+        connection_id,
+        &connection.connection_id,
+    )?;
     if request.item.connector_id != entry.id || request.imported_at.trim().is_empty() {
         return Err(command_error(
             "invalid-request",
@@ -2119,9 +2329,12 @@ pub async fn import_connector_item(
     let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
-    let bound = bind_source_to_private_connection(result, &scope, &connection.connection_id);
-    let source = persist_connector_knowledge_source(&app, &scope.private, bound.source)
-        .map_err(|message| command_error("unknown", entry.id, &message, false))?;
+    require_unchanged_project_target(durable_store, entry.id, &project_target)?;
+    let bound =
+        bind_source_to_private_connection(result, &project_target.scope, &connection.connection_id);
+    let source =
+        persist_connector_knowledge_source(&app, &project_target.scope.private, bound.source)
+            .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(ConnectorImportResult {
         source,
         imported: true,
@@ -2434,6 +2647,69 @@ mod workspace_scope_tests {
             error.message,
             "Requested OAuth scope set requires at least one scope."
         );
+    }
+
+    #[test]
+    fn project_connector_request_requires_exact_paired_scope_and_connection() {
+        assert!(
+            exact_project_connector_request("github", None, None, "connection-1")
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            exact_project_connector_request(
+                "github",
+                Some("project-1".into()),
+                Some("connection-1".into()),
+                "connection-1",
+            )
+            .unwrap(),
+            Some(("project-1".into(), "connection-1".into()))
+        );
+        let partial = exact_project_connector_request(
+            "github",
+            Some("project-1".into()),
+            None,
+            "connection-1",
+        )
+        .unwrap_err();
+        assert_eq!(partial.code, "invalid-request");
+        let substituted = exact_project_connector_request(
+            "github",
+            Some("project-1".into()),
+            Some("connection-2".into()),
+            "connection-1",
+        )
+        .unwrap_err();
+        assert_eq!(substituted.code, "conflict");
+    }
+
+    #[test]
+    fn project_connector_target_fences_revision_and_saved_connection() {
+        let mut project = crate::store::repos::project::ProjectRow {
+            id: "project-1".into(),
+            workspace_id: "workspace-1".into(),
+            authority: "local".into(),
+            visibility: "member-private".into(),
+            owner_member_id: "member-1".into(),
+            schema_version: 1,
+            revision: 4,
+            created_by_internal_user_id: "user-1".into(),
+            created_at: "t".into(),
+            updated_at: "t".into(),
+            title: "Launch".into(),
+            description: None,
+            instructions: None,
+            connection_ids: vec!["connection-1".into()],
+            lifecycle: "active".into(),
+        };
+        assert!(project_contains_connection(&project, "connection-1"));
+        assert!(!project_contains_connection(&project, "connection-2"));
+        assert!(project_target_still_matches(&project, 4, "connection-1"));
+        project.revision = 5;
+        assert!(!project_target_still_matches(&project, 4, "connection-1"));
+        project.connection_ids.clear();
+        assert!(!project_target_still_matches(&project, 5, "connection-1"));
     }
 
     #[test]

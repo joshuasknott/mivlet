@@ -502,6 +502,8 @@ export function ChatWorkspace() {
     actionStatus: projectKnowledge.actionStatus,
     refresh: projectKnowledge.refresh,
     importFile: projectKnowledge.importFile,
+    searchConnection: projectKnowledge.searchConnection,
+    importConnectionItem: projectKnowledge.importConnectionItem,
     toggleDisabled: projectKnowledge.toggleDisabled,
     remove: projectKnowledge.remove,
     updateFile: projectKnowledge.updateFile,
@@ -514,7 +516,7 @@ export function ChatWorkspace() {
         freshness: citation.freshness
       }));
     }
-  }), [projectKnowledge.actionStatus, projectKnowledge.error, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.remove, projectKnowledge.search, projectKnowledge.sources, projectKnowledge.toggleDisabled, projectKnowledge.updateFile]);
+  }), [projectKnowledge.actionStatus, projectKnowledge.error, projectKnowledge.importConnectionItem, projectKnowledge.importFile, projectKnowledge.loading, projectKnowledge.refresh, projectKnowledge.remove, projectKnowledge.search, projectKnowledge.searchConnection, projectKnowledge.sources, projectKnowledge.toggleDisabled, projectKnowledge.updateFile]);
   const projectMemory = useProjectMemory({
     workspaceId: boundWorkspaceId ?? "",
     projectId: scopedProjectId ?? "",

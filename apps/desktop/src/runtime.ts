@@ -2597,32 +2597,42 @@ export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
   }
 }
 
-export async function searchRuntimeConnector(request: ConnectorSearchRequest) {
+export async function searchRuntimeConnector(
+  request: ConnectorSearchRequest,
+  scopeOverride?: RuntimeKnowledgeScopeOverride,
+  connectionId?: string
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
-  const scope = activeDataScope();
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
   try {
     return await invoke<ConnectorSearchResult>("search_connector", {
       request,
-      workspaceId: scope.workspaceId
+      ...scope,
+      connectionId
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function importRuntimeConnectorItem(request: ConnectorImportRequest) {
+export async function importRuntimeConnectorItem(
+  request: ConnectorImportRequest,
+  scopeOverride?: RuntimeKnowledgeScopeOverride,
+  connectionId?: string
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
-  const scope = activeDataScope();
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
   try {
     return await invoke<ConnectorImportResult>("import_connector_item", {
       request,
-      workspaceId: scope.workspaceId
+      ...scope,
+      connectionId
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -2631,42 +2641,52 @@ export async function importRuntimeConnectorItem(request: ConnectorImportRequest
 
 async function invokeConnectorKnowledge<T>(
   command: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
+  scopeOverride?: RuntimeKnowledgeScopeOverride
 ): Promise<T | null> {
   if (!hasTauriRuntime()) {
     return null;
   }
-  const scope = activeDataScope();
+  const scope = knowledgeScope(scopeOverride);
   if (!scope) return null;
   try {
     return await invoke<T>(command, {
       ...args,
-      workspaceId: scope.workspaceId,
-      projectId: null
+      ...scope
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export function listRuntimeConnectorKnowledgeSources() {
-  return invokeConnectorKnowledge<KnowledgeSource[]>("list_connector_knowledge_sources");
+export function listRuntimeConnectorKnowledgeSources(scopeOverride?: RuntimeKnowledgeScopeOverride) {
+  return invokeConnectorKnowledge<KnowledgeSource[]>(
+    "list_connector_knowledge_sources",
+    {},
+    scopeOverride
+  );
 }
 
 export async function setRuntimeConnectorKnowledgeSourceDisabled(
   sourceId: string,
-  disabled: boolean
+  disabled: boolean,
+  scopeOverride?: RuntimeKnowledgeScopeOverride
 ) {
   return invokeConnectorKnowledge<KnowledgeSource>(
     "set_connector_knowledge_source_disabled",
-    { sourceId, disabled }
+    { sourceId, disabled },
+    scopeOverride
   );
 }
 
-export function deleteRuntimeConnectorKnowledgeSource(sourceId: string) {
+export function deleteRuntimeConnectorKnowledgeSource(
+  sourceId: string,
+  scopeOverride?: RuntimeKnowledgeScopeOverride
+) {
   return invokeConnectorKnowledge<KnowledgeSource>(
     "delete_connector_knowledge_source",
-    { sourceId }
+    { sourceId },
+    scopeOverride
   );
 }
 

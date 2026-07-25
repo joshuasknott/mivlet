@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { FIRST_WAVE_CONNECTOR_IDS } from "@fable/connectors";
 import type { ThreadSummary } from "@fable/protocol";
 import {
   listRuntimeProjectConnectionOptions
@@ -50,7 +51,9 @@ export interface ProjectActivityConnection {
 }
 
 export interface ProjectConnectionChoice extends ProjectActivityConnection {
+  connectorId: string;
   selectable: boolean;
+  searchable: boolean;
 }
 
 export interface ProjectActivityView {
@@ -197,9 +200,12 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
       const connectionOptions = (connectionOptionsResult ?? [])
         .map((connection) => ({
           id: connection.connectionId,
+          connectorId: connection.connectorId,
           name: connection.displayName,
           status: connectionStatusLabel(connection.healthState),
-          selectable: connection.selectable
+          selectable: connection.selectable,
+          searchable: (FIRST_WAVE_CONNECTOR_IDS as readonly string[])
+            .includes(connection.connectorId)
         }))
         .sort((left, right) => left.name.localeCompare(right.name));
       return {

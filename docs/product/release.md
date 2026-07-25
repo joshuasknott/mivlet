@@ -108,8 +108,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   secret-redacted before persistence, restored after restart, and supports
   durable disable/re-enable and tombstone delete. Retrieval rechecks that exact
   Connection before ranking and context assembly. Live credential-backed
-  observation, background synchronization, provider crawling, and
-  project-scoped Connector ingestion remain release gates.
+  observation, background synchronization, and provider crawling remain
+  release gates. Repository-local Project search/import is implemented: the
+  desktop offers only Connections already saved on the active private Project,
+  native code requires that exact Project/Connection pair before provider
+  egress, and it rechecks the encrypted Project revision and selection before
+  persisting the normalized source in Project-private Knowledge.
 - Project detail includes a bounded Activity summary for exact active
   Project conversation Mission runs, canonical project Routines, current
   project Artifacts, and workspace Connections referenced by those Routine

@@ -158,6 +158,18 @@ encrypted Project and requires the resolved native or MCP Connection id to
 match the saved selection before preparing or consuming a Project-scoped
 grant. Standalone workspace reads do not inherit a Project allowlist.
 
+The Project Knowledge surface can also search a selected first-wave Connection
+and import one exact result. The renderer sends the active Project id and opaque
+Connection id; Rust derives the authenticated workspace/member, verifies that
+the Connection is both the current canonical selection and saved on that active
+private Project, and only then performs provider egress. After egress it locks
+the same identity generation, rechecks the Connection selection, Project
+revision, and saved allowlist, and persists only into the owner/project-qualified
+encrypted Knowledge document. Missing, substituted, unselected, revoked, or
+concurrently changed evidence fails closed. Project selection still grants no
+new provider or capability authority. Browser preview exposes no substitute
+provider path.
+
 ## Credential storage and auth broker
 
 The auth broker is implemented in `apps/broker` and synthesised targeting Cloudflare Workers.

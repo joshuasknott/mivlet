@@ -1,6 +1,7 @@
 import type { PropsWithChildren } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ConnectorSearchItem } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProjectKnowledge } from "./useProjectKnowledge";
 
@@ -11,6 +12,11 @@ const mocks = vi.hoisted(() => ({
   refreshSource: vi.fn(),
   buildRefresh: vi.fn(),
   search: vi.fn(),
+  listConnected: vi.fn(),
+  toggleConnected: vi.fn(),
+  deleteConnected: vi.fn(),
+  searchConnected: vi.fn(),
+  importConnected: vi.fn(),
   getProject: vi.fn()
 }));
 
@@ -19,7 +25,12 @@ vi.mock("../runtime", () => ({
   saveRuntimeImportedKnowledgeSources: mocks.save,
   importRuntimeLocalKnowledgeSource: mocks.importSource,
   refreshRuntimeLocalKnowledgeSource: mocks.refreshSource,
-  searchRuntimeKnowledgeSources: mocks.search
+  searchRuntimeKnowledgeSources: mocks.search,
+  listRuntimeConnectorKnowledgeSources: mocks.listConnected,
+  setRuntimeConnectorKnowledgeSourceDisabled: mocks.toggleConnected,
+  deleteRuntimeConnectorKnowledgeSource: mocks.deleteConnected,
+  searchRuntimeConnector: mocks.searchConnected,
+  importRuntimeConnectorItem: mocks.importConnected
 }));
 vi.mock("../lib/local-knowledge-refresh", () => ({ buildLocalKnowledgeRefreshRequest: mocks.buildRefresh }));
 vi.mock("../lib/project-runtime", () => ({ getRuntimeProject: mocks.getProject }));
@@ -42,6 +53,31 @@ const imported = {
   scope: { level: "project", projectId: "project-a" }
 };
 
+const connected = {
+  ...imported,
+  id: "source-connected",
+  title: "Issue 42",
+  connectorId: "github",
+  connectionId: "connection-github",
+  provenance: "GitHub issue",
+  origin: "connector-import",
+  contentPreview: "Release blocker"
+};
+
+const connectedItem: ConnectorSearchItem = {
+  id: "issue-42",
+  connectorId: "github",
+  connectionId: "connection-github",
+  title: "Issue 42",
+  kind: "issue",
+  summary: "Release blocker",
+  provenance: "GitHub issue",
+  freshness: "now",
+  trust: "untrusted",
+  contentPreview: "Release blocker",
+  providerMetadata: { repository: "fable" }
+};
+
 function wrapper() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: Infinity } } });
   return ({ children }: PropsWithChildren) => (
@@ -53,10 +89,21 @@ describe("useProjectKnowledge", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.load.mockResolvedValue([]);
+    mocks.listConnected.mockResolvedValue([]);
     mocks.importSource.mockResolvedValue(imported);
     mocks.save.mockImplementation(async (sources) => sources);
     mocks.buildRefresh.mockImplementation(async (source, file: File) => ({ sourceId: source.id, candidate: { name: file.name, content: "selected content" } }));
     mocks.search.mockResolvedValue({ query: "notes", mode: "lexical-fallback", citations: [] });
+    mocks.searchConnected.mockResolvedValue({
+      connectorId: "github",
+      query: "release",
+      items: [connectedItem],
+      source: "live",
+      searchedAt: "2026-07-25T10:00:00.000Z"
+    });
+    mocks.importConnected.mockResolvedValue({ source: connected, imported: true });
+    mocks.toggleConnected.mockResolvedValue({ ...connected, disabled: true });
+    mocks.deleteConnected.mockResolvedValue({ ...connected, disabled: true, deletedAt: "now" });
     mocks.getProject.mockResolvedValue({ id: "project-a", lifecycle: "active" });
   });
 
@@ -195,5 +242,95 @@ describe("useProjectKnowledge", () => {
     await act(async () => { await expect(result.current.updateFile("source-1", file)).rejects.toThrow(/changed elsewhere/i); });
     expect(result.current.sources[0].contentFingerprint).toBe("fingerprint");
     expect(result.current.error).toMatch(/changed elsewhere/i);
+  });
+
+  it("loads connected sources and uses exact Project scope for their lifecycle", async () => {
+    mocks.load.mockResolvedValue([imported]);
+    mocks.listConnected
+      .mockResolvedValueOnce([connected])
+      .mockResolvedValueOnce([{ ...connected, disabled: true }])
+      .mockResolvedValueOnce([]);
+    const { result } = renderHook(() => useProjectKnowledge({
+      workspaceId: "workspace-a",
+      projectId: "project-a",
+      enabled: true
+    }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.sources).toHaveLength(2));
+
+    await act(async () => { await result.current.toggleDisabled("source-connected"); });
+    expect(mocks.toggleConnected).toHaveBeenCalledWith(
+      "source-connected",
+      true,
+      { workspaceId: "workspace-a", projectId: "project-a" }
+    );
+    await act(async () => { await result.current.remove("source-connected"); });
+    expect(mocks.deleteConnected).toHaveBeenCalledWith(
+      "source-connected",
+      { workspaceId: "workspace-a", projectId: "project-a" }
+    );
+    expect(mocks.save).not.toHaveBeenCalled();
+  });
+
+  it("searches and imports through the exact saved Connection without preview fallback", async () => {
+    mocks.listConnected
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([connected]);
+    const { result } = renderHook(() => useProjectKnowledge({
+      workspaceId: "workspace-a",
+      projectId: "project-a",
+      enabled: true
+    }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await expect(result.current.searchConnection(
+        "github",
+        "connection-github",
+        " release "
+      )).resolves.toEqual([connectedItem]);
+    });
+    expect(mocks.searchConnected).toHaveBeenCalledWith({
+      connectorId: "github",
+      query: "release",
+      limit: 20
+    }, { workspaceId: "workspace-a", projectId: "project-a" }, "connection-github");
+
+    await act(async () => {
+      await result.current.importConnectionItem(connectedItem);
+    });
+    expect(mocks.importConnected).toHaveBeenCalledWith(
+      expect.objectContaining({
+        connectorId: "github",
+        item: connectedItem,
+        importedAt: expect.any(String)
+      }),
+      { workspaceId: "workspace-a", projectId: "project-a" },
+      "connection-github"
+    );
+    await waitFor(() => expect(result.current.sources).toEqual([connected]));
+  });
+
+  it("rejects a result whose Connection evidence changes during search", async () => {
+    mocks.searchConnected.mockResolvedValue({
+      connectorId: "github",
+      query: "release",
+      items: [{ ...connectedItem, connectionId: "connection-substitute" }],
+      source: "live",
+      searchedAt: "2026-07-25T10:00:00.000Z"
+    });
+    const { result } = renderHook(() => useProjectKnowledge({
+      workspaceId: "workspace-a",
+      projectId: "project-a",
+      enabled: true
+    }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await expect(result.current.searchConnection(
+        "github",
+        "connection-github",
+        "release"
+      )).rejects.toThrow(/changed/i);
+    });
+    expect(mocks.importConnected).not.toHaveBeenCalled();
   });
 });

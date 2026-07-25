@@ -100,12 +100,14 @@ describe("project runtime", () => {
     setActiveRuntimeDataScope("workspace-a");
     mocks.invoke.mockResolvedValue([{
       connectionId: "connection-a",
+      connectorId: "github",
       displayName: "Work GitHub",
       healthState: "healthy",
       selectable: true
     }]);
     await expect(listRuntimeProjectConnectionOptions()).resolves.toEqual([{
       connectionId: "connection-a",
+      connectorId: "github",
       displayName: "Work GitHub",
       healthState: "healthy",
       selectable: true
@@ -115,12 +117,14 @@ describe("project runtime", () => {
     mocks.invoke.mockResolvedValue([
       {
         connectionId: "connection-a",
+        connectorId: "github",
         displayName: "One",
         healthState: "healthy",
         selectable: true
       },
       {
         connectionId: "connection-a",
+        connectorId: "github",
         displayName: "Substitute",
         healthState: "healthy",
         selectable: true

@@ -3,7 +3,7 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { FilePlus } from "@phosphor-icons/react/dist/csr/FilePlus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
-import type { SourceStatus, ThreadSummary } from "@fable/protocol";
+import type { ConnectorSearchItem, SourceStatus, ThreadSummary } from "@fable/protocol";
 import type { ProjectActivityView } from "../../hooks/useProjectActivity";
 import { getRuntimeArtifact, type RuntimeArtifactBundle } from "../../runtime";
 import { ArtifactDetail } from "../ArtifactDetail";
@@ -41,6 +41,12 @@ export interface ProjectKnowledgeView {
   toggleDisabled: (sourceId: string) => Promise<unknown>;
   remove: (sourceId: string) => Promise<unknown>;
   updateFile: (sourceId: string, file: File) => Promise<unknown>;
+  searchConnection?: (
+    connectorId: string,
+    connectionId: string,
+    query: string
+  ) => Promise<ConnectorSearchItem[]>;
+  importConnectionItem?: (item: ConnectorSearchItem) => Promise<unknown>;
 }
 
 export interface ProjectMemoryRecordView {
@@ -148,6 +154,11 @@ export function ProjectPage({
   const [artifactId, setArtifactId] = useState("");
   const [artifactVersionId, setArtifactVersionId] = useState("");
   const [artifactError, setArtifactError] = useState("");
+  const [connectorQuery, setConnectorQuery] = useState("");
+  const [connectorChoiceId, setConnectorChoiceId] = useState("");
+  const [connectorResults, setConnectorResults] = useState<ConnectorSearchItem[]>([]);
+  const [connectorBusy, setConnectorBusy] = useState(false);
+  const [connectorError, setConnectorError] = useState("");
   const artifactRequestRef = useRef(0);
   const activeWorkspaceRef = useRef(workspaceId);
   activeWorkspaceRef.current = workspaceId;
@@ -176,6 +187,11 @@ export function ProjectPage({
     setArtifactId("");
     setArtifactVersionId("");
     setArtifactError("");
+    setConnectorQuery("");
+    setConnectorChoiceId("");
+    setConnectorResults([]);
+    setConnectorBusy(false);
+    setConnectorError("");
     artifactRequestRef.current += 1;
   }, [project.id]);
 
@@ -274,6 +290,45 @@ export function ProjectPage({
       setArtifactError(cause instanceof Error
         ? cause.message
         : "Fable could not open that Artifact.");
+    }
+  };
+
+  const searchConnection = async () => {
+    const choice = activity.connectionOptions.find(
+      (connection) => connection.id === connectorChoiceId
+    );
+    if (!choice || !knowledge.searchConnection) return;
+    setConnectorBusy(true);
+    setConnectorError("");
+    setConnectorResults([]);
+    try {
+      setConnectorResults(await knowledge.searchConnection(
+        choice.connectorId,
+        choice.id,
+        connectorQuery
+      ));
+    } catch (cause) {
+      setConnectorError(cause instanceof Error
+        ? cause.message
+        : "Fable could not search that Connection.");
+    } finally {
+      setConnectorBusy(false);
+    }
+  };
+
+  const importConnectionItem = async (item: ConnectorSearchItem) => {
+    if (!knowledge.importConnectionItem) return;
+    setConnectorBusy(true);
+    setConnectorError("");
+    try {
+      await knowledge.importConnectionItem(item);
+      setConnectorResults((current) => current.filter((result) => result.id !== item.id));
+    } catch (cause) {
+      setConnectorError(cause instanceof Error
+        ? cause.message
+        : "Fable could not add that connected item.");
+    } finally {
+      setConnectorBusy(false);
     }
   };
 
@@ -619,6 +674,77 @@ export function ProjectPage({
             </button>
           ) : <span className="project-knowledge__read-only">Read only</span>}
         </div>
+
+        {project.lifecycle === "active"
+          && knowledge.searchConnection
+          && knowledge.importConnectionItem
+          && activity.connectionOptions.some((connection) =>
+            connection.selectable
+            && connection.searchable
+            && project.connectionIds?.includes(connection.id)
+          ) ? (
+            <div className="project-knowledge__connection">
+              <form onSubmit={(event) => { event.preventDefault(); void searchConnection(); }}>
+                <label>
+                  <span>Connection</span>
+                  <select
+                    aria-label="Project Connection to search"
+                    value={connectorChoiceId}
+                    disabled={connectorBusy}
+                    onChange={(event) => {
+                      setConnectorChoiceId(event.target.value);
+                      setConnectorResults([]);
+                      setConnectorError("");
+                    }}
+                  >
+                    <option value="">Choose a Connection</option>
+                    {activity.connectionOptions
+                      .filter((connection) =>
+                        connection.selectable
+                        && connection.searchable
+                        && project.connectionIds?.includes(connection.id)
+                      )
+                      .map((connection) => (
+                        <option key={connection.id} value={connection.id}>
+                          {connection.name}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Find connected work</span>
+                  <input
+                    type="search"
+                    value={connectorQuery}
+                    disabled={connectorBusy}
+                    onChange={(event) => setConnectorQuery(event.target.value)}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  disabled={connectorBusy || !connectorChoiceId || !connectorQuery.trim()}
+                >{connectorBusy ? "Searching…" : "Search Connection"}</button>
+              </form>
+              {connectorError ? <p role="alert">{connectorError}</p> : null}
+              {connectorResults.length > 0 ? (
+                <ul aria-label="Connected Project search results">
+                  {connectorResults.map((item) => (
+                    <li key={`${item.connectorId}:${item.id}`}>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <span>{item.provenance} · {item.freshness}</span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={connectorBusy}
+                        onClick={() => void importConnectionItem(item)}
+                      >Add</button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
 
         {project.lifecycle === "active" ? (
           <input

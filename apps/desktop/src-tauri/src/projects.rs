@@ -63,6 +63,7 @@ pub struct ProjectTransitionInput {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectConnectionOption {
     connection_id: String,
+    connector_id: String,
     display_name: String,
     health_state: String,
     selectable: bool,
@@ -202,6 +203,7 @@ pub fn project_connection_options() -> Result<Vec<ProjectConnectionOption>, Stri
                         let selectable = connection_is_selectable(&connection);
                         ProjectConnectionOption {
                             connection_id: connection.id,
+                            connector_id: connection.connector_definition_key,
                             display_name: connection.display_name,
                             health_state: connection.health_state,
                             selectable,

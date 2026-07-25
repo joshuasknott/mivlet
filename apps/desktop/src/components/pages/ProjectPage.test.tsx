@@ -90,9 +90,11 @@ const projectActivity: ProjectActivityView = {
   }],
   connectionOptions: [{
     id: "connection-1",
+    connectorId: "github",
     name: "GitHub · work",
     status: "Available",
-    selectable: true
+    selectable: true,
+    searchable: true
   }],
   loading: false,
   error: null,
@@ -226,6 +228,70 @@ describe("ProjectPage", () => {
     await user.click(screen.getByRole("button", { name: "Save Connections" }));
     await waitFor(() => expect(onSaveConnections).toHaveBeenCalledWith(["connection-1"]));
     expect(await screen.findByRole("status")).toHaveTextContent("Project Connections saved.");
+  });
+
+  it("searches and imports connected work only through a saved Project Connection", async () => {
+    const user = userEvent.setup();
+    const searchConnection = vi.fn().mockResolvedValue([{
+      id: "issue-42",
+      connectorId: "github",
+      connectionId: "connection-1",
+      title: "Issue 42",
+      kind: "issue",
+      summary: "Release blocker",
+      provenance: "GitHub issue",
+      freshness: "Updated today",
+      trust: "untrusted",
+      providerMetadata: {}
+    }]);
+    const importConnectionItem = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={{ ...project, connectionIds: ["connection-1"] }}
+        knowledge={{ ...emptyKnowledge, searchConnection, importConnectionItem }}
+        activity={{
+          ...projectActivity,
+          connectionOptions: [
+            ...projectActivity.connectionOptions,
+            {
+              id: "connection-unselected",
+              connectorId: "google-drive",
+              name: "Private Drive",
+              status: "Available",
+              selectable: true,
+              searchable: true
+            }
+          ]
+        }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    const connection = screen.getByRole("combobox", {
+      name: "Project Connection to search"
+    });
+    expect(connection).toHaveTextContent("GitHub · work");
+    expect(connection).not.toHaveTextContent("Private Drive");
+    await user.selectOptions(connection, "connection-1");
+    await user.type(screen.getByRole("searchbox", { name: "Find connected work" }), "release");
+    await user.click(screen.getByRole("button", { name: "Search Connection" }));
+    await waitFor(() => expect(searchConnection).toHaveBeenCalledWith(
+      "github",
+      "connection-1",
+      "release"
+    ));
+    expect(await screen.findByText("Issue 42")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await waitFor(() => expect(importConnectionItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "issue-42",
+        connectionId: "connection-1"
+      })
+    ));
+    expect(screen.queryByText("Issue 42")).not.toBeInTheDocument();
   });
 
   it("changes a Project Routine through its exact revision-fenced action", async () => {

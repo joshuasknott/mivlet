@@ -113,6 +113,7 @@ beforeEach(() => {
   }] as never);
   vi.mocked(listRuntimeProjectConnectionOptions).mockResolvedValue([{
     connectionId: "connection-1",
+    connectorId: "github",
     displayName: "GitHub · work",
     healthState: "healthy",
     selectable: true
@@ -163,9 +164,11 @@ describe("useProjectActivity", () => {
     }]);
     expect(result.current.connectionOptions).toEqual([{
       id: "connection-1",
+      connectorId: "github",
       name: "GitHub · work",
       status: "Available",
-      selectable: true
+      selectable: true,
+      searchable: true
     }]);
   });
 
@@ -196,6 +199,7 @@ describe("useProjectActivity", () => {
     vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
     vi.mocked(listRuntimeProjectConnectionOptions).mockResolvedValue([{
       connectionId: "connection-selected",
+      connectorId: "google-drive",
       displayName: "Selected Drive",
       healthState: "healthy",
       selectable: true

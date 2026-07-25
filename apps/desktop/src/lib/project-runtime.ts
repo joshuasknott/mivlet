@@ -11,6 +11,7 @@ export type ProjectRuntimePersistence = "native" | "preview-memory";
 
 export interface RuntimeProjectConnectionOption {
   connectionId: string;
+  connectorId: string;
   displayName: string;
   healthState: string;
   selectable: boolean;
@@ -211,6 +212,7 @@ export async function listRuntimeProjectConnectionOptions(): Promise<RuntimeProj
       || result.some((option) =>
         !option
         || typeof option.connectionId !== "string"
+        || typeof option.connectorId !== "string"
         || typeof option.displayName !== "string"
         || typeof option.healthState !== "string"
         || typeof option.selectable !== "boolean"
