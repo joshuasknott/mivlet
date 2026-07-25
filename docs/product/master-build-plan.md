@@ -1211,7 +1211,11 @@ Mission graph. Product Spine contract 1.7 adds one immutable
 execution. Rust derives the selection from the authenticated owner-scoped Run,
 selected Plan revision, exact reviewer assignment, and exact worker-evaluated
 criterion keys; replay re-derives the same receipt after reopen, and reviewer
-execution fails closed if the receipt is absent or changed. Native high-risk
+execution fails closed if the receipt is absent or changed. Product Spine
+contract 1.8 also admits one `user-requested-advisory` selection for the
+composer's explicit `review:` step. It carries no criterion keys, uses advisory
+authority, and fails closed if it is reshaped to claim human or worker
+acceptance. Native high-risk
 policy and conflicting-evidence inputs remain open rather than being inferred
 from model output or renderer state.
 

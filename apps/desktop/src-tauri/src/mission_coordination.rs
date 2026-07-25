@@ -559,12 +559,7 @@ fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>
                 .into(),
         );
     }
-    if worker_criteria.is_empty() {
-        if !review_steps.is_empty() {
-            return Err(
-                "The selected review step has no declared worker-acceptance justification.".into(),
-            );
-        }
+    if worker_criteria.is_empty() && review_steps.is_empty() {
         return Ok(None);
     }
     if authorized.journal.run.get("status").and_then(Value::as_str) != Some("running")
@@ -605,7 +600,12 @@ fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    if declared_criteria != worker_criteria
+    let advisory = worker_criteria.is_empty();
+    if advisory {
+        if !declared_criteria.is_empty() {
+            return Err("An advisory review step cannot claim Mission acceptance criteria.".into());
+        }
+    } else if declared_criteria != worker_criteria
         || declared_criteria.iter().collect::<BTreeSet<_>>().len() != declared_criteria.len()
     {
         return Err(
@@ -650,10 +650,18 @@ fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>
     Ok(Some(json!({
         "reviewStepKey":review_step_key,
         "reviewerWorkerId":reviewer_worker_id,
-        "justification":["declared-worker-acceptance"],
+        "justification":if advisory {
+            json!(["user-requested-advisory"])
+        } else {
+            json!(["declared-worker-acceptance"])
+        },
         "criterionKeys":worker_criteria,
-        "authority":"declared-worker-evaluator",
-        "policyRef":"native-policy:mission-review:v1"
+        "authority":if advisory {"advisory"} else {"declared-worker-evaluator"},
+        "policyRef":if advisory {
+            "native-policy:mission-advisory-review:v1"
+        } else {
+            "native-policy:mission-review:v1"
+        }
     })))
 }
 
@@ -5171,6 +5179,71 @@ mod tests {
         assert!(derive_reviewer_selection(&authorized)
             .unwrap_err()
             .contains("one exact reviewer"));
+    }
+
+    #[test]
+    fn user_declared_review_is_selected_only_as_an_advisory_worker() {
+        let lifecycle = mission_plan::MissionPlanLifecycleRow {
+            mission: json!({
+                "id":"mission-1","workspaceId":"workspace-1",
+                "constraints":[{
+                    "key":GENERAL_DECLARED_GRAPH_MARKER,
+                    "severity":"required","source":"user"
+                }],
+                "acceptance":{"criteria":[{
+                    "key":"human-final","evaluator":"human","required":true
+                }]}
+            }),
+            plan: json!({}),
+            current_revision: json!({
+                "id":"revision-1",
+                "steps":[{
+                    "key":"review","kind":"review","acceptanceCriterionKeys":[]
+                }]
+            }),
+        };
+        let reviewer = json!({
+            "id":"worker-review","runId":"run-1","planRevisionId":"revision-1",
+            "planStepKey":"review","workspaceId":"workspace-1",
+            "ownerMemberId":"member-1","authority":"local",
+            "role":{"kind":"reviewer"}
+        });
+        let mut authorized = AuthorizedRun {
+            scope: DataScope::workspace("workspace-1").unwrap(),
+            member: "member-1".into(),
+            actor: "user-1".into(),
+            journal: mission_run::MissionRunJournalRow {
+                run: json!({
+                    "id":"run-1","status":"running","executionDepth":"multi-worker",
+                    "planRevisionId":"revision-1","workspaceId":"workspace-1",
+                    "ownerMemberId":"member-1","authority":"local"
+                }),
+                events: vec![json!({
+                    "type":"worker-created","payload":{"worker":reviewer}
+                })],
+            },
+            lifecycle,
+        };
+
+        let selected = derive_reviewer_selection(&authorized).unwrap().unwrap();
+        assert_eq!(selected["reviewStepKey"], "review");
+        assert_eq!(selected["reviewerWorkerId"], "worker-review");
+        assert_eq!(
+            selected["justification"],
+            json!(["user-requested-advisory"])
+        );
+        assert_eq!(selected["criterionKeys"], json!([]));
+        assert_eq!(selected["authority"], "advisory");
+        assert_eq!(
+            selected["policyRef"],
+            "native-policy:mission-advisory-review:v1"
+        );
+
+        authorized.lifecycle.current_revision["steps"][0]["acceptanceCriterionKeys"] =
+            json!(["human-final"]);
+        assert!(derive_reviewer_selection(&authorized)
+            .unwrap_err()
+            .contains("cannot claim"));
     }
 
     #[test]

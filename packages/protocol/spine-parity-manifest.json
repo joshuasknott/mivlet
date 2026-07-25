@@ -1,5 +1,5 @@
 {
-  "contractVersion": "1.7.0",
+  "contractVersion": "1.8.0",
   "schemaVersion": 1,
   "limits": {
     "ARTIFACT_MAX_INLINE_CONTENT_BYTES": 65536,
@@ -22,5 +22,5 @@
     { "name": "Goals", "source": "goals.ts" },
     { "name": "ArtifactsAndRoutines", "source": "artifacts-routines.ts" }
   ],
-  "expectedCanonicalSha256": "8b71f9dad1acb6813b6c90650edb7b57d05e0bc8dfd7bdc16c7bd798af499dbb"
+  "expectedCanonicalSha256": "5f8cd5240c8bf7f441ac824b2de44b45c72bf6f892d19c0ad8618db305855e45"
 }

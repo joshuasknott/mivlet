@@ -770,6 +770,7 @@ export interface MissionReviewerSelection {
   reviewerWorkerId: WorkerId;
   justification: readonly (
     | "declared-worker-acceptance"
+    | "user-requested-advisory"
     | "high-risk-policy"
     | "conflicting-evidence"
   )[];

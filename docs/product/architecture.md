@@ -179,6 +179,11 @@ acceptance, and only when one scope-matched reviewer binds exactly those
 criteria. Reopen re-derives the receipt before accepting replay, and the
 reviewer's native objective cannot be obtained without the unchanged receipt.
 The fact chooses no provider and cannot confer policy or human acceptance.
+Product Spine contract 1.8 extends the same fact with one
+`user-requested-advisory` justification. A user-authored general Plan may select
+its single explicit review step with no acceptance criteria and advisory
+authority only; native preparation rejects any attempt to attach human criteria
+or worker-evaluator authority to that advisory selection.
 Provider-only workers nevertheless carry an immutable no-fallback route envelope
 derived from the Mission data boundary and an exact local-desktop, no-transfer
 placement policy. The desktop's execution-time resolver considers only current

@@ -690,6 +690,33 @@ describe("durable run journal projection", () => {
         )
       )
     ).toThrow("one exact declared reviewer");
+
+    const advisory: Spine.Missions.MissionReviewerSelection = {
+      reviewStepKey: "review",
+      reviewerWorkerId: reviewer.id,
+      justification: ["user-requested-advisory"],
+      criterionKeys: [],
+      authority: "advisory",
+      policyRef: "native-policy:mission-advisory-review:v1"
+    };
+    expect(appendRunEvent(
+      running,
+      event(
+        "reviewer-selected",
+        5,
+        { selection: advisory },
+        id<"run-event">("event-4")
+      )
+    ).events.at(-1)?.payload).toEqual({ selection: advisory });
+    expect(() => appendRunEvent(
+      running,
+      event(
+        "reviewer-selected",
+        5,
+        { selection: { ...advisory, criterionKeys: ["human-only"] } },
+        id<"run-event">("event-4")
+      )
+    )).toThrow("one exact declared reviewer");
   });
 
   it("can cancel the exact active join while its run is cancelling", () => {

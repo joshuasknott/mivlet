@@ -376,9 +376,12 @@ connected-source receipt can also survive checkpoint recovery without repeating
 its search, grant, or approval. The composer now also accepts repeated explicitly
 numbered `all`/`any` dependencies over earlier steps, validates the six-worker
 acyclic boundary, predeclares every join, and derives only terminal leaf
-deliverables; ordinary bullets still infer no edge. Repeated iteration,
-automatic escalation, production policy/reviewer-worker evaluation,
-cross-Mission handoffs, quorum authoring, broader tool shapes, and
+deliverables; ordinary bullets still infer no edge. Product Spine 1.8 also lets
+the explicit simple-path `review:` worker receive a native encrypted
+`user-requested-advisory` selection with no criteria or acceptance authority
+before it runs. Repeated iteration, automatic escalation, native
+high-risk/conflicting-evidence reviewer production, cross-Mission handoffs,
+quorum authoring, broader tool shapes, and
 packaged/live-provider observation remain open. The existing cited and
 benchmark-shaped journeys also retain their narrower contracts where the
 general path has not yet replaced them.
@@ -387,7 +390,7 @@ general path has not yet replaced them.
 
 The complete repository-local gate is green on this Windows checkout:
 `pnpm check`, `pnpm lint`, `cargo fmt --check`, `cargo test`, and
-`cargo clippy --all-targets -- -D warnings`. The native suite reports 809
+`cargo clippy --all-targets -- -D warnings`. The native suite reports 810
 passing tests. Its one ignored test is the deliberately opt-in live Google
 contract and still requires `FABLE_GOOGLE_LIVE_TEST` plus real external
 configuration; it is not counted as repository-local validation.

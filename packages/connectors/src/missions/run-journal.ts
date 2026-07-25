@@ -570,6 +570,7 @@ function validateReviewerSelected(
 ): void {
   const justifications = [
     "declared-worker-acceptance",
+    "user-requested-advisory",
     "high-risk-policy",
     "conflicting-evidence"
   ] as const;
@@ -620,7 +621,16 @@ function validateReviewerSelected(
         !boundedString(criterion, REVIEWER_SELECTION_LIMITS.criterionKey)
     ) ||
     (selection.authority === "declared-worker-evaluator") !==
-      selection.justification.includes("declared-worker-acceptance")
+      selection.justification.includes("declared-worker-acceptance") ||
+    (
+      selection.justification.includes("user-requested-advisory") &&
+      (
+        selection.authority !== "advisory" ||
+        selection.justification.length !== 1 ||
+        selection.criterionKeys.length !== 0 ||
+        selection.policyRef !== "native-policy:mission-advisory-review:v1"
+      )
+    )
   ) {
     throw new RunJournalError(
       "Reviewer selection must bind one exact declared reviewer to bounded native justification."

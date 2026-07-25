@@ -207,9 +207,11 @@ export async function executeGeneralMission(
         evaluator: "human" as const,
         evidenceRequired: [],
         evidenceFromStepOutputs: true
-      }));
+  }));
   const acceptanceKeysFor = (task: typeof taskRecords[number]): string[] =>
-    declaredAcceptance.length > 0
+    task.kind === "review"
+      ? []
+      : declaredAcceptance.length > 0
       ? task.requiredResult
         ? declaredAcceptance.map((criterion) => criterion.key)
         : []
