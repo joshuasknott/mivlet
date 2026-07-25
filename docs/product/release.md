@@ -147,7 +147,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   a retryable terminal general Mission can start a fresh run only from its exact
   canonical `/mission` record after the active Project thread is rechecked for
   unchanged membership and revision. The old journal and authority are not
-  reused. Project-level active-run cancellation remains open.
+  reused. Active Project Missions also expose a plain `Stop` action. It reloads
+  the exact encrypted Run head and appends the existing authenticated
+  cooperative cancellation request before refreshing Project activity. The UI
+  states that this prevents Fable from accepting further results but cannot
+  undo provider work already sent; provider-process interruption and terminal
+  settlement remain owned by the active or restart-recovery runtime.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

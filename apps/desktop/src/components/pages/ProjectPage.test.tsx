@@ -153,7 +153,8 @@ const projectActivity: ProjectActivityView = {
   truncated: false,
   refresh: async () => undefined,
   changeRoutine: async () => undefined,
-  reviewMission: async () => undefined
+  reviewMission: async () => undefined,
+  stopMission: async () => undefined
 };
 
 describe("ProjectPage", () => {
@@ -288,7 +289,7 @@ describe("ProjectPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Mission acceptance recorded.");
   });
 
-  it("starts a fresh retryable Mission without exposing active-run cancellation", async () => {
+  it("starts a fresh retryable Mission without presenting it as active work", async () => {
     const user = userEvent.setup();
     const onRerunMission = vi.fn().mockResolvedValue(undefined);
     const retryableMission = {
@@ -318,6 +319,29 @@ describe("ProjectPage", () => {
     await user.click(screen.getByRole("button", { name: "Run again" }));
     await waitFor(() => expect(onRerunMission).toHaveBeenCalledWith(retryableMission));
     expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+  });
+
+  it("requests a durable stop for active Project Mission work", async () => {
+    const user = userEvent.setup();
+    const stopMission = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={{ ...projectActivity, stopMission }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/cannot undo work already sent/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(stopMission).toHaveBeenCalledWith(
+      projectActivity.missions[0]
+    ));
+    expect(screen.getByRole("status")).toHaveTextContent("Mission stop requested.");
   });
 
   it("deliberately selects existing Connections without implying a grant", async () => {

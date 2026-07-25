@@ -105,7 +105,8 @@ const EMPTY_PROJECT_ACTIVITY: ProjectActivityView = {
   truncated: false,
   refresh: async () => undefined,
   changeRoutine: async () => undefined,
-  reviewMission: async () => undefined
+  reviewMission: async () => undefined,
+  stopMission: async () => undefined
 };
 
 export function ProjectPage({
@@ -161,6 +162,8 @@ export function ProjectPage({
   const [routineBusyId, setRoutineBusyId] = useState("");
   const [missionReviewBusy, setMissionReviewBusy] = useState("");
   const [missionReviewErrors, setMissionReviewErrors] = useState<Record<string, string>>({});
+  const [missionStopBusyId, setMissionStopBusyId] = useState("");
+  const [missionStopErrors, setMissionStopErrors] = useState<Record<string, string>>({});
   const [activityStatus, setActivityStatus] = useState("");
   const [artifactBundle, setArtifactBundle] = useState<RuntimeArtifactBundle | null>(null);
   const [artifactId, setArtifactId] = useState("");
@@ -196,6 +199,8 @@ export function ProjectPage({
     setRoutineBusyId("");
     setMissionReviewBusy("");
     setMissionReviewErrors({});
+    setMissionStopBusyId("");
+    setMissionStopErrors({});
     setActivityStatus("");
     setArtifactBundle(null);
     setArtifactId("");
@@ -319,6 +324,23 @@ export function ProjectPage({
       setMissionRerunErrors((current) => ({ ...current, [mission.runId]: message }));
     } finally {
       setMissionRerunBusyId(null);
+    }
+  };
+
+  const stopMission = async (mission: ProjectActivityMission) => {
+    if (missionStopBusyId) return;
+    setMissionStopBusyId(mission.runId);
+    setMissionStopErrors((current) => ({ ...current, [mission.runId]: "" }));
+    try {
+      await activity.stopMission(mission);
+      setActivityStatus("Mission stop requested.");
+    } catch (cause) {
+      const message = cause instanceof Error
+        ? cause.message
+        : "Fable could not request that Mission stop.";
+      setMissionStopErrors((current) => ({ ...current, [mission.runId]: message }));
+    } finally {
+      setMissionStopBusyId("");
     }
   };
 
@@ -595,9 +617,29 @@ export function ProjectPage({
                                   </button>
                                 </div>
                               ) : null}
+                            {project.lifecycle === "active"
+                              && matchesActiveMissionStatus(mission.progress.runStatus) ? (
+                                <div className="project-activity__actions">
+                                  <button
+                                    type="button"
+                                    disabled={Boolean(missionStopBusyId)}
+                                    onClick={() => void stopMission(mission)}
+                                  >
+                                    {missionStopBusyId === mission.runId ? "Requesting stop..." : "Stop"}
+                                  </button>
+                                  <small>
+                                    Stops Fable from accepting further results. It cannot undo work already sent.
+                                  </small>
+                                </div>
+                              ) : null}
                             {missionRerunErrors[mission.runId] ? (
                               <p className="project-activity__action-error" role="alert">
                                 {missionRerunErrors[mission.runId]}
+                              </p>
+                            ) : null}
+                            {missionStopErrors[mission.runId] ? (
+                              <p className="project-activity__action-error" role="alert">
+                                {missionStopErrors[mission.runId]}
                               </p>
                             ) : null}
                           </div>
@@ -1089,4 +1131,16 @@ export function ProjectPage({
       ) : null}
     </div>
   );
+}
+
+function matchesActiveMissionStatus(status: string): boolean {
+  return [
+    "created",
+    "planning",
+    "queued",
+    "running",
+    "waiting",
+    "retrying",
+    "paused"
+  ].includes(status);
 }

@@ -5,11 +5,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteRuntimeRoutine,
   finalizeRuntimeMissionCoordination,
+  getRuntimeMissionRun,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   pauseRuntimeRoutine,
   readRuntimeMissionProgress,
   recordRuntimeMissionHumanEvaluation,
+  requestRuntimeMissionRunCancellation,
   resumeRuntimeRoutine,
   searchRuntimeArtifacts
 } from "../runtime";
@@ -19,11 +21,13 @@ import { useProjectActivity } from "./useProjectActivity";
 vi.mock("../runtime", () => ({
   deleteRuntimeRoutine: vi.fn(),
   finalizeRuntimeMissionCoordination: vi.fn(),
+  getRuntimeMissionRun: vi.fn(),
   listRuntimeRoutines: vi.fn(),
   listRuntimeThreadMissionProgress: vi.fn(),
   pauseRuntimeRoutine: vi.fn(),
   readRuntimeMissionProgress: vi.fn(),
   recordRuntimeMissionHumanEvaluation: vi.fn(),
+  requestRuntimeMissionRunCancellation: vi.fn(),
   resumeRuntimeRoutine: vi.fn(),
   searchRuntimeArtifacts: vi.fn()
 }));
@@ -251,6 +255,39 @@ describe("useProjectActivity", () => {
     });
     expect(readRuntimeMissionProgress).toHaveBeenCalledWith("run-1");
     expect(finalizeRuntimeMissionCoordination).toHaveBeenCalledWith("run-1");
+  });
+
+  it("requests Project Mission cancellation against the exact durable run head", async () => {
+    vi.mocked(getRuntimeMissionRun).mockResolvedValue({
+      run: {
+        id: "run-1",
+        status: "running",
+        revision: 7,
+        eventHead: { lastSequence: 6, lastEventId: "event-6" }
+      },
+      events: []
+    });
+    vi.mocked(requestRuntimeMissionRunCancellation).mockResolvedValue(null);
+    const { result } = renderHook(() => useProjectActivity({
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      connectionIds: [],
+      threads,
+      enabled: true
+    }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await result.current.stopMission(result.current.missions[0]!);
+
+    expect(requestRuntimeMissionRunCancellation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        expectedRunRevision: 7,
+        expectedLastSequence: 6,
+        mode: "cooperative",
+        reason: "User requested stop from Project activity."
+      })
+    );
   });
 
   it("shows a deliberately selected Project Connection before it is used", async () => {

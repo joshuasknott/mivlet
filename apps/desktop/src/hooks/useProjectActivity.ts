@@ -8,11 +8,13 @@ import {
 import {
   deleteRuntimeRoutine,
   finalizeRuntimeMissionCoordination,
+  getRuntimeMissionRun,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   pauseRuntimeRoutine,
   readRuntimeMissionProgress,
   recordRuntimeMissionHumanEvaluation,
+  requestRuntimeMissionRunCancellation,
   resumeRuntimeRoutine,
   searchRuntimeArtifacts,
   type RuntimeMissionProgress,
@@ -80,6 +82,7 @@ export interface ProjectActivityView {
     criterionKey: string,
     passed: boolean
   ) => Promise<void>;
+  stopMission: (mission: ProjectActivityMission) => Promise<void>;
 }
 
 export interface UseProjectActivityOptions {
@@ -285,6 +288,38 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
       await queryClient.invalidateQueries({ queryKey });
     }
   }, [queryClient, queryKey]);
+  const stopMission = useCallback(async (mission: ProjectActivityMission) => {
+    const journal = await getRuntimeMissionRun(mission.runId);
+    const run = journal?.run;
+    if (!isRecord(run)) {
+      throw new Error("That Mission run is no longer available.");
+    }
+    if (run.status === "cancelling" || run.status === "cancelled") {
+      await queryClient.invalidateQueries({ queryKey });
+      return;
+    }
+    const head = run.eventHead;
+    if (
+      !Number.isInteger(run.revision)
+      || Number(run.revision) < 1
+      || !isRecord(head)
+      || !Number.isInteger(head.lastSequence)
+      || Number(head.lastSequence) < 1
+    ) {
+      throw new Error("That Mission cancellation boundary is unavailable.");
+    }
+    const identity = projectActivityIdentity();
+    await requestRuntimeMissionRunCancellation({
+      runId: mission.runId,
+      eventId: `project-mission-stop-${identity}`,
+      requestKey: `project-mission-stop:${identity}`,
+      expectedRunRevision: Number(run.revision),
+      expectedLastSequence: Number(head.lastSequence),
+      mode: "cooperative",
+      reason: "User requested stop from Project activity."
+    });
+    await queryClient.invalidateQueries({ queryKey });
+  }, [queryClient, queryKey]);
 
   useEffect(() => {
     if (!options.enabled) return;
@@ -304,8 +339,21 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     truncated: query.data?.truncated ?? false,
     refresh,
     changeRoutine,
-    reviewMission
+    reviewMission,
+    stopMission
   };
+}
+
+function projectActivityIdentity(): string {
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return uuid;
+  const values = new Uint32Array(4);
+  globalThis.crypto?.getRandomValues?.(values);
+  return Array.from(values, (value) => value.toString(16).padStart(8, "0")).join("");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function missionStateLabel(state: string): string {
