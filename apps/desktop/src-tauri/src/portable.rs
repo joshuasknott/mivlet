@@ -5021,12 +5021,19 @@ mod tests {
         assert_eq!(restored["artifact"]["status"], "accepted");
         assert_eq!(restored["artifact"]["reviews"].as_array().unwrap().len(), 2);
 
+        // Reuse one verified-empty destination for the malformed matrix. This
+        // keeps the test focused on transaction rollback instead of repeatedly
+        // paying for every encrypted schema migration, and proves one failed
+        // attempt cannot poison the destination for the next.
+        let reject_target = store();
+        bind_local_user(&reject_target);
+        seed_native_artifact_source(&reject_target);
         let rejects = |bad: Manifest| {
-            let target = store();
-            bind_local_user(&target);
-            seed_native_artifact_source(&target);
             let encoded = serde_json::to_string(&bad).unwrap();
-            assert!(import_workspace(&target, &encoded, ImportOptions::default()).is_err());
+            assert!(import_workspace(&reject_target, &encoded, ImportOptions::default()).is_err());
+            assert_eq!(count(&reject_target, "artifact"), 0);
+            assert_eq!(count(&reject_target, "artifact_version"), 0);
+            assert_eq!(count(&reject_target, "artifact_review"), 0);
         };
         let mut bad = manifest.clone();
         bad.sections.artifacts[0].owner_internal_user_id = Some("attacker".into());
