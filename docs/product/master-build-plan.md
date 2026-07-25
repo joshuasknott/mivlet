@@ -419,9 +419,11 @@ identity, restores the checkpoint once, and dispatches only the interrupted
 provider-writing turns from the shared restored head. Stop persists a cooperative
 cancellation before aborting resumed egress. Native settlement requires the
 same checkpoint/restore chain and exact sibling terminal advancement, then the
-portable graph runner continues later ready batches. Tool-bearing recovery,
-other mission artifact shapes, and packaged restart observation remain open, so
-the durable-run box remains unchecked.
+portable graph runner continues later ready batches. The same descriptor now
+reloads one exact attested `connection-read` receipt per tool-bearing worker and
+continues only its provider-writing turn without repeating the search, grant,
+or approval. Other tool shapes, other mission artifact shapes, and packaged
+restart observation remain open, so the durable-run box remains unchecked.
 
 The native `/stop` path now includes these general effect-approval waits. Before
 stopping anything, the desktop verifies bounded native lists for cited approval,
@@ -860,7 +862,7 @@ remains visible.
 
 ### Wave 4C - Multi-worker coordination
 
-- [ ] Add parallel workers, joins, and deterministic aggregation.
+- [x] Add parallel workers, joins, and deterministic aggregation.
 - [ ] Add dynamic reviewers/judges only when justified.
 - [ ] Add bounded iteration and explicit stop conditions.
 - [ ] Add durable human-input and approval waits.
@@ -884,11 +886,10 @@ replay are durable, while the desktop exposes the compact plan, live stop path,
 recovered result, and artifact action without overflow at desktop or mobile sizes.
 Focused portable, native, runtime, provider-cancellation, renderer, and responsive
 evidence covers this fixed benchmark. The later bounded `/mission` composition
-described below establishes user-declared worker counts plus one explicit
-all-source or any-source continuation, but not arbitrary multi-stage or branching
-graphs, quorum composition, multiple providers, tool-bearing parallel steps,
-bounded iteration, escalation, or live packaged-app/provider validation, so the
-Wave 4C checkbox remains unchecked.
+described below establishes user-declared worker counts and repeated explicitly
+numbered `all`/`any` dependencies across a six-worker acyclic graph. Quorum
+composition, multiple providers, broader tool-bearing parallel steps, bounded
+iteration, escalation, and live packaged-app/provider validation remain open.
 
 The provider-neutral coordination layer is no longer limited to that benchmark's
 two hard-coded producers. A reusable compiler now binds up to thirty-two worker
@@ -1097,8 +1098,7 @@ refused when declared durable evidence is absent. Exact replay returns the
 original decision, a changed replay fails, and after the final human criterion
 the desktop invokes the existing native finalizer so rejected work becomes an
 explicit partial result rather than success. General policy/worker evaluator
-production and arbitrary multi-stage dependency composition remain open. The
-bounded product Artifact path is covered below.
+production remains open. The bounded product Artifact path is covered below.
 
 Successful composer-owned general Missions now materialize every required final
 deliverable as one immutable accepted Artifact only after the identified human
@@ -1115,16 +1115,19 @@ none, and restart coverage reopens and validates the Artifact and its immutable
 input/decision receipt. The conversation refreshes and exposes every Artifact
 produced by the Run rather than showing only the first result. This closes
 general-manifest Artifact materialization for the bounded `/mission` shape; it
-does not implement arbitrary cross-Mission handoff, repeated iterative revision, or
-branching graph authoring, so the broader replay-safe handoff checkbox remains
-unchecked.
+does not implement arbitrary cross-Mission handoff or repeated iterative
+revision, so the broader replay-safe handoff checkbox remains unchecked.
 
 The normal desktop composer now owns one explicit bounded general-Mission entry
 point. `/mission` accepts a short title followed by at least two distinct bullet
 tasks within a six-step ceiling. An explicit `all: …` or `any: …` line may
 declare a fan-in, and following `then: …` lines may declare a short sequential
-chain while keeping the full Plan at two to six workers. A final explicit
-`review: …` and `revise: …` pair declares one advisory review and exactly one
+chain while keeping the full Plan at two to six workers. Alternatively, repeated
+numbered declarations such as `all 1,2: …` and `any 2,3: …` can bind any
+earlier steps into a bounded acyclic dependency graph; future-step references,
+duplicate dependencies, implicit edges, and mixed simple/numbered grammar fail
+closed. A final explicit `review: …` and `revise: …` pair on the simple path
+declares one advisory review and exactly one
 revision pass. The reviewer is a Plan-bound reviewer worker but receives no
 acceptance authority; the revision step has an explicit second `all` join over
 the exact draft and review receipts, and identified-human acceptance remains
@@ -1154,8 +1157,8 @@ durable output references from the immutable Plan steps and terminal worker
 facts, refuses a passing decision when any bound output is absent, stores those
 references in the evaluation, and verifies them on exact replay. Parser,
 dispatcher, composition, renderer, transcript, native validation, evidence,
-replay, and encrypted-reopen coverage are repository-local. Arbitrary branching
-graph authoring, quorum joins, dynamic tool/grant composition,
+replay, and encrypted-reopen coverage are repository-local. Quorum joins,
+dynamic tool/grant composition,
 arbitrary cross-Mission handoff/iteration, and packaged/live-provider observation
 remain open.
 

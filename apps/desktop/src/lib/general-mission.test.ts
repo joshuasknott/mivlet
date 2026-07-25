@@ -219,6 +219,53 @@ describe("parseGeneralMissionDraft", () => {
     ].join("\n"))).toBeNull();
   });
 
+  it("accepts a bounded explicitly numbered dependency graph", () => {
+    expect(parseGeneralMissionDraft([
+      "Launch decision",
+      "- Check customer evidence",
+      "- Check delivery evidence",
+      "- Check operational risk",
+      "all 1,2: Compare the customer and delivery evidence",
+      "any 3,4: Prepare a decision from the available evidence",
+      "all 2,5: Produce the final launch plan"
+    ].join("\n"))).toEqual({
+      title: "Launch decision",
+      tasks: [
+        "Check customer evidence",
+        "Check delivery evidence",
+        "Check operational risk"
+      ],
+      graph: {
+        steps: [{
+          strategy: "all",
+          dependsOn: [1, 2],
+          task: "Compare the customer and delivery evidence"
+        }, {
+          strategy: "any",
+          dependsOn: [3, 4],
+          task: "Prepare a decision from the available evidence"
+        }, {
+          strategy: "all",
+          dependsOn: [2, 5],
+          task: "Produce the final launch plan"
+        }]
+      }
+    });
+    expect(parseGeneralMissionDraft([
+      "Future dependency",
+      "- Check customer evidence",
+      "- Check delivery evidence",
+      "all 1,4: Use a step that does not exist yet"
+    ].join("\n"))).toBeNull();
+    expect(parseGeneralMissionDraft([
+      "Mixed dependency grammar",
+      "- Check customer evidence",
+      "- Check delivery evidence",
+      "all 1,2: Compare the evidence",
+      "then: Prepare the plan"
+    ].join("\n"))).toBeNull();
+  });
+
   it("accepts exactly one declared advisory review and revision pass", () => {
     expect(parseGeneralMissionDraft([
       "Launch readiness",
@@ -552,6 +599,131 @@ describe("executeGeneralMission", () => {
       .toBeLessThan(mocks.executeGraph.mock.invocationCallOrder[0]!);
     expect(result).toMatchObject({ outcome: "awaiting-review" });
     expect(result.text).toContain("## Recommend the next step from both drafts");
+  });
+
+  it("composes repeated explicit all and any joins into one bounded graph", async () => {
+    const ids = [
+      "mission-1",
+      "plan-2",
+      "plan-revision-3",
+      "mission-run-4",
+      "event-5",
+      "run-create-6",
+      "join-open-7",
+      "join-open-key-8",
+      "join-open-9",
+      "join-open-key-10",
+      "join-open-11",
+      "join-open-key-12"
+    ];
+    mocks.openJoin
+      .mockResolvedValueOnce({
+        run: { revision: 6, eventHead: { lastSequence: 6, lastEventId: "join-open-7" } },
+        events: []
+      })
+      .mockResolvedValueOnce({
+        run: { revision: 7, eventHead: { lastSequence: 7, lastEventId: "join-open-9" } },
+        events: []
+      })
+      .mockResolvedValueOnce({
+        run: { revision: 8, eventHead: { lastSequence: 8, lastEventId: "join-open-11" } },
+        events: []
+      });
+    mocks.getRun.mockResolvedValue({
+      run: { id: "mission-run-4" },
+      events: [
+        completion("task-1", "output-1"),
+        completion("task-2", "output-2"),
+        completion("task-3", "output-3"),
+        completion("graph-result-4", "output-4"),
+        completion("graph-result-5", "output-5"),
+        completion("graph-result-6", "output-6")
+      ]
+    });
+
+    const result = await executeGeneralMission({
+      title: "Launch decision",
+      tasks: [
+        "Check customer evidence.",
+        "Check delivery evidence.",
+        "Check operational risk."
+      ],
+      graph: {
+        steps: [{
+          strategy: "all",
+          dependsOn: [1, 2],
+          task: "Compare the customer and delivery evidence."
+        }, {
+          strategy: "any",
+          dependsOn: [3, 4],
+          task: "Prepare a decision from the available evidence."
+        }, {
+          strategy: "all",
+          dependsOn: [2, 5],
+          task: "Produce the final launch plan."
+        }]
+      },
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend,
+      model: "gpt-5",
+      resolveBackend: async () => backend,
+      createId: () => ids.shift()!
+    });
+
+    expect(mocks.createPlan).toHaveBeenCalledWith(expect.objectContaining({
+      bounds: expect.objectContaining({
+        maxSteps: 6,
+        maxDependenciesPerStep: 2,
+        maxParallelSteps: 6
+      }),
+      outcome: expect.objectContaining({
+        deliverables: expect.arrayContaining([
+          expect.objectContaining({ key: "task-3", required: false }),
+          expect.objectContaining({ key: "graph-result-4", required: false }),
+          expect.objectContaining({ key: "graph-result-6", required: true })
+        ])
+      }),
+      steps: [
+        expect.objectContaining({ key: "task-1", dependsOnStepKeys: [] }),
+        expect.objectContaining({ key: "task-2", dependsOnStepKeys: [] }),
+        expect.objectContaining({
+          key: "task-3",
+          dependsOnStepKeys: [],
+          optional: true
+        }),
+        expect.objectContaining({
+          key: "graph-result-4",
+          dependsOnStepKeys: ["task-1", "task-2"],
+          optional: true
+        }),
+        expect.objectContaining({
+          key: "graph-result-5",
+          dependsOnStepKeys: ["task-3", "graph-result-4"]
+        }),
+        expect.objectContaining({
+          key: "graph-result-6",
+          dependsOnStepKeys: ["task-2", "graph-result-5"]
+        })
+      ]
+    }));
+    expect(mocks.openJoin).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      targetStepKey: "graph-result-4",
+      strategy: "all",
+      allowFailedWorkers: false
+    }));
+    expect(mocks.openJoin).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      targetStepKey: "graph-result-5",
+      strategy: "any",
+      allowFailedWorkers: true
+    }));
+    expect(mocks.openJoin).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      targetStepKey: "graph-result-6",
+      strategy: "all",
+      allowFailedWorkers: false
+    }));
+    expect(result).toMatchObject({ outcome: "awaiting-review" });
+    expect(result.text).toContain("## Produce the final launch plan");
   });
 
   it("composes a short multi-stage chain without inferring another join", async () => {

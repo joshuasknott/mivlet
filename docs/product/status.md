@@ -371,9 +371,14 @@ inside terminal settlement after identified-human review. Native progress
 projection exposes the selected plan without renderer-authored authority, and
 cooperative cancellation terminalizes both fresh and restarted general runs.
 
-Those completions do not close broader Mission work. Tool-bearing checkpoint
-recovery, arbitrary graph authoring, repeated iteration, automatic escalation,
-production policy/reviewer-worker evaluation, cross-Mission handoffs, and
+Those completions do not close broader Mission work. One exact read-only
+connected-source receipt can also survive checkpoint recovery without repeating
+its search, grant, or approval. The composer now also accepts repeated explicitly
+numbered `all`/`any` dependencies over earlier steps, validates the six-worker
+acyclic boundary, predeclares every join, and derives only terminal leaf
+deliverables; ordinary bullets still infer no edge. Repeated iteration,
+automatic escalation, production policy/reviewer-worker evaluation,
+cross-Mission handoffs, quorum authoring, broader tool shapes, and
 packaged/live-provider observation remain open. The existing cited and
 benchmark-shaped journeys also retain their narrower contracts where the
 general path has not yet replaced them.

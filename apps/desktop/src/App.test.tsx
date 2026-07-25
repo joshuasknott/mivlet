@@ -2932,6 +2932,64 @@ describe("Fable home", () => {
     );
   });
 
+  it("passes an explicitly numbered Mission dependency graph to the native path", async () => {
+    runtimeMocks.conversationThreads = [{
+      id: "thread-general-graph", projectId: null, title: "Launch graph",
+      lifecycle: "active", updatedAt: "2026-07-25T12:00:00Z", messageHead: { lastSequence: 0 }
+    }];
+    runtimeMocks.backends = [{
+      id: "openai", backendType: "native-api", label: "OpenAI", description: "OpenAI native",
+      authState: "connected", capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Chats" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Launch graph" }));
+    const composer = screen.getByLabelText(/universal composer/i);
+    fireEvent.change(composer, {
+      target: {
+        value: [
+          "/mission Launch decision",
+          "- Check customer evidence",
+          "- Check delivery evidence",
+          "- Check operational risk",
+          "all 1,2: Compare customer and delivery evidence",
+          "any 3,4: Prepare the decision"
+        ].join("\n")
+      }
+    });
+    fireEvent.keyDown(composer, { key: "Enter", code: "Enter" });
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Launch decision",
+      tasks: [
+        "Check customer evidence",
+        "Check delivery evidence",
+        "Check operational risk"
+      ],
+      graph: {
+        steps: [{
+          strategy: "all",
+          dependsOn: [1, 2],
+          task: "Compare customer and delivery evidence"
+        }, {
+          strategy: "any",
+          dependsOn: [3, 4],
+          task: "Prepare the decision"
+        }]
+      }
+    });
+    expect(vi.mocked(appendRuntimeConversationMessage)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "assistant",
+        initialRevision: expect.objectContaining({
+          content: "Preparing 5 declared Mission steps..."
+        })
+      })
+    );
+  });
+
   it("passes one explicit advisory review and revision to the native graph path", async () => {
     runtimeMocks.conversationThreads = [{
       id: "thread-general-review", projectId: null, title: "Launch review",
