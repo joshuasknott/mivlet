@@ -16,11 +16,15 @@ import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/st
 import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
 import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, resumeReviewedParallelApproachesMissions, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
 import { parseGeneralMissionDraft } from "../lib/general-mission-command";
+import {
+  matchesTerminalGeneralRetryStatus,
+  resolveProjectMissionRerunSource
+} from "../lib/project-mission-rerun";
 import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
+import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
 import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
@@ -55,13 +59,6 @@ function messageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function matchesTerminalGeneralRetryStatus(
-  status: Spine.Missions.RunStatus
-): boolean {
-  return status === "partially-completed"
-    || status === "failed"
-    || status === "cancelled";
-}
 // Standalone pages are code-split: each is only rendered when navigated to, so
 // loading them lazily keeps the initial workspace bundle small. Named exports
 // are adapted to the lazy() default-export contract via `.then`. Suspense
@@ -152,6 +149,11 @@ export function ChatWorkspace() {
   const generalMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
+  const [pendingProjectMissionRerun, setPendingProjectMissionRerun] = useState<{
+    threadId: string;
+    sourceCommand: string;
+    sourceMessageId: string;
+  } | null>(null);
   const draftHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationKey = useRef<string | null>(null);
   const missionReceiptHydrationRequestKey = useRef<string | null>(null);
@@ -917,6 +919,16 @@ export function ChatWorkspace() {
     setPendingPrompt(null);
     void continueComposerSubmission(prompt).finally(() => setSubmissionInFlight(false));
   }, [pendingPrompt, selectedConversationThreadId]);
+
+  useEffect(() => {
+    if (
+      !pendingProjectMissionRerun
+      || pendingProjectMissionRerun.threadId !== selectedConversationThreadId
+    ) return;
+    const rerun = pendingProjectMissionRerun;
+    setPendingProjectMissionRerun(null);
+    void startFreshGeneralMission(rerun.sourceCommand, rerun.sourceMessageId);
+  }, [pendingProjectMissionRerun, selectedConversationThreadId]);
 
   const wasRunning = useRef(false);
   useEffect(() => {
@@ -2289,6 +2301,39 @@ export function ChatWorkspace() {
                 activity={projectActivity}
                 onNewChat={() => startNewChat(selectedProject.id)}
                 onSelectThread={(thread) => openConversation(thread, selectedProject.title)}
+                onRerunMission={async (mission) => {
+                  if (
+                    selectedProject.lifecycle !== "active"
+                    || !matchesTerminalGeneralRetryStatus(mission.progress.runStatus)
+                  ) {
+                    throw new Error("Only retryable terminal Missions in an active Project can run again.");
+                  }
+                  const thread = selectedProject.threads.find(
+                    (candidate) => candidate.id === mission.threadId
+                  );
+                  if (!thread) throw new Error("That Project conversation is no longer available.");
+                  const before = await getRuntimeConversationThread(thread.id);
+                  if (
+                    !before
+                    || before.projectId !== selectedProject.id
+                    || before.lifecycle !== "active"
+                  ) {
+                    throw new Error("That conversation no longer belongs to this active Project.");
+                  }
+                  const messages = await listRuntimeConversationMessages(thread.id);
+                  const after = await getRuntimeConversationThread(thread.id);
+                  if (
+                    !after
+                    || after.projectId !== selectedProject.id
+                    || after.lifecycle !== "active"
+                    || after.revision !== before.revision
+                  ) {
+                    throw new Error("That Project conversation changed while Fable checked it. Refresh and try again.");
+                  }
+                  const rerun = resolveProjectMissionRerunSource(messages, mission.runId);
+                  setPendingProjectMissionRerun({ threadId: thread.id, ...rerun });
+                  openConversation(thread, selectedProject.title);
+                }}
                 onExportCopy={async (destination) => Boolean(
                   boundWorkspaceId
                   && await exportRuntimeProjectArchive(

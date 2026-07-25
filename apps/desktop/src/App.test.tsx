@@ -779,6 +779,124 @@ describe("Fable home", () => {
     expect(screen.queryByRole("heading", { name: "Roadmap" })).not.toBeInTheDocument();
   });
 
+  it("starts a fresh Project Mission only from its exact durable terminal command", async () => {
+    const command = "/mission Repair launch\n- Check the evidence\n- Prepare the update";
+    runtimeMocks.projectRecords = [{
+      id: "project-retry",
+      title: "Launch recovery",
+      description: "Recover a bounded launch task.",
+      instructions: "Keep old evidence immutable.",
+      lifecycle: "active",
+      revision: 2
+    }];
+    runtimeMocks.conversationThreads = [{
+      id: "thread-project-retry",
+      projectId: "project-retry",
+      title: "Repair launch",
+      lifecycle: "active",
+      revision: 3,
+      updatedAt: "2026-07-25T10:00:00Z",
+      messageHead: { lastSequence: 2, lastMessageId: "message-project-response" }
+    }];
+    runtimeMocks.conversationMessages = [{
+      message: {
+        id: "message-project-request",
+        threadId: "thread-project-retry",
+        kind: "user",
+        sequence: 1,
+        runId: "run-project-old",
+        currentRevisionId: "revision-project-request",
+        currentRevisionNumber: 1,
+        currentRevisionState: "terminal"
+      },
+      currentRevision: {
+        id: "revision-project-request",
+        threadId: "thread-project-retry",
+        messageId: "message-project-request",
+        messageRevisionNumber: 1,
+        state: "terminal",
+        content: command
+      }
+    }, {
+      message: {
+        id: "message-project-response",
+        threadId: "thread-project-retry",
+        kind: "assistant",
+        sequence: 2,
+        runId: "run-project-old",
+        currentRevisionId: "revision-project-response",
+        currentRevisionNumber: 1,
+        currentRevisionState: "terminal"
+      },
+      currentRevision: {
+        id: "revision-project-response",
+        threadId: "thread-project-retry",
+        messageId: "message-project-response",
+        messageRevisionNumber: 1,
+        state: "terminal",
+        content: "The first attempt failed safely."
+      }
+    }];
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [{
+        runId: "run-project-old",
+        progress: {
+          version: 1,
+          state: "complete",
+          summary: "Repair launch",
+          runStatus: "failed",
+          completedSteps: 1,
+          totalSteps: 2,
+          runningWorkers: 0,
+          readyWorkers: 0,
+          waitingSteps: 0,
+          blockedSteps: 1,
+          steps: [],
+          usage: {
+            records: 1,
+            inputTokens: 10,
+            outputTokens: 5,
+            toolCalls: 0,
+            durationMs: 100,
+            costObservations: []
+          },
+          budget: { maxWorkers: 2 },
+          acceptance: [],
+          nextAction: "Run this Mission again."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
+    runtimeMocks.backends = [{
+      id: "openai",
+      backendType: "native-api",
+      label: "OpenAI",
+      description: "OpenAI native",
+      authState: "connected",
+      capabilities: ["authentication", "threads", "streaming", "cancellation"],
+      models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    }];
+
+    const user = await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Launch recovery" }));
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+
+    await waitFor(() => expect(runtimeMocks.generalMissionCalls).toHaveLength(1));
+    expect(runtimeMocks.generalMissionCalls[0]).toMatchObject({
+      title: "Repair launch",
+      tasks: ["Check the evidence", "Prepare the update"],
+      projectId: "project-retry",
+      sourceThreadId: "thread-project-retry"
+    });
+    expect(vi.mocked(getRuntimeConversationThread).mock.calls.filter(
+      ([threadId]) => threadId === "thread-project-retry"
+    ).length).toBeGreaterThanOrEqual(2);
+    expect(vi.mocked(reviseRuntimeConversationMessage)).not.toHaveBeenCalledWith(
+      expect.objectContaining({ messageId: "message-project-response" })
+    );
+  });
+
   it("shows archived Project conversations and Mission history without reopening a write path", async () => {
     runtimeMocks.projectRecords = [{
       id: "project-archive",
@@ -835,8 +953,9 @@ describe("Fable home", () => {
     expect(await screen.findByRole("heading", { name: "Archived roadmap" })).toBeInTheDocument();
     expect(screen.getByText("Project conversation · Read only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Historical thread" })).not.toBeInTheDocument();
-    expect(await screen.findByText("Historical Mission result")).toBeInTheDocument();
-    expect(screen.getByText("Historical Mission result").closest("button")).toBeNull();
+    const historicalMissionLabels = await screen.findAllByText("Historical Mission result");
+    expect(historicalMissionLabels.length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /Historical Mission result/i })).toBeNull();
     expect(listRuntimeThreadMissionProgress).toHaveBeenCalledWith("thread-archive", 6);
   });
 

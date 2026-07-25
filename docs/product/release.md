@@ -142,7 +142,10 @@ stored in React state, snapshots, logs, or JSON metadata.
   Project mutation control. Each Mission exposes its bounded durable progress,
   usage, budget, acceptance state, and next action. Active Projects can record
   exact revision-fenced identified-human acceptance or needs-revision decisions;
-  Project-level cancellation and fresh rerun remain open.
+  a retryable terminal general Mission can start a fresh run only from its exact
+  canonical `/mission` record after the active Project thread is rechecked for
+  unchanged membership and revision. The old journal and authority are not
+  reused. Project-level active-run cancellation remains open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

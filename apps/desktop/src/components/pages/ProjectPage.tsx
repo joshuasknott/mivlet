@@ -4,7 +4,11 @@ import { FilePlus } from "@phosphor-icons/react/dist/csr/FilePlus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import type { ConnectorSearchItem, SourceStatus, ThreadSummary } from "@fable/protocol";
-import type { ProjectActivityView } from "../../hooks/useProjectActivity";
+import type {
+  ProjectActivityMission,
+  ProjectActivityView
+} from "../../hooks/useProjectActivity";
+import { matchesTerminalGeneralRetryStatus } from "../../lib/project-mission-rerun";
 import { getRuntimeArtifact, type RuntimeArtifactBundle } from "../../runtime";
 import { ArtifactDetail } from "../ArtifactDetail";
 import { PageHeader } from "../PageHeader";
@@ -110,6 +114,7 @@ export function ProjectPage({
   onReload,
   onNewChat,
   onSelectThread,
+  onRerunMission,
   onExportCopy,
   onSaveConnections,
   workspaceId = "",
@@ -122,6 +127,7 @@ export function ProjectPage({
   onReload: () => void | Promise<void>;
   onNewChat: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
+  onRerunMission?: (mission: ProjectActivityMission) => Promise<void>;
   onExportCopy?: (destination: string) => Promise<boolean>;
   onSaveConnections?: (connectionIds: string[]) => Promise<void>;
   workspaceId?: string;
@@ -139,6 +145,8 @@ export function ProjectPage({
   const [knowledgeBusy, setKnowledgeBusy] = useState(false);
   const [knowledgeActionError, setKnowledgeActionError] = useState("");
   const [knowledgeActionId, setKnowledgeActionId] = useState<string | null>(null);
+  const [missionRerunBusyId, setMissionRerunBusyId] = useState<string | null>(null);
+  const [missionRerunErrors, setMissionRerunErrors] = useState<Record<string, string>>({});
   const knowledgeFileRef = useRef<HTMLInputElement>(null);
   const [memoryBusyId, setMemoryBusyId] = useState<string | null>(null);
   const [memoryActionError, setMemoryActionError] = useState("");
@@ -297,6 +305,20 @@ export function ProjectPage({
       }));
     } finally {
       setMissionReviewBusy("");
+    }
+  };
+
+  const rerunMission = async (mission: ProjectActivityMission) => {
+    if (!onRerunMission || missionRerunBusyId) return;
+    setMissionRerunBusyId(mission.runId);
+    setMissionRerunErrors((current) => ({ ...current, [mission.runId]: "" }));
+    try {
+      await onRerunMission(mission);
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : "Fable could not run this Mission again.";
+      setMissionRerunErrors((current) => ({ ...current, [mission.runId]: message }));
+    } finally {
+      setMissionRerunBusyId(null);
     }
   };
 
@@ -560,6 +582,24 @@ export function ProjectPage({
                                   void reviewMission(mission, criterionKey, passed)
                                 : undefined}
                             />
+                            {project.lifecycle === "active"
+                              && onRerunMission
+                              && matchesTerminalGeneralRetryStatus(mission.progress.runStatus) ? (
+                                <div className="project-activity__actions">
+                                  <button
+                                    type="button"
+                                    disabled={missionRerunBusyId !== null}
+                                    onClick={() => void rerunMission(mission)}
+                                  >
+                                    {missionRerunBusyId === mission.runId ? "Starting..." : "Run again"}
+                                  </button>
+                                </div>
+                              ) : null}
+                            {missionRerunErrors[mission.runId] ? (
+                              <p className="project-activity__action-error" role="alert">
+                                {missionRerunErrors[mission.runId]}
+                              </p>
+                            ) : null}
                           </div>
                         </li>
                       );

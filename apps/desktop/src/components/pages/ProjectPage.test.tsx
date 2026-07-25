@@ -288,6 +288,38 @@ describe("ProjectPage", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Mission acceptance recorded.");
   });
 
+  it("starts a fresh retryable Mission without exposing active-run cancellation", async () => {
+    const user = userEvent.setup();
+    const onRerunMission = vi.fn().mockResolvedValue(undefined);
+    const retryableMission = {
+      ...projectActivity.missions[0]!,
+      state: "Failed",
+      progress: {
+        ...projectMissionProgress,
+        state: "complete" as const,
+        runStatus: "failed" as const,
+        humanReview: undefined,
+        nextAction: "Run this Mission again."
+      }
+    };
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={{ ...projectActivity, missions: [retryableMission] }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+        onRerunMission={onRerunMission}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Run again" }));
+    await waitFor(() => expect(onRerunMission).toHaveBeenCalledWith(retryableMission));
+    expect(screen.queryByRole("button", { name: /cancel/i })).toBeNull();
+  });
+
   it("deliberately selects existing Connections without implying a grant", async () => {
     const user = userEvent.setup();
     const onSaveConnections = vi.fn().mockResolvedValue(undefined);
