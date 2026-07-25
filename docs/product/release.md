@@ -123,9 +123,13 @@ stored in React state, snapshots, logs, or JSON metadata.
   Re-import preserves Project, conversation, and message ownership plus
   conversation titles only for the same active private member and original
   internal creator; it rejects authority substitution or removal and never
-  transfers ownership. Project-level Connection configuration, Activity
-  mutation controls, archived Mission history, and full Artifact detail remain
-  open.
+  transfers ownership. An active Project can also choose up to 32 already
+  authorized exact-owner or workspace-shared Connections. Selection persists
+  only opaque IDs, grants no capability, and filters connector context before
+  ranking; native and MCP semantic reads independently require the resolved
+  Connection to match that saved selection before grant use. Missing prior
+  choices stay visible for removal. Activity mutation controls, archived
+  Mission history, and full Artifact detail remain open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

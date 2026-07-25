@@ -8,6 +8,7 @@ import {
   deleteRuntimeProject,
   getProjectRuntimePersistence,
   getRuntimeProject,
+  listRuntimeProjectConnectionOptions,
   listRuntimeProjects,
   restoreRuntimeProject,
   updateRuntimeProject,
@@ -30,6 +31,7 @@ function project(overrides: Partial<RuntimeProject> = {}): RuntimeProject {
     createdAt: "2026-07-11T10:00:00.000Z",
     updatedAt: "2026-07-11T10:00:00.000Z",
     title: "Project one",
+    connectionIds: [],
     lifecycle: "active",
     ...overrides
   } as RuntimeProject;
@@ -83,11 +85,50 @@ describe("project runtime", () => {
       .toThrow("invalid project record");
     expect(() => assertRuntimeProject(project(), "workspace-b"))
       .toThrow("invalid project record");
+    expect(() => assertRuntimeProject(project({
+      connectionIds: ["connection-a", "connection-a"] as never
+    }), "workspace-a")).toThrow("invalid project record");
 
     setNative(true);
     setActiveRuntimeDataScope("workspace-a");
     await expect(listRuntimeProjects("workspace-b")).rejects.toThrow("workspace changed");
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("accepts only bounded unique native Project Connection choices", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-a");
+    mocks.invoke.mockResolvedValue([{
+      connectionId: "connection-a",
+      displayName: "Work GitHub",
+      healthState: "healthy",
+      selectable: true
+    }]);
+    await expect(listRuntimeProjectConnectionOptions()).resolves.toEqual([{
+      connectionId: "connection-a",
+      displayName: "Work GitHub",
+      healthState: "healthy",
+      selectable: true
+    }]);
+    expect(mocks.invoke).toHaveBeenCalledWith("project_connection_options");
+
+    mocks.invoke.mockResolvedValue([
+      {
+        connectionId: "connection-a",
+        displayName: "One",
+        healthState: "healthy",
+        selectable: true
+      },
+      {
+        connectionId: "connection-a",
+        displayName: "Substitute",
+        healthState: "healthy",
+        selectable: true
+      }
+    ]);
+    await expect(listRuntimeProjectConnectionOptions()).rejects.toThrow(
+      "invalid Project Connection list"
+    );
   });
 
   it("keeps honest preview state isolated by workspace and revision", async () => {

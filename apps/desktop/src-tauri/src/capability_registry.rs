@@ -445,6 +445,18 @@ fn resolve_native_read(
                 false,
             )
         })?;
+    store
+        .with_conn(|tx| {
+            require_project_connection_selection(tx, store, &scope, project_id, &canonical.id)
+        })
+        .map_err(|store_error| {
+            error(
+                "no-eligible-connection",
+                capability_id,
+                &store_error.to_string(),
+                false,
+            )
+        })?;
     let availability = availability_for(implementation, &connection, &canonical)?.to_string();
     let expected_adapter = implementation.adapter_reference();
     let discovery_evidence = store
@@ -479,6 +491,38 @@ fn resolve_native_read(
         availability,
         discovery_evidence,
     })
+}
+
+fn require_project_connection_selection(
+    tx: &rusqlite::Connection,
+    store: &crate::store::Store,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+    project_id: Option<&str>,
+    connection_id: &str,
+) -> crate::store::Result<()> {
+    let Some(project_id) = project_id else {
+        return Ok(());
+    };
+    let owner_member_id = scope.member_id.as_deref().ok_or_else(|| {
+        crate::store::StoreError::Invalid(
+            "Project Connection selection requires an active member.".into(),
+        )
+    })?;
+    let project =
+        crate::store::repos::project::get(tx, store, &scope.data, project_id, owner_member_id)?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("The Project is unavailable.".into())
+            })?;
+    if !project
+        .connection_ids
+        .iter()
+        .any(|selected| selected == connection_id)
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "This Project has not selected the required Connection.".into(),
+        ));
+    }
+    Ok(())
 }
 
 pub(crate) fn native_grant_target(
@@ -534,11 +578,16 @@ pub(crate) fn mcp_grant_target(
     })?;
     let (connection, _binding) = store
         .with_conn(|tx| {
-            let connection =
-                crate::store::repos::connection_record::get(tx, store, &scope, connection_id)?
-                    .ok_or_else(|| {
-                        crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
-                    })?;
+            let connection = crate::store::repos::connection_record::get_private_owned(
+                tx,
+                store,
+                &scope,
+                connection_id,
+            )?
+            .ok_or_else(|| {
+                crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
+            })?;
+            require_project_connection_selection(tx, store, &scope, project_id, &connection.id)?;
             let credential_ready = (connection.authorization_state == "not-required"
                 && connection.credential_state == "not-required")
                 || (connection.authorization_state == "authorized"
@@ -1105,5 +1154,103 @@ mod tests {
         assert_eq!(encoded["implementation"]["kind"], "native");
         assert_eq!(encoded["citations"][0]["citationId"], "source-1");
         assert_eq!(encoded["citations"][0]["trust"], "external-untrusted");
+    }
+
+    #[test]
+    fn project_capabilities_require_the_exact_saved_connection_selection() {
+        use crate::authorized_scope::{resolve, ScopeAccess};
+        use crate::store::repos::workspace_directory::{
+            select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
+            WorkspaceDirectoryUpsert,
+        };
+        use crate::store::vault::{MasterKey, Vault};
+
+        let store = crate::store::Store::open_in_memory(
+            Vault::new(&MasterKey::generate().unwrap()).unwrap(),
+        )
+        .unwrap();
+        let scope = store
+            .transaction(|tx| {
+                let workspace = upsert_authoritative_summary(
+                    tx,
+                    &WorkspaceDirectoryUpsert {
+                        internal_user_id: "user-a".into(),
+                        fable_workspace_id: "workspace-a".into(),
+                        name: "Workspace".into(),
+                        workspace_status: "active".into(),
+                        workspace_revision: 1,
+                        policy_revision: 1,
+                        member_id: "member-a".into(),
+                        role: "owner".into(),
+                        membership_status: "active".into(),
+                        membership_revision: 1,
+                        updated_at: "t".into(),
+                    },
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
+                let scope = resolve(
+                    tx,
+                    Some(&workspace.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )?;
+                crate::store::repos::project::create(
+                    tx,
+                    &store,
+                    &scope.data,
+                    "project-a",
+                    "member-a",
+                    "user-a",
+                    "Project",
+                    None,
+                    None,
+                    "t",
+                )?;
+                Ok(scope)
+            })
+            .unwrap();
+
+        store
+            .transaction(|tx| {
+                assert!(require_project_connection_selection(
+                    tx,
+                    &store,
+                    &scope,
+                    Some("project-a"),
+                    "connection-a",
+                )
+                .is_err());
+                crate::store::repos::project::update(
+                    tx,
+                    &store,
+                    &scope.data,
+                    "member-a",
+                    "project-a",
+                    1,
+                    None,
+                    None,
+                    None,
+                    Some(&["connection-a".into()]),
+                    "t2",
+                )?;
+                require_project_connection_selection(
+                    tx,
+                    &store,
+                    &scope,
+                    Some("project-a"),
+                    "connection-a",
+                )?;
+                assert!(require_project_connection_selection(
+                    tx,
+                    &store,
+                    &scope,
+                    Some("project-a"),
+                    "connection-b",
+                )
+                .is_err());
+                require_project_connection_selection(tx, &store, &scope, None, "connection-b")
+            })
+            .unwrap();
     }
 }

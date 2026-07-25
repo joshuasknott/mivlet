@@ -14,6 +14,7 @@ import {
   recordsVisibleToRunAudience,
   resolveSelectedModel,
   selectMemoryForRun,
+  sourceAllowedByProjectConnections,
   withPreviewPrivateAuthority,
   workspaceSharedRunAudience
 } from "./agent-run";
@@ -310,6 +311,35 @@ describe("knowledgeScopeForRun", () => {
       threadId: "thread-1",
       projectId: "workspace"
     });
+  });
+});
+
+describe("sourceAllowedByProjectConnections", () => {
+  it("filters connector sources by exact Project selection before retrieval", () => {
+    const context = {
+      projectId: "project-a",
+      allowedConnectionIds: ["connection-a"]
+    };
+    expect(sourceAllowedByProjectConnections(source(), context)).toBe(true);
+    expect(sourceAllowedByProjectConnections(source({
+      connectorId: "github",
+      connectionId: "connection-a"
+    }), context)).toBe(true);
+    expect(sourceAllowedByProjectConnections(source({
+      connectorId: "github",
+      connectionId: "connection-b"
+    }), context)).toBe(false);
+    expect(sourceAllowedByProjectConnections(source({
+      connectorId: "github",
+      connectionId: undefined
+    }), context)).toBe(false);
+  });
+
+  it("keeps standalone workspace retrieval unchanged", () => {
+    expect(sourceAllowedByProjectConnections(source({
+      connectorId: "github",
+      connectionId: "connection-b"
+    }))).toBe(true);
   });
 });
 

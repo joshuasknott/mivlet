@@ -9,6 +9,13 @@ export type RuntimeProjectUpdate = Spine.Projects.ProjectUpdateInput;
 export type RuntimeProjectTransition = Spine.Projects.ProjectTransitionInput;
 export type ProjectRuntimePersistence = "native" | "preview-memory";
 
+export interface RuntimeProjectConnectionOption {
+  connectionId: string;
+  displayName: string;
+  healthState: string;
+  selectable: boolean;
+}
+
 const previewProjects = new Map<string, Map<string, RuntimeProject>>();
 let previewProjectSequence = 0;
 
@@ -59,6 +66,15 @@ export function assertRuntimeProject(value: unknown, workspaceId: string): Runti
     typeof value.title !== "string" || !value.title ||
     !optionalString(value.description) ||
     !optionalString(value.instructions) ||
+    (
+      value.connectionIds !== undefined
+      && (
+        !Array.isArray(value.connectionIds)
+        || value.connectionIds.length > 32
+        || value.connectionIds.some((id) => typeof id !== "string" || !id.trim())
+        || new Set(value.connectionIds).size !== value.connectionIds.length
+      )
+    ) ||
     !optionalString(value.deletedAt) ||
     (lifecycle !== "active" && lifecycle !== "archived" && lifecycle !== "deleted")
   ) {
@@ -93,6 +109,7 @@ function previewProject(workspaceId: string, input: RuntimeProjectCreate): Runti
     title: input.title.trim(),
     ...(input.description?.trim() ? { description: input.description.trim() } : {}),
     ...(input.instructions?.trim() ? { instructions: input.instructions.trim() } : {}),
+    connectionIds: [],
     lifecycle: "active"
   };
 }
@@ -173,11 +190,36 @@ export async function updateRuntimeProject(workspaceId: string, input: RuntimePr
     return updatePreviewProject(workspace, project, {
       ...(input.title === undefined ? {} : { title: input.title.trim() }),
       ...(input.description === undefined ? {} : { description: input.description?.trim() || undefined }),
-      ...(input.instructions === undefined ? {} : { instructions: input.instructions?.trim() || undefined })
+      ...(input.instructions === undefined ? {} : { instructions: input.instructions?.trim() || undefined }),
+      ...(input.connectionIds === undefined ? {} : { connectionIds: [...input.connectionIds] })
     });
   }
   try {
     return assertRuntimeProject(await invoke<unknown>("project_update", { input }), workspace);
+  } catch (error) {
+    throw runtimeError(error);
+  }
+}
+
+export async function listRuntimeProjectConnectionOptions(): Promise<RuntimeProjectConnectionOption[]> {
+  if (!hasTauriRuntime()) return [];
+  try {
+    const result = await invoke<RuntimeProjectConnectionOption[]>("project_connection_options");
+    if (
+      !Array.isArray(result)
+      || result.length > 256
+      || result.some((option) =>
+        !option
+        || typeof option.connectionId !== "string"
+        || typeof option.displayName !== "string"
+        || typeof option.healthState !== "string"
+        || typeof option.selectable !== "boolean"
+      )
+      || new Set(result.map((option) => option.connectionId)).size !== result.length
+    ) {
+      throw new Error("Fable returned an invalid Project Connection list.");
+    }
+    return result;
   } catch (error) {
     throw runtimeError(error);
   }

@@ -140,6 +140,24 @@ metadata. Supported non-GitHub write capabilities are functional provider calls
 only after the same explicit approval boundary and only when the connector is
 actually connected.
 
+## Project selection
+
+Connections remain workspace records; selecting one for a Project never makes
+it project-owned. An active private Project can save up to 32 opaque canonical
+Connection ids chosen from the current member's user-owned Connections and
+explicitly workspace-shared Connections. A new choice must already be
+authorized. Selection copies no credential, grant, provider, billing, privacy,
+or placement authority, and an unavailable prior choice remains only so the
+user can see and remove it.
+
+For ordinary Project context, the selected ids filter connector-backed sources
+before chunking, lexical or semantic ranking, and receipt assembly. Local files
+continue through their exact Project scope without pretending to be a
+Connection. For semantic capability reads, Rust independently reloads the
+encrypted Project and requires the resolved native or MCP Connection id to
+match the saved selection before preparing or consuming a Project-scoped
+grant. Standalone workspace reads do not inherit a Project allowlist.
+
 ## Credential storage and auth broker
 
 The auth broker is implemented in `apps/broker` and synthesised targeting Cloudflare Workers.

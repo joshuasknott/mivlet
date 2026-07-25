@@ -3,18 +3,20 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  listRuntimeRoutineConnectionOptions,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   searchRuntimeArtifacts
 } from "../runtime";
+import { listRuntimeProjectConnectionOptions } from "../lib/project-runtime";
 import { useProjectActivity } from "./useProjectActivity";
 
 vi.mock("../runtime", () => ({
-  listRuntimeRoutineConnectionOptions: vi.fn(),
   listRuntimeRoutines: vi.fn(),
   listRuntimeThreadMissionProgress: vi.fn(),
   searchRuntimeArtifacts: vi.fn()
+}));
+vi.mock("../lib/project-runtime", () => ({
+  listRuntimeProjectConnectionOptions: vi.fn()
 }));
 
 const threads = [{
@@ -102,10 +104,11 @@ beforeEach(() => {
     },
     matchedOn: []
   }] as never);
-  vi.mocked(listRuntimeRoutineConnectionOptions).mockResolvedValue([{
+  vi.mocked(listRuntimeProjectConnectionOptions).mockResolvedValue([{
     connectionId: "connection-1",
     displayName: "GitHub · work",
-    healthState: "healthy"
+    healthState: "healthy",
+    selectable: true
   }]);
 });
 
@@ -114,6 +117,7 @@ describe("useProjectActivity", () => {
     const { result } = renderHook(() => useProjectActivity({
       workspaceId: "workspace-1",
       projectId: "project-1",
+      connectionIds: [],
       threads,
       enabled: true
     }), { wrapper: wrapper() });
@@ -148,13 +152,45 @@ describe("useProjectActivity", () => {
       name: "GitHub · work",
       status: "Available"
     }]);
+    expect(result.current.connectionOptions).toEqual([{
+      id: "connection-1",
+      name: "GitHub · work",
+      status: "Available",
+      selectable: true
+    }]);
   });
 
-  it("does not expose an unavailable referenced Connection as connected", async () => {
-    vi.mocked(listRuntimeRoutineConnectionOptions).mockResolvedValue([]);
+  it("shows a deliberately selected Project Connection before it is used", async () => {
+    vi.mocked(listRuntimeRoutines).mockResolvedValue([]);
+    vi.mocked(searchRuntimeArtifacts).mockResolvedValue([]);
+    vi.mocked(listRuntimeProjectConnectionOptions).mockResolvedValue([{
+      connectionId: "connection-selected",
+      displayName: "Selected Drive",
+      healthState: "healthy",
+      selectable: true
+    }]);
     const { result } = renderHook(() => useProjectActivity({
       workspaceId: "workspace-1",
       projectId: "project-1",
+      connectionIds: ["connection-selected"],
+      threads: [],
+      enabled: true
+    }), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.connections).toEqual([{
+      id: "connection-selected",
+      name: "Selected Drive",
+      status: "Available"
+    }]);
+  });
+
+  it("does not expose an unavailable referenced Connection as connected", async () => {
+    vi.mocked(listRuntimeProjectConnectionOptions).mockResolvedValue([]);
+    const { result } = renderHook(() => useProjectActivity({
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      connectionIds: [],
       threads,
       enabled: true
     }), { wrapper: wrapper() });
@@ -172,6 +208,7 @@ describe("useProjectActivity", () => {
     const { result } = renderHook(() => useProjectActivity({
       workspaceId: "workspace-1",
       projectId: "project-1",
+      connectionIds: [],
       threads,
       enabled: true
     }), { wrapper: wrapper() });

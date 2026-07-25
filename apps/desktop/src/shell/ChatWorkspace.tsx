@@ -544,6 +544,7 @@ export function ChatWorkspace() {
   const projectActivity = useProjectActivity({
     workspaceId: boundWorkspaceId ?? "",
     projectId: selectedProject?.id ?? "",
+    connectionIds: selectedProject?.connectionIds ?? [],
     threads: selectedProject?.threads ?? [],
     enabled: Boolean(boundWorkspaceId && selectedProject)
   });
@@ -1978,11 +1979,15 @@ export function ChatWorkspace() {
     const assistantMessageId = appendConversationMessage("assistant", "Working...");
     activeAssistantMessageId.current = assistantMessageId;
     resetCancellation();
+    const runProject = runProjectId
+      ? projectWorkspaces.find((project) => project.id === runProjectId)
+      : undefined;
     const projectContext = runProjectId ? projectMemory.loadContextRecords() : Promise.resolve([]);
     void projectContext
       .then((projectMemoryRecords) => runtime.assembleKnowledgeContext(prompt, {
         projectId: runProjectId,
-        projectMemoryRecords
+        projectMemoryRecords,
+        allowedConnectionIds: runProject?.connectionIds ?? []
       }))
       .then((preparedContext) => {
         setConversationMessages((current) => current.map((entry) =>
@@ -2292,6 +2297,13 @@ export function ChatWorkspace() {
                     baseRevision: selectedProject.revision,
                     description,
                     instructions
+                  });
+                }}
+                onSaveConnections={async (connectionIds) => {
+                  await projectStore.update({
+                    projectId: selectedProject.id as never,
+                    baseRevision: selectedProject.revision,
+                    connectionIds: connectionIds as never
                   });
                 }}
               />

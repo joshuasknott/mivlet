@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { ThreadSummary } from "@fable/protocol";
 import {
-  listRuntimeRoutineConnectionOptions,
+  listRuntimeProjectConnectionOptions
+} from "../lib/project-runtime";
+import {
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   searchRuntimeArtifacts,
@@ -42,11 +44,16 @@ export interface ProjectActivityConnection {
   status: string;
 }
 
+export interface ProjectConnectionChoice extends ProjectActivityConnection {
+  selectable: boolean;
+}
+
 export interface ProjectActivityView {
   missions: ProjectActivityMission[];
   routines: ProjectActivityRoutine[];
   artifacts: ProjectActivityArtifact[];
   connections: ProjectActivityConnection[];
+  connectionOptions: ProjectConnectionChoice[];
   loading: boolean;
   error: string | null;
   truncated: boolean;
@@ -56,17 +63,24 @@ export interface ProjectActivityView {
 export interface UseProjectActivityOptions {
   workspaceId: string;
   projectId: string;
+  connectionIds: readonly string[];
   threads: ThreadSummary[];
   enabled: boolean;
 }
 
 export const projectActivityQueryKeys = {
-  scope: (workspaceId: string, projectId: string, threadIds: readonly string[]) =>
+  scope: (
+    workspaceId: string,
+    projectId: string,
+    threadIds: readonly string[],
+    connectionIds: readonly string[]
+  ) =>
     [
       "project-activity",
       workspaceId.trim() || "unavailable",
       projectId.trim() || "unavailable",
-      [...threadIds]
+      [...threadIds],
+      [...connectionIds]
     ] as const
 };
 
@@ -80,7 +94,16 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     [options.threads]
   );
   const threadIds = useMemo(() => threads.map((thread) => thread.id), [threads]);
-  const queryKey = projectActivityQueryKeys.scope(workspaceId, projectId, threadIds);
+  const connectionIds = useMemo(
+    () => [...new Set(options.connectionIds)].sort(),
+    [options.connectionIds]
+  );
+  const queryKey = projectActivityQueryKeys.scope(
+    workspaceId,
+    projectId,
+    threadIds,
+    connectionIds
+  );
   const queryClient = useQueryClient();
   const query = useQuery({
     queryKey,
@@ -97,7 +120,7 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
             projectId: projectId as never,
             limit: MAX_PROJECT_ACTIVITY_ITEMS
           }),
-          listRuntimeRoutineConnectionOptions()
+          listRuntimeProjectConnectionOptions()
         ]);
       const threadTitles = new Map(threads.map((thread) => [thread.id, thread.title]));
       const projectedMissions = missionLists.flatMap((list, threadIndex) => {
@@ -130,7 +153,7 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
           status: artifactStatusLabel(artifact.status),
           detail: `${artifactKindLabel(artifact.kind)} · Version ${currentVersion.version}`
         }));
-      const referencedConnectionIds = new Set<string>();
+      const referencedConnectionIds = new Set<string>(connectionIds);
       for (const bundle of routinesResult ?? []) {
         for (const trigger of bundle.triggers) {
           if (trigger.spec.kind === "connection-event") {
@@ -160,11 +183,20 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
           status: available ? connectionStatusLabel(available.healthState) : "Needs attention"
         };
       });
+      const connectionOptions = (connectionOptionsResult ?? [])
+        .map((connection) => ({
+          id: connection.connectionId,
+          name: connection.displayName,
+          status: connectionStatusLabel(connection.healthState),
+          selectable: connection.selectable
+        }))
+        .sort((left, right) => left.name.localeCompare(right.name));
       return {
         missions,
         routines,
         artifacts: projectedArtifacts,
         connections,
+        connectionOptions,
         truncated:
           options.threads.length > threads.length
           || missionLists.some((list) => list.truncated)
@@ -197,6 +229,7 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     routines: query.data?.routines ?? [],
     artifacts: query.data?.artifacts ?? [],
     connections: query.data?.connections ?? [],
+    connectionOptions: query.data?.connectionOptions ?? [],
     loading: options.enabled && query.isPending,
     error: query.error instanceof Error ? query.error.message : null,
     truncated: query.data?.truncated ?? false,

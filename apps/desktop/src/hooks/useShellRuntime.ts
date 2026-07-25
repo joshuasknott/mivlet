@@ -101,6 +101,7 @@ import {
   privateRunAudience,
   recordsVisibleToRunAudience,
   selectMemoryForRun,
+  sourceAllowedByProjectConnections,
   withPreviewPrivateAuthority,
   type ProjectMemoryRunContext
 } from "../lib/agent-run";
@@ -1636,13 +1637,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return connectionIsAuthorized(source.connectorId, source.account, source.connectionId);
   };
 
-  const knowledgeRetrievalSources = (sources: readonly KnowledgeSource[] = workspaceKnowledgeSources) =>
+  const knowledgeRetrievalSources = (
+    sources: readonly KnowledgeSource[] = workspaceKnowledgeSources,
+    context?: ProjectMemoryRunContext
+  ) =>
     sources
       // Only live (non-disabled), authorized, connected-connector sources can
       // enter retrieval. Stale/error statuses are additionally excluded by the
       // retrieve pipeline's filterRetrievable; we re-check live here so a
       // disabled source is never even chunked.
-      .filter((source) => isLiveSource(source) && sourceIsAuthorized(source))
+      .filter((source) =>
+        isLiveSource(source)
+        && sourceIsAuthorized(source)
+        && sourceAllowedByProjectConnections(source, context)
+      )
       .map((source) => ({
         source,
         chunks: chunkSourceText(source.contentPreview ?? "", {
@@ -1672,7 +1680,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       : withPreviewPrivateAuthority(selectedMemory, audience);
     const visibleSources = recordsVisibleToRunAudience(governedSources, audience);
     const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
-    const result = await retrieve(knowledgeRetrievalSources(visibleSources), {
+    const result = await retrieve(knowledgeRetrievalSources(visibleSources, context), {
       query,
       scope,
       audience,

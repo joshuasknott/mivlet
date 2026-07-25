@@ -163,6 +163,7 @@ pub fn run() {
             projects::project_create,
             projects::project_list,
             projects::project_get,
+            projects::project_connection_options,
             projects::project_update,
             projects::project_archive,
             projects::project_restore,

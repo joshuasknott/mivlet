@@ -1,4 +1,5 @@
 import type {
+  ConnectionId,
   MemberId,
   ProjectId,
   ScopedRecordMetadata
@@ -8,6 +9,7 @@ import type {
 export const PROJECT_TITLE_MAX_CHARACTERS = 200;
 export const PROJECT_DESCRIPTION_MAX_CHARACTERS = 4_000;
 export const PROJECT_INSTRUCTIONS_MAX_CHARACTERS = 32_000;
+export const PROJECT_CONNECTIONS_MAX = 32;
 
 export const PROJECT_LIFECYCLE_STATES = ["active", "archived", "deleted"] as const;
 export type ProjectLifecycleState = (typeof PROJECT_LIFECYCLE_STATES)[number];
@@ -50,6 +52,11 @@ export type Project = Readonly<ProjectRecordMetadata> & {
   readonly title: string;
   readonly description?: string;
   readonly instructions?: string;
+  /**
+   * Existing member-owned workspace Connections deliberately selected for
+   * this Project. Selection narrows context; it grants no capability.
+   */
+  readonly connectionIds?: readonly ConnectionId[];
   readonly lifecycle: ProjectLifecycleState;
 };
 
@@ -65,6 +72,7 @@ export interface ProjectUpdateInput {
   title?: string;
   description?: string | null;
   instructions?: string | null;
+  connectionIds?: readonly ConnectionId[];
 }
 
 export interface ProjectTransitionInput {

@@ -114,6 +114,8 @@ export interface BuildContextPrefixForRunInput {
 export interface ProjectMemoryRunContext {
   projectId?: string | null;
   projectMemoryRecords?: MemoryRecord[];
+  /** Exact workspace Connections selected for this Project; grants nothing. */
+  allowedConnectionIds?: readonly string[];
 }
 
 const PRIVATE_CONTEXT_MEMBER_ERROR =
@@ -267,6 +269,20 @@ export function knowledgeScopeForRun(
     threadId: activeThreadId,
     projectId: projectId || "workspace"
   };
+}
+
+/**
+ * Project Connection selection is an allowlist applied before chunking or
+ * ranking. Local files use the Project's own scope and need no Connection;
+ * every connector-backed source needs its exact selected canonical id.
+ */
+export function sourceAllowedByProjectConnections(
+  source: Pick<KnowledgeSource, "connectorId" | "connectionId">,
+  context?: ProjectMemoryRunContext
+): boolean {
+  if (!context?.projectId?.trim() || source.connectorId === "local-files") return true;
+  if (!source.connectionId) return false;
+  return (context.allowedConnectionIds ?? []).includes(source.connectionId);
 }
 
 /**

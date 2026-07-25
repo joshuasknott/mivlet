@@ -4524,6 +4524,19 @@ mod tests {
                     None,
                     "t",
                 )?;
+                crate::store::repos::project::update(
+                    tx,
+                    &source,
+                    &workspace,
+                    "member-a",
+                    "project-a",
+                    1,
+                    None,
+                    None,
+                    None,
+                    Some(&["connection-a".into()]),
+                    "t2",
+                )?;
                 crate::store::repos::project::create(
                     tx,
                     &source,
@@ -4690,6 +4703,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(restored.title, "Project A");
+        assert_eq!(restored.connection_ids, vec!["connection-a"]);
         let restored_thread: (String, String) = destination
             .with_conn(|tx| {
                 tx.query_row(

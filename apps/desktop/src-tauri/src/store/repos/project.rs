@@ -3,6 +3,7 @@
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 
 use crate::store::repos::{
     open_json,
@@ -14,6 +15,7 @@ use crate::store::{Result, Store, StoreError};
 const TITLE_MAX: usize = 200;
 const DESCRIPTION_MAX: usize = 4_000;
 const INSTRUCTIONS_MAX: usize = 32_000;
+pub const CONNECTIONS_MAX: usize = 32;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,6 +25,8 @@ struct ProjectContent {
     description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     instructions: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    connection_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     created_by_device_id: Option<String>,
 }
@@ -45,6 +49,7 @@ pub struct ProjectRow {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instructions: Option<String>,
+    pub connection_ids: Vec<String>,
     pub lifecycle: String,
 }
 
@@ -100,6 +105,24 @@ fn title_fingerprint(title: &str) -> String {
     format!("{:x}", Sha256::digest(normalized.as_bytes()))
 }
 
+pub fn normalize_connection_ids(values: &[String]) -> Result<Vec<String>> {
+    if values.len() > CONNECTIONS_MAX {
+        return Err(StoreError::Invalid(format!(
+            "A Project can use at most {CONNECTIONS_MAX} Connections."
+        )));
+    }
+    let mut normalized = BTreeSet::new();
+    for value in values {
+        let value = normalize_id(value, "Connection")?;
+        if !normalized.insert(value) {
+            return Err(StoreError::Invalid(
+                "Project Connections must be unique.".into(),
+            ));
+        }
+    }
+    Ok(normalized.into_iter().collect())
+}
+
 fn read_project(store: &Store, row: &rusqlite::Row<'_>) -> rusqlite::Result<ProjectRow> {
     let id: String = row.get("id")?;
     let sealed = super::payload_of(row)?;
@@ -123,6 +146,7 @@ fn read_project(store: &Store, row: &rusqlite::Row<'_>) -> rusqlite::Result<Proj
         title: content.title,
         description: content.description,
         instructions: content.instructions,
+        connection_ids: content.connection_ids,
         lifecycle: row.get("lifecycle")?,
     })
 }
@@ -176,6 +200,7 @@ pub fn upsert_shared_mirror(
             "instructions",
             INSTRUCTIONS_MAX,
         )?,
+        connection_ids: Vec::new(),
         created_by_device_id: Some(normalize_id(&project.created_by_device_id, "Device")?),
     };
     let sealed = seal_json(
@@ -257,6 +282,7 @@ pub fn create(
         title: title.clone(),
         description: normalize_optional(description, "description", DESCRIPTION_MAX)?,
         instructions: normalize_optional(instructions, "instructions", INSTRUCTIONS_MAX)?,
+        connection_ids: Vec::new(),
         created_by_device_id: None,
     };
     let unavailable: bool = tx.query_row(
@@ -331,6 +357,7 @@ pub fn update(
     title: Option<&str>,
     description: Option<Option<&str>>,
     instructions: Option<Option<&str>>,
+    connection_ids: Option<&[String]>,
     updated_at: &str,
 ) -> Result<ProjectRow> {
     let old = get(tx, store, scope, id, owner_member_id)?
@@ -357,6 +384,10 @@ pub fn update(
         instructions: match instructions {
             Some(value) => normalize_optional(value, "instructions", INSTRUCTIONS_MAX)?,
             None => old.instructions,
+        },
+        connection_ids: match connection_ids {
+            Some(values) => normalize_connection_ids(values)?,
+            None => old.connection_ids,
         },
         created_by_device_id: None,
     };
@@ -544,6 +575,7 @@ mod tests {
                 "project-1",
                 1,
                 Some("Stale"),
+                None,
                 None,
                 None,
                 "t3",

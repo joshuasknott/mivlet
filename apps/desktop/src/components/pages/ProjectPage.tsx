@@ -12,6 +12,7 @@ export interface ProjectPageRecord {
   title: string;
   description: string;
   instructions: string;
+  connectionIds?: readonly string[];
   lifecycle: "active" | "archived";
   revision: number;
   threads: ThreadSummary[];
@@ -85,6 +86,7 @@ const EMPTY_PROJECT_ACTIVITY: ProjectActivityView = {
   routines: [],
   artifacts: [],
   connections: [],
+  connectionOptions: [],
   loading: false,
   error: null,
   truncated: false,
@@ -98,6 +100,7 @@ export function ProjectPage({
   onNewChat,
   onSelectThread,
   onExportCopy,
+  onSaveConnections,
   knowledge,
   memory = EMPTY_PROJECT_MEMORY,
   activity = EMPTY_PROJECT_ACTIVITY
@@ -108,6 +111,7 @@ export function ProjectPage({
   onNewChat: () => void;
   onSelectThread: (thread: ThreadSummary) => void;
   onExportCopy?: (destination: string) => Promise<boolean>;
+  onSaveConnections?: (connectionIds: string[]) => Promise<void>;
   knowledge: ProjectKnowledgeView;
   memory?: ProjectMemoryView;
   activity?: ProjectActivityView;
@@ -131,6 +135,8 @@ export function ProjectPage({
   const [projectExportPath, setProjectExportPath] = useState("");
   const [projectExportBusy, setProjectExportBusy] = useState(false);
   const [projectExportStatus, setProjectExportStatus] = useState("");
+  const [connectionBusy, setConnectionBusy] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState("");
 
   useEffect(() => {
     setDescription(project.description);
@@ -149,6 +155,7 @@ export function ProjectPage({
     setMemoryExport("");
     setProjectExportPath("");
     setProjectExportStatus("");
+    setConnectionStatus("");
   }, [project.id]);
 
   const runMemoryAction = async (id: string, action: () => Promise<unknown>) => {
@@ -183,6 +190,22 @@ export function ProjectPage({
   };
 
   const visibleKnowledge = knowledgeResults ?? knowledge.sources;
+
+  const saveConnections = async (connectionIds: string[]) => {
+    if (!onSaveConnections) return;
+    setConnectionBusy(true);
+    setConnectionStatus("");
+    try {
+      await onSaveConnections(connectionIds);
+      setConnectionStatus("Project Connections saved.");
+    } catch (cause) {
+      setConnectionStatus(`!${cause instanceof Error
+        ? cause.message
+        : "Fable could not save this Project's Connections."}`);
+    } finally {
+      setConnectionBusy(false);
+    }
+  };
 
   const runKnowledgeSearch = async () => {
     const query = knowledgeQuery.trim();
@@ -397,9 +420,47 @@ export function ProjectPage({
               </div>
             </div>
 
-            {activity.connections.length > 0 ? (
-              <div className="project-activity__connections">
-                <h3>Connections used here</h3>
+            <div className="project-activity__connections">
+              <div className="project-activity__connections-heading">
+                <h3>Connections</h3>
+                <p>Choose existing Connections Fable may use for this Project. This does not grant new access.</p>
+              </div>
+              {project.lifecycle === "active" && onSaveConnections ? (
+                <form onSubmit={(event) => {
+                  event.preventDefault();
+                  void saveConnections(
+                    new FormData(event.currentTarget).getAll("connectionIds").map(String)
+                  );
+                }}>
+                  {activity.connectionOptions.length > 0 ? (
+                    <select
+                      key={`${project.id}:${project.revision}`}
+                      aria-label="Connections available to this Project"
+                      name="connectionIds"
+                      multiple
+                      defaultValue={[...(project.connectionIds ?? [])]}
+                      disabled={connectionBusy}
+                    >
+                      {activity.connectionOptions.map((connection) => (
+                        <option
+                          key={connection.id}
+                          value={connection.id}
+                          disabled={!connection.selectable && !project.connectionIds?.includes(connection.id)}
+                        >
+                          {connection.name} · {connection.status}
+                        </option>
+                      ))}
+                    </select>
+                  ) : <p className="project-page__empty">No Connections are ready yet.</p>}
+                  {activity.connectionOptions.length > 0 ? (
+                    <div className="project-guidance-form__actions">
+                      <button type="submit" disabled={connectionBusy}>
+                      {connectionBusy ? "Saving..." : "Save Connections"}
+                      </button>
+                    </div>
+                  ) : null}
+                </form>
+              ) : activity.connections.length > 0 ? (
                 <ul aria-label="Connections used by this project">
                   {activity.connections.map((connection) => (
                     <li key={connection.id}>
@@ -408,8 +469,13 @@ export function ProjectPage({
                     </li>
                   ))}
                 </ul>
-              </div>
-            ) : null}
+              ) : <p className="project-page__empty">No Connections chosen or used yet.</p>}
+              {connectionStatus ? (
+                <p role={connectionStatus.startsWith("!") ? "alert" : "status"}>
+                  {connectionStatus.replace(/^!/, "")}
+                </p>
+              ) : null}
+            </div>
             {activity.truncated ? (
               <p className="project-activity__state">Showing the newest bounded activity. Older records remain stored.</p>
             ) : null}

@@ -117,7 +117,7 @@ export function formatViolationReport(violations, budget) {
     `- CSS: ${formatBytes(budget.recordedBaseline.css.rawBytes)} raw`,
     `- Schedules route: ${formatBytes(budget.recordedBaseline.routeChunks.SchedulesPage.rawBytes)} raw`,
     "",
-    "Ceilings guard material regression above the observed post-schedule-polish build.",
+    "Ceilings guard material regression above the current recorded repository build.",
     "Hash suffixes are ignored; gzip tolerance is intentionally wider than raw."
   ];
   return `${lines.join("\n")}\n`;

@@ -74,6 +74,12 @@ const projectActivity: ProjectActivityView = {
     name: "GitHub · work",
     status: "Available"
   }],
+  connectionOptions: [{
+    id: "connection-1",
+    name: "GitHub · work",
+    status: "Available",
+    selectable: true
+  }],
   loading: false,
   error: null,
   truncated: false,
@@ -179,6 +185,32 @@ describe("ProjectPage", () => {
       .toHaveTextContent("GitHub · workAvailable");
     await user.click(screen.getByRole("button", { name: /prepare launch/i }));
     expect(onSelectThread).toHaveBeenCalledWith(project.threads[0]);
+  });
+
+  it("deliberately selects existing Connections without implying a grant", async () => {
+    const user = userEvent.setup();
+    const onSaveConnections = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={{ ...project, connectionIds: [] }}
+        knowledge={emptyKnowledge}
+        activity={projectActivity}
+        onSaveGuidance={vi.fn()}
+        onSaveConnections={onSaveConnections}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    expect(screen.getByText(/does not grant new access/i)).toBeInTheDocument();
+    await user.selectOptions(
+      screen.getByRole("listbox", { name: "Connections available to this Project" }),
+      "connection-1"
+    );
+    await user.click(screen.getByRole("button", { name: "Save Connections" }));
+    await waitFor(() => expect(onSaveConnections).toHaveBeenCalledWith(["connection-1"]));
+    expect(await screen.findByRole("status")).toHaveTextContent("Project Connections saved.");
   });
 
   it("surfaces project activity failures and retries the exact read", async () => {
