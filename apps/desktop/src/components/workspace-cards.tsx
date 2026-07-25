@@ -201,9 +201,22 @@ export function MissionProgressSummary({
   return (
     <details className="run-context-summary" aria-label="Mission progress">
       <summary>
-        <strong>Progress</strong>
+        <strong>Plan &amp; progress</strong>
         <span>{progress.completedSteps} of {progress.totalSteps} steps · {stateLabel}</span>
       </summary>
+      {progress.plan ? (
+        <>
+          <p className="run-context-summary__audience">
+            <strong>Goal</strong><span>{progress.plan.title}</span>
+          </p>
+          <p className="run-context-summary__audience">
+            <strong>Outcome</strong><span>{progress.plan.desiredOutcome}</span>
+          </p>
+          <p className="run-context-summary__audience">
+            <strong>Approach</strong><span>{progress.plan.summary}</span>
+          </p>
+        </>
+      ) : null}
       <p className="run-context-summary__audience">
         <strong>Status</strong><span>{progress.summary}</span>
       </p>
@@ -212,6 +225,12 @@ export function MissionProgressSummary({
           <li key={step.stepKey}>
             <strong>{step.title}</strong>
             <span>{missionStepStateLabel(step.state)}</span>
+            {step.objective ? <p>{step.objective}</p> : null}
+            {step.dependsOnStepKeys?.length ? (
+              <p>
+                After {step.dependsOnStepKeys.length} earlier {step.dependsOnStepKeys.length === 1 ? "step" : "steps"}
+              </p>
+            ) : null}
             <p>{step.detail}</p>
           </li>
         ))}

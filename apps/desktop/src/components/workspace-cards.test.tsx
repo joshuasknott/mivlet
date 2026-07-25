@@ -207,6 +207,12 @@ describe("RunContextSummary", () => {
   it("shows durable multi-worker progress without exposing worker authority ids", () => {
     render(<MissionProgressSummary progress={{
       version: 1,
+      plan: {
+        title: "Compare approaches",
+        desiredOutcome: "Choose a practical direction.",
+        summary: "Develop two options, then compare them.",
+        maxParallelSteps: 2
+      },
       state: "running",
       summary: "Mission work is progressing within its declared limits.",
       runStatus: "running",
@@ -217,9 +223,9 @@ describe("RunContextSummary", () => {
       waitingSteps: 1,
       blockedSteps: 0,
       steps: [
-        { stepKey: "approach-a", title: "Practical approach", kind: "produce", state: "completed", detail: "The durable output is complete." },
-        { stepKey: "approach-b", title: "Alternative approach", kind: "produce", state: "running", detail: "Work is in progress." },
-        { stepKey: "combine", title: "Compare", kind: "coordinate", state: "waiting", detail: "Waiting for its declared dependencies." }
+        { stepKey: "approach-a", title: "Practical approach", objective: "Develop the practical option.", kind: "produce", dependsOnStepKeys: [], state: "completed", detail: "The durable output is complete." },
+        { stepKey: "approach-b", title: "Alternative approach", objective: "Develop a distinct alternative.", kind: "produce", dependsOnStepKeys: [], state: "running", detail: "Work is in progress." },
+        { stepKey: "combine", title: "Compare", objective: "Compare both options.", kind: "coordinate", dependsOnStepKeys: ["approach-a", "approach-b"], state: "waiting", detail: "Waiting for its declared dependencies." }
       ],
       usage: { records: 1, inputTokens: 120, outputTokens: 80, toolCalls: 0, durationMs: 1250, costObservations: [] },
       budget: { maxWorkers: 2, maxInputTokens: 32_000, maxOutputTokens: 4_096, maxToolCalls: 0, maxDurationMs: 180_000, maxAttempts: 1 },
@@ -234,8 +240,13 @@ describe("RunContextSummary", () => {
       nextAction: "Wait for current bounded work to settle."
     }} />);
     const progress = screen.getByLabelText("Mission progress");
+    expect(progress).toHaveTextContent("Compare approaches");
+    expect(progress).toHaveTextContent("Choose a practical direction.");
+    expect(progress).toHaveTextContent("Develop two options, then compare them.");
     expect(progress).toHaveTextContent("1 of 3 steps · In progress");
     expect(progress).toHaveTextContent("Practical approachComplete");
+    expect(progress).toHaveTextContent("Develop the practical option.");
+    expect(progress).toHaveTextContent("After 2 earlier steps");
     expect(progress).toHaveTextContent("200 tokens observed");
     expect(progress).toHaveTextContent("0 connected actions");
     expect(progress).toHaveTextContent("Not evaluated: Both approaches reach the comparison.");

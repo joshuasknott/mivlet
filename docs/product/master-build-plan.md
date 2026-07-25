@@ -932,10 +932,14 @@ limit, totals only durable usage records, retains exact cost observations, and
 projects policy/human/worker acceptance as evaluated or explicitly unevaluated.
 Unknown workers, duplicate terminal facts, out-of-Plan work, malformed usage,
 ambiguous evaluation, and unavailable dependencies fail closed. The current
-parallel desktop journey publishes this compact calm receipt after the durable
-join, worker settlement, optional reviewer, and terminal boundaries. Browser
-preview returns no synthetic progress. This is inspectability, not automatic
-execution authority.
+desktop receipt now includes the selected Mission goal, desired outcome, Plan
+summary, step objectives, dependency counts, and parallel bound alongside live
+or rehydrated progress. The renderer receives no internal Plan, worker,
+provider, grant, owner, or authority identifiers; dependency identities are
+rendered only as calm counts. General conversation and Project activity
+surfaces publish the same native-derived card before execution and after reopen.
+Browser preview returns no synthetic progress. This is inspectability, not
+automatic execution authority.
 
 A native-owned bounded advance command now removes renderer orchestration from
 the deterministic part of that graph. Given only an authenticated run id, one

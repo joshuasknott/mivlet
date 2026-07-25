@@ -516,18 +516,6 @@ fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>
     if !declared_general_graph(&authorized.lifecycle) {
         return Ok(None);
     }
-    if authorized.journal.run.get("status").and_then(Value::as_str) != Some("running")
-        || authorized
-            .journal
-            .run
-            .get("executionDepth")
-            .and_then(Value::as_str)
-            != Some("multi-worker")
-    {
-        return Err(
-            "Native Mission reviewer selection requires one running multi-worker Run.".into(),
-        );
-    }
     let criteria = authorized
         .lifecycle
         .mission
@@ -578,6 +566,18 @@ fn derive_reviewer_selection(authorized: &AuthorizedRun) -> Result<Option<Value>
             );
         }
         return Ok(None);
+    }
+    if authorized.journal.run.get("status").and_then(Value::as_str) != Some("running")
+        || authorized
+            .journal
+            .run
+            .get("executionDepth")
+            .and_then(Value::as_str)
+            != Some("multi-worker")
+    {
+        return Err(
+            "Native Mission reviewer selection requires one running multi-worker Run.".into(),
+        );
     }
     let review = review_steps.first().copied().ok_or_else(|| {
         "Worker-evaluated acceptance requires a declared review step.".to_string()
@@ -3570,6 +3570,13 @@ fn mission_progress_projection(
             "Mission step title",
             400,
         )?;
+        let objective = bounded(
+            step.get("objective")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "Selected plan step objective is invalid.".to_string())?,
+            "Mission step objective",
+            2_000,
+        )?;
         let kind = bounded(
             step.get("kind")
                 .and_then(Value::as_str)
@@ -3684,7 +3691,9 @@ fn mission_progress_projection(
         projected_steps.push(json!({
             "stepKey":step_key,
             "title":title,
+            "objective":objective,
             "kind":kind,
+            "dependsOnStepKeys":dependencies,
             "state":state,
             "detail":detail
         }));
@@ -3926,8 +3935,41 @@ fn mission_progress_projection(
     } else {
         None
     };
+    let plan_title = bounded(
+        lifecycle
+            .mission
+            .pointer("/outcome/title")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission outcome title is invalid.".to_string())?,
+        "Mission outcome title",
+        400,
+    )?;
+    let desired_outcome = bounded(
+        lifecycle
+            .mission
+            .pointer("/outcome/desiredOutcome")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Mission desired outcome is invalid.".to_string())?,
+        "Mission desired outcome",
+        2_000,
+    )?;
+    let plan_summary = bounded(
+        lifecycle
+            .current_revision
+            .get("summary")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Selected plan summary is invalid.".to_string())?,
+        "Selected plan summary",
+        2_000,
+    )?;
     Ok(json!({
         "version":1,
+        "plan":{
+            "title":plan_title,
+            "desiredOutcome":desired_outcome,
+            "summary":plan_summary,
+            "maxParallelSteps":max_parallel
+        },
         "state":state,
         "summary":summary,
         "runStatus":run_status,
@@ -5135,6 +5177,10 @@ mod tests {
     fn progress_projection_derives_ready_work_usage_and_terminal_acceptance() {
         let lifecycle = mission_plan::MissionPlanLifecycleRow {
             mission: json!({
+                "outcome":{
+                    "title":"Compare approaches",
+                    "desiredOutcome":"Choose a practical direction."
+                },
                 "acceptance":{"criteria":[{
                     "key":"both","description":"Both approaches are present.",
                     "required":true,"evaluator":"policy"
@@ -5143,11 +5189,16 @@ mod tests {
             plan: json!({}),
             current_revision: json!({
                 "id":"revision-progress",
+                "summary":"Develop two options, then compare them.",
                 "bounds":{"maxParallelSteps":2},
                 "steps":[
-                    {"key":"approach-a","kind":"compose","title":"Approach A","dependsOnStepKeys":[]},
-                    {"key":"approach-b","kind":"compose","title":"Approach B","dependsOnStepKeys":[]},
-                    {"key":"combine","kind":"coordinate","title":"Combine","dependsOnStepKeys":["approach-a","approach-b"]}
+                    {"key":"approach-a","kind":"compose","title":"Approach A",
+                        "objective":"Develop the practical option.","dependsOnStepKeys":[]},
+                    {"key":"approach-b","kind":"compose","title":"Approach B",
+                        "objective":"Develop a distinct alternative.","dependsOnStepKeys":[]},
+                    {"key":"combine","kind":"coordinate","title":"Combine",
+                        "objective":"Compare both options.",
+                        "dependsOnStepKeys":["approach-a","approach-b"]}
                 ]
             }),
         };
@@ -5180,6 +5231,23 @@ mod tests {
         };
         let progress = mission_progress_projection(&lifecycle, &journal).unwrap();
         assert_eq!(progress.get("state").and_then(Value::as_str), Some("ready"));
+        assert_eq!(
+            progress.pointer("/plan/title").and_then(Value::as_str),
+            Some("Compare approaches")
+        );
+        assert_eq!(
+            progress
+                .pointer("/steps/2/objective")
+                .and_then(Value::as_str),
+            Some("Compare both options.")
+        );
+        assert_eq!(
+            progress
+                .pointer("/steps/2/dependsOnStepKeys")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(2)
+        );
         assert_eq!(
             progress.pointer("/steps/0/state").and_then(Value::as_str),
             Some("completed")
@@ -5432,7 +5500,8 @@ mod tests {
                 "id":"mission-general","status":"running",
                 "workspaceId":"workspace-1","visibility":"member-private",
                 "ownerMemberId":"member-1","authority":"local",
-                "outcome":{"deliverables":[{
+                "outcome":{"title":"Final brief","desiredOutcome":"Create the final brief.",
+                "deliverables":[{
                     "key":"final","description":"the final brief","required":true
                 }]},
                 "acceptance":{"requiresHumanAcceptance":false,"criteria":[{
@@ -5444,9 +5513,11 @@ mod tests {
             plan: json!({}),
             current_revision: json!({
                 "id":"revision-general",
+                "summary":"Produce the final brief.",
                 "bounds":{"maxParallelSteps":1},
                 "steps":[{
                     "key":"final","kind":"produce","title":"Final brief",
+                    "objective":"Produce the final brief.",
                     "dependsOnStepKeys":[],
                     "expectedOutputs":[{
                         "key":"final","description":"the final brief","required":true
@@ -5574,6 +5645,7 @@ mod tests {
             .unwrap()
             .push(json!({
                 "key":"alternate","kind":"produce","title":"Alternate",
+                "objective":"Produce an alternate final brief.",
                 "dependsOnStepKeys":[],
                 "expectedOutputs":[{
                     "key":"final","description":"the final brief","required":true

@@ -3425,6 +3425,12 @@ export interface RuntimeMissionHumanEvaluationInput {
 
 export interface RuntimeMissionProgress {
   version: 1;
+  plan?: {
+    title: string;
+    desiredOutcome: string;
+    summary: string;
+    maxParallelSteps: number;
+  };
   state: "ready" | "running" | "waiting" | "blocked" | "complete" | "cancelled";
   summary: string;
   runStatus: Spine.Missions.RunStatus;
@@ -3437,7 +3443,9 @@ export interface RuntimeMissionProgress {
   steps: Array<{
     stepKey: string;
     title: string;
+    objective?: string;
     kind: Spine.Missions.PlanStepKind;
+    dependsOnStepKeys?: string[];
     state: "pending" | "ready" | "running" | "waiting" | "completed" | "partial" | "failed" | "blocked" | "cancelled";
     detail: string;
   }>;
