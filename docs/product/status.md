@@ -140,7 +140,7 @@ This is the factual state of the repo, not the product pitch. Claims below were 
 | Non-Windows Packaging & CI Keychain | **Missing** | Release builds only support Windows (unsigned). macOS/Linux packaging and CI keychain test runners are missing. |
 | Native voice providers, Convex collaboration | **Mixed** | Dictation still depends on the host Web Speech API. Convex now has hosted membership lifecycle, config-gated hash-only verified-email invitation creation and acceptance, a capability-projected member roster, member role/status/removal controls, and shared-project revision history plus an authenticated native encrypted cache/outbox adapter. Workspace Settings can create, list, and accept invitations and manage eligible members without exposing hosted member authority or fabricating preview data; realtime desktop consumption, deployment, and live multi-member validation remain open. |
 
-Performance regression gates are repository-local and current as of 25 July 2026. Windows CI and `pnpm check` enforce measured byte ceilings for the desktop bundle, CSS, initial entry, and current lazy product routes, then run bounded connector, Knowledge, encrypted-store/cache, and scheduler-queue fixtures. React and its scheduler/query bridges no longer form a circular vendor split. The 681 KiB initial entry is recorded honestly and remains an optimization target. Packaged cold-start, comparable RSS, live-provider streaming, and long private soak performance are not validated.
+Performance regression gates are repository-local and current as of 25 July 2026. Windows CI and `pnpm check` enforce measured byte ceilings for the desktop bundle, CSS, initial entry, and current lazy product routes, then run bounded connector, Knowledge, encrypted-store/cache, and scheduler-queue fixtures. React and its scheduler/query bridges no longer form a circular vendor split. The initial entry remains above Vite's 600 KiB advisory threshold, stays within Fable's explicit repository budget, and remains an optimization target. Packaged cold-start, comparable RSS, live-provider streaming, and long private soak performance are not validated.
 
 Unsigned Windows distribution has a repository-owned private artifact lane. Manual dispatch builds MSI and NSIS after the full gate, records exact checksums and explicit unsigned/unpublished state in a deterministic private/internal/preview manifest, generates matching release notes, and rehearses clean NSIS install, same-version repair, uninstall registration, and local-data preservation on a disposable runner. The manifest refuses `public`; no release, updater, signing, or download hosting is created. A real previous-version upgrade/rollback, packaged first launch, vault/keyring continuity, signing, and private soak remain manual gates.
 
@@ -357,11 +357,32 @@ role state at the pre-paint roster boundary using stable roster facts, so a
 freshly rendered Remove action cannot race a delayed passive reset. The focused
 member suite passes repeatedly and the complete desktop suite remains green.
 
-## Repository Verification (2026-07-24)
+## General Mission Status Reconciliation (2026-07-25)
+
+The latest focused Mission slices supersede the earlier open clauses above about
+automatic general worker creation, provider-route dispatch, checkpoint
+restoration, restart orchestration, and successful reviewed-result artifact
+materialization. The bounded `/mission` composer now creates two-to-six
+provider workers, persists their selected graph, resolves and records an exact
+no-fallback route at execution time, checkpoints before egress, dispatches
+ready batches concurrently, restores interrupted provider-only work from the
+exact encrypted checkpoint, and materializes required accepted deliverables
+inside terminal settlement after identified-human review. Native progress
+projection exposes the selected plan without renderer-authored authority, and
+cooperative cancellation terminalizes both fresh and restarted general runs.
+
+Those completions do not close broader Mission work. Tool-bearing checkpoint
+recovery, arbitrary graph authoring, repeated iteration, automatic escalation,
+production policy/reviewer-worker evaluation, cross-Mission handoffs, and
+packaged/live-provider observation remain open. The existing cited and
+benchmark-shaped journeys also retain their narrower contracts where the
+general path has not yet replaced them.
+
+## Repository Verification (2026-07-25)
 
 The complete repository-local gate is green on this Windows checkout:
 `pnpm check`, `pnpm lint`, `cargo fmt --check`, `cargo test`, and
-`cargo clippy --all-targets -- -D warnings`. The native suite reports 802
+`cargo clippy --all-targets -- -D warnings`. The native suite reports 809
 passing tests. Its one ignored test is the deliberately opt-in live Google
 contract and still requires `FABLE_GOOGLE_LIVE_TEST` plus real external
 configuration; it is not counted as repository-local validation.
