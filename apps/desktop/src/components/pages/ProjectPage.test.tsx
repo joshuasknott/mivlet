@@ -405,6 +405,7 @@ describe("ProjectPage", () => {
       <ProjectPage
         project={{ ...project, lifecycle: "archived" }}
         knowledge={{ ...emptyKnowledge, error: "Project knowledge could not be loaded.", refresh }}
+        activity={projectActivity}
         onSaveGuidance={vi.fn()}
         onReload={vi.fn()}
         onNewChat={vi.fn()}
@@ -413,6 +414,9 @@ describe("ProjectPage", () => {
     );
     expect(screen.getByText("Read only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add files" })).not.toBeInTheDocument();
+    expect(screen.getByText("Project conversation · Read only")).toBeInTheDocument();
+    expect(screen.getByText("Prepare launch").closest("button")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("could not be loaded");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(refresh).toHaveBeenCalledTimes(1);

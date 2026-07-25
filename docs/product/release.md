@@ -133,7 +133,9 @@ stored in React state, snapshots, logs, or JSON metadata.
   only. Project Artifacts open immutable versions, private review state,
   citations, exact-version export, and explicitly confirmed same-owner private
   Project handoff through the same detail contract as Knowledge. Archived
-  Project Mission history and direct Project Mission lifecycle controls remain
+  Projects retain their exact durable private conversations and bounded Mission
+  summaries as non-interactive history; they cannot reopen the composer or any
+  Project mutation control. Direct Project Mission lifecycle controls remain
   open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider

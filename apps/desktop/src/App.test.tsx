@@ -779,6 +779,67 @@ describe("Fable home", () => {
     expect(screen.queryByRole("heading", { name: "Roadmap" })).not.toBeInTheDocument();
   });
 
+  it("shows archived Project conversations and Mission history without reopening a write path", async () => {
+    runtimeMocks.projectRecords = [{
+      id: "project-archive",
+      title: "Archived roadmap",
+      description: "Historical project.",
+      instructions: "Retain the evidence.",
+      lifecycle: "archived",
+      revision: 4
+    }];
+    runtimeMocks.conversationThreads = [{
+      id: "thread-archive",
+      projectId: "project-archive",
+      title: "Historical thread",
+      lifecycle: "active",
+      updatedAt: "2026-07-11T10:00:00Z",
+      messageHead: { lastSequence: 2 }
+    }];
+    vi.mocked(listRuntimeThreadMissionProgress).mockResolvedValue({
+      progress: [{
+        runId: "run-archive",
+        progress: {
+          version: 1,
+          state: "complete",
+          summary: "Historical Mission result",
+          runStatus: "completed",
+          completedSteps: 2,
+          totalSteps: 2,
+          runningWorkers: 0,
+          readyWorkers: 0,
+          waitingSteps: 0,
+          blockedSteps: 0,
+          steps: [],
+          usage: {
+            records: 2,
+            inputTokens: 20,
+            outputTokens: 10,
+            toolCalls: 0,
+            durationMs: 50,
+            costObservations: []
+          },
+          budget: {},
+          acceptance: [],
+          nextAction: "No further action."
+        }
+      }],
+      unavailableCount: 0,
+      truncated: false
+    });
+
+    await renderWorkspace();
+    fireEvent.click(screen.getByRole("button", { name: "Archived (1)" }));
+    fireEvent.click(screen.getByRole("button", { name: "Archived roadmap" }));
+
+    expect(await screen.findByRole("heading", { name: "Archived roadmap" })).toBeInTheDocument();
+    expect(screen.getByText("Project conversation · Read only")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Historical thread" })).not.toBeInTheDocument();
+    expect(await screen.findByText("Historical Mission result")).toBeInTheDocument();
+    expect(screen.getByText("Historical Mission result").closest("button")).toBeNull();
+    expect(listRuntimeThreadMissionProgress).toHaveBeenCalledWith("thread-archive", 6);
+  });
+
   it("exercises real WorkspaceSidebar project lifecycle, grouping, and thread placement controls", async () => {
     // Direct render of the shipped component (per audit requirement) with real ThreadSummary data.
     const sampleThread: ThreadSummary = {

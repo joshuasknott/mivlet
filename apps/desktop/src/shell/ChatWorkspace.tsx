@@ -459,9 +459,13 @@ export function ChatWorkspace() {
       description: project.description ?? "",
       instructions: project.instructions ?? "",
       lifecycle: "archived" as const,
-      threads: []
+      threads: durableThreads.filter((thread) =>
+        durableConversation.state.threads.some(
+          (record) => record.id === thread.id && record.projectId === project.id
+        )
+      )
     })),
-    [projectStore.archivedProjects]
+    [durableConversation.state.threads, durableThreads, projectStore.archivedProjects]
   );
   const selectedProject = useMemo(
     () => selectedProjectId

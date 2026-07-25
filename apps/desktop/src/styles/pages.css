@@ -225,7 +225,8 @@
   gap: 3px;
 }
 
-.project-page__thread-list button {
+.project-page__thread-list button,
+.project-page__thread-list > div {
   display: grid;
   gap: 3px;
   width: 100%;

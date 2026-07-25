@@ -392,11 +392,16 @@ export function ProjectPage({
         </div>
         {project.threads.length > 0 ? (
           <div className="project-page__thread-list">
-            {project.threads.map((thread) => (
+            {project.threads.map((thread) => project.lifecycle === "active" ? (
               <button key={thread.id} type="button" onClick={() => onSelectThread(thread)}>
                 <strong>{thread.title}</strong>
                 <span>{thread.description}</span>
               </button>
+            ) : (
+              <div key={thread.id}>
+                <strong>{thread.title}</strong>
+                <span>{thread.description} · Read only</span>
+              </div>
             ))}
           </div>
         ) : <p className="project-page__empty">No conversations yet.</p>}
@@ -437,7 +442,7 @@ export function ProjectPage({
                       const thread = project.threads.find((candidate) => candidate.id === mission.threadId);
                       return (
                         <li key={mission.runId}>
-                          {thread ? (
+                          {thread && project.lifecycle === "active" ? (
                             <button type="button" onClick={() => onSelectThread(thread)}>
                               <strong>{mission.title}</strong>
                               <span>{mission.state} · {mission.detail}</span>
