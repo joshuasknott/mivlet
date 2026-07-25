@@ -164,13 +164,29 @@ record!(PreferenceRecord {
     value: Value,
 });
 
-record!(ProjectRecord {
-    id: String,
-    title_fingerprint: String,
-    created_at: String,
-    updated_at: String,
-    payload: Value,
-});
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectRecord {
+    pub id: String,
+    pub title_fingerprint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by_internal_user_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schema_version: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+    pub payload: Value,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -178,19 +194,41 @@ pub struct ThreadRecord {
     pub id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lifecycle: Option<String>,
     pub created_at: String,
     pub updated_at: String,
     pub payload: Value,
 }
 
-record!(MessageRecord {
-    id: String,
-    thread_id: String,
-    role: String,
-    seq: i64,
-    created_at: String,
-    payload: Value,
-});
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageRecord {
+    pub id: String,
+    pub thread_id: String,
+    pub role: String,
+    pub seq: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<i64>,
+    pub created_at: String,
+    pub payload: Value,
+}
 
 record!(RunRecord {
     id: String,
@@ -1038,14 +1076,23 @@ fn read_sections(
         conn,
         store,
         "project",
-        "SELECT id, title_fingerprint, created_at, updated_at, payload, payload_nonce
+        "SELECT id,title_fingerprint,authority,visibility,owner_member_id,
+                created_by_internal_user_id,schema_version,revision,lifecycle,
+                created_at,updated_at,payload,payload_nonce
          FROM project WHERE workspace_id=?1 ORDER BY id;",
         &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "titleFingerprint", Cast::Text),
-            (2, "createdAt", Cast::Text),
-            (3, "updatedAt", Cast::Text),
+            (2, "authority", Cast::Text),
+            (3, "visibility", Cast::Text),
+            (4, "ownerMemberId", Cast::NullableText),
+            (5, "createdByInternalUserId", Cast::NullableText),
+            (6, "schemaVersion", Cast::Int),
+            (7, "revision", Cast::Int),
+            (8, "lifecycle", Cast::Text),
+            (9, "createdAt", Cast::Text),
+            (10, "updatedAt", Cast::Text),
         ],
     )?
     .into_iter()
@@ -1056,14 +1103,21 @@ fn read_sections(
         conn,
         store,
         "thread",
-        "SELECT t.id, t.project_id, t.created_at, t.updated_at, t.payload, t.payload_nonce
+        "SELECT t.id,t.project_id,t.title,t.authority,t.visibility,t.owner_member_id,
+                t.revision,t.lifecycle,t.created_at,t.updated_at,t.payload,t.payload_nonce
          FROM thread t WHERE t.workspace_id=?1 ORDER BY t.project_id, t.id;",
         &[&workspace_id],
         &[
             (0, "id", Cast::Text),
             (1, "projectId", Cast::NullableText),
-            (2, "createdAt", Cast::Text),
-            (3, "updatedAt", Cast::Text),
+            (2, "title", Cast::Text),
+            (3, "authority", Cast::Text),
+            (4, "visibility", Cast::Text),
+            (5, "ownerMemberId", Cast::NullableText),
+            (6, "revision", Cast::Int),
+            (7, "lifecycle", Cast::Text),
+            (8, "createdAt", Cast::Text),
+            (9, "updatedAt", Cast::Text),
         ],
     )?
     .into_iter()
@@ -1074,7 +1128,8 @@ fn read_sections(
         conn,
         store,
         "message",
-        "SELECT m.id, m.thread_id, m.kind, m.seq, m.created_at, m.payload, m.payload_nonce
+        "SELECT m.id,m.thread_id,m.kind,m.seq,m.authority,m.visibility,
+                m.owner_member_id,m.revision,m.created_at,m.payload,m.payload_nonce
          FROM message m WHERE m.workspace_id=?1 ORDER BY m.thread_id, m.seq, m.id;",
         &[&workspace_id],
         &[
@@ -1082,7 +1137,11 @@ fn read_sections(
             (1, "threadId", Cast::Text),
             (2, "role", Cast::Text),
             (3, "seq", Cast::Int),
-            (4, "createdAt", Cast::Text),
+            (4, "authority", Cast::Text),
+            (5, "visibility", Cast::Text),
+            (6, "ownerMemberId", Cast::NullableText),
+            (7, "revision", Cast::Int),
+            (8, "createdAt", Cast::Text),
         ],
     )?
     .into_iter()
@@ -2904,6 +2963,22 @@ fn apply_portable_routines(
     Ok(())
 }
 
+fn active_private_import_owner(tx: &Connection, workspace_id: &str) -> Result<(String, String)> {
+    let context =
+        crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(
+            tx,
+        )?;
+    if context.active_workspace.local_workspace_id != workspace_id {
+        return Err(StoreError::Invalid(
+            "Private archive import requires the active workspace.".into(),
+        ));
+    }
+    let member_id = context.member_id.ok_or_else(|| {
+        StoreError::Invalid("Private archive import requires an active workspace member.".into())
+    })?;
+    Ok((context.internal_user_id, member_id))
+}
+
 fn plan_and_apply(
     tx: &Connection,
     store: &Store,
@@ -2992,19 +3067,67 @@ fn plan_and_apply(
                 return Ok(());
             }
             let sealed = store.seal_json_owned(&r.payload, &format!("project:{}", r.id))?;
-            tx.execute(
-                "INSERT INTO project (id, workspace_id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
-                rusqlite::params![
-                    r.id,
-                    workspace_id,
-                    r.title_fingerprint,
-                    r.created_at,
-                    r.updated_at,
-                    sealed.ciphertext,
-                    sealed.nonce
-                ],
-            )?;
+            if let Some(owner_member_id) = r.owner_member_id.as_deref() {
+                let (active_internal_user_id, active_member_id) =
+                    active_private_import_owner(tx, workspace_id)?;
+                if r.authority.as_deref() != Some("local")
+                    || r.visibility.as_deref() != Some("member-private")
+                    || owner_member_id != active_member_id
+                    || r.created_by_internal_user_id.as_deref()
+                        != Some(active_internal_user_id.as_str())
+                    || r.schema_version.is_none_or(|version| version < 1)
+                    || r.revision.is_none_or(|revision| revision < 1)
+                    || !matches!(r.lifecycle.as_deref(), Some("active" | "archived"))
+                {
+                    return Err(StoreError::Invalid(
+                        "Project archive owner does not match the active private owner.".into(),
+                    ));
+                }
+                tx.execute(
+                    "INSERT INTO project(
+                       id,workspace_id,title_fingerprint,authority,visibility,owner_member_id,
+                       created_by_internal_user_id,schema_version,revision,lifecycle,
+                       created_at,updated_at,payload,payload_nonce
+                     ) VALUES (?1,?2,?3,'local','member-private',?4,?5,?6,?7,?8,?9,?10,?11,?12);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.title_fingerprint,
+                        owner_member_id,
+                        active_internal_user_id,
+                        r.schema_version,
+                        r.revision,
+                        r.lifecycle,
+                        r.created_at,
+                        r.updated_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            } else {
+                // Ownerless records are retained only for archives produced
+                // before private ownership was available. A current private
+                // project always has creator evidence, so removing only its
+                // owner id must fail closed instead of becoming a legacy row.
+                if r.created_by_internal_user_id.is_some() {
+                    return Err(StoreError::Invalid(
+                        "Project archive private authority is incomplete.".into(),
+                    ));
+                }
+                tx.execute(
+                    "INSERT INTO project (id, workspace_id, title_fingerprint, created_at, updated_at, payload, payload_nonce)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.title_fingerprint,
+                        r.created_at,
+                        r.updated_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            }
             Ok(())
         },
     )?;
@@ -3019,19 +3142,89 @@ fn plan_and_apply(
         report,
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("thread:{}", r.id))?;
-            tx.execute(
-                "INSERT INTO thread (id, workspace_id, project_id, created_at, updated_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7);",
-                rusqlite::params![
-                    r.id,
-                    workspace_id,
-                    r.project_id,
-                    r.created_at,
-                    r.updated_at,
-                    sealed.ciphertext,
-                    sealed.nonce
-                ],
-            )?;
+            if let Some(owner_member_id) = r.owner_member_id.as_deref() {
+                let (_, active_member_id) = active_private_import_owner(tx, workspace_id)?;
+                if owner_member_id != active_member_id
+                    || r.authority.as_deref() != Some("local")
+                    || r.visibility.as_deref() != Some("member-private")
+                    || r.revision.is_none_or(|revision| revision < 1)
+                    || !matches!(r.lifecycle.as_deref(), Some("active" | "archived"))
+                {
+                    return Err(StoreError::Invalid(
+                        "Conversation archive owner does not match the active private owner."
+                            .into(),
+                    ));
+                }
+                if let Some(project_id) = r.project_id.as_deref() {
+                    let exact_project: bool = tx.query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM project
+                           WHERE workspace_id=?1 AND id=?2 AND owner_member_id=?3
+                             AND authority='local' AND visibility='member-private'
+                             AND deleted_at IS NULL
+                         );",
+                        rusqlite::params![workspace_id, project_id, owner_member_id],
+                        |row| row.get(0),
+                    )?;
+                    if !exact_project {
+                        return Err(StoreError::Invalid(
+                            "Conversation archive references an unavailable private project."
+                                .into(),
+                        ));
+                    }
+                }
+                tx.execute(
+                    "INSERT INTO thread(
+                       id,workspace_id,project_id,title,authority,visibility,owner_member_id,
+                       revision,lifecycle,created_at,updated_at,payload,payload_nonce
+                     ) VALUES (?1,?2,?3,?4,'local','member-private',?5,?6,?7,?8,?9,?10,?11);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.project_id,
+                        r.title.as_deref().unwrap_or_default(),
+                        owner_member_id,
+                        r.revision,
+                        r.lifecycle,
+                        r.created_at,
+                        r.updated_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            } else {
+                let referenced_private_project = if let Some(project_id) = r.project_id.as_deref() {
+                    tx.query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM project
+                           WHERE workspace_id=?1 AND id=?2 AND owner_member_id IS NOT NULL
+                         );",
+                        rusqlite::params![workspace_id, project_id],
+                        |row| row.get::<_, bool>(0),
+                    )?
+                } else {
+                    false
+                };
+                if referenced_private_project {
+                    return Err(StoreError::Invalid(
+                        "Conversation archive private authority is incomplete.".into(),
+                    ));
+                }
+                tx.execute(
+                    "INSERT INTO thread (id, workspace_id, project_id, title, created_at, updated_at, payload, payload_nonce)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.project_id,
+                        r.title.as_deref().unwrap_or_default(),
+                        r.created_at,
+                        r.updated_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            }
             Ok(())
         },
     )?;
@@ -3046,22 +3239,79 @@ fn plan_and_apply(
         report,
         |tx, store, r| {
             let sealed = store.seal_json_owned(&r.payload, &format!("message:{}", r.id))?;
-            tx.execute(
-                "INSERT INTO message (id, workspace_id, thread_id, kind, seq, idempotency_key, current_revision_id, created_at, payload, payload_nonce)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);",
-                rusqlite::params![
-                    r.id,
-                    workspace_id,
-                    r.thread_id,
-                    r.role,
-                    r.seq,
-                    format!("portable:{}",r.id),
-                    format!("portable:{}",r.id),
-                    r.created_at,
-                    sealed.ciphertext,
-                    sealed.nonce
-                ],
-            )?;
+            if let Some(owner_member_id) = r.owner_member_id.as_deref() {
+                let (_, active_member_id) = active_private_import_owner(tx, workspace_id)?;
+                let exact_thread: bool = tx.query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM thread
+                       WHERE workspace_id=?1 AND id=?2 AND owner_member_id=?3
+                         AND authority='local' AND visibility='member-private'
+                         AND deleted_at IS NULL
+                     );",
+                    rusqlite::params![workspace_id, r.thread_id, owner_member_id],
+                    |row| row.get(0),
+                )?;
+                if owner_member_id != active_member_id
+                    || r.authority.as_deref() != Some("local")
+                    || r.visibility.as_deref() != Some("member-private")
+                    || r.revision.is_none_or(|revision| revision < 1)
+                    || !exact_thread
+                {
+                    return Err(StoreError::Invalid(
+                        "Message archive owner does not match its private conversation.".into(),
+                    ));
+                }
+                tx.execute(
+                    "INSERT INTO message(
+                       id,workspace_id,thread_id,kind,seq,idempotency_key,current_revision_id,
+                       authority,visibility,owner_member_id,revision,created_at,payload,payload_nonce
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,'local','member-private',?8,?9,?10,?11,?12);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.thread_id,
+                        r.role,
+                        r.seq,
+                        format!("portable:{}",r.id),
+                        format!("portable:{}",r.id),
+                        owner_member_id,
+                        r.revision,
+                        r.created_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            } else {
+                let referenced_private_thread: bool = tx.query_row(
+                    "SELECT EXISTS(
+                       SELECT 1 FROM thread
+                       WHERE workspace_id=?1 AND id=?2 AND owner_member_id IS NOT NULL
+                     );",
+                    rusqlite::params![workspace_id, r.thread_id],
+                    |row| row.get(0),
+                )?;
+                if referenced_private_thread {
+                    return Err(StoreError::Invalid(
+                        "Message archive private authority is incomplete.".into(),
+                    ));
+                }
+                tx.execute(
+                    "INSERT INTO message (id, workspace_id, thread_id, kind, seq, idempotency_key, current_revision_id, created_at, payload, payload_nonce)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10);",
+                    rusqlite::params![
+                        r.id,
+                        workspace_id,
+                        r.thread_id,
+                        r.role,
+                        r.seq,
+                        format!("portable:{}",r.id),
+                        format!("portable:{}",r.id),
+                        r.created_at,
+                        sealed.ciphertext,
+                        sealed.nonce
+                    ],
+                )?;
+            }
             Ok(())
         },
     )?;
@@ -4314,6 +4564,20 @@ mod tests {
                     "UPDATE thread SET owner_member_id='member-b' WHERE id='thread-b'",
                     [],
                 )?;
+                let message = source.seal_json_owned(
+                    &serde_json::json!({"text":"Project A note"}),
+                    "message:message-a",
+                )?;
+                tx.execute(
+                    "INSERT INTO message(
+                       id,workspace_id,thread_id,kind,seq,idempotency_key,current_revision_id,
+                       owner_member_id,created_at,payload,payload_nonce
+                     ) VALUES (
+                       'message-a','default','thread-a','user',1,'message-a','revision-a',
+                       'member-a','t',?1,?2
+                     )",
+                    rusqlite::params![message.ciphertext, message.nonce],
+                )?;
                 for (key, value) in [
                     (&project_a_document, serde_json::json!({"title":"A"})),
                     (&project_b_document, serde_json::json!({"title":"B"})),
@@ -4370,7 +4634,84 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![project_a_document.as_str()]
         );
+        assert_eq!(project_copy.sections.messages.len(), 1);
+        assert_eq!(
+            project_copy.sections.projects[0].owner_member_id.as_deref(),
+            Some("member-a")
+        );
+        assert_eq!(project_copy.sections.threads[0].title.as_deref(), Some("A"));
         assert!(export_project_for(&source, "default", "project-b").is_err());
+
+        let mut substituted = project_copy.clone();
+        substituted.sections.projects[0].owner_member_id = Some("member-b".into());
+        let rejected = store();
+        bind_member_owner(&rejected);
+        assert!(import_workspace(
+            &rejected,
+            &serde_json::to_string(&substituted).unwrap(),
+            ImportOptions::default()
+        )
+        .is_err());
+        assert_eq!(count(&rejected, "project"), 0);
+
+        let mut stripped = project_copy.clone();
+        stripped.sections.projects[0].owner_member_id = None;
+        let rejected = store();
+        bind_member_owner(&rejected);
+        assert!(import_workspace(
+            &rejected,
+            &serde_json::to_string(&stripped).unwrap(),
+            ImportOptions::default()
+        )
+        .is_err());
+        assert_eq!(count(&rejected, "project"), 0);
+
+        let destination = store();
+        bind_member_owner(&destination);
+        let report = import_workspace(
+            &destination,
+            &serde_json::to_string(&project_copy).unwrap(),
+            ImportOptions::default(),
+        )
+        .unwrap();
+        assert_eq!(report.inserted.get("projects"), Some(&1));
+        assert_eq!(report.inserted.get("threads"), Some(&1));
+        assert_eq!(report.inserted.get("messages"), Some(&1));
+        let restored = destination
+            .with_conn(|tx| {
+                crate::store::repos::project::get(
+                    tx,
+                    &destination,
+                    &workspace,
+                    "project-a",
+                    "member-a",
+                )
+            })
+            .unwrap()
+            .unwrap();
+        assert_eq!(restored.title, "Project A");
+        let restored_thread: (String, String) = destination
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT title,owner_member_id FROM thread WHERE id='thread-a'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(restored_thread, ("A".into(), "member-a".into()));
+        let restored_message_owner: String = destination
+            .with_conn(|tx| {
+                tx.query_row(
+                    "SELECT owner_member_id FROM message WHERE id='message-a'",
+                    [],
+                    |row| row.get(0),
+                )
+                .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(restored_message_owner, "member-a");
     }
 
     fn seed_portable_routine(store: &Store) {
@@ -5075,6 +5416,10 @@ mod tests {
             thread_id: "no-such-thread".into(),
             role: "user".into(),
             seq: 99,
+            authority: None,
+            visibility: None,
+            owner_member_id: None,
+            revision: None,
             created_at: "t".into(),
             payload: serde_json::json!({}),
         });

@@ -1,6 +1,6 @@
 # Release Readiness
 
-Last updated: 2026-07-24.
+Last updated: 2026-07-25.
 
 > **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. The current Clerk/Convex implementation is still a config-gated foundation, so the repository must not be presented as having completed that account requirement.
 
@@ -74,7 +74,7 @@ stored in React state, snapshots, logs, or JSON metadata.
 
 - Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, one-time Mission approval consumption, artifacts, Connections, and grants persist in `fable-vault.db` under schema v35.
 - Privacy settings can create and immediately verify a non-overwriting encrypted SQLite recovery backup. Raw backup restore requires the same OS-held vault key, is staged without replacing the live database, applies only at restart, preserves the prior database, and rolls back if the candidate cannot open or migrate. Provider and OAuth credentials are excluded and still require their own account recovery or reconnection. Portable workspace export is the separate credential-free cross-device path. Packaged installer/upgrade restore observation and any vault-key export or escrow decision remain release gates.
-- Portable workspace export and import are available in Privacy settings as a plaintext JSON copy. Native code derives the active authenticated workspace, validates integrity and secret absence, writes atomically only to a new link-free `.json` destination, and never overwrites. Import requires an exact confirmation, rejects linked, non-JSON, oversized, invalid, newer-format, or credential-shaped archives, and applies inside one rollback-safe transaction under skip-existing conflict handling. Workspace content never enters renderer state. Imported Connections, schedules, scheduled jobs, and active canonical Routines remain disabled or paused. Routine definitions, immutable versions, triggers, and occurrence history require the exact active owner/workspace/member; scheduler authority, leases, cursors, retries, and legacy-migration rollback evidence remain node-local and are excluded.
+- Portable workspace export and import are available in Privacy settings as a plaintext JSON copy. Native code derives the active authenticated workspace, validates integrity and secret absence, writes atomically only to a new link-free `.json` destination, and never overwrites. Import requires an exact confirmation, rejects linked, non-JSON, oversized, invalid, newer-format, or credential-shaped archives, and applies inside one rollback-safe transaction under skip-existing conflict handling. Workspace content never enters renderer state. Exact-owner Project copies preserve Project, conversation, and message ownership plus conversation titles only for the same active private member and original internal creator; substituted, stripped, or cross-owner current authority fails closed and cannot transfer ownership. Ownerless legacy archives gain no private authority. Imported Connections, schedules, scheduled jobs, and active canonical Routines remain disabled or paused. Routine definitions, immutable versions, triggers, and occurrence history require the exact active owner/workspace/member; scheduler authority, leases, cursors, retries, and legacy-migration rollback evidence remain node-local and are excluded.
 - Privacy settings also expose a secret-free local health report for storage, providers, Connections, MCP, Missions, Routines, queues, migrations, and sync. It returns only authenticated workspace-scoped states and counts from control columns and never includes content, paths, account identifiers, or credentials. Deployed monitoring and runtime-node telemetry remain open.
 - Privacy settings can pause new execution for the active workspace. The encrypted, revisioned control blocks new native-provider, local-model, ACP, Codex, approved MCP tool, Schedule, and Routine starts, and pause/resume transitions enter secret-safe action history. It does not undo external effects already accepted or replace the owning runtime's in-flight cancellation path.
 - Repository and Windows CI checks enforce the current desktop bundle, CSS, initial-entry, and lazy-route size budgets plus deterministic connector, Knowledge, encrypted-storage/cache, and scheduler-queue performance fixtures. The initial entry remains above Vite's 600 KiB advisory threshold and is an explicit optimization target. These checks are not evidence of packaged cold start, comparable RSS, live-provider streaming, or private long-run soak behavior.
@@ -120,9 +120,12 @@ stored in React state, snapshots, logs, or JSON metadata.
   and ambiguous legacy Projects, filters private documents before decryption,
   and excludes credentials, workspace/account settings, machine state, audit
   history, unrelated records, and external Artifact handoff authority.
-  Preserved-owner Project re-import, Project-level Connection configuration,
-  Activity mutation controls, archived Mission history, and full Artifact
-  detail remain open.
+  Re-import preserves Project, conversation, and message ownership plus
+  conversation titles only for the same active private member and original
+  internal creator; it rejects authority substitution or removal and never
+  transfers ownership. Project-level Connection configuration, Activity
+  mutation controls, archived Mission history, and full Artifact detail remain
+  open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary
