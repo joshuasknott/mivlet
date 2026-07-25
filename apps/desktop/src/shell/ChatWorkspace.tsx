@@ -2277,6 +2277,7 @@ export function ChatWorkspace() {
             <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
               <ProjectPage
                 project={selectedProject}
+                workspaceId={boundWorkspaceId ?? ""}
                 knowledge={projectKnowledgeView}
                 memory={projectMemoryView}
                 activity={projectActivity}

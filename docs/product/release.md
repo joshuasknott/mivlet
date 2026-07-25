@@ -110,7 +110,7 @@ stored in React state, snapshots, logs, or JSON metadata.
   Connection before ranking and context assembly. Live credential-backed
   observation, background synchronization, provider crawling, and
   project-scoped Connector ingestion remain release gates.
-- Project detail includes a bounded, read-only Activity summary for exact active
+- Project detail includes a bounded Activity summary for exact active
   Project conversation Mission runs, canonical project Routines, current
   project Artifacts, and workspace Connections referenced by those Routine
   triggers or Artifact evidence. Connection labels come only from the current
@@ -128,8 +128,13 @@ stored in React state, snapshots, logs, or JSON metadata.
   only opaque IDs, grants no capability, and filters connector context before
   ranking; native and MCP semantic reads independently require the resolved
   Connection to match that saved selection before grant use. Missing prior
-  choices stay visible for removal. Activity mutation controls, archived
-  Mission history, and full Artifact detail remain open.
+  choices stay visible for removal. Exact-revision native controls can pause,
+  resume, or delete a Project Routine, while archived Projects remain read
+  only. Project Artifacts open immutable versions, private review state,
+  citations, exact-version export, and explicitly confirmed same-owner private
+  Project handoff through the same detail contract as Knowledge. Archived
+  Project Mission history and direct Project Mission lifecycle controls remain
+  open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

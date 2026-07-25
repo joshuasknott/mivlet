@@ -5,6 +5,8 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { DownloadSimple } from "@phosphor-icons/react/dist/csr/DownloadSimple";
 import type { SourceStatus, ThreadSummary } from "@fable/protocol";
 import type { ProjectActivityView } from "../../hooks/useProjectActivity";
+import { getRuntimeArtifact, type RuntimeArtifactBundle } from "../../runtime";
+import { ArtifactDetail } from "../ArtifactDetail";
 import { PageHeader } from "../PageHeader";
 
 export interface ProjectPageRecord {
@@ -90,7 +92,8 @@ const EMPTY_PROJECT_ACTIVITY: ProjectActivityView = {
   loading: false,
   error: null,
   truncated: false,
-  refresh: async () => undefined
+  refresh: async () => undefined,
+  changeRoutine: async () => undefined
 };
 
 export function ProjectPage({
@@ -101,6 +104,7 @@ export function ProjectPage({
   onSelectThread,
   onExportCopy,
   onSaveConnections,
+  workspaceId = "",
   knowledge,
   memory = EMPTY_PROJECT_MEMORY,
   activity = EMPTY_PROJECT_ACTIVITY
@@ -112,6 +116,7 @@ export function ProjectPage({
   onSelectThread: (thread: ThreadSummary) => void;
   onExportCopy?: (destination: string) => Promise<boolean>;
   onSaveConnections?: (connectionIds: string[]) => Promise<void>;
+  workspaceId?: string;
   knowledge: ProjectKnowledgeView;
   memory?: ProjectMemoryView;
   activity?: ProjectActivityView;
@@ -137,6 +142,15 @@ export function ProjectPage({
   const [projectExportStatus, setProjectExportStatus] = useState("");
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("");
+  const [routineBusyId, setRoutineBusyId] = useState("");
+  const [activityStatus, setActivityStatus] = useState("");
+  const [artifactBundle, setArtifactBundle] = useState<RuntimeArtifactBundle | null>(null);
+  const [artifactId, setArtifactId] = useState("");
+  const [artifactVersionId, setArtifactVersionId] = useState("");
+  const [artifactError, setArtifactError] = useState("");
+  const artifactRequestRef = useRef(0);
+  const activeWorkspaceRef = useRef(workspaceId);
+  activeWorkspaceRef.current = workspaceId;
 
   useEffect(() => {
     setDescription(project.description);
@@ -156,6 +170,13 @@ export function ProjectPage({
     setProjectExportPath("");
     setProjectExportStatus("");
     setConnectionStatus("");
+    setRoutineBusyId("");
+    setActivityStatus("");
+    setArtifactBundle(null);
+    setArtifactId("");
+    setArtifactVersionId("");
+    setArtifactError("");
+    artifactRequestRef.current += 1;
   }, [project.id]);
 
   const runMemoryAction = async (id: string, action: () => Promise<unknown>) => {
@@ -204,6 +225,55 @@ export function ProjectPage({
         : "Fable could not save this Project's Connections."}`);
     } finally {
       setConnectionBusy(false);
+    }
+  };
+
+  const changeRoutine = async (
+    routine: ProjectActivityView["routines"][number],
+    action: "pause" | "resume" | "delete"
+  ) => {
+    if (action === "delete" && !window.confirm(`Delete “${routine.title}”?`)) return;
+    setRoutineBusyId(routine.id);
+    setActivityStatus("");
+    try {
+      await activity.changeRoutine(routine, action);
+      setActivityStatus(action === "delete"
+        ? "Routine deleted."
+        : `Routine ${action === "pause" ? "paused" : "resumed"}.`);
+    } catch (cause) {
+      setActivityStatus(`!${cause instanceof Error
+        ? cause.message
+        : "Fable could not change that Routine."}`);
+    } finally {
+      setRoutineBusyId("");
+    }
+  };
+
+  const openArtifact = async (nextArtifactId: string) => {
+    if (artifactId === nextArtifactId) {
+      artifactRequestRef.current += 1;
+      setArtifactId("");
+      setArtifactBundle(null);
+      setArtifactError("");
+      return;
+    }
+    const request = ++artifactRequestRef.current;
+    setArtifactId(nextArtifactId);
+    setArtifactBundle(null);
+    setArtifactError("");
+    try {
+      const bundle = await getRuntimeArtifact(nextArtifactId);
+      if (request !== artifactRequestRef.current) return;
+      if (!bundle || bundle.artifact.context.projectId !== project.id) {
+        throw new Error("This Artifact is no longer available in this Project.");
+      }
+      setArtifactBundle(bundle);
+      setArtifactVersionId(bundle.currentVersion.id);
+    } catch (cause) {
+      if (request !== artifactRequestRef.current) return;
+      setArtifactError(cause instanceof Error
+        ? cause.message
+        : "Fable could not open that Artifact.");
     }
   };
 
@@ -396,6 +466,28 @@ export function ProjectPage({
                         <div>
                           <strong>{routine.title}</strong>
                           <span>{routine.status} · {routine.detail}</span>
+                          {project.lifecycle === "active" ? (
+                            <span className="project-activity__actions">
+                              {routine.lifecycle === "active" ? (
+                                <button
+                                  type="button"
+                                  disabled={routineBusyId === routine.id}
+                                  onClick={() => void changeRoutine(routine, "pause")}
+                                >Pause</button>
+                              ) : routine.lifecycle === "paused" ? (
+                                <button
+                                  type="button"
+                                  disabled={routineBusyId === routine.id}
+                                  onClick={() => void changeRoutine(routine, "resume")}
+                                >Resume</button>
+                              ) : null}
+                              <button
+                                type="button"
+                                disabled={routineBusyId === routine.id}
+                                onClick={() => void changeRoutine(routine, "delete")}
+                              >Delete</button>
+                            </span>
+                          ) : null}
                         </div>
                       </li>
                     ))}
@@ -409,16 +501,43 @@ export function ProjectPage({
                   <ul aria-label="Project Artifacts">
                     {activity.artifacts.map((artifact) => (
                       <li key={artifact.id}>
-                        <div>
+                        <button
+                          type="button"
+                          aria-expanded={artifactId === artifact.id}
+                          onClick={() => void openArtifact(artifact.id)}
+                        >
                           <strong>{artifact.title}</strong>
                           <span>{artifact.status} · {artifact.detail}</span>
-                        </div>
+                        </button>
                       </li>
                     ))}
                   </ul>
                 ) : <p className="project-page__empty">No Artifacts yet.</p>}
               </div>
             </div>
+            {activityStatus ? (
+              <p
+                className="project-activity__state"
+                role={activityStatus.startsWith("!") ? "alert" : "status"}
+              >{activityStatus.replace(/^!/, "")}</p>
+            ) : null}
+            {artifactId ? (
+              <div className="project-activity__artifact">
+                {artifactBundle ? (
+                  <ArtifactDetail
+                    bundle={artifactBundle}
+                    selectedVersionId={artifactVersionId || artifactBundle.currentVersion.id}
+                    activeWorkspaceId={workspaceId}
+                    activeWorkspaceRef={activeWorkspaceRef}
+                    onSelectVersion={setArtifactVersionId}
+                  />
+                ) : artifactError ? (
+                  <p role="alert">{artifactError}</p>
+                ) : (
+                  <p role="status">Opening Artifact…</p>
+                )}
+              </div>
+            ) : null}
 
             <div className="project-activity__connections">
               <div className="project-activity__connections-heading">

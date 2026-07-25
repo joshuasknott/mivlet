@@ -3,16 +3,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  deleteRuntimeRoutine,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
+  pauseRuntimeRoutine,
+  resumeRuntimeRoutine,
   searchRuntimeArtifacts
 } from "../runtime";
 import { listRuntimeProjectConnectionOptions } from "../lib/project-runtime";
 import { useProjectActivity } from "./useProjectActivity";
 
 vi.mock("../runtime", () => ({
+  deleteRuntimeRoutine: vi.fn(),
   listRuntimeRoutines: vi.fn(),
   listRuntimeThreadMissionProgress: vi.fn(),
+  pauseRuntimeRoutine: vi.fn(),
+  resumeRuntimeRoutine: vi.fn(),
   searchRuntimeArtifacts: vi.fn()
 }));
 vi.mock("../lib/project-runtime", () => ({
@@ -75,7 +81,8 @@ beforeEach(() => {
       id: "routine-1",
       title: "Weekly launch check",
       status: "active",
-      currentVersion: 1
+      currentVersion: 1,
+      revision: 3
     },
     currentVersion: {},
     triggers: [{
@@ -139,6 +146,8 @@ describe("useProjectActivity", () => {
     }]);
     expect(result.current.routines[0]).toMatchObject({
       title: "Weekly launch check",
+      lifecycle: "active",
+      revision: 3,
       status: "Active",
       detail: "Runs from a project-used Connection"
     });
@@ -158,6 +167,28 @@ describe("useProjectActivity", () => {
       status: "Available",
       selectable: true
     }]);
+  });
+
+  it("uses exact Project and revision fences for Routine controls", async () => {
+    vi.mocked(pauseRuntimeRoutine).mockResolvedValue(null);
+    vi.mocked(resumeRuntimeRoutine).mockResolvedValue(null);
+    vi.mocked(deleteRuntimeRoutine).mockResolvedValue(null);
+    const { result } = renderHook(() => useProjectActivity({
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      connectionIds: [],
+      threads,
+      enabled: true
+    }), { wrapper: wrapper() });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await result.current.changeRoutine(result.current.routines[0]!, "pause");
+    expect(pauseRuntimeRoutine).toHaveBeenCalledWith({
+      projectId: "project-1",
+      routineId: "routine-1",
+      expectedRevision: 3,
+      reason: "Paused from Project activity."
+    });
   });
 
   it("shows a deliberately selected Project Connection before it is used", async () => {

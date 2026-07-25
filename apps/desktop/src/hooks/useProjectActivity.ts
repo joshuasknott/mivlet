@@ -5,8 +5,11 @@ import {
   listRuntimeProjectConnectionOptions
 } from "../lib/project-runtime";
 import {
+  deleteRuntimeRoutine,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
+  pauseRuntimeRoutine,
+  resumeRuntimeRoutine,
   searchRuntimeArtifacts,
   type RuntimeRoutineTriggerSpec
 } from "../runtime";
@@ -27,6 +30,8 @@ export interface ProjectActivityMission {
 export interface ProjectActivityRoutine {
   id: string;
   title: string;
+  lifecycle: string;
+  revision: number;
   status: string;
   detail: string;
 }
@@ -58,6 +63,10 @@ export interface ProjectActivityView {
   error: string | null;
   truncated: boolean;
   refresh: () => void | Promise<unknown>;
+  changeRoutine: (
+    routine: ProjectActivityRoutine,
+    action: "pause" | "resume" | "delete"
+  ) => Promise<void>;
 }
 
 export interface UseProjectActivityOptions {
@@ -142,6 +151,8 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
         .map((bundle) => ({
           id: bundle.routine.id,
           title: bundle.routine.title,
+          lifecycle: bundle.routine.status,
+          revision: bundle.routine.revision,
           status: routineStatusLabel(bundle.routine.status),
           detail: routineTriggerLabel(bundle.triggers[0]?.spec)
         }));
@@ -216,6 +227,21 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     () => queryClient.invalidateQueries({ queryKey }),
     [queryClient, queryKey]
   );
+  const changeRoutine = useCallback(async (
+    routine: ProjectActivityRoutine,
+    action: "pause" | "resume" | "delete"
+  ) => {
+    const input = {
+      projectId,
+      routineId: routine.id,
+      expectedRevision: routine.revision,
+      ...(action === "pause" ? { reason: "Paused from Project activity." } : {})
+    };
+    if (action === "pause") await pauseRuntimeRoutine(input);
+    else if (action === "resume") await resumeRuntimeRoutine(input);
+    else await deleteRuntimeRoutine(input);
+    await queryClient.invalidateQueries({ queryKey });
+  }, [projectId, queryClient, queryKey]);
 
   useEffect(() => {
     if (!options.enabled) return;
@@ -233,7 +259,8 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     loading: options.enabled && query.isPending,
     error: query.error instanceof Error ? query.error.message : null,
     truncated: query.data?.truncated ?? false,
-    refresh
+    refresh,
+    changeRoutine
   };
 }
 

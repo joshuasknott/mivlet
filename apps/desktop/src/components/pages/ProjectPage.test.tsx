@@ -3,6 +3,18 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ProjectPage, type ProjectKnowledgeView, type ProjectMemoryView, type ProjectPageRecord } from "./ProjectPage";
 import type { ProjectActivityView } from "../../hooks/useProjectActivity";
+import { getRuntimeArtifact } from "../../runtime";
+
+vi.mock("../../runtime", () => ({
+  acceptRuntimeArtifactHandoff: vi.fn(),
+  exportRuntimeArtifact: vi.fn(),
+  getRuntimeArtifact: vi.fn(),
+  getRuntimeArtifactSourceProjectId: vi.fn(async () => null),
+  proposeRuntimeArtifactHandoff: vi.fn()
+}));
+vi.mock("../../lib/project-runtime", () => ({
+  listRuntimeProjects: vi.fn(async () => [])
+}));
 
 const project: ProjectPageRecord = {
   id: "project-1",
@@ -60,6 +72,8 @@ const projectActivity: ProjectActivityView = {
   routines: [{
     id: "routine-1",
     title: "Weekly launch check",
+    lifecycle: "active",
+    revision: 3,
     status: "Active",
     detail: "Weekly schedule"
   }],
@@ -83,7 +97,8 @@ const projectActivity: ProjectActivityView = {
   loading: false,
   error: null,
   truncated: false,
-  refresh: async () => undefined
+  refresh: async () => undefined,
+  changeRoutine: async () => undefined
 };
 
 describe("ProjectPage", () => {
@@ -211,6 +226,83 @@ describe("ProjectPage", () => {
     await user.click(screen.getByRole("button", { name: "Save Connections" }));
     await waitFor(() => expect(onSaveConnections).toHaveBeenCalledWith(["connection-1"]));
     expect(await screen.findByRole("status")).toHaveTextContent("Project Connections saved.");
+  });
+
+  it("changes a Project Routine through its exact revision-fenced action", async () => {
+    const user = userEvent.setup();
+    const changeRoutine = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={{ ...projectActivity, changeRoutine }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    await waitFor(() => expect(changeRoutine).toHaveBeenCalledWith(
+      projectActivity.routines[0],
+      "pause"
+    ));
+    expect(screen.getByRole("status")).toHaveTextContent("Routine paused.");
+  });
+
+  it("opens the complete exact Project Artifact detail", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getRuntimeArtifact).mockResolvedValue({
+      artifact: {
+        id: "artifact-1",
+        title: "Launch brief",
+        kind: "document",
+        status: "accepted",
+        context: { workspaceId: "workspace-1", projectId: "project-1" },
+        ownerMemberId: "member-1",
+        sourceProvenance: [],
+        reviews: [{
+          id: "review-1",
+          versionId: "version-1",
+          status: "accepted"
+        }]
+      },
+      currentVersion: {
+        id: "version-1",
+        version: 1,
+        content: { kind: "inline", text: "Approved launch copy." },
+        provenance: { kind: "run" },
+        citations: [{ id: "citation-1", label: "Release source" }]
+      },
+      versions: [{
+        id: "version-1",
+        version: 1,
+        content: { kind: "inline", text: "Approved launch copy." },
+        provenance: { kind: "run" },
+        citations: [{ id: "citation-1", label: "Release source" }]
+      }]
+    } as never);
+    render(
+      <ProjectPage
+        project={project}
+        workspaceId="workspace-1"
+        knowledge={emptyKnowledge}
+        activity={projectActivity}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: /Launch brief/i }));
+    const detail = await screen.findByRole("region", {
+      name: "Artifact details for Launch brief"
+    });
+    expect(detail).toHaveTextContent("Approved launch copy.");
+    expect(detail).toHaveTextContent("Review: Accepted");
+    expect(detail).toHaveTextContent("Release source");
   });
 
   it("surfaces project activity failures and retries the exact read", async () => {
