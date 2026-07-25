@@ -139,8 +139,10 @@ stored in React state, snapshots, logs, or JSON metadata.
   Project handoff through the same detail contract as Knowledge. Archived
   Projects retain their exact durable private conversations and bounded Mission
   summaries as non-interactive history; they cannot reopen the composer or any
-  Project mutation control. Direct Project Mission lifecycle controls remain
-  open.
+  Project mutation control. Each Mission exposes its bounded durable progress,
+  usage, budget, acceptance state, and next action. Active Projects can record
+  exact revision-fenced identified-human acceptance or needs-revision decisions;
+  Project-level cancellation and fresh rerun remain open.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

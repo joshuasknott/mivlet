@@ -8,6 +8,7 @@ import type { ProjectActivityView } from "../../hooks/useProjectActivity";
 import { getRuntimeArtifact, type RuntimeArtifactBundle } from "../../runtime";
 import { ArtifactDetail } from "../ArtifactDetail";
 import { PageHeader } from "../PageHeader";
+import { MissionProgressSummary } from "../workspace-cards";
 
 export interface ProjectPageRecord {
   id: string;
@@ -99,7 +100,8 @@ const EMPTY_PROJECT_ACTIVITY: ProjectActivityView = {
   error: null,
   truncated: false,
   refresh: async () => undefined,
-  changeRoutine: async () => undefined
+  changeRoutine: async () => undefined,
+  reviewMission: async () => undefined
 };
 
 export function ProjectPage({
@@ -149,6 +151,8 @@ export function ProjectPage({
   const [connectionBusy, setConnectionBusy] = useState(false);
   const [connectionStatus, setConnectionStatus] = useState("");
   const [routineBusyId, setRoutineBusyId] = useState("");
+  const [missionReviewBusy, setMissionReviewBusy] = useState("");
+  const [missionReviewErrors, setMissionReviewErrors] = useState<Record<string, string>>({});
   const [activityStatus, setActivityStatus] = useState("");
   const [artifactBundle, setArtifactBundle] = useState<RuntimeArtifactBundle | null>(null);
   const [artifactId, setArtifactId] = useState("");
@@ -182,6 +186,8 @@ export function ProjectPage({
     setProjectExportStatus("");
     setConnectionStatus("");
     setRoutineBusyId("");
+    setMissionReviewBusy("");
+    setMissionReviewErrors({});
     setActivityStatus("");
     setArtifactBundle(null);
     setArtifactId("");
@@ -262,6 +268,35 @@ export function ProjectPage({
         : "Fable could not change that Routine."}`);
     } finally {
       setRoutineBusyId("");
+    }
+  };
+
+  const reviewMission = async (
+    mission: ProjectActivityView["missions"][number],
+    criterionKey: string,
+    passed: boolean
+  ) => {
+    if (missionReviewBusy) return;
+    setMissionReviewBusy(`${mission.runId}:${criterionKey}`);
+    setMissionReviewErrors((current) => {
+      const next = { ...current };
+      delete next[mission.runId];
+      return next;
+    });
+    try {
+      await activity.reviewMission(mission, criterionKey, passed);
+      setActivityStatus(passed
+        ? "Mission acceptance recorded."
+        : "Mission revision requested.");
+    } catch (cause) {
+      setMissionReviewErrors((current) => ({
+        ...current,
+        [mission.runId]: cause instanceof Error
+          ? cause.message
+          : "Fable could not save this Mission review."
+      }));
+    } finally {
+      setMissionReviewBusy("");
     }
   };
 
@@ -510,6 +545,22 @@ export function ProjectPage({
                               <small>{mission.conversation}</small>
                             </div>
                           )}
+                          <div className="project-activity__mission-progress">
+                            <MissionProgressSummary
+                              progress={mission.progress}
+                              reviewBusyCriterion={
+                                missionReviewBusy.startsWith(`${mission.runId}:`)
+                                  ? missionReviewBusy.slice(mission.runId.length + 1)
+                                  : undefined
+                              }
+                              reviewError={missionReviewErrors[mission.runId]}
+                              onReview={project.lifecycle === "active"
+                                && mission.progress.humanReview?.criteria.length
+                                ? (criterionKey, passed) =>
+                                  void reviewMission(mission, criterionKey, passed)
+                                : undefined}
+                            />
+                          </div>
                         </li>
                       );
                     })}

@@ -7,11 +7,15 @@ import {
 } from "../lib/project-runtime";
 import {
   deleteRuntimeRoutine,
+  finalizeRuntimeMissionCoordination,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   pauseRuntimeRoutine,
+  readRuntimeMissionProgress,
+  recordRuntimeMissionHumanEvaluation,
   resumeRuntimeRoutine,
   searchRuntimeArtifacts,
+  type RuntimeMissionProgress,
   type RuntimeRoutineTriggerSpec
 } from "../runtime";
 
@@ -26,6 +30,7 @@ export interface ProjectActivityMission {
   state: string;
   detail: string;
   conversation: string;
+  progress: RuntimeMissionProgress;
 }
 
 export interface ProjectActivityRoutine {
@@ -69,6 +74,11 @@ export interface ProjectActivityView {
   changeRoutine: (
     routine: ProjectActivityRoutine,
     action: "pause" | "resume" | "delete"
+  ) => Promise<void>;
+  reviewMission: (
+    mission: ProjectActivityMission,
+    criterionKey: string,
+    passed: boolean
   ) => Promise<void>;
 }
 
@@ -144,7 +154,8 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
           title: progress.summary,
           state: missionStateLabel(progress.state),
           detail: `${progress.completedSteps} of ${progress.totalSteps} steps · ${progress.nextAction}`,
-          conversation: threadTitles.get(thread.id) ?? "Project conversation"
+          conversation: threadTitles.get(thread.id) ?? "Project conversation",
+          progress
         }));
       });
       const missions = projectedMissions.slice(0, MAX_PROJECT_ACTIVITY_ITEMS);
@@ -248,6 +259,32 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     else await deleteRuntimeRoutine(input);
     await queryClient.invalidateQueries({ queryKey });
   }, [projectId, queryClient, queryKey]);
+  const reviewMission = useCallback(async (
+    mission: ProjectActivityMission,
+    criterionKey: string,
+    passed: boolean
+  ) => {
+    const review = mission.progress.humanReview;
+    if (!review || !review.criteria.some((criterion) => criterion.criterionKey === criterionKey)) {
+      throw new Error("That Mission acceptance check is no longer waiting.");
+    }
+    await recordRuntimeMissionHumanEvaluation({
+      runId: review.runId,
+      criterionKey,
+      passed,
+      expectedRunRevision: review.expectedRunRevision,
+      expectedLastSequence: review.expectedLastSequence
+    });
+    try {
+      const progress = await readRuntimeMissionProgress(review.runId);
+      if (!progress) throw new Error("Mission progress is available only in the desktop app.");
+      if (!progress.humanReview?.criteria.length) {
+        await finalizeRuntimeMissionCoordination(review.runId);
+      }
+    } finally {
+      await queryClient.invalidateQueries({ queryKey });
+    }
+  }, [queryClient, queryKey]);
 
   useEffect(() => {
     if (!options.enabled) return;
@@ -266,7 +303,8 @@ export function useProjectActivity(options: UseProjectActivityOptions): ProjectA
     error: query.error instanceof Error ? query.error.message : null,
     truncated: query.data?.truncated ?? false,
     refresh,
-    changeRoutine
+    changeRoutine,
+    reviewMission
   };
 }
 

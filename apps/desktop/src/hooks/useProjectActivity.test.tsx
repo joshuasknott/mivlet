@@ -4,9 +4,12 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteRuntimeRoutine,
+  finalizeRuntimeMissionCoordination,
   listRuntimeRoutines,
   listRuntimeThreadMissionProgress,
   pauseRuntimeRoutine,
+  readRuntimeMissionProgress,
+  recordRuntimeMissionHumanEvaluation,
   resumeRuntimeRoutine,
   searchRuntimeArtifacts
 } from "../runtime";
@@ -15,9 +18,12 @@ import { useProjectActivity } from "./useProjectActivity";
 
 vi.mock("../runtime", () => ({
   deleteRuntimeRoutine: vi.fn(),
+  finalizeRuntimeMissionCoordination: vi.fn(),
   listRuntimeRoutines: vi.fn(),
   listRuntimeThreadMissionProgress: vi.fn(),
   pauseRuntimeRoutine: vi.fn(),
+  readRuntimeMissionProgress: vi.fn(),
+  recordRuntimeMissionHumanEvaluation: vi.fn(),
   resumeRuntimeRoutine: vi.fn(),
   searchRuntimeArtifacts: vi.fn()
 }));
@@ -143,7 +149,11 @@ describe("useProjectActivity", () => {
       title: "Prepare launch",
       state: "Waiting",
       detail: "2 of 3 steps · Review the final draft.",
-      conversation: "Launch plan"
+      conversation: "Launch plan",
+      progress: expect.objectContaining({
+        state: "waiting",
+        nextAction: "Review the final draft."
+      })
     }]);
     expect(result.current.routines[0]).toMatchObject({
       title: "Weekly launch check",
@@ -192,6 +202,55 @@ describe("useProjectActivity", () => {
       expectedRevision: 3,
       reason: "Paused from Project activity."
     });
+  });
+
+  it("records an exact human Mission decision and finalizes only after the wait clears", async () => {
+    vi.mocked(recordRuntimeMissionHumanEvaluation).mockResolvedValue(null);
+    vi.mocked(finalizeRuntimeMissionCoordination).mockResolvedValue(null);
+    const { result } = renderHook(() => useProjectActivity({
+      workspaceId: "workspace-1",
+      projectId: "project-1",
+      connectionIds: [],
+      threads,
+      enabled: true
+    }), { wrapper: wrapper() });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    const mission = {
+      ...result.current.missions[0]!,
+      progress: {
+        ...result.current.missions[0]!.progress,
+        humanReview: {
+          runId: "run-1",
+          expectedRunRevision: 4,
+          expectedLastSequence: 3,
+          criteria: [{
+            criterionKey: "member-review",
+            description: "The result is ready to use.",
+            required: true,
+            evaluator: "human" as const,
+            status: "not-evaluated" as const,
+            evidenceCount: 1
+          }]
+        }
+      }
+    };
+    vi.mocked(readRuntimeMissionProgress).mockResolvedValue({
+      ...mission.progress,
+      state: "complete",
+      runStatus: "completed",
+      humanReview: null
+    });
+
+    await result.current.reviewMission(mission, "member-review", true);
+    expect(recordRuntimeMissionHumanEvaluation).toHaveBeenCalledWith({
+      runId: "run-1",
+      criterionKey: "member-review",
+      passed: true,
+      expectedRunRevision: 4,
+      expectedLastSequence: 3
+    });
+    expect(readRuntimeMissionProgress).toHaveBeenCalledWith("run-1");
+    expect(finalizeRuntimeMissionCoordination).toHaveBeenCalledWith("run-1");
   });
 
   it("shows a deliberately selected Project Connection before it is used", async () => {

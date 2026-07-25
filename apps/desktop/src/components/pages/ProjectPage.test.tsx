@@ -60,6 +60,57 @@ const emptyMemory: ProjectMemoryView = {
   exportText: async () => "# Memory export"
 };
 
+const projectMissionProgress = {
+  version: 1 as const,
+  state: "waiting" as const,
+  summary: "Prepare launch",
+  runStatus: "running" as const,
+  completedSteps: 2,
+  totalSteps: 3,
+  runningWorkers: 0,
+  readyWorkers: 0,
+  waitingSteps: 1,
+  blockedSteps: 0,
+  steps: [{
+    stepKey: "draft",
+    title: "Prepare draft",
+    kind: "produce" as const,
+    state: "completed" as const,
+    detail: "The durable output is complete."
+  }],
+  usage: {
+    records: 1,
+    inputTokens: 20,
+    outputTokens: 40,
+    toolCalls: 0,
+    durationMs: 500,
+    costObservations: []
+  },
+  budget: { maxWorkers: 1, maxAttempts: 1 },
+  acceptance: [{
+    criterionKey: "member-review",
+    description: "The result is ready to use.",
+    required: true,
+    evaluator: "human",
+    status: "not-evaluated" as const,
+    evidenceCount: 1
+  }],
+  humanReview: {
+    runId: "run-1",
+    expectedRunRevision: 4,
+    expectedLastSequence: 3,
+    criteria: [{
+      criterionKey: "member-review",
+      description: "The result is ready to use.",
+      required: true,
+      evaluator: "human" as const,
+      status: "not-evaluated" as const,
+      evidenceCount: 1
+    }]
+  },
+  nextAction: "Review the declared human acceptance criteria."
+};
+
 const projectActivity: ProjectActivityView = {
   missions: [{
     runId: "run-1",
@@ -67,7 +118,8 @@ const projectActivity: ProjectActivityView = {
     title: "Prepare launch",
     state: "Waiting",
     detail: "2 of 3 steps · Review the final draft.",
-    conversation: "Release notes"
+    conversation: "Release notes",
+    progress: projectMissionProgress
   }],
   routines: [{
     id: "routine-1",
@@ -100,7 +152,8 @@ const projectActivity: ProjectActivityView = {
   error: null,
   truncated: false,
   refresh: async () => undefined,
-  changeRoutine: async () => undefined
+  changeRoutine: async () => undefined,
+  reviewMission: async () => undefined
 };
 
 describe("ProjectPage", () => {
@@ -202,6 +255,37 @@ describe("ProjectPage", () => {
       .toHaveTextContent("GitHub · workAvailable");
     await user.click(screen.getByRole("button", { name: /prepare launch/i }));
     expect(onSelectThread).toHaveBeenCalledWith(project.threads[0]);
+  });
+
+  it("shows exact Mission progress and records identified-human acceptance", async () => {
+    const user = userEvent.setup();
+    const reviewMission = vi.fn().mockResolvedValue(undefined);
+    render(
+      <ProjectPage
+        project={project}
+        knowledge={emptyKnowledge}
+        activity={{ ...projectActivity, reviewMission }}
+        onSaveGuidance={vi.fn()}
+        onReload={vi.fn()}
+        onNewChat={vi.fn()}
+        onSelectThread={vi.fn()}
+      />
+    );
+
+    const progress = screen.getByLabelText("Mission progress");
+    await user.click(progress.querySelector("summary")!);
+    expect(progress).toHaveTextContent("The durable output is complete.");
+    expect(progress).toHaveTextContent("60 tokens observed");
+    expect(screen.getByLabelText("Mission acceptance review")).toHaveTextContent(
+      "Only your decision can settle these acceptance checks."
+    );
+    await user.click(screen.getByRole("button", { name: "Accept" }));
+    await waitFor(() => expect(reviewMission).toHaveBeenCalledWith(
+      projectActivity.missions[0],
+      "member-review",
+      true
+    ));
+    expect(screen.getByRole("status")).toHaveTextContent("Mission acceptance recorded.");
   });
 
   it("deliberately selects existing Connections without implying a grant", async () => {
@@ -481,8 +565,11 @@ describe("ProjectPage", () => {
     expect(screen.getByText("Read only")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Add files" })).not.toBeInTheDocument();
     expect(screen.getByText("Project conversation · Read only")).toBeInTheDocument();
-    expect(screen.getByText("Prepare launch").closest("button")).toBeNull();
+    expect(screen.getAllByText("Prepare launch")
+      .every((element) => element.closest("button") === null)).toBe(true);
     expect(screen.queryByRole("button", { name: "Pause" })).not.toBeInTheDocument();
+    await user.click(screen.getByLabelText("Mission progress").querySelector("summary")!);
+    expect(screen.queryByRole("button", { name: "Accept" })).not.toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("could not be loaded");
     await user.click(screen.getByRole("button", { name: "Try again" }));
     expect(refresh).toHaveBeenCalledTimes(1);
