@@ -151,8 +151,10 @@ stored in React state, snapshots, logs, or JSON metadata.
   the exact encrypted Run head and appends the existing authenticated
   cooperative cancellation request before refreshing Project activity. The UI
   states that this prevents Fable from accepting further results but cannot
-  undo provider work already sent; provider-process interruption and terminal
-  settlement remain owned by the active or restart-recovery runtime.
+  undo provider work already sent. The active graph aborts its providers, waits
+  for every in-flight boundary to settle, and only then asks Rust to append the
+  terminal cancellation and Mission result; restart recovery owns the same
+  terminalization when no active graph remains.
 - Browser-preview schedules are explicitly labeled `Preview only` and state
   that their synthetic records stay in the browser and cannot run provider
   work. The unavailable Departments placeholder is not shown in primary

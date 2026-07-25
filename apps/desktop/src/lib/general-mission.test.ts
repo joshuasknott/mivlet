@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listRoutes: vi.fn(),
   readProgress: vi.fn(),
   advance: vi.fn(),
+  finalizeCancellation: vi.fn(),
   getRun: vi.fn(),
   readOutput: vi.fn(),
   executeGraph: vi.fn()
@@ -22,6 +23,7 @@ vi.mock("../runtime", () => ({
   listRuntimeNativeProviderRoutes: mocks.listRoutes,
   readRuntimeMissionProgress: mocks.readProgress,
   advanceRuntimeMissionCoordination: mocks.advance,
+  finalizeRuntimeMissionRunCancellation: mocks.finalizeCancellation,
   getRuntimeMissionRun: mocks.getRun,
   readRuntimeMissionWorkerOutput: mocks.readOutput
 }));
@@ -115,6 +117,10 @@ beforeEach(() => {
     recordedAggregationStepKeys: []
   });
   mocks.advance.mockResolvedValue({ progress });
+  mocks.finalizeCancellation.mockResolvedValue({
+    run: { id: "mission-run-4", status: "cancelled" },
+    events: []
+  });
   mocks.getRun.mockResolvedValue({
     run: { id: "mission-run-4" },
     events: [
@@ -421,6 +427,63 @@ describe("executeGeneralMission", () => {
       resolveBackend: async () => backend
     })).rejects.toThrow("authorized Mission route");
     expect(mocks.createPlan).not.toHaveBeenCalled();
+  });
+
+  it("terminalizes a durable graph cancellation after worker egress settles", async () => {
+    const ids = [
+      "mission-1",
+      "plan-2",
+      "plan-revision-3",
+      "mission-run-4",
+      "event-5",
+      "run-create-6",
+      "mission-cancelled-7"
+    ];
+    mocks.executeGraph.mockResolvedValue({
+      status: "cancelled",
+      launchedWorkerIds: ["worker-1"],
+      settledJoinKeys: [],
+      recordedAggregationStepKeys: []
+    });
+    mocks.getRun.mockResolvedValue({
+      run: {
+        id: "mission-run-4",
+        status: "cancelling",
+        revision: 8,
+        eventHead: { lastSequence: 7, lastEventId: "cancellation-requested" }
+      },
+      events: []
+    });
+    mocks.readProgress
+      .mockResolvedValueOnce(progress)
+      .mockResolvedValueOnce({
+        ...progress,
+        state: "cancelled",
+        runStatus: "cancelled",
+        summary: "The Mission was stopped.",
+        humanReview: null
+      });
+
+    const result = await executeGeneralMission({
+      title: "Launch readiness",
+      tasks: ["Prepare the launch brief.", "Identify the main risks."],
+      workspaceId: "workspace-1",
+      sourceThreadId: "thread-1",
+      backend,
+      model: "gpt-5",
+      resolveBackend: async () => backend,
+      createId: () => ids.shift()!
+    });
+
+    expect(mocks.finalizeCancellation).toHaveBeenCalledWith({
+      runId: "mission-run-4",
+      eventId: "mission-cancelled-7",
+      expectedRunRevision: 8,
+      expectedLastSequence: 7
+    });
+    expect(mocks.advance).not.toHaveBeenCalled();
+    expect(result.outcome).toBe("cancelled");
+    expect(result.text).toContain("The Mission was stopped.");
   });
 
   it("opens an explicit dependency join before provider execution", async () => {

@@ -4,6 +4,7 @@ import {
   advanceRuntimeMissionCoordination,
   createRuntimeMissionPlan,
   createRuntimeMissionRun,
+  finalizeRuntimeMissionRunCancellation,
   getRuntimeMissionRun,
   listRuntimeNativeProviderRoutes,
   openRuntimeMissionJoin,
@@ -43,7 +44,7 @@ export interface GeneralMissionResult {
   runId: string;
   text: string;
   progress: RuntimeMissionProgress;
-  outcome: "awaiting-review" | "partial";
+  outcome: "awaiting-review" | "partial" | "cancelled";
 }
 
 /**
@@ -302,7 +303,7 @@ export async function executeGeneralMission(
     await input.backend.cancel(runId);
   });
   try {
-    await executeRuntimeProviderMissionGraph({
+    const graphReceipt = await executeRuntimeProviderMissionGraph({
       runId,
       signal: cancellation.signal,
       resolveBackend: async (route) => {
@@ -310,7 +311,11 @@ export async function executeGeneralMission(
         return input.resolveBackend(route);
       }
     });
-    await advanceRuntimeMissionCoordination(runId);
+    if (graphReceipt?.status === "cancelled") {
+      await finalizeCancelledGeneralMission(runId, id("mission-cancelled"));
+    } else {
+      await advanceRuntimeMissionCoordination(runId);
+    }
   } finally {
     input.onCancellationReady?.(null);
   }
@@ -323,9 +328,11 @@ export async function executeGeneralMission(
   const requiredKeys = new Set(
     taskRecords.filter((task) => task.requiredResult).map((task) => task.key)
   );
-  const outcome = [...requiredKeys].every((key) => outputs.some((output) => output.key === key))
-    ? "awaiting-review"
-    : "partial";
+  const outcome = progress.runStatus === "cancelled"
+    ? "cancelled"
+    : [...requiredKeys].every((key) => outputs.some((output) => output.key === key))
+      ? "awaiting-review"
+      : "partial";
   return {
     missionId,
     runId,
@@ -333,6 +340,37 @@ export async function executeGeneralMission(
     outcome,
     text: formatOutputs(draft.title, taskRecords, outputs, outcome)
   };
+}
+
+async function finalizeCancelledGeneralMission(
+  runId: string,
+  eventId: string
+): Promise<void> {
+  const value = await getRuntimeMissionRun(runId);
+  const run = value?.run;
+  if (!isRecord(run) || run.status !== "cancelling") {
+    if (isRecord(run) && run.status === "cancelled") return;
+    throw new Error("The durable Mission cancellation request is unavailable.");
+  }
+  const head = run.eventHead;
+  if (
+    !Number.isInteger(run.revision)
+    || Number(run.revision) < 1
+    || !isRecord(head)
+    || !Number.isInteger(head.lastSequence)
+    || Number(head.lastSequence) < 1
+  ) {
+    throw new Error("The durable Mission cancellation head is invalid.");
+  }
+  const settled = await finalizeRuntimeMissionRunCancellation({
+    runId,
+    eventId,
+    expectedRunRevision: Number(run.revision),
+    expectedLastSequence: Number(head.lastSequence)
+  });
+  if (!settled) {
+    throw new Error("Mission cancellation finalization requires the desktop runtime.");
+  }
 }
 
 function runtimeJournal(value: Record<string, unknown> | null): {
@@ -405,7 +443,9 @@ function formatOutputs(
     .map((task) => `- ${task.title}`);
   const lead = outcome === "awaiting-review"
     ? `# ${title}\n\nThe declared Mission work is ready for your review.`
-    : `# ${title}\n\nFable preserved the completed drafts, but some declared work did not finish.`;
+    : outcome === "cancelled"
+      ? `# ${title}\n\nThe Mission was stopped. Fable kept only results that were already durable.`
+      : `# ${title}\n\nFable preserved the completed drafts, but some declared work did not finish.`;
   return [
     lead,
     ...sections,
