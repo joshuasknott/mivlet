@@ -88,6 +88,38 @@ describe("useRuntimeSchedules", () => {
     expect(runtime.listRuntimeSchedulerJobs).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps scoped mutations behind the initial hydration", async () => {
+    let resolveJobs!: (jobs: ScheduledJob[]) => void;
+    vi.mocked(runtime.listRuntimeSchedulerJobs).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveJobs = resolve;
+      })
+    );
+    const { result } = renderHook(
+      () => useRuntimeSchedules({ workspaceId: "preview-default", projectId: null }),
+      { wrapper }
+    );
+
+    expect(result.current.schedulesReady).toBe(false);
+    act(() => resolveJobs([]));
+    await waitFor(() => expect(result.current.schedulesReady).toBe(true));
+  });
+
+  it("keeps local fallback jobs when there is no durable workspace scope", async () => {
+    const { result } = renderHook(() => useRuntimeSchedules(null), { wrapper });
+
+    act(() => {
+      result.current.setScheduledJobs(() => [makeJob()]);
+    });
+    await waitFor(() => expect(result.current.scheduledJobs).toHaveLength(1));
+    await act(async () => {
+      await result.current.invalidateSchedules();
+    });
+
+    expect(result.current.scheduledJobs).toHaveLength(1);
+    expect(result.current.scheduledJobs[0].name).toBe("Daily digest");
+  });
+
   it("surfaces load errors and retries through the query", async () => {
     vi.mocked(runtime.listRuntimeSchedulerJobs)
       .mockRejectedValueOnce(new Error("store locked"))

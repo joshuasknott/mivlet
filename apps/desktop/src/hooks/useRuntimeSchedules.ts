@@ -16,7 +16,6 @@ import {
   wireToWorkflowRun
 } from "../runtime";
 import { toSlug } from "../lib/helpers";
-import { hasTauriRuntime } from "../lib/persistence";
 
 export interface RuntimeScheduleScope {
   workspaceId: string;
@@ -93,7 +92,7 @@ export function useRuntimeSchedules(scope: RuntimeScheduleScope | null) {
   const query = useQuery({
     queryKey,
     queryFn: () => loadRuntimeScheduleState(scope),
-    enabled: !hasTauriRuntime() || scope !== null,
+    enabled: scope !== null,
     networkMode: "always",
     retry: 1,
     staleTime: 5_000
@@ -108,10 +107,16 @@ export function useRuntimeSchedules(scope: RuntimeScheduleScope | null) {
 
   return {
     queryKey,
-    schedulesReady: !hasTauriRuntime() || (scope !== null && !query.isPending),
+    // Mutations must not begin while a scoped hydration can still replace the
+    // optimistic cache with the older snapshot it started loading.
+    schedulesReady: scope === null || !query.isPending,
     scheduleLoadError: query.error instanceof Error ? query.error.message : null,
     retryScheduleLoad: query.refetch,
-    invalidateSchedules: () => queryClient.invalidateQueries({ queryKey }),
+    // A null scope is the local preview/legacy fallback. Refetching it can only
+    // return EMPTY_SCHEDULE_STATE, which would discard optimistic create/edit
+    // state and briefly unmount the row the user is interacting with.
+    invalidateSchedules: () =>
+      scope ? queryClient.invalidateQueries({ queryKey }) : Promise.resolve(),
     scheduledJobs: data.jobs,
     schedulerQueue: data.queue,
     workflowDefinitions: data.definitions,

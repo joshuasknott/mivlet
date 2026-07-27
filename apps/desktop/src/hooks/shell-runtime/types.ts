@@ -146,7 +146,7 @@ export interface ShellRuntime {
   schedules: Schedule[];
   createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
   toggleSchedule: (job: ScheduledJob) => void;
-  deleteSchedule: (job: ScheduledJob) => void;
+  deleteSchedule: (job: ScheduledJob) => Promise<void>;
   /**
    * Create a durable scheduled job from a fully-formed trigger (daily/weekly/
    * monthly/once). The Schedules UI uses this so the form can express every
@@ -190,7 +190,7 @@ export interface ShellRuntime {
     missedRunPolicy?: MissedRunPolicy;
     /** Connected connector ids whose data the workflow should read first. */
     connectorIds?: string[];
-  }) => void;
+  }) => Promise<void>;
   // goals + plans (structured Fable state created by /goal and /plan)
   goals: WorkspaceGoal[];
   plans: WorkspacePlan[];

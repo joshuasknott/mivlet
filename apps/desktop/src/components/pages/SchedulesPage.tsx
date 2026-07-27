@@ -45,6 +45,7 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
             className="schedule-new-button"
             onClick={() => setIsCreateModalOpen(true)}
             id="new-schedule-btn"
+            disabled={!runtime.schedulesReady}
           >
             <Plus size={15} weight="bold" aria-hidden="true" />
             New

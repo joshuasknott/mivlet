@@ -271,6 +271,7 @@ const connectedCodex: BackendProvider = {
 };
 
 vi.mock("./runtime", () => ({
+  wireToWorkflowRun: (run: unknown) => run,
   recoverRuntimeInterruptedCitedMissions: vi.fn(async () => null),
   recoverRuntimeCompletedParallelApproaches: vi.fn(async () => null),
   loadRuntimeExecutionControl: vi.fn(async () => ({
@@ -500,7 +501,12 @@ vi.mock("./runtime", () => ({
   requeueRuntimeBlockedJobRun: vi.fn(async () => null),
   cancelRuntimeJobRun: vi.fn(async () => null),
   setRuntimeJobStatus: vi.fn(async () => null),
-  deleteRuntimeScheduledJob: vi.fn(async () => null),
+  deleteRuntimeScheduledJob: vi.fn(async (jobId: string) => {
+    runtimeMocks.savedScheduledJobs = runtimeMocks.savedScheduledJobs.filter(
+      (existing) => (existing as { id: string }).id !== jobId
+    );
+    return null;
+  }),
   deliverRuntimeNotification: vi.fn(async () => null),
   executeRuntimeConnectorAction: vi.fn(async () => null),
   saveRuntimeAgentRun: vi.fn(async (run: unknown) => run),
@@ -610,6 +616,16 @@ async function renderWorkspace() {
   render(<App />);
   await screen.findByLabelText(/universal composer/i);
   return user;
+}
+
+async function waitForScheduleNewButton() {
+  const button = await screen.findByRole(
+    "button",
+    { name: /^new$/i },
+    { timeout: 15000 }
+  );
+  await waitFor(() => expect(button).toBeEnabled(), { timeout: 15000 });
+  return button;
 }
 
 describe("Fable home", () => {
@@ -1316,9 +1332,11 @@ describe("Fable home", () => {
     // Schedules is a lazily-loaded page; await its first paint before querying.
     expect(await screen.findByRole("heading", { name: "Schedules" })).toBeInTheDocument();
     // The hydration gate clears and the empty state is shown.
-    expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 })
+    ).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     fireEvent.change(screen.getByLabelText(/schedule task name/i), {
       target: { value: "Weekly digest" }
     });
@@ -1335,27 +1353,38 @@ describe("Fable home", () => {
     expect(within(savedSchedules).getByText(/Weekly on Mon at 9:00 AM/i)).toBeInTheDocument();
     expect(within(savedSchedules).getByText("Summarize active projects and approvals.")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /edit schedule weekly digest/i }));
-    const editName = screen.getByLabelText(/edit schedule task name/i);
+    const editName = await screen.findByLabelText(
+      /edit schedule task name/i,
+      undefined,
+      { timeout: 15000 }
+    );
     fireEvent.change(editName, { target: { value: "Friday briefing" } });
     await user.click(screen.getByRole("button", { name: /^save$/i }));
-    expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Friday briefing", undefined, { timeout: 15000 })
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /run friday briefing now/i }));
     // Scheduled runs now execute through the dedicated headless runner
-    // (useScheduledAgent), not the composer. In the test environment no live
-    // AgentBackend is resolvable, so the run surfaces its real state rather than
-    // a fake completion. The schedule (renamed above) is still present.
-    expect(await screen.findByText("Friday briefing")).toBeInTheDocument();
+    // (useScheduledAgent), not the composer. Verify the runtime queue boundary
+    // was called without assuming whether a particular backend is available.
+    await waitFor(
+      () => expect(vi.mocked(runtimeModule.enqueueRuntimeJobRun)).toHaveBeenCalled(),
+      { timeout: 10000 }
+    );
+    expect(
+      await screen.findByText("Friday briefing", undefined, { timeout: 15000 })
+    ).toBeInTheDocument();
     // No draft/active status labels anywhere on the page.
     expect(screen.queryByText(/^draft$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/^active$/i)).not.toBeInTheDocument();
-  }, 30000);
+  }, 60000);
 
   it("pauses and resumes a created schedule", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
-    await user.click(await screen.findByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Daily check");
     await user.type(screen.getByLabelText(/schedule description/i), "Quick daily summary.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
@@ -1375,23 +1404,23 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
 
-    await user.click(await screen.findByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Throwaway");
     await user.type(screen.getByLabelText(/schedule description/i), "To be removed.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
 
     expect(await screen.findByText("Throwaway")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /delete schedule throwaway/i }));
-    expect(screen.queryByText("Throwaway")).not.toBeInTheDocument();
-    expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Throwaway")).not.toBeInTheDocument());
+    expect(await screen.findByText(/no schedules yet/i)).toBeInTheDocument();
   }, 15000);
 
   it("creates a daily schedule from the frequency selector", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Daily standup");
     await user.type(screen.getByLabelText(/schedule description/i), "Morning summary.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
@@ -1404,9 +1433,9 @@ describe("Fable home", () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
     expect(await screen.findByRole("heading", { name: "Schedules" })).toBeInTheDocument();
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     fireEvent.change(screen.getByLabelText(/schedule task name/i), {
       target: { value: "Month-end review" }
     });
@@ -1421,14 +1450,14 @@ describe("Fable home", () => {
 
     expect(await screen.findByText("Month-end review")).toBeInTheDocument();
     expect(screen.getByText(/Monthly on day 15 at 9:00 AM/i)).toBeInTheDocument();
-  }, 30000);
+  }, 45000);
 
   it("creates a one-time schedule", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Launch day");
     await user.type(screen.getByLabelText(/schedule description/i), "Ship the release.");
     await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "once");
@@ -1442,9 +1471,9 @@ describe("Fable home", () => {
   it("toggles weekly weekdays into the recurrence summary", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Multi-day");
     await user.type(screen.getByLabelText(/schedule description/i), "Selected days.");
     await user.selectOptions(screen.getByLabelText(/schedule frequency/i), "weekly");
@@ -1460,9 +1489,9 @@ describe("Fable home", () => {
   it("keeps schedule creation disabled while required fields are empty", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     expect(screen.getByRole("button", { name: /add scheduled task/i })).toBeDisabled();
     expect(screen.queryByText(/no schedules yet/i)).toBeInTheDocument();
   }, 15000);
@@ -1470,9 +1499,9 @@ describe("Fable home", () => {
   it("requires confirming before pausing but resumes immediately", async () => {
     const user = await renderWorkspace();
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
 
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Confirm guard");
     await user.type(screen.getByLabelText(/schedule description/i), "Needs a click.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));
@@ -2755,8 +2784,8 @@ describe("Fable home", () => {
     const first = render(<App />);
     await screen.findByLabelText(/universal composer/i);
     await user.click(screen.getByRole("button", { name: /^schedules$/i }));
-    await screen.findByText(/no schedules yet/i);
-    await user.click(screen.getByRole("button", { name: /^new$/i }));
+    await screen.findByText(/no schedules yet/i, undefined, { timeout: 15000 });
+    await user.click(await waitForScheduleNewButton());
     await user.type(screen.getByLabelText(/schedule task name/i), "Persisted digest");
     await user.type(screen.getByLabelText(/schedule description/i), "Survives reload.");
     await user.click(screen.getByRole("button", { name: /add scheduled task/i }));

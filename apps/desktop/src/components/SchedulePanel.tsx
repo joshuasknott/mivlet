@@ -102,9 +102,9 @@ export function SchedulePanel({
     trigger: SchedulePanelTrigger;
     missedRunPolicy?: MissedRunPolicy;
     connectorIds?: string[];
-  }) => void;
+  }) => Promise<void>;
   onToggle: (job: ScheduledJob) => void;
-  onDelete: (job: ScheduledJob) => void;
+  onDelete: (job: ScheduledJob) => Promise<void>;
   onRunNow?: (job: ScheduledJob) => void;
   onCancelRun?: (runId: string) => void;
   /** Open Run History pre-filtered to this schedule's executions. */
@@ -773,9 +773,9 @@ function ScheduleRow({
     trigger: SchedulePanelTrigger;
     missedRunPolicy?: MissedRunPolicy;
     connectorIds?: string[];
-  }) => void;
+  }) => Promise<void>;
   onToggle: (job: ScheduledJob) => void;
-  onDelete: (job: ScheduledJob) => void;
+  onDelete: (job: ScheduledJob) => Promise<void>;
   onRunNow?: (job: ScheduledJob) => void;
   onCancelRun?: (runId: string) => void;
   onViewRuns?: (job: ScheduledJob) => void;
@@ -805,8 +805,8 @@ function ScheduleRow({
             job={job}
             connectors={connectors}
             definitions={definitions}
-            onSave={(value) => {
-              onEdit({
+            onSave={async (value) => {
+              await onEdit({
                 jobId: job.id,
                 name: value.name.trim(),
                 description: value.prompt.trim(),
@@ -928,7 +928,7 @@ function ScheduleRow({
             type="button"
             className="schedule-row__delete button button--destructive"
             aria-label={`Delete schedule ${job.name}`}
-            onClick={() => onDelete(job)}
+            onClick={() => void onDelete(job)}
           >
             <Trash size={15} />
           </button>
@@ -949,18 +949,28 @@ function ScheduleEditForm({
   job: ScheduledJob;
   connectors: ConnectorManifest[];
   definitions?: WorkflowDefinition[];
-  onSave: (value: ScheduleFormValue) => void;
+  onSave: (value: ScheduleFormValue) => Promise<void>;
   onCancel: () => void;
 }) {
   const [form, setForm] = useState<ScheduleFormValue>(() => jobToForm(job, definitions));
   const validation = useMemo(() => validateForm(form), [form]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   return (
     <form
       className="schedule-edit"
       aria-label={`Edit schedule ${job.name}`}
-      onSubmit={(event) => {
+      onSubmit={async (event) => {
         event.preventDefault();
-        if (validation.valid) onSave(form);
+        if (!validation.valid || saving) return;
+        setSaving(true);
+        setSaveError(null);
+        try {
+          await onSave(form);
+        } catch (error) {
+          setSaveError(error instanceof Error ? error.message : "Fable could not save this schedule.");
+          setSaving(false);
+        }
       }}
     >
       <input
@@ -975,9 +985,12 @@ function ScheduleEditForm({
       />
       <RecurrenceControls form={form} onChange={setForm} />
       <ConnectorControls form={form} onChange={setForm} connectors={connectors} />
+      {saveError ? <span role="alert">{saveError}</span> : null}
       <div className="schedule-edit__actions">
-        <button type="submit">Save</button>
-        <button type="button" onClick={onCancel}>Cancel</button>
+        <button type="submit" disabled={saving}>
+          {saving ? "Saving..." : "Save"}
+        </button>
+        <button type="button" onClick={onCancel} disabled={saving}>Cancel</button>
       </div>
     </form>
   );

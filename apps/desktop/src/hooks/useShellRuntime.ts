@@ -3273,7 +3273,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    * schedule from weekly to daily, monthly, or one-time. Re-enqueues the next
    * occurrence.
    */
-  const editScheduleFromTrigger = ({
+  const editScheduleFromTrigger = async ({
     jobId,
     name,
     description,
@@ -3299,10 +3299,24 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
     const now = new Date();
     const currentJob = scheduledJobs.find((job) => job.id === jobId);
-    const currentDefinition = workflowDefinitions.find(
-      (definition) => definition.id === currentJob?.workflowDefinitionId
-    );
-    if (!currentJob || !currentDefinition) return;
+    if (!currentJob) return;
+    const currentDefinition =
+      workflowDefinitions.find(
+        (definition) => definition.id === currentJob.workflowDefinitionId
+      ) ?? {
+        schemaVersion: 1 as const,
+        id: currentJob.workflowDefinitionId,
+        version: 0,
+        name: currentJob.name,
+        description: currentJob.description,
+        steps: buildWorkflowSteps(currentJob.description, []),
+        notificationPrefs: {
+          disableOs: false,
+          enabledKinds: ["run-completed", "run-failed", "approval-needed"] as const
+        },
+        createdAt: currentJob.createdAt,
+        updatedAt: currentJob.updatedAt
+      };
     const definition: WorkflowDefinition = {
       ...currentDefinition,
       version: currentDefinition.version + 1,
@@ -3335,7 +3349,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setScheduledJobs((current) =>
       current.map((entry) => (entry.id === jobId ? job : entry))
     );
-    void (async () => {
+    try {
       const definitionWrite = saveRuntimeWorkflowDefinition(definition);
       const jobWrite = saveRuntimeScheduledJob(job);
       await definitionWrite;
@@ -3347,15 +3361,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           job.nextRunAt
         );
       }
-    })()
-      .then(() => void invalidateSchedules())
-      .catch((error) => {
-        setLastAction(error instanceof Error ? error.message : "Fable could not persist the schedule update.");
-      });
-    setLastAction(`Schedule updated: ${name}`);
+      void invalidateSchedules();
+      setLastAction(`Schedule updated: ${name}`);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Fable could not persist the schedule update.";
+      setLastAction(message);
+      throw error;
+    }
   };
 
-  const deleteSchedule = (job: ScheduledJob) => {
+  const deleteSchedule = async (job: ScheduledJob) => {
     const schedulePolicy = evaluatePermissionPolicy({
       mode: permissionMode,
       effect: "schedule-mutation",
@@ -3365,10 +3381,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setLastAction(`Schedule not deleted: ${schedulePolicy.reason}`);
       return;
     }
-    setSchedules((current) => current.filter((entry) => entry.id !== job.id));
-    setScheduledJobs((current) => current.filter((entry) => entry.id !== job.id));
-    void deleteRuntimeScheduledJob(job.id).then(() => void invalidateSchedules());
-    setLastAction(`Schedule deleted: ${job.name}`);
+    try {
+      await deleteRuntimeScheduledJob(job.id);
+      setSchedules((current) => current.filter((entry) => entry.id !== job.id));
+      setScheduledJobs((current) => current.filter((entry) => entry.id !== job.id));
+      void invalidateSchedules();
+      setLastAction(`Schedule deleted: ${job.name}`);
+    } catch (error) {
+      setLastAction(
+        error instanceof Error ? error.message : "Fable could not delete the schedule."
+      );
+    }
   };
 
   function queueWorkflowRun(
