@@ -15,7 +15,7 @@
     "test:csp": "vitest run --configLoader runner src/lib/tauri-csp.test.ts",
     "lint": "tsc -b --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json"
+    "tauri:dev": "node scripts/tauri-dev.mjs"
   },
   "dependencies": {
     "@fable/connectors": "workspace:*",

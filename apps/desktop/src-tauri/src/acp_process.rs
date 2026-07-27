@@ -650,13 +650,20 @@ pub async fn detect_acp_cli(provider_id: String) -> Result<AcpCliProbeResult, St
                 outcome => return Ok(outcome),
             }
         }
-        let output = Command::new(candidate.executable)
+        let mut command = Command::new(candidate.executable);
+        command
             .args(candidate.auth_probe_args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
-            .output()
-            .await;
+            .kill_on_drop(true);
+        let output = match command.spawn() {
+            Ok(child) => match timeout(Duration::from_secs(6), child.wait_with_output()).await {
+                Ok(output) => output,
+                Err(_) => return Ok(AcpCliProbeResult::Unavailable),
+            },
+            Err(error) => Err(error),
+        };
         match output {
             Ok(output) => {
                 discovered = Some(output);

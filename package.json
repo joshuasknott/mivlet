@@ -17,7 +17,7 @@
     "release:test": "node --test scripts/release/windows-manifest.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "pnpm --filter @fable/desktop tauri build",
-    "tauri:dev": "pnpm --filter @fable/desktop tauri dev --config src-tauri/tauri.dev.conf.json",
+    "tauri:dev": "pnpm --filter @fable/desktop tauri:dev",
     "marketing:dev": "pnpm --filter @fable/marketing dev",
     "marketing:build": "pnpm --filter @fable/marketing build",
     "marketing:check-forbidden-claims": "node apps/marketing/scripts/check-claims.mjs apps/marketing/dist",

@@ -1,8 +1,8 @@
 # Release Readiness
 
-Last updated: 2026-07-25.
+Last updated: 2026-07-27.
 
-> **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. The current Clerk/Convex implementation is still a config-gated foundation, so the repository must not be presented as having completed that account requirement.
+> **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. One Clerk + Convex development account and the local Codex path are now live-validated on one Windows machine, but production configuration, recovery, multi-account collaboration, packaging, and external connectors remain release gates.
 
 ## Runnable paths
 
@@ -11,12 +11,17 @@ Local setup and checks use pnpm:
 ```bash
 pnpm install
 pnpm dev
+pnpm tauri:dev
 pnpm typecheck
 pnpm test
 pnpm build
 pnpm tauri:check
 pnpm check
 ```
+
+`pnpm tauri:dev` loads optional desktop development configuration from the
+ignored `apps/desktop/.env.local` file before launching Tauri. Keep Clerk,
+Convex, and debugging values there or in secure storage; never commit them.
 
 Windows desktop bundles use:
 
@@ -56,12 +61,16 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Google connectors are independent desktop public clients. They require
   `FABLE_GOOGLE_OAUTH_CLIENT_ID`, enabled Google APIs, consent configuration,
   test users while unpublished, and any verification required by Google.
-- Codex runs through the local `codex app-server` process. Cursor, GitHub
-  Copilot, Grok Build, OpenCode, Kimi, and Mistral Vibe use their installed ACP
-  runtimes and provider-owned sign-in. Live account coverage remains unverified.
+- Codex runs through the local `codex app-server` process. One authenticated
+  Codex CLI completed a harmless streamed prompt and a no-tools scheduled run
+  during the 2026-07-27 development validation. Cursor, GitHub Copilot, Grok
+  Build, OpenCode, Kimi, and Mistral Vibe use their installed ACP runtimes and
+  provider-owned sign-in; their execution paths were not validated in that run.
 - Clerk + Convex now have a schema, policy tests, device/outbox foundations,
-  and config-gated desktop commands. The product vertical slice for mandatory
-  account onboarding and multi-person workspaces is still incomplete.
+  and config-gated desktop commands. Real development sign-in, initial hosted
+  workspace bootstrap, and restart persistence are validated for one account.
+  Production configuration, recovery, device revocation, and the multi-person
+  workspace journey remain incomplete release evidence.
   Verified-email invitation targeting additionally requires the Convex server
   environment variable `FABLE_INVITATION_RECIPIENT_HMAC_KEYRING`, encoded as
   `{"active":"v2","keys":{"v2":"<64 lowercase hex>","v1":"<64 lowercase hex>"}}`.
@@ -72,7 +81,7 @@ stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, one-time Mission approval consumption, artifacts, Connections, and grants persist in `fable-vault.db` under schema v35.
+- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, one-time Mission approval consumption, artifacts, Connections, and grants persist in `fable-vault.db` under schema v37. The v36/v37 steps repair the historical agent-run and dependent foreign-key names; their table rebuilds preserve existing rows, and the migration transaction refuses to commit when SQLite reports a foreign-key violation.
 - Privacy settings can create and immediately verify a non-overwriting encrypted SQLite recovery backup. Raw backup restore requires the same OS-held vault key, is staged without replacing the live database, applies only at restart, preserves the prior database, and rolls back if the candidate cannot open or migrate. Provider and OAuth credentials are excluded and still require their own account recovery or reconnection. Portable workspace export is the separate credential-free cross-device path. Packaged installer/upgrade restore observation and any vault-key export or escrow decision remain release gates.
 - Portable workspace export and import are available in Privacy settings as a plaintext JSON copy. Native code derives the active authenticated workspace, validates integrity and secret absence, writes atomically only to a new link-free `.json` destination, and never overwrites. Import requires an exact confirmation, rejects linked, non-JSON, oversized, invalid, newer-format, or credential-shaped archives, and applies inside one rollback-safe transaction under skip-existing conflict handling. Workspace content never enters renderer state. Exact-owner Project copies preserve Project, conversation, and message ownership plus conversation titles only for the same active private member and original internal creator; substituted, stripped, or cross-owner current authority fails closed and cannot transfer ownership. Ownerless legacy archives gain no private authority. Imported Connections, schedules, scheduled jobs, and active canonical Routines remain disabled or paused. Routine definitions, immutable versions, triggers, and occurrence history require the exact active owner/workspace/member; scheduler authority, leases, cursors, retries, and legacy-migration rollback evidence remain node-local and are excluded.
 - Privacy settings also expose a secret-free local health report for storage, providers, Connections, MCP, Missions, Routines, queues, migrations, and sync. It returns only authenticated workspace-scoped states and counts from control columns and never includes content, paths, account identifiers, or credentials. Deployed monitoring and runtime-node telemetry remain open.
@@ -80,7 +89,7 @@ stored in React state, snapshots, logs, or JSON metadata.
 - Repository and Windows CI checks enforce the current desktop bundle, CSS, initial-entry, and lazy-route size budgets plus deterministic connector, Knowledge, encrypted-storage/cache, and scheduler-queue performance fixtures. The initial entry remains above Vite's 600 KiB advisory threshold and is an explicit optimization target. These checks are not evidence of packaged cold start, comparable RSS, live-provider streaming, or private long-run soak behavior.
 - General Mission reviewer selection is native, owner-scoped, encrypted, replay-safe, and required before reviewer execution. Declared worker-evaluated criteria retain exact evaluator authority. The composer's explicit `review:` step instead records a Product Spine 1.8 `user-requested-advisory` selection with no criterion keys and no acceptance authority; reshaping it to claim human or worker authority fails closed. Native high-risk/conflicting-evidence policy composition, reviewer-provider validation, and packaged/live-provider observation remain release gates.
 - General Mission plan and progress cards are native-derived and reopen-safe. They expose readable goals, outcomes, step objectives, dependency counts, budgets, usage, and acceptance without exposing internal authority or provider identifiers; packaged live-provider observation remains a release gate.
-- Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store.
+- Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store. A live development cycle created, edited, paused, resumed, ran, and deleted one harmless Codex schedule while Fable remained open; tool-bearing, connector-backed, consequential, multi-process, and packaged-restart cases remain gated.
 - The desktop composer exposes a bounded `/mission` entry for two to six total steps. Ordinary bullets remain independent; an explicit `all: …` or `any: …` line declares one continuation over their immutable outputs, and following `then: …` lines can declare a short sequential continuation chain within the same six-worker ceiling. A final explicit `review: …` plus `revise: …` pair instead adds one advisory reviewer and exactly one revision pass. The revision receives both exact encrypted draft and review receipts through a second predeclared `all` join; model review cannot accept the work, and identified-human acceptance remains required. Up to four final `accept: …` lines replace the generic review placeholder with exact human-authored required criteria; they consume no worker slots and bind only to immutable required-output receipts. Fable creates an encrypted Plan, persists every multi-source join before outcomes exist, pins the selected authorized provider/model route without fallback, runs native provider workers through the reusable graph path, and has Rust rebuild every downstream objective from exact encrypted predecessor receipts before egress. It persists the command and review bundle in the source conversation, supports native cancellation and restart recovery, and requires evidence-bound human review. A successful reviewed result materializes every required final deliverable as a deterministic immutable accepted Artifact in the same terminal transaction; intermediate outputs remain immutable Mission evidence rather than silently becoming accepted deliverables. Replay revalidates the encrypted provider receipt, signed-in human evidence, selected Plan, private owner, source conversation, and every required acceptance result, while partial, failed, and cancelled results create none. A terminal partial, failed, or cancelled result can start a fresh Mission only from its exact durable preceding `/mission` command; the current scope and authorized route are selected again, while the old journal, output, checkpoints, grants, approvals, provider choice, and route evidence are never reused. It does not infer branches, tools, effects, grants, or cross-Mission handoff authority. Arbitrary branching graph authoring, repeated iteration, automatic escalation, packaged-app observation, and live-provider observation remain release gates.
 - The same `/mission` ceiling now admits repeated explicitly numbered joins such
   as `all 1,2: …` and `any 2,3: …`. Every dependency must name distinct earlier
@@ -193,8 +202,8 @@ stored in React state, snapshots, logs, or JSON metadata.
   external users.
 - Complete provider-console setup, callback registration, OAuth consent review,
   and live non-production validation for each external connector.
-- Complete mandatory Clerk account onboarding, recovery, sign-out, device
-  revocation, and hosted session policy.
+- Complete production Clerk configuration and validate recovery, sign-out,
+  device revocation, hosted session policy, and account switching.
 - Complete and review the Clerk + Convex shared-workspace vertical slice before
   enabling team workspaces for external users.
 - Add release signing, updater channels, download/legal pages, and platform

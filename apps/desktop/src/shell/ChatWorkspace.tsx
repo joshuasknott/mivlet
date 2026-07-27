@@ -1848,10 +1848,8 @@ export function ChatWorkspace() {
       finishNewMissionLaunch();
       return;
     }
-    const nativeConnected = runtime.connectedAgentBackend?.backendType === "native-api"
-      ? runtime.connectedAgentBackend
-      : undefined;
-    if (!nativeConnected) {
+    const connectedBackend = runtime.connectedAgentBackend;
+    if (!connectedBackend) {
       if (options.forceCitedMission) {
         const error = "Starting a new cited mission requires a connected native model provider.";
         agent.reportError(error);
@@ -1865,7 +1863,7 @@ export function ChatWorkspace() {
       return;
     }
     const validation = validateModelSelection(
-      nativeConnected.id,
+      connectedBackend.id,
       resolvedComposerModelId,
       runtime.selectableModels,
       2048

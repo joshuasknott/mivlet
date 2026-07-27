@@ -1,0 +1,56 @@
+import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const localEnvironmentPath = resolve(desktopRoot, ".env.local");
+const tauriEntrypoint = resolve(
+  desktopRoot,
+  "node_modules",
+  "@tauri-apps",
+  "cli",
+  "tauri.js",
+);
+
+if (existsSync(localEnvironmentPath)) {
+  process.loadEnvFile(localEnvironmentPath);
+}
+
+if (!existsSync(tauriEntrypoint)) {
+  throw new Error(
+    "The Tauri CLI is unavailable. Install the frozen workspace dependencies first.",
+  );
+}
+
+const child = spawn(
+  process.execPath,
+  [tauriEntrypoint, "dev", "--config", "src-tauri/tauri.dev.conf.json"],
+  {
+    cwd: desktopRoot,
+    env: process.env,
+    stdio: "inherit",
+    windowsHide: true,
+  },
+);
+
+for (const signal of ["SIGINT", "SIGTERM"]) {
+  process.on(signal, () => {
+    if (!child.killed) {
+      child.kill(signal);
+    }
+  });
+}
+
+child.on("error", (error) => {
+  console.error(`Fable could not start the Tauri development process: ${error.message}`);
+  process.exitCode = 1;
+});
+
+child.on("exit", (code, signal) => {
+  if (signal) {
+    process.kill(process.pid, signal);
+    return;
+  }
+  process.exitCode = code ?? 1;
+});

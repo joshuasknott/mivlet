@@ -11,7 +11,8 @@ use std::sync::{Mutex, OnceLock};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{SecondsFormat, TimeZone, Utc};
-use serde::{Deserialize, Serialize};
+use serde::de::IntoDeserializer;
+use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -71,10 +72,13 @@ struct IdempotencyReceipt {
 struct HostedWorkspace {
     workspace_id: String,
     name: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     revision: i64,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     policy_revision: i64,
     member_id: String,
     role: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     membership_revision: i64,
 }
 
@@ -85,10 +89,11 @@ struct HostedDevice {
     kind: String,
     label: String,
     status: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     registered_at: i64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_convex_i64")]
     last_seen_at: Option<i64>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_optional_convex_i64")]
     revoked_at: Option<i64>,
 }
 
@@ -105,6 +110,7 @@ struct CreateWorkspaceResult {
 struct DeviceRevokeResult {
     device_id: String,
     status: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     revoked_workspace_links: i64,
 }
 
@@ -114,7 +120,9 @@ struct HostedInvitation {
     invitation_id: String,
     workspace_id: String,
     authority: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     schema_version: i64,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     revision: i64,
     created_by_internal_user_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -206,6 +214,7 @@ struct HostedAccountWorkspaceMemberSummary {
     member_id: String,
     role: String,
     status: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     revision: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display_name: Option<String>,
@@ -342,7 +351,9 @@ enum HostedInvitationCreateResult {
 struct HostedMembership {
     workspace_id: String,
     authority: String,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     schema_version: i64,
+    #[serde(deserialize_with = "deserialize_convex_i64")]
     revision: i64,
     created_by_internal_user_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -401,9 +412,11 @@ pub enum AccountWorkspaceMemberChangeOutcome {
 )]
 enum LastOwnerSafety {
     Safe {
+        #[serde(deserialize_with = "deserialize_convex_i64")]
         remaining_active_owner_count: i64,
     },
     Blocked {
+        #[serde(deserialize_with = "deserialize_convex_i64")]
         remaining_active_owner_count: i64,
         error: FailClosedAuthorizationError,
     },
@@ -942,6 +955,35 @@ fn valid_id(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+fn deserialize_convex_i64<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    const MAX_SAFE_INTEGER: f64 = 9_007_199_254_740_991.0;
+    let value = f64::deserialize(deserializer)?;
+    if !value.is_finite()
+        || value.fract() != 0.0
+        || !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&value)
+    {
+        return Err(de::Error::custom(
+            "expected an integral Convex number within JavaScript's safe integer range",
+        ));
+    }
+    Ok(value as i64)
+}
+
+fn deserialize_optional_convex_i64<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Option::<f64>::deserialize(deserializer)?
+        .map(|value| {
+            deserialize_convex_i64(value.into_deserializer())
+                .map_err(|error: de::value::Error| de::Error::custom(error.to_string()))
+        })
+        .transpose()
 }
 
 fn unwrap_convex_success(envelope: Value) -> Result<Value, String> {
@@ -2142,6 +2184,33 @@ fn local_status(
 ) -> Result<AccountWorkspaceStatus, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let fallback = store
+        .with_conn(directory::legacy_default_workspace)
+        .map_err(|error| error.to_string())?;
+
+    // A signed-out identity has no current internal user yet. Requiring the
+    // account-scoped directory queries here would turn that expected state into
+    // an error and disable the sign-in button before OAuth can even begin.
+    if !matches!(identity.state.as_str(), "signed-in" | "offline") {
+        return Ok(AccountWorkspaceStatus {
+            configured: identity.enabled,
+            state: match identity.state.as_str() {
+                "disabled" => "disabled",
+                "signed-out" => "signed-out",
+                "expired" => "expired",
+                "revoked" => "revoked",
+                _ => "error",
+            }
+            .into(),
+            message: identity.message.clone(),
+            account_bound: false,
+            workspaces: Vec::new(),
+            active_workspace: fallback,
+            active_context_owner: None,
+            devices: Vec::new(),
+        });
+    }
+
     let (workspaces, active_workspace, active_context_owner, devices) = store
         .with_conn(|conn| {
             let workspaces = directory::list_authoritative_summaries_for_current_user(conn)?;
@@ -2158,9 +2227,6 @@ fn local_status(
         })
         .map_err(|error| error.to_string())?;
     let account_bound = workspaces.is_some();
-    let fallback = store
-        .with_conn(directory::legacy_default_workspace)
-        .map_err(|error| error.to_string())?;
     let state = match identity.state.as_str() {
         "disabled" => "disabled",
         "signed-out" => "signed-out",
@@ -2739,6 +2805,37 @@ mod tests {
         assert!(parse_devices(json!([{
             "deviceId": "dev_a", "kind": "desktop", "label": "A", "status": "active",
             "registeredAt": 1, "revokedAt": 2
+        }]))
+        .is_err());
+    }
+
+    #[test]
+    fn convex_integral_json_numbers_are_accepted_without_rounding() {
+        let workspaces = parse_workspaces(json!([{
+            "workspaceId": "ws_a", "name": "A", "revision": 2.0, "policyRevision": 3.0,
+            "memberId": "m_a", "role": "owner", "membershipRevision": 4.0
+        }]))
+        .unwrap();
+        assert_eq!(workspaces[0].revision, 2);
+        assert_eq!(workspaces[0].policy_revision, 3);
+        assert_eq!(workspaces[0].membership_revision, 4);
+
+        let devices = parse_devices(json!([{
+            "deviceId": "dev_a", "kind": "desktop", "label": "A", "status": "active",
+            "registeredAt": 1_700_000_000_000.0, "lastSeenAt": 1_700_000_000_001.0
+        }]))
+        .unwrap();
+        assert_eq!(devices.len(), 1);
+
+        assert!(parse_workspaces(json!([{
+            "workspaceId": "ws_a", "name": "A", "revision": 2.5, "policyRevision": 3.0,
+            "memberId": "m_a", "role": "owner", "membershipRevision": 4.0
+        }]))
+        .is_err());
+        assert!(parse_workspaces(json!([{
+            "workspaceId": "ws_a", "name": "A", "revision": 9_007_199_254_740_992.0,
+            "policyRevision": 3.0, "memberId": "m_a", "role": "owner",
+            "membershipRevision": 4.0
         }]))
         .is_err());
     }

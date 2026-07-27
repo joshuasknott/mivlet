@@ -10,7 +10,7 @@
 //!   the new schema idempotently, recording diagnostics in `migration_log`.
 //!   Legacy files are never deleted.
 
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 pub mod legacy;
 pub use legacy::migrate_all;
@@ -151,6 +151,15 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 34 -> 35: add an empty encrypted Mission approval-consumption
             // ledger. Migration creates no approval or execution authority.
             34 => conn.execute_batch(crate::store::schema::SCHEMA_V34_TO_V35)?,
+            // 35 -> 36: repair the historical v10 conversation migration's
+            // renamed thread foreign key on agent runs. No rows or authority
+            // are inferred; the run table is rebuilt only when the dangling
+            // `thread_v10` reference is present.
+            35 => apply_v35_to_v36(conn)?,
+            // 36 -> 37: repair any run-dependent table names rewritten by the
+            // original v35 -> v36 parent rebuild. Remaining rows and every
+            // child relationship are copied exactly; no authority is inferred.
+            36 => apply_v36_to_v37(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -160,6 +169,225 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn foreign_key_target(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+) -> super::Result<Option<String>> {
+    conn.query_row(
+        r#"SELECT "table"
+             FROM pragma_foreign_key_list(?1)
+            WHERE "from"=?2
+            LIMIT 1"#,
+        rusqlite::params![table, column],
+        |row| row.get(0),
+    )
+    .optional()
+    .map_err(super::StoreError::from)
+}
+
+fn require_foreign_keys_disabled(conn: &Connection, migration: &str) -> super::Result<()> {
+    let enabled = conn.pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))? != 0;
+    if enabled {
+        return Err(super::StoreError::Invalid(format!(
+            "Schema migration {migration} requires foreign-key enforcement to be disabled before its transaction starts."
+        )));
+    }
+    Ok(())
+}
+
+fn apply_v35_to_v36(conn: &Connection) -> super::Result<()> {
+    if foreign_key_target(conn, "run", "thread_id")?.as_deref() != Some("thread_v10") {
+        return Ok(());
+    }
+    require_foreign_keys_disabled(conn, "v35 -> v36")?;
+
+    // Preserve every existing dependent reference to the canonical `run`
+    // table while the broken parent is moved aside. Without legacy rename
+    // semantics SQLite rewrites child foreign keys to the temporary name and
+    // recreates the same dangling-reference bug.
+    conn.pragma_update(None, "legacy_alter_table", "ON")?;
+    let rebuild = conn.execute_batch(
+        r#"
+        ALTER TABLE run RENAME TO run_v35_broken;
+        CREATE TABLE run (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
+          thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+          provider_id TEXT NOT NULL,
+          model TEXT NOT NULL,
+          status TEXT NOT NULL,
+          turn INTEGER NOT NULL DEFAULT 0,
+          recoverable INTEGER NOT NULL DEFAULT 0,
+          retry_count INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          payload BLOB NOT NULL,
+          payload_nonce BLOB NOT NULL
+        );
+        INSERT INTO run (
+          id,workspace_id,thread_id,provider_id,model,status,turn,recoverable,
+          retry_count,created_at,updated_at,payload,payload_nonce
+        )
+        SELECT
+          id,workspace_id,thread_id,provider_id,model,status,turn,recoverable,
+          retry_count,created_at,updated_at,payload,payload_nonce
+        FROM run_v35_broken;
+        DROP TABLE run_v35_broken;
+        CREATE INDEX idx_run_status ON run(workspace_id,status);
+        CREATE INDEX idx_run_thread ON run(workspace_id,thread_id);
+        "#,
+    );
+    let reset = conn.pragma_update(None, "legacy_alter_table", "OFF");
+    rebuild?;
+    reset?;
+    Ok(())
+}
+
+fn run_child_needs_repair(conn: &Connection, table: &str) -> super::Result<bool> {
+    if !table_exists(conn, table)? {
+        return Ok(false);
+    }
+    match foreign_key_target(conn, table, "run_id")?.as_deref() {
+        Some("run") => Ok(false),
+        Some("run_v35_broken") => Ok(true),
+        Some(other) => Err(super::StoreError::Invalid(format!(
+            "Schema v36 has an unexpected {table}.run_id parent ({other})."
+        ))),
+        None => Err(super::StoreError::Invalid(format!(
+            "Schema v36 is missing the required {table}.run_id foreign key."
+        ))),
+    }
+}
+
+fn apply_v36_to_v37(conn: &Connection) -> super::Result<()> {
+    // A database can reach v36 only after the run parent itself was repaired,
+    // but keeping this idempotent call makes partial/retried migrations safe.
+    apply_v35_to_v36(conn)?;
+
+    let rebuild_tool_call = run_child_needs_repair(conn, "tool_call")?;
+    let rebuild_approval = run_child_needs_repair(conn, "approval")?;
+    let rebuild_artifact = run_child_needs_repair(conn, "artifact")?;
+    if !rebuild_tool_call && !rebuild_approval && !rebuild_artifact {
+        return Ok(());
+    }
+    require_foreign_keys_disabled(conn, "v36 -> v37")?;
+
+    // With foreign keys disabled before the migration transaction and legacy
+    // rename behavior enabled, dependent tables keep pointing at the canonical
+    // names while each affected child is rebuilt. The store runs
+    // `foreign_key_check` before the transaction can commit.
+    conn.pragma_update(None, "legacy_alter_table", "ON")?;
+    let rebuild = (|| -> super::Result<()> {
+        if rebuild_tool_call {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE tool_call RENAME TO tool_call_v36_broken;
+                CREATE TABLE tool_call (
+                  id TEXT PRIMARY KEY,
+                  run_id TEXT NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+                  tool TEXT NOT NULL,
+                  status TEXT NOT NULL,
+                  created_at TEXT NOT NULL,
+                  payload BLOB NOT NULL,
+                  payload_nonce BLOB NOT NULL
+                );
+                INSERT INTO tool_call
+                  (id,run_id,tool,status,created_at,payload,payload_nonce)
+                SELECT id,run_id,tool,status,created_at,payload,payload_nonce
+                  FROM tool_call_v36_broken;
+                DROP TABLE tool_call_v36_broken;
+                CREATE INDEX idx_tool_call_run ON tool_call(run_id);
+                "#,
+            )?;
+        }
+        if rebuild_approval {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE approval RENAME TO approval_v36_broken;
+                CREATE TABLE approval (
+                  id TEXT PRIMARY KEY,
+                  run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
+                  service TEXT NOT NULL,
+                  action TEXT NOT NULL,
+                  mode TEXT NOT NULL,
+                  risk_level TEXT NOT NULL,
+                  decision TEXT NOT NULL,
+                  request_fingerprint TEXT NOT NULL,
+                  decided_at TEXT NOT NULL,
+                  payload BLOB NOT NULL,
+                  payload_nonce BLOB NOT NULL
+                );
+                INSERT INTO approval
+                  (id,run_id,service,action,mode,risk_level,decision,
+                   request_fingerprint,decided_at,payload,payload_nonce)
+                SELECT id,run_id,service,action,mode,risk_level,decision,
+                       request_fingerprint,decided_at,payload,payload_nonce
+                  FROM approval_v36_broken;
+                DROP TABLE approval_v36_broken;
+                CREATE INDEX idx_approval_run ON approval(run_id);
+                CREATE INDEX idx_approval_rules
+                  ON approval(service,action) WHERE decision='rule';
+                "#,
+            )?;
+        }
+        if rebuild_artifact {
+            conn.execute_batch(
+                r#"
+                ALTER TABLE artifact RENAME TO artifact_v36_broken;
+                CREATE TABLE artifact (
+                  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+                  owner_subject TEXT NOT NULL,
+                  authority TEXT NOT NULL CHECK(authority='local'),
+                  visibility TEXT NOT NULL CHECK(visibility='member-private'),
+                  owner_member_id TEXT,
+                  owner_internal_user_id TEXT,
+                  id TEXT NOT NULL,
+                  run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
+                  thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+                  source_message_id TEXT,
+                  kind TEXT NOT NULL,
+                  status TEXT NOT NULL DEFAULT 'draft',
+                  revision INTEGER NOT NULL DEFAULT 1,
+                  current_version_id TEXT NOT NULL,
+                  title_fingerprint TEXT NOT NULL,
+                  content_fingerprint TEXT NOT NULL,
+                  size_bytes INTEGER NOT NULL,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL,
+                  payload BLOB NOT NULL,
+                  payload_nonce BLOB NOT NULL,
+                  PRIMARY KEY(workspace_id,owner_subject,id),
+                  CHECK ((owner_member_id IS NOT NULL) != (owner_internal_user_id IS NOT NULL))
+                );
+                INSERT INTO artifact (
+                  workspace_id,owner_subject,authority,visibility,owner_member_id,
+                  owner_internal_user_id,id,run_id,thread_id,source_message_id,
+                  kind,status,revision,current_version_id,title_fingerprint,
+                  content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce
+                )
+                SELECT
+                  workspace_id,owner_subject,authority,visibility,owner_member_id,
+                  owner_internal_user_id,id,run_id,thread_id,source_message_id,
+                  kind,status,revision,current_version_id,title_fingerprint,
+                  content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce
+                FROM artifact_v36_broken;
+                DROP TABLE artifact_v36_broken;
+                CREATE INDEX idx_artifact_run
+                  ON artifact(workspace_id,owner_subject,run_id);
+                CREATE INDEX idx_artifact_thread
+                  ON artifact(workspace_id,owner_subject,thread_id,created_at);
+                "#,
+            )?;
+        }
+        Ok(())
+    })();
+    let reset = conn.pragma_update(None, "legacy_alter_table", "OFF");
+    rebuild?;
+    reset?;
     Ok(())
 }
 
@@ -994,7 +1222,13 @@ fn apply_v10_to_v11(conn: &Connection) -> super::Result<()> {
         )?;
         conn.execute_batch("UPDATE run SET workspace_id=COALESCE((SELECT p.workspace_id FROM thread t JOIN project p ON p.id=t.project_id WHERE t.id=run.thread_id),'default');")?;
     }
-    conn.execute_batch(r#"
+    require_foreign_keys_disabled(conn, "v10 -> v11")?;
+    // Keep existing dependent foreign keys pointed at the canonical names
+    // while their legacy parents are moved aside. SQLite's modern rename
+    // behavior otherwise rewrites `run.thread_id` to the temporary
+    // `thread_v10` table, which is dropped later in this migration.
+    conn.pragma_update(None, "legacy_alter_table", "ON")?;
+    let rebuild = conn.execute_batch(r#"
       ALTER TABLE draft RENAME TO draft_v10;
       CREATE TABLE draft (workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,thread_id TEXT NOT NULL DEFAULT '',id TEXT NOT NULL,updated_at TEXT NOT NULL,payload BLOB NOT NULL,payload_nonce BLOB NOT NULL,PRIMARY KEY(workspace_id,thread_id,id));
       INSERT INTO draft (workspace_id,thread_id,id,updated_at,payload,payload_nonce) SELECT 'default','',id,updated_at,payload,payload_nonce FROM draft_v10;
@@ -1033,7 +1267,10 @@ fn apply_v10_to_v11(conn: &Connection) -> super::Result<()> {
       INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,payload,payload_nonce)
       SELECT current_revision_id,workspace_id,thread_id,id,1,0,'terminal','initial','legacy:'||id,created_at,created_at,payload,payload_nonce FROM message;
       CREATE TABLE IF NOT EXISTS conversation_tombstone (workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,target TEXT NOT NULL,thread_id TEXT NOT NULL,message_id TEXT,idempotency_key TEXT NOT NULL,deleted_at TEXT NOT NULL,reason TEXT NOT NULL,PRIMARY KEY(workspace_id,target,thread_id,message_id));
-    "#)?;
+    "#);
+    let reset = conn.pragma_update(None, "legacy_alter_table", "OFF");
+    rebuild?;
+    reset?;
     Ok(())
 }
 
@@ -1598,8 +1835,8 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v35 is current; v35 -> v36 has no registered migration.
-        let err = apply(&conn, 35, 36).unwrap_err();
+        // v37 is current; v37 -> v38 has no registered migration.
+        let err = apply(&conn, 37, 38).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
     }
 
@@ -2806,5 +3043,293 @@ mod tests {
             )
             .unwrap();
         assert_eq!(row, ("".into(), None, None));
+    }
+
+    #[test]
+    fn v10_to_v11_keeps_agent_runs_bound_to_the_canonical_thread_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE workspace(id TEXT PRIMARY KEY);
+            INSERT INTO workspace VALUES('workspace-1');
+            CREATE TABLE project(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL);
+            INSERT INTO project VALUES('project-1','workspace-1');
+            CREATE TABLE draft(
+              id TEXT PRIMARY KEY,updated_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            CREATE TABLE thread(
+              id TEXT PRIMARY KEY,project_id TEXT NOT NULL REFERENCES project(id),
+              created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO thread VALUES(
+              'thread-1','project-1','now','now',x'01',x'02'
+            );
+            CREATE TABLE message(
+              id TEXT PRIMARY KEY,thread_id TEXT NOT NULL REFERENCES thread(id),
+              role TEXT NOT NULL,seq INTEGER NOT NULL,created_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO message VALUES(
+              'message-1','thread-1','user',1,'now',x'03',x'04'
+            );
+            CREATE TABLE run(
+              id TEXT PRIMARY KEY,
+              thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+              provider_id TEXT NOT NULL,model TEXT NOT NULL,status TEXT NOT NULL,
+              turn INTEGER NOT NULL DEFAULT 0,recoverable INTEGER NOT NULL DEFAULT 0,
+              retry_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO run VALUES(
+              'run-1','thread-1','codex','gpt','completed',0,0,0,
+              'now','now',x'05',x'06'
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 10, 11).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        assert_eq!(
+            foreign_key_target(&conn, "run", "thread_id")
+                .unwrap()
+                .as_deref(),
+            Some("thread")
+        );
+        assert_eq!(
+            conn.query_row("SELECT workspace_id FROM run WHERE id='run-1'", [], |row| {
+                row.get::<_, String>(0)
+            })
+            .unwrap(),
+            "workspace-1"
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(1_i64))
+                .optional()
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn v35_to_v36_repairs_dangling_run_thread_foreign_key_without_losing_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE workspace(id TEXT PRIMARY KEY);
+            INSERT INTO workspace VALUES('workspace-1');
+            CREATE TABLE thread(id TEXT PRIMARY KEY);
+            INSERT INTO thread VALUES('thread-1');
+            CREATE TABLE run(
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL DEFAULT 'default'
+                REFERENCES workspace(id) ON DELETE CASCADE,
+              thread_id TEXT REFERENCES "thread_v10"(id) ON DELETE CASCADE,
+              provider_id TEXT NOT NULL,model TEXT NOT NULL,status TEXT NOT NULL,
+              turn INTEGER NOT NULL DEFAULT 0,recoverable INTEGER NOT NULL DEFAULT 0,
+              retry_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            CREATE INDEX idx_run_status ON run(workspace_id,status);
+            CREATE INDEX idx_run_thread ON run(workspace_id,thread_id);
+            INSERT INTO run VALUES(
+              'run-1','workspace-1','thread-1','codex','gpt','completed',
+              0,0,0,'now','now',x'01',x'02'
+            );
+            CREATE TABLE tool_call(
+              id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL REFERENCES run(id) ON DELETE CASCADE
+            );
+            INSERT INTO tool_call VALUES('tool-1','run-1');
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 35, 36).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        assert_eq!(
+            foreign_key_target(&conn, "run", "thread_id")
+                .unwrap()
+                .as_deref(),
+            Some("thread")
+        );
+        assert_eq!(
+            foreign_key_target(&conn, "tool_call", "run_id")
+                .unwrap()
+                .as_deref(),
+            Some("run")
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM run", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tool_call", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(1_i64))
+                .optional()
+                .unwrap(),
+            None
+        );
+
+        conn.execute("DELETE FROM thread WHERE id='thread-1'", [])
+            .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM run", [], |row| row.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM tool_call", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn v36_to_v37_repairs_run_dependents_without_losing_rows_or_child_links() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            r#"
+            PRAGMA foreign_keys = OFF;
+            CREATE TABLE workspace(id TEXT PRIMARY KEY);
+            INSERT INTO workspace VALUES('workspace-1');
+            CREATE TABLE thread(id TEXT PRIMARY KEY);
+            INSERT INTO thread VALUES('thread-1');
+            CREATE TABLE run(
+              id TEXT PRIMARY KEY,
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+              provider_id TEXT NOT NULL,model TEXT NOT NULL,status TEXT NOT NULL,
+              turn INTEGER NOT NULL DEFAULT 0,recoverable INTEGER NOT NULL DEFAULT 0,
+              retry_count INTEGER NOT NULL DEFAULT 0,created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            INSERT INTO run VALUES(
+              'run-1','workspace-1','thread-1','codex','gpt','completed',
+              0,0,0,'now','now',x'01',x'02'
+            );
+            CREATE TABLE tool_call(
+              id TEXT PRIMARY KEY,
+              run_id TEXT NOT NULL REFERENCES "run_v35_broken"(id) ON DELETE CASCADE,
+              tool TEXT NOT NULL,status TEXT NOT NULL,created_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            CREATE INDEX idx_tool_call_run ON tool_call(run_id);
+            INSERT INTO tool_call VALUES(
+              'tool-1','run-1','read','completed','now',x'03',x'04'
+            );
+            CREATE TABLE approval(
+              id TEXT PRIMARY KEY,
+              run_id TEXT REFERENCES "run_v35_broken"(id) ON DELETE CASCADE,
+              service TEXT NOT NULL,action TEXT NOT NULL,mode TEXT NOT NULL,
+              risk_level TEXT NOT NULL,decision TEXT NOT NULL,
+              request_fingerprint TEXT NOT NULL,decided_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL
+            );
+            CREATE INDEX idx_approval_run ON approval(run_id);
+            CREATE INDEX idx_approval_rules
+              ON approval(service,action) WHERE decision='rule';
+            INSERT INTO approval VALUES(
+              'approval-1','run-1','local','read','read-only','low','once',
+              'fingerprint','now',x'05',x'06'
+            );
+            CREATE TABLE artifact(
+              workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+              owner_subject TEXT NOT NULL,
+              authority TEXT NOT NULL CHECK(authority='local'),
+              visibility TEXT NOT NULL CHECK(visibility='member-private'),
+              owner_member_id TEXT,owner_internal_user_id TEXT,id TEXT NOT NULL,
+              run_id TEXT REFERENCES "run_v35_broken"(id) ON DELETE CASCADE,
+              thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+              source_message_id TEXT,kind TEXT NOT NULL,
+              status TEXT NOT NULL DEFAULT 'draft',
+              revision INTEGER NOT NULL DEFAULT 1,current_version_id TEXT NOT NULL,
+              title_fingerprint TEXT NOT NULL,content_fingerprint TEXT NOT NULL,
+              size_bytes INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
+              payload BLOB NOT NULL,payload_nonce BLOB NOT NULL,
+              PRIMARY KEY(workspace_id,owner_subject,id),
+              CHECK ((owner_member_id IS NOT NULL) != (owner_internal_user_id IS NOT NULL))
+            );
+            CREATE INDEX idx_artifact_run
+              ON artifact(workspace_id,owner_subject,run_id);
+            CREATE INDEX idx_artifact_thread
+              ON artifact(workspace_id,owner_subject,thread_id,created_at);
+            INSERT INTO artifact VALUES(
+              'workspace-1','internal:user-1','local','member-private',NULL,'user-1',
+              'artifact-1','run-1','thread-1',NULL,'document','draft',1,'version-1',
+              'title','content',1,'now','now',x'07',x'08'
+            );
+            CREATE TABLE artifact_version(
+              workspace_id TEXT NOT NULL,owner_subject TEXT NOT NULL,
+              artifact_id TEXT NOT NULL,id TEXT NOT NULL,
+              PRIMARY KEY(workspace_id,owner_subject,id),
+              FOREIGN KEY(workspace_id,owner_subject,artifact_id)
+                REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE
+            );
+            INSERT INTO artifact_version VALUES(
+              'workspace-1','internal:user-1','artifact-1','version-1'
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 36, 37).unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+
+        for table in ["tool_call", "approval", "artifact"] {
+            assert_eq!(
+                foreign_key_target(&conn, table, "run_id")
+                    .unwrap()
+                    .as_deref(),
+                Some("run"),
+                "{table} must reference the canonical run table"
+            );
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                1,
+                "{table} rows must survive the repair"
+            );
+        }
+        assert_eq!(
+            foreign_key_target(&conn, "artifact_version", "artifact_id")
+                .unwrap()
+                .as_deref(),
+            Some("artifact")
+        );
+        assert_eq!(
+            conn.query_row("PRAGMA foreign_key_check", [], |_| Ok(1_i64))
+                .optional()
+                .unwrap(),
+            None
+        );
+
+        conn.execute("DELETE FROM run WHERE id='run-1'", [])
+            .unwrap();
+        for table in ["tool_call", "approval", "artifact", "artifact_version"] {
+            assert_eq!(
+                conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| row
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0,
+                "{table} must retain its cascade relationship"
+            );
+        }
     }
 }

@@ -63,6 +63,26 @@ describe("OnboardingPage account and provider journey", () => {
     expect(onRecover).toHaveBeenCalledTimes(1);
   });
 
+  it("shows an identity failure instead of masking it with stale workspace status", () => {
+    renderOnboarding({
+      identityStatus: {
+        ...signedOut,
+        state: "error",
+        message: "Fable could not store cloud identity credentials."
+      },
+      accountWorkspaceStatus: {
+        ...readyWorkspace,
+        state: "signed-out",
+        accountBound: false,
+        message: "Sign in to open your workspace."
+      }
+    });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Fable could not store cloud identity credentials."
+    );
+  });
+
   it("uses the provider catalogue only after a ready account and requires a connected provider", async () => {
     const user = userEvent.setup();
     renderOnboarding({

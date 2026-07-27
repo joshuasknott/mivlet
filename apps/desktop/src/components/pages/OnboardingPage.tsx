@@ -20,6 +20,16 @@ function accountActionLabel(identity: IdentityStatus, workspace: AccountWorkspac
   return "Sign in to Fable";
 }
 
+function accountStatusMessage(identity: IdentityStatus, workspace: AccountWorkspaceStatus): string {
+  if (identity.state === "error" || identity.state === "expired" || identity.state === "revoked") {
+    return identity.message;
+  }
+  if (workspace.state === "error" || workspace.state === "expired" || workspace.state === "revoked") {
+    return workspace.message;
+  }
+  return workspace.message || identity.message;
+}
+
 /**
  * The required minimum journey: a Fable account establishes the active
  * workspace, then the user connects a provider. Account credentials are
@@ -103,7 +113,7 @@ export function OnboardingPage({
               <p className="og-connection-status-msg" role="status">Signed in as {display.displayName ?? display.email}.</p>
             ) : null}
             <p className="og-connection-status-msg" role={identityStatus.state === "error" || accountWorkspaceStatus.state === "error" ? "alert" : "status"}>
-              {accountWorkspaceStatus.message || identityStatus.message}
+              {accountStatusMessage(identityStatus, accountWorkspaceStatus)}
             </p>
             <div className="og-primary-cta">
               <button type="button" className="og-primary-cta__start" disabled={pending || !identityStatus.enabled || !accountWorkspaceStatus.configured} onClick={handleAccountAction}>

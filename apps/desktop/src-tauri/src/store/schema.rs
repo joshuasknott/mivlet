@@ -9,7 +9,7 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 35;
+pub const CURRENT_SCHEMA_VERSION: u32 = 37;
 
 /// Forward schema step `v34 -> v35`: adds an encrypted, owner-qualified
 /// at-most-once consumption ledger for approved Mission effects.

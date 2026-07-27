@@ -10,8 +10,9 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::PathBuf,
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{mpsc, Arc, Mutex, OnceLock},
     thread,
+    time::{Duration, Instant},
 };
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,13 @@ pub struct CodexCliStatus {
     pub(crate) executable_path: Option<String>,
     pub(crate) version: Option<String>,
     pub(crate) message: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct CodexModelCatalogEntry {
+    pub(crate) id: String,
+    pub(crate) label: String,
+    pub(crate) is_default: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -228,6 +236,135 @@ pub fn codex_cli_status() -> CodexCliStatus {
     }
 }
 
+/// Ask the installed app-server for its current model catalog.
+///
+/// Codex owns both authentication and model availability. Keeping this lookup
+/// at the native process boundary avoids stale hardcoded model IDs without
+/// exposing any auth material to JavaScript.
+pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, String> {
+    let path =
+        find_codex_executable().ok_or_else(|| "Codex CLI was not found on PATH.".to_string())?;
+    let mut command = codex_command(&path);
+    command
+        .arg("app-server")
+        .arg("--stdio")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|_| "Fable could not start Codex app-server.".to_string())?;
+    let stdin =
+        Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {
+            "Codex app-server stdin was unavailable.".to_string()
+        })?));
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Codex app-server stdout was unavailable.".to_string())?;
+
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                if sender.send(value).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    let request_result = (|| {
+        write_json_line(
+            &stdin,
+            &json!({
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientInfo": {
+                        "name": "fable",
+                        "title": "Fable",
+                        "version": env!("CARGO_PKG_VERSION")
+                    },
+                    "capabilities": {
+                        "experimentalApi": true,
+                        "requestAttestation": false
+                    }
+                }
+            }),
+        )?;
+        write_json_line(&stdin, &json!({ "method": "initialized" }))?;
+        write_json_line(
+            &stdin,
+            &json!({
+                "id": 2,
+                "method": "model/list",
+                "params": { "limit": 100 }
+            }),
+        )?;
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("Codex app-server did not return its model list.".to_string());
+            }
+            let value = receiver
+                .recv_timeout(remaining)
+                .map_err(|_| "Codex app-server did not return its model list.".to_string())?;
+            if value.get("id").and_then(Value::as_i64) != Some(2) {
+                continue;
+            }
+            if value.get("error").is_some() {
+                return Err("Codex app-server could not list available models.".to_string());
+            }
+
+            let mut models = value
+                .pointer("/result/data")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|model| {
+                    !model
+                        .get("hidden")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false)
+                })
+                .filter_map(|model| {
+                    let id = model.get("model").and_then(Value::as_str)?.trim();
+                    if id.is_empty() {
+                        return None;
+                    }
+                    let label = model
+                        .get("displayName")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .unwrap_or(id);
+                    Some(CodexModelCatalogEntry {
+                        id: id.to_string(),
+                        label: label.to_string(),
+                        is_default: model
+                            .get("isDefault")
+                            .and_then(Value::as_bool)
+                            .unwrap_or(false),
+                    })
+                })
+                .collect::<Vec<_>>();
+            models.sort_by_key(|model| !model.is_default);
+            if models.is_empty() {
+                return Err("Codex app-server returned no available models.".to_string());
+            }
+            return Ok(models);
+        }
+    })();
+
+    let _ = child.kill();
+    let _ = child.wait();
+    request_result
+}
+
 #[tauri::command]
 pub fn start_codex_app_server_turn(
     app: AppHandle,
@@ -348,6 +485,15 @@ fn read_codex_stdout(
             continue;
         };
         if value.get("id").and_then(Value::as_i64) == Some(2) {
+            if value.get("error").is_some() {
+                let message = value
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Codex app-server could not start or resume the thread.");
+                let _ = app.emit(&channel, json!({ "type": "error", "message": message }));
+                let _ = app.emit(&channel, json!({ "type": "done", "finishReason": "error" }));
+                continue;
+            }
             if let Some(thread_id) = value
                 .pointer("/result/thread/id")
                 .and_then(Value::as_str)
@@ -355,7 +501,25 @@ fn read_codex_stdout(
             {
                 let _ = app.emit(&channel, json!({ "type": "thread", "threadId": thread_id }));
                 let _ = write_json_line(&stdin, &turn_start_request(&thread_id, &request));
+            } else {
+                let _ = app.emit(
+                    &channel,
+                    json!({
+                        "type": "error",
+                        "message": "Codex app-server returned no thread identifier."
+                    }),
+                );
+                let _ = app.emit(&channel, json!({ "type": "done", "finishReason": "error" }));
             }
+            continue;
+        }
+        if value.get("id").and_then(Value::as_i64) == Some(3) && value.get("error").is_some() {
+            let message = value
+                .pointer("/error/message")
+                .and_then(Value::as_str)
+                .unwrap_or("Codex app-server could not start the turn.");
+            let _ = app.emit(&channel, json!({ "type": "error", "message": message }));
+            let _ = app.emit(&channel, json!({ "type": "done", "finishReason": "error" }));
             continue;
         }
         if let Some(method) = value.get("method").and_then(Value::as_str) {

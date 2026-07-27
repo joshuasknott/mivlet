@@ -14,6 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
+use jsonwebtoken::errors::ErrorKind;
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +25,12 @@ use url::Url;
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.identity.clerk";
 const SESSION_KEY: &str = "clerk-session";
+const KEYRING_CHUNK_MANIFEST_PREFIX: &str = "fable-keyring-chunks-v1:";
+// Windows Credential Manager limits generic credential blobs to 2,560 bytes.
+// keyring encodes passwords as UTF-16 there, so keep each entry comfortably
+// below that ceiling while retaining OS-secure storage on every platform.
+const KEYRING_CHUNK_UTF16_UNITS: usize = 900;
+const KEYRING_MAX_CHUNKS: usize = 64;
 const PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(10);
@@ -86,15 +93,55 @@ trait IdentitySecretStore: Send + Sync {
 
 struct NativeIdentitySecretStore;
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+struct KeyringChunkManifest {
+    generation: String,
+    chunks: usize,
+    digest: String,
+}
+
+fn split_keyring_secret(secret: &str) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let mut current = String::new();
+    let mut current_units = 0;
+    for character in secret.chars() {
+        let units = character.len_utf16();
+        if current_units > 0 && current_units + units > KEYRING_CHUNK_UTF16_UNITS {
+            chunks.push(std::mem::take(&mut current));
+            current_units = 0;
+        }
+        current.push(character);
+        current_units += units;
+    }
+    if !current.is_empty() || secret.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+fn keyring_manifest(value: &str) -> Option<KeyringChunkManifest> {
+    let encoded = value.strip_prefix(KEYRING_CHUNK_MANIFEST_PREFIX)?;
+    let manifest = serde_json::from_str::<KeyringChunkManifest>(encoded).ok()?;
+    let generation_valid = !manifest.generation.is_empty()
+        && manifest.generation.len() <= 64
+        && manifest
+            .generation
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_');
+    (generation_valid && (1..=KEYRING_MAX_CHUNKS).contains(&manifest.chunks)).then_some(manifest)
+}
+
 impl NativeIdentitySecretStore {
     fn entry(key: &str) -> Result<keyring::Entry, String> {
         keyring::Entry::new(KEYRING_SERVICE, key)
             .map_err(|_| "Fable could not open the OS secure store.".to_string())
     }
-}
 
-impl IdentitySecretStore for NativeIdentitySecretStore {
-    fn get(&self, key: &str) -> Result<Option<String>, String> {
+    fn chunk_key(key: &str, generation: &str, index: usize) -> String {
+        format!("{key}:chunk:{generation}:{index}")
+    }
+
+    fn read_entry(key: &str) -> Result<Option<String>, String> {
         match Self::entry(key)?.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
@@ -102,17 +149,95 @@ impl IdentitySecretStore for NativeIdentitySecretStore {
         }
     }
 
-    fn set(&self, key: &str, secret: &str) -> Result<(), String> {
+    fn write_entry(key: &str, secret: &str) -> Result<(), String> {
         Self::entry(key)?
             .set_password(secret)
             .map_err(|_| "Fable could not store cloud identity credentials.".to_string())
     }
 
-    fn remove(&self, key: &str) -> Result<(), String> {
+    fn remove_entry(key: &str) -> Result<(), String> {
         match Self::entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(_) => Err("Fable could not remove cloud identity credentials.".to_string()),
         }
+    }
+
+    fn remove_manifest_chunks(key: &str, manifest: &KeyringChunkManifest) -> Result<(), String> {
+        for index in 0..manifest.chunks {
+            Self::remove_entry(&Self::chunk_key(key, &manifest.generation, index))?;
+        }
+        Ok(())
+    }
+}
+
+impl IdentitySecretStore for NativeIdentitySecretStore {
+    fn get(&self, key: &str) -> Result<Option<String>, String> {
+        let Some(value) = Self::read_entry(key)? else {
+            return Ok(None);
+        };
+        let Some(manifest) = keyring_manifest(&value) else {
+            return Ok(Some(value));
+        };
+        let mut secret = String::new();
+        for index in 0..manifest.chunks {
+            let chunk = Self::read_entry(&Self::chunk_key(key, &manifest.generation, index))?
+                .ok_or_else(|| "Fable cloud identity credentials were incomplete.".to_string())?;
+            secret.push_str(&chunk);
+        }
+        let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes()));
+        if digest != manifest.digest {
+            return Err("Fable cloud identity credentials failed integrity checking.".to_string());
+        }
+        Ok(Some(secret))
+    }
+
+    fn set(&self, key: &str, secret: &str) -> Result<(), String> {
+        let previous_manifest = Self::read_entry(key)?.as_deref().and_then(keyring_manifest);
+        let chunks = split_keyring_secret(secret);
+        if chunks.len() == 1 {
+            Self::write_entry(key, &chunks[0])?;
+        } else {
+            if chunks.len() > KEYRING_MAX_CHUNKS {
+                return Err("Fable cloud identity credentials were unexpectedly large.".to_string());
+            }
+            let generation = random_urlsafe(12).map_err(|error| error.message)?;
+            let manifest = KeyringChunkManifest {
+                generation: generation.clone(),
+                chunks: chunks.len(),
+                digest: URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes())),
+            };
+            for (index, chunk) in chunks.iter().enumerate() {
+                if let Err(error) =
+                    Self::write_entry(&Self::chunk_key(key, &generation, index), chunk)
+                {
+                    for cleanup_index in 0..index {
+                        let _ =
+                            Self::remove_entry(&Self::chunk_key(key, &generation, cleanup_index));
+                    }
+                    return Err(error);
+                }
+            }
+            let encoded = serde_json::to_string(&manifest)
+                .map_err(|_| "Fable could not encode cloud identity storage.".to_string())?;
+            if let Err(error) =
+                Self::write_entry(key, &format!("{KEYRING_CHUNK_MANIFEST_PREFIX}{encoded}"))
+            {
+                let _ = Self::remove_manifest_chunks(key, &manifest);
+                return Err(error);
+            }
+        }
+        if let Some(previous) = previous_manifest {
+            let _ = Self::remove_manifest_chunks(key, &previous);
+        }
+        Ok(())
+    }
+
+    fn remove(&self, key: &str) -> Result<(), String> {
+        let manifest = Self::read_entry(key)?.as_deref().and_then(keyring_manifest);
+        if let Some(manifest) = manifest {
+            Self::remove_manifest_chunks(key, &manifest)?;
+        }
+        Self::remove_entry(key)
     }
 }
 
@@ -204,7 +329,8 @@ impl AudienceClaim {
 struct TokenClaims {
     iss: String,
     sub: String,
-    aud: AudienceClaim,
+    #[serde(default)]
+    aud: Option<AudienceClaim>,
     exp: u64,
     #[serde(default)]
     nbf: Option<u64>,
@@ -309,7 +435,6 @@ struct LegacyIdentitySummary {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct StoredSession {
     access_token: String,
-    id_token: Option<String>,
     refresh_token: Option<String>,
     token_type: String,
     expires_at: u64,
@@ -505,14 +630,6 @@ fn load_config_from(
         .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
-    if production && authorized_party.is_none() {
-        return Err(identity_error(
-            "configuration-required",
-            "Clerk authorized party must be explicit in production.",
-            false,
-        ));
-    }
-
     Ok(Some(ClerkIdentityConfig {
         issuer,
         client_id,
@@ -811,10 +928,20 @@ async fn fetch_jwks(jwks_uri: &str) -> Result<Jwks, IdentityError> {
     })
 }
 
+#[cfg(test)]
 fn validate_claims(
     claims: &TokenClaims,
     config: &ClerkIdentityConfig,
     now: u64,
+) -> Result<(), IdentityError> {
+    validate_claims_for_use(claims, config, now, true)
+}
+
+fn validate_claims_for_use(
+    claims: &TokenClaims,
+    config: &ClerkIdentityConfig,
+    now: u64,
+    audience_required: bool,
 ) -> Result<(), IdentityError> {
     if claims.sub.trim().is_empty() {
         return Err(identity_error(
@@ -830,12 +957,23 @@ fn validate_claims(
             false,
         ));
     }
-    if !claims.aud.contains(&config.audience) {
-        return Err(identity_error(
-            "invalid-token",
-            "Clerk token audience did not match configuration.",
-            false,
-        ));
+    match &claims.aud {
+        Some(audience) if audience.contains(&config.audience) => {}
+        Some(_) => {
+            return Err(identity_error(
+                "invalid-token",
+                "Clerk token audience did not match configuration.",
+                false,
+            ))
+        }
+        None if audience_required => {
+            return Err(identity_error(
+                "invalid-token",
+                "Clerk identity token audience was missing.",
+                false,
+            ))
+        }
+        None => {}
     }
     if let Some(expected_azp) = &config.authorized_party {
         if claims.azp.as_deref() != Some(expected_azp.as_str()) {
@@ -916,10 +1054,59 @@ fn decoding_key_for(header_kid: Option<&str>, jwks: &Jwks) -> Result<DecodingKey
     })
 }
 
+fn token_claim_shape_error(claims: &Value, audience_required: bool) -> Option<String> {
+    let object = claims.as_object()?;
+    for field in ["iss", "sub"] {
+        match object.get(field) {
+            Some(value) if value.is_string() => {}
+            Some(_) => return Some(format!("the `{field}` claim was not a string")),
+            None => return Some(format!("the required `{field}` claim was missing")),
+        }
+    }
+    match object.get("aud") {
+        Some(Value::String(_)) => {}
+        Some(Value::Array(values)) if values.iter().all(Value::is_string) => {}
+        Some(_) => return Some("the `aud` claim was not a string or string array".to_string()),
+        None if audience_required => {
+            return Some("the required `aud` claim was missing".to_string())
+        }
+        None => {}
+    }
+    match object.get("exp") {
+        Some(value) if value.as_u64().is_some() => {}
+        Some(_) => return Some("the `exp` claim was not an unsigned timestamp".to_string()),
+        None => return Some("the required `exp` claim was missing".to_string()),
+    }
+    for field in ["nbf", "iat"] {
+        if object
+            .get(field)
+            .is_some_and(|value| !value.is_null() && value.as_u64().is_none())
+        {
+            return Some(format!("the `{field}` claim was not an unsigned timestamp"));
+        }
+    }
+    for field in ["azp", "sid", "jti", "email", "name"] {
+        if object
+            .get(field)
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
+            return Some(format!("the `{field}` claim was not a string"));
+        }
+    }
+    if object
+        .get("email_verified")
+        .is_some_and(|value| !value.is_null() && !value.is_boolean())
+    {
+        return Some("the `email_verified` claim was not a boolean".to_string());
+    }
+    None
+}
+
 fn validate_jwt_with_jwks(
     token: &str,
     config: &ClerkIdentityConfig,
     jwks: &Jwks,
+    audience_required: bool,
 ) -> Result<TokenClaims, IdentityError> {
     let header = decode_header(token)
         .map_err(|_| identity_error("invalid-token", "Clerk token header was invalid.", false))?;
@@ -936,15 +1123,44 @@ fn validate_jwt_with_jwks(
     validation.validate_exp = false;
     validation.validate_nbf = false;
     validation.required_spec_claims.clear();
-    let data = decode::<TokenClaims>(token, &key, &validation).map_err(|_| {
+    let data = decode::<Value>(token, &key, &validation).map_err(|error| {
+        let reason = match error.kind() {
+            ErrorKind::InvalidSignature => "signature did not match Clerk's signing key",
+            ErrorKind::Json(_) | ErrorKind::MissingRequiredClaim(_) => "claims were not valid JSON",
+            ErrorKind::Base64(_) | ErrorKind::Utf8(_) | ErrorKind::InvalidToken => {
+                "encoding was not a valid JWT"
+            }
+            _ => "cryptographic validation failed",
+        };
         identity_error(
             "invalid-token",
-            "Clerk token signature or shape was invalid.",
+            format!("Clerk token validation failed because its {reason}."),
             false,
         )
     })?;
-    validate_claims(&data.claims, config, now_epoch())?;
-    Ok(data.claims)
+    if !data.claims.is_object() {
+        return Err(identity_error(
+            "invalid-token",
+            "Clerk token claims were not a JSON object.",
+            false,
+        ));
+    }
+    if let Some(reason) = token_claim_shape_error(&data.claims, audience_required) {
+        return Err(identity_error(
+            "invalid-token",
+            format!("Clerk token claims were invalid because {reason}."),
+            false,
+        ));
+    }
+    let claims = serde_json::from_value::<TokenClaims>(data.claims).map_err(|_| {
+        identity_error(
+            "invalid-token",
+            "Clerk token claims used unsupported field types.",
+            false,
+        )
+    })?;
+    validate_claims_for_use(&claims, config, now_epoch(), audience_required)?;
+    Ok(claims)
 }
 
 fn opaque_reference(kind: &str, value: &str) -> String {
@@ -1412,16 +1628,34 @@ async fn session_from_tokens(
         ));
     }
     let jwks = fetch_jwks(&metadata.jwks_uri).await?;
-    let access_claims = validate_jwt_with_jwks(&tokens.access_token, &config, &jwks)?;
-    if let Some(id_token) = &tokens.id_token {
-        let id_claims = validate_jwt_with_jwks(id_token, &config, &jwks)?;
-        if id_claims.sub != access_claims.sub {
-            return Err(identity_error(
-                "invalid-token",
-                "Clerk access and identity tokens named different subjects.",
-                false,
-            ));
-        }
+    let oauth_access_claims = validate_jwt_with_jwks(&tokens.access_token, &config, &jwks, false)
+        .map_err(|error| {
+        identity_error(
+            error.code,
+            format!("Clerk access token was rejected: {}", error.message),
+            error.retryable,
+        )
+    })?;
+    let id_token = tokens.id_token.ok_or_else(|| {
+        identity_error(
+            "invalid-token",
+            "Clerk did not return the required OpenID identity token.",
+            false,
+        )
+    })?;
+    let id_claims = validate_jwt_with_jwks(&id_token, &config, &jwks, true).map_err(|error| {
+        identity_error(
+            error.code,
+            format!("Clerk ID token was rejected: {}", error.message),
+            error.retryable,
+        )
+    })?;
+    if id_claims.sub != oauth_access_claims.sub {
+        return Err(identity_error(
+            "invalid-token",
+            "Clerk access and identity tokens named different subjects.",
+            false,
+        ));
     }
     if let Some(previous_subject) = current.as_ref().and_then(|session| {
         session
@@ -1435,7 +1669,7 @@ async fn session_from_tokens(
                     .map(|identity| identity.user_id.as_str())
             })
     }) {
-        if previous_subject != access_claims.sub {
+        if previous_subject != id_claims.sub {
             return Err(identity_error(
                 "invalid-token",
                 "Clerk refresh changed the authenticated subject; recover the account session.",
@@ -1459,26 +1693,17 @@ async fn session_from_tokens(
     let expires_at = tokens
         .expires_in
         .map(|seconds| now_epoch().saturating_add(seconds))
-        .unwrap_or(access_claims.exp)
-        .min(access_claims.exp);
-    let mut authentication = authentication_from_claims(
-        &access_claims,
-        &config.issuer,
-        &tokens.access_token,
-        expires_at,
-    );
+        .unwrap_or(id_claims.exp)
+        .min(id_claims.exp);
+    let mut authentication =
+        authentication_from_claims(&id_claims, &config.issuer, &id_token, expires_at);
     if let Some(userinfo_endpoint) = &metadata.userinfo_endpoint {
         if let Some(userinfo) = fetch_userinfo(userinfo_endpoint, &tokens.access_token).await {
             merge_userinfo(&mut authentication, userinfo);
         }
     }
     Ok(StoredSession {
-        access_token: tokens.access_token,
-        id_token: tokens.id_token.or_else(|| {
-            current
-                .as_ref()
-                .and_then(|session| session.id_token.clone())
-        }),
+        access_token: id_token.clone(),
         refresh_token: tokens
             .refresh_token
             .or_else(|| current.and_then(|session| session.refresh_token)),
@@ -1552,7 +1777,7 @@ async fn status_with_store(
             authorized_party: session.authorized_party.clone(),
             scopes: session.scopes.clone(),
         };
-        match validate_jwt_with_jwks(&session.access_token, &active_config, &jwks) {
+        match validate_jwt_with_jwks(&session.access_token, &active_config, &jwks, true) {
             Ok(claims) => {
                 if session.authentication.is_none() {
                     let mut authentication = authentication_from_claims(
@@ -2211,7 +2436,7 @@ mod tests {
         TokenClaims {
             iss: "https://issuer.example".to_string(),
             sub: "user_123".to_string(),
-            aud: AudienceClaim::One("fable-desktop".to_string()),
+            aud: Some(AudienceClaim::One("fable-desktop".to_string())),
             exp: now_epoch() + 3600,
             nbf: Some(now_epoch() - 5),
             iat: Some(now_epoch() - 5),
@@ -2232,6 +2457,36 @@ mod tests {
     }
 
     #[test]
+    fn secure_store_chunks_round_trip_with_windows_safe_bounds() {
+        let secret = format!("{}{}{}", "a".repeat(901), "🦀", "b".repeat(901));
+        let chunks = split_keyring_secret(&secret);
+        assert!(chunks.len() >= 3);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.encode_utf16().count() <= KEYRING_CHUNK_UTF16_UNITS));
+        assert_eq!(chunks.concat(), secret);
+    }
+
+    #[test]
+    fn secure_store_manifest_rejects_unbounded_or_unsafe_chunk_keys() {
+        let valid = KeyringChunkManifest {
+            generation: "safe_generation-1".to_string(),
+            chunks: 3,
+            digest: "digest".to_string(),
+        };
+        let encoded = format!(
+            "{KEYRING_CHUNK_MANIFEST_PREFIX}{}",
+            serde_json::to_string(&valid).unwrap()
+        );
+        assert_eq!(keyring_manifest(&encoded).unwrap().chunks, 3);
+
+        let unsafe_generation = encoded.replace("safe_generation-1", "../unsafe");
+        assert!(keyring_manifest(&unsafe_generation).is_none());
+        let too_many = encoded.replace("\"chunks\":3", "\"chunks\":65");
+        assert!(keyring_manifest(&too_many).is_none());
+    }
+
+    #[test]
     fn enabled_production_config_requires_explicit_security_fields() {
         let incomplete = config_values(&[
             ("FABLE_CLERK_ISSUER", "https://issuer.example"),
@@ -2248,13 +2503,12 @@ mod tests {
             ("FABLE_CLERK_ISSUER", "https://issuer.example"),
             ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
             ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
-            ("FABLE_CLERK_AUTHORIZED_PARTY", "client_123"),
         ]);
         let config = load_config_from(true, |key| complete.get(key).cloned())
             .unwrap()
             .unwrap();
         assert_eq!(config.audience, "fable-desktop");
-        assert_eq!(config.authorized_party.as_deref(), Some("client_123"));
+        assert_eq!(config.authorized_party, None);
     }
 
     #[test]
@@ -2283,7 +2537,6 @@ mod tests {
         let config = test_config();
         let mut session = StoredSession {
             access_token: "access_secret".to_string(),
-            id_token: None,
             refresh_token: None,
             token_type: "Bearer".to_string(),
             expires_at: now_epoch() + 3600,
@@ -2315,7 +2568,7 @@ mod tests {
         );
 
         let mut wrong_audience = test_claims();
-        wrong_audience.aud = AudienceClaim::One("other".to_string());
+        wrong_audience.aud = Some(AudienceClaim::One("other".to_string()));
         assert_eq!(
             validate_claims(&wrong_audience, &config, now)
                 .unwrap_err()
@@ -2339,6 +2592,26 @@ mod tests {
                 .unwrap_err()
                 .message,
             "Clerk token subject was missing."
+        );
+    }
+
+    #[test]
+    fn oauth_access_token_may_omit_audience_but_identity_token_may_not() {
+        let config = ClerkIdentityConfig {
+            authorized_party: None,
+            ..test_config()
+        };
+        let now = now_epoch();
+        let mut claims = test_claims();
+        claims.aud = None;
+        claims.azp = None;
+
+        validate_claims_for_use(&claims, &config, now, false).unwrap();
+        assert_eq!(
+            validate_claims_for_use(&claims, &config, now, true)
+                .unwrap_err()
+                .message,
+            "Clerk identity token audience was missing."
         );
     }
 
@@ -2484,7 +2757,6 @@ mod tests {
         );
         let session = StoredSession {
             access_token: "access_secret".to_string(),
-            id_token: Some("id_secret".to_string()),
             refresh_token: Some("refresh_secret".to_string()),
             token_type: "Bearer".to_string(),
             expires_at: now_epoch() + 3600,

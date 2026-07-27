@@ -295,7 +295,9 @@ describe("useShellRuntime - account onboarding boundary", () => {
       message: "Signed in",
       scopes: []
     });
-    vi.mocked(runtime.reconcileRuntimeAccountWorkspace).mockResolvedValue(workspace("workspace-a", "local-a"));
+    vi.mocked(runtime.loadRuntimeAccountWorkspaceStatus).mockResolvedValue(
+      workspace("workspace-a", "local-a")
+    );
     vi.mocked(runtime.loadRuntimeSnapshot)
       .mockResolvedValueOnce(shellStateToRuntimeSnapshot({
         ...defaultShellState,

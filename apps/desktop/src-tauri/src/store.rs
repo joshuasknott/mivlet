@@ -218,19 +218,54 @@ impl Store {
 
     /// Run pending schema/data migrations inside a transaction.
     fn run_migrations(conn: &Connection) -> Result<()> {
-        let tx = conn.unchecked_transaction()?;
-        let current = read_schema_version(&tx)?;
-        if current > CURRENT_SCHEMA_VERSION {
-            // A newer schema than this binary understands. Fail closed rather
-            // than downgrade-silently.
-            return Err(StoreError::Invalid(format!(
-                "The local database schema (v{current}) is newer than this version of Fable supports (v{CURRENT_SCHEMA_VERSION})."
-            )));
+        // SQLite's documented table-rebuild procedure requires foreign-key
+        // enforcement to be disabled before the migration transaction starts.
+        // The completed schema is checked inside that same transaction before
+        // it can commit, then enforcement is restored for normal operation.
+        let foreign_keys_enabled =
+            conn.pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))? != 0;
+        if foreign_keys_enabled {
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
         }
-        migrations::apply(&tx, current, CURRENT_SCHEMA_VERSION)?;
-        write_schema_version(&tx, CURRENT_SCHEMA_VERSION)?;
-        tx.commit()?;
-        Ok(())
+
+        let migration_result = (|| -> Result<()> {
+            let tx = conn.unchecked_transaction()?;
+            let current = read_schema_version(&tx)?;
+            if current > CURRENT_SCHEMA_VERSION {
+                // A newer schema than this binary understands. Fail closed rather
+                // than downgrade-silently.
+                return Err(StoreError::Invalid(format!(
+                    "The local database schema (v{current}) is newer than this version of Fable supports (v{CURRENT_SCHEMA_VERSION})."
+                )));
+            }
+            migrations::apply(&tx, current, CURRENT_SCHEMA_VERSION)?;
+            write_schema_version(&tx, CURRENT_SCHEMA_VERSION)?;
+            let violation = tx
+                .query_row("PRAGMA foreign_key_check;", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()?;
+            if violation.is_some() {
+                return Err(StoreError::Corrupt(
+                    "Fable's local database migration could not preserve referential integrity."
+                        .to_string(),
+                ));
+            }
+            tx.commit()?;
+            Ok(())
+        })();
+
+        let restore_result = if foreign_keys_enabled {
+            conn.pragma_update(None, "foreign_keys", "ON")
+                .map_err(StoreError::from)
+        } else {
+            Ok(())
+        };
+        match (migration_result, restore_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     /// Run `f` against the raw connection under the lock (for integrity checks,
@@ -1319,6 +1354,13 @@ mod tests {
             })
             .unwrap();
         assert_eq!(v.parse::<u32>().unwrap(), CURRENT_SCHEMA_VERSION);
+        let foreign_keys_enabled: i64 = store
+            .with_conn(|conn| {
+                conn.pragma_query_value(None, "foreign_keys", |row| row.get(0))
+                    .map_err(StoreError::from)
+            })
+            .unwrap();
+        assert_eq!(foreign_keys_enabled, 1);
     }
 
     #[test]

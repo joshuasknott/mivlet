@@ -1030,7 +1030,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }, [refreshIdentityStatus]);
 
   useEffect(() => {
-    if (hasTauriRuntime()) void refreshAccountWorkspace(true);
+    if (hasTauriRuntime()) void refreshAccountWorkspace(false);
   }, [refreshAccountWorkspace]);
 
   const signInIdentity = useCallback(async () => {
@@ -1129,9 +1129,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }, [applyAccountWorkspaceStatus]);
 
   const reconcileAccountWorkspace = useCallback(async () => {
-    const status = await refreshAccountWorkspace(true);
+    const status = await refreshAccountWorkspace(identityStatus.state === "signed-in");
     setLastAction(status.message);
-  }, [refreshAccountWorkspace]);
+  }, [identityStatus.state, refreshAccountWorkspace]);
 
   const createAccountWorkspace = useCallback(async (name: string) => {
     const requestGeneration = ++accountRequestGenerationRef.current;

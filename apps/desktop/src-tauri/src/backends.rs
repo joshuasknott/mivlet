@@ -1753,6 +1753,28 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
     if let Some(codex) = providers.iter_mut().find(|provider| provider.id == "codex") {
         let status = crate::codex_app_server::codex_cli_status();
         apply_codex_cli_status(codex, &status);
+        if status.authenticated {
+            match crate::codex_app_server::codex_model_catalog() {
+                Ok(models) => {
+                    codex.models = models
+                        .into_iter()
+                        .take(MAX_BACKEND_MODELS)
+                        .map(|model| BackendModel {
+                            id: model.id,
+                            label: model.label,
+                            available: true,
+                            capabilities: None,
+                        })
+                        .collect();
+                }
+                Err(message) => {
+                    codex.auth_state = "unavailable".to_string();
+                    codex.capabilities.clear();
+                    codex.models.clear();
+                    codex.install_hint = Some(message);
+                }
+            }
+        }
     }
     Ok(providers)
 }

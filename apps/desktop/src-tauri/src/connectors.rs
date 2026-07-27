@@ -1008,6 +1008,29 @@ pub(crate) fn list_connector_statuses_with(
         .collect()
 }
 
+fn list_unconfigured_workspace_connector_statuses() -> Vec<ConnectorManifest> {
+    let mut manifests = list_connector_statuses_with(&UnavailableCredentialBoundary);
+    for manifest in &mut manifests {
+        let message =
+            "Connector credentials are not configured for this Fable workspace.".to_string();
+        manifest.status = "unconfigured".to_string();
+        manifest.health.state = "unknown".to_string();
+        manifest.health.summary = message.clone();
+        manifest.health.checked_at = "Not checked".to_string();
+        manifest.health.retry_after = None;
+        manifest.health_summary = message.clone();
+        manifest.setup_message = Some(message);
+        manifest.account = None;
+        manifest.supports_search = false;
+        manifest.supports_import = false;
+        manifest.supported_actions.clear();
+        for scope in &mut manifest.scopes {
+            scope.granted = false;
+        }
+    }
+    manifests
+}
+
 #[cfg(test)]
 pub(crate) fn list_unconfigured_connector_statuses() -> Vec<ConnectorManifest> {
     list_connector_statuses_with(&UnavailableCredentialBoundary)
@@ -1243,7 +1266,9 @@ pub fn list_connector_statuses(
     app: tauri::AppHandle,
     workspace_id: Option<String>,
 ) -> Result<Vec<ConnectorManifest>, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
+    if require_connector_workspace(workspace_id).is_err() {
+        return Ok(list_unconfigured_workspace_connector_statuses());
+    }
     let boundary = connector_connections_path(&app)
         .map(|connections_path| NativeCredentialBoundary { connections_path });
     Ok(match boundary {
@@ -2617,6 +2642,25 @@ mod workspace_scope_tests {
     fn connector_commands_fail_closed_for_an_unconfigured_workspace() {
         let error = require_connector_workspace(Some("another-workspace".to_string())).unwrap_err();
         assert_eq!(error.code, "invalid-request");
+    }
+
+    #[test]
+    fn connector_statuses_remain_truthful_for_an_unconfigured_workspace() {
+        let manifests = list_unconfigured_workspace_connector_statuses();
+
+        assert_eq!(manifests.len(), FIRST_WAVE_CONNECTOR_IDS.len());
+        assert!(manifests
+            .iter()
+            .all(|manifest| manifest.status == "unconfigured"));
+        assert!(manifests.iter().all(|manifest| {
+            manifest.setup_message.as_deref()
+                == Some("Connector credentials are not configured for this Fable workspace.")
+                && manifest.account.is_none()
+                && !manifest.supports_search
+                && !manifest.supports_import
+                && manifest.supported_actions.is_empty()
+                && manifest.scopes.iter().all(|scope| !scope.granted)
+        }));
     }
 
     #[test]

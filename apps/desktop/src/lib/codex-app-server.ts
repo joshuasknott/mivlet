@@ -69,6 +69,11 @@ export function createDesktopCodexAppServer(
       const queue: CodexAppServerEvent[] = [];
       let resolveNext: ((value: CodexAppServerEvent | undefined) => void) | null = null;
       let finished = false;
+      const finish = () => {
+        finished = true;
+        resolveNext?.(undefined);
+        resolveNext = null;
+      };
       const unlisten = await listenRuntimeCodexEvents(currentRequestId, (event) => {
         if (event.type === "retrying") {
           handlers.onRetry();
@@ -83,29 +88,30 @@ export function createDesktopCodexAppServer(
           return;
         }
         if (event.type === "process-exited") {
-          finished = true;
-          resolveNext?.(undefined);
+          finish();
           return;
         }
         if (isCodexEvent(event)) {
           queue.push(event);
           resolveNext?.(event);
           resolveNext = null;
+          if (event.type === "done" || event.type === "cancelled" || event.type === "error") {
+            finished = true;
+          }
         }
       });
 
-      const completion = startRuntimeCodexTurn({
-        requestId: currentRequestId,
-        providerId: provider.id,
-        threadId: turn.threadId.startsWith("pending-") ? null : turn.threadId,
-        request: turn.request,
-        options: turn.options
-      }).finally(() => {
-        finished = true;
-        resolveNext?.(undefined);
-      });
-
       try {
+        // The native command acknowledges process startup immediately; it does
+        // not represent turn completion. Keep listening until the app-server
+        // emits a terminal turn event or the supervised process exits.
+        await startRuntimeCodexTurn({
+          requestId: currentRequestId,
+          providerId: provider.id,
+          threadId: turn.threadId.startsWith("pending-") ? null : turn.threadId,
+          request: turn.request,
+          options: turn.options
+        });
         while (!finished || queue.length > 0) {
           if (queue.length > 0) {
             yield queue.shift() as CodexAppServerEvent;
@@ -116,7 +122,6 @@ export function createDesktopCodexAppServer(
             if (!next && finished) break;
           }
         }
-        await completion;
       } finally {
         void unlisten?.();
       }
