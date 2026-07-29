@@ -1,6 +1,6 @@
 {
-  "version": 2,
-  "recordedAt": "2026-07-25",
+  "version": 3,
+  "recordedAt": "2026-07-29",
   "previousBaseline": {
     "recordedAt": "2026-07-24",
     "totalJsCss": {
@@ -16,44 +16,44 @@
   },
   "recordedBaseline": {
     "totalJsCss": {
-      "rawBytes": 1531341,
-      "gzipBytes": 407815
+      "rawBytes": 1411960,
+      "gzipBytes": 379193
     },
     "css": {
-      "rawBytes": 193012
+      "rawBytes": 195056
     },
     "initialEntryJs": {
-      "rawBytes": 711053
+      "rawBytes": 609277
     },
     "routeChunks": {
-      "SchedulesPage": { "rawBytes": 43076 },
-      "SettingsPage": { "rawBytes": 98100 },
-      "KnowledgePage": { "rawBytes": 44671 },
-      "ProjectPage": { "rawBytes": 18915 },
-      "OnboardingPage": { "rawBytes": 3871 },
+      "SchedulesPage": { "rawBytes": 43371 },
+      "SettingsPage": { "rawBytes": 98106 },
+      "KnowledgePage": { "rawBytes": 38735 },
+      "ProjectPage": { "rawBytes": 25317 },
+      "OnboardingPage": { "rawBytes": 4041 },
       "ConnectorsPage": { "rawBytes": 8267 },
       "ApprovalPanel": { "rawBytes": 8196 },
       "DepartmentsPage": { "rawBytes": 3194 }
     }
   },
   "observedBuild": {
-    "recordedAt": "2026-07-25",
+    "recordedAt": "2026-07-29",
     "totalJsCss": {
-      "rawBytes": 1531341,
-      "gzipBytes": 407815
+      "rawBytes": 1411960,
+      "gzipBytes": 379193
     },
     "css": {
-      "rawBytes": 193012
+      "rawBytes": 195056
     },
     "initialEntryJs": {
-      "rawBytes": 711053
+      "rawBytes": 609277
     },
     "routeChunks": {
-      "SchedulesPage": { "rawBytes": 43076 },
-      "SettingsPage": { "rawBytes": 98100 },
-      "KnowledgePage": { "rawBytes": 44671 },
-      "ProjectPage": { "rawBytes": 18915 },
-      "OnboardingPage": { "rawBytes": 3871 },
+      "SchedulesPage": { "rawBytes": 43371 },
+      "SettingsPage": { "rawBytes": 98106 },
+      "KnowledgePage": { "rawBytes": 38735 },
+      "ProjectPage": { "rawBytes": 25317 },
+      "OnboardingPage": { "rawBytes": 4041 },
       "ConnectorsPage": { "rawBytes": 8267 },
       "ApprovalPanel": { "rawBytes": 8196 },
       "DepartmentsPage": { "rawBytes": 3194 }
@@ -61,17 +61,17 @@
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 1596877,
-      "gzipBytes": 432391,
-      "marginNote": "+64 KiB raw / +24 KiB gzip above the measured repository build"
+      "rawBytes": 1552743,
+      "gzipBytes": 404593,
+      "marginNote": "approved raw ceiling / +24 KiB gzip above the measured repository build"
     },
     "css": {
-      "rawBytes": 209396,
-      "marginNote": "+16 KiB raw above the measured repository build"
+      "rawBytes": 195410,
+      "marginNote": "below the approved 195,411-byte ceiling"
     },
     "initialEntryJs": {
-      "rawBytes": 760205,
-      "marginNote": "+48 KiB raw above the measured repository build"
+      "rawBytes": 614399,
+      "marginNote": "strictly below 600 KiB"
     },
     "routeChunks": {
       "SchedulesPage": {

@@ -22,19 +22,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
-      - run: node apps/marketing/scripts/check-claims.mjs apps/marketing/dist
-      - run: pnpm perf:check
-      - run: pnpm perf:test
-      - run: pnpm perf:runtime
-      - run: pnpm release:test
-      - run: pnpm tauri:check
+      - run: pnpm check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml -- -D warnings
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
-      - run: pnpm audit:all
-      # Conservative waitlist checks (D1 migrations use wrangler local, no secrets)
-      - run: pnpm --filter @fable/waitlist build
-      - run: pnpm --filter @fable/marketing build
