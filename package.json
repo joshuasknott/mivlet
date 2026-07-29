@@ -10,6 +10,9 @@
     "typecheck": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/broker typecheck && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop typecheck && pnpm --filter @fable/marketing typecheck && pnpm --filter @fable/waitlist typecheck",
     "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/broker test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test && pnpm --filter @fable/waitlist test && pnpm --filter @fable/marketing test",
     "lint": "pnpm -r --if-present lint",
+    "audit:pnpm": "pnpm audit --prod --audit-level=low",
+    "audit:cargo": "node scripts/audit/cargo-audit.mjs",
+    "audit:all": "pnpm audit:pnpm && pnpm audit:cargo",
     "perf:baseline": "node scripts/perf/baseline.mjs",
     "perf:check": "node scripts/perf/budget-check.mjs",
     "perf:test": "node --test scripts/perf/budget.test.mjs",
@@ -27,10 +30,16 @@
     "waitlist:migrate": "pnpm --filter @fable/waitlist migrate",
     "waitlist:build": "pnpm --filter @fable/waitlist build",
     "waitlist:verify": "pnpm --filter @fable/waitlist verify:local",
-    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm perf:check && pnpm perf:test && pnpm perf:runtime && pnpm release:test && pnpm tauri:check"
+    "check": "pnpm typecheck && pnpm test && pnpm build && pnpm perf:check && pnpm perf:test && pnpm perf:runtime && pnpm release:test && pnpm tauri:check && pnpm audit:all"
   },
   "engines": {
     "node": ">=22",
     "pnpm": ">=10"
+  },
+  "pnpm": {
+    "overrides": {
+      "sharp": "0.35.3",
+      "svgo": "4.0.2"
+    }
   }
 }
