@@ -25,7 +25,7 @@ use crate::models::{
 use crate::paths::connector_connections_path;
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.connectors";
-const OAUTH_PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
+pub(crate) const OAUTH_AUTHORIZATION_WINDOW_SECONDS: u64 = 15 * 60;
 
 #[derive(Clone, Debug)]
 pub(crate) struct OAuthProviderConfig {
@@ -183,6 +183,18 @@ pub(crate) fn pkce_challenge(verifier: &str) -> String {
 
 fn pending_key(connector_id: &str, state: &str) -> String {
     format!("oauth-pending:{connector_id}:{state}")
+}
+
+fn discard_pending_with_store(
+    connector_id: &str,
+    state: &str,
+    store: &dyn ConnectorSecretStore,
+) -> Result<(), String> {
+    store.remove(&pending_key(connector_id, state))
+}
+
+pub(crate) fn discard_pending_auth(connector_id: &str, state: &str) -> Result<(), String> {
+    discard_pending_with_store(connector_id, state, &NativeConnectorSecretStore)
 }
 
 pub(crate) fn native_connector_credential_ref(connector_id: &str, account_id: &str) -> String {
@@ -834,7 +846,7 @@ async fn prepare_with_store(
             false,
         ));
     }
-    if now_epoch().saturating_sub(pending.created_at) > OAUTH_PENDING_MAX_AGE_SECONDS {
+    if now_epoch().saturating_sub(pending.created_at) > OAUTH_AUTHORIZATION_WINDOW_SECONDS {
         store
             .remove(&key)
             .map_err(|message| command_error("unknown", connector_id, &message, false))?;
@@ -1225,18 +1237,16 @@ pub(crate) fn write_connections(
 /// support several accounts may be connected; reads/actions resolve against the
 /// one flagged active. Falls back to the first connection if none is flagged
 /// (legacy files / invariant drift) so an account never becomes unreachable.
-fn selected_connection_id(path: &Path, connector_id: &str) -> Option<String> {
+fn selected_connection_id_for_scope(
+    path: &Path,
+    connector_id: &str,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Option<String> {
     let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
-    let scope = crate::authorized_scope::command_scope(
-        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-        None,
-        crate::authorized_scope::ScopeAccess::Write,
-    )
-    .ok()?;
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity).ok()?;
     let durable_store = crate::store::try_global()?;
     let existing = durable_store
-        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, connector_id))
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, scope, connector_id))
         .ok()?;
     if let Some(selection) = existing {
         return Some(selection.connection_id);
@@ -1253,7 +1263,7 @@ fn selected_connection_id(path: &Path, connector_id: &str) -> Option<String> {
         })?;
     let record = canonical_connection_for_refresh(
         durable_store,
-        &scope,
+        scope,
         connector_id,
         &compatibility_active.account.id,
     )
@@ -1269,7 +1279,7 @@ fn selected_connection_id(path: &Path, connector_id: &str) -> Option<String> {
             crate::store::repos::connection_selection::select(
                 tx,
                 durable_store,
-                &scope,
+                scope,
                 connector_id,
                 &record.id,
                 None,
@@ -1280,32 +1290,48 @@ fn selected_connection_id(path: &Path, connector_id: &str) -> Option<String> {
         .map(|selection| selection.connection_id)
 }
 
-pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
-    let selected = selected_connection_id(path, connector_id)?;
+pub(crate) fn connection_for_scope(
+    path: &Path,
+    connector_id: &str,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Option<ConnectorConnection> {
+    let selected = selected_connection_id_for_scope(path, connector_id, scope)?;
     read_connections(path).ok()?.into_iter().find(|connection| {
         connection.connector_id == connector_id
             && derive_native_connection_id(
-                crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+                scope.data.workspace_id(),
                 connector_id,
                 &connection.account.id,
             ) == selected
     })
 }
 
+pub(crate) fn connection_for(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
+    let scope =
+        crate::authorized_scope::active_command_scope(crate::authorized_scope::ScopeAccess::Read)
+            .ok()?;
+    connection_for_scope(path, connector_id, &scope)
+}
+
 pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<ConnectorConnection> {
-    let mut connection = connection_for(path, connector_id)?;
+    let scope =
+        crate::authorized_scope::active_command_scope(crate::authorized_scope::ScopeAccess::Read)
+            .ok()?;
+    usable_connection_for_scope(path, connector_id, &scope)
+}
+
+pub(crate) fn usable_connection_for_scope(
+    path: &Path,
+    connector_id: &str,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Option<ConnectorConnection> {
+    let mut connection = connection_for_scope(path, connector_id, scope)?;
     let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
-    let scope = crate::authorized_scope::command_scope(
-        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-        None,
-        crate::authorized_scope::ScopeAccess::Read,
-    )
-    .ok()?;
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity).ok()?;
     let durable_store = crate::store::try_global()?;
     let canonical = canonical_connection_for_refresh(
         durable_store,
-        &scope,
+        scope,
         connector_id,
         &connection.account.id,
     )
@@ -1317,7 +1343,7 @@ pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<Conne
         return None;
     }
     connection.credential_ref =
-        canonical_credential_binding(durable_store, &scope, connector_id, &connection.account.id)
+        canonical_credential_binding(durable_store, scope, connector_id, &connection.account.id)
             .ok()?;
     NativeConnectorSecretStore
         .get(&connection.credential_ref)
@@ -1746,7 +1772,7 @@ pub(crate) async fn disconnect(
             false,
         )
     })?;
-    let _ = selected_connection_id(&path, connector_id);
+    let _ = selected_connection_id_for_scope(&path, connector_id, scope);
     disconnect_with_store_and_path(
         connector_id,
         &NativeConnectorSecretStore,
@@ -2012,12 +2038,9 @@ fn refresh_authorization_context(
 > {
     let identity = crate::clerk_identity::native_identity_generation_snapshot()
         .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
-    let scope = crate::authorized_scope::command_scope(
-        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-        None,
-        crate::authorized_scope::ScopeAccess::Write,
-    )
-    .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
+    let scope =
+        crate::authorized_scope::active_command_scope(crate::authorized_scope::ScopeAccess::Write)
+            .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
     let durable_store = crate::store::try_global().ok_or_else(|| {
         command_error(
             "unknown",
@@ -2321,7 +2344,7 @@ async fn refresh_connection_for_connection(
     let connections = read_connections(&path)
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
     let (identity, scope, durable_store) = refresh_authorization_context(connector_id)?;
-    let _ = selected_connection_id(&path, connector_id);
+    let _ = selected_connection_id_for_scope(&path, connector_id, &scope);
     let selection = durable_store
         .with_conn(|tx| crate::store::repos::connection_selection::get(tx, &scope, connector_id))
         .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))?
@@ -2612,7 +2635,16 @@ pub(crate) async fn authorized_tokens_for_connection(
     let connection =
         refresh_connection_for_connection(app, connector_id, expected_connection_id).await?;
     if let Some(expected) = expected_connection_id {
-        require_expected_connection(connector_id, &connection.account.id, expected)?;
+        let scope = crate::authorized_scope::active_command_scope(
+            crate::authorized_scope::ScopeAccess::Read,
+        )
+        .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
+        require_expected_connection(
+            scope.data.workspace_id(),
+            connector_id,
+            &connection.account.id,
+            expected,
+        )?;
     }
     let encoded = NativeConnectorSecretStore
         .get(&connection.credential_ref)
@@ -2668,15 +2700,12 @@ pub(crate) async fn provider_access_token_for_connection(
 }
 
 fn require_expected_connection(
+    workspace_id: &str,
     connector_id: &str,
     provider_account_id: &str,
     expected_connection_id: &str,
 ) -> Result<(), ConnectorCommandError> {
-    let actual = derive_native_connection_id(
-        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
-        connector_id,
-        provider_account_id,
-    );
+    let actual = derive_native_connection_id(workspace_id, connector_id, provider_account_id);
     if actual != expected_connection_id {
         return Err(command_error(
             "conflict",
@@ -2819,6 +2848,32 @@ mod tests {
         let pending = store.get(&pending_key("fixture", state)).unwrap().unwrap();
         assert!(pending.contains("\"verifier\""));
         assert!(!result.authorization_url.unwrap().contains("verifier"));
+    }
+
+    #[test]
+    fn abandoned_oauth_state_is_removed_idempotently() {
+        let store = MemoryStore::default();
+        let result = start_with_store(
+            "fixture",
+            "http://127.0.0.1:43123/callback",
+            fixture_config(),
+            &store,
+        )
+        .expect("start");
+        let state = Url::parse(result.authorization_url.as_deref().unwrap())
+            .unwrap()
+            .query_pairs()
+            .find(|(key, _)| key == "state")
+            .unwrap()
+            .1
+            .into_owned();
+        let key = pending_key("fixture", &state);
+        assert!(store.get(&key).unwrap().is_some());
+
+        discard_pending_with_store("fixture", &state, &store).unwrap();
+        discard_pending_with_store("fixture", &state, &store).unwrap();
+
+        assert!(store.get(&key).unwrap().is_none());
     }
 
     #[test]
@@ -3360,13 +3415,19 @@ mod tests {
 
     #[test]
     fn provider_access_binding_accepts_only_the_resolved_connection() {
-        let expected = derive_native_connection_id("default", "github", "account-a");
-        assert!(require_expected_connection("github", "account-a", &expected).is_ok());
-        let error = require_expected_connection("github", "account-b", &expected).unwrap_err();
+        let expected = derive_native_connection_id("workspace-a", "github", "account-a");
+        assert!(
+            require_expected_connection("workspace-a", "github", "account-a", &expected).is_ok()
+        );
+        let error = require_expected_connection("workspace-a", "github", "account-b", &expected)
+            .unwrap_err();
         assert_eq!(error.code, "conflict");
         assert!(error.retryable);
         assert!(!error.message.contains("account-a"));
         assert!(!error.message.contains("account-b"));
+        assert!(
+            require_expected_connection("workspace-b", "github", "account-a", &expected).is_err()
+        );
     }
 
     // -------------------------------------------------------------------------

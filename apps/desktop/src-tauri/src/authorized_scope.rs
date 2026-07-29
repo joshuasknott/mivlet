@@ -91,6 +91,23 @@ pub fn command_scope(
         .map_err(|error| error.to_string())
 }
 
+pub fn active_command_scope(access: ScopeAccess) -> Result<AuthorizedCommandScope, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|conn| {
+            let context =
+                workspace_directory::require_active_workspace_context_for_current_user(conn)?;
+            resolve(
+                conn,
+                Some(&context.active_workspace.local_workspace_id),
+                None,
+                access,
+            )
+        })
+        .map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

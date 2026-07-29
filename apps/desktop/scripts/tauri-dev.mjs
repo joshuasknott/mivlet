@@ -1,7 +1,9 @@
-import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { applyLocalEnvironment } from "./local-env.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localEnvironmentPath = resolve(desktopRoot, ".env.local");
@@ -14,7 +16,7 @@ const tauriEntrypoint = resolve(
 );
 
 if (existsSync(localEnvironmentPath)) {
-  process.loadEnvFile(localEnvironmentPath);
+  applyLocalEnvironment(localEnvironmentPath);
 }
 
 if (!existsSync(tauriEntrypoint)) {
