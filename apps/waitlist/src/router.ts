@@ -7,7 +7,8 @@
 import { signup, confirm, unsubscribe, requestExport, performExport, requestDelete, doDelete } from "./waitlist.js";
 import { createWaitlistDB } from "./db.js";
 import { createRateLimiter } from "./rate-limiter.js";
-import type { WaitlistEnv, WaitlistServices } from "./waitlist.js";
+import type { WaitlistEnv } from "./waitlist.js";
+import type { WaitlistServices } from "./services.js";
 import type { ErrorBody } from "./types.js";
 
 export const WAITLIST_CORRELATION = "x-fable-request-id";

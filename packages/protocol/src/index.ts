@@ -2,6 +2,7 @@ export * as Spine from "./spine/index.js";
 export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
 export * from "./domains/agent-runtime.js";
+export * from "./domains/connectors.js";
 export * from "./domains/scheduling-workflows.js";
 export * from "./domains/remote-control.js";
 
@@ -18,6 +19,7 @@ import type {
   PermissionProfileId
 } from "./domains/approvals.js";
 import type { BackendProvider, ContextRecordAuthorityScope } from "./domains/agent-runtime.js";
+import type { ConnectorId, FirstWaveConnectorId } from "./domains/connectors.js";
 import type { AutomationStatus, ScheduleEntry } from "./domains/scheduling-workflows.js";
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
@@ -194,18 +196,6 @@ export interface MemoryPromotionResponse {
   auditEntry: ApprovalAuditEntry;
   state: MemoryControlState;
 }
-
-export type FirstWaveConnectorId =
-  | "github"
-  | "vercel"
-  | "google-drive"
-  | "notion"
-  | "gmail"
-  | "slack"
-  | "google-calendar"
-  | "linear";
-
-export type ConnectorId = "local-files" | FirstWaveConnectorId | (string & {});
 
 export type ConnectorStatus =
   | "fixture"

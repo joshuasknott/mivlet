@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { McpClient } from "@fable/connectors";
+import { McpClient } from "@fable/connectors/mcp/client";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
   beginRuntimeRemoteMcpAuthorization,

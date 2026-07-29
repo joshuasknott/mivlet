@@ -17,7 +17,7 @@ import type {
   WorkflowDefinition,
   WorkflowRun
 } from "@fable/protocol";
-import { validateScheduleTrigger } from "@fable/connectors";
+import { validateScheduleTrigger } from "@fable/connectors/scheduler";
 import {
   DEFAULT_FORM_VALUE,
   ScheduleFormValue,

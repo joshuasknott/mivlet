@@ -95,27 +95,23 @@ describe("run context audience", () => {
     expect(() => privateRunAudience(accountStatus({
       activeWorkspace: {
         localWorkspaceId: "workspace-local",
-        name: "Legacy",
-        source: "legacy-default"
+        name: "Unbound",
+        source: "unbound"
       },
       activeContextOwner: undefined
     }))).toThrow(/could not confirm who can use this context/i);
   });
 
-  it("uses the authenticated internal user for a legacy-default local workspace", () => {
-    expect(privateRunAudience(accountStatus({
+  it("fails closed for an unbound workspace even when an account owner is present", () => {
+    expect(() => privateRunAudience(accountStatus({
       workspaces: [],
       activeWorkspace: {
-        localWorkspaceId: "workspace-local",
-        name: "Local workspace",
-        source: "legacy-default"
+        localWorkspaceId: "",
+        name: "No workspace selected",
+        source: "unbound"
       },
       activeContextOwner: { internalUserId: "user-local" }
-    }))).toEqual({
-      authority: "local",
-      visibility: "member-private",
-      actingInternalUserId: "user-local"
-    });
+    }))).toThrow(/could not confirm who can use this context/i);
   });
 
   it("assigns explicit preview ownership without mutating fixture records", () => {
@@ -125,7 +121,7 @@ describe("run context audience", () => {
         localWorkspaceId: "workspace-local",
         fableWorkspaceId: "workspace-hosted",
         name: "Preview",
-        source: "legacy-default"
+        source: "preview"
       },
       activeContextOwner: { internalUserId: "preview-user" }
     }));

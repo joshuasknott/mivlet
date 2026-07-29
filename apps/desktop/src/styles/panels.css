@@ -36,7 +36,6 @@
 .approval-list,
 .source-list,
 .memory-list,
-.automation-list,
 .schedule-list {
   display: grid;
   gap: 8px;
@@ -45,7 +44,6 @@
 .approval-card,
 .memory-row,
 .connector-card,
-.automation-row,
 .schedule-row,
 .source-row,
 .empty-state,
@@ -128,7 +126,6 @@
 .approval-card h3,
 .memory-row strong,
 .connector-card strong,
-.automation-row strong,
 .source-row strong {
   margin: 0;
   color: var(--ink);
@@ -226,7 +223,6 @@
 
 .approval-actions button,
 .connector-card button,
-.automation-row button,
 .schedule-row button {
   min-height: 34px;
   padding: 0 12px;
@@ -240,7 +236,6 @@
 
 .approval-actions button:hover,
 .connector-card button:hover,
-.automation-row button:hover,
 .schedule-row button:hover {
   color: var(--accent);
   background: var(--accent-subtle);
@@ -437,7 +432,6 @@
 
 .source-row small,
 .connector-card small,
-.automation-row small,
 .memory-row small {
   display: block;
   margin-top: 4px;
@@ -873,21 +867,6 @@
   margin-top: 3px;
   color: var(--ink-muted);
   font-size: var(--text-11);
-}
-
-.automation-row {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 13px;
-  min-height: 68px;
-  padding: 12px 14px;
-}
-
-.automation-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
 }
 
 /* ---------- Schedules ---------- */

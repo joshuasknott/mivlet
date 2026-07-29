@@ -4,6 +4,7 @@ import {
   importRuntimeLocalKnowledgeSource, loadRuntimeImportedKnowledgeSources,
   refreshRuntimeLocalKnowledgeSource, searchRuntimeKnowledgeSources
 } from "./runtime";
+import { selectRuntimeAdapterForTest } from "./runtime/adapters/select";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
@@ -13,6 +14,7 @@ const a = { workspaceId: "workspace-a", projectId: "project-a-refresh" };
 const b = { workspaceId: "workspace-a", projectId: "project-b-refresh" };
 const old = { name: "notes.md", content: "old notes", sizeBytes: 9, importedAt: "before" };
 function setNative(enabled: boolean) {
+  selectRuntimeAdapterForTest(enabled ? "native" : "preview");
   Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: enabled ? {} : undefined });
 }
 

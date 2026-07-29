@@ -1,4 +1,4 @@
-import { parseComposerText } from "@fable/connectors";
+import { parseComposerText } from "@fable/connectors/commands";
 import type { Spine } from "@fable/protocol";
 import type { RuntimeConversationMessageView } from "../runtime";
 

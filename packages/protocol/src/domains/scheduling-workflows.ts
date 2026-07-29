@@ -1,4 +1,4 @@
-import type { ConnectorId } from "../index.js";
+import type { ConnectorId } from "./connectors.js";
 import type {
   ApprovalRiskLevel,
   PermissionMode,

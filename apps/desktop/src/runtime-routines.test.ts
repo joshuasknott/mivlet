@@ -13,12 +13,14 @@ import {
   clearActiveRuntimeDataScope,
   setActiveRuntimeDataScope
 } from "./runtime-scope";
+import { selectRuntimeAdapterForTest } from "./runtime/adapters/select";
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mocks.listen }));
 
 function setNative(enabled: boolean) {
+  selectRuntimeAdapterForTest(enabled ? "native" : "preview");
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     configurable: true,
     value: enabled ? {} : undefined

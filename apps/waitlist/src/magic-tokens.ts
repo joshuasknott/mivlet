@@ -6,7 +6,7 @@
  */
 
 import { generateConfirmToken, hashToken, computeExpiry } from "./tokens.js";
-import type { WaitlistServices } from "./waitlist.js";
+import type { WaitlistServices } from "./services.js";
 
 export type MagicTokenType = 'export' | 'delete' | 'unsub';
 

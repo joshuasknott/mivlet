@@ -55,20 +55,59 @@ async function readSlack(http: ProviderHttpClient, request: ConnectorRequest, to
   else if (request.capability === "slack.users.list") [method, input] = ["users.list", { limit: i.limit ?? 200, cursor: request.cursor }];
   else throw new Error(`Unsupported Slack read capability: ${request.capability}`);
   const data = await slackApi(http, method, input, tokens, "GET", request.signal);
-  const items = data.channels ?? data.messages?.matches ?? data.messages ?? data.members ?? [];
-  return page(items, data.response_metadata?.next_cursor || undefined);
+  const messages = data.messages;
+  const messageRecord =
+    typeof messages === "object" && messages !== null && !Array.isArray(messages)
+      ? messages as JsonObject
+      : undefined;
+  const metadata =
+    typeof data.response_metadata === "object" &&
+    data.response_metadata !== null &&
+    !Array.isArray(data.response_metadata)
+      ? data.response_metadata as JsonObject
+      : undefined;
+  const items =
+    arrayValue(data.channels) ??
+    arrayValue(messageRecord?.matches) ??
+    arrayValue(messages) ??
+    arrayValue(data.members) ??
+    [];
+  const nextCursor =
+    typeof metadata?.next_cursor === "string" && metadata.next_cursor
+      ? metadata.next_cursor
+      : undefined;
+  return page(items.map(slackRecord), nextCursor);
 }
 
-async function slackApi(http: ProviderHttpClient, method: string, input: Record<string, unknown>, tokens: ConnectorTokenSet, verb = "GET", signal?: AbortSignal): Promise<any> {
+async function slackApi(http: ProviderHttpClient, method: string, input: Record<string, unknown>, tokens: ConnectorTokenSet, verb = "GET", signal?: AbortSignal): Promise<JsonObject> {
   const clean = Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  const { data } = await http.request<any>({ method: verb, path: method, ...(verb === "GET" ? { query: clean as Record<string, string> } : { body: clean }), signal }, tokens);
-  if (!data.ok) { const code = String(data.error ?? "unknown"); throw { connectorId: "slack", code: code === "invalid_auth" || code === "token_revoked" ? "expired-auth" : code === "missing_scope" ? "permission-denied" : code.includes("not_in_channel") || code.includes("channel_not_found") ? "not-found" : code === "ratelimited" ? "rate-limited" : "invalid-request", message: `Slack rejected the request (${code}).`, retryable: code === "ratelimited" }; }
-  return data;
+  const { data } = await http.request<unknown>({ method: verb, path: method, ...(verb === "GET" ? { query: clean as Record<string, string> } : { body: clean }), signal }, tokens);
+  const response = slackRecord(data);
+  if (response.ok !== true) { const code = String(response.error ?? "unknown"); throw { connectorId: "slack", code: code === "invalid_auth" || code === "token_revoked" ? "expired-auth" : code === "missing_scope" ? "permission-denied" : code.includes("not_in_channel") || code.includes("channel_not_found") ? "not-found" : code === "ratelimited" ? "rate-limited" : "invalid-request", message: `Slack rejected the request (${code}).`, retryable: code === "ratelimited" }; }
+  return response;
 }
 function required(input: Record<string, unknown>, key: string) { const value = input[key]; if (typeof value !== "string" || !value) throw new Error(`Slack ${key} is required.`); return value; }
+function arrayValue(value: unknown): unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+function slackRecord(value: unknown): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Slack returned an invalid response.");
+  }
+  return value as JsonObject;
+}
 
 /** Resolve Slack workspace identity from auth.test. */
 export async function slackIdentity(http: ProviderHttpClient, tokens: ConnectorTokenSet): Promise<ConnectorAccountSummary> {
   const data = await slackApi(http, "auth.test", {}, tokens);
-  return { id: String(data.user_id ?? data.bot_id), displayName: String(data.user ?? "Slack account"), workspace: String(data.team ?? "Slack workspace"), handle: String(data.url ?? "") };
+  const id = data.user_id ?? data.bot_id;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new Error("Slack returned an invalid account identity.");
+  }
+  return {
+    id,
+    displayName: typeof data.user === "string" ? data.user : "Slack account",
+    workspace: typeof data.team === "string" ? data.team : "Slack workspace",
+    handle: typeof data.url === "string" ? data.url : ""
+  };
 }

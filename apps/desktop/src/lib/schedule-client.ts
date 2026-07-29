@@ -21,7 +21,7 @@ import type {
   ScheduleWeekday,
   WorkflowRun
 } from "@fable/protocol";
-import { validateScheduleTrigger } from "@fable/connectors";
+import { validateScheduleTrigger } from "@fable/connectors/scheduler";
 
 /** Recurrence frequencies the form offers, mirroring the /schedule command. */
 export type RecurrenceFrequency = "daily" | "weekly" | "monthly";

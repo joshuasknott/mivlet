@@ -1,0 +1,235 @@
+/* ---------------------------------------------------------------------------
+ * Onboarding gate shell (two-path AI backend) — visually mirrors the main
+ * workspace: warm radial-gradient canvas, large centered hero, and
+ * frosted-glass surface treatment. The `.og-` namespace (onboarding-gate) is
+ * deliberately separate from the `.onboarding-` classes shared with the
+ * Settings page panel.
+ * ------------------------------------------------------------------------- */
+
+.og-frame {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100dvh;
+  padding: 42px 28px;
+  overflow-y: auto;
+  background: var(--surface);
+}
+
+.og-frame::before {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: transparent;
+  content: "";
+}
+
+.og-center {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 1180px);
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+/* Hero — same greeting + headline rhythm as the workspace. */
+.og-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 20px;
+}
+
+.og-hero h1 {
+  max-width: 860px;
+  margin: 12px 0 0;
+  color: var(--ink);
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 500;
+  letter-spacing: 0;
+  line-height: 1.08;
+}
+
+.og-lede {
+  max-width: 68ch;
+  margin: 16px 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-16);
+  line-height: 1.55;
+}
+
+/* Scale up onboarding presence on desktop screens */
+@media (min-width: 769px) {
+  .og-form {
+    max-width: 680px;
+    padding: 38px 42px;
+    gap: 22px;
+    border-radius: var(--radius-3);
+  }
+  .og-progress-container {
+    max-width: 680px;
+    margin-bottom: 34px;
+  }
+  .og-progress-step {
+    padding: 14px 18px;
+    font-size: var(--text-15);
+    gap: 10px;
+  }
+  .og-progress-step > span {
+    width: 28px;
+    height: 28px;
+    font-size: var(--text-13);
+  }
+  .og-field {
+    gap: 8px;
+  }
+  .og-field span {
+    font-size: var(--text-15);
+  }
+  .og-field input {
+    min-height: 48px;
+    padding: 14px 18px;
+    font-size: var(--text-15);
+  }
+  .og-submit {
+    margin-top: 10px;
+    padding: 14px;
+    font-size: var(--text-15);
+  }
+  .og-hero {
+    margin-bottom: 34px;
+  }
+  .og-hero h1 {
+    font-size: 36px;
+    line-height: 1.15;
+  }
+  .og-lede {
+    font-size: var(--text-16);
+    margin-top: 16px;
+    max-width: 64ch;
+  }
+}
+
+/* Two equal frosted-glass path cards. */
+.og-paths {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.og-path {
+  display: flex;
+  flex-direction: column;
+  padding: 20px 22px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+  box-shadow: none;
+  backdrop-filter: var(--glass-filter);
+}
+
+.og-path__heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.og-path__heading strong {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-14);
+  font-weight: 500;
+}
+
+.og-path__heading small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
+.og-path__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  color: var(--ink);
+  background: var(--accent-blue);
+  border-radius: var(--radius-2);
+}
+
+.og-path__note {
+  margin: 12px 0 0 46px;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+  line-height: 1.5;
+}
+
+/* Obsolete og-provider card styles removed */
+
+/* Trust note — quiet centered frosted pill. */
+.og-trust {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 28px 0 0;
+  padding: 8px 14px;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  backdrop-filter: var(--glass-filter);
+}
+
+.og-status {
+  margin: 14px 0 0;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+
+.og-status--error {
+  margin: 4px 0;
+  color: var(--destructive);
+}
+
+.og-skip {
+  margin-top: 14px;
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.og-skip--profile {
+  margin-top: 6px;
+}
+
+.og-skip:hover {
+  color: var(--ink-muted);
+}

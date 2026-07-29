@@ -1,15 +1,67 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
 import { getActiveRuntimeDataScope } from "./runtime-scope";
 import {
-  importLocalTextFile,
-  searchKnowledgeSources
-} from "@fable/connectors";
+  getRuntimeAdapter,
+  hasNativeRuntimeAdapter
+} from "./runtime/adapters/select";
+import type { RuntimeEvent, RuntimeUnlisten } from "./runtime/ports";
+import { toRuntimeError } from "./runtime/errors";
+export {
+  createRuntimeLocalBackup,
+  deleteRuntimeLocalData,
+  exportRuntimeProjectArchive,
+  exportRuntimeWorkspaceArchive,
+  importRuntimeWorkspaceArchive,
+  loadRuntimeExecutionControl,
+  loadRuntimeLocalDiagnostics,
+  pauseRuntimeExecution,
+  prepareRuntimeLocalRestore,
+  resumeRuntimeExecution,
+  type LocalDataRuntimePort,
+  type RuntimeExecutionControlState,
+  type RuntimeLocalBackupReceipt,
+  type RuntimeLocalDataDeletionReceipt,
+  type RuntimeLocalDiagnosticCategory,
+  type RuntimeLocalDiagnosticsSnapshot,
+  type RuntimeLocalRestorePreparation,
+  type RuntimePortableExportReceipt,
+  type RuntimePortableImportReport
+} from "./runtime/domains/local-data";
+export {
+  acceptRuntimePendingInvitation,
+  beginRuntimeIdentityRecovery,
+  beginRuntimeIdentitySignIn,
+  changeRuntimeWorkspaceMember,
+  clearRuntimeAccountWorkspaceSession,
+  createRuntimeAccountWorkspace,
+  createRuntimeWorkspaceInvitation,
+  disableRuntimeRemoteControl,
+  enableRuntimeRemoteControl,
+  enqueueRuntimeCloudSyncMutation,
+  flushRuntimeCloudSyncOutbox,
+  getRuntimeRemoteControlStatus,
+  listRuntimeRemoteDevices,
+  loadRuntimeAccountWorkspaceStatus,
+  loadRuntimeCloudSyncLinkState,
+  loadRuntimeCloudSyncStatus,
+  loadRuntimeIdentityStatus,
+  loadRuntimePendingInvitations,
+  loadRuntimeWorkspaceMembers,
+  pullRuntimeCloudSyncAfterCursor,
+  reconcileRuntimeAccountWorkspace,
+  refreshRuntimeIdentity,
+  revokeRuntimeAccountDevice,
+  revokeRuntimeRemoteDevice,
+  selectRuntimeAccountWorkspace,
+  signOutRuntimeIdentity,
+  type AccountRuntimePort
+} from "./runtime/domains/account";
+import { importLocalTextFile } from "@fable/connectors/local-files";
+import { searchKnowledgeSources } from "@fable/connectors/knowledge-search";
+import type { LocalTextFileCandidate } from "@fable/connectors/local-files";
 import type {
   LegacyRoutineMigrationInput,
-  LegacyRoutineMigrationPlan,
-  LocalTextFileCandidate
-} from "@fable/connectors";
+  LegacyRoutineMigrationPlan
+} from "@fable/connectors/routines";
 import { applyLocalKnowledgeRefresh } from "./lib/local-knowledge-refresh";
 import { getRuntimeProject } from "./lib/project-runtime";
 import type {
@@ -49,9 +101,6 @@ import type {
   NotificationRecord,
   PersistedAgentRun,
   RecordActionHistoryRequest,
-  RemoteControlPreferenceRequest,
-  RemoteControlStatusSnapshot,
-  RemoteDevice,
   RuntimeSnapshot,
   ScheduledExecutionRoute,
   ScheduledJob,
@@ -59,22 +108,7 @@ import type {
   SchedulerQueueEntry,
   WorkflowDefinition,
   WorkflowRun,
-  WorkflowRunStatus,
-  IdentityStatus,
-  CloudMutationOutboxRow,
-  CloudSyncEnqueueRequest,
-  CloudSyncFlushResult,
-  CloudSyncPullResult,
-  CloudSyncStatus,
-  CloudWorkspaceLinkState,
-  AccountInvitationAcceptanceOutcome,
-  AccountPendingInvitationList,
-  AccountWorkspaceMemberChangeOutcome,
-  AccountWorkspaceMemberChangeRequest,
-  AccountWorkspaceInvitationCreateOutcome,
-  AccountWorkspaceInvitationCreateRequest,
-  AccountWorkspaceMemberList,
-  AccountWorkspaceStatus
+  WorkflowRunStatus
 } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
 
@@ -85,32 +119,18 @@ interface ApprovalAuditRecordResponse {
 }
 
 function hasTauriRuntime() {
-  return (
-    typeof window !== "undefined" &&
-    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
-  );
+  return hasNativeRuntimeAdapter();
 }
 
-function toRuntimeError(error: unknown) {
-  if (error instanceof Error) {
-    return error;
-  }
+function invoke<T>(command: string, args?: Record<string, unknown>) {
+  return getRuntimeAdapter().invoke<T>(command, args);
+}
 
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    const runtimeError = new Error(error.message) as Error & { code?: string; retryable?: boolean };
-    if ("code" in error && typeof error.code === "string") runtimeError.code = error.code;
-    if ("retryable" in error && typeof error.retryable === "boolean") {
-      runtimeError.retryable = error.retryable;
-    }
-    return runtimeError;
-  }
-
-  return new Error(typeof error === "string" ? error : "Fable runtime request failed.");
+function listen<T>(
+  event: string,
+  handler: (event: RuntimeEvent<T>) => void
+): Promise<RuntimeUnlisten> {
+  return getRuntimeAdapter().listen<T>(event, handler);
 }
 
 /**
@@ -120,205 +140,6 @@ function toRuntimeError(error: unknown) {
  */
 function activeDataScope() {
   return getActiveRuntimeDataScope();
-}
-
-export interface RuntimeLocalBackupReceipt {
-  path: string;
-  createdAt: string;
-  schemaVersion: number;
-  requiresMatchingOsVaultKey: boolean;
-  credentialsIncluded: false;
-}
-
-export interface RuntimeLocalRestorePreparation {
-  restartRequired: true;
-  backupCreatedAt: string;
-  schemaVersion: number;
-  credentialsIncluded: false;
-}
-
-export interface RuntimeLocalDataDeletionReceipt {
-  restartRequired: true;
-  hostedDataDeleted: false;
-  providerCredentialsRevoked: false;
-}
-
-export interface RuntimePortableExportReceipt {
-  path: string;
-  formatVersion: number;
-  schemaVersion: number;
-  bytes: number;
-  sha256: string;
-  credentialsIncluded: false;
-}
-
-export interface RuntimePortableImportReport {
-  inserted: Record<string, number>;
-  skipped: Record<string, number>;
-  warnings: string[];
-  errors: string[];
-}
-
-export interface RuntimeLocalDiagnosticCategory {
-  id: "storage" | "providers" | "connections" | "mcp" | "runs" | "routines" | "queues" | "migrations" | "sync";
-  label: string;
-  status: "healthy" | "attention" | "unavailable";
-  summary: string;
-  metrics: Record<string, number>;
-}
-
-export interface RuntimeLocalDiagnosticsSnapshot {
-  generatedAt: string;
-  schemaVersion: number;
-  categories: RuntimeLocalDiagnosticCategory[];
-}
-
-export interface RuntimeExecutionControlState {
-  paused: boolean;
-  revision: number;
-  changedAt: string;
-}
-
-export async function loadRuntimeExecutionControl(
-  workspaceId: string
-): Promise<RuntimeExecutionControlState | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeExecutionControlState>("execution_control_get", { workspaceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function pauseRuntimeExecution(
-  workspaceId: string,
-  confirmation: "pause all execution"
-): Promise<RuntimeExecutionControlState | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeExecutionControlState>("execution_control_pause", {
-      workspaceId,
-      confirmation
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function resumeRuntimeExecution(
-  workspaceId: string,
-  baseRevision: number,
-  confirmation: "resume execution"
-): Promise<RuntimeExecutionControlState | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeExecutionControlState>("execution_control_resume", {
-      workspaceId,
-      baseRevision,
-      confirmation
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function createRuntimeLocalBackup(
-  destination: string
-): Promise<RuntimeLocalBackupReceipt | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeLocalBackupReceipt>("backup_local_data", { destination });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function exportRuntimeWorkspaceArchive(
-  destination: string,
-  workspaceId: string
-): Promise<RuntimePortableExportReceipt | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimePortableExportReceipt>("export_workspace_archive_to_file", {
-      destination,
-      workspaceId
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function exportRuntimeProjectArchive(
-  destination: string,
-  workspaceId: string,
-  projectId: string
-): Promise<RuntimePortableExportReceipt | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimePortableExportReceipt>("export_project_archive_to_file", {
-      destination,
-      workspaceId,
-      projectId
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function importRuntimeWorkspaceArchive(
-  source: string,
-  workspaceId: string,
-  confirmation: "import workspace copy"
-): Promise<RuntimePortableImportReport | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimePortableImportReport>("import_workspace_archive_from_file", {
-      source,
-      workspaceId,
-      confirmation
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function prepareRuntimeLocalRestore(
-  source: string,
-  confirmation: "restore local data"
-): Promise<RuntimeLocalRestorePreparation | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeLocalRestorePreparation>("prepare_local_data_restore", {
-      source,
-      confirmation
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function deleteRuntimeLocalData(
-  confirmation: "delete local data"
-): Promise<RuntimeLocalDataDeletionReceipt | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeLocalDataDeletionReceipt>("delete_local_data", {
-      confirmation
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function loadRuntimeLocalDiagnostics(
-  workspaceId: string
-): Promise<RuntimeLocalDiagnosticsSnapshot | null> {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RuntimeLocalDiagnosticsSnapshot>("local_diagnostics", { workspaceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
 }
 
 export interface RuntimeKnowledgeScopeOverride {
@@ -2128,283 +1949,6 @@ export async function recordRuntimeActionHistory(
 // Rust owns Clerk OAuth, refresh, token validation, and keyring storage. These
 // wrappers expose only the secret-free status surface to React.
 // ---------------------------------------------------------------------------
-
-export async function loadRuntimeIdentityStatus() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<IdentityStatus>("identity_status");
-  } catch (error) {
-    return {
-      enabled: true,
-      state: "error",
-      message: toRuntimeError(error).message,
-      scopes: []
-    } satisfies IdentityStatus;
-  }
-}
-
-export async function beginRuntimeIdentitySignIn() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<IdentityStatus>("identity_begin_sign_in");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function beginRuntimeIdentityRecovery() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<IdentityStatus>("identity_begin_recovery");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function refreshRuntimeIdentity() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<IdentityStatus>("identity_refresh");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function signOutRuntimeIdentity() {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<IdentityStatus>("identity_sign_out");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-/** The authoritative account directory; no local scope is trusted before this succeeds. */
-export async function loadRuntimeAccountWorkspaceStatus() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceStatus>("account_workspace_status");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function reconcileRuntimeAccountWorkspace() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceStatus>("account_workspace_reconcile");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function createRuntimeAccountWorkspace(name: string) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceStatus>("account_workspace_create", { name });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function selectRuntimeAccountWorkspace(fableWorkspaceId: string) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceStatus>("account_workspace_select", { fableWorkspaceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function revokeRuntimeAccountDevice(deviceId: string) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceStatus>("account_device_revoke", { deviceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function clearRuntimeAccountWorkspaceSession() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    await invoke<void>("account_workspace_clear_session");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function loadRuntimePendingInvitations() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountPendingInvitationList>("account_membership_pending_invitations");
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function loadRuntimeWorkspaceMembers(fableWorkspaceId: string) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceMemberList>("account_workspace_members", {
-      fableWorkspaceId
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function changeRuntimeWorkspaceMember(request: AccountWorkspaceMemberChangeRequest) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceMemberChangeOutcome>("account_workspace_member_change", {
-      request
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function createRuntimeWorkspaceInvitation(request: AccountWorkspaceInvitationCreateRequest) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountWorkspaceInvitationCreateOutcome>("account_workspace_invitation_create", {
-      request
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function acceptRuntimePendingInvitation(invitationId: string) {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<AccountInvitationAcceptanceOutcome>("account_membership_accept_invitation", {
-      invitationId
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function loadRuntimeCloudSyncStatus(workspaceId = activeDataScope()?.workspaceId) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  if (!workspaceId) return null;
-  try {
-    return await invoke<CloudSyncStatus>("cloud_sync_status", { workspaceId });
-  } catch {
-    return null;
-  }
-}
-
-export async function loadRuntimeCloudSyncLinkState(workspaceId = activeDataScope()?.workspaceId) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  if (!workspaceId) return null;
-  try {
-    return await invoke<CloudWorkspaceLinkState | null>("cloud_sync_link_state", { workspaceId });
-  } catch {
-    return null;
-  }
-}
-
-export async function enqueueRuntimeCloudSyncMutation(request: CloudSyncEnqueueRequest) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  const scope = activeDataScope();
-  if (!scope || request.localWorkspaceId !== scope.workspaceId) return null;
-  try {
-    return await invoke<CloudMutationOutboxRow>("cloud_sync_enqueue_shared_mutation", { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function flushRuntimeCloudSyncOutbox(workspaceId = activeDataScope()?.workspaceId) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  if (!workspaceId) return null;
-  try {
-    return await invoke<CloudSyncFlushResult>("cloud_sync_flush_outbox", { workspaceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function pullRuntimeCloudSyncAfterCursor(workspaceId = activeDataScope()?.workspaceId) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  if (!workspaceId) return null;
-  try {
-    return await invoke<CloudSyncPullResult>("cloud_sync_pull_after_cursor", { workspaceId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Mobile remote control.
-//
-// Rust owns status and trust metadata. Browser preview returns null, so the UI
-// never implies that a live connection exists outside the desktop runtime.
-// ---------------------------------------------------------------------------
-
-export async function getRuntimeRemoteControlStatus() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RemoteControlStatusSnapshot>("remote_control_status");
-  } catch {
-    return null;
-  }
-}
-
-export async function enableRuntimeRemoteControl(request?: RemoteControlPreferenceRequest) {
-  if (!hasTauriRuntime()) return null;
-  return invoke<RemoteControlStatusSnapshot>("remote_control_enable", {
-    request: request ?? null
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
-}
-
-export async function disableRuntimeRemoteControl(request?: RemoteControlPreferenceRequest) {
-  if (!hasTauriRuntime()) return null;
-  return invoke<RemoteControlStatusSnapshot>("remote_control_disable", {
-    request: request ?? null
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
-}
-
-export async function listRuntimeRemoteDevices() {
-  if (!hasTauriRuntime()) return null;
-  try {
-    return await invoke<RemoteDevice[]>("remote_list_devices");
-  } catch {
-    return null;
-  }
-}
-
-export async function revokeRuntimeRemoteDevice(deviceId: string) {
-  if (!hasTauriRuntime()) return null;
-  return invoke<RemoteDevice>("remote_revoke_device", { deviceId }).catch((error) => {
-    throw toRuntimeError(error);
-  });
-}
 
 // ---------------------------------------------------------------------------
 // First-wave connectors.
@@ -5218,7 +4762,7 @@ export async function migrateLegacyRoutines(projectId?: string) {
     const evidence = await invoke<LegacyRoutineMigrationInput>("routine_migration_capture", {
       input: { projectId, plannedAt }
     });
-    const { planLegacyRoutineMigration } = await import("@fable/connectors");
+    const { planLegacyRoutineMigration } = await import("@fable/connectors/routines");
     const plan: LegacyRoutineMigrationPlan = planLegacyRoutineMigration(evidence);
     const summary = await invoke<RuntimeRoutineMigrationSummary>("routine_migration_apply", {
       input: { projectId, evidence, plan }

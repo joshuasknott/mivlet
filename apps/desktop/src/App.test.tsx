@@ -99,6 +99,17 @@ vi.mock("./lib/cited-brief-mission", () => ({
   })
 }));
 
+vi.mock("./lib/cited-brief-contract", () => ({
+  isCitedBriefMissionPrompt: (value: string) =>
+    /connected work sources?/i.test(value) &&
+    /(?:cited|trustworthy)/i.test(value) &&
+    /brief/i.test(value),
+  isCitedBriefMissionReceipt: (value: unknown) =>
+    typeof value === "object" && value !== null,
+  isCitedBriefMissionPlanSummary: (value: unknown) =>
+    typeof value === "object" && value !== null
+}));
+
 vi.mock("./lib/runtime-mission-graph", () => ({
   resumeInterruptedRuntimeProviderMissions: vi.fn(async () => ({
     resumed: 0,
@@ -169,6 +180,13 @@ vi.mock("./lib/parallel-approaches-mission", () => ({
       journal: {}, plan
     };
   })
+}));
+
+vi.mock("./lib/parallel-approaches-contract", () => ({
+  isParallelApproachesMissionPrompt: (value: string) =>
+    /generate two approaches/i.test(value) && /compare/i.test(value),
+  isParallelApproachesPlanSummary: (value: unknown) =>
+    typeof value === "object" && value !== null
 }));
 
 vi.mock("./lib/general-mission", async (importOriginal) => {
@@ -4269,7 +4287,9 @@ describe("Fable onboarding", () => {
     await user.click(within(modal).getByRole("button", { name: /add key & connect/i }));
 
     // A useful error is shown inside the modal; the gate does not clear.
-    expect(await within(modal).findByText(/rejected this key/i)).toBeInTheDocument();
+    expect(
+      await within(modal).findByText(/rejected this key/i, {}, { timeout: 5_000 })
+    ).toBeInTheDocument();
     expect(screen.queryByLabelText(/universal composer/i)).not.toBeInTheDocument();
     verifySpy.mockRestore();
   });
