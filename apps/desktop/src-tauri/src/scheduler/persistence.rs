@@ -1,9 +1,11 @@
 //! Scheduler persistence adapters.
 //!
-//! Production uses the encrypted SQLite repositories. The JSON store remains a
-//! compatibility fallback for unit tests and safe downgrade/rollback paths.
+//! Production uses the encrypted SQLite repositories exclusively. The JSON
+//! codec remains test-only for deterministic isolated fixtures.
 
-use std::{collections::BTreeMap, fs, path::Path, sync::Mutex};
+#[cfg(test)]
+use std::fs;
+use std::{collections::BTreeMap, path::Path, sync::Mutex};
 
 use tauri::AppHandle;
 
@@ -14,9 +16,9 @@ use crate::{
     },
     paths::scheduler_store_path,
     scheduler::{logic, state::SchedulerState},
-    store::repos::scope::DEFAULT_WORKSPACE_ID,
 };
 
+#[cfg(test)]
 pub(crate) fn read_store(path: &Path) -> Result<SchedulerStore, String> {
     if !path.exists() {
         return Ok(logic::empty_store("unset"));
@@ -38,6 +40,7 @@ pub(crate) fn read_store(path: &Path) -> Result<SchedulerStore, String> {
     Ok(store)
 }
 
+#[cfg(test)]
 pub(crate) fn write_store(path: &Path, store: &SchedulerStore) -> Result<(), String> {
     let encoded = serde_json::to_vec_pretty(store)
         .map_err(|_| "Fable could not encode scheduler store.".to_string())?;
@@ -151,10 +154,15 @@ pub(crate) fn load_store(path: &Path, workspace_id: &str) -> Result<SchedulerSto
     if let Some(store) = load_store_from_sqlite(workspace_id)? {
         return Ok(store);
     }
-    if workspace_id == DEFAULT_WORKSPACE_ID {
-        return read_store(path);
+    #[cfg(test)]
+    {
+        read_store(path)
     }
-    Ok(logic::empty_store(workspace_id))
+    #[cfg(not(test))]
+    {
+        let _ = path;
+        Err("Fable's encrypted scheduler store is not initialized.".into())
+    }
 }
 
 pub(crate) fn persist<F: FnOnce(&mut SchedulerStore) -> bool>(
@@ -175,16 +183,33 @@ pub(crate) fn persist<F: FnOnce(&mut SchedulerStore) -> bool>(
         return Ok(());
     }
     store.updated_at = logic::now_iso();
-    match write_store_to_sqlite(workspace_id, store)? {
-        true => Ok(()),
-        false if workspace_id == DEFAULT_WORKSPACE_ID => write_store(&path, store),
-        false => Ok(()),
+    if write_store_to_sqlite(workspace_id, store)? {
+        return Ok(());
+    }
+    #[cfg(test)]
+    {
+        write_store(&path, store)
+    }
+    #[cfg(not(test))]
+    {
+        let _ = path;
+        Err("Fable's encrypted scheduler store is not initialized.".into())
     }
 }
 
 pub(crate) fn initialize_store(app: &AppHandle, state: &SchedulerState) -> Result<(), String> {
+    let selected = crate::store::with_store(|store| {
+        store.with_conn(
+            crate::store::repos::workspace_directory::selected_active_workspace_for_current_user,
+        )
+    })?
+    .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let Some(selected) = selected else {
+        return Ok(());
+    };
+    let workspace_id = selected.local_workspace_id;
     let path = scheduler_store_path(app)?;
-    let mut store = load_store(&path, DEFAULT_WORKSPACE_ID)?;
+    let mut store = load_store(&path, &workspace_id)?;
     let changed = store
         .queue
         .iter()
@@ -192,15 +217,17 @@ pub(crate) fn initialize_store(app: &AppHandle, state: &SchedulerState) -> Resul
     if changed {
         logic::recover_store_at(&mut store);
         store.updated_at = logic::now_iso();
-        match write_store_to_sqlite(DEFAULT_WORKSPACE_ID, &store)? {
-            true => {}
-            false => write_store(&path, &store)?,
+        if !write_store_to_sqlite(&workspace_id, &store)? {
+            #[cfg(test)]
+            write_store(&path, &store)?;
+            #[cfg(not(test))]
+            return Err("Fable's encrypted scheduler store is not initialized.".into());
         }
     }
     let mut guard = state
         .0
         .lock()
         .map_err(|_| "Scheduler lock poisoned.".to_string())?;
-    guard.insert(DEFAULT_WORKSPACE_ID.to_string(), store);
+    guard.insert(workspace_id, store);
     Ok(())
 }

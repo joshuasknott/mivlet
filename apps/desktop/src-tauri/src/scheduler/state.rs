@@ -20,13 +20,6 @@ pub(crate) fn command_scope(
 /// Loaded once at setup; the tick mutates + persists it under the mutex.
 pub struct SchedulerState(pub Mutex<BTreeMap<String, SchedulerStore>>);
 
-impl SchedulerState {
-    /// An empty store used before a real file is loaded.
-    pub fn empty() -> SchedulerStore {
-        super::logic::empty_store("unset")
-    }
-}
-
 /// Resolve the managed scheduler state. Managed state is registered at app
 /// setup, so this is always present in the running app. Unit tests that call
 /// the pure helpers directly (`read_store`, `normalize_*`) do not need it.

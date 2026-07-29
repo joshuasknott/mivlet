@@ -30,10 +30,8 @@ pub fn list_workspace_directory() -> Result<WorkspaceDirectoryState, String> {
         .with_conn(|conn| {
             let workspaces = repo::list_authoritative_summaries_for_current_user(conn)?;
             let account_bound = workspaces.is_some();
-            let active_workspace = match repo::resolve_active_workspace_for_current_user(conn)? {
-                Some(active_workspace) => active_workspace,
-                None => repo::legacy_default_workspace(conn)?,
-            };
+            let active_workspace = repo::selected_active_workspace_for_current_user(conn)?
+                .unwrap_or_else(repo::unbound_workspace_selection);
             // The account id stays inside the native store. The directory
             // response is intentionally empty until the authenticated adapter
             // has established that binding.

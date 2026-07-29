@@ -8,11 +8,11 @@ use crate::portable::{
 use crate::store::repos::scope::DataScope;
 use crate::store::repos::{
     connector_account, knowledge_source, memory_record, preferences, schedule, scheduled_job,
-    scheduler_queue, workflow, workspace,
+    workflow, workspace,
 };
 use crate::store::vault::{MasterKey, Vault};
 use crate::store::{Store, StoreError};
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use serde_json::{json, Value};
 use std::fs;
 use tempfile::TempDir;
@@ -536,154 +536,59 @@ fn test_import_targets_workspace_and_preserves_project_scope() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_legacy_json_to_encrypted_sqlite_success_and_idempotency() {
-    let store = test_store();
-    let dir = TempDir::new().unwrap();
-
-    // 1. Write legacy JSON files
-    let snapshot_data = json!({
-        "activeItem": "item1",
-        "voiceEnabled": true,
-        "selectedModelId": "gpt-4",
-        "permissionMode": "restricted",
-        "dismissedApprovalIds": ["id1", "id2"],
-        "pinnedSourceIds": ["s1"],
-        "schedules": [
-            {"id": "sch1", "weekday": "Mon", "time": "09:00", "enabled": true}
-        ]
-    });
-    fs::write(
-        dir.path().join("runtime-snapshot.json"),
-        serde_json::to_vec(&snapshot_data).unwrap(),
-    )
-    .unwrap();
-
-    let scheduler_data = json!({
-        "schemaVersion": 1,
-        "jobs": [
-            {
-                "id": "job1",
-                "status": "active",
-                "workflowDefinitionId": "wf1",
-                "triggerKind": "recurring",
-                "missedRunPolicy": "skip",
-                "nextRunAt": "2026-06-30T12:00:00Z",
-                "lastRunAt": "",
-                "lastRunId": "",
-                "createdAt": "2026-06-30T10:00:00Z",
-                "updatedAt": "2026-06-30T10:00:00Z",
-                "name": "Cron Job",
-                "description": "desc",
-                "trigger": { "kind": "recurring" },
-                "route": {}
-            }
-        ],
-        "queue": [
-            {
-                "id": "q1",
-                "jobId": "job1",
-                "runId": "run1",
-                "state": "queued",
-                "leaseHolder": "",
-                "leaseExpiresAt": "",
-                "leaseToken": "",
-                "deduplicationKey": "dedup1",
-                "availableAt": "2026-06-30T12:00:00Z",
-                "lastError": "",
-                "scheduledAt": "2026-06-30T12:00:00Z",
-                "updatedAt": "2026-06-30T12:00:00Z",
-                "attemptHistory": [],
-                "route": {}
-            }
-        ]
-    });
-    fs::write(
-        dir.path().join("scheduler-store.json"),
-        serde_json::to_vec(&scheduler_data).unwrap(),
-    )
-    .unwrap();
-
-    // 2. Perform Migration
-    crate::store::migrations::migrate_all(&store, dir.path()).unwrap();
-
-    // 3. Assert rows exist in SQLite
-    let (active_item, voice_enabled): (String, bool) = store
+fn schema_v37_restart_ignores_retired_pre_v37_json_inputs() {
+    let directory = TempDir::new().unwrap();
+    let database = directory.path().join(crate::store::DB_FILENAME);
+    for (name, body) in [
+        ("runtime-snapshot.json", r#"{"activeItem":"legacy"}"#),
+        (
+            "scheduler-store.json",
+            r#"{"schemaVersion":1,"jobs":[],"queue":[]}"#,
+        ),
+        ("workflow-definitions.json", "[]"),
+        ("workflow-runs.json", "[]"),
+    ] {
+        fs::write(directory.path().join(name), body).unwrap();
+    }
+    let vault = vault();
+    {
+        let store = Store::open(&database, vault.clone()).unwrap();
+        store
+            .with_conn(|conn| {
+                assert_eq!(
+                    crate::store::read_schema_version(conn)?,
+                    crate::store::schema::CURRENT_SCHEMA_VERSION
+                );
+                assert_eq!(
+                    conn.query_row("PRAGMA foreign_key_check;", [], |_| Ok(1))
+                        .optional()?,
+                    None
+                );
+                assert!(preferences::keys_scoped(conn, &DataScope::legacy_default())?.is_empty());
+                assert!(scheduled_job::list(conn, &store, "default")?.is_empty());
+                Ok(())
+            })
+            .unwrap();
+    }
+    let reopened = Store::open(&database, vault).unwrap();
+    reopened
         .with_conn(|conn| {
-            let prefs =
-                preferences::get_scoped(conn, &store, &DataScope::legacy_default(), "shell")?
-                    .unwrap();
-            Ok((
-                prefs["activeItem"].as_str().unwrap().to_string(),
-                prefs["voiceEnabled"].as_bool().unwrap(),
-            ))
+            assert_eq!(
+                crate::store::read_schema_version(conn)?,
+                crate::store::schema::CURRENT_SCHEMA_VERSION
+            );
+            assert!(preferences::keys_scoped(conn, &DataScope::legacy_default())?.is_empty());
+            Ok(())
         })
         .unwrap();
-    assert_eq!(active_item, "item1");
-    assert!(voice_enabled);
-
-    let jobs = store
-        .with_conn(|conn| scheduled_job::list(conn, &store, "default"))
-        .unwrap();
-    let queue = store
-        .with_conn(|conn| scheduler_queue::list(conn, &store, "default"))
-        .unwrap();
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(queue.len(), 1);
-    assert_eq!(jobs[0].id, "job1");
-    assert_eq!(queue[0].id, "queue:default:run1");
-
-    // 4. Repeated Migration (Idempotency check)
-    crate::store::migrations::migrate_all(&store, dir.path()).unwrap();
-    // Count remains 1, no duplicate rows added
-    let jobs_post = store
-        .with_conn(|conn| scheduled_job::list(conn, &store, "default"))
-        .unwrap();
-    assert_eq!(jobs_post.len(), 1);
-
-    // 5. Original data retained (not deleted from disk)
-    assert!(dir.path().join("runtime-snapshot.json").exists());
-    assert!(dir.path().join("scheduler-store.json").exists());
-}
-
-#[test]
-fn test_migration_tolerates_malformed_json_and_rolls_back_partially_written_source() {
-    let store = test_store();
-    let dir = TempDir::new().unwrap();
-
-    // Write a malformed file (invalid json)
-    fs::write(dir.path().join("runtime-snapshot.json"), b"{malformed").unwrap();
-
-    // Run migration
-    crate::store::migrations::migrate_all(&store, dir.path()).unwrap();
-
-    // Verify preferences remained empty (except for default inserts if any)
-    let keys = store
-        .with_conn(|conn| preferences::keys_scoped(conn, &DataScope::legacy_default()))
-        .unwrap();
-    assert!(keys.is_empty() || !keys.contains(&"shell".to_string()));
-
-    // Write scheduler store with unsupported version to fail transaction midway
-    let invalid_scheduler_data = json!({
-        "schemaVersion": 999, // unsupported schema version
-        "jobs": [
-            { "id": "job_should_not_exist", "status": "active", "createdAt": "now", "updatedAt": "now" }
-        ],
-        "queue": []
-    });
-    fs::write(
-        dir.path().join("scheduler-store.json"),
-        serde_json::to_vec(&invalid_scheduler_data).unwrap(),
-    )
-    .unwrap();
-
-    // Run migration
-    crate::store::migrations::migrate_all(&store, dir.path()).unwrap();
-
-    // Assert that the transaction rolled back and no jobs were saved
-    let jobs = store
-        .with_conn(|conn| scheduled_job::list(conn, &store, "default"))
-        .unwrap();
-    assert_eq!(jobs.len(), 0);
+    for name in [
+        "runtime-snapshot.json",
+        "scheduler-store.json",
+        "workflow-definitions.json",
+        "workflow-runs.json",
+    ] {
+        assert!(directory.path().join(name).exists());
+    }
 }
 
 #[test]

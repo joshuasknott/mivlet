@@ -24,6 +24,7 @@
 //! SECRET INVARIANT: the execution route stored on jobs/entries carries only
 //! provider/model ids + permission mode — never keys, tokens, or credentials.
 
+#[cfg(test)]
 use std::path::Path;
 
 use crate::authorized_scope::ScopeAccess;
@@ -33,8 +34,7 @@ use crate::models::{
 };
 #[cfg(test)]
 use crate::models::{RetryPolicy, ScheduledExecutionRoute, MAX_OCCURRENCE_LEDGER};
-use crate::paths::{normalize_spaces, scheduler_store_path, truncate_characters};
-use crate::store::repos::scope::DEFAULT_WORKSPACE_ID;
+use crate::paths::{normalize_spaces, truncate_characters};
 use tauri::{AppHandle, Emitter, Manager};
 
 #[cfg(test)]
@@ -51,15 +51,16 @@ use super::{
         failed_count, iso_from_ms, normalize_attempt, normalize_job, now_epoch_ms, now_iso,
         remember_occurrence, retry_backoff_ms, set_job_status_in_store,
     },
-    persistence::{load_store_from_sqlite, read_store as read_store_impl},
+    persistence::load_store_from_sqlite,
     state::{command_scope, with_state},
 };
 
 pub use super::state::SchedulerState;
 
-/// Stable facade for the JSON compatibility fallback.
+/// Test-only fixture codec. Native production persistence is SQLite-only.
+#[cfg(test)]
 pub fn read_store(path: &Path) -> Result<SchedulerStore, String> {
-    read_store_impl(path)
+    super::persistence::read_store(path)
 }
 
 /// Persist a managed store through the SQLite-first adapter.
@@ -144,7 +145,7 @@ pub(crate) fn apply_native_job_ownership(
 
 #[tauri::command]
 pub fn list_scheduler_jobs(
-    app: AppHandle,
+    _app: AppHandle,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<ScheduledJob>, String> {
@@ -156,20 +157,12 @@ pub fn list_scheduler_jobs(
             .filter(|job| job.project_id.as_deref() == scope.project_id())
             .collect());
     }
-    let path = scheduler_store_path(&app)?;
-    Ok(read_store(&path)?
-        .jobs
-        .into_iter()
-        .filter(|job| {
-            job.workspace_id == scope.workspace_id()
-                && job.project_id.as_deref() == scope.project_id()
-        })
-        .collect())
+    Err("Fable's encrypted scheduler store is not initialized.".into())
 }
 
 #[tauri::command]
 pub fn list_scheduler_queue(
-    app: AppHandle,
+    _app: AppHandle,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<SchedulerQueueEntry>, String> {
@@ -181,15 +174,7 @@ pub fn list_scheduler_queue(
             .filter(|entry| entry.project_id.as_deref() == scope.project_id())
             .collect());
     }
-    let path = scheduler_store_path(&app)?;
-    Ok(read_store(&path)?
-        .queue
-        .into_iter()
-        .filter(|entry| {
-            entry.workspace_id == scope.workspace_id()
-                && entry.project_id.as_deref() == scope.project_id()
-        })
-        .collect())
+    Err("Fable's encrypted scheduler store is not initialized.".into())
 }
 
 #[tauri::command]
@@ -702,11 +687,7 @@ pub fn run_tick(app: &AppHandle) -> Result<usize, String> {
         let guard = mutex
             .lock()
             .map_err(|_| "Scheduler lock poisoned.".to_string())?;
-        let mut workspaces = guard.keys().cloned().collect::<Vec<_>>();
-        if workspaces.is_empty() {
-            workspaces.push(DEFAULT_WORKSPACE_ID.to_string());
-        }
-        Ok::<Vec<String>, String>(workspaces)
+        Ok::<Vec<String>, String>(guard.keys().cloned().collect())
     })?;
 
     let mut newly_leased = Vec::new();

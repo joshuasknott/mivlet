@@ -18,22 +18,10 @@ use crate::store::repos::scope::DataScope;
 use crate::store::repos::{open_json, seal_json};
 use crate::store::{Result, Store, StoreError};
 
-/// The single-profile default workspace. The desktop shell is single-profile
-/// today; the workspace-model branch (Batch 9 data model) will pass an explicit
-/// `workspace_id` through the command surface once that contract lands. Until
-/// then every schedule/workflow is scoped here so isolation is enforced from
-/// day one and the workspace filter can be tightened without a data migration.
-pub const DEFAULT_WORKSPACE_ID: &str = "default";
-
-/// Normalize a workspace id, defaulting empty input to the single-profile
-/// default so every read/write carries a non-empty scope.
+/// Normalize a caller-supplied workspace id without inventing authority.
+/// Write paths validate the result through `DataScope`.
 pub fn normalize_workspace(workspace_id: &str) -> String {
-    let trimmed = workspace_id.trim();
-    if trimmed.is_empty() {
-        DEFAULT_WORKSPACE_ID.to_string()
-    } else {
-        trimmed.to_string()
-    }
+    workspace_id.trim().to_string()
 }
 
 /// Upsert a scheduled job from its wire `Value` (the camelCase `ScheduledJob`
@@ -268,6 +256,8 @@ mod tests {
     use super::*;
     use crate::store::vault::{MasterKey, Vault};
 
+    const TEST_WORKSPACE: &str = "ws-scheduled-job-test";
+
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
     }
@@ -300,10 +290,15 @@ mod tests {
     #[test]
     fn round_trips_a_job() {
         let store = store();
+        add_workspace(&store, TEST_WORKSPACE);
         store
-            .transaction(|tx| upsert_from_value(tx, &store, "", sample_job("j1"), "now"))
+            .transaction(|tx| {
+                upsert_from_value(tx, &store, TEST_WORKSPACE, sample_job("j1"), "now")
+            })
             .unwrap();
-        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let rows = store
+            .with_conn(|conn| list(conn, &store, TEST_WORKSPACE))
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value["name"], "Weekly brief");
         assert_eq!(rows[0].value["execution"]["backendId"], "openai");
@@ -312,8 +307,11 @@ mod tests {
     #[test]
     fn payload_is_encrypted_at_rest() {
         let store = store();
+        add_workspace(&store, TEST_WORKSPACE);
         store
-            .transaction(|tx| upsert_from_value(tx, &store, "", sample_job("j1"), "now"))
+            .transaction(|tx| {
+                upsert_from_value(tx, &store, TEST_WORKSPACE, sample_job("j1"), "now")
+            })
             .unwrap();
         let raw_blob: Vec<u8> = store
             .with_conn(|conn| {

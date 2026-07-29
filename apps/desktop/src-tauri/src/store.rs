@@ -326,10 +326,7 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     };
     let recovery = apply_pending_restore(app_data_dir, &key)?;
     let vault = Vault::new(&key).map_err(|_| "Fable could not initialize local encryption.")?;
-    let store = match Store::open(&db_path, vault).and_then(|store| {
-        migrations::migrate_all(&store, app_data_dir)?;
-        Ok(store)
-    }) {
+    let store = match Store::open(&db_path, vault) {
         Ok(store) => store,
         Err(error) => {
             if let Some(recovery) = recovery.as_ref() {
@@ -343,20 +340,6 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
             return Err(error.to_string());
         }
     };
-    if let Err(error) = seed_legacy_documents(&store, app_data_dir)
-        .and_then(|_| migrate_legacy_workflows(&store, app_data_dir))
-    {
-        drop(store);
-        if let Some(recovery) = recovery.as_ref() {
-            return Err(rollback_applied_restore(
-                app_data_dir,
-                &db_path,
-                recovery,
-                &error,
-            ));
-        }
-        return Err(error);
-    }
     GLOBAL_STORE
         .set(store)
         .map_err(|_| "Fable's encrypted store was initialized twice.".to_string())
@@ -563,50 +546,6 @@ fn timestamp() -> String {
         .unwrap_or_else(|_| "0".to_string())
 }
 
-fn seed_legacy_documents(store: &Store, app_data_dir: &Path) -> std::result::Result<(), String> {
-    let scope = repos::scope::DataScope::legacy_default();
-    const DOCUMENTS: &[&str] = &[
-        "runtime-snapshot.json",
-        "agent-runs.json",
-        "approval-audit.json",
-        "approval-rules.json",
-        "connector-connections.json",
-        "connected-backends.json",
-        "memory-state.json",
-        "imported-knowledge.json",
-        // The scheduler store, workflow definitions, and workflow runs are
-        // migrated into dedicated encrypted tables by `migrations::legacy`; do
-        // NOT seed them as opaque documents — their typed rows are the source of
-        // truth once migration has run.
-    ];
-    for name in DOCUMENTS {
-        let path = app_data_dir.join(name);
-        if !path.exists() {
-            continue;
-        }
-        let key = document_key(&path)?;
-        let exists = store
-            .with_conn(|conn| repos::preferences::get_scoped(conn, store, &scope, &key))
-            .map_err(|error| error.to_string())?
-            .is_some();
-        if exists {
-            continue;
-        }
-        let Ok(bytes) = std::fs::read(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-            continue;
-        };
-        store
-            .transaction(|tx| {
-                repos::preferences::upsert_scoped(tx, store, &scope, &key, &value, &timestamp())
-            })
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(())
-}
-
 /// Borrow the process-global encrypted store when initialized, or `None`. This
 /// is the production-path accessor used by execution boundaries that record
 /// audit through an explicit `&Store` (via the testable recorder seam); it
@@ -635,101 +574,17 @@ pub fn with_store<R>(
 pub fn read_document<T: serde::de::DeserializeOwned>(
     path: &Path,
 ) -> std::result::Result<Option<T>, String> {
-    read_workspace_document(path, &repos::scope::DataScope::legacy_default())
-}
-
-fn migrate_legacy_workflows(store: &Store, app_data_dir: &Path) -> std::result::Result<(), String> {
-    let scope = repos::scope::DataScope::legacy_default();
-    let definitions_path = app_data_dir.join("workflow-definitions.json");
-    if let Ok(bytes) = std::fs::read(&definitions_path) {
-        if let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
-            store
-                .transaction(|tx| {
-                    for value in values {
-                        let Some(id) = value.get("id").and_then(serde_json::Value::as_str) else {
-                            continue;
-                        };
-                        let Some(version) =
-                            value.get("version").and_then(serde_json::Value::as_u64)
-                        else {
-                            continue;
-                        };
-                        let created_at = value
-                            .get("createdAt")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("1970-01-01T00:00:00Z");
-                        let updated_at = value
-                            .get("updatedAt")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or(created_at);
-                        repos::workflow::upsert_definition(
-                            tx,
-                            store,
-                            &scope,
-                            id,
-                            version as u32,
-                            created_at,
-                            updated_at,
-                            &value,
-                        )?;
-                    }
-                    Ok(())
-                })
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    let runs_path = app_data_dir.join("workflow-runs.json");
-    if let Ok(bytes) = std::fs::read(&runs_path) {
-        if let Ok(values) = serde_json::from_slice::<Vec<serde_json::Value>>(&bytes) {
-            store
-                .transaction(|tx| {
-                    for value in values {
-                        let Some(id) = value.get("id").and_then(serde_json::Value::as_str) else {
-                            continue;
-                        };
-                        let Some(definition_id) = value
-                            .get("definitionId")
-                            .and_then(serde_json::Value::as_str)
-                        else {
-                            continue;
-                        };
-                        let Some(definition_version) = value
-                            .get("definitionVersion")
-                            .and_then(serde_json::Value::as_u64)
-                        else {
-                            continue;
-                        };
-                        let status = value
-                            .get("status")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("failed");
-                        let started_at = value
-                            .get("startedAt")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("1970-01-01T00:00:00Z");
-                        let updated_at = value
-                            .get("updatedAt")
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or(started_at);
-                        repos::workflow::upsert_run(
-                            tx,
-                            store,
-                            &scope,
-                            id,
-                            definition_id,
-                            definition_version as u32,
-                            status,
-                            started_at,
-                            updated_at,
-                            &value,
-                        )?;
-                    }
-                    Ok(())
-                })
-                .map_err(|error| error.to_string())?;
-        }
-    }
-    Ok(())
+    let Some(store) = GLOBAL_STORE.get() else {
+        return Ok(None);
+    };
+    let scope = store
+        .with_conn(|conn| {
+            let active =
+                repos::workspace_directory::require_active_workspace_for_current_user(conn)?;
+            repos::scope::DataScope::workspace(active.local_workspace_id)
+        })
+        .map_err(|error| error.to_string())?;
+    read_workspace_document(path, &scope)
 }
 
 pub fn read_workspace_document<T: serde::de::DeserializeOwned>(
@@ -773,7 +628,17 @@ pub fn write_document<T: serde::Serialize>(
     path: &Path,
     value: &T,
 ) -> std::result::Result<bool, String> {
-    write_workspace_document(path, &repos::scope::DataScope::legacy_default(), value)
+    let Some(store) = GLOBAL_STORE.get() else {
+        return Ok(false);
+    };
+    let scope = store
+        .with_conn(|conn| {
+            let active =
+                repos::workspace_directory::require_active_workspace_for_current_user(conn)?;
+            repos::scope::DataScope::workspace(active.local_workspace_id)
+        })
+        .map_err(|error| error.to_string())?;
+    write_workspace_document(path, &scope, value)
 }
 
 pub fn write_workspace_document<T: serde::Serialize>(
@@ -887,10 +752,12 @@ pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<St
     let store = GLOBAL_STORE
         .get()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let scope = repos::scope::DataScope::workspace(
-        workspace_id.unwrap_or_else(|| repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-    )
-    .map_err(|error| error.to_string())?;
+    let scope = crate::authorized_scope::command_scope(
+        workspace_id,
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?
+    .data;
     // Fetch every document for the scope in a single query + decryption pass,
     // rather than re-acquiring the store mutex and re-querying once per key.
     let documents = store

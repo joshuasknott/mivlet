@@ -220,6 +220,7 @@ pub const CONNECTOR_ACTIONS: [&str; 45] = [
 pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
 pub const MAX_CONNECTOR_RESULT_LIMIT: usize = 50;
 pub const MAX_CONNECTOR_PAYLOAD_FIELDS: usize = 32;
+#[cfg(test)]
 pub const MAX_AGENT_RUNS: usize = 100;
 pub const MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS: usize = 200_000;
 
@@ -269,9 +270,8 @@ pub const SCHEDULER_QUEUE_STATES: [&str; 9] = [
 
 // Workflow-run store constants.
 pub const WORKFLOW_RUN_STORE_VERSION: u8 = 1;
+#[cfg(test)]
 pub const MAX_WORKFLOW_RUNS: usize = 200;
-/// Legacy flat workflow-definition journal cap; migrated at most this many.
-pub const MAX_WORKFLOW_DEFINITION_HISTORY: usize = 500;
 pub const MAX_WORKFLOW_STEPS: usize = 24;
 pub const WORKFLOW_RUN_STATUSES: [&str; 7] = [
     "queued",
@@ -1273,7 +1273,6 @@ impl Default for RetryPolicy {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScheduledJob {
-    #[serde(default = "default_workspace_id")]
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
@@ -1331,7 +1330,6 @@ pub struct JobAttempt {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SchedulerQueueEntry {
-    #[serde(default = "default_workspace_id")]
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
@@ -1372,10 +1370,6 @@ pub struct SchedulerQueueEntry {
     pub retry_policy: RetryPolicy,
 }
 
-fn default_workspace_id() -> String {
-    crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SchedulerStore {
@@ -1407,7 +1401,6 @@ pub struct SchedulerStore {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowRunRecord {
-    #[serde(default = "default_workspace_id")]
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
@@ -1447,7 +1440,6 @@ pub struct WorkflowRunRecord {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkflowDefinitionRecord {
-    #[serde(default = "default_workspace_id")]
     pub workspace_id: String,
     #[serde(default)]
     pub project_id: Option<String>,
