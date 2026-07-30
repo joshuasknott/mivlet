@@ -23,10 +23,11 @@ import {
 import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
+import { ConversationMessageActions } from "../components/ConversationMessageActions";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -39,6 +40,7 @@ import { useProjectKnowledge } from "../hooks/useProjectKnowledge";
 import { useProjectMemory } from "../hooks/useProjectMemory";
 import { useProjectActivity } from "../hooks/useProjectActivity";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
+import { toSlug } from "../lib/helpers";
 
 type ConversationMessage = {
   id: string;
@@ -164,6 +166,7 @@ export function ChatWorkspace() {
   const parallelRecoveryWorkspaceRef = useRef<string | null>(null);
   const optimisticMissionInputRunIds = useRef(new Set<string>());
   const activeAssistantMessageId = useRef<string | null>(null);
+  const conversationScrollRef = useRef<HTMLDivElement | null>(null);
   const hydratedConversation = durableConversation.state.conversation;
   const boundWorkspaceId =
     runtime.accountWorkspaceStatus.accountBound &&
@@ -937,6 +940,19 @@ export function ChatWorkspace() {
   }, [agent.state.running, durableConversation.refresh]);
 
   useEffect(() => {
+    const scrollRegion = conversationScrollRef.current;
+    if (!scrollRegion) return;
+    scrollRegion.scrollTop = scrollRegion.scrollHeight;
+  }, [
+    agent.state.running,
+    conversationMessages,
+    pendingCitedApprovals.length,
+    pendingMissionApprovals.length,
+    pendingMissionInputs.length,
+    threadMissionProgress.length
+  ]);
+
+  useEffect(() => {
     const assistantId = activeAssistantMessageId.current;
     if (!assistantId) return;
     const fallback =
@@ -1149,6 +1165,27 @@ export function ChatWorkspace() {
     return null;
   };
 
+  const saveMessageToKnowledge = async (message: ConversationMessage) => {
+    const firstLine = message.content
+      .split(/\r?\n/, 1)[0]
+      .replace(/^#+\s*/, "")
+      .trim();
+    const title = firstLine.slice(0, 72) || (
+      message.role === "user" ? "Conversation prompt" : "Assistant response"
+    );
+
+    if (scopedProjectId) {
+      const sourceName = `${toSlug(title).slice(0, 72)}.md`;
+      await projectKnowledge.importFile(
+        new File([message.content], sourceName, { type: "text/markdown" })
+      );
+      return;
+    }
+
+    const saved = await runtime.saveTextToKnowledge(title, message.content);
+    if (!saved) throw new Error("Fable could not save this message to Knowledge.");
+  };
+
   const renderConversation = () => {
     if (conversationMessages.length === 0 && pendingCitedApprovals.length === 0
       && pendingMissionApprovals.length === 0 && pendingMissionInputs.length === 0
@@ -1188,14 +1225,11 @@ export function ChatWorkspace() {
           const sourceRequest = [...conversationMessages.slice(0, messageIndex)]
             .reverse()
             .find((candidate) => candidate.role === "user");
+          const isCurrentResponse =
+            message.role === "assistant"
+            && messageIndex === conversationMessages.length - 1
+            && conversationWorking;
           const sourceCommand = sourceRequest ? parseComposerText(sourceRequest.content) : null;
-          const canCreateRoutine =
-            message.role === "assistant" &&
-            Boolean(message.runId) &&
-            Boolean(sourceRequest?.content.trim()) &&
-            !message.missionOutcome &&
-            !agent.state.recoverableRuns.some((run) => run.id === message.runId) &&
-            !(agent.state.running && agent.state.currentRunId === message.runId);
           const existingArtifact = threadArtifacts.find((entry) =>
             entry.sourceMessageId === message.id
             || entry.artifact.id === message.missionArtifactId
@@ -1219,9 +1253,27 @@ export function ChatWorkspace() {
           return (
             <article
               key={message.id}
-              className={`conversation-message conversation-message--${message.role}`}
+              className={`conversation-message conversation-message--${message.role}${
+                isCurrentResponse ? " conversation-message--working" : ""
+              }`}
             >
               <p>{message.content}</p>
+              {message.role === "user" || !isCurrentResponse ? (
+                <ConversationMessageActions
+                  role={message.role}
+                  content={message.content}
+                  onSaveToKnowledge={() => saveMessageToKnowledge(message)}
+                  onEdit={message.role === "user" ? () => {
+                    runtime.setComposerValue(message.content);
+                    runtime.focusComposer(message.content);
+                  } : undefined}
+                  onRedo={message.role === "assistant" && sourceRequest ? () => {
+                    if (conversationWorking) return;
+                    runPrompt(sourceRequest.content, { appendUserMessage: false });
+                  } : undefined}
+                  redoDisabled={conversationWorking}
+                />
+              ) : null}
               {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
               {message.role === "assistant" && message.parallelMissionPlan
                 ? <ParallelMissionPlanSummary plan={message.parallelMissionPlan} />
@@ -1240,17 +1292,10 @@ export function ChatWorkspace() {
                   />
                 : null}
               {message.role === "assistant" && missionArtifacts.length > 0 ? (
-                <section aria-label="Mission artifacts">
+                <section aria-label="Mission saved work">
                   {missionArtifacts.map((entry) => (
                     <ResponseArtifactAction
                       key={entry.artifact.id}
-                      threadId={selectedConversationThreadId ?? ""}
-                      messageId={`${message.id}-${entry.artifact.id}`}
-                      runId={message.runId ?? ""}
-                      content={entry.currentVersion.content.kind === "inline"
-                        ? entry.currentVersion.content.text
-                        : message.content}
-                      citations={[]}
                       existing={entry}
                       onSaved={(saved) => setThreadArtifacts((current) => [
                         ...current.filter((artifact) => artifact.artifact.id !== saved.artifact.id),
@@ -1291,22 +1336,6 @@ export function ChatWorkspace() {
                   )}
                 />
               ) : null}
-              {canCreateRoutine && sourceRequest ? (
-                <button
-                  type="button"
-                  className="secondary-button"
-                  onClick={() =>
-                    runtime.openRoutineDraft({
-                      title:
-                        sourceRequest.content.trim().split(/[.!?\n]/)[0]?.slice(0, 160) ||
-                        "Saved routine",
-                      instruction: sourceRequest.content
-                    })
-                  }
-                >
-                  Run this again later
-                </button>
-              ) : null}
               {message.role === "assistant" && message.runId && agent.state.providerRoutes[message.runId] ? (
                 <ProviderRouteSummary
                   route={agent.state.providerRoutes[message.runId]}
@@ -1318,13 +1347,10 @@ export function ChatWorkspace() {
               ) : null}
               {message.role === "assistant" && message.runId && message.content
                 && missionArtifacts.length === 0
+                && existingArtifact
+                && !isCurrentResponse
                 && (!message.missionOutcome || existingArtifact) ? (
                 <ResponseArtifactAction
-                  threadId={selectedConversationThreadId ?? ""}
-                  messageId={message.id}
-                  runId={message.runId}
-                  content={message.content}
-                  citations={citationsForRun(message.runId, agent.state.contextReceipts)}
                   existing={existingArtifact}
                   onSaved={(saved) => setThreadArtifacts((current) => [...current.filter((entry) => entry.artifact.id !== saved.artifact.id), saved])}
                 />
@@ -1410,8 +1436,6 @@ export function ChatWorkspace() {
   };
 
   const renderChatContext = () => {
-    const visibleAgentError = agent.state.noTransport ? null : agent.state.lastError;
-
     return (
       <>
         {connectedConnectorCards.length > 0 ? (
@@ -1469,11 +1493,8 @@ export function ChatWorkspace() {
             onUseDirective={runtime.useDirective}
           />
         ) : null}
-        {agent.state.usage ||
-        visibleAgentError ||
-        agent.state.running ||
-        visibleRecoverableRuns.length > 0 ? (
-          <section className="agent-panel" aria-label="Agent activity">
+        {visibleRecoverableRuns.length > 0 ? (
+          <section className="agent-panel" aria-label="Interrupted responses">
             {visibleRecoverableRuns.map((run) => (
               <div className="agent-panel__recovery" key={run.id}>
                 <p>
@@ -1491,37 +1512,6 @@ export function ChatWorkspace() {
                 </button>
               </div>
             ))}
-            {agent.state.usage ? (
-              <p className="agent-panel__usage">
-                {agent.state.usage.inputTokens} in · {agent.state.usage.outputTokens} out · {" "}
-                {agent.state.usage.costUnknown
-                  ? "cost unknown"
-                  : `$${agent.state.usage.costUsd.toFixed(6)}${
-                      agent.state.usage.costEstimated ? " estimated" : ""
-                    }`}
-              </p>
-            ) : null}
-            {agent.state.running ? (
-              <p className="agent-panel__running">
-                {agent.state.status === "awaiting-approval"
-                  ? "Waiting for approval…"
-                  : agent.state.status === "retrying"
-                    ? "Retrying provider…"
-                    : "Running…"}
-                <button
-                  type="button"
-                  className="agent-panel__stop"
-                  onClick={() => {
-                    void agent.cancel();
-                  }}
-                >
-                  Stop
-                </button>
-              </p>
-            ) : null}
-            {visibleAgentError ? (
-              <p className="agent-panel__error">{visibleAgentError}</p>
-            ) : null}
           </section>
         ) : null}
       </>
@@ -1531,6 +1521,16 @@ export function ChatWorkspace() {
   const liveStatusLead = /[.!?]$/.test(runtime.lastAction)
     ? runtime.lastAction
     : `${runtime.lastAction}.`;
+  const conversationIsActive = Boolean(
+    selectedConversationThreadId || conversationMessages.length > 0
+  );
+  const conversationWorking = Boolean(
+    citedMissionRunning ||
+    parallelMissionRunning ||
+    generalMissionRunning ||
+    agent.state.running
+  );
+  const conversationSubmissionBlocked = conversationWorking || Boolean(pendingPrompt);
   // Label for the model chip: the selected model's friendly label, or a
   // placeholder when no model is selected/available on the connected backend.
   // Memoized so the composer's chip prop keeps a stable primitive unless the
@@ -2362,9 +2362,23 @@ export function ChatWorkspace() {
             </Suspense>
           </div>
         ) : (
-          <div className="workspace-center workspace-center--composer">
-            {renderConversation()}
-            <Composer
+          <div
+            className={`workspace-center workspace-center--composer${
+              conversationIsActive ? " workspace-center--conversation" : ""
+            }`}
+          >
+            {conversationIsActive ? (
+              <div
+                ref={conversationScrollRef}
+                className="conversation-scroll"
+                aria-live="polite"
+              >
+                {renderConversation()}
+                {renderChatContext()}
+              </div>
+            ) : null}
+            <div className={conversationIsActive ? "conversation-composer-dock" : undefined}>
+              <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
               composerValue={runtime.composerValue}
@@ -2374,7 +2388,7 @@ export function ChatWorkspace() {
                 const text = runtime.composerValue;
                 const parsed = parseComposerText(text);
                 const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-                if (!text.trim() || ((agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) && !stopRequested)) return;
+                if (!text.trim() || (conversationSubmissionBlocked && !stopRequested)) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}
@@ -2415,13 +2429,17 @@ export function ChatWorkspace() {
               permissionProfiles={PERMISSION_PROFILES}
               onSelectPermissionLabel={runtime.selectPermissionLabel}
               inThread={!!selectedConversationThreadId}
+              isWorking={conversationWorking}
+              onStop={() => {
+                void stopActiveWork();
+              }}
               connectedConnectors={connectedConnectorCards}
               knowledgeSources={runtime.workspaceKnowledgeSources}
               attachments={runtime.composerAttachments}
               onRemoveAttachment={runtime.removeComposerAttachment}
-            />
-
-            {renderChatContext()}
+              />
+            </div>
+            {!conversationIsActive ? renderChatContext() : null}
           </div>
         )}
         <p className="sr-only" aria-live="polite">

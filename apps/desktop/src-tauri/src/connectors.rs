@@ -790,11 +790,14 @@ fn build_manifest_with_health(
         account: connected
             .then(|| {
                 connection.as_ref().map(|connection| {
-                    safe_account_projection(
-                        &connection.account,
-                        entry.id,
-                        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+                    let workspace_id = crate::authorized_scope::active_command_scope(
+                        crate::authorized_scope::ScopeAccess::Read,
                     )
+                    .map(|scope| scope.data.workspace_id().to_string())
+                    .unwrap_or_else(|_| {
+                        crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()
+                    });
+                    safe_account_projection(&connection.account, entry.id, &workspace_id)
                 })
             })
             .flatten(),
@@ -1224,17 +1227,13 @@ fn audit_connector_action(
 }
 
 fn require_connector_workspace(workspace_id: Option<String>) -> Result<(), ConnectorCommandError> {
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
-    if workspace_id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
-        return Err(command_error(
-            "invalid-request",
-            "workspace",
-            "Connector credentials are not configured for this workspace.",
-            false,
-        ));
-    }
-    Ok(())
+    crate::authorized_scope::command_scope(
+        workspace_id,
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map(|_| ())
+    .map_err(|message| command_error("invalid-request", "workspace", &message, false))
 }
 
 fn connector_authorization_context(
@@ -1247,13 +1246,10 @@ fn connector_authorization_context(
     ),
     ConnectorCommandError,
 > {
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
-    require_connector_workspace(Some(workspace_id.clone()))?;
     let identity = crate::clerk_identity::native_identity_generation_snapshot()
         .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
     let scope = crate::authorized_scope::command_scope(
-        Some(workspace_id),
+        workspace_id,
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )
@@ -1266,7 +1262,7 @@ pub fn list_connector_statuses(
     app: tauri::AppHandle,
     workspace_id: Option<String>,
 ) -> Result<Vec<ConnectorManifest>, ConnectorCommandError> {
-    if require_connector_workspace(workspace_id).is_err() {
+    if require_connector_workspace(workspace_id.clone()).is_err() {
         return Ok(list_unconfigured_workspace_connector_statuses());
     }
     let boundary = connector_connections_path(&app)
@@ -1362,9 +1358,6 @@ pub fn list_connector_accounts(
     connector_id: String,
     workspace_id: Option<String>,
 ) -> Result<Vec<crate::models::ConnectorAccountOption>, ConnectorCommandError> {
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
-    require_connector_workspace(Some(workspace_id.clone()))?;
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
@@ -1373,11 +1366,12 @@ pub fn list_connector_accounts(
     let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     let scope = crate::authorized_scope::command_scope(
-        Some(workspace_id.clone()),
+        workspace_id,
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )
     .map_err(|message| command_error("invalid-request", entry.id, &message, false))?;
+    let workspace_id = scope.data.workspace_id().to_string();
     let connections = read_connections(&path)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     let store = crate::store::try_global().ok_or_else(|| {
@@ -2007,10 +2001,9 @@ pub fn switch_connector_account(
     connection_id: String,
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
-    let workspace_id = workspace_id
-        .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string());
     let entry = require_connector(&connector_id)?;
-    let (identity, scope) = connector_authorization_context(Some(workspace_id.clone()), entry.id)?;
+    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let workspace_id = scope.data.workspace_id().to_string();
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
         .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     let durable_store = crate::store::try_global().ok_or_else(|| {

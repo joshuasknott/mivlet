@@ -330,6 +330,20 @@
     margin-top: 20px;
   }
 
+  .workspace-center--conversation {
+    width: 100%;
+    height: calc(100dvh - 58px);
+    margin-top: 0;
+  }
+
+  .conversation-scroll {
+    padding: 28px 16px 20px;
+  }
+
+  .conversation-composer-dock {
+    padding: 10px 12px 12px;
+  }
+
   .hero h1 {
     font-size: var(--text-13);
   }

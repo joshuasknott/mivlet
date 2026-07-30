@@ -116,11 +116,45 @@ kbd {
   width: min(100% - 48px, 1040px);
 }
 
+.workspace-center--conversation {
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  justify-content: flex-start;
+  overflow: hidden;
+}
+
+.conversation-scroll {
+  width: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 48px 24px 24px;
+}
+
+.conversation-composer-dock {
+  position: relative;
+  z-index: 4;
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 12px 24px 18px;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--surface) 0%, transparent),
+      var(--surface) 26px
+    );
+}
+
 .conversation-feed {
   display: grid;
-  gap: 12px;
+  gap: 22px;
   width: min(100%, 840px);
-  margin: 0 auto 18px;
+  margin: 0 auto;
 }
 
 .conversation-feed__notice {
@@ -139,27 +173,29 @@ kbd {
   width: 100%;
 }
 
-.conversation-message p {
+.conversation-message > p {
   max-width: min(720px, 86%);
   margin: 0;
   padding: 12px 14px;
   color: var(--ink);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  font-size: var(--text-14);
-  line-height: 1.45;
+  border-radius: 18px;
+  font-size: var(--text-15);
+  line-height: 1.6;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
 .conversation-message--user {
+  flex-direction: column;
+  align-items: flex-end;
   justify-content: flex-end;
 }
 
-.conversation-message--user p {
-  color: var(--surface);
-  background: var(--accent);
-  border-color: var(--accent);
+.conversation-message--user > p {
+  max-width: min(680px, 82%);
+  color: var(--ink);
+  background: var(--surface-hover);
+  border-radius: 22px;
 }
 
 .conversation-message--assistant {
@@ -168,8 +204,119 @@ kbd {
   justify-content: flex-start;
 }
 
-.conversation-message--assistant p {
-  background: var(--surface-raised);
+.conversation-message--assistant > p {
+  width: 100%;
+  max-width: none;
+  padding: 2px 0;
+  background: transparent;
+  border-radius: 0;
+}
+
+.conversation-message--working > p {
+  color: var(--ink-muted);
+  animation: conversation-working-pulse 1.4s ease-in-out infinite;
+}
+
+.conversation-message-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 30px;
+  margin-top: 3px;
+  animation: conversation-actions-enter 160ms ease-out both;
+}
+
+.conversation-message-actions--user {
+  justify-content: flex-end;
+}
+
+.conversation-message-actions--assistant {
+  justify-content: flex-start;
+}
+
+.conversation-message-action {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--ink-muted);
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  transition:
+    color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.conversation-message-action:hover:not(:disabled),
+.conversation-message-action:focus-visible {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+
+.conversation-message-action:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.conversation-message-action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.conversation-message-action:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.conversation-message-action__tooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  z-index: 20;
+  width: max-content;
+  max-width: 180px;
+  padding: 6px 9px;
+  color: var(--surface);
+  background: var(--ink);
+  border-radius: 8px;
+  box-shadow: var(--shadow-2);
+  font-size: var(--text-12);
+  font-weight: 500;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -2px);
+  transition:
+    opacity 100ms ease,
+    transform 100ms ease;
+  white-space: nowrap;
+}
+
+.conversation-message-action:hover .conversation-message-action__tooltip,
+.conversation-message-action:focus-visible .conversation-message-action__tooltip {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+@keyframes conversation-actions-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+}
+
+@keyframes conversation-working-pulse {
+  0%,
+  100% {
+    opacity: 0.52;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .run-context-summary {

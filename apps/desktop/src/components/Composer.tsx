@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useState } from "react";
 import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { Books } from "@phosphor-icons/react/dist/csr/Books";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
@@ -78,6 +78,8 @@ export function Composer({
   permissionProfiles,
   onSelectPermissionLabel,
   inThread = false,
+  isWorking = false,
+  onStop,
   connectedConnectors = [],
   knowledgeSources = [],
   attachments = [],
@@ -118,6 +120,8 @@ export function Composer({
   permissionProfiles: readonly PermissionProfile[];
   onSelectPermissionLabel: (label: string) => void;
   inThread?: boolean;
+  isWorking?: boolean;
+  onStop?: () => void;
   connectedConnectors?: { id: string; name: string; status: string }[];
   knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
   attachments?: ComposerAttachment[];
@@ -174,6 +178,12 @@ export function Composer({
         : voiceMessage;
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
+  useEffect(() => {
+    const input = composerRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, 248)}px`;
+  }, [composerRef, composerValue, inThread]);
   const currentToken = useMemo(() => {
     const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
     if (!match) return null;
@@ -660,8 +670,17 @@ export function Composer({
                 <X size={16} weight="bold" />
               </button>
             </div>
-            <button className="send-button" type="submit" aria-label="Send prompt">
-              <ArrowUp size={19} weight="bold" />
+            <button
+              className={`send-button${isWorking ? " send-button--stop" : ""}`}
+              type={isWorking ? "button" : "submit"}
+              aria-label={isWorking ? "Stop response" : "Send prompt"}
+              onClick={isWorking ? onStop : undefined}
+            >
+              {isWorking ? (
+                <Stop size={14} weight="fill" />
+              ) : (
+                <ArrowUp size={19} weight="bold" />
+              )}
             </button>
           </div>
         </div>

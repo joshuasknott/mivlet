@@ -1,28 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import type { KnowledgeCitation } from "@fable/protocol";
 import {
   appendRuntimeArtifactVersion,
-  createRuntimeResponseArtifact,
   reviewRuntimeArtifact,
   type RuntimeArtifactBundle
 } from "../runtime";
 
 export function ResponseArtifactAction({
-  threadId,
-  messageId,
-  runId,
-  content,
-  citations,
   existing,
   onSaved
 }: {
-  threadId: string;
-  messageId: string;
-  runId: string;
-  content: string;
-  citations: readonly KnowledgeCitation[];
-  existing?: RuntimeArtifactBundle;
-  onSaved: (artifact: RuntimeArtifactBundle) => void;
+  existing: RuntimeArtifactBundle;
+  onSaved: (savedWork: RuntimeArtifactBundle) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
@@ -37,42 +25,21 @@ export function ResponseArtifactAction({
   const reviewStatusRef = useRef<HTMLSpanElement>(null);
 
   const artifact = existing;
-  const sourceCount = artifact?.currentVersion.citations.length ?? citations.length;
-  const regionId = `artifact-${messageId}`;
-  const reviewStatusLabel = artifact ? ({
+  const sourceCount = artifact.currentVersion.citations.length;
+  const regionId = `saved-work-${artifact.artifact.id}`;
+  const reviewStatusLabel = ({
     draft: "Draft",
     "in-review": "Private review",
     "changes-requested": "Changes requested",
     accepted: "Accepted"
   } as const)[artifact.artifact.status as "draft" | "in-review" | "changes-requested" | "accepted"]
-    ?? artifact.artifact.status.replaceAll("-", " ") : "";
+    ?? artifact.artifact.status.replaceAll("-", " ");
 
   useEffect(() => {
     if (requestingChanges) changesInputRef.current?.focus();
   }, [requestingChanges]);
 
-  const saveInitialArtifact = () => {
-    setSaving(true);
-    setError("");
-    setNotice("");
-    void createRuntimeResponseArtifact({
-      threadId,
-      messageId,
-      runId,
-      title: content.trim().split(/\r?\n/, 1)[0].slice(0, 80) || "Assistant response",
-      content,
-      citations
-    }).then((saved) => {
-      onSaved(saved);
-      setOpen(true);
-      setNotice("Artifact saved.");
-    }).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Could not save this artifact.");
-    }).finally(() => setSaving(false));
-  };
-
   const saveNewVersion = () => {
-    if (!artifact) return;
     setSaving(true);
     setError("");
     setNotice("");
@@ -86,7 +53,9 @@ export function ResponseArtifactAction({
       setEditing(false);
       setNotice(`Version ${saved.currentVersion.version} saved.`);
     }).catch((cause) => {
-      setError(cause instanceof Error ? cause.message : "Could not save a new version.");
+      setError(cause instanceof Error
+        ? cause.message.replace(/\bartifact\b/gi, "saved work")
+        : "Could not save a new version.");
     }).finally(() => setSaving(false));
   };
 
@@ -94,7 +63,6 @@ export function ResponseArtifactAction({
     action: "request-review" | "accept" | "request-changes",
     requestedChanges?: readonly string[]
   ) => {
-    if (!artifact) return;
     setSaving(true);
     setError("");
     setNotice("");
@@ -126,23 +94,18 @@ export function ResponseArtifactAction({
       <button
         type="button"
         disabled={saving}
-        aria-expanded={artifact ? open : undefined}
-        aria-controls={artifact ? regionId : undefined}
-        aria-label={artifact
-          ? `${open ? "Hide" : "View"} artifact ${artifact.artifact.title}`
-          : "Save response as artifact"}
-        onClick={() => {
-          if (artifact) setOpen((value) => !value);
-          else saveInitialArtifact();
-        }}
+        aria-expanded={open}
+        aria-controls={regionId}
+        aria-label={`${open ? "Hide" : "View"} saved work ${artifact.artifact.title}`}
+        onClick={() => setOpen((value) => !value)}
       >
-        {artifact ? (open ? "Hide artifact" : "View artifact") : saving ? "Saving..." : "Save as artifact"}
+        {open ? "Hide saved work" : "View saved work"}
       </button>
-      {artifact && sourceCount > 0 ? <span>{sourceCount} {sourceCount === 1 ? "source" : "sources"}</span> : null}
+      {sourceCount > 0 ? <span>{sourceCount} {sourceCount === 1 ? "source" : "sources"}</span> : null}
       {error ? <p role="alert">{error}</p> : null}
       {notice ? <p role="status" aria-live="polite">{notice}</p> : null}
-      {artifact && open ? (
-        <section id={regionId} aria-label="Saved artifact">
+      {open ? (
+        <section id={regionId} aria-label="Saved work">
           <header className="response-artifact__header">
             <strong>{artifact.artifact.title}</strong>
             <div className="response-artifact__meta">
@@ -152,7 +115,7 @@ export function ResponseArtifactAction({
           </header>
           {editing ? (
             <div className="response-artifact__editor">
-              <label htmlFor={`${regionId}-editor`}>Edit artifact markdown</label>
+              <label htmlFor={`${regionId}-editor`}>Edit saved work</label>
               <textarea
                 id={`${regionId}-editor`}
                 value={draft}
@@ -253,7 +216,7 @@ export function ResponseArtifactAction({
             </ol>
           </details>
           {artifact.currentVersion.citations.length > 0 ? (
-            <ul aria-label="Artifact sources">
+            <ul aria-label="Saved work sources">
               {artifact.currentVersion.citations.map((citation) => <li key={citation.id}>{citation.label}</li>)}
             </ul>
           ) : <p>No external sources were used.</p>}

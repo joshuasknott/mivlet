@@ -1484,6 +1484,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
   };
 
+  const saveTextToKnowledge = (title: string, content: string) => {
+    const sourceName = `${toSlug(title).slice(0, 72)}.md`;
+    return importLocalKnowledgeFile(
+      new File([content], sourceName, { type: "text/markdown" }),
+      sourceName
+    );
+  };
+
   const supportedKnowledgeExtensions = useMemo(
     () => new Set(SUPPORTED_LOCAL_FILE_EXTENSIONS.map((extension) => extension.toLowerCase())),
     []
@@ -3940,6 +3948,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     confirmApprovalDecision,
     clearApprovalInteraction,
     workspaceKnowledgeSources,
+    saveTextToKnowledge,
     contextualDirectives,
     pinnedSourceIds,
     managedMemoryRecords,

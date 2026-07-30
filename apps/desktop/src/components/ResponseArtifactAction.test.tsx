@@ -21,7 +21,6 @@ const saved = {
 } as unknown as runtime.RuntimeArtifactBundle;
 
 vi.mock("../runtime", () => ({
-  createRuntimeResponseArtifact: vi.fn(async () => saved),
   appendRuntimeArtifactVersion: vi.fn(),
   reviewRuntimeArtifact: vi.fn()
 }));
@@ -29,25 +28,17 @@ vi.mock("../runtime", () => ({
 describe("ResponseArtifactAction", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(runtime.createRuntimeResponseArtifact).mockResolvedValue(saved);
   });
 
-  it("saves and opens a sourced assistant response", async () => {
+  it("opens versioned saved work without exposing internal artifact language", async () => {
     const onSaved = vi.fn();
-    const { rerender } = render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[{ sourceId: "source-1", title: "Roadmap", snippet: "Evidence" } as never]} onSaved={onSaved} />);
-    await userEvent.click(screen.getByRole("button", { name: "Save response as artifact" }));
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(saved));
-    expect(runtime.createRuntimeResponseArtifact).toHaveBeenCalledWith(expect.objectContaining({
-      runId: "run-1",
-      citations: [expect.objectContaining({ sourceId: "source-1" })]
-    }));
-
-    rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={onSaved} />);
-    expect(screen.getByRole("region", { name: "Saved artifact" })).toHaveTextContent("Answer");
-    await userEvent.click(screen.getByRole("button", { name: "Hide artifact Answer" }));
-    await userEvent.click(screen.getByRole("button", { name: "View artifact Answer" }));
-    expect(screen.getByRole("region", { name: "Saved artifact" })).toHaveTextContent("Answer");
-    expect(screen.getByRole("list", { name: "Artifact sources" })).toHaveTextContent("Roadmap");
+    render(<ResponseArtifactAction existing={saved} onSaved={onSaved} />);
+    await userEvent.click(screen.getByRole("button", { name: "View saved work Answer" }));
+    expect(screen.getByRole("region", { name: "Saved work" })).toHaveTextContent("Answer");
+    await userEvent.click(screen.getByRole("button", { name: "Hide saved work Answer" }));
+    await userEvent.click(screen.getByRole("button", { name: "View saved work Answer" }));
+    expect(screen.getByRole("list", { name: "Saved work sources" })).toHaveTextContent("Roadmap");
+    expect(screen.queryByText(/artifact/i)).not.toBeInTheDocument();
   });
 
   it("renders history and appends an immutable second version", async () => {
@@ -61,11 +52,11 @@ describe("ResponseArtifactAction", () => {
     } as unknown as runtime.RuntimeArtifactBundle;
     vi.mocked(runtime.appendRuntimeArtifactVersion).mockResolvedValue(revised);
     const onSaved = vi.fn();
-    const view = render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={onSaved} />);
+    const view = render(<ResponseArtifactAction existing={saved} onSaved={onSaved} />);
 
-    await user.click(screen.getByRole("button", { name: "View artifact Answer" }));
+    await user.click(screen.getByRole("button", { name: "View saved work Answer" }));
     await user.click(screen.getByRole("button", { name: "Edit Answer" }));
-    const editor = screen.getByRole("textbox", { name: "Edit artifact markdown" });
+    const editor = screen.getByRole("textbox", { name: "Edit saved work" });
     await user.clear(editor);
     await user.type(editor, "Revised answer");
     await user.click(screen.getByRole("button", { name: "Save new version of Answer" }));
@@ -78,12 +69,12 @@ describe("ResponseArtifactAction", () => {
     });
     expect(version1.content.text).toBe("Answer");
 
-    view.rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={revised} onSaved={onSaved} />);
+    view.rerender(<ResponseArtifactAction existing={revised} onSaved={onSaved} />);
     expect(screen.getByText("Version 2")).toBeInTheDocument();
     await user.click(screen.getByText("Version history (2)"));
     expect(screen.getByText("Version 1")).toBeInTheDocument();
     expect(screen.getByText("Version 2 - Current")).toBeInTheDocument();
-    expect(screen.getByRole("list", { name: "Artifact sources" })).toHaveTextContent("Roadmap");
+    expect(screen.getByRole("list", { name: "Saved work sources" })).toHaveTextContent("Roadmap");
   });
 
   it("shows a stale edit conflict plainly and keeps the editor open", async () => {
@@ -91,12 +82,12 @@ describe("ResponseArtifactAction", () => {
       new Error("This artifact changed elsewhere. Reopen it before saving a new version.")
     );
     const user = userEvent.setup();
-    render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "View artifact Answer" }));
+    render(<ResponseArtifactAction existing={saved} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "View saved work Answer" }));
     await user.click(screen.getByRole("button", { name: "Edit Answer" }));
     await user.click(screen.getByRole("button", { name: "Save new version of Answer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("changed elsewhere");
-    expect(screen.getByRole("textbox", { name: "Edit artifact markdown" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Edit saved work" })).toBeInTheDocument();
   });
 
   it("shows calm review states and exact actions", async () => {
@@ -113,9 +104,9 @@ describe("ResponseArtifactAction", () => {
     vi.mocked(runtime.reviewRuntimeArtifact)
       .mockResolvedValueOnce(inReview)
       .mockResolvedValueOnce(changesRequested);
-    const view = render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={saved} onSaved={onSaved} />);
+    const view = render(<ResponseArtifactAction existing={saved} onSaved={onSaved} />);
 
-    await user.click(screen.getByRole("button", { name: "View artifact Answer" }));
+    await user.click(screen.getByRole("button", { name: "View saved work Answer" }));
     expect(screen.getByText("Draft")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start private review for Answer" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Mark Answer accepted" })).not.toBeInTheDocument();
@@ -129,7 +120,7 @@ describe("ResponseArtifactAction", () => {
     });
     expect(screen.getByRole("status")).toHaveTextContent("Private review started");
 
-    view.rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={inReview} onSaved={onSaved} />);
+    view.rerender(<ResponseArtifactAction existing={inReview} onSaved={onSaved} />);
     expect(screen.getByText("Private review")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Answer" })).not.toBeInTheDocument();
     expect(screen.getByText("Resolve private review before editing.")).toBeInTheDocument();
@@ -153,7 +144,7 @@ describe("ResponseArtifactAction", () => {
       action: "request-changes",
       requestedChanges: ["Clarify the conclusion."]
     });
-    view.rerender(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={changesRequested} onSaved={onSaved} />);
+    view.rerender(<ResponseArtifactAction existing={changesRequested} onSaved={onSaved} />);
     const changedStatus = screen.getByText("Changes requested", { exact: true });
     await waitFor(() => expect(changedStatus).toHaveFocus());
     expect(screen.getByRole("button", { name: "Edit Answer" })).toBeInTheDocument();
@@ -166,8 +157,8 @@ describe("ResponseArtifactAction", () => {
       artifact: { ...saved.artifact, status: "accepted", revision: 3 }
     } as unknown as runtime.RuntimeArtifactBundle;
     const user = userEvent.setup();
-    render(<ResponseArtifactAction threadId="thread-1" messageId="message-1" runId="run-1" content="Answer" citations={[]} existing={accepted} onSaved={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "View artifact Answer" }));
+    render(<ResponseArtifactAction existing={accepted} onSaved={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "View saved work Answer" }));
     expect(screen.getByText("Accepted")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Answer" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Start private review for Answer" })).not.toBeInTheDocument();

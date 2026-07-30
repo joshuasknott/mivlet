@@ -103,6 +103,7 @@ export interface ShellRuntime {
   clearApprovalInteraction: () => void;
   // knowledge + memory
   workspaceKnowledgeSources: KnowledgeSource[];
+  saveTextToKnowledge: (title: string, content: string) => Promise<boolean>;
   contextualDirectives: WorkspaceDirective[];
   pinnedSourceIds: string[];
   managedMemoryRecords: MemoryRecord[];

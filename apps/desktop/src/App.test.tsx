@@ -1946,6 +1946,8 @@ describe("Fable home", () => {
     });
     expect(screen.getByText("summarize the project")).toBeInTheDocument();
     expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
+    expect(composer.closest(".workspace-center--conversation")).toBeInTheDocument();
+    expect(composer.closest(".conversation-composer-dock")).toBeInTheDocument();
     // The newline was not inserted into the composer.
     expect(composer).toHaveValue("");
   });
@@ -1956,6 +1958,18 @@ describe("Fable home", () => {
     await user.keyboard("{Enter}");
     const conversation = await screen.findByRole("region", { name: /conversation/i });
     expect(await within(conversation).findByText(/plan saved/i)).toBeInTheDocument();
+    const promptActions = within(conversation).getByRole("group", { name: "User message actions" });
+    expect(within(promptActions).getByRole("button", { name: "Save to Knowledge" })).toBeInTheDocument();
+    expect(within(promptActions).getByRole("button", { name: "Copy prompt" })).toBeInTheDocument();
+    await user.click(within(promptActions).getByRole("button", { name: "Edit prompt" }));
+    expect(screen.getByLabelText(/universal composer/i)).toHaveValue(
+      "Create a plan to migrate the config store"
+    );
+    const responseActions = within(conversation).getByRole("group", { name: "Assistant message actions" });
+    expect(within(responseActions).getByRole("button", { name: "Save to Knowledge" })).toBeInTheDocument();
+    expect(within(responseActions).getByRole("button", { name: "Copy response" })).toBeInTheDocument();
+    expect(within(responseActions).getByRole("button", { name: "Redo response" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save response as artifact/i })).not.toBeInTheDocument();
   });
 
   it("starts and submits the structured brief intake without provider execution", async () => {
@@ -2159,7 +2173,7 @@ describe("Fable home", () => {
       }]);
       await artifactListCompleted;
     });
-    expect(screen.queryByRole("button", { name: "View artifact Output A" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "View saved work Output A" })).not.toBeInTheDocument();
   });
 
   it("keeps a delayed structured-intake card bound to its source conversation", async () => {
@@ -2232,7 +2246,7 @@ describe("Fable home", () => {
     expect(screen.getByRole("group", { name: "Mission plan" })).toHaveTextContent("One focused research step");
     expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("OpenAI · 200 tokens");
     expect(screen.getByRole("group", { name: "Run receipt" })).toHaveTextContent("Provider time 1.3s / 120s · attempt 1 / 2");
-    expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View saved work Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
     expect(runtimeMocks.citedBriefCalls).toHaveLength(1);
     expect(runtimeMocks.citedBriefCalls[0]).toMatchObject({
@@ -2299,7 +2313,7 @@ describe("Fable home", () => {
     expect(plan).toHaveTextContent("Two workers · deterministic join");
     expect(plan).toHaveTextContent("Practical approach");
     expect(plan).toHaveTextContent("Alternative approach");
-    expect(await screen.findByRole("button", { name: "View artifact Two approaches" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View saved work Two approaches" })).toBeInTheDocument();
     expect(runtimeMocks.parallelApproachCalls[0]).toMatchObject({
       workspaceId: "preview-default", sourceThreadId: expect.any(String), model: "gpt-5"
     });
@@ -2493,7 +2507,7 @@ describe("Fable home", () => {
     const acceptedReceipt = await screen.findByRole("group", { name: "Run receipt" });
     expect(acceptedReceipt).toHaveTextContent("OpenAI · 200 tokens");
     expect(acceptedReceipt).toHaveTextContent("Provider time 1.3s / 120s · attempt 1 / 1");
-    expect(await screen.findByRole("button", { name: "View artifact Connected work brief" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View saved work Connected work brief" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Run again as a new mission" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Save response as artifact" })).not.toBeInTheDocument();
   });
@@ -2541,7 +2555,7 @@ describe("Fable home", () => {
     fireEvent.click(await screen.findByRole("menuitem", { name: "Structured restart" }));
 
     expect(await screen.findByText(/# Autumn launch/)).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "View artifact Autumn launch" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "View saved work Autumn launch" })).toBeInTheDocument();
     expect(screen.queryByText("Plan unavailable")).not.toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Run receipt" })).not.toBeInTheDocument();
     expect(readRuntimeCitedMissionReceipts).not.toHaveBeenCalled();
@@ -3441,16 +3455,16 @@ describe("Fable home", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chats" }));
     fireEvent.click(await screen.findByRole("menuitem", { name: "Reviewed outputs" }));
 
-    const artifacts = await screen.findByRole("region", { name: "Mission artifacts" });
-    expect(within(artifacts).getByRole("button", {
-      name: "View artifact Launch brief"
+    const savedWork = await screen.findByRole("region", { name: "Mission saved work" });
+    expect(within(savedWork).getByRole("button", {
+      name: "View saved work Launch brief"
     })).toBeInTheDocument();
-    expect(within(artifacts).getByRole("button", {
-      name: "View artifact Risk review"
+    expect(within(savedWork).getByRole("button", {
+      name: "View saved work Risk review"
     })).toBeInTheDocument();
   });
 
-  it("turns a completed request into an editable Routine draft without auto-saving it", async () => {
+  it("does not add a run-later control to completed responses", async () => {
     installDesktopRuntime();
     runtimeMocks.backends = [
       {
@@ -3474,13 +3488,7 @@ describe("Fable home", () => {
     await user.type(composer, "Summarize the project every Friday.");
     await user.click(screen.getByRole("button", { name: /send prompt/i }));
     await screen.findByText("Weekly summary ready.");
-    await user.click(await screen.findByRole("button", { name: "Run this again later" }));
-
-    expect(await screen.findByRole("heading", { name: "New routine" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Name")).toHaveValue("Summarize the project every Friday");
-    expect(screen.getByLabelText("What should Fable do?")).toHaveValue(
-      "Summarize the project every Friday."
-    );
+    expect(screen.queryByRole("button", { name: "Run this again later" })).not.toBeInTheDocument();
   });
 
   it("drives a cooperative cancel from the Fable stop command while work is running", async () => {
@@ -3534,24 +3542,28 @@ describe("Fable home", () => {
     await user.type(composer, "summarize the project");
     await user.click(screen.getByRole("button", { name: /send prompt/i }));
 
-    // The run is in flight: the transcript shows the first delta and a Stop
-    // button is rendered (the cooperative-cancel affordance on the agent panel).
+    // The run is in flight: the transcript shows the first delta and the
+    // composer's send control becomes the one cooperative-cancel affordance.
     expect(await screen.findByText(/^partial$/)).toBeInTheDocument();
-    await screen.findByRole("button", { name: /stop/i });
+    const stopButton = await screen.findByRole("button", { name: /stop response/i });
+    expect(screen.queryByLabelText(/agent activity/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Assistant message actions" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /save response as artifact/i })).not.toBeInTheDocument();
 
     // Clicking Stop drives App.tsx's cancel path (agent.cancel() → onCancel flips
-    // the cancelRequestedRef flag the loop's shouldCancel reads).
-    await user.type(composer, "Stop current work");
-    await user.keyboard("{Enter}");
+    // the transformed send control now owns that same path.
+    await user.click(stopButton);
 
     // The Rust boundary cancel fired (the real-Rust drop stays intact) and the
-    // Stop button disappears as running drops.
+    // composer returns to its send state as running drops.
     await waitFor(() => expect(runtimeMocks.cancelCalls.length).toBeGreaterThanOrEqual(1));
     expect(cancelRuntimeCitedApproval).not.toHaveBeenCalled();
     expect(cancelRuntimeMissionHumanInput).not.toHaveBeenCalled();
     await waitFor(() =>
-      expect(screen.queryByRole("button", { name: /stop/i })).not.toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /stop response/i })).not.toBeInTheDocument()
     );
+    expect(screen.getByRole("button", { name: /send prompt/i })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Assistant message actions" })).toBeInTheDocument();
 
     // Feed a SECOND delta after the cancel, then settle the run. The cooperative
     // bail (shouldCancel returned true) must prevent this delta from accumulating
