@@ -20,7 +20,11 @@ import type {
   RunContextAudience,
   Spine
 } from "@fable/protocol";
-import { buildContextPrefix, MAX_TOKENS_DEFAULT, validateModelForRun } from "@fable/connectors";
+import { buildContextPrefix } from "@fable/connectors/native-api/memory-context";
+import {
+  MAX_TOKENS_DEFAULT,
+  validateModelForRun
+} from "@fable/connectors/native-api/model-catalogue";
 import { authorityScopeAllowsAudience } from "@fable/knowledge";
 
 /**
@@ -123,8 +127,8 @@ const PRIVATE_CONTEXT_MEMBER_ERROR =
 
 /**
  * Resolve the native-confirmed owner of local private context. Hosted
- * workspaces use the exact active member pair; legacy-default local workspaces
- * use the authenticated internal user and never fabricate membership.
+ * workspaces use the exact active member pair. The explicit development-only
+ * preview adapter uses its fixture internal user and never fabricates membership.
  */
 export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAudience {
   const activeLocalId = status.activeWorkspace.localWorkspaceId.trim();
@@ -157,7 +161,7 @@ export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAu
       actingMemberId: member.memberId as never
     };
   }
-  if (status.activeWorkspace.source === "legacy-default" && !owner.memberId) {
+  if (status.activeWorkspace.source === "preview" && !owner.memberId) {
     return {
       authority: "local",
       visibility: "member-private",

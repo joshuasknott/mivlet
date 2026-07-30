@@ -1290,7 +1290,7 @@ fn selected_connection_id_for_scope(
         .map(|selection| selection.connection_id)
 }
 
-fn connection_for_scope(
+pub(crate) fn connection_for_scope(
     path: &Path,
     connector_id: &str,
     scope: &crate::authorized_scope::AuthorizedCommandScope,
@@ -1317,13 +1317,21 @@ pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<Conne
     let scope =
         crate::authorized_scope::active_command_scope(crate::authorized_scope::ScopeAccess::Read)
             .ok()?;
-    let mut connection = connection_for_scope(path, connector_id, &scope)?;
+    usable_connection_for_scope(path, connector_id, &scope)
+}
+
+pub(crate) fn usable_connection_for_scope(
+    path: &Path,
+    connector_id: &str,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Option<ConnectorConnection> {
+    let mut connection = connection_for_scope(path, connector_id, scope)?;
     let identity = crate::clerk_identity::native_identity_generation_snapshot().ok()?;
     let _guard = crate::clerk_identity::lock_native_identity_generation(&identity).ok()?;
     let durable_store = crate::store::try_global()?;
     let canonical = canonical_connection_for_refresh(
         durable_store,
-        &scope,
+        scope,
         connector_id,
         &connection.account.id,
     )
@@ -1335,7 +1343,7 @@ pub(crate) fn usable_connection(path: &Path, connector_id: &str) -> Option<Conne
         return None;
     }
     connection.credential_ref =
-        canonical_credential_binding(durable_store, &scope, connector_id, &connection.account.id)
+        canonical_credential_binding(durable_store, scope, connector_id, &connection.account.id)
             .ok()?;
     NativeConnectorSecretStore
         .get(&connection.credential_ref)
@@ -2731,9 +2739,10 @@ pub(crate) async fn access_token_for_connection(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::authorized_scope::{resolve, ScopeAccess};
+    use crate::authorized_scope::{resolve, AuthorizedCommandScope, ScopeAccess};
     use crate::store::repos::workspace_directory::{
-        clear_current_internal_user, set_current_internal_user,
+        clear_current_internal_user, select_active_workspace, set_current_internal_user,
+        upsert_authoritative_summary, WorkspaceDirectoryUpsert,
     };
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
@@ -2758,6 +2767,37 @@ mod tests {
             self.0.lock().unwrap().remove(key);
             Ok(())
         }
+    }
+
+    fn authorized_test_scope(durable: &Store) -> AuthorizedCommandScope {
+        durable
+            .transaction(|tx| {
+                let summary = upsert_authoritative_summary(
+                    tx,
+                    &WorkspaceDirectoryUpsert {
+                        internal_user_id: "user-a".into(),
+                        fable_workspace_id: "workspace-a".into(),
+                        name: "Workspace A".into(),
+                        workspace_status: "active".into(),
+                        workspace_revision: 1,
+                        policy_revision: 1,
+                        member_id: "member-a".into(),
+                        role: "owner".into(),
+                        membership_status: "active".into(),
+                        membership_revision: 1,
+                        updated_at: "t".into(),
+                    },
+                )?;
+                set_current_internal_user(tx, "user-a", "t")?;
+                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
+                resolve(
+                    tx,
+                    Some(&summary.local_workspace_id),
+                    None,
+                    ScopeAccess::Write,
+                )
+            })
+            .unwrap()
     }
 
     fn fixture_config() -> OAuthProviderConfig {
@@ -3114,16 +3154,7 @@ mod tests {
     fn canonical_auth_commit_succeeds_and_stale_scope_restores_prior_stores() {
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let scope = durable
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
-                    [],
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                resolve(tx, Some("default"), None, ScopeAccess::Write)
-            })
-            .unwrap();
+        let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
             "fable-canonical-auth-commit-{}.json",
             std::process::id()
@@ -3927,16 +3958,7 @@ mod tests {
         let store = MemoryStore::default();
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let scope = durable
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
-                    [],
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                resolve(tx, Some("default"), None, ScopeAccess::Write)
-            })
-            .unwrap();
+        let scope = authorized_test_scope(&durable);
         let path =
             std::env::temp_dir().join(format!("fable-disconnect-test-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
@@ -4042,16 +4064,7 @@ mod tests {
         let store = MemoryStore::default();
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let scope = durable
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
-                    [],
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                resolve(tx, Some("default"), None, ScopeAccess::Write)
-            })
-            .unwrap();
+        let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
             "fable-disconnect-rollback-test-{}.json",
             std::process::id()
@@ -4156,16 +4169,7 @@ mod tests {
         let store = MemoryStore::default();
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let scope = durable
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES('user-a','active',1,'t')",
-                    [],
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                resolve(tx, Some("default"), None, ScopeAccess::Write)
-            })
-            .unwrap();
+        let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
             "fable-canonical-refresh-test-{}.json",
             std::process::id()

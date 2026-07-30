@@ -8,11 +8,13 @@ import { randomUUID } from "./uuid.js"; // simple uuid
 import { normalizeEmail, isValidEmail, boundPlatformInterest, boundConnectorInterest, boundReferralCode, boundLocale, isHoneypotFilled } from "./validation.js";
 import { computeConsentTextHash, verifyConsent } from "./consent.js";
 import { generateConfirmToken, hashToken, computeExpiry, isExpired } from "./tokens.js";
-import { createRateLimiter, rateLimitKeyForSignup, rateLimitKeyForEmailHash, type RateLimiter } from "./rate-limiter.js";
-import type { WaitlistDB } from "./db.js";
+import { createRateLimiter, rateLimitKeyForSignup, rateLimitKeyForEmailHash } from "./rate-limiter.js";
 import type { SignupInput, SignupResult, SubscriberStatus } from "./types.js";
 import { hmacSha256, encryptEmail } from "./crypto.js";
 import { issueMagicToken, redeemMagicToken, type MagicTokenType } from "./magic-tokens.js";
+import type { WaitlistServices } from "./services.js";
+
+export type { WaitlistServices } from "./services.js";
 
 export interface WaitlistEnv {
   DB: D1Database; // from cf
@@ -23,17 +25,6 @@ export interface WaitlistEnv {
   CONFIRM_URL_BASE?: string;
   RATE_LIMIT_SIGNUP_PER_HOUR?: string;
   RATE_LIMIT_EMAIL_PER_DAY?: string;
-}
-
-export interface WaitlistServices {
-  db: WaitlistDB;
-  verifyTurnstile: (token: string, ip?: string) => Promise<boolean>;
-  clock: { nowMs: () => number; nowIso: () => string };
-  log: (msg: string) => void; // redacted only
-  signupLimiter?: RateLimiter;
-  emailLimiter?: RateLimiter;
-  /** Test-only capture for issued magic tokens (populated by issueMagicToken; no-op in production). */
-  capture?: { issued: Array<{ type: string; token: string; subscriberId: string }> };
 }
 
 function makeRedactedLog(base: (s: string) => void) {

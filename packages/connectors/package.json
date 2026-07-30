@@ -5,6 +5,96 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./agent-runtime": {
+      "types": "./dist/agent-runtime/index.d.ts",
+      "import": "./dist/agent-runtime/index.js"
+    },
+    "./commands": {
+      "types": "./dist/commands/index.d.ts",
+      "import": "./dist/commands/index.js"
+    },
+    "./departments": {
+      "types": "./dist/departments/index.d.ts",
+      "import": "./dist/departments/index.js"
+    },
+    "./missions": {
+      "types": "./dist/missions/index.d.ts",
+      "import": "./dist/missions/index.js"
+    },
+    "./mobile-remote": {
+      "types": "./dist/mobile-remote/index.d.ts",
+      "import": "./dist/mobile-remote/index.js"
+    },
+    "./notifications": {
+      "types": "./dist/notifications/index.d.ts",
+      "import": "./dist/notifications/index.js"
+    },
+    "./routines": {
+      "types": "./dist/routines/index.d.ts",
+      "import": "./dist/routines/index.js"
+    },
+    "./scheduler": {
+      "types": "./dist/scheduler/index.d.ts",
+      "import": "./dist/scheduler/index.js"
+    },
+    "./sync": {
+      "types": "./dist/sync/index.d.ts",
+      "import": "./dist/sync/index.js"
+    },
+    "./voice": {
+      "types": "./dist/voice/index.d.ts",
+      "import": "./dist/voice/index.js"
+    },
+    "./workflows": {
+      "types": "./dist/workflows/index.d.ts",
+      "import": "./dist/workflows/index.js"
+    },
+    "./backends/*": {
+      "types": "./dist/backends/*.d.ts",
+      "import": "./dist/backends/*.js"
+    },
+    "./mcp/*": {
+      "types": "./dist/mcp/*.d.ts",
+      "import": "./dist/mcp/*.js"
+    },
+    "./native-api/*": {
+      "types": "./dist/native-api/*.d.ts",
+      "import": "./dist/native-api/*.js"
+    },
+    "./providers/*": {
+      "types": "./dist/providers/*.d.ts",
+      "import": "./dist/providers/*.js"
+    },
+    "./browser-session": {
+      "types": "./dist/browser-session.d.ts",
+      "import": "./dist/browser-session.js"
+    },
+    "./fixtures": {
+      "types": "./dist/fixtures.d.ts",
+      "import": "./dist/fixtures.js"
+    },
+    "./knowledge-search": {
+      "types": "./dist/knowledge-search.d.ts",
+      "import": "./dist/knowledge-search.js"
+    },
+    "./local-files": {
+      "types": "./dist/local-files.d.ts",
+      "import": "./dist/local-files.js"
+    },
+    "./permission-policy": {
+      "types": "./dist/permission-policy.d.ts",
+      "import": "./dist/permission-policy.js"
+    },
+    "./sdk": {
+      "types": "./dist/sdk.d.ts",
+      "import": "./dist/sdk.js"
+    }
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

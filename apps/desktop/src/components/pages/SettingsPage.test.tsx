@@ -33,7 +33,7 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
       message: "Fable account setup is not configured.",
       accountBound: false,
       workspaces: [],
-      activeWorkspace: { localWorkspaceId: "default", name: "Fable workspace", source: "legacy-default" },
+      activeWorkspace: { localWorkspaceId: "preview-default", name: "Preview workspace", source: "preview" },
       devices: []
     },
     accountWorkspacePending: false,

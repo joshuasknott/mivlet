@@ -1,4 +1,7 @@
-import { importLocalTextFile, validateLocalFileCandidate } from "@fable/connectors";
+import {
+  importLocalTextFile,
+  validateLocalFileCandidate
+} from "@fable/connectors/local-files";
 import type {
   LocalFileImport,
   LocalKnowledgeRefreshResponse,

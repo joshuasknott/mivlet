@@ -586,9 +586,27 @@ pub fn resolve_active_workspace_for_current_user(
         .transpose()
 }
 
-/// Resolves the active workspace only when an authenticated internal user is
-/// currently bound. Unlike the legacy resolver, this deliberately fails closed
-/// after sign-out instead of silently granting access to the default workspace.
+pub fn selected_active_workspace_for_current_user(
+    conn: &Connection,
+) -> Result<Option<ActiveWorkspaceSelection>> {
+    let Some(internal_user_id) = current_internal_user_id(conn)? else {
+        return Ok(None);
+    };
+    selected_active_workspace(conn, &internal_user_id)
+}
+
+pub fn unbound_workspace_selection() -> ActiveWorkspaceSelection {
+    ActiveWorkspaceSelection {
+        local_workspace_id: String::new(),
+        fable_workspace_id: None,
+        name: "No workspace selected".into(),
+        source: "unbound".into(),
+    }
+}
+
+/// Resolves the active workspace only when an authenticated internal user and
+/// an explicit hosted selection are currently bound. It deliberately fails
+/// closed after sign-out or before selection.
 pub fn require_active_workspace_context_for_current_user(
     conn: &Connection,
 ) -> Result<AuthorizedWorkspaceContext> {
@@ -618,24 +636,19 @@ pub fn require_active_workspace_for_current_user(
     require_active_workspace_context_for_current_user(conn).map(|context| context.active_workspace)
 }
 
-pub fn legacy_default_workspace(conn: &Connection) -> Result<ActiveWorkspaceSelection> {
-    workspace::ensure_default(conn)?;
-    let default = workspace::get(conn, crate::store::repos::scope::DEFAULT_WORKSPACE_ID)?
-        .ok_or_else(|| {
-            StoreError::Invalid("The legacy default workspace is unavailable.".into())
-        })?;
-    Ok(ActiveWorkspaceSelection {
-        local_workspace_id: default.id,
-        fable_workspace_id: None,
-        name: default.name,
-        source: "legacy-default".into(),
-    })
-}
-
 pub fn resolve_active_workspace(
     conn: &Connection,
     internal_user_id: &str,
 ) -> Result<ActiveWorkspaceSelection> {
+    selected_active_workspace(conn, internal_user_id)?.ok_or_else(|| {
+        StoreError::Invalid("Select an available workspace before accessing workspace data.".into())
+    })
+}
+
+fn selected_active_workspace(
+    conn: &Connection,
+    internal_user_id: &str,
+) -> Result<Option<ActiveWorkspaceSelection>> {
     let internal_user_id = normalize_id(internal_user_id, "Internal user")?;
     let selected = conn
         .query_row(
@@ -651,15 +664,15 @@ pub fn resolve_active_workspace(
                     "The remembered hosted workspace is no longer available for this user.".into(),
                 )
             })?;
-        return Ok(ActiveWorkspaceSelection {
+        return Ok(Some(ActiveWorkspaceSelection {
             local_workspace_id: summary.local_workspace_id,
             fable_workspace_id: Some(summary.fable_workspace_id),
             name: summary.name,
             source: "hosted".into(),
-        });
+        }));
     }
 
-    legacy_default_workspace(conn)
+    Ok(None)
 }
 
 fn current_internal_user_id(conn: &Connection) -> Result<Option<String>> {
@@ -922,15 +935,11 @@ mod tests {
     }
 
     #[test]
-    fn default_is_used_only_without_a_hosted_selection_and_inactive_targets_are_rejected() {
+    fn missing_selection_and_inactive_targets_fail_closed() {
         let store = Store::open_in_memory(vault()).unwrap();
-        assert_eq!(
-            store
-                .with_conn(|conn| resolve_active_workspace(conn, "user-alpha"))
-                .unwrap()
-                .source,
-            "legacy-default"
-        );
+        assert!(store
+            .with_conn(|conn| resolve_active_workspace(conn, "user-alpha"))
+            .is_err());
         let mut inactive = summary("user-alpha", "workspace-alpha", "Alpha");
         inactive.membership_status = "suspended".into();
         store
@@ -1091,14 +1100,10 @@ mod tests {
                 set_current_internal_user(conn, "user-alpha", "now")
             })
             .unwrap();
-        assert_eq!(
-            store
-                .with_conn(resolve_active_workspace_for_current_user)
-                .unwrap()
-                .unwrap()
-                .source,
-            "legacy-default"
-        );
+        assert!(store
+            .with_conn(selected_active_workspace_for_current_user)
+            .unwrap()
+            .is_none());
         assert_eq!(
             store
                 .transaction(|conn| {
@@ -1165,12 +1170,12 @@ mod tests {
         store
             .transaction(|conn| set_current_internal_user(conn, "user-beta", "later"))
             .unwrap();
-        let beta_context = store
+        let beta_error = store
             .with_conn(require_active_workspace_context_for_current_user)
-            .unwrap();
-        assert_eq!(beta_context.internal_user_id, "user-beta");
-        assert_eq!(beta_context.member_id, None);
-        assert_eq!(beta_context.active_workspace.source, "legacy-default");
+            .unwrap_err();
+        assert!(beta_error
+            .to_string()
+            .contains("Select an available workspace"));
     }
 
     #[test]
@@ -1198,14 +1203,13 @@ mod tests {
             .unwrap();
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].fable_workspace_id, "workspace-alpha");
-        assert_eq!(
-            store
-                .with_conn(resolve_active_workspace_for_current_user)
-                .unwrap()
-                .unwrap()
-                .source,
-            "legacy-default"
-        );
+        assert!(store
+            .with_conn(selected_active_workspace_for_current_user)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .with_conn(require_active_workspace_for_current_user)
+            .is_err());
         assert!(store
             .transaction(|conn| {
                 select_active_workspace_for_current_user(conn, "workspace-beta", "later")

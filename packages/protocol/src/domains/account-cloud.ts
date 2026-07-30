@@ -90,7 +90,7 @@ export interface ActiveWorkspaceSelection {
   localWorkspaceId: string;
   fableWorkspaceId?: string;
   name: string;
-  source: "hosted" | "legacy-default";
+  source: "hosted" | "unbound" | "preview";
 }
 
 export interface AccountDeviceSummary {

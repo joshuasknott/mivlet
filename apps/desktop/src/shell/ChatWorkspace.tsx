@@ -1,5 +1,5 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { parseComposerText } from "@fable/connectors";
+import { parseComposerText } from "@fable/connectors/commands";
 import type { KnowledgeCitation, Spine } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
@@ -11,10 +11,10 @@ import {
   validateModelSelection
 } from "../lib/agent-run";
 import { insertDictation } from "../lib/insert-dictation";
-import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-mission";
+import { isCitedBriefMissionPlanSummary, isCitedBriefMissionPrompt, isCitedBriefMissionReceipt, type CitedBriefMissionPlanSummary, type CitedBriefMissionReceipt } from "../lib/cited-brief-contract";
 import { startStructuredIntakeMission, structuredIntakeSubject } from "../lib/structured-intake-mission";
 import { artifactRevisionBriefFocus, startArtifactRevisionBriefMission } from "../lib/artifact-revision-brief-mission";
-import { executeParallelApproachesMission, isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, resumeReviewedParallelApproachesMissions, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-mission";
+import { isParallelApproachesMissionPrompt, isParallelApproachesPlanSummary, type ParallelApproachesPlanSummary } from "../lib/parallel-approaches-contract";
 import { parseGeneralMissionDraft } from "../lib/general-mission-command";
 import {
   matchesTerminalGeneralRetryStatus,
@@ -25,9 +25,9 @@ import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSi
 import { Composer } from "../components/Composer";
 import { ConversationMessageActions } from "../components/ConversationMessageActions";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
-import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeArtifactBundle, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress, type RuntimeThreadMissionProgress } from "../runtime";
+import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
-import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
+import { CitationResults, CitedApprovalCard, DirectiveCards, MissionEffectApprovalCard, MissionHumanInputCard, MissionPlanSummary, MissionPlanUnavailable, MissionProgressSummary, MissionRunReceipt, NewCitedMissionAction, ParallelMissionPlanSummary, ProviderRouteSummary, RunContextSummary, citationsForRun, type MissionHumanInputArtifactOption } from "../components/workspace-cards";
 import { tabs as settingsTabs } from "../components/pages/settings-tabs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
@@ -41,6 +41,7 @@ import { useProjectMemory } from "../hooks/useProjectMemory";
 import { useProjectActivity } from "../hooks/useProjectActivity";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { toSlug } from "../lib/helpers";
+import { useMissionWorkspaceState } from "./chat-workspace/useMissionWorkspaceState";
 
 type ConversationMessage = {
   id: string;
@@ -106,49 +107,34 @@ export function ChatWorkspace() {
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
-  const [hydratedMissionReceipts, setHydratedMissionReceipts] = useState<{
-    key: string;
-    receipts: Record<string, CitedBriefMissionReceipt>;
-  }>({ key: "", receipts: {} });
-  const [hydratedMissionPlans, setHydratedMissionPlans] = useState<{
-    key: string;
-    plans: Record<string, CitedBriefMissionPlanSummary>;
-  }>({ key: "", plans: {} });
-  const [threadArtifacts, setThreadArtifacts] = useState<RuntimeArtifactBundle[]>([]);
-  const [pendingCitedApprovals, setPendingCitedApprovals] = useState<RuntimeCitedApproval[]>([]);
-  const [approvalListWarning, setApprovalListWarning] = useState<string | null>(null);
-  const [approvalBusyRunId, setApprovalBusyRunId] = useState<string | null>(null);
-  const [approvalErrors, setApprovalErrors] = useState<Record<string, string>>({});
-  const [pendingMissionApprovals, setPendingMissionApprovals] = useState<RuntimeMissionApproval[]>([]);
-  const [missionApprovalListWarning, setMissionApprovalListWarning] = useState<string | null>(null);
-  const [missionApprovalBusyRunId, setMissionApprovalBusyRunId] = useState<string | null>(null);
-  const [missionApprovalErrors, setMissionApprovalErrors] = useState<Record<string, string>>({});
-  const [pendingMissionInputs, setPendingMissionInputs] = useState<RuntimeMissionHumanInputRequest[]>([]);
-  const [missionInputListWarning, setMissionInputListWarning] = useState<string | null>(null);
-  const [missionInputBusyRunId, setMissionInputBusyRunId] = useState<string | null>(null);
-  const [missionInputErrors, setMissionInputErrors] = useState<Record<string, string>>({});
-  const [missionInputArtifactOptions, setMissionInputArtifactOptions] = useState<Record<string, {
-    loading: boolean;
-    options: MissionHumanInputArtifactOption[];
-    error?: string;
-  }>>({});
-  const [pendingMissionProgress, setPendingMissionProgress] = useState<Record<string, {
-    loading: boolean;
-    progress?: RuntimeMissionProgress;
-    error?: string;
-  }>>({});
-  const [threadMissionProgress, setThreadMissionProgress] = useState<RuntimeThreadMissionProgress[]>([]);
-  const [threadMissionProgressWarning, setThreadMissionProgressWarning] = useState<string | null>(null);
-  const [missionReviewState, setMissionReviewState] = useState<Record<string, {
-    busyCriterion?: string;
-    error?: string;
-  }>>({});
+  const {
+    hydratedMissionReceipts, setHydratedMissionReceipts,
+    hydratedMissionPlans, setHydratedMissionPlans,
+    threadArtifacts, setThreadArtifacts,
+    pendingCitedApprovals, setPendingCitedApprovals,
+    approvalListWarning, setApprovalListWarning,
+    approvalBusyRunId, setApprovalBusyRunId,
+    approvalErrors, setApprovalErrors,
+    pendingMissionApprovals, setPendingMissionApprovals,
+    missionApprovalListWarning, setMissionApprovalListWarning,
+    missionApprovalBusyRunId, setMissionApprovalBusyRunId,
+    missionApprovalErrors, setMissionApprovalErrors,
+    pendingMissionInputs, setPendingMissionInputs,
+    missionInputListWarning, setMissionInputListWarning,
+    missionInputBusyRunId, setMissionInputBusyRunId,
+    missionInputErrors, setMissionInputErrors,
+    missionInputArtifactOptions, setMissionInputArtifactOptions,
+    pendingMissionProgress, setPendingMissionProgress,
+    threadMissionProgress, setThreadMissionProgress,
+    threadMissionProgressWarning, setThreadMissionProgressWarning,
+    missionReviewState, setMissionReviewState,
+    parallelMissionRunning, setParallelMissionRunning,
+    parallelMissionCancellationRef,
+    generalMissionRunning, setGeneralMissionRunning,
+    generalMissionCancellationRef
+  } = useMissionWorkspaceState();
   const [pendingPrompt, setPendingPrompt] = useState<string | null>(null);
   const [submissionInFlight, setSubmissionInFlight] = useState(false);
-  const [parallelMissionRunning, setParallelMissionRunning] = useState(false);
-  const parallelMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
-  const [generalMissionRunning, setGeneralMissionRunning] = useState(false);
-  const generalMissionCancellationRef = useRef<(() => Promise<void>) | null>(null);
   const [newMissionSourceMessageId, setNewMissionSourceMessageId] = useState<string | null>(null);
   const [newThreadProjectId, setNewThreadProjectId] = useState<string | null>(null);
   const [pendingProjectMissionRerun, setPendingProjectMissionRerun] = useState<{
@@ -330,6 +316,7 @@ export function ChatWorkspace() {
       let lastError: unknown;
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
+          const { resumeReviewedParallelApproachesMissions } = await import("../lib/parallel-approaches-mission");
           const reviewed = await resumeReviewedParallelApproachesMissions({
             backend: recoveryBackend,
             onCancellationReady: (cancel) => {
@@ -1885,7 +1872,7 @@ export function ChatWorkspace() {
       const assistantMessageId = appendConversationMessage("assistant", "Developing two independent approaches...");
       resetCancellation();
       setParallelMissionRunning(true);
-      void executeParallelApproachesMission({
+      void import("../lib/parallel-approaches-mission").then(({ executeParallelApproachesMission }) => executeParallelApproachesMission({
         prompt,
         workspaceId: boundWorkspaceId,
         sourceThreadId,
@@ -1904,7 +1891,7 @@ export function ChatWorkspace() {
             entry.id === assistantMessageId ? { ...entry, missionProgress } : entry
           ));
         }
-      }).then((result) => {
+      })).then((result) => {
         if (selectedConversationThreadIdRef.current !== sourceThreadId) return;
         setConversationMessages((current) => current.map((entry) =>
           entry.id === assistantMessageId ? {

@@ -20,6 +20,7 @@ import {
   type RunDisplayStatus
 } from "../../lib/run-status";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import "../../styles/routes/run-history.css";
 
 /**
  * Run History page.

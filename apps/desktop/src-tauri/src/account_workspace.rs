@@ -1866,11 +1866,8 @@ async fn reconcile_hosted_with_transport(
             )?;
             // Only establish an initial selection. A later explicit choice is
             // remembered for this user and must not be overwritten by refresh.
-            let active = directory::resolve_active_workspace_for_current_user(conn)?;
-            if active
-                .as_ref()
-                .is_none_or(|selection| selection.source == "legacy-default")
-            {
+            let active = directory::selected_active_workspace_for_current_user(conn)?;
+            if active.is_none() {
                 directory::select_active_workspace_for_current_user(
                     conn,
                     &bootstrap.workspace_id,
@@ -2184,9 +2181,7 @@ fn local_status(
 ) -> Result<AccountWorkspaceStatus, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let fallback = store
-        .with_conn(directory::legacy_default_workspace)
-        .map_err(|error| error.to_string())?;
+    let unbound = directory::unbound_workspace_selection();
 
     // A signed-out identity has no current internal user yet. Requiring the
     // account-scoped directory queries here would turn that expected state into
@@ -2205,7 +2200,7 @@ fn local_status(
             message: identity.message.clone(),
             account_bound: false,
             workspaces: Vec::new(),
-            active_workspace: fallback,
+            active_workspace: unbound,
             active_context_owner: None,
             devices: Vec::new(),
         });
@@ -2215,7 +2210,7 @@ fn local_status(
         .with_conn(|conn| {
             let workspaces = directory::list_authoritative_summaries_for_current_user(conn)?;
             let devices = directory::list_account_device_summaries_for_current_user(conn)?;
-            let active_workspace = directory::resolve_active_workspace_for_current_user(conn)?;
+            let active_workspace = directory::selected_active_workspace_for_current_user(conn)?;
             let active_context_owner =
                 directory::require_active_workspace_context_for_current_user(conn)
                     .ok()
@@ -2243,7 +2238,7 @@ fn local_status(
         message: identity.message.clone(),
         account_bound,
         workspaces: workspaces.unwrap_or_default(),
-        active_workspace: active_workspace.unwrap_or(fallback),
+        active_workspace: active_workspace.unwrap_or(unbound),
         active_context_owner,
         devices: devices.unwrap_or_default(),
     })

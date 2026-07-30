@@ -587,7 +587,7 @@ describe("retrieve — audience privacy", () => {
     expect(result.citations[0].authorityScope).toEqual(sharedAuthority);
   });
 
-  it("matches legacy-default private records by internal user exactly", async () => {
+  it("matches local private records by internal user exactly", async () => {
     const result = await retrieve(sources(), { query: "connector", audience: PRIVATE_USER });
     expect(result.citations.map((citation) => citation.sourceId).sort()).toEqual(["private-user", "shared"]);
   });

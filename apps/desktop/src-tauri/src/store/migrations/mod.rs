@@ -5,15 +5,12 @@
 //! - **Schema migrations** ([`apply`]) run forward-only step functions keyed by
 //!   version, inside the migration transaction. v1 DDL is applied by
 //!   [`crate::store::schema`]; this module owns v→v+1 steps for future versions.
-//! - **Data migrations** ([`legacy`]) read the legacy JSON files + localStorage
-//!   payload exactly once per source, classify each record, and write it into
-//!   the new schema idempotently, recording diagnostics in `migration_log`.
-//!   Legacy files are never deleted.
+//!
+//! Pre-v37 JSON ingestion was retired after the schema-v37, recovery-backup,
+//! portable-transfer, foreign-key, and restart fixtures passed. Forward SQLite
+//! migrations remain data preserving and are the only startup migration path.
 
 use rusqlite::{Connection, OptionalExtension};
-
-pub mod legacy;
-pub use legacy::migrate_all;
 
 /// Apply forward schema migrations from `from` → `to` (inclusive of `to`).
 ///

@@ -1,9 +1,9 @@
-//! Durable workflow-run journal. Atomic writes (tmp + rename) so a process
-//! interruption cannot leave a partially encoded file. The rich step-record
-//! shape is owned by the TS protocol; Rust owns durability + bounded history
-//! only. Restart recovery of in-flight runs is handled by the TS layer marking
+//! Durable encrypted SQLite workflow-run journal. The rich step-record shape is
+//! owned by the TS protocol; Rust owns scoped durability and bounded history.
+//! Restart recovery of in-flight runs is handled by the TS layer marking
 //! `running`/`awaiting-approval` runs as recoverable on resume.
 
+#[cfg(test)]
 use std::{fs, path::Path};
 
 use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
@@ -13,22 +13,8 @@ use crate::models::{
     WorkflowDefinitionRecord, WorkflowRunRecord, MAX_WORKFLOW_STEPS, WORKFLOW_RUN_STATUSES,
     WORKFLOW_RUN_STORE_VERSION,
 };
-use crate::paths::{
-    normalize_spaces, truncate_characters, workflow_definitions_path, workflow_runs_path,
-};
-use crate::store::repos::{scope::DataScope, workflow};
-
-fn data_scope(
-    workspace_id: Option<String>,
-    project_id: Option<String>,
-) -> Result<DataScope, String> {
-    DataScope::new(
-        workspace_id
-            .unwrap_or_else(|| crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-        project_id,
-    )
-    .map_err(|error| error.to_string())
-}
+use crate::paths::{normalize_spaces, truncate_characters};
+use crate::store::repos::workflow;
 
 fn normalize_definition(
     mut definition: WorkflowDefinitionRecord,
@@ -187,6 +173,7 @@ fn apply_run_ownership(
     Ok(())
 }
 
+#[cfg(test)]
 fn read_definitions(path: &Path) -> Result<Vec<WorkflowDefinitionRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -280,11 +267,11 @@ fn record_definition_change(definition: &WorkflowDefinitionRecord) {
 
 #[tauri::command]
 pub fn list_workflow_definitions(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<WorkflowDefinitionRecord>, String> {
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     if let Some(values) = crate::store::with_store(|store| {
         store.with_conn(|conn| workflow::list_definitions(conn, store, &scope))
     })? {
@@ -296,7 +283,7 @@ pub fn list_workflow_definitions(
             })
             .collect();
     }
-    read_definitions(&workflow_definitions_path(&app)?)
+    Err("Fable's encrypted workflow store is not initialized.".into())
 }
 
 fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String> {
@@ -359,6 +346,7 @@ fn normalize_run(mut run: WorkflowRunRecord) -> Result<WorkflowRunRecord, String
     Ok(run)
 }
 
+#[cfg(test)]
 pub fn read_runs(path: &Path) -> Result<Vec<WorkflowRunRecord>, String> {
     if !path.exists() {
         return Ok(Vec::new());
@@ -496,11 +484,17 @@ fn record_run_change(run: &WorkflowRunRecord) {
 /// the journal is moved back to `queued` so the UI never presents a stale run
 /// as actively executing.
 pub fn recover_stale_runs(app: &tauri::AppHandle) -> Result<usize, String> {
-    let mut runs = list_workflow_runs(
-        app.clone(),
-        Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-        None,
-    )?;
+    let selected = crate::store::with_store(|store| {
+        store.with_conn(
+            crate::store::repos::workspace_directory::selected_active_workspace_for_current_user,
+        )
+    })?
+    .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let Some(selected) = selected else {
+        return Ok(0);
+    };
+    let workspace_id = selected.local_workspace_id;
+    let mut runs = list_workflow_runs(app.clone(), Some(workspace_id.clone()), None)?;
     let recovered_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let mut recovered = 0;
     for run in &mut runs {
@@ -510,12 +504,7 @@ pub fn recover_stale_runs(app: &tauri::AppHandle) -> Result<usize, String> {
         run.status = "queued".to_string();
         run.updated_at = recovered_at.clone();
         run.failure_reason = Some("Interrupted; queued for recovery.".to_string());
-        save_workflow_run(
-            app.clone(),
-            run.clone(),
-            Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()),
-            None,
-        )?;
+        save_workflow_run(app.clone(), run.clone(), Some(workspace_id.clone()), None)?;
         recovered += 1;
     }
     Ok(recovered)
@@ -523,11 +512,11 @@ pub fn recover_stale_runs(app: &tauri::AppHandle) -> Result<usize, String> {
 
 #[tauri::command]
 pub fn list_workflow_runs(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<WorkflowRunRecord>, String> {
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     if let Some(values) = crate::store::with_store(|store| {
         store.with_conn(|conn| workflow::list_runs(conn, store, &scope, None))
     })? {
@@ -539,18 +528,18 @@ pub fn list_workflow_runs(
             })
             .collect();
     }
-    read_runs(&workflow_runs_path(&app)?)
+    Err("Fable's encrypted workflow store is not initialized.".into())
 }
 
 #[tauri::command]
 pub fn list_workflow_runs_for_definition(
-    app: tauri::AppHandle,
+    _app: tauri::AppHandle,
     definition_id: String,
     workspace_id: Option<String>,
     project_id: Option<String>,
 ) -> Result<Vec<WorkflowRunRecord>, String> {
     let definition_id = normalize_spaces(&definition_id);
-    let scope = data_scope(workspace_id, project_id)?;
+    let scope = authorized_scope::command_scope(workspace_id, project_id, ScopeAccess::Read)?.data;
     if let Some(values) = crate::store::with_store(|store| {
         store.with_conn(|conn| workflow::list_runs(conn, store, &scope, Some(&definition_id)))
     })? {
@@ -562,11 +551,7 @@ pub fn list_workflow_runs_for_definition(
             })
             .collect();
     }
-    let runs = read_runs(&workflow_runs_path(&app)?)?;
-    Ok(runs
-        .into_iter()
-        .filter(|r| r.definition_id == definition_id)
-        .collect())
+    Err("Fable's encrypted workflow store is not initialized.".into())
 }
 
 #[cfg(test)]

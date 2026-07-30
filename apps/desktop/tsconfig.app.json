@@ -22,6 +22,7 @@
     "paths": {
       "@fable/protocol": ["../../packages/protocol/src/index.ts"],
       "@fable/connectors": ["../../packages/connectors/src/index.ts"],
+      "@fable/connectors/*": ["../../packages/connectors/src/*"],
       "@fable/knowledge": ["../../packages/knowledge/src/index.ts"]
     }
   },

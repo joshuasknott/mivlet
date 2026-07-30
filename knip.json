@@ -1,0 +1,59 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    "apps/broker": {
+      "entry": ["src/worker.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "apps/desktop": {
+      "entry": [
+        "src/main.tsx",
+        "src/**/*.test.{ts,tsx}",
+        "src-tauri/tests/fixtures/*.mjs",
+        "vite.config.ts",
+        "convex/**/*.ts",
+        "!convex/_generated/**"
+      ],
+      "project": ["src/**/*.{ts,tsx}", "convex/**/*.ts", "vite.config.ts"]
+    },
+    "apps/marketing": {
+      "entry": ["src/pages/**/*.astro", "src/**/*.test.ts", "astro.config.mjs"],
+      "project": [
+        "src/**/*.{astro,ts,tsx}",
+        "scripts/**/*.mjs",
+        "astro.config.mjs"
+      ]
+    },
+    "apps/waitlist": {
+      "entry": ["src/worker.ts", "src/**/*.test.ts", "vite.config.ts"],
+      "project": ["src/**/*.ts", "vite.config.ts"]
+    },
+    "packages/connectors": {
+      "entry": ["src/index.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/knowledge": {
+      "entry": ["src/index.ts", "src/**/*.test.ts"],
+      "project": ["src/**/*.ts"]
+    },
+    "packages/protocol": {
+      "entry": [
+        "src/index.ts",
+        "src/compatibility-regression.ts",
+        "src/**/*.test.ts"
+      ],
+      "project": ["src/**/*.ts"]
+    },
+    ".": {
+      "entry": ["scripts/**/*.mjs"],
+      "project": ["scripts/**/*.mjs"]
+    }
+  },
+  "ignore": [
+    "**/dist/**",
+    "**/target/**",
+    "**/_generated/**",
+    "**/worker-configuration.d.ts"
+  ],
+  "ignoreDependencies": ["@fontsource/inter", "cloudflare"]
+}

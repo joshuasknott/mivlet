@@ -68,6 +68,7 @@ fn lists_first_wave_connectors_without_faking_live_connections() {
 
 struct StaticConnectorBoundary {
     connection: Option<ConnectorConnection>,
+    workspace_id: Option<String>,
 }
 
 impl ConnectorCredentialBoundary for StaticConnectorBoundary {
@@ -76,6 +77,10 @@ impl ConnectorCredentialBoundary for StaticConnectorBoundary {
             .as_ref()
             .filter(|connection| connection.connector_id == connector_id)
             .cloned()
+    }
+
+    fn workspace_id(&self) -> Option<&str> {
+        self.workspace_id.as_deref()
     }
 }
 
@@ -108,6 +113,7 @@ fn connector_lifecycle_statuses_do_not_collapse_to_connected() {
 
     let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
         connection: Some(slack_connection("expired")),
+        workspace_id: Some("workspace-a".into()),
     });
     let slack = manifests
         .iter()
@@ -132,6 +138,7 @@ fn connected_manifest_projects_opaque_connection_identity() {
 
     let manifests = list_connector_statuses_with(&StaticConnectorBoundary {
         connection: Some(slack_connection("connected")),
+        workspace_id: Some("workspace-a".into()),
     });
     let slack = manifests
         .iter()
@@ -146,6 +153,30 @@ fn connected_manifest_projects_opaque_connection_identity() {
     assert!(!serde_json::to_string(slack)
         .unwrap()
         .contains("\"id\":\"U1\""));
+
+    let other_manifests = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(slack_connection("connected")),
+        workspace_id: Some("workspace-b".into()),
+    });
+    let other_projected = other_manifests
+        .iter()
+        .find(|manifest| manifest.id == "slack")
+        .and_then(|manifest| manifest.account.as_ref())
+        .expect("second workspace account projection");
+    assert_ne!(projected.id, other_projected.id);
+
+    let missing_scope = list_connector_statuses_with(&StaticConnectorBoundary {
+        connection: Some(slack_connection("connected")),
+        workspace_id: None,
+    });
+    let missing_scope_slack = missing_scope
+        .iter()
+        .find(|manifest| manifest.id == "slack")
+        .unwrap();
+    assert_ne!(missing_scope_slack.status, "connected");
+    assert!(missing_scope_slack.account.is_none());
+    assert!(!missing_scope_slack.supports_search);
+    assert!(!missing_scope_slack.supports_import);
 
     if let Some(value) = old_broker {
         std::env::set_var("FABLE_AUTH_BROKER_URL", value);

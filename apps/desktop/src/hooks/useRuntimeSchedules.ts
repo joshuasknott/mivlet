@@ -5,7 +5,7 @@ import type {
   WorkflowDefinition,
   WorkflowRun
 } from "@fable/protocol";
-import { missedOccurrences, nextOccurrence } from "@fable/connectors";
+import { missedOccurrences, nextOccurrence } from "@fable/connectors/scheduler";
 import {
   enqueueRuntimeJobRun,
   listRuntimeSchedulerJobs,

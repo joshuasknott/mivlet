@@ -319,6 +319,8 @@ mod tests {
     use crate::store::vault::{MasterKey, Vault};
     use std::time::Instant;
 
+    const TEST_WORKSPACE: &str = "ws-queue-test";
+
     fn store() -> Store {
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
     }
@@ -368,36 +370,46 @@ mod tests {
     #[test]
     fn deduplication_rejects_duplicate_occurrence() {
         let store = store();
-        seed_job(&store, "default", "j");
+        seed_job(&store, TEST_WORKSPACE, "j");
         store
             .transaction(|tx| {
-                assert!(upsert_entry(tx, &store, "", &entry("j", "r1"), "now")?.is_some());
+                assert!(
+                    upsert_entry(tx, &store, TEST_WORKSPACE, &entry("j", "r1"), "now")?.is_some()
+                );
                 // Same occurrence (same dedup key), different run id → rejected.
-                assert!(upsert_entry(tx, &store, "", &entry("j", "r2"), "now")?.is_none());
+                assert!(
+                    upsert_entry(tx, &store, TEST_WORKSPACE, &entry("j", "r2"), "now")?.is_none()
+                );
                 Ok(())
             })
             .unwrap();
-        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let rows = store
+            .with_conn(|conn| list(conn, &store, TEST_WORKSPACE))
+            .unwrap();
         assert_eq!(rows.len(), 1);
     }
 
     #[test]
     fn same_queue_id_reupserts_in_place() {
         let store = store();
-        seed_job(&store, "default", "j");
+        seed_job(&store, TEST_WORKSPACE, "j");
         store
             .transaction(|tx| {
-                assert!(upsert_entry(tx, &store, "", &entry("j", "r1"), "now")?.is_some());
+                assert!(
+                    upsert_entry(tx, &store, TEST_WORKSPACE, &entry("j", "r1"), "now")?.is_some()
+                );
                 let mut replacement = entry("j", "r1");
                 replacement["state"] = serde_json::json!("leased");
                 replacement["leaseHolder"] = serde_json::json!("instance-a");
                 replacement["scheduledAt"] = serde_json::json!("2026-07-01T10:00:00.000Z");
                 replacement["deduplicationKey"] = serde_json::json!("j:2026-07-01T10:00:00.000Z");
-                assert!(upsert_entry(tx, &store, "", &replacement, "later")?.is_some());
+                assert!(upsert_entry(tx, &store, TEST_WORKSPACE, &replacement, "later")?.is_some());
                 Ok(())
             })
             .unwrap();
-        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let rows = store
+            .with_conn(|conn| list(conn, &store, TEST_WORKSPACE))
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value["state"], "leased");
         assert_eq!(rows[0].value["leaseHolder"], "instance-a");
@@ -428,20 +440,20 @@ mod tests {
     #[test]
     fn payload_is_encrypted_at_rest() {
         let store = store();
-        seed_job(&store, "default", "j");
+        seed_job(&store, TEST_WORKSPACE, "j");
         store
             .transaction(|tx| {
                 let mut e = entry("j", "r1");
                 e["lastError"] = serde_json::json!("very-secret-error");
-                upsert_entry(tx, &store, "", &e, "now")?;
+                upsert_entry(tx, &store, TEST_WORKSPACE, &e, "now")?;
                 Ok(())
             })
             .unwrap();
         let raw_blob: Vec<u8> = store
             .with_conn(|conn| {
                 conn.query_row(
-                    "SELECT payload FROM scheduler_queue_entry WHERE id='queue:default:r1';",
-                    [],
+                    "SELECT payload FROM scheduler_queue_entry WHERE id=?1;",
+                    [queue_id(TEST_WORKSPACE, "r1")],
                     |row| row.get::<_, Vec<u8>>(0),
                 )
                 .map_err(StoreError::from)
@@ -451,8 +463,8 @@ mod tests {
             .with_conn(|conn| {
                 conn.query_row(
                     "SELECT last_error FROM scheduler_queue_entry
-                     WHERE id='queue:default:r1';",
-                    [],
+                     WHERE id=?1;",
+                    [queue_id(TEST_WORKSPACE, "r1")],
                     |row| row.get(0),
                 )
                 .map_err(StoreError::from)
@@ -468,21 +480,23 @@ mod tests {
     #[test]
     fn perf_scheduler_queue_lists_workspace_entries_at_current_scale() {
         let store = store();
-        seed_job(&store, "default", "j");
+        seed_job(&store, TEST_WORKSPACE, "j");
         store
             .transaction(|tx| {
                 for index in 0..500 {
                     let mut value = entry("j", &format!("r{index}"));
                     value["deduplicationKey"] =
                         serde_json::json!(format!("j:2026-07-01T09:{index:04}.000Z"));
-                    assert!(upsert_entry(tx, &store, "", &value, "now")?.is_some());
+                    assert!(upsert_entry(tx, &store, TEST_WORKSPACE, &value, "now")?.is_some());
                 }
                 Ok(())
             })
             .unwrap();
 
         let started = Instant::now();
-        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let rows = store
+            .with_conn(|conn| list(conn, &store, TEST_WORKSPACE))
+            .unwrap();
         let elapsed = started.elapsed();
 
         eprintln!("perf_scheduler_queue_list_ms={}", elapsed.as_millis());
@@ -498,27 +512,29 @@ mod tests {
     #[test]
     fn dedup_key_and_state_transitions_conservative() {
         let store = store();
-        seed_job(&store, "default", "j");
+        seed_job(&store, TEST_WORKSPACE, "j");
         let base = entry("j", "r-dup");
         store
             .transaction(|tx| {
-                assert!(upsert_entry(tx, &store, "", &base, "now")?.is_some());
+                assert!(upsert_entry(tx, &store, TEST_WORKSPACE, &base, "now")?.is_some());
                 // same dedup key (even diff run) -> no insert
                 let mut dup = base.clone();
                 dup["runId"] = serde_json::json!("r-dup2");
-                assert!(upsert_entry(tx, &store, "", &dup, "now")?.is_none());
+                assert!(upsert_entry(tx, &store, TEST_WORKSPACE, &dup, "now")?.is_none());
                 // update via apply_state (the path used by tick/report for state/lease/backoff changes); upsert with same dedup intentionally NO-OPs for dup prevention
                 let mut upd = base.clone();
                 upd["state"] = serde_json::json!("leased");
                 upd["leaseHolder"] = serde_json::json!("holder-x");
                 upd["deduplicationKey"] = serde_json::json!("j:2026-07-01T09:00:00.000Z"); // keep same dedup
-                let qid = queue_id("default", "r-dup");
-                apply_state(tx, &store, "", &qid, &upd, "later")
+                let qid = queue_id(TEST_WORKSPACE, "r-dup");
+                apply_state(tx, &store, TEST_WORKSPACE, &qid, &upd, "later")
                     .expect("apply_state succeeds for state transition test");
                 Ok(())
             })
             .unwrap();
-        let rows = store.with_conn(|conn| list(conn, &store, "")).unwrap();
+        let rows = store
+            .with_conn(|conn| list(conn, &store, TEST_WORKSPACE))
+            .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].value["state"], "leased");
         assert_eq!(rows[0].value["leaseHolder"], "holder-x");

@@ -4444,13 +4444,6 @@ mod tests {
         assert_eq!(manifest_b.sections.drafts.len(), 1);
     }
 
-    fn bind_local_user(store: &Store) {
-        store.transaction(|tx|{
-            tx.execute("INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES ('user-local','active',1,'t')",[])?;
-            crate::store::repos::workspace_directory::set_current_internal_user(tx,"user-local","t")
-        }).unwrap();
-    }
-
     fn bind_member_owner(store: &Store) {
         store
             .transaction(|tx| {
@@ -4862,7 +4855,7 @@ mod tests {
     fn seed_native_artifact_source(store: &Store) {
         store.transaction(|tx|{
             let thread=store.seal_json_owned(&serde_json::json!({}),"thread:artifact-thread")?;
-            tx.execute("INSERT INTO thread(id,workspace_id,title,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-thread','default','T','t','t',?1,?2)",rusqlite::params![thread.ciphertext,thread.nonce])?;
+            tx.execute("INSERT INTO thread(id,workspace_id,title,owner_member_id,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-thread','default','T','member-a','t','t',?1,?2)",rusqlite::params![thread.ciphertext,thread.nonce])?;
             let run=store.seal_json_owned(&serde_json::json!({}),"run:artifact-run")?;
             tx.execute("INSERT INTO run(id,workspace_id,thread_id,provider_id,model,status,created_at,updated_at,payload,payload_nonce) VALUES ('artifact-run','default','artifact-thread','p','m','completed','t','t',?1,?2)",rusqlite::params![run.ciphertext,run.nonce])?;
             let message=store.seal_json_owned(&serde_json::json!({}),"message:artifact-message")?;
@@ -4876,30 +4869,30 @@ mod tests {
     #[test]
     fn projectless_artifact_exports_all_versions_and_round_trips_for_exact_owner() {
         let source = store();
-        bind_local_user(&source);
+        bind_member_owner(&source);
         seed_native_artifact_source(&source);
         source.transaction(|tx|{
             let run_provenance=serde_json::json!({"kind":"run","runId":"artifact-run","observedAt":"t"});
-            let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","schemaVersion":1,"revision":2,"createdByInternalUserId":"user-local","createdAt":"t","updatedAt":"t2","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v2","producingRunId":"artifact-run","sourceProvenance":[run_provenance],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
-            let artifact=source.seal_json_owned(&artifact_payload,"artifact:default:user:user-local:artifact-1")?;
+            let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerMemberId":"member-a","schemaVersion":1,"revision":2,"createdByInternalUserId":"user-a","createdAt":"t","updatedAt":"t2","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v2","producingRunId":"artifact-run","sourceProvenance":[run_provenance],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
+            let artifact=source.seal_json_owned(&artifact_payload,"artifact:default:member:member-a:artifact-1")?;
             let title_hash=format!("{:x}",Sha256::digest(b"Artifact"));
             let current_hash=format!("{:x}",Sha256::digest(b"Two"));
-            tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,id,run_id,thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default','user:user-local','local','member-private','user-local','artifact-1','artifact-run','artifact-thread','artifact-message','document','draft',2,'artifact-1:v2',?1,?2,3,'t','t2',?3,?4)",rusqlite::params![title_hash,current_hash,artifact.ciphertext,artifact.nonce])?;
+            tx.execute("INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_member_id,id,run_id,thread_id,source_message_id,kind,status,revision,current_version_id,title_fingerprint,content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce) VALUES ('default','member:member-a','local','member-private','member-a','artifact-1','artifact-run','artifact-thread','artifact-message','document','draft',2,'artifact-1:v2',?1,?2,3,'t','t2',?3,?4)",rusqlite::params![title_hash,current_hash,artifact.ciphertext,artifact.nonce])?;
             for (id,version,text) in [("artifact-1:v1",1,"One"),("artifact-1:v2",2,"Two")] {
                 let hash=format!("{:x}",Sha256::digest(text.as_bytes()));
                 let media=serde_json::json!({"mediaType":"text/markdown","byteLength":text.len(),"encoding":"utf-8"});
                 let content_hash=serde_json::json!({"algorithm":"sha-256","value":hash});
                 let (created,provenance,lineage)=if version==1 {("t",run_provenance.clone(),serde_json::json!([]))} else {("t2",serde_json::json!({"kind":"artifact-version","sourceArtifactVersionId":"artifact-1:v1","observedAt":"t2"}),serde_json::json!([{"relation":"supersedes","artifactId":"artifact-1","artifactVersionId":"artifact-1:v1","recordedAt":"t2"}]))};
-                let payload=serde_json::json!({"id":id,"artifactId":"artifact-1","version":version,"status":"available","createdAt":created,"createdByInternalUserId":"user-local","content":{"kind":"inline","text":text,"media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":provenance,"citations":[],"inputs":[],"decisions":[],"lineage":lineage});
-                let sealed=source.seal_json_owned(&payload,&format!("artifact_version:default:user:user-local:artifact-1:{id}"))?;
-                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default','user:user-local','artifact-1',?1,?2,'available',?3,3,?4,?5,?6)",rusqlite::params![id,version,hash,created,sealed.ciphertext,sealed.nonce])?;
+                let payload=serde_json::json!({"id":id,"artifactId":"artifact-1","version":version,"status":"available","createdAt":created,"createdByInternalUserId":"user-a","content":{"kind":"inline","text":text,"media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":provenance,"citations":[],"inputs":[],"decisions":[],"lineage":lineage});
+                let sealed=source.seal_json_owned(&payload,&format!("artifact_version:default:member:member-a:artifact-1:{id}"))?;
+                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,content_fingerprint,size_bytes,created_at,payload,payload_nonce) VALUES ('default','member:member-a','artifact-1',?1,?2,'available',?3,3,?4,?5,?6)",rusqlite::params![id,version,hash,created,sealed.ciphertext,sealed.nonce])?;
             }
             Ok(())
         }).unwrap();
         let scope = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
             crate::store::repos::scope::DataScope::workspace("default").unwrap(),
-            "user-local",
-            None,
+            "user-a",
+            Some("member-a"),
         )
         .unwrap();
         source
@@ -4912,7 +4905,7 @@ mod tests {
                     "artifact-1:v2",
                     2,
                     "request-review",
-                    "user-local",
+                    "user-a",
                     Some("Please review"),
                     &[],
                     "2026-07-11T01:00:00Z",
@@ -4925,7 +4918,7 @@ mod tests {
                     "artifact-1:v2",
                     3,
                     "request-changes",
-                    "user-local",
+                    "user-a",
                     Some("Needs one change"),
                     &["Clarify the result".into()],
                     "2026-07-11T01:01:00Z",
@@ -4933,8 +4926,8 @@ mod tests {
                 let hash = format!("{:x}", Sha256::digest(b"Three"));
                 let media = serde_json::json!({"mediaType":"text/markdown","byteLength":5,"encoding":"utf-8"});
                 let content_hash = serde_json::json!({"algorithm":"sha-256","value":hash});
-                let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerInternalUserId":"user-local","schemaVersion":1,"revision":5,"createdByInternalUserId":"user-local","createdAt":"t","updatedAt":"2026-07-11T01:02:00Z","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v3","producingRunId":"artifact-run","sourceProvenance":[{"kind":"run","runId":"artifact-run","observedAt":"t"}],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
-                let version_payload=serde_json::json!({"id":"artifact-1:v3","artifactId":"artifact-1","version":3,"status":"available","createdAt":"2026-07-11T01:02:00Z","createdByInternalUserId":"user-local","content":{"kind":"inline","text":"Three","media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":{"kind":"artifact-version","sourceArtifactVersionId":"artifact-1:v2","observedAt":"2026-07-11T01:02:00Z"},"citations":[],"inputs":[],"decisions":[],"lineage":[{"relation":"supersedes","artifactId":"artifact-1","artifactVersionId":"artifact-1:v2","recordedAt":"2026-07-11T01:02:00Z"}]});
+                let artifact_payload=serde_json::json!({"id":"artifact-1","workspaceId":"default","authority":"local","visibility":"member-private","ownerMemberId":"member-a","schemaVersion":1,"revision":5,"createdByInternalUserId":"user-a","createdAt":"t","updatedAt":"2026-07-11T01:02:00Z","kind":"document","status":"draft","title":"Artifact","currentVersionId":"artifact-1:v3","producingRunId":"artifact-run","sourceProvenance":[{"kind":"run","runId":"artifact-run","observedAt":"t"}],"context":{"threadId":"artifact-thread"},"reviews":[],"retention":{"status":"active"}});
+                let version_payload=serde_json::json!({"id":"artifact-1:v3","artifactId":"artifact-1","version":3,"status":"available","createdAt":"2026-07-11T01:02:00Z","createdByInternalUserId":"user-a","content":{"kind":"inline","text":"Three","media":media,"contentHash":content_hash},"media":media,"contentHash":content_hash,"provenance":{"kind":"artifact-version","sourceArtifactVersionId":"artifact-1:v2","observedAt":"2026-07-11T01:02:00Z"},"citations":[],"inputs":[],"decisions":[],"lineage":[{"relation":"supersedes","artifactId":"artifact-1","artifactVersionId":"artifact-1:v2","recordedAt":"2026-07-11T01:02:00Z"}]});
                 crate::store::repos::artifact::append_version(
                     tx,
                     &source,
@@ -4957,7 +4950,7 @@ mod tests {
                     "artifact-1:v3",
                     5,
                     "request-review",
-                    "user-local",
+                    "user-a",
                     None,
                     &[],
                     "2026-07-11T01:03:00Z",
@@ -4970,7 +4963,7 @@ mod tests {
                     "artifact-1:v3",
                     6,
                     "accept",
-                    "user-local",
+                    "user-a",
                     Some("Approved"),
                     &[],
                     "2026-07-11T01:04:00Z",
@@ -5000,7 +4993,7 @@ mod tests {
         let database = directory.path().join("portable-review.db");
         let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
         let destination = Store::open(&database, vault.clone()).unwrap();
-        bind_local_user(&destination);
+        bind_member_owner(&destination);
         seed_native_artifact_source(&destination);
         import_workspace(&destination, &json, ImportOptions::default()).unwrap();
         let roundtrip = export_workspace(&destination).unwrap();
@@ -5026,7 +5019,7 @@ mod tests {
         // paying for every encrypted schema migration, and proves one failed
         // attempt cannot poison the destination for the next.
         let reject_target = store();
-        bind_local_user(&reject_target);
+        bind_member_owner(&reject_target);
         seed_native_artifact_source(&reject_target);
         let rejects = |bad: Manifest| {
             let encoded = serde_json::to_string(&bad).unwrap();
@@ -5106,11 +5099,11 @@ mod tests {
                 artifact_id: "artifact-1".into(),
                 version_id: "artifact-1:v3".into(),
                 status: "requested".into(),
-                requested_by_internal_user_id: "user-local".into(),
+                requested_by_internal_user_id: "user-a".into(),
                 reviewer_member_id: None,
                 requested_at: requested_at.into(),
                 resolved_at: None,
-                payload: serde_json::json!({"id":id,"status":"requested","requestedByInternalUserId":"user-local","versionId":"artifact-1:v3","requestedAt":requested_at}),
+                payload: serde_json::json!({"id":id,"status":"requested","requestedByInternalUserId":"user-a","versionId":"artifact-1:v3","requestedAt":requested_at}),
             });
         }
         rejects(bad);

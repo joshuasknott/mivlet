@@ -1,7 +1,7 @@
 import { Lightning } from "@phosphor-icons/react/dist/csr/Lightning";
 import { PuzzlePiece } from "@phosphor-icons/react/dist/csr/PuzzlePiece";
 import { Stack } from "@phosphor-icons/react/dist/csr/Stack";
-import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors";
+import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors/local-files";
 
 /**
  * Workspace shell constants. Extracted from App.tsx so the persistence,

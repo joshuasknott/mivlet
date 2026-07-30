@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "exceptions": [
+    {
+      "advisories": [
+        "RUSTSEC-2026-0194",
+        "RUSTSEC-2026-0195"
+      ],
+      "package": "quick-xml",
+      "version": "0.37.5",
+      "introducedBy": "tauri-winrt-notification",
+      "introducedByVersion": "0.7.2",
+      "dependencyPath": [
+        "quick-xml",
+        "tauri-winrt-notification",
+        "notify-rust",
+        "tauri-plugin-notification",
+        "fable-desktop"
+      ],
+      "allowedSourceReference": "quick_xml::escape::escape",
+      "expiresOn": "2026-10-31",
+      "reviewNote": "The Windows notification crate only escapes strings while constructing XML. Windows XmlDocument performs parsing. The affected quick-xml Reader, attribute, and namespace parser APIs are unreachable from this crate."
+    }
+  ]
+}

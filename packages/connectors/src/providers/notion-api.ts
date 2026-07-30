@@ -60,17 +60,20 @@ export function createNotionAdapter(options: NotionAdapterOptions): ConnectorAda
 async function readNotion(http: ProviderHttpClient, request: ConnectorRequest, tokens: ConnectorTokenSet): Promise<ConnectorPage<JsonObject>> {
   const input = request.input;
   if (request.capability === "notion.search") {
-    const { data, headers } = await http.request<any>({ method: "POST", path: "search", signal: request.signal, headers: version(), body: { query: input.query ?? "", page_size: input.pageSize ?? 50, ...(request.cursor ? { start_cursor: request.cursor } : {}), ...(input.object ? { filter: { property: "object", value: input.object } } : {}) } }, tokens);
-    return page((data.results ?? []).map(normalizeNotionObject), data.has_more ? data.next_cursor : undefined, headers);
+    const { data, headers } = await http.request<unknown>({ method: "POST", path: "search", signal: request.signal, headers: version(), body: { query: input.query ?? "", page_size: input.pageSize ?? 50, ...(request.cursor ? { start_cursor: request.cursor } : {}), ...(input.object ? { filter: { property: "object", value: input.object } } : {}) } }, tokens);
+    const result = notionListResponse(data);
+    return page(result.results.map(normalizeNotionObject), result.nextCursor, headers);
   }
   if (request.capability === "notion.page.read") return one(await call(http, `pages/${required(input, "pageId")}`, tokens, request));
   if (request.capability === "notion.blocks.read") {
-    const { data, headers } = await http.request<any>({ path: `blocks/${required(input, "blockId")}/children`, signal: request.signal, headers: version(), query: { page_size: Number(input.pageSize ?? 100), start_cursor: request.cursor } }, tokens);
-    return page(data.results ?? [], data.has_more ? data.next_cursor : undefined, headers);
+    const { data, headers } = await http.request<unknown>({ path: `blocks/${required(input, "blockId")}/children`, signal: request.signal, headers: version(), query: { page_size: Number(input.pageSize ?? 100), start_cursor: request.cursor } }, tokens);
+    const result = notionListResponse(data);
+    return page(result.results.map(normalizeNotionObject), result.nextCursor, headers);
   }
   if (request.capability === "notion.database.query") {
-    const { data, headers } = await http.request<any>({ method: "POST", path: `databases/${required(input, "databaseId")}/query`, signal: request.signal, headers: version(), body: { ...(input.filter ? { filter: input.filter } : {}), ...(input.sorts ? { sorts: input.sorts } : {}), ...(request.cursor ? { start_cursor: request.cursor } : {}), page_size: input.pageSize ?? 100 } }, tokens);
-    return page((data.results ?? []).map(normalizeNotionObject), data.has_more ? data.next_cursor : undefined, headers);
+    const { data, headers } = await http.request<unknown>({ method: "POST", path: `databases/${required(input, "databaseId")}/query`, signal: request.signal, headers: version(), body: { ...(input.filter ? { filter: input.filter } : {}), ...(input.sorts ? { sorts: input.sorts } : {}), ...(request.cursor ? { start_cursor: request.cursor } : {}), page_size: input.pageSize ?? 100 } }, tokens);
+    const result = notionListResponse(data);
+    return page(result.results.map(normalizeNotionObject), result.nextCursor, headers);
   }
   throw new Error(`Unsupported Notion read capability: ${request.capability}`);
 }
@@ -79,10 +82,56 @@ async function call(http: ProviderHttpClient, path: string, tokens: ConnectorTok
 function version() { return { "notion-version": VERSION }; }
 function required(input: Record<string, unknown>, key: string) { const value = input[key]; if (typeof value !== "string" || !value) throw new Error(`Notion ${key} is required.`); return value; }
 function one(value: JsonObject): ConnectorPage<JsonObject> { return { items: [value] }; }
-export function normalizeNotionObject(value: any): JsonObject { return { id: value.id, object: value.object, url: value.url, archived: value.archived ?? false, parent: value.parent, properties: value.properties ?? {}, createdTime: value.created_time, lastEditedTime: value.last_edited_time }; }
+function record(value: unknown, label: string): JsonObject {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`Notion returned an invalid ${label}.`);
+  }
+  return value as JsonObject;
+}
+
+function notionListResponse(value: unknown) {
+  const response = record(value, "list response");
+  const results = Array.isArray(response.results) ? response.results : [];
+  const nextCursor =
+    response.has_more === true && typeof response.next_cursor === "string"
+      ? response.next_cursor
+      : undefined;
+  return { results, nextCursor };
+}
+
+export function normalizeNotionObject(value: unknown): JsonObject {
+  const item = record(value, "object");
+  return {
+    id: item.id,
+    object: item.object,
+    url: item.url,
+    archived: item.archived ?? false,
+    parent: item.parent,
+    properties: item.properties ?? {},
+    createdTime: item.created_time,
+    lastEditedTime: item.last_edited_time
+  };
+}
 
 /** Resolve Notion workspace identity from the provider users/me endpoint. */
 export async function notionIdentity(http: ProviderHttpClient, tokens: ConnectorTokenSet): Promise<ConnectorAccountSummary> {
-  const { data } = await http.request<Record<string, any>>({ path: "users/me", headers: version() }, tokens);
-  return { id: String(data.id), displayName: data.bot?.owner?.workspace_name ?? data.bot?.workspace_name ?? "Notion workspace", workspace: data.bot?.workspace_name };
+  const { data } = await http.request<unknown>({ path: "users/me", headers: version() }, tokens);
+  const identity = record(data, "identity response");
+  const bot = typeof identity.bot === "object" && identity.bot !== null
+    ? identity.bot as JsonObject
+    : {};
+  const owner = typeof bot.owner === "object" && bot.owner !== null
+    ? bot.owner as JsonObject
+    : {};
+  const workspace = typeof bot.workspace_name === "string" ? bot.workspace_name : undefined;
+  const ownerWorkspace =
+    typeof owner.workspace_name === "string" ? owner.workspace_name : undefined;
+  if (typeof identity.id !== "string" || identity.id.length === 0) {
+    throw new Error("Notion returned an invalid identity.");
+  }
+  return {
+    id: identity.id,
+    displayName: ownerWorkspace ?? workspace ?? "Notion workspace",
+    workspace
+  };
 }

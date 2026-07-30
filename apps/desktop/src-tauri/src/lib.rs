@@ -115,19 +115,10 @@ pub fn run() {
             // command surface is registered below and fails closed until then.
             app.manage(remote_control::initialize_state());
             if let Err(error) = scheduler::initialize_store(&handle) {
-                // Fall back to an empty store so the app still starts; the error
-                // is surfaced via the read commands' own error paths.
+                // Keep the scheduler unavailable rather than inventing a
+                // default workspace authority. Scoped commands surface the
+                // initialization error after account reconciliation.
                 eprintln!("scheduler initialize failed: {error}");
-                let mut guard = app
-                    .state::<scheduler::SchedulerState>()
-                    .inner()
-                    .0
-                    .lock()
-                    .expect("scheduler lock");
-                guard.insert(
-                    store::repos::scope::DEFAULT_WORKSPACE_ID.to_string(),
-                    scheduler::SchedulerState::empty(),
-                );
             }
             if let Err(error) = workflows::recover_stale_runs(&handle) {
                 eprintln!("workflow recovery failed: {error}");

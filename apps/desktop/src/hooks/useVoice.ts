@@ -3,7 +3,7 @@ import {
   SpeechToTextError,
   type SpeechToTextProvider,
   type SpeechToTextSession
-} from "@fable/connectors";
+} from "@fable/connectors/voice";
 import type { VoiceCapability, VoiceInputState } from "@fable/protocol";
 
 export type VoiceStatus = VoiceInputState["status"];

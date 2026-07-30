@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { buildToolApproval, createApprovalGate, createBrowserSpeechProvider } from "@fable/connectors";
+import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
+import { createBrowserSpeechProvider } from "@fable/connectors/voice";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
-import { executeCitedBriefMission, resumeInterruptedCitedBriefMissions, type CitedBriefMissionPlanSummary } from "../lib/cited-brief-mission";
-import { resumeInterruptedRuntimeProviderMissions } from "../lib/runtime-mission-graph";
+import type { CitedBriefMissionPlanSummary } from "../lib/cited-brief-contract";
 import { useNativeAgent } from "../hooks/useNativeAgent";
 import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/useDurableConversation";
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
@@ -43,13 +44,13 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     setCitedMissionRunning(true);
     void (async () => {
       const cited = await Promise.allSettled([
-        resumeInterruptedCitedBriefMissions({
+        import("../lib/cited-brief-mission").then(({ resumeInterruptedCitedBriefMissions }) => resumeInterruptedCitedBriefMissions({
           resolveBackend: agent.resolveBackend,
           onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
-        })
+        }))
       ]);
       const general = await Promise.allSettled([
-        resumeInterruptedRuntimeProviderMissions({
+        import("../lib/runtime-mission-graph").then(({ resumeInterruptedRuntimeProviderMissions }) => resumeInterruptedRuntimeProviderMissions({
           resolveBackend: (route) =>
             agent.resolveBackend(route.providerFamily),
           executeMissionTool: async (toolInput) => {
@@ -88,7 +89,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
             }
           },
           onCancellationReady: (cancel) => { citedMissionCancelRef.current = cancel; }
-        })
+        }))
       ]);
       const failure = [...cited, ...general].find((result) => result.status === "rejected");
       if (failure?.status === "rejected") throw failure.reason;
@@ -124,6 +125,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     citedMissionRunningRef.current = true;
     setCitedMissionRunning(true);
     try {
+      const { executeCitedBriefMission } = await import("../lib/cited-brief-mission");
       return await executeCitedBriefMission({
         query,
         workspaceId: workspace.localWorkspaceId,

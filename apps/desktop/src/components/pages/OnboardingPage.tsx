@@ -3,6 +3,7 @@ import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import type { AccountWorkspaceStatus, BackendProvider, BackendVerifyResult, IdentityStatus } from "@fable/protocol";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
+import "../../styles/routes/onboarding.css";
 
 type AccountStage = "account" | "provider";
 

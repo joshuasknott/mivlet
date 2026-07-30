@@ -5,11 +5,24 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      "@fable/protocol": fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url)),
-      "@fable/connectors": fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url)),
-      "@fable/knowledge": fileURLToPath(new URL("../../packages/knowledge/src/index.ts", import.meta.url))
-    }
+    alias: [
+      {
+        find: /^@fable\/connectors\/(.+)$/,
+        replacement: `${fileURLToPath(new URL("../../packages/connectors/src", import.meta.url))}/$1`
+      },
+      {
+        find: "@fable/protocol",
+        replacement: fileURLToPath(new URL("../../packages/protocol/src/index.ts", import.meta.url))
+      },
+      {
+        find: "@fable/connectors",
+        replacement: fileURLToPath(new URL("../../packages/connectors/src/index.ts", import.meta.url))
+      },
+      {
+        find: "@fable/knowledge",
+        replacement: fileURLToPath(new URL("../../packages/knowledge/src/index.ts", import.meta.url))
+      }
+    ]
   },
   clearScreen: false,
   server: {

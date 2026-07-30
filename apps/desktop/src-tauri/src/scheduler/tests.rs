@@ -1,5 +1,6 @@
 use super::*;
 use crate::models::SCHEDULER_STORE_VERSION;
+use crate::store::repos::scope::DEFAULT_WORKSPACE_ID;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{fs, path::PathBuf};
 

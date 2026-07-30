@@ -14,7 +14,7 @@ use crate::connector_approvals::{
 };
 use crate::connector_auth::{
     account_options_from_connections, complete_auth, connection_for, disconnect, read_connections,
-    refresh_connection, safe_account_projection, start_auth, usable_connection,
+    refresh_connection, safe_account_projection, start_auth, usable_connection_for_scope,
     ConnectorConnection,
 };
 use crate::execution_approvals::verify_and_consume_execution_approval;
@@ -35,6 +35,7 @@ use crate::paths::{
 
 pub(crate) trait ConnectorCredentialBoundary {
     fn connection(&self, connector_id: &str) -> Option<ConnectorConnection>;
+    fn workspace_id(&self) -> Option<&str>;
 }
 
 struct UnavailableCredentialBoundary;
@@ -43,15 +44,24 @@ impl ConnectorCredentialBoundary for UnavailableCredentialBoundary {
     fn connection(&self, _connector_id: &str) -> Option<ConnectorConnection> {
         None
     }
+
+    fn workspace_id(&self) -> Option<&str> {
+        None
+    }
 }
 
-struct NativeCredentialBoundary {
+struct NativeCredentialBoundary<'scope> {
     connections_path: std::path::PathBuf,
+    scope: &'scope crate::authorized_scope::AuthorizedCommandScope,
 }
 
-impl ConnectorCredentialBoundary for NativeCredentialBoundary {
+impl ConnectorCredentialBoundary for NativeCredentialBoundary<'_> {
     fn connection(&self, connector_id: &str) -> Option<ConnectorConnection> {
-        usable_connection(&self.connections_path, connector_id)
+        usable_connection_for_scope(&self.connections_path, connector_id, self.scope)
+    }
+
+    fn workspace_id(&self) -> Option<&str> {
+        Some(self.scope.data.workspace_id())
     }
 }
 
@@ -723,7 +733,11 @@ fn build_manifest_with_health(
     boundary: &dyn ConnectorCredentialBoundary,
     health: Option<ConnectorHealth>,
 ) -> ConnectorManifest {
-    let connection = boundary.connection(entry.id);
+    // A credential without an explicitly authorized projection scope is not a
+    // usable connection. Do not infer or substitute a legacy workspace.
+    let connection = boundary
+        .workspace_id()
+        .and_then(|_| boundary.connection(entry.id));
     let configuration_state = connector_configuration_state(entry);
     let configured = configuration_state == "configured";
     let status = connector_manifest_status(entry, connection.as_ref(), health.as_ref());
@@ -789,15 +803,10 @@ fn build_manifest_with_health(
         health,
         account: connected
             .then(|| {
-                connection.as_ref().map(|connection| {
-                    let workspace_id = crate::authorized_scope::active_command_scope(
-                        crate::authorized_scope::ScopeAccess::Read,
-                    )
-                    .map(|scope| scope.data.workspace_id().to_string())
-                    .unwrap_or_else(|_| {
-                        crate::store::repos::scope::DEFAULT_WORKSPACE_ID.to_string()
-                    });
-                    safe_account_projection(&connection.account, entry.id, &workspace_id)
+                connection.as_ref().and_then(|connection| {
+                    boundary.workspace_id().map(|workspace_id| {
+                        safe_account_projection(&connection.account, entry.id, workspace_id)
+                    })
                 })
             })
             .flatten(),
@@ -1262,11 +1271,19 @@ pub fn list_connector_statuses(
     app: tauri::AppHandle,
     workspace_id: Option<String>,
 ) -> Result<Vec<ConnectorManifest>, ConnectorCommandError> {
-    if require_connector_workspace(workspace_id.clone()).is_err() {
-        return Ok(list_unconfigured_workspace_connector_statuses());
-    }
-    let boundary = connector_connections_path(&app)
-        .map(|connections_path| NativeCredentialBoundary { connections_path });
+    let scope = match crate::authorized_scope::command_scope(
+        workspace_id,
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    ) {
+        Ok(scope) => scope,
+        Err(_) => return Ok(list_unconfigured_workspace_connector_statuses()),
+    };
+    let boundary =
+        connector_connections_path(&app).map(|connections_path| NativeCredentialBoundary {
+            connections_path,
+            scope: &scope,
+        });
     Ok(match boundary {
         Ok(boundary) => list_connector_statuses_with(&boundary),
         Err(_) => list_connector_statuses_with(&UnavailableCredentialBoundary),
@@ -1343,6 +1360,7 @@ pub async fn clear_connector_auth(
         entry,
         &NativeCredentialBoundary {
             connections_path: path,
+            scope: &scope,
         },
     ))
 }
@@ -2062,6 +2080,7 @@ pub fn switch_connector_account(
         entry,
         &NativeCredentialBoundary {
             connections_path: path,
+            scope: &scope,
         },
     ))
 }
@@ -2124,7 +2143,10 @@ pub async fn refresh_connector_health(
     }
     Ok(build_manifest_with_health(
         entry,
-        &NativeCredentialBoundary { connections_path },
+        &NativeCredentialBoundary {
+            connections_path,
+            scope: &scope,
+        },
         health,
     ))
 }

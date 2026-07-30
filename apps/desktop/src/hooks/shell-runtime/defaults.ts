@@ -83,7 +83,7 @@ export const PREVIEW_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
     localWorkspaceId: "preview-default",
     fableWorkspaceId: "preview-workspace",
     name: "Preview workspace",
-    source: "legacy-default"
+    source: "preview"
   },
   activeContextOwner: {
     internalUserId: "preview-user"

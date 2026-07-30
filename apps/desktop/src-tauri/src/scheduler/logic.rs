@@ -14,6 +14,7 @@ use crate::models::{
 use crate::paths::{normalize_spaces, truncate_characters};
 use crate::store::repos::scope::normalize_id;
 
+#[cfg(test)]
 pub(crate) fn empty_store(instance_id: &str) -> SchedulerStore {
     SchedulerStore {
         schema_version: SCHEDULER_STORE_VERSION,

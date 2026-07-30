@@ -127,8 +127,6 @@ import {
   clearRuntimeConnectorAuth,
   clearRuntimeBackend,
   connectRuntimeBackend,
-  detectRuntimeLocalModel,
-  detectRuntimeAcpCli,
   exportRuntimeMemoryState,
   deleteRuntimeConnectorKnowledgeSource,
   importRuntimeConnectorItem,
@@ -240,11 +238,11 @@ import {
   defaultShellState,
   runtimeOrPreview
 } from "./shell-runtime/defaults";
+import { isFirstWaveConnectorId } from "./shell-runtime/backend-normalization";
 import {
-  acpAuthStateFor,
-  isFirstWaveConnectorId,
-  localLoopbackCapabilities
-} from "./shell-runtime/backend-normalization";
+  mergeAcpProbeResults,
+  mergeLocalLoopbackProbeResults
+} from "./shell-runtime/provider-probes";
 import type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types";
 
 export type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types";
@@ -255,90 +253,6 @@ export type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types
  * state and callbacks the root component needs to render the shell, composer,
  * and context views.
  */
-
-/**
- * Safely probe a provider's ACP CLI auth state. Guards against a missing or
- * non-function runtime export (browser preview, partial mocks) so a probe
- * failure never breaks backend resolution — the provider keeps its catalog
- * state instead. Never reads a secret.
- */
-async function safeDetectAcpCli(
-  providerId: string
-): Promise<"not-installed" | "signed-out" | "connected" | "auth-failed" | "unavailable" | null> {
-  if (typeof detectRuntimeAcpCli !== "function") {
-    return null;
-  }
-  try {
-    return await detectRuntimeAcpCli(providerId);
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Probe each ACP provider's CLI auth state and merge the truthful result into
- * the provider list. Non-ACP providers are returned unchanged. Outside Tauri
- * (no probe) the providers are returned as-is so preview/fixture state holds.
- * Never reads a secret — the CLI owns its auth.
- */
-async function mergeAcpProbeResults(
-  providers: BackendProvider[]
-): Promise<BackendProvider[]> {
-  if (providers.every((provider) => provider.backendType !== "acp")) {
-    return providers;
-  }
-  return Promise.all(
-    providers.map(async (provider) => {
-      if (provider.backendType !== "acp") {
-        return provider;
-      }
-      const probe = await safeDetectAcpCli(provider.id);
-      if (!probe) {
-        return provider;
-      }
-      const { authState, capabilities } = acpAuthStateFor(probe);
-      return {
-        ...provider,
-        authState,
-        capabilities,
-        // Models are selectable only once the CLI reports connected.
-        models: provider.models.map((model) => ({
-          ...model,
-          available: authState === "connected"
-        }))
-      };
-    })
-  );
-}
-
-async function mergeLocalLoopbackProbeResults(
-  providers: BackendProvider[]
-): Promise<BackendProvider[]> {
-  if (providers.every((provider) => provider.backendType !== "local-loopback")) {
-    return providers;
-  }
-  return Promise.all(
-    providers.map(async (provider) => {
-      if (provider.backendType !== "local-loopback") {
-        return provider;
-      }
-      const probe = await detectRuntimeLocalModel(provider.id);
-      if (!probe) {
-        return provider;
-      }
-      const next: BackendProvider = {
-        ...provider,
-        authState: probe.authState,
-        models: probe.models,
-        installHint: probe.message
-      };
-      return {
-        ...next,
-        capabilities: localLoopbackCapabilities(next)
-      };
-    })
-  );
-}
 
 function createRunContextId() {
   const uuid = globalThis.crypto?.randomUUID?.();

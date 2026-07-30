@@ -1,6 +1,6 @@
 # Release Readiness
 
-Last updated: 2026-07-27.
+Last updated: 2026-07-29.
 
 > **Release policy:** Fable is not authorised for public release. The agreed product requires a hosted, Clerk-backed Fable account and one connected provider. One Clerk + Convex development account and the local Codex path are now live-validated on one Windows machine, but production configuration, recovery, multi-account collaboration, packaging, and external connectors remain release gates.
 
@@ -81,12 +81,28 @@ stored in React state, snapshots, logs, or JSON metadata.
 
 ## Known limits
 
-- Encrypted SQLite is active in the production Tauri path and intercept-routes monolithic JSON documents (snapshot, memory, approvals) to the `preferences` table, while falling back to JSON for tests. Action history is stored in the encrypted SQLite `audit_event` table. Schedules, workflows, canonical private Routines and versions, trigger cursors, migration evidence, Knowledge, Memory, Missions, one-time Mission approval consumption, artifacts, Connections, and grants persist in `fable-vault.db` under schema v37. The v36/v37 steps repair the historical agent-run and dependent foreign-key names; their table rebuilds preserve existing rows, and the migration transaction refuses to commit when SQLite reports a foreign-key violation.
+- Encrypted SQLite is the production Tauri persistence path. Snapshot, memory,
+  and approval documents resolve the exact authenticated active workspace;
+  schedules and workflows are SQLite-only in production. Pre-v37 JSON ingestion
+  and synthetic default-workspace authority are retired, while test-only codecs
+  remain for isolated deterministic fixtures. Action history, canonical private
+  Routines and versions, trigger cursors, migration evidence, Knowledge, Memory,
+  Missions, one-time Mission approval consumption, artifacts, Connections, and
+  grants persist in `fable-vault.db` under schema v37. The v36/v37 steps repair
+  the historical agent-run and dependent foreign-key names; their table rebuilds
+  preserve existing rows, and the migration transaction refuses to commit when
+  SQLite reports a foreign-key violation.
 - Privacy settings can create and immediately verify a non-overwriting encrypted SQLite recovery backup. Raw backup restore requires the same OS-held vault key, is staged without replacing the live database, applies only at restart, preserves the prior database, and rolls back if the candidate cannot open or migrate. Provider and OAuth credentials are excluded and still require their own account recovery or reconnection. Portable workspace export is the separate credential-free cross-device path. Packaged installer/upgrade restore observation and any vault-key export or escrow decision remain release gates.
 - Portable workspace export and import are available in Privacy settings as a plaintext JSON copy. Native code derives the active authenticated workspace, validates integrity and secret absence, writes atomically only to a new link-free `.json` destination, and never overwrites. Import requires an exact confirmation, rejects linked, non-JSON, oversized, invalid, newer-format, or credential-shaped archives, and applies inside one rollback-safe transaction under skip-existing conflict handling. Workspace content never enters renderer state. Exact-owner Project copies preserve Project, conversation, and message ownership plus conversation titles only for the same active private member and original internal creator; substituted, stripped, or cross-owner current authority fails closed and cannot transfer ownership. Ownerless legacy archives gain no private authority. Imported Connections, schedules, scheduled jobs, and active canonical Routines remain disabled or paused. Routine definitions, immutable versions, triggers, and occurrence history require the exact active owner/workspace/member; scheduler authority, leases, cursors, retries, and legacy-migration rollback evidence remain node-local and are excluded.
 - Privacy settings also expose a secret-free local health report for storage, providers, Connections, MCP, Missions, Routines, queues, migrations, and sync. It returns only authenticated workspace-scoped states and counts from control columns and never includes content, paths, account identifiers, or credentials. Deployed monitoring and runtime-node telemetry remain open.
 - Privacy settings can pause new execution for the active workspace. The encrypted, revisioned control blocks new native-provider, local-model, ACP, Codex, approved MCP tool, Schedule, and Routine starts, and pause/resume transitions enter secret-safe action history. It does not undo external effects already accepted or replace the owning runtime's in-flight cancellation path.
-- Repository and Windows CI checks enforce the current desktop bundle, CSS, initial-entry, and lazy-route size budgets plus deterministic connector, Knowledge, encrypted-storage/cache, and scheduler-queue performance fixtures. The initial entry remains above Vite's 600 KiB advisory threshold and is an explicit optimization target. These checks are not evidence of packaged cold start, comparable RSS, live-provider streaming, or private long-run soak behavior.
+- Repository and Windows CI checks enforce the current desktop bundle, CSS,
+  initial-entry, and lazy-route size budgets plus deterministic connector,
+  Knowledge, encrypted-storage/cache, and scheduler-queue performance fixtures.
+  The measured initial entry is 609,277 B, below 600 KiB, with a checked
+  614,399 B ceiling; aggregate JavaScript/CSS is 1,411,960 B and CSS is
+  195,056 B. These checks are not evidence of packaged cold start, comparable
+  RSS, live-provider streaming, or private long-run soak behavior.
 - General Mission reviewer selection is native, owner-scoped, encrypted, replay-safe, and required before reviewer execution. Declared worker-evaluated criteria retain exact evaluator authority. The composer's explicit `review:` step instead records a Product Spine 1.8 `user-requested-advisory` selection with no criterion keys and no acceptance authority; reshaping it to claim human or worker authority fails closed. Native high-risk/conflicting-evidence policy composition, reviewer-provider validation, and packaged/live-provider observation remain release gates.
 - General Mission plan and progress cards are native-derived and reopen-safe. They expose readable goals, outcomes, step objectives, dependency counts, budgets, usage, and acceptance without exposing internal authority or provider identifiers; packaged live-provider observation remains a release gate.
 - Schedules persist locally and the Tauri runtime leases due occurrences, queues workflow runs, and executes scheduled prompts through the same provider-neutral `AgentBackend` path as the composer. Execution still depends on a connected runnable backend, respects approvals, and is backed by the SQLite store. A live development cycle created, edited, paused, resumed, ran, and deleted one harmless Codex schedule while Fable remained open; tool-bearing, connector-backed, consequential, multi-process, and packaged-restart cases remain gated.

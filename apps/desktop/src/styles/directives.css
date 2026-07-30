@@ -148,8 +148,7 @@
 
 .thread-context span,
 .label-row,
-.section-heading span,
-.automation-status {
+.section-heading span {
   color: var(--ink-muted);
   font-size: var(--text-12);
   font-weight: 500;
