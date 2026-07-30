@@ -23,7 +23,6 @@ import {
 import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
 import { Composer } from "../components/Composer";
-import { ConversationMessageActions } from "../components/ConversationMessageActions";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
 import { ConnectorIcon } from "../components/ConnectorIcon";
@@ -67,6 +66,12 @@ function messageId(prefix: string) {
 // are adapted to the lazy() default-export contract via `.then`. Suspense
 // fallbacks are minimal (no layout shift) - the heaviest of these (Settings)
 // pulls in Run History, Schedule panel, and provider rendering on demand.
+const ConversationMessageActions = lazy(() =>
+  import("../components/ConversationMessageActions").then((module) => ({
+    default: module.ConversationMessageActions
+  }))
+);
+
 const OnboardingPage = lazy(() =>
   import("../components/pages/OnboardingPage").then((m) => ({ default: m.OnboardingPage }))
 );
@@ -1246,20 +1251,22 @@ export function ChatWorkspace() {
             >
               <p>{message.content}</p>
               {message.role === "user" || !isCurrentResponse ? (
-                <ConversationMessageActions
-                  role={message.role}
-                  content={message.content}
-                  onSaveToKnowledge={() => saveMessageToKnowledge(message)}
-                  onEdit={message.role === "user" ? () => {
-                    runtime.setComposerValue(message.content);
-                    runtime.focusComposer(message.content);
-                  } : undefined}
-                  onRedo={message.role === "assistant" && sourceRequest ? () => {
-                    if (conversationWorking) return;
-                    runPrompt(sourceRequest.content, { appendUserMessage: false });
-                  } : undefined}
-                  redoDisabled={conversationWorking}
-                />
+                <Suspense fallback={null}>
+                  <ConversationMessageActions
+                    role={message.role}
+                    content={message.content}
+                    onSaveToKnowledge={() => saveMessageToKnowledge(message)}
+                    onEdit={message.role === "user" ? () => {
+                      runtime.setComposerValue(message.content);
+                      runtime.focusComposer(message.content);
+                    } : undefined}
+                    onRedo={message.role === "assistant" && sourceRequest ? () => {
+                      if (conversationWorking) return;
+                      runPrompt(sourceRequest.content, { appendUserMessage: false });
+                    } : undefined}
+                    redoDisabled={conversationWorking}
+                  />
+                </Suspense>
               ) : null}
               {message.role === "assistant" && missionPlan ? <MissionPlanSummary plan={missionPlan} /> : null}
               {message.role === "assistant" && message.parallelMissionPlan

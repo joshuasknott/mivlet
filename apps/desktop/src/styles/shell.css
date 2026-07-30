@@ -484,7 +484,9 @@
   color: var(--ink-soft);
   opacity: 0;
   transform: rotate(0deg);
-  transition: opacity 120ms ease, transform 140ms ease;
+  transition:
+    opacity 120ms ease,
+    transform 140ms ease;
 }
 
 .nav-group-heading:hover .collection-caret,
@@ -664,7 +666,8 @@
   pointer-events: auto;
 }
 
-.project-row-actions button {
+.project-row-actions button,
+.conversation-message-action {
   display: grid;
   width: 25px;
   height: 25px;
@@ -676,7 +679,9 @@
 }
 
 .project-row-actions button:hover,
-.project-row-actions button:focus-visible {
+.project-row-actions button:focus-visible,
+.conversation-message-action:hover:not(:disabled),
+.conversation-message-action:focus-visible {
   color: var(--ink);
   background: var(--surface-hover);
 }
@@ -869,7 +874,9 @@
   padding: 0;
   outline: none;
   cursor: pointer;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 .sidebar-footer__action:hover {
   background: var(--surface-hover);
@@ -891,7 +898,6 @@
   font-size: var(--text-14);
   font-weight: 500;
 }
-
 
 .sidebar-reopen-card {
   position: fixed;
@@ -982,8 +988,6 @@
   color: var(--ink);
   background: rgba(255, 255, 255, 0.1);
 }
-
-
 
 .desktop-frame[data-theme="dark"] .sidebar-reopen-card {
   color: var(--ink-muted);
@@ -1100,7 +1104,9 @@
   align-items: center;
   gap: 8px;
   color: var(--ink-soft);
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .workspace-dropdown__item--button:hover {

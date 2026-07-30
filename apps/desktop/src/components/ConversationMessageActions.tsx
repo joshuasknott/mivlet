@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import type { ReactNode } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { Books } from "@phosphor-icons/react/dist/csr/Books";
@@ -31,7 +31,7 @@ export function ConversationMessageActions({
   onSaveToKnowledge,
   onEdit,
   onRedo,
-  redoDisabled = false
+  redoDisabled = false,
 }: {
   role: MessageRole;
   content: string;
@@ -40,7 +40,6 @@ export function ConversationMessageActions({
   onRedo?: () => void;
   redoDisabled?: boolean;
 }) {
-  const statusId = useId();
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState("");
 
@@ -71,20 +70,17 @@ export function ConversationMessageActions({
     label: string,
     icon: ReactNode,
     onClick: () => void,
-    disabled = false
+    disabled = false,
   ) => (
     <button
       type="button"
       className="conversation-message-action"
       aria-label={label}
-      aria-describedby={status ? statusId : undefined}
+      title={label}
       disabled={disabled}
       onClick={onClick}
     >
       {icon}
-      <span className="conversation-message-action__tooltip" role="tooltip">
-        {label}
-      </span>
     </button>
   );
 
@@ -97,26 +93,34 @@ export function ConversationMessageActions({
       {action(
         saving ? "Saving to Knowledge" : "Save to Knowledge",
         <Books size={16} aria-hidden="true" />,
-        () => { void runSave(); },
-        saving
+        () => {
+          void runSave();
+        },
+        saving,
       )}
       {action(
         role === "user" ? "Copy prompt" : "Copy response",
         <Copy size={16} aria-hidden="true" />,
-        () => { void runCopy(); }
+        () => {
+          void runCopy();
+        },
       )}
       {role === "user" && onEdit
-        ? action("Edit prompt", <PencilSimple size={16} aria-hidden="true" />, onEdit)
+        ? action(
+            "Edit prompt",
+            <PencilSimple size={16} aria-hidden="true" />,
+            onEdit,
+          )
         : null}
       {role === "assistant" && onRedo
         ? action(
             "Redo response",
             <ArrowClockwise size={16} aria-hidden="true" />,
             onRedo,
-            redoDisabled
+            redoDisabled,
           )
         : null}
-      <span id={statusId} className="sr-only" role="status" aria-live="polite">
+      <span className="sr-only" role="status" aria-live="polite">
         {status}
       </span>
     </div>

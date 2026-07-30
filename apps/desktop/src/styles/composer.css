@@ -28,14 +28,6 @@
   margin-top: 0;
 }
 
-.composer-glow--in-thread {
-  width: min(100%, 840px);
-  margin: 0 auto;
-  border-color: var(--line);
-  border-radius: 22px;
-  box-shadow: var(--shadow-1);
-}
-
 .composer-attachments {
   display: flex;
   flex-wrap: wrap;
@@ -146,11 +138,6 @@
   border-radius: var(--radius-2);
 }
 
-.composer-glow--in-thread .composer {
-  min-height: 112px;
-  padding: 12px 12px 10px;
-}
-
 .composer-field {
   position: relative;
   display: flex;
@@ -171,13 +158,6 @@
   font-size: var(--text-14);
   line-height: 1.45;
   transition: color 150ms ease;
-}
-
-.composer-glow--in-thread .composer-input {
-  min-height: 44px;
-  max-height: 160px;
-  padding: 4px 6px 10px;
-  font-size: var(--text-15);
 }
 
 .composer-input::placeholder {
@@ -382,15 +362,6 @@
 
 .send-button:hover {
   background: var(--accent-strong);
-}
-
-.send-button--stop {
-  color: var(--surface);
-  background: var(--ink);
-}
-
-.send-button--stop:hover {
-  background: var(--ink-secondary);
 }
 
 /* Upward-opening menus anchored above the control row. */
@@ -676,7 +647,9 @@
   opacity: 0;
   pointer-events: none;
   transform: translateY(3px);
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
 }
 
 .voice-action:hover .voice-tooltip,
@@ -865,7 +838,9 @@
 .composer-menu-item__arrow {
   color: var(--ink-soft);
   opacity: 0.7;
-  transition: transform 150ms ease, color 150ms ease;
+  transition:
+    transform 150ms ease,
+    color 150ms ease;
   margin-right: 4px;
 }
 
@@ -922,7 +897,9 @@
   border: 0;
   border-radius: var(--radius-2);
   text-align: left;
-  transition: background 120ms ease, color 120ms ease;
+  transition:
+    background 120ms ease,
+    color 120ms ease;
 }
 
 .composer-submenu-sidebar button:hover {
