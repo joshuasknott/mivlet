@@ -17,8 +17,8 @@ use crate::knowledge::import_local_text_file;
 use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
-    ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, LocalFileImport,
-    LocalKnowledgeRefreshResponse, LocalTextFileCandidate, PlanStep,
+    ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, FableAgentProfile,
+    LocalFileImport, LocalKnowledgeRefreshResponse, LocalTextFileCandidate, PlanStep,
     RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot, RuntimeStatus, Schedule, WorkspaceGoal,
     WorkspacePlan, APPROVAL_MODES, AUTOMATION_STATUSES, GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
     MAX_GOAL_FIELD_CHARACTERS, MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES,
@@ -743,6 +743,16 @@ pub(crate) fn normalize_runtime_snapshot(
     let schedules = normalize_runtime_schedules(snapshot.schedules)?;
     let goals = normalize_runtime_goals(snapshot.goals)?;
     let plans = normalize_runtime_plans(snapshot.plans)?;
+    let agents = normalize_runtime_agents(snapshot.agents)?;
+    let active_agent_id = snapshot
+        .active_agent_id
+        .map(|value| {
+            truncate_characters(
+                &normalize_spaces(&value),
+                MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+            )
+        })
+        .filter(|value| agents.iter().any(|agent| agent.id == *value));
 
     let permission_mode = if APPROVAL_MODES.contains(&snapshot.permission_mode.as_str()) {
         snapshot.permission_mode
@@ -773,6 +783,8 @@ pub(crate) fn normalize_runtime_snapshot(
         schedules,
         goals,
         plans,
+        agents,
+        active_agent_id,
         pinned_source_ids: normalize_snapshot_id_list(snapshot.pinned_source_ids),
         imported_knowledge_sources,
         memory_disabled: memory_state.disabled,
@@ -788,6 +800,78 @@ pub(crate) fn normalize_runtime_snapshot(
         custom_approval_settings: snapshot.custom_approval_settings,
         saved_at,
     })
+}
+
+fn normalize_runtime_agents(
+    agents: Vec<FableAgentProfile>,
+) -> Result<Vec<FableAgentProfile>, String> {
+    const ICON_COLORS: [&str; 10] = [
+        "#6D5DF7", "#2672E8", "#13966F", "#D07A19", "#D6537D", "#A14FD1", "#0E8FA4", "#D2543D",
+        "#626B78", "#202124",
+    ];
+    const PERMISSIONS: [&str; 4] = ["Read Only", "Ask Me", "Work Freely", "Custom"];
+    let mut normalized = Vec::new();
+    for (index, agent) in agents.into_iter().take(100).enumerate() {
+        let id = truncate_characters(
+            &normalize_spaces(&agent.id),
+            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+        );
+        let name = truncate_characters(&normalize_spaces(&agent.name), 80);
+        if id.is_empty()
+            || name.is_empty()
+            || normalized
+                .iter()
+                .any(|item: &FableAgentProfile| item.id == id)
+        {
+            continue;
+        }
+        let icon_color = if agent.icon_color.len() == 7
+            && agent.icon_color.starts_with('#')
+            && agent.icon_color[1..]
+                .chars()
+                .all(|character| character.is_ascii_hexdigit())
+        {
+            agent.icon_color.to_uppercase()
+        } else {
+            ICON_COLORS[index % ICON_COLORS.len()].to_string()
+        };
+        let icon_image_data_url = agent.icon_image_data_url.filter(|value| {
+            value.len() <= 512_000
+                && (value.starts_with("data:image/png;base64,")
+                    || value.starts_with("data:image/jpeg;base64,")
+                    || value.starts_with("data:image/webp;base64,"))
+        });
+        let permission_label = if PERMISSIONS.contains(&agent.permission_label.as_str()) {
+            agent.permission_label
+        } else {
+            "Ask Me".to_string()
+        };
+        normalized.push(FableAgentProfile {
+            id,
+            name,
+            instructions: truncate_characters(&agent.instructions, 8_000),
+            model_id: truncate_characters(
+                &normalize_spaces(&agent.model_id),
+                MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+            ),
+            icon: "agent".to_string(),
+            icon_color,
+            icon_image_data_url,
+            connector_ids: normalize_snapshot_id_list(agent.connector_ids),
+            knowledge_source_ids: normalize_snapshot_id_list(agent.knowledge_source_ids),
+            permission_label,
+            thread_id: agent
+                .thread_id
+                .map(|value| {
+                    truncate_characters(
+                        &normalize_spaces(&value),
+                        MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+                    )
+                })
+                .filter(|value| !value.is_empty()),
+        });
+    }
+    Ok(normalized)
 }
 
 // Retained for legacy-file compatibility tests. Production restores through
@@ -948,6 +1032,8 @@ mod tests {
             schedules: Vec::new(),
             goals: Vec::new(),
             plans: Vec::new(),
+            agents: Vec::new(),
+            active_agent_id: None,
             pinned_source_ids: Vec::new(),
             imported_knowledge_sources: Vec::new(),
             memory_disabled: false,

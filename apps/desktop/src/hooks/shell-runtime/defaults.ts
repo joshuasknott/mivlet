@@ -14,6 +14,20 @@ export const defaultShellState: PersistedShellState = {
   schedules: [],
   goals: [],
   plans: [],
+  agents: [
+    {
+      id: "chief-of-staff",
+      name: "Chief of Staff",
+      instructions: "Coordinate my work, keep priorities clear, and help me move from decision to execution.",
+      modelId: "",
+      icon: "agent",
+      iconColor: "#6D5DF7",
+      connectorIds: [],
+      knowledgeSourceIds: [],
+      permissionLabel: DEFAULT_PERMISSION_LABEL
+    }
+  ],
+  activeAgentId: "chief-of-staff",
   pinnedSourceIds: knowledgeSources.filter((source) => source.pinned).map((source) => source.id),
   importedKnowledgeSources: [],
   memoryDisabled: false,

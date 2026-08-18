@@ -1181,6 +1181,27 @@ pub struct CustomApprovalSettings {
     pub allow_powerful_commands: bool,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FableAgentProfile {
+    pub id: String,
+    pub name: String,
+    pub instructions: String,
+    pub model_id: String,
+    pub icon: String,
+    #[serde(default)]
+    pub icon_color: String,
+    #[serde(default)]
+    pub icon_image_data_url: Option<String>,
+    #[serde(default)]
+    pub connector_ids: Vec<String>,
+    #[serde(default)]
+    pub knowledge_source_ids: Vec<String>,
+    pub permission_label: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RuntimeSnapshot {
@@ -1205,6 +1226,11 @@ pub struct RuntimeSnapshot {
     /// the snapshot. Defaulted for back-compat with pre-existing files.
     #[serde(default)]
     pub plans: Vec<WorkspacePlan>,
+    /// User-owned agent identities and their non-secret execution preferences.
+    #[serde(default)]
+    pub agents: Vec<FableAgentProfile>,
+    #[serde(default)]
+    pub active_agent_id: Option<String>,
     pub pinned_source_ids: Vec<String>,
     pub imported_knowledge_sources: Vec<LocalFileImport>,
     pub memory_disabled: bool,

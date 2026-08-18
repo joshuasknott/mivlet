@@ -12,17 +12,14 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
-import { Terminal } from "@phosphor-icons/react/dist/csr/Terminal";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_COMPOSER_ATTACHMENTS } from "../lib/constants";
-import { PERMISSION_PROFILES, type PermissionProfile } from "../lib/agent-run";
+import type { PermissionProfile } from "../lib/agent-run";
 import type { ProviderModelOption } from "../lib/provider-models";
 import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { ProviderIcon } from "./ProviderIcon";
-
-const COMMANDS = ["/mission", "/plan", "/goal", "/remember", "/schedule", "/stop"] as const;
 
 const PERMISSION_PRESENTATION = {
   "Read Only": {
@@ -67,7 +64,6 @@ export function Composer({
   onToggleAddMenu,
   onTogglePermissions,
   onOpenTool,
-  onRunCommand,
   onFileChange,
   importStatus,
   models,
@@ -83,7 +79,8 @@ export function Composer({
   connectedConnectors = [],
   knowledgeSources = [],
   attachments = [],
-  onRemoveAttachment
+  onRemoveAttachment,
+  compactAgentSurface = false
 }: {
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
@@ -126,9 +123,10 @@ export function Composer({
   knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
   attachments?: ComposerAttachment[];
   onRemoveAttachment?: (attachmentId: string) => void;
+  compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | "commands" | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | null>(null);
   const activePermissionPresentation =
     PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
   const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
@@ -140,7 +138,7 @@ export function Composer({
     if (permissionsOpen) onTogglePermissions();
     setActiveSubmenu(null);
   };
-  const openSubmenu = (submenu: "connectors" | "knowledge" | "commands") => {
+  const openSubmenu = (submenu: "connectors" | "knowledge") => {
     if (submenu === "connectors" && connectedConnectors.length === 0) return;
     if (submenu === "knowledge" && knowledgeSources.length === 0) return;
     setActiveSubmenu(submenu);
@@ -195,25 +193,6 @@ export function Composer({
   const composerSuggestions = useMemo(() => {
     if (!currentToken) return [];
     const query = currentToken.token.toLowerCase();
-    if (query.startsWith("/")) {
-      return COMMANDS.filter((command) => command.startsWith(query)).map((command) => ({
-        id: command,
-        label: command,
-        description:
-          command === "/mission"
-            ? "Run 2–6 declared steps with optional review and acceptance criteria"
-            : command === "/goal"
-            ? "Create a goal"
-            : command === "/schedule"
-              ? "Create a schedule"
-              : command === "/remember"
-                ? "Save memory"
-                : command === "/stop"
-                  ? "Stop current work"
-                : "Create a plan",
-        value: command
-      }));
-    }
     if (query.startsWith("@")) {
       return connectedConnectors
         .map((connector) => {
@@ -481,55 +460,11 @@ export function Composer({
                     )}
                   </div>
 
-                  <div className="composer-add-menu__divider" aria-hidden="true" />
-
-                  <div
-                    className={`composer-menu-item-wrapper${activeSubmenu === "commands" ? " is-active" : ""}`}
-                    onPointerEnter={() => openSubmenu("commands")}
-                    onMouseEnter={() => openSubmenu("commands")}
-                    onPointerLeave={() => setActiveSubmenu(null)}
-                    onMouseLeave={() => setActiveSubmenu(null)}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className="composer-menu-item"
-                      onPointerEnter={() => openSubmenu("commands")}
-                      onMouseEnter={() => openSubmenu("commands")}
-                    >
-                      <Terminal size={18} />
-                      <span>
-                        <strong>Commands</strong>
-                        <small>Run prompt-level automations</small>
-                      </span>
-                      <CaretRight size={14} className="composer-menu-item__arrow" />
-                    </button>
-                    {activeSubmenu === "commands" && (
-                      <div className="composer-submenu-sidebar composer-submenu-sidebar--commands composer-submenu-sidebar--align-bottom" role="menu" aria-label="Commands list">
-                        <span className="composer-menu__heading">Available Commands</span>
-                        {COMMANDS.map((command) => (
-                          <button
-                            key={command}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              onRunCommand(command);
-                              onToggleAddMenu();
-                              setActiveSubmenu(null);
-                            }}
-                          >
-                            <span className="composer-menu__command">{command}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
                 </div>
               ) : null}
             </div>
 
-            <div className="composer-control-anchor composer-control-anchor--permissions">
+            {!compactAgentSurface ? <div className="composer-control-anchor composer-control-anchor--permissions">
               <button
                 type="button"
                 className={`composer-permissions-card${permissionsOpen ? " composer-chip--active composer-trigger--open" : ""}`}
@@ -579,11 +514,11 @@ export function Composer({
                   })}
                 </div>
               ) : null}
-            </div>
+            </div> : null}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
-            <div className="composer-control-anchor composer-control-anchor--model">
+            {!compactAgentSurface ? <div className="composer-control-anchor composer-control-anchor--model">
               <button
                 type="button"
                 className={`composer-model${modelOpen ? " composer-trigger--open" : ""}`}
@@ -633,7 +568,7 @@ export function Composer({
                   )}
                 </div>
               ) : null}
-            </div>
+            </div> : null}
             <div className="voice-actions" data-state={voiceStatus}>
               <div className="voice-action">
                 <button

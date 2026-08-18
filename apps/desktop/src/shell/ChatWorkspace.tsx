@@ -1,6 +1,6 @@
 ﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { parseComposerText } from "@fable/connectors/commands";
-import type { KnowledgeCitation, Spine } from "@fable/protocol";
+import type { FableAgentProfile, KnowledgeCitation, Spine } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { connectors } from "../data/workspace";
@@ -21,7 +21,12 @@ import {
   resolveProjectMissionRerunSource
 } from "../lib/project-mission-rerun";
 import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
-import { WorkspaceSidebar, type SidebarProject } from "../components/WorkspaceSidebar";
+import type { SidebarProject } from "../components/WorkspaceSidebar";
+import { AgentSidebar, type AgentSidebarPreview } from "../components/agents/AgentSidebar";
+import { AgentEditor } from "../components/agents/AgentEditor";
+import { nextAgentColor } from "../components/agents/agent-icons";
+import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
+import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
@@ -59,6 +64,16 @@ type ConversationMessage = {
 
 function messageId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function compactThreadTime(value?: string) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date();
+  return date.toDateString() === today.toDateString()
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 // Standalone pages are code-split: each is only rendered when navigated to, so
@@ -111,6 +126,11 @@ export function ChatWorkspace() {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
   const { runtime, agent, durableConversation, voice, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
+  const activeAgent = runtime.agents.find((candidate) => candidate.id === runtime.activeAgentId) ?? runtime.agents[0]!;
+  const [liveRailOpen, setLiveRailOpen] = useState(() => window.innerWidth > 880);
+  const [agentEditorOpen, setAgentEditorOpen] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [agentPreviewMessages, setAgentPreviewMessages] = useState<Record<string, string>>({});
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
   const {
     hydratedMissionReceipts, setHydratedMissionReceipts,
@@ -434,6 +454,37 @@ export function ChatWorkspace() {
     })),
     [durableConversation.state.threads]
   );
+
+  useEffect(() => {
+    runtime.selectModel(activeAgent.modelId);
+    runtime.selectPermissionLabel(activeAgent.permissionLabel);
+  }, [activeAgent.id, activeAgent.modelId, activeAgent.permissionLabel]);
+
+  useEffect(() => {
+    let current = true;
+    const load = async () => {
+      const entries = await Promise.all(runtime.agents.map(async (profile) => {
+        if (!profile.threadId) return [profile.id, ""] as const;
+        const messages = await listRuntimeConversationMessages(profile.threadId).catch(() => []);
+        return [profile.id, messages.at(-1)?.currentRevision.content ?? ""] as const;
+      }));
+      if (current) setAgentPreviewMessages(Object.fromEntries(entries));
+    };
+    void load();
+    return () => { current = false; };
+  }, [durableConversation.state.threads, runtime.agents]);
+
+  useEffect(() => {
+    if (selectedConversationThreadId || !activeAgent.threadId) return;
+    if (!durableThreads.some((thread) => thread.id === activeAgent.threadId)) return;
+    setSelectedConversationThreadId(activeAgent.threadId);
+    runtime.setActiveItem(activeAgent.id);
+  }, [activeAgent.id, activeAgent.threadId, durableThreads, selectedConversationThreadId]);
+
+  useEffect(() => {
+    if (!selectedConversationThreadId || activeAgent.threadId === selectedConversationThreadId) return;
+    runtime.updateAgent(activeAgent.id, { threadId: selectedConversationThreadId });
+  }, [activeAgent.id, activeAgent.threadId, selectedConversationThreadId]);
   const standaloneThreads = useMemo(
     () => durableThreads.filter((thread) => thread.kind === "chat"),
     [durableThreads]
@@ -1525,6 +1576,23 @@ export function ChatWorkspace() {
     agent.state.running
   );
   const conversationSubmissionBlocked = conversationWorking || Boolean(pendingPrompt);
+  const agentSidebarPreviews = useMemo<Record<string, AgentSidebarPreview>>(() => {
+    return Object.fromEntries(runtime.agents.map((profile) => {
+      const thread = profile.threadId
+        ? durableThreads.find((candidate) => candidate.id === profile.threadId)
+        : undefined;
+      const currentMessage = profile.id === activeAgent.id
+        ? [...conversationMessages].reverse().find((message) => message.content.trim() && message.content !== "Working...")?.content
+        : undefined;
+      const message = currentMessage || agentPreviewMessages[profile.id] || "Start a conversation";
+      const status: AgentSidebarPreview["status"] = profile.id === activeAgent.id && runtime.openApprovals.length > 0
+        ? "attention"
+        : profile.id === activeAgent.id && conversationWorking
+          ? "running"
+          : "idle";
+      return [profile.id, { message, time: compactThreadTime(thread?.updatedAt), status }];
+    }));
+  }, [activeAgent.id, agentPreviewMessages, conversationMessages, conversationWorking, durableThreads, runtime.agents, runtime.openApprovals.length]);
   // Label for the model chip: the selected model's friendly label, or a
   // placeholder when no model is selected/available on the connected backend.
   // Memoized so the composer's chip prop keeps a stable primitive unless the
@@ -1554,9 +1622,7 @@ export function ChatWorkspace() {
    */
   async function submitComposerText(rawText: string) {
     const submitted = rawText.trim();
-    const parsed = parseComposerText(submitted);
-    const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-    if (!submitted || ((agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) && !stopRequested)) return;
+    if (!submitted || agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) return;
     if (!selectedConversationThreadId) {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
@@ -1579,23 +1645,6 @@ export function ChatWorkspace() {
     // broader natural-language /plan parser can interpret "project brief".
     if (structuredIntakeSubject(submitted)) {
       runPrompt(submitted, { appendUserMessage: false });
-      return;
-    }
-    const outcome = parseComposerText(submitted);
-    if (outcome.status === "command") {
-      if (outcome.request.name === "mission") {
-        await runGeneralMissionCommand(submitted, outcome.request.args);
-        return;
-      }
-      const result = await runtime.runFableCommand(outcome.request, { stopCurrentWork: stopActiveWork });
-      // Clear the composer so the command token doesn't also reach the model
-      // as ordinary prompt text. A follow-up prompt (if any) is submitted
-      // through the same agent path as a normal prompt.
-      runtime.setComposerValue("");
-      appendConversationMessage("assistant", result.message);
-      if (result.status === "ok" && result.followUpPrompt) {
-        runPrompt(result.followUpPrompt, { appendUserMessage: false });
-      }
       return;
     }
     runPrompt(submitted, { appendUserMessage: false });
@@ -1983,9 +2032,12 @@ export function ChatWorkspace() {
       return;
     }
     finishNewMissionLaunch();
+    const executionPrompt = activeAgent.instructions.trim()
+      ? `Agent instructions:\n${activeAgent.instructions.trim()}\n\nUser request:\n${prompt}`
+      : prompt;
     const request = buildAgentRequest({
       model: resolvedComposerModelId,
-      prompt,
+      prompt: executionPrompt,
       maxTokens: validation.maxTokens
     });
     const assistantMessageId = appendConversationMessage("assistant", "Working...");
@@ -1999,7 +2051,9 @@ export function ChatWorkspace() {
       .then((projectMemoryRecords) => runtime.assembleKnowledgeContext(prompt, {
         projectId: runProjectId,
         projectMemoryRecords,
-        allowedConnectionIds: runProject?.connectionIds ?? []
+        allowedConnectionIds: runProject?.connectionIds ?? [],
+        allowedConnectorIds: activeAgent.connectorIds,
+        allowedKnowledgeSourceIds: activeAgent.knowledgeSourceIds
       }))
       .then((preparedContext) => {
         setConversationMessages((current) => current.map((entry) =>
@@ -2039,7 +2093,7 @@ export function ChatWorkspace() {
     setNewMissionSourceMessageId(sourceMessageId);
     appendConversationMessage("user", sourceCommand);
     try {
-      await continueComposerSubmission(sourceCommand);
+      await runGeneralMissionCommand(sourceCommand, parsed.request.args);
     } finally {
       if (newMissionLaunchRef.current === sourceMessageId) {
         newMissionLaunchRef.current = null;
@@ -2112,6 +2166,7 @@ export function ChatWorkspace() {
             await runtime.refreshBackendProviders();
           }}
           onComplete={runtime.dismissOnboarding}
+          allowProviderless={import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)}
         />
       </Suspense>
     );
@@ -2144,6 +2199,29 @@ export function ChatWorkspace() {
     runtime.setLastAction(projectId ? "New project chat ready" : "New chat ready");
   };
 
+  const selectAgentSurface = (profile: FableAgentProfile) => {
+    setSelectedProjectId(null);
+    setNewThreadProjectId(null);
+    activeAssistantMessageId.current = null;
+    setConversationMessages([]);
+    runtime.setComposerValue("");
+    const thread = profile.threadId
+      ? durableThreads.find((candidate) => candidate.id === profile.threadId)
+      : undefined;
+    setSelectedConversationThreadId(thread?.id);
+    runtime.selectAgent(profile.id);
+  };
+
+  const openAgentEditor = (profile?: FableAgentProfile) => {
+    setEditingAgentId(profile?.id ?? null);
+    setAgentEditorOpen(true);
+  };
+
+  const closeAgentEditor = () => {
+    setAgentEditorOpen(false);
+    setEditingAgentId(null);
+  };
+
   const openConversation = (thread: SidebarProject["threads"][number], context: string) => {
     setSelectedProjectId(null);
     setNewThreadProjectId(null);
@@ -2167,121 +2245,30 @@ export function ChatWorkspace() {
 
   return (
     <main
-      className={`desktop-frame${sidebarCollapsed ? " desktop-frame--sidebar-collapsed" : ""}`}
+      className={`desktop-frame desktop-frame--agents${liveRailOpen ? "" : " desktop-frame--live-closed"}`}
       data-theme={theme}
     >
-      <WorkspaceSidebar
+      <AgentSidebar
+        agents={runtime.agents}
+        activeAgentId={activeAgent.id}
+        previews={agentSidebarPreviews}
         workspaceName={workspaceName}
-        utilityItems={utilityItems}
-        activeItem={runtime.activeItem}
-        profile={verifiedProfile}
-        expandedCollections={expandedCollections}
-        expandedProjects={expandedProjects}
-        projects={projectWorkspaces}
-        archivedProjects={archivedProjectWorkspaces}
-        projectsLoading={projectStore.loading}
-        projectsError={projectStore.error}
-        chatThreads={standaloneThreads}
-        mobileNavOpen={runtime.mobileNavOpen}
-        collapsed={sidebarCollapsed}
-        loadingItemIds={loadingItemIds}
-        isSettingsActive={false}
-        activeSettingsTab={activeSettingsTab}
-        onSelectSettingsTab={handleSelectSettingsTab}
-        canNavigateBack={navigationIndex > 0}
-        canNavigateForward={navigationIndex < navigationHistory.current.length - 1}
-        onNavigateBack={() => navigateHistory(-1)}
-        onNavigateForward={() => navigateHistory(1)}
-        onCloseSettings={closeSettingsModal}
-        onNewChat={() => startNewChat(null)}
-        onAddProject={async (input) => { await projectStore.create(input); }}
-        onNewProjectChat={(projectId) => startNewChat(projectId)}
-        onRenameProject={async (project, title) => {
-          await projectStore.update({ projectId: project.id as never, baseRevision: project.revision, title });
-        }}
-        onArchiveProject={async (project) => {
-          await projectStore.archive({ projectId: project.id as never, baseRevision: project.revision });
-          if (selectedProjectId === project.id) setSelectedProjectId(null);
-        }}
-        onRestoreProject={async (project) => {
-          await projectStore.restore({ projectId: project.id as never, baseRevision: project.revision });
-        }}
-        onDeleteProject={async (project) => {
-          await projectStore.remove({ projectId: project.id as never, baseRevision: project.revision });
-          if (selectedProjectId === project.id) setSelectedProjectId(null);
-          await durableConversation.refresh();
-        }}
-        onMoveThread={async (threadId, projectId) => {
-          await durableConversation.updateThread({ threadId: threadId as never, projectId: projectId as never });
-        }}
-        onSearch={() => {
-          runtime.setLastAction("Search ready");
-          runtime.focusComposer("Search ");
-        }}
-        onSelectWorkspace={() => runtime.setLastAction("Workspace selector ready")}
-        accountWorkspaces={runtime.accountWorkspaceStatus.workspaces}
-        activeAccountWorkspaceId={runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId}
-        workspacePending={runtime.accountWorkspacePending}
-        workspaceSelectorButtonRef={workspaceSelectorButtonRef}
-        onSelectAccountWorkspace={async (fableWorkspaceId) => {
-          await runtime.selectAccountWorkspace(fableWorkspaceId);
-          runtime.setLastAction("Workspace switched");
-        }}
-        onCreateAccountWorkspace={async (name) => {
-          await runtime.createAccountWorkspace(name);
-          runtime.setLastAction("Workspace created");
-        }}
-        onToggleProjects={() =>
-          setExpandedCollections((current) => ({ ...current, projects: !current.projects }))
-        }
-        onToggleChats={() =>
-          setExpandedCollections((current) => ({ ...current, chats: !current.chats }))
-        }
-        onSelectUtility={(label) => {
-          setSelectedProjectId(null);
-          runtime.setActiveItem(label);
-          runtime.setLastAction(`${label} selected`);
-        }}
-        onOpenProject={openProject}
-        onSelectProjectThread={(thread, projectTitle) => openConversation(thread, projectTitle)}
-        onToggleProject={(projectId, projectTitle, expanded) => {
-          setExpandedProjects((current) => ({ ...current, [projectId]: !expanded }));
-          runtime.setLastAction(`${expanded ? "Collapsed" : "Expanded"} project: ${projectTitle}`);
-        }}
-        onToggleMobileNav={() => runtime.setMobileNavOpen((open) => !open)}
-        onToggleCollapsed={() => {
-          setSidebarCollapsed((collapsed) => !collapsed);
-          runtime.setLastAction(sidebarCollapsed ? "Navigation opened" : "Navigation closed");
-        }}
-        onOpenMobileConnection={() => {
-          setActiveSettingsTab("privacy");
-          runtime.setActiveItem("Settings");
-          runtime.setMobileNavOpen(false);
-          runtime.setLastAction("Mobile approvals opened");
-        }}
-        onOpenWorkspaceSettings={() => {
-          setWorkspaceSettingsStatus("");
-          setWorkspaceSettingsOpen(true);
-          runtime.setMobileNavOpen(false);
-          runtime.setLastAction("Workspace settings opened");
-        }}
-        onSelectThread={(thread) => {
-          openConversation(thread, "chat");
-        }}
-        onAccountMenu={(item) => {
-          if (item === "logout") {
-            void runtime.signOutIdentity();
-            runtime.setLastAction("Signing out of Fable account");
-            return;
-          }
-
-          const page = item === "profile" ? "Profile" : "Settings";
-          runtime.setActiveItem(page);
-          runtime.setMobileNavOpen(false);
-          runtime.setLastAction(`${page} selected`);
-        }}
+        profileName={verifiedProfile.name}
+        onSelectAgent={selectAgentSurface}
+        onCreateAgent={() => openAgentEditor()}
+        onEditAgent={openAgentEditor}
+        onOpenKnowledge={() => runtime.setActiveItem("Knowledge")}
+        onOpenConnectors={() => runtime.setActiveItem("Connectors")}
+        onOpenSettings={() => runtime.setActiveItem("Settings")}
       />
       <section className="workspace" aria-label="Fable workspace">
+        <AgentWorkspaceHeader
+          agent={activeAgent}
+          liveRailOpen={liveRailOpen}
+          onEdit={() => openAgentEditor(activeAgent)}
+          onToggleLiveRail={() => setLiveRailOpen((open) => !open)}
+        />
+        <div className="agent-workspace-body">
         {runtime.activePage && !isSettingsActive ? (
           <ShellPageBoundary runtime={runtime} />
         ) : selectedProject && !isSettingsActive ? (
@@ -2380,9 +2367,7 @@ export function ChatWorkspace() {
               onSubmit={(event) => {
                 event.preventDefault();
                 const text = runtime.composerValue;
-                const parsed = parseComposerText(text);
-                const stopRequested = parsed.status === "command" && parsed.request.name === "stop";
-                if (!text.trim() || (conversationSubmissionBlocked && !stopRequested)) return;
+                if (!text.trim() || conversationSubmissionBlocked) return;
                 void submitComposerText(text);
               }}
               voiceStatus={voice.state.status}
@@ -2431,6 +2416,7 @@ export function ChatWorkspace() {
               knowledgeSources={runtime.workspaceKnowledgeSources}
               attachments={runtime.composerAttachments}
               onRemoveAttachment={runtime.removeComposerAttachment}
+              compactAgentSurface
               />
             </div>
             {!conversationIsActive ? renderChatContext() : null}
@@ -2441,7 +2427,45 @@ export function ChatWorkspace() {
           {runtime.workspaceKnowledgeSources.length} sources. {runtime.openApprovals.length} approvals
           pending. {scheduledActive ? `Running scheduled prompt ${scheduledActive.jobId}.` : ""}
         </p>
+        </div>
       </section>
+
+      {liveRailOpen ? (
+        <LiveWorkRail
+          agentName={activeAgent.name}
+          running={conversationWorking}
+          status={agent.state.status}
+          transcript={agent.state.transcript}
+          runId={agent.state.currentRunId}
+          approvalCount={runtime.openApprovals.length}
+          computerUseActive={!runtime.browserSession.fixtureOnly && runtime.browserSession.lifecycle === "active"}
+          onClose={() => setLiveRailOpen(false)}
+        />
+      ) : null}
+
+      <AgentEditor
+        open={agentEditorOpen}
+        agent={editingAgentId ? runtime.agents.find((profile) => profile.id === editingAgentId) ?? null : null}
+        models={runtime.modelOptions}
+        connectors={runtime.connectorManifests}
+        knowledgeSources={runtime.workspaceKnowledgeSources}
+        suggestedColor={nextAgentColor(runtime.agents.map((profile) => profile.iconColor))}
+        canDelete={runtime.agents.length > 1}
+        onClose={closeAgentEditor}
+        onSave={(draft) => {
+          if (editingAgentId) {
+            runtime.updateAgent(editingAgentId, draft);
+          } else {
+            const created = runtime.createAgent(draft);
+            selectAgentSurface(created);
+          }
+          closeAgentEditor();
+        }}
+        onDelete={() => {
+          if (editingAgentId) runtime.removeAgent(editingAgentId);
+          closeAgentEditor();
+        }}
+      />
 
       {isSettingsActive ? (
         <div className="settings-modal-backdrop" role="presentation">

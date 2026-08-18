@@ -51,6 +51,7 @@ export function OnboardingPage({
   onConnectWithVerify,
   onCheckConnection,
   onComplete
+  ,allowProviderless = false
 }: {
   providers: BackendProvider[];
   connectedBackendIds: string[];
@@ -69,6 +70,7 @@ export function OnboardingPage({
   /** Re-probe a provider-owned CLI after the user completes its login flow. */
   onCheckConnection?: (providerId: string) => void | Promise<void>;
   onComplete: () => void;
+  allowProviderless?: boolean;
 }) {
   const step = accountStage(identityStatus, accountWorkspaceStatus);
   const pending = identityPending || accountWorkspacePending;
@@ -138,6 +140,7 @@ export function OnboardingPage({
             {status ? <p className="og-connection-status-msg" role="status">{status}</p> : null}
             <div className="og-primary-cta">
               <button type="button" className="og-primary-cta__start" disabled={!hasAnyConnected} onClick={onComplete}>Start using Fable</button>
+              {!hasAnyConnected && allowProviderless ? <button type="button" className="og-primary-cta__secondary" onClick={onComplete}>Continue without a provider</button> : null}
             </div>
           </section>
         )}

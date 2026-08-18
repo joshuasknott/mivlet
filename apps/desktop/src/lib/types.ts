@@ -73,6 +73,9 @@ export interface PersistedShellState {
   goals: WorkspaceGoal[];
   /** Structured plans created by /plan. */
   plans: WorkspacePlan[];
+  /** User-owned agents. Optional only for snapshots created before agents existed. */
+  agents?: import("@fable/protocol").FableAgentProfile[];
+  activeAgentId?: string;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;

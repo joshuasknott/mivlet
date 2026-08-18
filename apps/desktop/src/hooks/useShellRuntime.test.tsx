@@ -717,6 +717,47 @@ describe("useShellRuntime — localStorage persistence round-trip", () => {
     expect(second.result.current.schedules.length).toBe(1);
     expect(second.result.current.schedules[0].name).toBe("Weekly digest");
   });
+
+  it("persists customizable agents and protects the only remaining agent", async () => {
+    const first = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    expect(first.result.current.agents.map((agent) => agent.name)).toEqual(["Chief of Staff"]);
+    act(() => first.result.current.removeAgent("chief-of-staff"));
+    expect(first.result.current.agents).toHaveLength(1);
+
+    let developerId = "";
+    act(() => {
+      developerId = first.result.current.createAgent({
+        name: "Developer",
+        instructions: "Build and review software.",
+        modelId: "",
+        icon: "agent",
+        iconColor: "#2672E8",
+        connectorIds: ["github"],
+        knowledgeSourceIds: [],
+        permissionLabel: "Ask Me"
+      }).id;
+    });
+    expect(first.result.current.activeAgentId).toBe(developerId);
+
+    act(() => {
+      first.result.current.removeAgent("chief-of-staff");
+      first.result.current.updateAgent(developerId, { name: "Product engineer" });
+    });
+    expect(first.result.current.agents.map((agent) => agent.name)).toEqual(["Product engineer"]);
+    first.unmount();
+
+    const second = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+    expect(second.result.current.agents).toMatchObject([{
+      id: developerId,
+      name: "Product engineer",
+      icon: "agent",
+      iconColor: "#2672E8",
+      connectorIds: ["github"]
+    }]);
+  });
 });
 
 describe("useShellRuntime — durable schedule contracts", () => {

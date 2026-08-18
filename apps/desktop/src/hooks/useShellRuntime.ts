@@ -23,6 +23,7 @@ import type {
   FirstWaveConnectorId,
   FableCommandRequest,
   FableCommandResult,
+  FableAgentProfile,
   KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
@@ -317,6 +318,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [schedules, setSchedules] = useState<Schedule[]>(initialState.schedules);
   const [goals, setGoals] = useState<WorkspaceGoal[]>(initialState.goals);
   const [plans, setPlans] = useState<WorkspacePlan[]>(initialState.plans);
+  const [agents, setAgents] = useState<FableAgentProfile[]>(
+    initialState.agents?.length ? initialState.agents : defaultShellState.agents ?? []
+  );
+  const [activeAgentId, setActiveAgentId] = useState(
+    initialState.activeAgentId ?? initialState.agents?.[0]?.id ?? "chief-of-staff"
+  );
   const {
     scheduledJobs: runtimeScheduledJobs,
     setScheduledJobs,
@@ -604,6 +611,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       schedules,
       goals,
       plans,
+      agents,
+      activeAgentId,
       pinnedSourceIds,
       importedKnowledgeSources,
       memoryDisabled,
@@ -621,6 +630,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       schedules,
       goals,
       plans,
+      agents,
+      activeAgentId,
       composerValue,
       connectedBackendIds,
       customApprovalSettings,
@@ -796,6 +807,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setSchedules([]);
       setGoals([]);
       setPlans([]);
+      setAgents(defaultShellState.agents ?? []);
+      setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
       setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
       setImportStatus(null);
@@ -833,6 +846,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setSchedules(recovered.schedules);
         setGoals(recovered.goals);
         setPlans(recovered.plans);
+        setAgents(recovered.agents?.length ? recovered.agents : defaultShellState.agents ?? []);
+        setActiveAgentId(
+          recovered.activeAgentId ?? recovered.agents?.[0]?.id ?? "chief-of-staff"
+        );
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
@@ -1572,6 +1589,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         isLiveSource(source)
         && sourceIsAuthorized(source)
         && sourceAllowedByProjectConnections(source, context)
+        && (!context?.allowedConnectorIds || source.connectorId === "local-files" || context.allowedConnectorIds.includes(source.connectorId))
+        && (!context?.allowedKnowledgeSourceIds || context.allowedKnowledgeSourceIds.includes(source.id))
       )
       .map((source) => ({
         source,
@@ -2513,7 +2532,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // and one connected provider are both required. Browser fixtures may still
   // use the explicit preview dismissal path.
   const onboardingRequired =
-    !activeWorkspaceScope || connectedBackendIds.length === 0;
+    !activeWorkspaceScope ||
+    (connectedBackendIds.length === 0 && !(ALLOW_PREVIEW_FALLBACKS && onboardingDismissed));
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;
@@ -3792,6 +3812,59 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const clearRunHistoryJobId = () => setRunHistoryJobId(null);
 
+  const createAgent = (input: Omit<FableAgentProfile, "id" | "threadId">) => {
+    const id = `agent-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
+    const created: FableAgentProfile = {
+      ...input,
+      id,
+      icon: "agent",
+      iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor) ? input.iconColor : "#6D5DF7"
+    };
+    setAgents((current) => [...current, created]);
+    setActiveAgentId(id);
+    setActiveItem(id);
+    selectModel(created.modelId);
+    selectPermissionLabel(created.permissionLabel);
+    return created;
+  };
+
+  const updateAgent = (
+    agentId: string,
+    patch: Partial<Omit<FableAgentProfile, "id">>
+  ) => {
+    setAgents((current) => current.map((agent) =>
+      agent.id === agentId ? { ...agent, ...patch } : agent
+    ));
+    if (agentId === activeAgentId) {
+      if (patch.modelId !== undefined) selectModel(patch.modelId);
+      if (patch.permissionLabel !== undefined) selectPermissionLabel(patch.permissionLabel);
+    }
+  };
+
+  const selectAgent = (agentId: string) => {
+    const selected = agents.find((agent) => agent.id === agentId);
+    if (!selected) return;
+    setActiveAgentId(agentId);
+    setActiveItem(agentId);
+    selectModel(selected.modelId);
+    selectPermissionLabel(selected.permissionLabel);
+  };
+
+  const removeAgent = (agentId: string) => {
+    if (agents.length <= 1) return;
+    const remaining = agents.filter((agent) => agent.id !== agentId);
+    setAgents(remaining);
+    if (activeAgentId === agentId) {
+      const next = remaining[0];
+      if (next) {
+        setActiveAgentId(next.id);
+        setActiveItem(next.id);
+        selectModel(next.modelId);
+        selectPermissionLabel(next.permissionLabel);
+      }
+    }
+  };
+
   return {
     activeItem,
     setActiveItem,
@@ -3803,6 +3876,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     isChatView,
     activeThread,
     allThreads,
+    agents,
+    activeAgentId,
+    createAgent,
+    updateAgent,
+    removeAgent,
+    selectAgent,
     composerValue,
     setComposerValue,
     voiceEnabled,

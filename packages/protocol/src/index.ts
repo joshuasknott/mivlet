@@ -1180,6 +1180,10 @@ export interface RuntimeSnapshot {
    * through the snapshot so it survives a desktop restart.
    */
   plans: WorkspacePlan[];
+  /** User-defined agent identities and their non-secret execution preferences. */
+  agents?: FableAgentProfile[];
+  /** The agent currently owning the conversation surface. */
+  activeAgentId?: string;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;
@@ -1214,4 +1218,26 @@ export interface RuntimeSnapshot {
    */
   customApprovalSettings?: CustomApprovalSettings;
   savedAt: string;
+}
+
+export type FableAgentIcon = "agent";
+
+/**
+ * A user-owned agent. Instructions and selections are non-secret; provider
+ * credentials remain in the native credential boundary.
+ */
+export interface FableAgentProfile {
+  id: string;
+  name: string;
+  instructions: string;
+  modelId: string;
+  icon: FableAgentIcon;
+  /** Hex colour used by the shared agent mark when no custom image is set. */
+  iconColor: string;
+  /** Locally uploaded, normalized image. Remote URLs are deliberately unsupported. */
+  iconImageDataUrl?: string;
+  connectorIds: string[];
+  knowledgeSourceIds: string[];
+  permissionLabel: ApprovalPresetLabel;
+  threadId?: string;
 }

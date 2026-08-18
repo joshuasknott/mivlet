@@ -120,6 +120,10 @@ export interface ProjectMemoryRunContext {
   projectMemoryRecords?: MemoryRecord[];
   /** Exact workspace Connections selected for this Project; grants nothing. */
   allowedConnectionIds?: readonly string[];
+  /** Agent-level connector allowlist using connector manifest ids. */
+  allowedConnectorIds?: readonly string[];
+  /** Agent-level knowledge pool. When present, only these source ids enter retrieval. */
+  allowedKnowledgeSourceIds?: readonly string[];
 }
 
 const PRIVATE_CONTEXT_MEMBER_ERROR =

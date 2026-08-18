@@ -1,6 +1,7 @@
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
+  FableAgentProfile,
   LocalFileImport,
   MemoryRecord,
   PermissionMode,
@@ -22,6 +23,9 @@ import {
 } from "./agent-run";
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
+
+const AGENT_ICON_COLORS = ["#6D5DF7", "#2672E8", "#13966F", "#D07A19", "#D6537D", "#A14FD1", "#0E8FA4", "#D2543D", "#626B78", "#202124"];
+const MAX_AGENT_IMAGE_DATA_URL_CHARACTERS = 512_000;
 
 /**
  * LocalStorage persistence and Tauri runtime snapshot conversion. These are
@@ -156,6 +160,8 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     schedules: state.schedules,
     goals: state.goals,
     plans: state.plans,
+    agents: state.agents,
+    activeAgentId: state.activeAgentId,
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
@@ -188,6 +194,8 @@ export function shellStateFromRuntimeSnapshot(
     // snapshot; fall back to defaults when a snapshot omits them.
     goals: snapshot.goals ?? defaultShellState.goals,
     plans: snapshot.plans ?? defaultShellState.plans,
+    agents: normalizeAgentProfiles(snapshot.agents?.length ? snapshot.agents : defaultShellState.agents),
+    activeAgentId: snapshot.activeAgentId ?? defaultShellState.activeAgentId,
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
@@ -211,10 +219,30 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
     ...state,
     activeItem: normalizeActiveItem(state.activeItem),
     voiceEnabled: state.voiceEnabled !== false,
+    agents: normalizeAgentProfiles(state.agents),
     permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(state.permissionLabel, permissionMode),
     customApprovalSettings: normalizeCustomApprovalSettings(state.customApprovalSettings)
   };
+}
+
+function normalizeAgentProfiles(agents: FableAgentProfile[] | undefined): FableAgentProfile[] {
+  return (agents ?? []).map((agent, index) => {
+    const iconColor = typeof agent.iconColor === "string" && /^#[0-9a-f]{6}$/i.test(agent.iconColor)
+      ? agent.iconColor.toUpperCase()
+      : AGENT_ICON_COLORS[index % AGENT_ICON_COLORS.length];
+    const iconImageDataUrl = typeof agent.iconImageDataUrl === "string"
+      && /^data:image\/(?:png|jpeg|webp);base64,/i.test(agent.iconImageDataUrl)
+      && agent.iconImageDataUrl.length <= MAX_AGENT_IMAGE_DATA_URL_CHARACTERS
+      ? agent.iconImageDataUrl
+      : undefined;
+    return {
+      ...agent,
+      icon: "agent",
+      iconColor,
+      iconImageDataUrl
+    };
+  });
 }
 
 function normalizePermissionMode(mode: PermissionMode | undefined): PermissionMode {

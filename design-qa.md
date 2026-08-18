@@ -132,6 +132,32 @@ lazy-loaded pages observed. Evidence: `qa-shots/*.png` in the worktree.
 
 final result: passed
 
+## Standalone agent icon refinement QA (2026-08-18)
+
+### Evidence
+
+- Source visual truth: `C:\Users\JOSHUA~1\AppData\Local\Temp\codex-clipboard-a487b004-7164-457e-a89f-b4012b29a703.png` (449 x 449 pixels at 1x).
+- Browser-rendered implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icon-standalone-dark.png` (1280 x 720 pixels, 1280 x 720 CSS viewport, device scale factor 1).
+- State: dark theme, agent workspace, shared robot icon beside Chief of Staff, and a separate uploaded-image agent showing the alternate identity path.
+- Full-view and focused evidence: the source icon and latest browser capture were opened together in the same comparison input. The 27-pixel sidebar robot remained readable without needing a separate crop.
+
+### Findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+- The robot now renders as the coloured standalone mark. Computed browser styles confirmed a transparent background, no border, no shadow, and a 27 x 27 pixel glyph in the agent list.
+- Uploaded agent images retain their own image content without an added coloured tile.
+- Typography, spacing, dark-theme tokens, image sharpness, and surrounding copy remained unchanged and visually consistent after the icon-only refinement.
+
+### Verification
+
+- Primary workspace rendering and the separate uploaded-image identity path were inspected in the browser.
+- Focused agent-surface and accessibility tests passed (5 tests), and the desktop production build passed.
+- Earlier icon-tile treatment was removed; the post-fix browser capture above is the comparison evidence.
+
+final result: passed
+
 ## Onboarding and schedules merge QA (2026-07-02)
 
 ### Comparison target
@@ -284,5 +310,70 @@ No actionable P0, P1, or P2 findings remain.
 
 - P3: A future brand pass can replace the generated raster dragon with a
   production vector master while preserving the current silhouette.
+
+final result: passed
+
+## Agent surface redesign QA (2026-08-16)
+
+Final result: passed
+
+## Comparison
+
+- Source reference: `C:\Users\Joshua Knott\.codex\attachments\6f42ba19-1fa0-4c5e-b193-a9a4960ac15a\image-1.png`
+- Desktop implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agents-desktop.png`
+- Mobile implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agents-mobile.png`
+- Reviewed together at original resolution on 2026-08-16.
+
+## Blocking findings
+
+- P0: none.
+- P1: none.
+- P2: none remaining.
+
+## Verified qualities
+
+- The three-part desktop hierarchy matches the reference: compact agent list, focused conversation, and contextual live-work rail.
+- Agent rows use message previews and status dots without a redundant working label.
+- Knowledge and Connectors sit at the bottom of the agent rail rather than competing with agents.
+- The composer keeps files, context, voice, and send visible while model and permission controls move into agent settings.
+- The live-work rail is quiet when idle, surfaces approval state, and reserves an expandable computer-use preview only for real runtime frames.
+- The mobile layout changes the agent list into a compact horizontal picker and keeps live work closed until requested.
+- No projects, departments, playbooks, schedules, chats, cloud product area, or slash-command affordances remain in the primary surface.
+
+## Agent identity and theme QA (2026-08-16)
+
+Final result: passed
+
+## Evidence
+
+- Source icon reference: `C:\Users\JOSHUA~1\AppData\Local\Temp\codex-clipboard-a487b004-7164-457e-a89f-b4012b29a703.png` (449 x 449 at 1x).
+- Light workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-light.png` (1280 x 720 at 1x).
+- Light agent editor: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icon-editor-light.png` (1280 x 720 at 1x).
+- Dark workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-dark.png` (1280 x 720 at 1x).
+- Mobile dark workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-mobile-dark.png` (390 x 844 at 1x).
+- The source and implementation were opened together for a focused visual comparison.
+
+## Comparison
+
+- The same recognizable robot mark is used for every agent; identity comes from color or a user-supplied image rather than role-specific iconography.
+- The compact Phosphor Robot mark preserves the source reference's antenna, head, and eye cues at sidebar scale while fitting the existing product icon system.
+- New agents receive the next unused palette color, and the editor exposes color swatches plus local PNG, JPEG, or WebP image replacement.
+- Light and dark modes now share semantic surface, text, border, accent, status, and shadow tokens across the agent rail, workspace, editor, and live-work panel.
+- Responsive verification found no visible overflow, collision, clipping, or illegible contrast at 390 x 844.
+
+## Blocking findings
+
+- P0: none.
+- P1: none.
+- P2: none.
+
+## Interactions verified
+
+- Created an agent through the live UI and confirmed it received the next unused color.
+- Switched between light and dark themes and reloaded to confirm the saved theme and agent state persisted.
+- Opened and closed the mobile live-work rail.
+- Removed the temporary QA agent so the delivered preview returns to the truthful single-agent default.
+- Reviewed the browser diagnostics after the final render; no console errors or warnings were present.
+- The upload control and its image normalization boundary were reviewed in code; the browser test interface did not expose file injection, so an actual upload was not simulated in the browser.
 
 final result: passed

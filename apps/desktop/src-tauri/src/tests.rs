@@ -949,6 +949,8 @@ fn runtime_snapshot() -> RuntimeSnapshot {
         schedules,
         goals: Vec::new(),
         plans: Vec::new(),
+        agents: Vec::new(),
+        active_agent_id: None,
         pinned_source_ids: vec![
             "codex-manual".to_string(),
             "codex-manual".to_string(),

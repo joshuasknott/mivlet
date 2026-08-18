@@ -5,6 +5,7 @@ import type {
   ApprovalRequest, BackendProvider, BackendVerifyResult, BrowserSessionState, ConnectorActionKind,
   ConnectorAccountOption, ConnectorManifest, ConnectorSearchItem, ConnectorSearchRequest,
   ConnectorSearchResult, CustomApprovalSettings, FableCommandRequest, FableCommandResult,
+  FableAgentProfile,
   IdentityStatus, KnowledgeCitation, KnowledgeSource, LocalFileImport, MemoryControlState,
   MemoryRecord, MissedRunPolicy, NotificationRecord, PermissionMode, ScheduledExecutionRoute,
   PreparedRunContext, ScheduledJob, SchedulerQueueEntry, ScheduleTrigger, ThreadSummary, WorkflowDefinition,
@@ -35,6 +36,12 @@ export interface ShellRuntime {
   isChatView: boolean;
   activeThread: ThreadSummary | undefined;
   allThreads: ThreadSummary[];
+  agents: FableAgentProfile[];
+  activeAgentId: string;
+  createAgent: (input: Omit<FableAgentProfile, "id" | "threadId">) => FableAgentProfile;
+  updateAgent: (agentId: string, patch: Partial<Omit<FableAgentProfile, "id">>) => void;
+  removeAgent: (agentId: string) => void;
+  selectAgent: (agentId: string) => void;
   // composer
   composerValue: string;
   setComposerValue: (value: string) => void;
