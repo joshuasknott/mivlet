@@ -372,18 +372,18 @@ export function Composer({
                     >
                       <PlugsConnected size={18} />
                       <span>
-                        <strong>Connectors</strong>
+                        <strong>Connections</strong>
                         <small>
                           {connectedConnectors.length > 0
                             ? "Bring in context from your tools"
-                            : "No connectors added. Add a connector"}
+                            : "No connections added. Add a connection"}
                         </small>
                       </span>
                       {connectedConnectors.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
                     </button>
                     {activeSubmenu === "connectors" && connectedConnectors.length > 0 && (
-                      <div className="composer-submenu-sidebar" role="menu" aria-label="Connectors list">
-                        <span className="composer-menu__heading">Your Connectors</span>
+                      <div className="composer-submenu-sidebar" role="menu" aria-label="Connections list">
+                        <span className="composer-menu__heading">Your connections</span>
                         {connectedConnectors.map((connector) => (
                           <button
                             key={connector.id}

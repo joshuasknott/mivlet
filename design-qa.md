@@ -1,379 +1,113 @@
-# Design QA
+# Fable agent workspace design QA
 
 ## Comparison target
 
-- Source visual truth:
-  - `C:\Users\Josh\.codex\attachments\6b5205b2-1a8a-4a23-8200-6c8e8bfec543\image-1.png`
-  - `C:\Users\Josh\.codex\attachments\6b5205b2-1a8a-4a23-8200-6c8e8bfec543\image-2.png`
-  - `C:\Users\Josh\.codex\attachments\6b5205b2-1a8a-4a23-8200-6c8e8bfec543\image-3.png`
-- Primary implementation screenshot:
-  - `C:\Users\Josh\Projects\fable\output\design-qa\workspace-light-final.jpg`
-- Combined comparison:
-  - `C:\Users\Josh\Projects\fable\output\design-qa\cursor-light-workspace-comparison-final.jpg`
-- Additional evidence:
-  - Desktop onboarding: `output\design-qa\.playwright-cli\page-2026-07-02T00-48-40-698Z.png`
-  - Desktop provider grid: `output\design-qa\.playwright-cli\page-2026-07-02T00-49-15-340Z.png`
-  - Mobile onboarding: `output\design-qa\.playwright-cli\page-2026-07-02T00-50-04-177Z.png`
-  - Mobile provider grid: `output\design-qa\.playwright-cli\page-2026-07-02T00-50-37-056Z.png`
-  - Mobile workspace: `output\design-qa\.playwright-cli\page-2026-07-02T01-00-36-381Z.png`
-  - Mobile settings drawer: `output\design-qa\.playwright-cli\page-2026-07-02T00-54-30-160Z.png`
-  - Desktop dark settings: `output\design-qa\.playwright-cli\page-2026-07-02T00-55-15-860Z.png`
-  - Tablet workspace: `output\design-qa\.playwright-cli\page-2026-07-02T01-00-59-335Z.png`
-- Viewports: 1440x900, 800x700, and 390x844.
-- States: onboarding profile/provider, empty workspace, settings general/history, Departments, light and dark themes.
-
-## Full-view comparison
-
-Fable now follows the supplied Cursor references in overall density and composition: a flat 212px sidebar, neutral canvas, restrained selection fills, compact type, sparse borders, a centered low-profile composer, and minimal elevation. The product-specific tools and labels remain Fable's rather than cloning Cursor's information architecture.
-
-## Focused comparison
-
-The sidebar and composer were compared together at matched 900px height in the combined image. Settings was checked separately against the supplied Back/Search Settings crop. Onboarding and provider cards were checked at desktop and phone widths because their text, controls, and brand marks were too small to judge reliably in the full workspace comparison.
-
-## Required fidelity surfaces
-
-- Fonts and typography: Inter is bundled at 400/500; UI sizes, weights, line heights, wrapping, and hierarchy are compact and consistent across themes.
-- Spacing and layout rhythm: the shell uses a flat 212px rail, 100dvh sizing, compact rows, a 640px composer, and one mobile drawer breakpoint without an icon-only intermediate rail.
-- Colors and visual tokens: light and dark themes use neutral Cursor-like greys; light is the first-run default; status colours and authentic provider colours remain semantic exceptions.
-- Image and asset fidelity: the UI contains no decorative raster imagery. Provider and connector marks use real brand paths/colours; monochrome marks adapt for dark contrast.
-- Copy and content: redundant onboarding exits and credential-boundary card are gone; settings labels are consolidated; Departments is explicitly unavailable; history distinguishes Runs from Activity.
-- Accessibility and behavior: responsive screenshots show no clipping at tested viewports; Back/Forward, settings search, provider actions, tabs, theme controls, and mobile drawer were exercised; console error/warning checks were clean.
+- Source visual truth: `C:\Users\Josh\.codex\attachments\c307d40a-4c78-420c-8690-6c4121e53271\image-1.png`
+- Final implementation capture: `C:\Users\Josh\Projects\fable\docs\design\qa\agent-workspace-final.png`
+- Combined comparison input: `C:\Users\Josh\Projects\fable\docs\design\qa\agent-workspace-comparison-final.png`
+- Search capture: `C:\Users\Josh\Projects\fable\docs\design\qa\workspace-search-final.png`
+- Connections capture: `C:\Users\Josh\Projects\fable\docs\design\qa\connections.png`
+- Viewport: 1486 x 1058 CSS pixels, light theme, desktop agent workspace
+- Source pixels: 1486 x 1058
+- Implementation pixels: 1486 x 1058
+- Density normalization: equal source and implementation pixel dimensions; no resampling was needed for the final comparison.
+- State: Chief of Staff selected with one user message and no active run. The source contains a longer completed example run; the implementation deliberately renders real runtime state instead of inventing completed work or approvals.
 
 ## Findings
 
-No actionable P0, P1, or P2 visual mismatches remain.
+No actionable P0, P1, or P2 design differences remain.
 
-## Patches made since the audit
+- Typography: Inter remains the product typeface. Workspace, agent, message, and work-rail hierarchy now follow the source's optical scale without introducing a separate display face.
+- Spacing and layout: the desktop tracks are 308 px / fluid 764 px / 414 px at the source viewport. The 108 px agent header, 700 px composer, bottom dock, left navigation rhythm, and work-rail section start align with the source composition.
+- Colors and tokens: the implementation uses Fable's existing neutral surfaces, violet agent accent, semantic green/caution states, and tokenized borders/shadows. Contrast remains valid in both light and dark themes.
+- Image and icon fidelity: the implementation uses the shared Fold mascot selected by the user, real connector brand assets, and Phosphor controls. The mascot is a single colour-parameterized vector component because the user explicitly requested an exact code implementation rather than a raster asset.
+- Copy and content: visible teammate language is removed. The product now says Agents and Connections. Search copy is plain-language and connector setup internals are not exposed in workspace search results.
+- Interaction and accessibility: Search opens from the button and Ctrl+K, traps focus, filters by All / Agents / Work / Knowledge / Connections, closes on Escape, and returns focus. Connection cards, catalogue search, modal details, the composer, agent selection, theme selection, and work-rail close/reopen were exercised in the browser.
+- Responsiveness: 1024 x 768 and 640 x 900 captures show no persistent overlap or clipped controls. At compact widths the work rail is a dismissible overlay; with it closed, Search, Agents, the conversation, and the composer remain usable.
+- Browser console: no errors were recorded during the final interaction pass.
 
-- Repaired provider-card text collision and mobile header clipping found during the first QA pass.
-- Made settings Back visible on mobile and kept Search Settings inside the drawer.
-- Reduced the workspace heading to a small context label so the composer matches Cursor's visual weight.
-- Moved empty Projects and Chats into one compact navigation area.
-- Made black/white provider marks theme-aware.
-- Updated changed UI contracts in the app and settings tests.
+## Focused evidence
+
+The final combined input preserves both full 1486 x 1058 frames at native width, so the header, sidebar, message typography, composer, work rail, icons, borders, and spacing remain directly readable without a downsampled crop. Separate full-resolution Search and Connections captures cover the two new interaction-heavy regions; no additional focused crop was necessary.
+
+## Comparison history
+
+1. Initial capture: `agent-workspace-implemented-1486x1058.png`
+   - [P1] The empty composer floated in the center instead of belonging to the conversation.
+   - [P2] The work rail and center track did not match the source proportions, and the agent header was too shallow.
+   - [P2] User messages rendered as right-aligned chat bubbles rather than an authored human-agent stream.
+   - Fixes: anchored the composer at the bottom; set source-matched column and header dimensions; added message authors and left-aligned plain message content.
+2. Structural correction: `agent-workspace-pass-2.png`
+   - The composer, columns, and header aligned. The message hierarchy and work-rail vertical rhythm still differed.
+   - Fixes: introduced human/agent author rows, removed the user bubble treatment, aligned the Work title/sections, and preserved real runtime state.
+3. Content correction: `agent-workspace-pass-3.png`
+   - Core fidelity passed. Remaining refinements were the heavy primary sidebar button, small navigation type, and conversation previews in the agent list.
+   - Fixes: matched the quiet outlined New agent control, increased navigation type, and reduced each agent row to identity only. Conversation text remains discoverable through the agent and workspace Search, not as a separate product section.
+4. Final evidence: `agent-workspace-final.png` and `agent-workspace-comparison-final.png`
+   - Earlier P1/P2 findings are resolved. No new P0/P1/P2 findings were found.
 
 ## Follow-up polish
 
-- P3: Replace the preview-only onboarding skip when the production onboarding completion path is finalized.
-- P3: Revisit provider descriptions with real connected-account data to determine whether Settings can become even denser.
+- [P3] Populated work-rail captures should be added once a live or deterministic preview run exposes real progress, completion, and approval states without fabricated data.
 
-## Frontend optimization QA (branch `codex/frontend-optimization`)
-
-A dedicated frontend optimization pass (React render stability, bundle size,
-layout performance, and a small Schedules information-density cleanup) was
-verified with the package-level suite plus a real-browser pass against the
-local dev server (Playwright/Chromium). No backend or src-tauri files were
-touched.
-
-### Checks
-
-- `pnpm --filter @fable/desktop typecheck` — PASS
-- `pnpm --filter @fable/desktop test` — 341 passed / 12 failed (353 total)
-  - The 12 failures are pre-existing on the baseline (`6ae1a68`) and relate to
-    the earlier UI reorganization (nav "Projects"/"Josh's Fable" heading,
-    connector "Connect" button, onboarding "Add API key" button). None are
-    caused by this optimization pass; the count is unchanged from baseline
-    (one new test was added for the Schedules live summary).
-- `pnpm --filter @fable/desktop build` — PASS
-
-### Bundle: before vs after
-
-Baseline shipped a single 699.74 kB JS chunk (gzip 194.73 kB) over the 500 kB
-warning. After route-level `React.lazy` + vendor `manualChunks` + esnext target:
-
-| Chunk | Before | After |
-|---|---|---|
-| index (initial app) | 699.74 kB (gzip 194.73) | 226.76 kB (gzip 65.80) |
-| react-vendor | (in index) | 188.72 kB (gzip 59.01) |
-| icons | (in index) | 161.68 kB (gzip 35.10) |
-| SettingsPage (lazy) | (in index) | 52.82 kB (gzip 13.19) |
-| SchedulesPage (lazy) | (in index) | 15.47 kB (gzip 4.68) |
-| KnowledgePage (lazy) | (in index) | 13.42 kB (gzip 3.61) |
-| OnboardingPage (lazy) | (in index) | 11.10 kB (gzip 3.40) |
-| ConnectorsPage (lazy) | (in index) | 7.90 kB (gzip 2.64) |
-
-No chunk exceeds the 500 kB warning. Lazy pages load on demand; vendor chunks
-are cacheable across app changes. Inter fonts scoped to latin + latin-ext
-(28 → 8 font files; unused cyrillic/greek/vietnamese subsets dropped).
-
-### Render / layout
-
-- Composer typing no longer triggers a per-keystroke localStorage write and
-  Rust snapshot save (both debounced, with an unmount flush so drafts/schedules
-  still persist exactly).
-- Hot derivations memoized (openApprovals, connector cards/ids, recoverable
-  runs, model chip label, settings/sidebar tab filters, provider lists).
-- Scheduled-agent runner options held in a ref (mirrors useNativeAgent) so its
-  drain effect no longer re-evaluates every render; global shortcut listener
-  subscribes once.
-- Replaced the only literal `backdrop-filter: blur()` (always-visible reopen
-  card) with the `--glass-filter` token; enumerated `transition: all` on
-  onboarding buttons; added overflow/ellipsis truncation to model/permission
-  chips and connector/schedule/backend titles; layout containment on repeated
-  rows; stable height on the workspace-settings modal; submenu clamp in the
-  701–980px band.
-
-### Schedules cleanup
-
-The create/edit form now shows a single live recurrence summary
-("Weekly on Mon, Wed at 9:00 AM · Next …") reusing `summarizeRecurrence`, so
-the previously split Repeat/Frequency/Time/Weekdays readback is consolidated.
-List pattern + next-run grouped into one timing block. Scheduler logic,
-validation, data shapes, and accessibility labels are unchanged.
-
-### Browser QA (Playwright/Chromium, dev server)
-
-Viewports: 1440x900, 800x700, 390x844. Surfaces exercised: onboarding gate
-(lazy), empty workspace + composer typing, model menu, add menu, settings
-modal + search (lazy), Knowledge (lazy), Connectors (lazy), Schedules with the
-cleaned-up summary (lazy), mobile workspace. Console errors: none. Page
-errors: none. No text clipping, control overlap, broken menus, or blank
-lazy-loaded pages observed. Evidence: `qa-shots/*.png` in the worktree.
-
-final result: passed
-
-## Standalone agent icon refinement QA (2026-08-18)
-
-### Evidence
-
-- Source visual truth: `C:\Users\JOSHUA~1\AppData\Local\Temp\codex-clipboard-a487b004-7164-457e-a89f-b4012b29a703.png` (449 x 449 pixels at 1x).
-- Browser-rendered implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icon-standalone-dark.png` (1280 x 720 pixels, 1280 x 720 CSS viewport, device scale factor 1).
-- State: dark theme, agent workspace, shared robot icon beside Chief of Staff, and a separate uploaded-image agent showing the alternate identity path.
-- Full-view and focused evidence: the source icon and latest browser capture were opened together in the same comparison input. The 27-pixel sidebar robot remained readable without needing a separate crop.
-
-### Findings
-
-- P0: none.
-- P1: none.
-- P2: none.
-- The robot now renders as the coloured standalone mark. Computed browser styles confirmed a transparent background, no border, no shadow, and a 27 x 27 pixel glyph in the agent list.
-- Uploaded agent images retain their own image content without an added coloured tile.
-- Typography, spacing, dark-theme tokens, image sharpness, and surrounding copy remained unchanged and visually consistent after the icon-only refinement.
-
-### Verification
-
-- Primary workspace rendering and the separate uploaded-image identity path were inspected in the browser.
-- Focused agent-surface and accessibility tests passed (5 tests), and the desktop production build passed.
-- Earlier icon-tile treatment was removed; the post-fix browser capture above is the comparison evidence.
-
-final result: passed
-
-## Onboarding and schedules merge QA (2026-07-02)
+## Fold mascot implementation QA — 2026-08-18
 
 ### Comparison target
 
-- Source visual truth:
-  - `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-737b2f70-2e73-483b-8276-88505609dd81.png`
-  - `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-822a7295-4a7b-4060-9121-4a0e7d3dfdc6.png`
-- Implementation screenshot:
-  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-modal.png`
-- Combined focused comparison:
-  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-comparison.png`
-- Additional implementation evidence:
-  - `C:\Users\Josh\AppData\Local\Temp\fable-onboarding-profile.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-provider-grid.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-api-key-chooser.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-provider-setup.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-workspace-composer.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-schedules-page.png`
-  - `C:\Users\Josh\AppData\Local\Temp\fable-schedule-modal-mobile.png`
-- Viewports: 1280x720 and 390x844.
-- States: onboarding profile, provider grid, API-key provider chooser, API-key entry,
-  workspace composer, empty schedules page, and new scheduled task modal.
-
-### Full-view comparison
-
-The schedules page preserves the reference hierarchy: one compact title/action
-row, a search field directly beneath it, and a modal-led creation flow. The
-scheduled-task modal matches the reference's Name, Schedule, and Prompt rhythm
-while intentionally using Fable's light/dark tokens and excluding Project and
-Flash-specific copy.
-
-The onboarding pass now uses the desktop canvas rather than a narrow centered
-column. Provider logos are the dominant tile content and API-key setup is a
-separate modal flow instead of an expanded secondary grid.
-
-### Focused comparison
-
-The scheduled-task modal was cropped to the same 640px content width as the
-reference and placed in one combined comparison image. The implementation keeps
-the source's alignment, field order, compact Daily/at/time row, prompt height,
-close placement, and bottom-right disabled action. Its shorter height is the
-expected result of removing the explicitly excluded Project and Flash rows.
-
-### Required fidelity surfaces
-
-- Fonts and typography: Inter remains the application font; the modal preserves
-  the reference's compact label hierarchy and readable control sizing.
-- Spacing and layout rhythm: title, fields, schedule row, prompt, and action use
-  the same top-to-bottom rhythm as the reference without the removed sections.
-- Colors and visual tokens: all surfaces and states use existing Fable tokens;
-  the reference colour scheme was intentionally not copied.
-- Image and asset fidelity: provider marks use the existing real ProviderIcon
-  assets at larger sizes; UI actions use Phosphor icons.
-- Copy and content: Project and Flash copy are absent; the API-key offer is now
-  “Prefer direct provider access? Add an API key.”
-- Accessibility and behavior: dialogs are labelled and modal, Escape/backdrop
-  close works, focus is restored, schedule fields are keyboard-accessible, and
-  the API key remains outside React state.
+- Source visual truth: `C:\Users\Josh\AppData\Local\Temp\codex-clipboard-fe122c8c-5012-42e8-b0bf-cab3abcc4292.png`
+- Browser-rendered workspace: `C:\Users\Josh\Projects\fable\docs\design\qa\fold-agent-workspace.png`
+- Browser-rendered editor: `C:\Users\Josh\Projects\fable\docs\design\qa\fold-agent-editor.png`
+- Focused source/implementation comparison: `C:\Users\Josh\Projects\fable\docs\design\qa\fold-agent-comparison.png`
+- Viewport: 1486 x 1058 CSS pixels, device scale factor 1, light theme.
+- Source pixels: 1254 x 1254. Focused purple mascot cutout: 274 x 295.
+- Implementation pixels: 1486 x 1058 full capture. Production avatar boxes: 34 x 34 in the sidebar and 48 x 48 in the editor; focused rendered cutout: 40 x 41.
+- Density normalization: the focused cutouts are fitted into equal 300 x 300 comparison regions to judge silhouette, fold, eye position, and proportions. The full browser captures remain the authority for production size and antialiasing.
+- State: Chief of Staff selected; violet Fold visible in the sidebar/header; editor colour interaction separately exercised with blue and violet.
 
 ### Findings
 
-No actionable P0, P1, or P2 mismatches remain.
+No actionable P0, P1, or P2 mascot differences remain at the production avatar sizes.
 
-### Patches made during QA
+- Fonts and typography: no type surfaces changed.
+- Spacing and layout rhythm: the background-free mascot occupies a 32 x 32 SVG inside the 34 x 34 sidebar avatar and a 34 x 34 SVG in the 36 x 36 header avatar, increasing presence without changing row or header geometry.
+- Colors and visual tokens: the six source colours are implemented as Violet `#865DFA`, Blue `#3581FB`, Green `#2CC663`, Amber `#FCBD22`, Coral `#FC6D69`, and Slate `#555B63`. The fold highlight and shadow are derived from the selected colour so every agent retains the same identity.
+- Image quality and asset fidelity: the shared Fold silhouette, separate darker page fold, and two charcoal oval eyes match the supplied source. The vector stays sharp across the sidebar, header, message author, Search, and editor sizes. No circle, card surface, border, or shadow remains around the mascot.
+- Copy and content: no new mascot label or separate icon ontology was introduced; every profile remains an Agent distinguished by colour.
+- Interaction and accessibility: all six colour controls remain named and keyboard-addressable. Blue selection updated the preview to `#3581FB`; saving Violet persisted `#865DFA`. Browser console warnings/errors: none.
 
-- Moved API-key provider selection into its own icon-first modal.
-- Centred and enlarged provider branding in tiles and setup dialogs.
-- Corrected CSS cascade ordering that kept the desktop profile form at 420px.
-- Replaced the nested recurrence form with a compact progressive schedule row.
-- Removed the schedules description line to match the sparse reference header.
-- Increased composer control sizing without changing the composer container.
-- Increased sidebar text sizing, softened Threads/Chats, and replaced the New
-  chat plus glyph with the NotePencil icon.
-- Updated stale App integration tests for the modal schedule flow.
+### Comparison history
 
-### Verification
+1. Initial implementation:
+   - [P2] The mascot was placed inside an off-white circular card with a border and shadow, contrary to the requested standalone icon.
+   - [P2] The visible mascot was too small beside Grok Bot's agent-icon scale.
+   - Fix: removed background, border, radius, and shadow; increased rendered sizes across every agent surface and tightened the SVG view box.
+2. First focused source/implementation comparison:
+   - [P2] The folded tuft had insufficient contrast and the eyes read wider than the source when normalized.
+   - Fix: enlarged and darkened the folded tuft, reduced eye width/height, and recaptured the actual editor and workspace states.
+3. Final focused and full-view evidence:
+   - Earlier P2 findings are resolved. Computed browser styles confirm transparent background, zero border, no shadow, 32 x 32 sidebar SVG, and the exact Violet token. No new P0/P1/P2 findings were found.
 
-- `pnpm --filter @fable/desktop typecheck` — passed.
-- `pnpm --filter @fable/desktop test` — 360 passed.
-- `pnpm --filter @fable/desktop build` — passed.
-- Browser console errors/warnings for tested flows — none.
+### Fold implementation checklist
 
-final result: passed
+- [x] One shared mascot for every agent
+- [x] Colour is the only built-in agent-specific visual variable
+- [x] Exact six-colour source palette
+- [x] No card background, border, radius, or shadow
+- [x] Larger Grok-like avatar presence
+- [x] Sidebar, header, Search, message, and editor coverage
+- [x] Colour selection and persistence exercised
+- [x] Browser console checked
 
-## Marketing page QA (2026-07-04)
+## Implementation checklist
 
-### Comparison target
-
-- Source visual truth:
-  - `C:\Users\Josh\.codex\generated_images\019f2a7d-2c89-7bf3-b48c-85c90e7d18b2\ig_0a10ca53dfea0ee0016a485b25a4c48191a41b0d89a2f40129.png`
-- Implementation screenshot:
-  - `C:\Users\Josh\Projects\fable\output\playwright\marketing-home-full.png`
-- Combined comparison:
-  - `C:\Users\Josh\Projects\fable\output\playwright\marketing-design-comparison.png`
-- Viewport: 1440x1100, full-page capture.
-- State: marketing home, default state.
-
-### Full-view comparison
-
-The implementation preserves the selected mockup's black-and-white visual
-system, large Fable dragon lockup, strong hero typography, grayscale horizon
-light, local-first/open-source product framing, connector ecosystem, and
-product updates section.
-
-Later user direction intentionally moved providers out of the hero into a
-dedicated rail directly below it, removed Hugging Face, removed icon cards,
-required real provider and connector icons, and added automatic and manual
-horizontal rail movement.
-
-### Focused comparison
-
-The hero, provider rail, connector rail, and update form are readable in the
-full-page comparison. Desktop and mobile screenshots were reviewed
-independently for text overlap, asset transparency, responsive hierarchy, and
-rail clipping.
-
-### Required fidelity surfaces
-
-- Fonts and typography: hierarchy, wrapping, line height, and weights remain
-  legible at desktop and mobile sizes.
-- Spacing and layout rhythm: hero, section rhythm, rails, product pillars, and
-  update form maintain consistent alignment.
-- Colors and visual tokens: the implementation uses a strict black, white, and
-  grayscale token system.
-- Image and asset fidelity: the Fable dragon has a transparent background;
-  Codex, OpenCode, provider, and connector icons use local real SVG assets
-  rendered in grayscale.
-- Copy and content: Windows preview language and Hugging Face are absent from
-  the marketing implementation.
-- Accessibility and behavior: the rails auto-scroll, support pointer/touch
-  scrolling and manual drag, remain keyboard-focusable, and disable animation
-  for reduced-motion preferences.
-
-### Findings
-
-No actionable P0, P1, or P2 findings remain.
-
-### Patches made during QA
-
-- Rebuilt the home page from the selected third mockup direction.
-- Added the transparent Fable technology-dragon asset.
-- Added local provider and connector SVG assets.
-- Moved providers below the hero.
-- Converted provider and connector groups into transparent, one-line,
-  auto-scrolling, manually draggable rails.
-- Added smooth light-horizon animation and responsive layouts.
-- Updated waitlist copy and static marketing tests.
-
-### Follow-up polish
-
-- P3: A future brand pass can replace the generated raster dragon with a
-  production vector master while preserving the current silhouette.
-
-final result: passed
-
-## Agent surface redesign QA (2026-08-16)
-
-Final result: passed
-
-## Comparison
-
-- Source reference: `C:\Users\Joshua Knott\.codex\attachments\6f42ba19-1fa0-4c5e-b193-a9a4960ac15a\image-1.png`
-- Desktop implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agents-desktop.png`
-- Mobile implementation: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agents-mobile.png`
-- Reviewed together at original resolution on 2026-08-16.
-
-## Blocking findings
-
-- P0: none.
-- P1: none.
-- P2: none remaining.
-
-## Verified qualities
-
-- The three-part desktop hierarchy matches the reference: compact agent list, focused conversation, and contextual live-work rail.
-- Agent rows use message previews and status dots without a redundant working label.
-- Knowledge and Connectors sit at the bottom of the agent rail rather than competing with agents.
-- The composer keeps files, context, voice, and send visible while model and permission controls move into agent settings.
-- The live-work rail is quiet when idle, surfaces approval state, and reserves an expandable computer-use preview only for real runtime frames.
-- The mobile layout changes the agent list into a compact horizontal picker and keeps live work closed until requested.
-- No projects, departments, playbooks, schedules, chats, cloud product area, or slash-command affordances remain in the primary surface.
-
-## Agent identity and theme QA (2026-08-16)
-
-Final result: passed
-
-## Evidence
-
-- Source icon reference: `C:\Users\JOSHUA~1\AppData\Local\Temp\codex-clipboard-a487b004-7164-457e-a89f-b4012b29a703.png` (449 x 449 at 1x).
-- Light workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-light.png` (1280 x 720 at 1x).
-- Light agent editor: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icon-editor-light.png` (1280 x 720 at 1x).
-- Dark workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-dark.png` (1280 x 720 at 1x).
-- Mobile dark workspace: `C:\Users\Joshua Knott\Projects\fable\tmp\design-qa\fable-agent-icons-mobile-dark.png` (390 x 844 at 1x).
-- The source and implementation were opened together for a focused visual comparison.
-
-## Comparison
-
-- The same recognizable robot mark is used for every agent; identity comes from color or a user-supplied image rather than role-specific iconography.
-- The compact Phosphor Robot mark preserves the source reference's antenna, head, and eye cues at sidebar scale while fitting the existing product icon system.
-- New agents receive the next unused palette color, and the editor exposes color swatches plus local PNG, JPEG, or WebP image replacement.
-- Light and dark modes now share semantic surface, text, border, accent, status, and shadow tokens across the agent rail, workspace, editor, and live-work panel.
-- Responsive verification found no visible overflow, collision, clipping, or illegible contrast at 390 x 844.
-
-## Blocking findings
-
-- P0: none.
-- P1: none.
-- P2: none.
-
-## Interactions verified
-
-- Created an agent through the live UI and confirmed it received the next unused color.
-- Switched between light and dark themes and reloaded to confirm the saved theme and agent state persisted.
-- Opened and closed the mobile live-work rail.
-- Removed the temporary QA agent so the delivered preview returns to the truthful single-agent default.
-- Reviewed the browser diagnostics after the final render; no console errors or warnings were present.
-- The upload control and its image normalization boundary were reviewed in code; the browser test interface did not expose file injection, so an actual upload was not simulated in the browser.
+- [x] Agents-first conversational shell
+- [x] No top-level Conversations section
+- [x] Workspace-wide Search with scoped filters
+- [x] Projects and routines represented as Work, not as conversations
+- [x] Minimal Connections catalogue with Installed section
+- [x] Desktop, tablet, and compact-width browser checks
+- [x] Keyboard and focus behavior
+- [x] Browser console check
+- [x] Production build
 
 final result: passed

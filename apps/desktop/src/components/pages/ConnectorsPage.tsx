@@ -3,8 +3,8 @@ import { PluginPanel } from "../PluginPanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 /**
- * Minimal connector setup surface. The app shell owns navigation; this page
- * only renders the icon-led connector grid and the selected connector details.
+ * Minimal connection setup surface. The app shell owns navigation; this page
+ * only renders the icon-led catalogue and the selected connection details.
  */
 export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
   const visibleConnectors = runtime.connectorManifests.filter(
@@ -27,9 +27,9 @@ export function ConnectorsPage({ runtime }: { runtime: ShellRuntime }) {
   return (
     <>
       <PageHeader
-        title="Connectors"
-        description={runtime.browserSession.reason}
-        meta={`${connected} of ${visibleConnectors.length} connected · ${sessionLabel}`}
+        title="Connections"
+        description="Let your agents use the apps and services you choose."
+        meta={`${connected} installed · ${sessionLabel}`}
       />
 
       <PluginPanel

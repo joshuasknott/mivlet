@@ -24,9 +24,10 @@ import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import type { SidebarProject } from "../components/WorkspaceSidebar";
 import { AgentSidebar, type AgentSidebarPreview } from "../components/agents/AgentSidebar";
 import { AgentEditor } from "../components/agents/AgentEditor";
-import { nextAgentColor } from "../components/agents/agent-icons";
+import { nextAgentColor, ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
+import { WorkspaceSearchModal, type WorkspaceSearchItem } from "../components/agents/WorkspaceSearchModal";
 import { Composer } from "../components/Composer";
 import { ResponseArtifactAction } from "../components/ResponseArtifactAction";
 import { exportRuntimeProjectArchive, finalizeRuntimeMissionCoordination, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, recordRuntimeMissionHumanEvaluation, recoverRuntimeCompletedParallelApproaches, resolveRuntimeCitedApproval, resolveRuntimeMissionApproval, searchRuntimeArtifacts, type RuntimeCitedApproval, type RuntimeMissionApproval, type RuntimeMissionHumanInputRequest, type RuntimeMissionHumanInputValue, type RuntimeMissionProgress } from "../runtime";
@@ -129,6 +130,7 @@ export function ChatWorkspace() {
   const activeAgent = runtime.agents.find((candidate) => candidate.id === runtime.activeAgentId) ?? runtime.agents[0]!;
   const [liveRailOpen, setLiveRailOpen] = useState(() => window.innerWidth > 880);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
+  const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [agentPreviewMessages, setAgentPreviewMessages] = useState<Record<string, string>>({});
   const [conversationMessages, setConversationMessages] = useState<ConversationMessage[]>([]);
@@ -1300,6 +1302,16 @@ export function ChatWorkspace() {
                 isCurrentResponse ? " conversation-message--working" : ""
               }`}
             >
+              <div className="conversation-message__author">
+                {message.role === "assistant" ? (
+                  <ProfileAgentAvatar agent={activeAgent} iconSize={36} />
+                ) : (
+                  <span className="conversation-message__user-avatar">
+                    {verifiedProfile.name.trim().slice(0, 1).toUpperCase() || "F"}
+                  </span>
+                )}
+                <strong>{message.role === "assistant" ? activeAgent.name : verifiedProfile.name}</strong>
+              </div>
               <p>{message.content}</p>
               {message.role === "user" || !isCurrentResponse ? (
                 <Suspense fallback={null}>
@@ -1603,6 +1615,58 @@ export function ChatWorkspace() {
       "Select model",
     [composerModels, resolvedComposerModelOptionId]
   );
+  const workspaceSearchItems = useMemo<WorkspaceSearchItem[]>(() => [
+    ...runtime.agents.map((profile) => ({
+      id: profile.id,
+      scope: "agents" as const,
+      action: "agent" as const,
+      title: profile.name,
+      description: agentSidebarPreviews[profile.id]?.message ?? "Start a conversation",
+      meta: "Agent",
+      keywords: profile.instructions,
+      agent: profile
+    })),
+    ...projectWorkspaces.map((project) => ({
+      id: project.id,
+      scope: "work" as const,
+      action: "project" as const,
+      title: project.title,
+      description: project.description || "Project workspace",
+      meta: "Project",
+      keywords: project.instructions
+    })),
+    ...runtime.schedules.map((schedule) => ({
+      id: schedule.id,
+      scope: "work" as const,
+      action: "schedule" as const,
+      title: schedule.name,
+      description: schedule.description,
+      meta: schedule.enabled ? "Routine" : "Paused routine",
+      keywords: `${schedule.day} ${schedule.time}`
+    })),
+    ...runtime.workspaceKnowledgeSources.map((source) => ({
+      id: source.id,
+      scope: "knowledge" as const,
+      action: "knowledge" as const,
+      title: source.title,
+      description: source.contentPreview || source.provenance,
+      meta: source.kind,
+      keywords: `${source.provenance} ${source.connectorId}`
+    })),
+    ...runtime.connectorManifests
+      .filter((connector) => connector.id !== "local-files")
+      .map((connector) => ({
+        id: connector.id,
+        scope: "connections" as const,
+        action: "connection" as const,
+        title: connector.name,
+        description: connector.status === "connected"
+          ? "Ready for your agents to use"
+          : `Connect ${connector.name} when you want an agent to use it`,
+        meta: connector.status === "connected" ? "Installed" : "Connection",
+        keywords: connector.permissions.join(" ")
+      }))
+  ], [agentSidebarPreviews, projectWorkspaces, runtime.agents, runtime.connectorManifests, runtime.schedules, runtime.workspaceKnowledgeSources]);
 
   // Settings nav search filter. Memoized (and kept above the onboarding early
   // return so the Rules of Hooks hold) so typing in the settings search box
@@ -2119,8 +2183,8 @@ export function ChatWorkspace() {
       const current = runtimeRef.current;
       if (key === "k") {
         event.preventDefault();
-        current.setLastAction("Search ready");
-        current.focusComposer("Search ");
+        setWorkspaceSearchOpen(true);
+        current.setLastAction("Workspace search opened");
       }
 
       if (key === "n") {
@@ -2243,6 +2307,24 @@ export function ChatWorkspace() {
     runtime.setLastAction("Project opened");
   };
 
+  const selectWorkspaceSearchItem = (item: WorkspaceSearchItem) => {
+    setWorkspaceSearchOpen(false);
+    if (item.action === "agent") {
+      const profile = runtime.agents.find((candidate) => candidate.id === item.id);
+      if (profile) selectAgentSurface(profile);
+      return;
+    }
+    if (item.action === "project") {
+      openProject(item.id);
+      return;
+    }
+    if (item.action === "schedule") {
+      runtime.setActiveItem("Schedules");
+      return;
+    }
+    runtime.setActiveItem(item.action === "knowledge" ? "Knowledge" : "Connectors");
+  };
+
   return (
     <main
       className={`desktop-frame desktop-frame--agents${liveRailOpen ? "" : " desktop-frame--live-closed"}`}
@@ -2256,6 +2338,7 @@ export function ChatWorkspace() {
         profileName={verifiedProfile.name}
         onSelectAgent={selectAgentSurface}
         onCreateAgent={() => openAgentEditor()}
+        onOpenSearch={() => setWorkspaceSearchOpen(true)}
         onEditAgent={openAgentEditor}
         onOpenKnowledge={() => runtime.setActiveItem("Knowledge")}
         onOpenConnectors={() => runtime.setActiveItem("Connectors")}
@@ -2264,6 +2347,7 @@ export function ChatWorkspace() {
       <section className="workspace" aria-label="Fable workspace">
         <AgentWorkspaceHeader
           agent={activeAgent}
+          modelLabel={modelChipLabel}
           liveRailOpen={liveRailOpen}
           onEdit={() => openAgentEditor(activeAgent)}
           onToggleLiveRail={() => setLiveRailOpen((open) => !open)}
@@ -2465,6 +2549,13 @@ export function ChatWorkspace() {
           if (editingAgentId) runtime.removeAgent(editingAgentId);
           closeAgentEditor();
         }}
+      />
+
+      <WorkspaceSearchModal
+        open={workspaceSearchOpen}
+        items={workspaceSearchItems}
+        onClose={() => setWorkspaceSearchOpen(false)}
+        onSelect={selectWorkspaceSearchItem}
       />
 
       {isSettingsActive ? (

@@ -24,7 +24,7 @@ import {
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
 
-const AGENT_ICON_COLORS = ["#6D5DF7", "#2672E8", "#13966F", "#D07A19", "#D6537D", "#A14FD1", "#0E8FA4", "#D2543D", "#626B78", "#202124"];
+const AGENT_ICON_COLORS = ["#865DFA", "#3581FB", "#2CC663", "#FCBD22", "#FC6D69", "#555B63"];
 const MAX_AGENT_IMAGE_DATA_URL_CHARACTERS = 512_000;
 
 /**

@@ -132,7 +132,7 @@ export function AgentEditor({
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim()) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar color={draft.iconColor} imageDataUrl={draft.iconImageDataUrl} iconSize={38} />
+            <AgentAvatar color={draft.iconColor} imageDataUrl={draft.iconImageDataUrl} iconSize={46} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
@@ -186,7 +186,7 @@ export function AgentEditor({
             <label className="agent-editor__field"><span>Permissions</span><select aria-label="Permissions" value={draft.permissionLabel} onChange={(event) => setDraft({ ...draft, permissionLabel: event.target.value as ApprovalPresetLabel })}>{permissionOptions.map((option) => <option key={option}>{option}</option>)}</select><small>Fable still asks before consequential actions.</small></label>
           </div>
 
-          <fieldset className="agent-editor__choices"><legend>Connectors</legend>{connectors.filter((connector) => connector.id !== "local-files").length ? connectors.filter((connector) => connector.id !== "local-files").map((connector) => <label key={connector.id}><input type="checkbox" checked={draft.connectorIds.includes(connector.id)} onChange={() => toggle("connectorIds", connector.id)} /><span>{connector.name}</span><small>{connector.status === "connected" ? "Connected" : "Not connected"}</small></label>) : <p>No connectors are available yet.</p>}</fieldset>
+          <fieldset className="agent-editor__choices"><legend>Connections</legend>{connectors.filter((connector) => connector.id !== "local-files").length ? connectors.filter((connector) => connector.id !== "local-files").map((connector) => <label key={connector.id}><input type="checkbox" checked={draft.connectorIds.includes(connector.id)} onChange={() => toggle("connectorIds", connector.id)} /><span>{connector.name}</span><small>{connector.status === "connected" ? "Connected" : "Not connected"}</small></label>) : <p>No connections are available yet.</p>}</fieldset>
 
           <fieldset className="agent-editor__choices"><legend>Knowledge pool</legend>{knowledgeSources.length ? knowledgeSources.map((source) => <label key={source.id}><input type="checkbox" checked={draft.knowledgeSourceIds.includes(source.id)} onChange={() => toggle("knowledgeSourceIds", source.id)} /><span>{source.title}</span></label>) : <p>Add knowledge to make it available to this agent.</p>}</fieldset>
 

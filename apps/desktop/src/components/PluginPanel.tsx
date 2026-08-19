@@ -4,6 +4,7 @@ import type {
   ConnectorActionKind,
   ConnectorManifest
 } from "@fable/protocol";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
@@ -33,6 +34,7 @@ export function PluginPanel({
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
   onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
+  const [query, setQuery] = useState("");
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
     null
   );
@@ -50,64 +52,112 @@ export function PluginPanel({
     onClose: () => setSelectedConnectorId(null)
   });
 
+  const visibleManifests = useMemo(() => {
+    const normalized = query.trim().toLocaleLowerCase();
+    if (!normalized) return manifests;
+    return manifests.filter((connector) => [
+      connector.name,
+      connector.setupMessage,
+      connector.healthSummary,
+      ...connector.permissions
+    ].filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized));
+  }, [manifests, query]);
+  const installedManifests = visibleManifests.filter((connector) => connector.status === "connected");
+  const availableManifests = visibleManifests.filter((connector) => connector.status !== "connected");
+
+  const renderConnector = (connector: ConnectorManifest) => {
+    const connected = connector.status === "connected";
+    const selected = selectedConnector?.id === connector.id;
+    const cardDetail = resolveDetailedStatus(connector);
+    const needsReconnect = cardDetail.className === "expired" || cardDetail.className === "revoked" || cardDetail.className === "failed";
+
+    return (
+      <article
+        className="connector-card"
+        key={connector.id}
+        data-connector-id={connector.id}
+        data-selected={selected}
+        role="button"
+        aria-label={
+          connected
+            ? `Manage ${connector.name}`
+            : connector.authMode !== "none"
+              ? `${needsReconnect ? "Reconnect" : "Connect"} ${connector.name}`
+              : `Open ${connector.name}`
+        }
+        tabIndex={0}
+        onClick={() => {
+          setSelectedConnectorId(connector.id);
+          onSelect(connector);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            setSelectedConnectorId(connector.id);
+            onSelect(connector);
+          }
+        }}
+      >
+        <span className="sr-only">{connector.status}</span>
+        <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
+          <ConnectorIcon id={connector.id} />
+        </span>
+        <strong>{connector.name}</strong>
+
+        {connected ? (
+          <span className="connector-card__connected">
+            <span aria-hidden="true" />
+            Installed
+          </span>
+        ) : connector.authMode !== "none" ? (
+          <span className="connector-card__connect">
+            {needsReconnect ? "Reconnect" : "Connect"}
+          </span>
+        ) : (
+          <span className="connector-card__connected">Available</span>
+        )}
+      </article>
+    );
+  };
+
   return (
-    <section className="context-panel connectors-panel" aria-label="Connectors">
-      <div className="connector-grid">
-        {manifests.map((connector) => {
-          const connected = connector.status === "connected";
-          const selected = selectedConnector?.id === connector.id;
-          const cardDetail = resolveDetailedStatus(connector);
-          const needsReconnect = cardDetail.className === "expired" || cardDetail.className === "revoked" || cardDetail.className === "failed";
+    <section className="context-panel connectors-panel" aria-label="Connections">
+      <label className="connections-search">
+        <MagnifyingGlass size={17} aria-hidden="true" />
+        <span className="sr-only">Search connections</span>
+        <input
+          type="search"
+          placeholder="Search connections"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
 
-          return (
-            <article
-              className="connector-card"
-              key={connector.id}
-              data-connector-id={connector.id}
-              data-selected={selected}
-              role="button"
-              aria-label={
-                connected
-                  ? `Manage ${connector.name}`
-                  : connector.authMode !== "none"
-                    ? `${needsReconnect ? "Reconnect" : "Connect"} ${connector.name}`
-                    : `Open ${connector.name}`
-              }
-              tabIndex={0}
-              onClick={() => {
-                setSelectedConnectorId(connector.id);
-                onSelect(connector);
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  setSelectedConnectorId(connector.id);
-                  onSelect(connector);
-                }
-              }}
-            >
-              <span className="sr-only">{connector.status}</span>
-              <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
-                <ConnectorIcon id={connector.id} />
-              </span>
-              <strong>{connector.name}</strong>
+      <section className="connections-group" aria-labelledby="installed-connections-title">
+        <div className="connections-group__heading">
+          <h2 id="installed-connections-title">Installed</h2>
+          <span>{installedManifests.length}</span>
+        </div>
+        {installedManifests.length ? (
+          <div className="connector-grid connector-grid--installed">{installedManifests.map(renderConnector)}</div>
+        ) : (
+          <p className="connections-group__empty">
+            {query.trim() ? "No installed connections match this search." : "No connections installed yet."}
+          </p>
+        )}
+      </section>
 
-              {connected ? (
-                <span className="connector-card__connected">
-                  <span aria-hidden="true" />
-                  Connected
-                </span>
-              ) : connector.authMode !== "none" ? (
-                <span className="connector-card__connect">
-                  {needsReconnect ? "Reconnect" : "Connect"}
-                </span>
-              ) : (
-                <span className="connector-card__connected">Available</span>
-              )}
-            </article>
-          );
-        })}
-      </div>
+      <section className="connections-group" aria-labelledby="all-connections-title">
+        <div className="connections-group__heading">
+          <h2 id="all-connections-title">All connections</h2>
+          <span>{availableManifests.length}</span>
+        </div>
+        {availableManifests.length ? (
+          <div className="connector-grid">{availableManifests.map(renderConnector)}</div>
+        ) : (
+          <p className="connections-group__empty">No connections match “{query}”.</p>
+        )}
+      </section>
 
       {selectedConnector ? (
         <div

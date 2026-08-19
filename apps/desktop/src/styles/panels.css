@@ -1615,8 +1615,70 @@
 /* Minimal Connectors page */
 
 .connectors-panel {
-  gap: 18px;
+  gap: 28px;
   margin-top: 26px;
+}
+
+.connections-search {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  min-height: 44px;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--ink-soft);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+}
+
+.connections-search:focus-within {
+  border-color: var(--accent-line);
+  box-shadow: 0 0 0 3px var(--accent-subtle);
+}
+
+.connections-search input {
+  min-width: 0;
+  height: 42px;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  outline: 0;
+  font-size: var(--text-13);
+}
+
+.connections-group {
+  display: grid;
+  gap: 12px;
+}
+
+.connections-group__heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+}
+
+.connections-group__heading h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: var(--text-14);
+  font-weight: 600;
+}
+
+.connections-group__heading span {
+  color: var(--ink-soft);
+  font-size: var(--text-11);
+}
+
+.connections-group__empty {
+  margin: 0;
+  padding: 18px 2px;
+  color: var(--ink-soft);
+  border-top: 1px solid var(--line);
+  font-size: var(--text-12);
 }
 
 .connectors-panel .connector-grid {
@@ -1641,6 +1703,12 @@
     background-color 150ms ease,
     border-color 150ms ease,
     transform 150ms ease;
+}
+
+.connectors-panel .connector-grid--installed .connector-card {
+  min-height: 132px;
+  background: var(--accent-subtle);
+  border-color: var(--accent-line);
 }
 
 .connectors-panel .connector-card:hover,

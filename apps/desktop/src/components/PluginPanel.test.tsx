@@ -23,6 +23,15 @@ const gmail: ConnectorManifest = {
   supportedActions: []
 };
 
+const github: ConnectorManifest = {
+  ...gmail,
+  id: "github",
+  name: "GitHub",
+  status: "needs-auth",
+  account: undefined,
+  health: { state: "unknown", summary: "Not connected", checkedAt: "2026-07-11T12:00:00.000Z" }
+};
+
 describe("Connector Connection selection", () => {
   it("labels and selects the opaque Fable Connection instead of provider account authority", async () => {
     const user = userEvent.setup();
@@ -77,5 +86,30 @@ describe("Connector Connection selection", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(opener).toHaveFocus();
+  });
+
+  it("separates installed connections and searches the remaining catalogue", async () => {
+    const user = userEvent.setup();
+    render(
+      <PluginPanel
+        manifests={[gmail, github]}
+        onUseConnector={() => {}}
+        onConnect={() => {}}
+        onDisconnect={() => {}}
+        onRefresh={() => {}}
+        onSelect={() => {}}
+        accounts={{}}
+        onSwitchAccount={() => {}}
+        onPrepareAction={() => {}}
+      />
+    );
+
+    expect(screen.getByRole("heading", { name: "Installed" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Manage Gmail" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+
+    await user.type(screen.getByRole("searchbox", { name: "Search connections" }), "github");
+    expect(screen.queryByRole("button", { name: "Manage Gmail" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
   });
 });

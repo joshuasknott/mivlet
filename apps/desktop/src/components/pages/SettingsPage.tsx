@@ -736,7 +736,7 @@ function PrivacySettingsView({
                 </div>
               ) : (
                 <p style={{ color: "var(--ink-muted)", fontSize: "var(--text-13)", fontStyle: "italic", margin: "8px 0" }}>
-                  No active connector connections. Connect external accounts in the Providers tab or the Connectors page.
+                  No active connections. Connect external accounts in the Providers tab or the Connections page.
                 </p>
               )}
             </div>
@@ -1161,7 +1161,7 @@ const HISTORY_CATEGORY_LABELS: Record<string, string> = {
 const HISTORY_CATEGORY_FILTERS: Array<{ id: string; label: string }> = [
   { id: "all", label: "All" },
   { id: "model-call", label: "Model calls" },
-  { id: "connector-action", label: "Connectors" },
+  { id: "connector-action", label: "Connections" },
   { id: "tool-action", label: "Tools / shell" },
   { id: "web-action", label: "Web" },
   { id: "approval", label: "Approvals" },

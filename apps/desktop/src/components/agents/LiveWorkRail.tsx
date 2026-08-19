@@ -29,8 +29,8 @@ export function LiveWorkRail({
   const [screenOpen, setScreenOpen] = useState(false);
   const needsAttention = approvalCount > 0 || status === "awaiting-approval";
   return (
-    <aside className="live-rail" aria-label="Live work">
-      <header className="live-rail__header"><div><span>Live work</span><strong>{agentName}</strong></div><button type="button" onClick={onClose} aria-label="Close live work"><X size={17} /></button></header>
+    <aside className="live-rail" aria-label="Work">
+      <header className="live-rail__header"><div><strong>Work</strong><span>{agentName}</span></div><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
 
       {computerUseActive ? (
         <button className="live-screen" type="button" onClick={() => screenPreviewUrl && setScreenOpen(true)} disabled={!screenPreviewUrl}>
@@ -39,6 +39,7 @@ export function LiveWorkRail({
         </button>
       ) : null}
 
+      <h3 className="live-rail__section-label">{needsAttention ? "Awaiting approval" : running ? "In progress" : "Ready"}</h3>
       <section className={`live-run-card${needsAttention ? " live-run-card--attention" : ""}`}>
         <div className="live-run-card__status">{running ? <span className="live-pulse" /> : <CheckCircle size={16} weight="fill" />}<strong>{needsAttention ? "Needs your approval" : running ? "In progress" : "Ready"}</strong></div>
         <p>{transcript.trim() || (running ? "Starting this run…" : "Send a message to begin work.")}</p>

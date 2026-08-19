@@ -3,7 +3,7 @@ import type { FableAgentProfile } from "@fable/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { AgentEditor } from "./AgentEditor";
 import { AgentSidebar } from "./AgentSidebar";
-import { nextAgentColor } from "./agent-icons";
+import { AgentAvatar, nextAgentColor } from "./agent-icons";
 
 const chief: FableAgentProfile = {
   id: "chief-of-staff",
@@ -11,7 +11,7 @@ const chief: FableAgentProfile = {
   instructions: "Keep priorities clear.",
   modelId: "",
   icon: "agent",
-  iconColor: "#6D5DF7",
+  iconColor: "#865DFA",
   connectorIds: [],
   knowledgeSourceIds: [],
   permissionLabel: "Ask Me"
@@ -22,7 +22,7 @@ const developer: FableAgentProfile = {
   id: "developer",
   name: "Developer",
   icon: "agent",
-  iconColor: "#2672E8"
+  iconColor: "#3581FB"
 };
 
 describe("agent surface", () => {
@@ -30,11 +30,23 @@ describe("agent surface", () => {
     expect(nextAgentColor([chief.iconColor])).toBe(developer.iconColor);
     expect(chief.icon).toBe("agent");
     expect(developer.icon).toBe("agent");
+
+    const { container } = render(
+      <>
+        <AgentAvatar color={chief.iconColor} />
+        <AgentAvatar color={developer.iconColor} />
+      </>
+    );
+    const marks = container.querySelectorAll('[data-agent-mark="fold"]');
+    expect(marks).toHaveLength(2);
+    expect(marks[0]?.closest(".agent-avatar")).toHaveStyle({ "--agent-icon-base": chief.iconColor });
+    expect(marks[1]?.closest(".agent-avatar")).toHaveStyle({ "--agent-icon-base": developer.iconColor });
   });
 
-  it("keeps agents compact and exposes knowledge and connectors as native utilities", () => {
+  it("keeps agents conversational and opens one workspace-wide search surface", () => {
     const onSelectAgent = vi.fn();
     const onCreateAgent = vi.fn();
+    const onOpenSearch = vi.fn();
     render(
       <AgentSidebar
         agents={[chief, developer]}
@@ -47,6 +59,7 @@ describe("agent surface", () => {
         profileName="Joshua"
         onSelectAgent={onSelectAgent}
         onCreateAgent={onCreateAgent}
+        onOpenSearch={onOpenSearch}
         onEditAgent={vi.fn()}
         onOpenKnowledge={vi.fn()}
         onOpenConnectors={vi.fn()}
@@ -57,8 +70,11 @@ describe("agent surface", () => {
     expect(screen.getByText("Your priorities are ready")).toBeVisible();
     expect(screen.queryByText("Working")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Knowledge" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Connectors" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
+    expect(screen.getByText("Agents")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Connections" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
+    expect(onOpenSearch).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "New agent" }));
     expect(onCreateAgent).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByText("Developer"));
     expect(onSelectAgent).toHaveBeenCalledWith(developer);
@@ -72,7 +88,7 @@ describe("agent surface", () => {
       models: [],
       connectors: [],
       knowledgeSources: [],
-      suggestedColor: "#13966F",
+      suggestedColor: "#2CC663",
       onClose: vi.fn(),
       onSave: vi.fn(),
       onDelete

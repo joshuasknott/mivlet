@@ -764,7 +764,7 @@ describe("Fable home", () => {
     expect(screen.queryByRole("button", { name: /daily catch-up/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /initial build/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /memory and approvals/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^connectors$/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^connections$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^knowledge$/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^schedules$/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^departments$/i })).not.toBeInTheDocument();
@@ -1171,7 +1171,7 @@ describe("Fable home", () => {
 
   it("shows first-wave connectors as minimal setup cards", async () => {
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
 
     for (const name of [
       "GitHub",
@@ -1197,7 +1197,7 @@ describe("Fable home", () => {
 
   it("reveals connector details after selecting a card", async () => {
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
 
     await user.click(screen.getByText("Gmail"));
 
@@ -1209,7 +1209,7 @@ describe("Fable home", () => {
 
   it("routes broker-gated connector auth through the loopback OAuth command", async () => {
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
 
     await user.click(await screen.findByRole("button", { name: /connect github/i }));
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
@@ -1223,7 +1223,7 @@ describe("Fable home", () => {
     // auth-broker path as GitHub. Pinning this prevents the distinct auth_mode
     // from silently bypassing or breaking the broker-gated connect flow.
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
 
     await user.click(await screen.findByRole("button", { name: /connect vercel/i }));
     await user.click(screen.getByRole("button", { name: /^connect$/i }));
@@ -1233,7 +1233,7 @@ describe("Fable home", () => {
 
   it("prepares connector writes as approval requests instead of executing them", async () => {
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
     const gmailCard = (await screen.findAllByText("Gmail"))
       .map((node) => node.closest("article"))
       .find(Boolean);
@@ -3848,7 +3848,7 @@ describe("Fable home", () => {
     vi.mocked(listRuntimeConnectorStatuses).mockResolvedValue(customManifests as any);
 
     const user = await renderWorkspace();
-    await user.click(screen.getByRole("button", { name: /^connectors$/i }));
+    await user.click(screen.getByRole("button", { name: /^connections$/i }));
 
     // Test Slack (connected)
     await user.click(await screen.findByText("Slack"));

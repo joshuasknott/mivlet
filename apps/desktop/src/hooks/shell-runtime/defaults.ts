@@ -21,7 +21,7 @@ export const defaultShellState: PersistedShellState = {
       instructions: "Coordinate my work, keep priorities clear, and help me move from decision to execution.",
       modelId: "",
       icon: "agent",
-      iconColor: "#6D5DF7",
+      iconColor: "#865DFA",
       connectorIds: [],
       knowledgeSourceIds: [],
       permissionLabel: DEFAULT_PERMISSION_LABEL

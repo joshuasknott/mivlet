@@ -3818,7 +3818,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ...input,
       id,
       icon: "agent",
-      iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor) ? input.iconColor : "#6D5DF7"
+      iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor) ? input.iconColor : "#865DFA"
     };
     setAgents((current) => [...current, created]);
     setActiveAgentId(id);
