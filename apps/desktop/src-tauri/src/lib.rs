@@ -42,6 +42,7 @@ mod execution_approvals;
 mod execution_control;
 mod goals;
 mod google;
+mod hosted_computer;
 mod knowledge;
 mod local_model;
 mod mcp_process;
@@ -321,6 +322,34 @@ pub fn run() {
             account_workspace::account_workspace_select,
             account_workspace::account_device_revoke,
             account_workspace::account_workspace_clear_session,
+            hosted_computer::hosted_computer_status,
+            hosted_computer::hosted_computer_provision,
+            hosted_computer::hosted_process_prepare,
+            hosted_computer::hosted_process_launch,
+            hosted_computer::hosted_process_schedule_prepare,
+            hosted_computer::hosted_process_schedule_create,
+            hosted_computer::hosted_process_schedule_status,
+            hosted_computer::hosted_process_schedule_list,
+            hosted_computer::hosted_process_schedule_run_list,
+            hosted_computer::hosted_process_schedule_cancel_prepare,
+            hosted_computer::hosted_process_schedule_cancel,
+            hosted_computer::hosted_process_schedule_control_prepare,
+            hosted_computer::hosted_process_schedule_control,
+            hosted_computer::hosted_agent_routine_prepare,
+            hosted_computer::hosted_agent_routine_create,
+            hosted_computer::hosted_agent_routine_list,
+            hosted_computer::hosted_agent_routine_run_list,
+            hosted_computer::hosted_agent_routine_cancel_prepare,
+            hosted_computer::hosted_agent_routine_cancel,
+            hosted_computer::hosted_agent_routine_control_prepare,
+            hosted_computer::hosted_agent_routine_control,
+            hosted_computer::hosted_process_status,
+            hosted_computer::hosted_process_kill,
+            hosted_computer::hosted_browser_prepare,
+            hosted_computer::hosted_browser_navigate,
+            hosted_computer::hosted_browser_action_prepare,
+            hosted_computer::hosted_browser_action,
+            hosted_computer::hosted_browser_snapshot,
             cloud_sync::cloud_sync_status,
             cloud_sync::cloud_sync_link_state,
             cloud_sync::cloud_sync_enqueue_shared_mutation,

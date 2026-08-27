@@ -16,9 +16,8 @@ required by some thread paths, schedules and workflows appear as top-level
 concepts, external accounts and runtimes use several unrelated record families,
 and earlier cloud documents distinguish solo and shared workspace modes.
 
-The [Product Blueprint](../product/vision.md) is authoritative for the final
-state. The [Master Build Plan](../product/master-build-plan.md) sequences the
-work needed to reach it. This ADR makes the blueprint's ontology durable and
+The [product direction](../product/vision.md) defines the intended final state.
+This ADR makes that ontology durable and
 precise enough to guide later protocol, schema, product-copy, and migration work.
 It does not assign records to SQLite or Convex and does not define identity
 provider, membership-role, invitation, or authorization mechanics; those are

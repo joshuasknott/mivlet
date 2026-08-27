@@ -3,14 +3,17 @@ import { useRef, useState } from "react";
 import { PageHeader } from "../PageHeader";
 import { SchedulePanel } from "../SchedulePanel";
 import { RoutinePanel } from "../RoutinePanel";
+import { HostedSchedulesPanel, type HostedSchedulesPageState } from "../HostedSchedulesPanel";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 /**
  * Standalone Schedules page. Hosts the create form and the list of saved
- * schedules. Schedules persist locally and execute through the local
- * AgentBackend runtime while the desktop app is open; no hosted runner is
- * configured. Queue states (queued, running, blocked-auth, cancelled) are
- * surfaced so the user can see and cancel live runs.
+ * schedules. Local schedules persist through the native scheduler and execute
+ * through the local AgentBackend while the desktop app is open. A separate
+ * always-on section projects recurring programs from the active teammate's
+ * cloud computer, including durable lifecycle, next/last run, error evidence,
+ * refresh, provisioning, and approval-bound cancellation. Queue states
+ * (queued, running, blocked-auth, cancelled) remain visible for local runs.
  *
  * The create form is always available — creating does not depend on hydration.
  * The list shows a brief loading indicator until persisted jobs are hydrated
@@ -18,7 +21,13 @@ import type { ShellRuntime } from "../../hooks/useShellRuntime";
  * about to arrive. Management callbacks use the durable `ScheduledJob`
  * contract directly, so no legacy UI adapter can discard recurrence data.
  */
-export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
+export function SchedulesPage({
+  runtime,
+  hostedComputer
+}: {
+  runtime: ShellRuntime;
+  hostedComputer?: HostedSchedulesPageState;
+}) {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const newButtonRef = useRef<HTMLButtonElement>(null);
   const isPreview = runtime.browserSession?.source === "fixture-preview";
@@ -48,10 +57,16 @@ export function SchedulesPage({ runtime }: { runtime: ShellRuntime }) {
             disabled={!runtime.schedulesReady}
           >
             <Plus size={15} weight="bold" aria-hidden="true" />
-            New
+            New local
           </button>
         }
       />
+      {hostedComputer ? <HostedSchedulesPanel state={hostedComputer} /> : null}
+      <div className="local-schedules-heading">
+        <span>On this device</span>
+        <h2>Local schedules</h2>
+        <p>Prompt-based work below runs through this Fable installation and stops when the desktop runtime is unavailable.</p>
+      </div>
       <SchedulePanel
         jobs={runtime.scheduledJobs}
         runs={runtime.workflowRuns}

@@ -31,8 +31,8 @@ redemption. Direct desktop operations use `refresh` and `revoke`. The earlier
 `token` and `identity` route sketch is superseded by this handoff protocol.
 
 Deploying, configuring, and independently reviewing the broker is explicitly a
-separate release task (see [Roadmap](../product/roadmap.md) Milestone 3 and
-[Threat model](../security/threat-model.md) "Remaining security work"). Until a
+separate release task (see the [Threat model](../security/threat-model.md)
+"Remaining security work"). Until a
 broker is deployed and its callback URLs are registered in each provider
 console, **no confidential-client connector can be connected**. The desktop
 runtime already enforces this by failing closed — see the "Fail-closed

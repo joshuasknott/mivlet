@@ -193,7 +193,7 @@ describe("SchedulePanel — Modal Creation Flow", () => {
 describe("SchedulePanel — list states", () => {
   it("shows the empty state when there are no jobs and not loading", () => {
     renderPanel();
-    expect(screen.getByText(/no schedules yet/i)).toBeInTheDocument();
+    expect(screen.getByText(/no local schedules yet/i)).toBeInTheDocument();
   });
 
   it("shows a loading indicator while jobs are hydrating", () => {

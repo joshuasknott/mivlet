@@ -2,7 +2,7 @@
 //!
 //! A conservative, local-first archive format for user-owned data in the
 //! encrypted SQLite store. See
-//! `docs/superpowers/specs/2026-06-30-export-import-design.md`.
+//! The portable boundary is exercised by the module tests below.
 //!
 //! ## What this is
 //! A versioned JSON manifest (`formatVersion`, independent of the DB

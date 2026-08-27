@@ -22,10 +22,8 @@ does not have separate Personal Home and Team Workspace types, does not use
 Clerk Organizations as tenancy, and does not add a parent Fable Organization
 layer now.
 
-This decision is the authority for Wave 0B identity and workspace contracts
-and Wave 0C tenancy implementation. It follows the [Product
-Blueprint](../product/vision.md) and the ordering in the [Master Build
-Plan](../product/master-build-plan.md).
+This decision is the authority for Fable identity, workspace, and tenancy
+contracts. It follows the [product direction](../product/vision.md).
 
 ## Scope and decision boundary
 
@@ -87,8 +85,8 @@ The decision in this ADR is the intended product contract:
 
 ### Current implementation state
 
-The current checkout is a config-gated foundation and does not satisfy this
-decision yet. As also recorded in [Status](../product/status.md):
+At the time this decision was accepted, the checkout was a config-gated
+foundation and did not satisfy the decision yet:
 
 - the Rust Clerk module treats identity as optional, stores Clerk credentials
   in a dedicated native keyring boundary, validates issuer, audience,

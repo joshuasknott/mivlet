@@ -55,6 +55,37 @@ export {
   signOutRuntimeIdentity,
   type AccountRuntimePort
 } from "./runtime/domains/account";
+export {
+  inspectRuntimeHostedProcess,
+  inspectRuntimeHostedProcessSchedule,
+  listRuntimeHostedProcessSchedules,
+  listRuntimeHostedProcessScheduleRuns,
+  cancelRuntimeHostedProcessSchedule,
+  controlRuntimeHostedProcessSchedule,
+  prepareRuntimeHostedAgentRoutine,
+  createRuntimeHostedAgentRoutine,
+  listRuntimeHostedAgentRoutines,
+  listRuntimeHostedAgentRoutineRuns,
+  prepareRuntimeHostedAgentRoutineCancel,
+  cancelRuntimeHostedAgentRoutine,
+  prepareRuntimeHostedAgentRoutineControl,
+  controlRuntimeHostedAgentRoutine,
+  killRuntimeHostedProcess,
+  launchRuntimeHostedProcess,
+  loadRuntimeHostedComputer,
+  createRuntimeHostedProcessSchedule,
+  navigateRuntimeHostedBrowser,
+  actRuntimeHostedBrowser,
+  prepareRuntimeHostedBrowser,
+  prepareRuntimeHostedBrowserAction,
+  prepareRuntimeHostedProcess,
+  prepareRuntimeHostedProcessSchedule,
+  prepareRuntimeHostedProcessScheduleCancel,
+  prepareRuntimeHostedProcessScheduleControl,
+  provisionRuntimeHostedComputer,
+  snapshotRuntimeHostedBrowser,
+  type HostedComputerRuntimePort
+} from "./runtime/domains/hosted-computer";
 import { importLocalTextFile } from "@fable/connectors/local-files";
 import { searchKnowledgeSources } from "@fable/connectors/knowledge-search";
 import type { LocalTextFileCandidate } from "@fable/connectors/local-files";

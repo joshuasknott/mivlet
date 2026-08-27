@@ -6,7 +6,7 @@
  * long-lived device keys) live behind the Rust boundary, never here.
  *
  * See docs/architecture/mobile-remote.md and the design spec at
- * docs/superpowers/specs/2026-06-29-mobile-remote-control-design.md.
+ * docs/architecture/mobile-remote.md.
  */
 
 export {

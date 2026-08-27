@@ -1,6 +1,6 @@
 //! SQL schema for the durable encrypted store.
 //!
-//! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
+//! See `docs/architecture/encrypted-storage.md`.
 //!
 //! Sensitive free-text lives inside an encrypted `payload` BLOB with a companion
 //! `payload_nonce` BLOB. Plaintext columns are non-secret only: ids, enums,

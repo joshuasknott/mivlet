@@ -50,4 +50,44 @@ describe("ConversationMessageActions", () => {
     await user.click(screen.getByRole("button", { name: "Redo response" }));
     expect(onRedo).toHaveBeenCalledOnce();
   });
+
+  it("turns a useful message into a routine draft", async () => {
+    const onMakeRoutine = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ConversationMessageActions
+        role="assistant"
+        content="Prepare the daily launch brief"
+        onSaveToKnowledge={vi.fn(async () => undefined)}
+        onMakeRoutine={onMakeRoutine}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Make routine" }));
+    expect(onMakeRoutine).toHaveBeenCalledOnce();
+  });
+
+  it("teaches a completed response without exposing the action on user prompts", async () => {
+    const onTeachTask = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <ConversationMessageActions
+        role="assistant"
+        content="Here is the repeatable result."
+        onSaveToKnowledge={vi.fn(async () => undefined)}
+        onTeachTask={onTeachTask}
+      />
+    );
+    await user.click(screen.getByRole("button", { name: "Teach this" }));
+    expect(onTeachTask).toHaveBeenCalledOnce();
+
+    rerender(
+      <ConversationMessageActions
+        role="user"
+        content="Repeat this work"
+        onSaveToKnowledge={vi.fn(async () => undefined)}
+        onTeachTask={onTeachTask}
+      />
+    );
+    expect(screen.queryByRole("button", { name: "Teach this" })).not.toBeInTheDocument();
+  });
 });

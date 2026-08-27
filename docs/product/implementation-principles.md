@@ -1,6 +1,7 @@
 # Implementation Principles
 
-These are supporting implementation rules for the private-product build. They are subordinate to the [Product Blueprint](vision.md), accepted ADRs, and the [Master Build Plan](master-build-plan.md).
+These rules support the [product direction](vision.md), accepted ADRs, and the
+current maturity boundaries in the root `README.md`.
 
 ## 1. Local Execution And Hosted Identity Have Separate Jobs
 
@@ -42,10 +43,10 @@ Prefer plain files, typed protocol objects, narrow Rust commands, and focused Re
 
 Before claims, releases, or public docs, check the current files and run the relevant gates. At minimum, keep typecheck, tests, build, Tauri check, Rust tests, clippy, and formatting aligned with the package manager and platform.
 
-## Evidence Checked
+## Related current sources
 
-- `docs/product/thesis.md`
-- `docs/product/architecture.md`
+- `README.md`
+- `docs/product/vision.md`
 - `docs/product/connectors.md`
 - `docs/security/threat-model.md`
 - `apps/desktop/src/runtime.ts`

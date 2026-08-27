@@ -26,6 +26,9 @@ import type { PersistedShellState } from "./types";
 
 const AGENT_ICON_COLORS = ["#865DFA", "#3581FB", "#2CC663", "#FCBD22", "#FC6D69", "#555B63"];
 const MAX_AGENT_IMAGE_DATA_URL_CHARACTERS = 512_000;
+const MAX_AGENT_LEARNED_TASKS = 24;
+const MAX_AGENT_LEARNED_TASK_TITLE = 120;
+const MAX_AGENT_LEARNED_TASK_INSTRUCTION = 4_000;
 
 /**
  * LocalStorage persistence and Tauri runtime snapshot conversion. These are
@@ -236,11 +239,29 @@ function normalizeAgentProfiles(agents: FableAgentProfile[] | undefined): FableA
       && agent.iconImageDataUrl.length <= MAX_AGENT_IMAGE_DATA_URL_CHARACTERS
       ? agent.iconImageDataUrl
       : undefined;
+    const learnedTasks = Array.isArray(agent.learnedTasks)
+      ? agent.learnedTasks
+        .filter((task) => task && typeof task === "object")
+        .slice(0, MAX_AGENT_LEARNED_TASKS)
+        .map((task) => ({
+          id: typeof task.id === "string" ? task.id.trim().slice(0, 120) : "",
+          title: typeof task.title === "string"
+            ? task.title.trim().slice(0, MAX_AGENT_LEARNED_TASK_TITLE)
+            : "",
+          instruction: typeof task.instruction === "string"
+            ? task.instruction.trim().slice(0, MAX_AGENT_LEARNED_TASK_INSTRUCTION)
+            : "",
+          createdAt: typeof task.createdAt === "string" ? task.createdAt : "",
+          updatedAt: typeof task.updatedAt === "string" ? task.updatedAt : ""
+        }))
+        .filter((task) => task.id && task.title && task.instruction)
+      : [];
     return {
       ...agent,
       icon: "agent",
       iconColor,
-      iconImageDataUrl
+      iconImageDataUrl,
+      learnedTasks
     };
   });
 }

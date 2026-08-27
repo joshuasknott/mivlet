@@ -1,6 +1,6 @@
 //! Schema and data migrations for the durable store.
 //!
-//! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
+//! See `docs/architecture/encrypted-storage.md`.
 //!
 //! - **Schema migrations** ([`apply`]) run forward-only step functions keyed by
 //!   version, inside the migration transaction. v1 DDL is applied by

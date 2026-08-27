@@ -57,6 +57,27 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it("shows one adaptive primary action for empty and typed drafts", () => {
+    const { rerender } = render(
+      <Composer {...propsFor("idle", { composerValue: "" })} />
+    );
+
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+
+    rerender(<Composer {...propsFor("idle", { composerValue: "Draft reply" })} />);
+
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start dictation" })).not.toBeInTheDocument();
+  });
+
+  it("treats whitespace-only drafts as empty", () => {
+    render(<Composer {...propsFor("idle", { composerValue: "   " })} />);
+
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+  });
+
   it("shows truthful listening controls while keeping typing available", () => {
     const props = propsFor("listening");
     render(<Composer {...props} />);
@@ -100,7 +121,7 @@ describe("Composer dictation controls", () => {
   it.each(["disabled", "unsupported"] as const)(
     "keeps the %s explanation keyboard discoverable",
     (status) => {
-      render(<Composer {...propsFor(status)} />);
+      render(<Composer {...propsFor(status, { composerValue: "" })} />);
 
       const explanation = screen.getByRole("button", {
         name: `State: ${status}`

@@ -1,0 +1,2 @@
+# Copy to .dev.vars for local development. Never commit the real value.
+FABLE_HOSTED_RUNNER_API_KEY=replace-with-a-long-random-secret

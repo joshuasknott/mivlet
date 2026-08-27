@@ -508,15 +508,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // A page view is any first-class utility page or account page. When a page
   // is active the composer is hidden and the dedicated page renders instead.
   const activePage: WorkspacePage | null =
-    activeItem === "Departments"
-      ? "Departments"
-      : activeUtility === "Knowledge" ||
-          activeUtility === "Schedules" ||
-          activeUtility === "Connectors"
-        ? activeUtility
-        : activeItem === "Profile" || activeItem === "Settings"
-          ? activeItem
-          : null;
+    activeUtility === "Knowledge" ||
+    activeUtility === "Schedules" ||
+    activeUtility === "Connectors"
+      ? activeUtility
+      : activeItem === "Profile" || activeItem === "Settings"
+        ? activeItem
+        : null;
   // Chat views: the default home, a selected thread/project, or a new chat.
   const isChatView = activePage === null;
   const workspaceKnowledgeSources = useMemo(

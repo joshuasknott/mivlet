@@ -58,6 +58,16 @@ describe("permission profile policy", () => {
     expect(effectForTool("read-file")).toBe("local-read");
     expect(effectForTool("write-file")).toBe("local-write");
     expect(effectForTool("run-shell")).toBe("shell-execution");
+    expect(effectForTool("cloud-browser")).toBe("browser-state-mutation");
+    expect(effectForTool("cloud-browser-action")).toBe("browser-state-mutation");
+    expect(effectForTool("cloud-process-schedule")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-process-schedule-cancel")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-process-schedule-pause")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-process-schedule-resume")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-agent-routine")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-agent-routine-cancel")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-agent-routine-pause")).toBe("schedule-mutation");
+    expect(effectForTool("cloud-agent-routine-resume")).toBe("schedule-mutation");
     expect(effectForTool("connection-read")).toBe("connector-read");
     expect(effectForTool("gmail-read")).toBe("connector-read");
   });

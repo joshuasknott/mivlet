@@ -318,7 +318,7 @@ export function SchedulePanel({
       ) : jobs.length === 0 ? (
         <div className="schedule-empty" data-testid="schedule-empty">
           <CalendarPlus size={28} weight="duotone" aria-hidden="true" />
-          <p>No schedules yet. Create one with New.</p>
+          <p>No local schedules yet. Create one with New local.</p>
         </div>
       ) : filteredJobs.length === 0 ? (
         <div className="schedule-empty schedule-empty--search" data-testid="schedule-no-results">

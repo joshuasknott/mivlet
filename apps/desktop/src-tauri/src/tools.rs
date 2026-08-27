@@ -242,6 +242,16 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
+        "cloud-browser"
+        | "cloud-browser-action"
+        | "cloud-process-schedule"
+        | "cloud-process-schedule-cancel"
+        | "cloud-process-schedule-pause"
+        | "cloud-process-schedule-resume"
+        | "cloud-agent-routine"
+        | "cloud-agent-routine-cancel"
+        | "cloud-agent-routine-pause"
+        | "cloud-agent-routine-resume" => Some(("full-access", "critical")),
         "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
         }
@@ -286,7 +296,7 @@ pub(crate) fn validate_tool_approval_binding(
     })?;
     let expected = object
         .iter()
-        .take(4)
+        .take(16)
         .map(|(key, value)| {
             let raw_rendered = value
                 .as_str()
@@ -294,6 +304,9 @@ pub(crate) fn validate_tool_approval_binding(
                 .unwrap_or_else(|| value.to_string());
             let rendered = if tool == "web-fetch" && key == "url" {
                 normalize_url_for_fingerprint(&raw_rendered).unwrap_or(raw_rendered)
+            } else if tool == "cloud-browser" && key == "url" {
+                crate::hosted_computer::normalize_public_https_url(&raw_rendered)
+                    .unwrap_or(raw_rendered)
             } else {
                 raw_rendered
             };

@@ -176,6 +176,9 @@ export function Composer({
         : voiceMessage;
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
+  const hasComposerText = composerValue.trim().length > 0;
+  const showVoiceAction =
+    !isWorking && (!hasComposerText || voiceListening || voiceTransitioning);
   useEffect(() => {
     const input = composerRef.current;
     if (!input) return;
@@ -258,7 +261,7 @@ export function Composer({
         </div>
       ) : null}
       <form
-        className={`composer-glow ${menuPlacementClass}`}
+        className={`composer-glow ${menuPlacementClass}${compactAgentSurface ? " composer-glow--compact-agent" : ""}`}
         onSubmit={onSubmit}
         onKeyDown={(event) => {
           if (event.key === "Escape" && voiceCancelable) {
@@ -569,54 +572,57 @@ export function Composer({
                 </div>
               ) : null}
             </div> : null}
-            <div className="voice-actions" data-state={voiceStatus}>
-              <div className="voice-action">
+            {showVoiceAction ? (
+              <div className="voice-actions" data-state={voiceStatus}>
+                <div className="voice-action">
+                  <button
+                    type="button"
+                    className="composer-chip voice-action__primary"
+                    onClick={() => {
+                      if (voiceListening) onStopVoice();
+                      else if (voiceCanStart && !voiceTransitioning) onStartVoice();
+                    }}
+                    aria-label={voiceActionLabel}
+                    aria-pressed={voiceListening}
+                    aria-busy={voiceTransitioning}
+                    aria-disabled={voiceUnavailable || voiceTransitioning}
+                    aria-describedby="dictation-status dictation-disclosure"
+                  >
+                    {voiceListening ? (
+                      <Stop size={15} weight="fill" />
+                    ) : (
+                      <Microphone size={17} weight="fill" />
+                    )}
+                  </button>
+                  <span className="voice-tooltip" role="tooltip" aria-hidden="true">
+                    {voiceActionLabel}
+                  </span>
+                </div>
                 <button
                   type="button"
-                  className="composer-chip voice-action__primary"
-                  onClick={() => {
-                    if (voiceListening) onStopVoice();
-                    else if (voiceCanStart && !voiceTransitioning) onStartVoice();
-                  }}
-                  aria-label={voiceActionLabel}
-                  aria-pressed={voiceListening}
-                  aria-busy={voiceTransitioning}
-                  aria-disabled={voiceUnavailable || voiceTransitioning}
-                  aria-describedby="dictation-status dictation-disclosure"
+                  className="composer-chip voice-action__cancel"
+                  onClick={onCancelVoice}
+                  aria-label="Cancel dictation"
+                  aria-hidden={!voiceCancelable}
+                  tabIndex={voiceCancelable ? 0 : -1}
                 >
-                  {voiceListening ? (
-                    <Stop size={15} weight="fill" />
-                  ) : (
-                    <Microphone size={17} weight="fill" />
-                  )}
+                  <X size={16} weight="bold" />
                 </button>
-                <span className="voice-tooltip" role="tooltip" aria-hidden="true">
-                  {voiceActionLabel}
-                </span>
               </div>
+            ) : (
               <button
-                type="button"
-                className="composer-chip voice-action__cancel"
-                onClick={onCancelVoice}
-                aria-label="Cancel dictation"
-                aria-hidden={!voiceCancelable}
-                tabIndex={voiceCancelable ? 0 : -1}
+                className={`send-button${isWorking ? " send-button--stop" : ""}`}
+                type={isWorking ? "button" : "submit"}
+                aria-label={isWorking ? "Stop response" : "Send prompt"}
+                onClick={isWorking ? onStop : undefined}
               >
-                <X size={16} weight="bold" />
+                {isWorking ? (
+                  <Stop size={14} weight="fill" />
+                ) : (
+                  <ArrowUp size={19} weight="bold" />
+                )}
               </button>
-            </div>
-            <button
-              className={`send-button${isWorking ? " send-button--stop" : ""}`}
-              type={isWorking ? "button" : "submit"}
-              aria-label={isWorking ? "Stop response" : "Send prompt"}
-              onClick={isWorking ? onStop : undefined}
-            >
-              {isWorking ? (
-                <Stop size={14} weight="fill" />
-              ) : (
-                <ArrowUp size={19} weight="bold" />
-              )}
-            </button>
+            )}
           </div>
         </div>
 

@@ -1,7 +1,7 @@
 //! Core durable encrypted store: connection management, pragmas, transactions,
 //! integrity checks, and row-bound encryption helpers.
 //!
-//! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
+//! See `docs/architecture/encrypted-storage.md`.
 //!
 //! A [`Store`] owns a single SQLite connection (guarded by a mutex; WAL allows
 //! concurrent readers) and a [`Vault`] (the AEAD primitive). Repositories

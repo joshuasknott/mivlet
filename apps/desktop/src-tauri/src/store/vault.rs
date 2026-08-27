@@ -1,6 +1,6 @@
 //! Application-layer encryption for the durable local store.
 //!
-//! See `docs/superpowers/specs/2026-06-28-encrypted-storage-design.md`.
+//! See `docs/architecture/encrypted-storage.md`.
 //!
 //! Each sensitive payload is stored as two columns: a 12-byte random `nonce`
 //! and an AES-256-GCM `ciphertext` that authenticates both the plaintext and

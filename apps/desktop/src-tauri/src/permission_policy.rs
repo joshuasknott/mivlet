@@ -66,6 +66,15 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         "write-file" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
+        "cloud-browser" | "cloud-browser-action" => Some("browser-state-mutation"),
+        "cloud-process-schedule"
+        | "cloud-process-schedule-cancel"
+        | "cloud-process-schedule-pause"
+        | "cloud-process-schedule-resume"
+        | "cloud-agent-routine"
+        | "cloud-agent-routine-cancel"
+        | "cloud-agent-routine-pause"
+        | "cloud-agent-routine-resume" => Some("schedule-mutation"),
         "connection-read"
         | "github-read"
         | "vercel-read"
@@ -129,6 +138,7 @@ pub(crate) fn evaluate_permission_policy(
             | "app-state-mutation"
             | "schedule-mutation"
             | "schedule-execution"
+            | "browser-state-mutation"
             | "web-fetch"
     ) || matches!(risk_level, "high" | "critical");
 

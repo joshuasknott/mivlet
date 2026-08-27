@@ -92,5 +92,18 @@ export default defineSchema({
   }).index("by_mutation", ["workspaceId", "deviceId", "clientMutationId"]),
   mutation_audit: defineTable({
     workspaceId: v.string(), internalUserId: v.string(), memberId: v.string(), deviceId: v.string(), clientMutationId: v.string(), recordType: v.literal("project"), recordId: v.string(), operation, status: mutationStatus, revision: v.optional(v.number()), createdAt: v.number()
-  }).index("by_workspace", ["workspaceId"])
+  }).index("by_workspace", ["workspaceId"]),
+  hosted_execution_nodes: defineTable({
+    executionNodeId: v.string(), workspaceId: v.string(), agentId: v.string(), computerId: v.string(),
+    locality: v.literal("hosted"), status: v.union(v.literal("provisioning"), v.literal("ready"), v.literal("degraded"), v.literal("destroyed")),
+    runtimeActive: v.boolean(), keepAlive: v.boolean(), runnerGeneration: v.number(), revision: v.number(),
+    createdByInternalUserId: v.string(), createdByMemberId: v.string(), createdByDeviceId: v.string(),
+    createdAt: v.number(), updatedAt: v.number()
+  }).index("by_workspace_agent", ["workspaceId", "agentId"]).index("by_computer", ["computerId"]),
+  hosted_execution_requests: defineTable({
+    requestKey: v.string(), workspaceId: v.string(), agentId: v.string(), executionNodeId: v.string(), computerId: v.string(),
+    operation: v.literal("provision"), status: v.union(v.literal("pending"), v.literal("completed"), v.literal("failed")),
+    actorInternalUserId: v.string(), actorMemberId: v.string(), actorDeviceId: v.string(),
+    errorCode: v.optional(v.string()), createdAt: v.number(), updatedAt: v.number()
+  }).index("by_request", ["requestKey"]).index("by_workspace", ["workspaceId"])
 });

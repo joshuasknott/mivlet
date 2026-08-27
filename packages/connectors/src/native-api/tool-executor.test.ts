@@ -84,6 +84,30 @@ function approvalFor(
       consequence: "Execute the web-fetch tool via openai with the given arguments.",
       requestedAt: new Date(0).toISOString(),
       decisions: ["once", "session", "rule", "modify", "deny"]
+    },
+    "cloud-browser": {
+      id,
+      service: "openai",
+      action: "cloud-browser url: https://x.test/",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["url: https://x.test/"],
+      consequence: "Open the page in the cloud browser.",
+      requestedAt: new Date(0).toISOString(),
+      decisions: ["once", "modify", "deny"],
+      confirmationPhrase: "approve cloud-browser"
+    },
+    "cloud-browser-action": {
+      id,
+      service: "openai",
+      action: "cloud-browser-action action: click elementRef: control-1234567890abcdef-1",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["action: click", "observationId: observation-1234567890abcdef", "elementRef: control-1234567890abcdef-1", "controlRole: button"],
+      consequence: "Use one observed browser control.",
+      requestedAt: new Date(0).toISOString(),
+      decisions: ["once", "modify", "deny"],
+      confirmationPhrase: "approve cloud-browser-action"
     }
   };
   return { ...base[tool], ...over };
@@ -99,6 +123,16 @@ function argsFor(tool: string): string {
       return JSON.stringify({ command: "ls" });
     case "web-fetch":
       return JSON.stringify({ url: "https://x.test" });
+    case "cloud-browser":
+      return JSON.stringify({ url: "https://x.test/" });
+    case "cloud-browser-action":
+      return JSON.stringify({
+        action: "click",
+        observationId: "observation-1234567890abcdef",
+        elementRef: "control-1234567890abcdef-1",
+        controlRole: "button",
+        controlName: "Continue"
+      });
     default:
       return "{}";
   }
@@ -110,16 +144,22 @@ function fakeRuntime(): ToolRuntime & {
   writes: { path: string; content: string }[];
   shellRuns: string[];
   fetched: string[];
+  opened: string[];
+  browserActions: string[];
 } {
   const files = new Map<string, string>([["x.txt", "hello world"]]);
   const writes: { path: string; content: string }[] = [];
   const shellRuns: string[] = [];
   const fetched: string[] = [];
+  const opened: string[] = [];
+  const browserActions: string[] = [];
   return {
     files,
     writes,
     shellRuns,
     fetched,
+    opened,
+    browserActions,
     async readFile(path) {
       return files.get(path) ?? null;
     },
@@ -135,6 +175,14 @@ function fakeRuntime(): ToolRuntime & {
     async fetchUrl(url) {
       fetched.push(url);
       return `<html>${url}</html>`;
+    },
+    async openBrowser(url) {
+      opened.push(url);
+      return `opened: ${url}`;
+    },
+    async actBrowser(input) {
+      browserActions.push(`${input.action}:${input.controlRole}:${input.controlName}`);
+      return "browser action complete";
     }
   };
 }
@@ -179,6 +227,76 @@ describe("createToolExecutor — dispatch + grant gating", () => {
       executor(approvalFor("c1", "web-fetch"), argsFor("web-fetch"))
     ).resolves.toBe("<html>https://x.test</html>");
     expect(runtime.fetched).toEqual(["https://x.test"]);
+  });
+
+  it("dispatches cloud-browser only after a critical grant", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+
+    await expect(
+      executor(approvalFor("c1", "cloud-browser"), argsFor("cloud-browser"))
+    ).resolves.toBe("opened: https://x.test/");
+    expect(runtime.opened).toEqual(["https://x.test/"]);
+  });
+
+  it("dispatches only the structured observed cloud-browser action", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(
+      executor(approvalFor("c1", "cloud-browser-action"), argsFor("cloud-browser-action"))
+    ).resolves.toBe("browser action complete");
+    expect(runtime.browserActions).toEqual(["click:button:Continue"]);
+  });
+
+  it("dispatches an exact native-dropdown selection as an observed browser action", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(executor(
+      approvalFor("c1", "cloud-browser-action"),
+      JSON.stringify({
+        action: "select",
+        observationId: "observation-1234567890abcdef",
+        elementRef: "control-1234567890abcdef-2",
+        controlRole: "combobox",
+        controlName: "Region",
+        value: "Europe"
+      })
+    )).resolves.toBe("browser action complete");
+    expect(runtime.browserActions).toEqual(["select:combobox:Region"]);
+  });
+
+  it("dispatches an observation-scoped page scroll without a selector or script", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(executor(
+      approvalFor("c1", "cloud-browser-action"),
+      JSON.stringify({
+        action: "scroll",
+        observationId: "observation-1234567890abcdef",
+        elementRef: "control-1234567890abcdef-0",
+        controlRole: "document",
+        controlName: "Page",
+        value: "half-page-down"
+      })
+    )).resolves.toBe("browser action complete");
+    expect(runtime.browserActions).toEqual(["scroll:document:Page"]);
+  });
+
+  it("dispatches an observation-scoped history move without a caller URL", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(executor(
+      approvalFor("c1", "cloud-browser-action"),
+      JSON.stringify({
+        action: "history",
+        observationId: "observation-1234567890abcdef",
+        elementRef: "control-1234567890abcdef-0",
+        controlRole: "document",
+        controlName: "Page",
+        value: "back"
+      })
+    )).resolves.toBe("browser action complete");
+    expect(runtime.browserActions).toEqual(["history:document:Page"]);
   });
 
   it("(b) write-file runs through the runtime only after a grant (records the write)", async () => {

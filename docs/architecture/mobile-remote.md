@@ -19,8 +19,7 @@ offline behavior, the approval flow, and what is explicitly not cloud-hosted.
 The wire types live in `packages/protocol/src/index.ts` (the mobile-remote
 section); the pure session/pairing/authorization/dispatch logic lives in
 `packages/connectors/src/mobile-remote/`; the desktop command boundary is
-`apps/desktop/src-tauri/src/remote_control.rs`. The design spec is
-`docs/superpowers/specs/2026-06-29-mobile-remote-control-design.md`.
+`apps/desktop/src-tauri/src/remote_control.rs`.
 
 ## Mental model
 

@@ -1,9 +1,7 @@
 import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
-import { Plugs } from "@phosphor-icons/react/dist/csr/Plugs";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { Stack } from "@phosphor-icons/react/dist/csr/Stack";
 import type { FableAgentProfile } from "@fable/protocol";
 import { ProfileAgentAvatar } from "./agent-icons";
 
@@ -17,48 +15,37 @@ export function AgentSidebar({
   agents,
   activeAgentId,
   previews,
-  workspaceName,
   profileName,
   onSelectAgent,
   onCreateAgent,
   onOpenSearch,
   onEditAgent,
-  onOpenKnowledge,
-  onOpenConnectors,
   onOpenSettings
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
   previews: Record<string, AgentSidebarPreview>;
-  workspaceName: string;
   profileName: string;
   onSelectAgent: (agent: FableAgentProfile) => void;
   onCreateAgent: () => void;
   onOpenSearch: () => void;
   onEditAgent: (agent: FableAgentProfile) => void;
-  onOpenKnowledge: () => void;
-  onOpenConnectors: () => void;
   onOpenSettings: () => void;
 }) {
   return (
     <aside className="agent-sidebar" aria-label="Agents">
       <div className="agent-sidebar__topline">
-        <span className="agent-sidebar__workspace" title={workspaceName}>{workspaceName}</span>
+        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent} aria-label="New agent" title="New agent">
+          <Plus size={17} aria-hidden="true" />
+        </button>
       </div>
 
       <div className="agent-sidebar__actions">
-        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent}>
-          <Plus size={16} weight="bold" aria-hidden="true" />
-          <span>New agent</span>
-        </button>
         <button className="agent-search" type="button" onClick={onOpenSearch} aria-label="Search">
           <MagnifyingGlass size={15} aria-hidden="true" />
           <span>Search</span>
-          <kbd>Ctrl K</kbd>
         </button>
       </div>
-
-      <div className="agent-sidebar__section-label">Agents</div>
 
       <div className="agent-list" role="list">
         {agents.map((agent) => {
@@ -84,11 +71,6 @@ export function AgentSidebar({
           );
         })}
         {agents.length === 0 ? <p className="agent-list__empty">Create your first agent to get started.</p> : null}
-      </div>
-
-      <div className="agent-sidebar__utilities">
-        <button type="button" onClick={onOpenKnowledge}><Stack size={16} aria-hidden="true" /><span>Knowledge</span></button>
-        <button type="button" onClick={onOpenConnectors}><Plugs size={16} aria-hidden="true" /><span>Connections</span></button>
       </div>
 
       <button className="agent-sidebar__profile" type="button" onClick={onOpenSettings}>

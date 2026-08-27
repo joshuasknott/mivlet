@@ -20,7 +20,6 @@ import type {
  */
 
 export type UtilityItem =
-  | "Departments"
   | "Connectors"
   | "Knowledge"
   | "Schedules";
