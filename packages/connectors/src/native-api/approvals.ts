@@ -43,6 +43,22 @@ function normalizeWebFetchUrl(raw: string): string | null {
   }
 }
 
+/** Match the native cloud-browser proposal canonicalization. Navigation is
+ * HTTPS-only and fragments are removed because they are not sent to the
+ * remote page. Keeping the approval preview canonical lets Rust bind the
+ * source tool approval to the exact prepared navigation proposal. */
+function normalizeCloudBrowserUrl(raw: string): string | null {
+  try {
+    const u = new URL(raw);
+    if (u.protocol !== "https:") return null;
+    if (u.username || u.password) return null;
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
 /** Build the ApprovalRequest for a model-emitted tool call. */
 export function buildToolApproval(
   providerId: string,
@@ -57,11 +73,15 @@ export function buildToolApproval(
   const mode = registered?.defaultMode ?? "full-access";
   const risk = registered?.defaultRisk ?? "critical";
   const dataUsed = Object.entries(parsed)
-    .slice(0, 4)
+    .slice(0, 16)
     .map(([key, value]) => {
       let vstr = typeof value === "string" ? value : JSON.stringify(value);
       if (toolName === "web-fetch" && key === "url" && typeof value === "string") {
         const norm = normalizeWebFetchUrl(value);
+        if (norm) vstr = norm;
+      }
+      if (toolName === "cloud-browser" && key === "url" && typeof value === "string") {
+        const norm = normalizeCloudBrowserUrl(value);
         if (norm) vstr = norm;
       }
       return `${key}: ${vstr}`;

@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "fable-hosted-runner",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-25",
+  "compatibility_flags": ["nodejs_compat"],
+  "browser": {
+    "binding": "MYBROWSER"
+  },
+  "ai": {
+    "binding": "AI"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 }
+  },
+  "containers": [
+    {
+      "class_name": "Sandbox",
+      "image": "./Dockerfile",
+      "instance_type": "lite",
+      "max_instances": 10
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "Sandbox", "class_name": "Sandbox" },
+      { "name": "COMPUTER_AUTHORITY", "class_name": "ComputerAuthority" },
+      { "name": "BROWSER_AUTHORITY", "class_name": "BrowserAuthority" },
+      { "name": "AGENT_ROUTINE_AUTHORITY", "class_name": "AgentRoutineAuthority" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1-hosted-computer",
+      "new_sqlite_classes": ["Sandbox", "ComputerAuthority"]
+    },
+    {
+      "tag": "v2-hosted-browser",
+      "new_sqlite_classes": ["BrowserAuthority"]
+    },
+    {
+      "tag": "v3-hosted-agent-routines",
+      "new_sqlite_classes": ["AgentRoutineAuthority"]
+    }
+  ]
+}

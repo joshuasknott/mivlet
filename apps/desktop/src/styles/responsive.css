@@ -468,6 +468,95 @@
     flex-wrap: wrap;
   }
 
+  .hosted-schedules {
+    padding: 15px;
+  }
+
+  .hosted-schedules__header {
+    grid-template-columns: 38px minmax(0, 1fr);
+  }
+
+  .hosted-schedules__header-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .hosted-agent-routines__header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hosted-agent-routines__header > button {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .hosted-schedules__header-actions button,
+  .hosted-schedules__error button,
+  .hosted-schedule__cancel,
+  .hosted-schedule__control,
+  .hosted-schedule__cancel-confirm,
+  .schedule-new-button {
+    min-height: 44px;
+  }
+
+  .hosted-schedule {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .hosted-schedule__actions {
+    grid-column: 2;
+  }
+
+  .hosted-schedule-history__summary {
+    grid-template-columns: 68px minmax(0, 1fr);
+  }
+
+  .hosted-schedule-history__summary small,
+  .hosted-schedule-history__summary button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .hosted-schedule-create__fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hosted-schedule-create__arguments {
+    grid-column: auto;
+  }
+
+  .hosted-agent-routine-create__instruction {
+    grid-column: auto;
+  }
+
+  .hosted-schedule-create > header > button {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    flex: 0 0 44px;
+  }
+
+  .hosted-schedule-create input,
+  .hosted-schedule-create select,
+  .hosted-schedule-create > footer button,
+  .hosted-schedule-history__summary button {
+    min-height: 44px;
+  }
+
+  .hosted-agent-routine-create__authority label {
+    min-height: 44px;
+  }
+
+  .hosted-schedules__error {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .hosted-schedules__error button {
+    grid-column: 2;
+    justify-self: start;
+  }
+
   .schedule-edit {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }

@@ -24,6 +24,9 @@ import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
 import type { SidebarProject } from "../components/WorkspaceSidebar";
 import { AgentSidebar, type AgentSidebarPreview } from "../components/agents/AgentSidebar";
 import { AgentEditor } from "../components/agents/AgentEditor";
+import { AgentWelcome } from "../components/agents/AgentWelcome";
+import { AgentTeamMissionDialog } from "../components/agents/AgentTeamMissionDialog";
+import { AgentLearningDialog, type AgentLearningSource } from "../components/agents/AgentLearningDialog";
 import { nextAgentColor, ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
@@ -46,6 +49,7 @@ import { useProjectMemory } from "../hooks/useProjectMemory";
 import { useProjectActivity } from "../hooks/useProjectActivity";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { toSlug } from "../lib/helpers";
+import { agentExecutionInstructions, suggestTeammateName } from "../lib/agent-learning";
 import { useMissionWorkspaceState } from "./chat-workspace/useMissionWorkspaceState";
 
 type ConversationMessage = {
@@ -61,6 +65,7 @@ type ConversationMessage = {
   missionOutcome?: "accepted" | "completed" | "partial" | "failed" | "cancelled" | "awaiting-approval" | "awaiting-review";
   missionArtifactId?: string;
   approvalRunId?: string;
+  action?: "connect-provider";
 };
 
 function messageId(prefix: string) {
@@ -126,9 +131,14 @@ export function ChatWorkspace() {
   selectedConversationThreadIdRef.current = selectedConversationThreadId;
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
-  const { runtime, agent, durableConversation, voice, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
+  const { runtime, agent, durableConversation, voice, hostedComputer, hostedBrowser, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const activeAgent = runtime.agents.find((candidate) => candidate.id === runtime.activeAgentId) ?? runtime.agents[0]!;
-  const [liveRailOpen, setLiveRailOpen] = useState(() => window.innerWidth > 880);
+  const [liveRailOpen, setLiveRailOpen] = useState(false);
+  const [teamMissionOpen, setTeamMissionOpen] = useState(false);
+  const [learningDialog, setLearningDialog] = useState<{
+    mode: "manage" | "teach";
+    source: AgentLearningSource | null;
+  } | null>(null);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [workspaceSearchOpen, setWorkspaceSearchOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -193,6 +203,15 @@ export function ChatWorkspace() {
     .sort()
     .join("|")}`;
   const projectStore = useProjects(boundWorkspaceId);
+  const liveMissionProgress = useMemo(() => {
+    const optimistic = [...conversationMessages]
+      .reverse()
+      .find((message) => message.missionProgress)?.missionProgress;
+    if (optimistic && !["complete", "cancelled"].includes(optimistic.state)) return optimistic;
+    return [...threadMissionProgress]
+      .reverse()
+      .find((entry) => !["complete", "cancelled"].includes(entry.progress.state))?.progress;
+  }, [conversationMessages, threadMissionProgress]);
   const conversationWorkspaceId = useRef<string | null>(boundWorkspaceId);
   const workspaceName = runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace";
   // Account identity and native ownership can settle at different moments.
@@ -439,9 +458,13 @@ export function ChatWorkspace() {
     [composerModels, resolvedComposerModelOptionId, runtime.resolvedSelectedModelId]
   );
 
-  const appendConversationMessage = (role: ConversationMessage["role"], content: string) => {
+  const appendConversationMessage = (
+    role: ConversationMessage["role"],
+    content: string,
+    metadata: Pick<ConversationMessage, "action"> = {}
+  ) => {
     const id = messageId(role);
-    setConversationMessages((current) => [...current, { id, role, content }]);
+    setConversationMessages((current) => [...current, { id, role, content, ...metadata }]);
     return id;
   };
 
@@ -1313,12 +1336,38 @@ export function ChatWorkspace() {
                 <strong>{message.role === "assistant" ? activeAgent.name : verifiedProfile.name}</strong>
               </div>
               <p>{message.content}</p>
+              {message.action === "connect-provider" ? (
+                <button
+                  type="button"
+                  className="conversation-message__setup-action"
+                  onClick={() => handleSelectSettingsTab("providers")}
+                >
+                  Connect a model
+                </button>
+              ) : null}
               {message.role === "user" || !isCurrentResponse ? (
                 <Suspense fallback={null}>
                   <ConversationMessageActions
                     role={message.role}
                     content={message.content}
                     onSaveToKnowledge={() => saveMessageToKnowledge(message)}
+                    onMakeRoutine={() => {
+                      const title = message.content
+                        .split(/\r?\n/, 1)[0]
+                        .replace(/^#+\s*/, "")
+                        .trim()
+                        .slice(0, 72) || "Conversation routine";
+                      runtime.openRoutineDraft({ title, instruction: message.content });
+                    }}
+                    onTeachTask={message.role === "assistant" && sourceRequest ? () => {
+                      const sourcePrompt = sourceCommand?.status === "command"
+                        ? sourceCommand.request.args.trim() || sourceRequest.content
+                        : sourceRequest.content;
+                      setLearningDialog({
+                        mode: "teach",
+                        source: { prompt: sourcePrompt, response: message.content }
+                      });
+                    } : undefined}
                     onEdit={message.role === "user" ? () => {
                       runtime.setComposerValue(message.content);
                       runtime.focusComposer(message.content);
@@ -1616,6 +1665,33 @@ export function ChatWorkspace() {
     [composerModels, resolvedComposerModelOptionId]
   );
   const workspaceSearchItems = useMemo<WorkspaceSearchItem[]>(() => [
+    {
+      id: "schedules-page",
+      scope: "work" as const,
+      action: "schedule" as const,
+      title: "Schedules",
+      description: "Manage local routines and always-on cloud work",
+      meta: "Page",
+      keywords: "automation recurring routines cloud computer background"
+    },
+    {
+      id: "knowledge-page",
+      scope: "knowledge" as const,
+      action: "knowledge" as const,
+      title: "Knowledge",
+      description: "Review sources, memory, and reusable context",
+      meta: "Page",
+      keywords: "sources files memory context"
+    },
+    {
+      id: "connections-page",
+      scope: "connections" as const,
+      action: "connection" as const,
+      title: "Connections",
+      description: "Connect apps and inspect what agents can access",
+      meta: "Page",
+      keywords: "plugins connectors apps permissions"
+    },
     ...runtime.agents.map((profile) => ({
       id: profile.id,
       scope: "agents" as const,
@@ -1684,27 +1760,54 @@ export function ChatWorkspace() {
    * model work through the agent run. Unknown slashes and ordinary text fall
    * through to the normal prompt path unchanged.
    */
-  async function submitComposerText(rawText: string) {
+  async function submitComposerText(rawText: string, options: { displayText?: string } = {}) {
     const submitted = rawText.trim();
+    const displayed = options.displayText?.trim() || submitted;
     if (!submitted || agent.state.running || parallelMissionRunning || generalMissionRunning || pendingPrompt) return;
+    if (!activeAgent.instructions.trim()) {
+      const parsedPurpose = parseComposerText(submitted);
+      const purpose = parsedPurpose.status === "command"
+        ? parsedPurpose.request.args.trim() || submitted
+        : submitted;
+      runtime.updateAgent(activeAgent.id, {
+        instructions: purpose,
+        ...(activeAgent.name === "New teammate" ? { name: suggestTeammateName(purpose) } : {})
+      });
+    }
     if (!selectedConversationThreadId) {
       setSubmissionInFlight(true);
       const thread = await durableConversation.createThread({
         authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "current-member" as never },
         ...(newThreadProjectId ? { projectId: newThreadProjectId as never } : {}),
-        title: submitted.slice(0, 72)
+        title: displayed.slice(0, 72)
       });
       await durableConversation.deleteDraft();
       setSelectedConversationThreadId(thread.id);
-      setConversationMessages([{ id: messageId("user"), role: "user", content: submitted }]);
+      setConversationMessages([{ id: messageId("user"), role: "user", content: displayed }]);
       setPendingPrompt(submitted);
       return;
     }
-    appendConversationMessage("user", submitted);
+    appendConversationMessage("user", displayed);
     void continueComposerSubmission(submitted);
   }
 
   async function continueComposerSubmission(submitted: string) {
+    const parsed = parseComposerText(submitted);
+    if (parsed.status === "command") {
+      if (parsed.request.name === "mission") {
+        await runGeneralMissionCommand(submitted, parsed.request.args);
+        return;
+      }
+      const result = await runtime.runFableCommand(parsed.request, {
+        backendConnected: Boolean(runtime.connectedAgentBackend),
+        stopCurrentWork: stopActiveWork
+      });
+      appendConversationMessage("assistant", result.message);
+      if (result.status === "ok" && result.followUpPrompt && runtime.connectedAgentBackend) {
+        runPrompt(result.followUpPrompt, { appendUserMessage: false });
+      }
+      return;
+    }
     // The explicit local intake journey owns this narrow phrase before the
     // broader natural-language /plan parser can interpret "project brief".
     if (structuredIntakeSubject(submitted)) {
@@ -1964,8 +2067,12 @@ export function ChatWorkspace() {
         finishNewMissionLaunch();
         return;
       }
-      runtime.submitPrompt(prompt);
-      runtime.setComposerValue("");
+      appendConversationMessage(
+        "assistant",
+        "I’m ready to take this on, but I need a model connection before I can do the work. Your request is safe here—nothing ran in the background.",
+        { action: "connect-provider" }
+      );
+      runtime.setLastAction("Connect a model to start agent work");
       finishNewMissionLaunch();
       return;
     }
@@ -2096,8 +2203,9 @@ export function ChatWorkspace() {
       return;
     }
     finishNewMissionLaunch();
-    const executionPrompt = activeAgent.instructions.trim()
-      ? `Agent instructions:\n${activeAgent.instructions.trim()}\n\nUser request:\n${prompt}`
+    const executionInstructions = agentExecutionInstructions(activeAgent);
+    const executionPrompt = executionInstructions
+      ? `Agent instructions:\n${executionInstructions}\n\nUser request:\n${prompt}`
       : prompt;
     const request = buildAgentRequest({
       model: resolvedComposerModelId,
@@ -2264,6 +2372,7 @@ export function ChatWorkspace() {
   };
 
   const selectAgentSurface = (profile: FableAgentProfile) => {
+    setLearningDialog(null);
     setSelectedProjectId(null);
     setNewThreadProjectId(null);
     activeAssistantMessageId.current = null;
@@ -2284,6 +2393,21 @@ export function ChatWorkspace() {
   const closeAgentEditor = () => {
     setAgentEditorOpen(false);
     setEditingAgentId(null);
+  };
+
+  const createConversationalAgent = () => {
+    const created = runtime.createAgent({
+      name: "New teammate",
+      instructions: "",
+      modelId: "",
+      icon: "agent",
+      iconColor: nextAgentColor(runtime.agents.map((profile) => profile.iconColor)),
+      connectorIds: [],
+      knowledgeSourceIds: [],
+      permissionLabel: "Ask Me"
+    });
+    selectAgentSurface(created);
+    runtime.setLastAction("New teammate ready");
   };
 
   const openConversation = (thread: SidebarProject["threads"][number], context: string) => {
@@ -2334,27 +2458,64 @@ export function ChatWorkspace() {
         agents={runtime.agents}
         activeAgentId={activeAgent.id}
         previews={agentSidebarPreviews}
-        workspaceName={workspaceName}
         profileName={verifiedProfile.name}
         onSelectAgent={selectAgentSurface}
-        onCreateAgent={() => openAgentEditor()}
+        onCreateAgent={createConversationalAgent}
         onOpenSearch={() => setWorkspaceSearchOpen(true)}
         onEditAgent={openAgentEditor}
-        onOpenKnowledge={() => runtime.setActiveItem("Knowledge")}
-        onOpenConnectors={() => runtime.setActiveItem("Connectors")}
         onOpenSettings={() => runtime.setActiveItem("Settings")}
       />
       <section className="workspace" aria-label="Fable workspace">
         <AgentWorkspaceHeader
           agent={activeAgent}
-          modelLabel={modelChipLabel}
+          canTeamUp={runtime.agents.length > 1}
+          teamUpOpen={teamMissionOpen}
+          onTeamUp={() => setTeamMissionOpen(true)}
+          learnedCount={activeAgent.learnedTasks?.length ?? 0}
+          learnedOpen={learningDialog !== null}
+          onOpenLearned={() => setLearningDialog({ mode: "manage", source: null })}
+          attentionCount={runtime.openApprovals.length}
           liveRailOpen={liveRailOpen}
-          onEdit={() => openAgentEditor(activeAgent)}
           onToggleLiveRail={() => setLiveRailOpen((open) => !open)}
         />
         <div className="agent-workspace-body">
         {runtime.activePage && !isSettingsActive ? (
-          <ShellPageBoundary runtime={runtime} />
+          <ShellPageBoundary
+            runtime={runtime}
+            hostedComputer={{
+              scopeKey: hostedComputer.scopeKey,
+              agentName: activeAgent.name,
+              available: hostedComputer.available,
+              status: hostedComputer.node?.status,
+              keepAlive: hostedComputer.node?.keepAlive ?? false,
+              loading: hostedComputer.loading,
+              provisioning: hostedComputer.provisioning,
+              schedules: hostedComputer.schedules,
+              schedulesLoading: hostedComputer.schedulesLoading,
+              schedulesRefreshing: hostedComputer.schedulesRefreshing,
+              schedulesError: hostedComputer.schedulesError,
+              scheduleRuns: hostedComputer.scheduleRuns,
+              scheduleRunsLoading: hostedComputer.scheduleRunsLoading,
+              scheduleRunsError: hostedComputer.scheduleRunsError,
+              agentRoutines: hostedComputer.agentRoutines,
+              agentRoutinesLoading: hostedComputer.agentRoutinesLoading,
+              agentRoutinesError: hostedComputer.agentRoutinesError,
+              agentRoutineRuns: hostedComputer.agentRoutineRuns,
+              agentRoutineRunsLoading: hostedComputer.agentRoutineRunsLoading,
+              agentRoutineRunsError: hostedComputer.agentRoutineRunsError,
+              onProvision: hostedComputer.provision,
+              onRefresh: hostedComputer.refreshSchedules,
+              onCreate: hostedComputer.createSchedule,
+              onCancel: hostedComputer.cancelSchedule,
+              onPause: hostedComputer.pauseSchedule,
+              onResume: hostedComputer.resumeSchedule,
+              onInspectRun: hostedComputer.inspectScheduleRun,
+              onCreateAgentRoutine: hostedComputer.createAgentRoutine,
+              onCancelAgentRoutine: hostedComputer.cancelAgentRoutine,
+              onPauseAgentRoutine: hostedComputer.pauseAgentRoutine,
+              onResumeAgentRoutine: hostedComputer.resumeAgentRoutine
+            }}
+          />
         ) : selectedProject && !isSettingsActive ? (
           <div className="workspace-center workspace-center--page">
             <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
@@ -2442,7 +2603,16 @@ export function ChatWorkspace() {
                 {renderChatContext()}
               </div>
             ) : null}
-            <div className={conversationIsActive ? "conversation-composer-dock" : undefined}>
+            {!conversationIsActive ? (
+              <AgentWelcome
+                agent={activeAgent}
+                onChoose={(prompt) => {
+                  runtime.setComposerValue(prompt);
+                  runtime.focusComposer(prompt);
+                }}
+              />
+            ) : null}
+            <div className={conversationIsActive ? "conversation-composer-dock" : "agent-composer-dock"}>
               <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
@@ -2522,7 +2692,36 @@ export function ChatWorkspace() {
           transcript={agent.state.transcript}
           runId={agent.state.currentRunId}
           approvalCount={runtime.openApprovals.length}
-          computerUseActive={!runtime.browserSession.fixtureOnly && runtime.browserSession.lifecycle === "active"}
+          computerUseActive={Boolean(hostedBrowser.snapshot) || (!runtime.browserSession.fixtureOnly && runtime.browserSession.lifecycle === "active")}
+          hostedComputer={{
+            available: hostedComputer.available,
+            status: hostedComputer.node?.status,
+            runtimeActive: hostedComputer.node?.runtimeActive ?? false,
+            keepAlive: hostedComputer.node?.keepAlive ?? false,
+            loading: hostedComputer.loading,
+            provisioning: hostedComputer.provisioning,
+            error: hostedComputer.error,
+            onProvision: hostedComputer.provision,
+            browserOpening: hostedBrowser.opening,
+            browserPhase: hostedBrowser.phase,
+            browserError: hostedBrowser.error,
+            browserUrl: hostedBrowser.snapshot?.currentUrl,
+            browserTitle: hostedBrowser.snapshot?.title,
+            liveViewUrl: hostedBrowser.snapshot?.liveViewUrl,
+            browserDownload: hostedBrowser.snapshot?.lastDownload,
+            schedules: hostedComputer.schedules,
+            schedulesLoading: hostedComputer.schedulesLoading,
+            schedulesError: hostedComputer.schedulesError,
+            agentRoutines: hostedComputer.agentRoutines,
+            onOpenBrowser: hostedBrowser.open,
+            onRefreshBrowser: hostedBrowser.refresh
+          }}
+          screenPreviewUrl={hostedBrowser.snapshot?.previewDataUrl}
+          missionProgress={liveMissionProgress}
+          onReviewApprovals={() => {
+            setLiveRailOpen(false);
+            handleSelectSettingsTab("privacy");
+          }}
           onClose={() => setLiveRailOpen(false)}
         />
       ) : null}
@@ -2548,6 +2747,41 @@ export function ChatWorkspace() {
         onDelete={() => {
           if (editingAgentId) runtime.removeAgent(editingAgentId);
           closeAgentEditor();
+        }}
+      />
+
+      <AgentLearningDialog
+        open={learningDialog !== null}
+        agent={activeAgent}
+        source={learningDialog?.mode === "teach" ? learningDialog.source : null}
+        onClose={() => setLearningDialog(null)}
+        onChange={(learnedTasks) => {
+          runtime.updateAgent(activeAgent.id, { learnedTasks });
+          runtime.setLastAction(
+            learnedTasks.length
+              ? `${activeAgent.name} learned ${learnedTasks.length === 1 ? "a responsibility" : `${learnedTasks.length} responsibilities`}`
+              : `${activeAgent.name} has no learned responsibilities`
+          );
+        }}
+        onMakeRoutine={(draft) => {
+          setLearningDialog(null);
+          runtime.openRoutineDraft(draft);
+        }}
+        onRun={(task) => {
+          setLearningDialog(null);
+          void submitComposerText(task.instruction, { displayText: `Run: ${task.title}` });
+        }}
+      />
+
+      <AgentTeamMissionDialog
+        open={teamMissionOpen}
+        agents={runtime.agents}
+        activeAgentId={activeAgent.id}
+        busy={conversationSubmissionBlocked}
+        onClose={() => setTeamMissionOpen(false)}
+        onLaunch={(command, objective) => {
+          setTeamMissionOpen(false);
+          void submitComposerText(command, { displayText: `Team up: ${objective}` });
         }}
       />
 

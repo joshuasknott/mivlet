@@ -5,6 +5,9 @@ export * from "./domains/agent-runtime.js";
 export * from "./domains/connectors.js";
 export * from "./domains/scheduling-workflows.js";
 export * from "./domains/remote-control.js";
+export * from "./domains/hosted-computer.js";
+export * from "./domains/hosted-agent-routine.js";
+export * from "./domains/hosted-execution-capability.js";
 
 import type {
   ApprovalAuditEntry,
@@ -1222,6 +1225,15 @@ export interface RuntimeSnapshot {
 
 export type FableAgentIcon = "agent";
 
+/** A repeatable responsibility explicitly taught to a teammate by the user. */
+export interface FableLearnedTask {
+  id: string;
+  title: string;
+  instruction: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /**
  * A user-owned agent. Instructions and selections are non-secret; provider
  * credentials remain in the native credential boundary.
@@ -1238,6 +1250,8 @@ export interface FableAgentProfile {
   iconImageDataUrl?: string;
   connectorIds: string[];
   knowledgeSourceIds: string[];
+  /** Structured, reviewable work learned from conversation. */
+  learnedTasks?: FableLearnedTask[];
   permissionLabel: ApprovalPresetLabel;
   threadId?: string;
 }

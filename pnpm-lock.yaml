@@ -123,11 +123,39 @@ importers:
         specifier: ^3.2.4
         version: 3.2.6(@types/debug@4.1.13)(@types/node@24.13.2)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(yaml@2.9.0)
 
+  apps/hosted-runner:
+    dependencies:
+      '@cloudflare/ai-utils':
+        specifier: 1.0.1
+        version: 1.0.1
+      '@cloudflare/sandbox':
+        specifier: 0.13.0-next.738.2
+        version: 0.13.0-next.738.2
+      '@fable/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+    devDependencies:
+      '@cloudflare/playwright':
+        specifier: 1.3.0
+        version: 1.3.0
+      '@types/node':
+        specifier: ^24.3.0
+        version: 24.13.2
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.6(@types/debug@4.1.13)(@types/node@24.13.2)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(yaml@2.9.0)
+      wrangler:
+        specifier: ^4.105.0
+        version: 4.105.0(@cloudflare/workers-types@4.20260702.1)(@types/node@24.13.2)
+
   apps/marketing:
     dependencies:
       astro:
         specifier: ^7.1.5
-        version: 7.1.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@24.13.2)(jiti@2.7.0)(rollup@4.62.2)(yaml@2.9.0)
+        version: 7.1.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@24.13.2)(aws4fetch@1.0.20)(jiti@2.7.0)(rollup@4.62.2)(yaml@2.9.0)
     devDependencies:
       '@astrojs/check':
         specifier: ^0.9.10
@@ -446,9 +474,32 @@ packages:
     resolution: {integrity: sha512-y7/yvZ2TPAnR9+jnc00klvNNLkJiXFFrQA/hlLCcxA9a2A4zQIOimyFQ9XfwYKiGD1fb5GY8vbKIIgO8d5Tb2A==}
     engines: {node: '>= 20.12.0'}
 
+  '@cloudflare/ai-utils@1.0.1':
+    resolution: {integrity: sha512-gmn16AvVqtMLcaBYvPkwEWui39E4hlcFPqXuVamKbGleIDO6hVpvAy3KCvbnoPVT7KqRcfdLLpHRIBQDwI9tWQ==}
+
+  '@cloudflare/containers@0.3.7':
+    resolution: {integrity: sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw==}
+
   '@cloudflare/kv-asset-handler@0.5.0':
     resolution: {integrity: sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg==}
     engines: {node: '>=22.0.0'}
+
+  '@cloudflare/playwright@1.3.0':
+    resolution: {integrity: sha512-WOlpXzfJ7noXmW8qE/qlU7MbVHyt9IzxxwPcTGeh2+YQS1gqNIe3fl99AZvBsheH0o7oCePYtL9wRV1KPCYghQ==}
+
+  '@cloudflare/sandbox@0.13.0-next.738.2':
+    resolution: {integrity: sha512-fD5rANNn4L6rHHsxaOi4gME31VBSF9pdvyaeQv+4OBhYThfpgonHvqcLC1lUHmV4R6OXUDt+NVJOzK2d9CNMxw==}
+    peerDependencies:
+      '@openai/agents': ^0.3.3
+      '@opencode-ai/sdk': ^1.1.40
+      '@xterm/xterm': '>=5.0.0'
+    peerDependenciesMeta:
+      '@openai/agents':
+        optional: true
+      '@opencode-ai/sdk':
+        optional: true
+      '@xterm/xterm':
+        optional: true
 
   '@cloudflare/unenv-preset@2.16.1':
     resolution: {integrity: sha512-ECxObrMfyTl5bhQf/lZCXwo5G6xX9IAUo+nDMKK4SZ8m4Jvvxp52vilxyySSWh2YTZz8+HQ07qGH/2rEom1vDw==}
@@ -2203,6 +2254,9 @@ packages:
       '@astrojs/markdown-remark':
         optional: true
 
+  aws4fetch@1.0.20:
+    resolution: {integrity: sha512-/djoAN709iY65ETD6LKCtyyEI04XIBP5xVvfmNxsEP0uJB5tyaGBztSryRr4HqMStr9R06PisQE7m9zDTXKu6g==}
+
   axobject-query@4.1.0:
     resolution: {integrity: sha512-qIj0G9wZbMGNLjLmg1PT6v2mE9AH2zlnADJD/2tC6E00hgmhUOfEB6greHPAfLRSufHqROIUTkw6E+M3lH0PTQ==}
     engines: {node: '>= 0.4'}
@@ -2249,6 +2303,9 @@ packages:
 
   caniuse-lite@1.0.30001799:
     resolution: {integrity: sha512-hG1bReV+OUU+MOqK4t/ZWI0tZOyz3rqS9XuhOUz1cIcbwBKjOyJEJuw9ER5JuNyqxNk8u/JUVbGibBOL1yrjFw==}
+
+  capnweb@0.8.0:
+    resolution: {integrity: sha512-BK/TuXUiyfLSKsmjojn70yN7oYG/JJzoURZ3tckjg5Zj2KcygPm0A5jyOlswK7SYB4f0Gh9tt+RZ132b80iLfA==}
 
   ccount@2.0.1:
     resolution: {integrity: sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg==}
@@ -2805,6 +2862,10 @@ packages:
 
   hastscript@9.0.1:
     resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+
+  hono@4.13.4:
+    resolution: {integrity: sha512-AGEwKIyRMHRv1t8Wjwa3LHxQ61X5CqrdFT+4BRNTpqS5aJNnpl5WLjADb7vFlJzI/8uK7T5QLVApCMQKNa3LgQ==}
+    engines: {node: '>=16.9.0'}
 
   html-encoding-sniffer@4.0.0:
     resolution: {integrity: sha512-Y22oTqIU4uuPgEemfz7NDJz6OeKf12Lsu+QC+s3BVpda64lTiMYCyGwg5ki4vFxkMwQdeZDl2adZoqUgdFuTgQ==}
@@ -4277,6 +4338,9 @@ packages:
   youch@4.1.0-beta.10:
     resolution: {integrity: sha512-rLfVLB4FgQneDr0dv1oddCVZmKjcJ6yX6mS4pU82Mq/Dt9a3cLZQ62pDBL4AUO+uVrCvtWz3ZFUL2HFAFJ/BXQ==}
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.4.3:
     resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
 
@@ -4367,7 +4431,7 @@ snapshots:
       '@types/hast': 3.0.4
       '@types/mdast': 4.0.4
       js-yaml: 4.3.0
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       retext-smartypants: 6.2.0
       shiki: 4.3.1
       smol-toml: 1.7.0
@@ -4582,7 +4646,23 @@ snapshots:
       fast-wrap-ansi: 0.2.2
       sisteransi: 1.0.5
 
+  '@cloudflare/ai-utils@1.0.1':
+    dependencies:
+      yaml: 2.9.0
+      zod: 3.25.76
+
+  '@cloudflare/containers@0.3.7': {}
+
   '@cloudflare/kv-asset-handler@0.5.0': {}
+
+  '@cloudflare/playwright@1.3.0': {}
+
+  '@cloudflare/sandbox@0.13.0-next.738.2':
+    dependencies:
+      '@cloudflare/containers': 0.3.7
+      aws4fetch: 1.0.20
+      capnweb: 0.8.0
+      hono: 4.13.4
 
   '@cloudflare/unenv-preset@2.16.1(unenv@2.0.0-rc.24)(workerd@1.20260625.1)':
     dependencies:
@@ -5310,7 +5390,7 @@ snapshots:
     dependencies:
       '@types/estree': 1.0.9
       estree-walker: 2.0.2
-      picomatch: 4.0.4
+      picomatch: 4.0.5
     optionalDependencies:
       rollup: 4.62.2
 
@@ -5953,7 +6033,7 @@ snapshots:
 
   ast-module-types@6.0.2: {}
 
-  astro@7.1.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@24.13.2)(jiti@2.7.0)(rollup@4.62.2)(yaml@2.9.0):
+  astro@7.1.5(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)(@types/node@24.13.2)(aws4fetch@1.0.20)(jiti@2.7.0)(rollup@4.62.2)(yaml@2.9.0):
     dependencies:
       '@astrojs/compiler-rs': 0.3.1(@emnapi/core@1.11.2)(@emnapi/runtime@1.11.2)
       '@astrojs/internal-helpers': 0.10.2
@@ -6002,7 +6082,7 @@ snapshots:
       tinyglobby: 0.2.17
       ultrahtml: 1.6.0
       unifont: 0.7.4
-      unstorage: 1.17.5
+      unstorage: 1.17.5(aws4fetch@1.0.20)
       vite: 8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0)
       vitefu: 1.1.3(vite@8.1.5(@types/node@24.13.2)(esbuild@0.28.1)(jiti@2.7.0)(yaml@2.9.0))
       xxhash-wasm: 1.1.0
@@ -6045,6 +6125,8 @@ snapshots:
       - uploadthing
       - yaml
 
+  aws4fetch@1.0.20: {}
+
   axobject-query@4.1.0: {}
 
   bail@2.0.2: {}
@@ -6085,6 +6167,8 @@ snapshots:
   cac@6.7.14: {}
 
   caniuse-lite@1.0.30001799: {}
+
+  capnweb@0.8.0: {}
 
   ccount@2.0.1: {}
 
@@ -6725,6 +6809,8 @@ snapshots:
       hast-util-parse-selector: 4.0.0
       property-information: 7.2.0
       space-separated-tokens: 2.0.2
+
+  hono@4.13.4: {}
 
   html-encoding-sniffer@4.0.0:
     dependencies:
@@ -7754,7 +7840,7 @@ snapshots:
       unist-util-is: 6.0.1
       unist-util-visit-parents: 6.0.2
 
-  unstorage@1.17.5:
+  unstorage@1.17.5(aws4fetch@1.0.20):
     dependencies:
       anymatch: 3.1.3
       chokidar: 5.0.0
@@ -7764,6 +7850,8 @@ snapshots:
       node-fetch-native: 1.6.7
       ofetch: 1.5.1
       ufo: 1.6.4
+    optionalDependencies:
+      aws4fetch: 1.0.20
 
   update-browserslist-db@1.2.3(browserslist@4.28.4):
     dependencies:
@@ -7925,7 +8013,7 @@ snapshots:
       expect-type: 1.4.0
       magic-string: 0.30.21
       pathe: 2.0.3
-      picomatch: 4.0.4
+      picomatch: 4.0.5
       std-env: 3.10.0
       tinybench: 2.9.0
       tinyexec: 0.3.2
@@ -8187,6 +8275,8 @@ snapshots:
       '@speed-highlight/core': 1.2.17
       cookie: 1.1.1
       youch-core: 0.3.3
+
+  zod@3.25.76: {}
 
   zod@4.4.3: {}
 

@@ -2430,6 +2430,129 @@ fn execution_boundary_rejects_argument_substitution_and_permission_downgrade() {
 }
 
 #[test]
+fn cloud_browser_source_approval_binds_to_the_canonical_public_page() {
+    let mut approval = tool_approval(
+        "cloud-browser",
+        "full-access",
+        "critical",
+        Some("approve cloud-browser"),
+    );
+    approval.action = "cloud-browser url: https://example.com/path".to_string();
+    approval.data_used = vec!["url: https://example.com/path".to_string()];
+
+    validate_tool_approval_binding(
+        "cloud-browser",
+        &serde_json::json!({ "url": "https://example.com/path#discarded" }),
+        &approval,
+    )
+    .expect("canonical browser approval binding");
+    assert!(validate_tool_approval_binding(
+        "cloud-browser",
+        &serde_json::json!({ "url": "https://other.example/path" }),
+        &approval,
+    )
+    .is_err());
+}
+
+#[test]
+fn cloud_browser_action_source_approval_binds_every_observed_control_argument() {
+    let arguments = serde_json::json!({
+        "action": "fill",
+        "observationId": "observation-1234567890abcdef",
+        "elementRef": "control-1234567890abcdef-1",
+        "controlRole": "textbox",
+        "controlName": "Search",
+        "value": "quarterly plan"
+    });
+    let mut approval = tool_approval(
+        "cloud-browser-action",
+        "full-access",
+        "critical",
+        Some("approve cloud-browser-action"),
+    );
+    approval.action = "cloud-browser-action action: fill".to_string();
+    approval.data_used = arguments
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| {
+            let rendered = value
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string());
+            format!("{key}: {rendered}")
+        })
+        .collect();
+
+    validate_tool_approval_binding("cloud-browser-action", &arguments, &approval)
+        .expect("exact browser action approval binding");
+
+    let mut substituted = arguments.clone();
+    substituted["elementRef"] = serde_json::json!("control-1234567890abcdef-2");
+    assert!(
+        validate_tool_approval_binding("cloud-browser-action", &substituted, &approval).is_err()
+    );
+}
+
+#[test]
+fn cloud_process_schedule_source_approval_binds_program_and_timing() {
+    let arguments = serde_json::json!({
+        "scheduleId": "schedule-digest-123",
+        "runId": "scheduled-digest",
+        "argv": ["node", "digest.mjs"],
+        "firstRunAt": "2026-08-25T18:00:00.000Z",
+        "intervalSeconds": 3600
+    });
+    let mut approval = tool_approval(
+        "cloud-process-schedule",
+        "full-access",
+        "critical",
+        Some("approve cloud-process-schedule"),
+    );
+    approval.action = "cloud-process-schedule scheduleId: schedule-digest-123".to_string();
+    approval.data_used = arguments
+        .as_object()
+        .unwrap()
+        .iter()
+        .map(|(key, value)| {
+            let rendered = value
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string());
+            format!("{key}: {rendered}")
+        })
+        .collect();
+    validate_tool_approval_binding("cloud-process-schedule", &arguments, &approval)
+        .expect("exact schedule approval binding");
+    let mut substituted = arguments.clone();
+    substituted["intervalSeconds"] = serde_json::json!(300);
+    assert!(
+        validate_tool_approval_binding("cloud-process-schedule", &substituted, &approval).is_err()
+    );
+}
+
+#[test]
+fn cloud_process_schedule_cancel_source_approval_binds_schedule_id() {
+    let arguments = serde_json::json!({ "scheduleId": "schedule-digest-123" });
+    let mut approval = tool_approval(
+        "cloud-process-schedule-cancel",
+        "full-access",
+        "critical",
+        Some("approve cloud-process-schedule-cancel"),
+    );
+    approval.action = "cloud-process-schedule-cancel scheduleId: schedule-digest-123".to_string();
+    approval.data_used = vec!["scheduleId: schedule-digest-123".to_string()];
+    validate_tool_approval_binding("cloud-process-schedule-cancel", &arguments, &approval)
+        .expect("exact schedule cancellation approval binding");
+    assert!(validate_tool_approval_binding(
+        "cloud-process-schedule-cancel",
+        &serde_json::json!({ "scheduleId": "schedule-other-123" }),
+        &approval
+    )
+    .is_err());
+}
+
+#[test]
 fn tool_approval_binding_rejects_mismatches() {
     let mut approval = tool_approval(
         "write-file",

@@ -13,6 +13,8 @@ import type * as cloudPolicy from "../cloudPolicy.js";
 import type * as convexAuth from "../convexAuth.js";
 import type * as device from "../device.js";
 import type * as invitationRecipient from "../invitationRecipient.js";
+import type * as hostedExecution from "../hostedExecution.js";
+import type * as hostedExecutionPolicy from "../hostedExecutionPolicy.js";
 import type * as membership from "../membership.js";
 import type * as mutations from "../mutations.js";
 import type * as viewer from "../viewer.js";
@@ -30,6 +32,8 @@ declare const fullApi: ApiFromModules<{
   convexAuth: typeof convexAuth;
   device: typeof device;
   invitationRecipient: typeof invitationRecipient;
+  hostedExecution: typeof hostedExecution;
+  hostedExecutionPolicy: typeof hostedExecutionPolicy;
   membership: typeof membership;
   mutations: typeof mutations;
   viewer: typeof viewer;

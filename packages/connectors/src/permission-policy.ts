@@ -130,6 +130,18 @@ export function effectForTool(toolName: string): PermissionEffect | null {
       return "shell-execution";
     case "web-fetch":
       return "web-fetch";
+    case "cloud-browser":
+    case "cloud-browser-action":
+      return "browser-state-mutation";
+    case "cloud-process-schedule":
+    case "cloud-process-schedule-cancel":
+    case "cloud-process-schedule-pause":
+    case "cloud-process-schedule-resume":
+    case "cloud-agent-routine":
+    case "cloud-agent-routine-cancel":
+    case "cloud-agent-routine-pause":
+    case "cloud-agent-routine-resume":
+      return "schedule-mutation";
     case "connection-read":
     case "github-read":
     case "vercel-read":

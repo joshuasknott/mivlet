@@ -154,7 +154,7 @@ describe("Schedules Page & Runtime UI Integration", () => {
 
     render(<SchedulesPage runtime={runtime} />);
 
-    const newBtn = screen.getByRole("button", { name: /^New$/i });
+    const newBtn = screen.getByRole("button", { name: /^New local$/i });
     expect(newBtn).toBeInTheDocument();
 
     // Modal is initially closed
@@ -195,7 +195,7 @@ describe("Schedules Page & Runtime UI Integration", () => {
     });
     render(<SchedulesPage runtime={runtime} />);
 
-    await user.click(screen.getByRole("button", { name: /^New$/i }));
+    await user.click(screen.getByRole("button", { name: /^New local$/i }));
     await user.type(screen.getByLabelText(/^Name$/i), "Morning brief");
     await user.type(screen.getByLabelText(/^Prompt$/i), "Summarize today.");
     await user.click(screen.getByRole("button", { name: "Add Scheduled Task" }));

@@ -1,39 +1,64 @@
-import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
+import { GraduationCap } from "@phosphor-icons/react/dist/csr/GraduationCap";
+import { UsersThree } from "@phosphor-icons/react/dist/csr/UsersThree";
 import type { FableAgentProfile } from "@fable/protocol";
 import { ProfileAgentAvatar } from "./agent-icons";
 
 export function AgentWorkspaceHeader({
   agent,
-  modelLabel,
+  canTeamUp,
+  teamUpOpen,
+  onTeamUp,
+  learnedCount,
+  learnedOpen,
+  onOpenLearned,
+  attentionCount,
   liveRailOpen,
-  onEdit,
   onToggleLiveRail
 }: {
   agent: FableAgentProfile;
-  modelLabel: string;
+  canTeamUp: boolean;
+  teamUpOpen: boolean;
+  onTeamUp: () => void;
+  learnedCount: number;
+  learnedOpen: boolean;
+  onOpenLearned: () => void;
+  attentionCount: number;
   liveRailOpen: boolean;
-  onEdit: () => void;
   onToggleLiveRail: () => void;
 }) {
-  const routeLabel = agent.modelId
-    ? modelLabel
-    : modelLabel === "Select model"
-      ? "Auto"
-      : `Auto · ${modelLabel}`;
-
   return (
     <header className="agent-workspace-header">
       <div className="agent-workspace-header__identity">
-        <ProfileAgentAvatar agent={agent} iconSize={34} />
-        <span>
-          <strong>{agent.name}</strong>
-          <small>{routeLabel}</small>
-        </span>
+        <ProfileAgentAvatar agent={agent} iconSize={22} />
+        <strong>{agent.name}</strong>
       </div>
-      <div>
-        <button type="button" onClick={onEdit} aria-label={`Edit ${agent.name}`}><DotsThree size={19} weight="bold" /></button>
-        <button type="button" className={liveRailOpen ? "is-active" : ""} onClick={onToggleLiveRail} aria-label="Toggle live work"><SidebarSimple size={18} /></button>
+      <div className="agent-workspace-header__actions">
+        <button
+          type="button"
+          className={learnedOpen ? "is-active" : ""}
+          onClick={onOpenLearned}
+          aria-label={`Learned work${learnedCount ? `, ${learnedCount}` : ""}`}
+          title={learnedCount ? `${learnedCount} learned ${learnedCount === 1 ? "responsibility" : "responsibilities"}` : "Learned work"}
+        ><GraduationCap size={18} /><span className="agent-workspace-header__count">{learnedCount || ""}</span></button>
+        <button
+          type="button"
+          className={teamUpOpen ? "is-active" : ""}
+          onClick={onTeamUp}
+          disabled={!canTeamUp}
+          aria-label="Bring in teammates"
+          title={canTeamUp ? "Bring in teammates" : "Create another teammate first"}
+        ><UsersThree size={18} /></button>
+        <button
+          type="button"
+          className={liveRailOpen ? "is-active" : ""}
+          onClick={onToggleLiveRail}
+          aria-label={attentionCount ? `Toggle live work, ${attentionCount} needs attention` : "Toggle live work"}
+          title={attentionCount ? `${attentionCount} approval${attentionCount === 1 ? "" : "s"} waiting` : "Live work"}
+        >
+          <SidebarSimple size={18} />
+          {attentionCount ? <span className="agent-workspace-header__count agent-workspace-header__count--attention">{attentionCount}</span> : null}
+        </button>
       </div>
     </header>
   );

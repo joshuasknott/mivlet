@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { Books } from "@phosphor-icons/react/dist/csr/Books";
 import { Copy } from "@phosphor-icons/react/dist/csr/Copy";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { GraduationCap } from "@phosphor-icons/react/dist/csr/GraduationCap";
 import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
 
 type MessageRole = "user" | "assistant";
@@ -29,6 +31,8 @@ export function ConversationMessageActions({
   role,
   content,
   onSaveToKnowledge,
+  onMakeRoutine,
+  onTeachTask,
   onEdit,
   onRedo,
   redoDisabled = false,
@@ -36,6 +40,8 @@ export function ConversationMessageActions({
   role: MessageRole;
   content: string;
   onSaveToKnowledge: () => Promise<void>;
+  onMakeRoutine?: () => void;
+  onTeachTask?: () => void;
   onEdit?: () => void;
   onRedo?: () => void;
   redoDisabled?: boolean;
@@ -105,6 +111,20 @@ export function ConversationMessageActions({
           void runCopy();
         },
       )}
+      {onMakeRoutine
+        ? action(
+            "Make routine",
+            <Clock size={16} aria-hidden="true" />,
+            onMakeRoutine,
+          )
+        : null}
+      {role === "assistant" && onTeachTask
+        ? action(
+            "Teach this",
+            <GraduationCap size={16} aria-hidden="true" />,
+            onTeachTask,
+          )
+        : null}
       {role === "user" && onEdit
         ? action(
             "Edit prompt",

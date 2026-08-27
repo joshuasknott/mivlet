@@ -75,6 +75,44 @@ describe("Fable persistence migration", () => {
       composerValue: "Continue the existing thread"
     });
   });
+
+  it("bounds and validates learned teammate responsibilities during recovery", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...defaultState,
+        agents: [{
+          id: "chief",
+          name: "Chief",
+          instructions: "Coordinate work.",
+          modelId: "",
+          icon: "agent",
+          iconColor: "#865DFA",
+          connectorIds: [],
+          knowledgeSourceIds: [],
+          permissionLabel: "Ask Me",
+          learnedTasks: [
+            {
+              id: " learned-one ",
+              title: "  Weekly brief  ",
+              instruction: "  Summarize decisions.  ",
+              createdAt: "2026-08-24T12:00:00.000Z",
+              updatedAt: "2026-08-24T12:00:00.000Z"
+            },
+            { id: "broken", title: "", instruction: "Missing a title." }
+          ]
+        }]
+      })
+    );
+
+    expect(readPersistedShellState(defaultState).agents?.[0]?.learnedTasks).toEqual([{
+      id: "learned-one",
+      title: "Weekly brief",
+      instruction: "Summarize decisions.",
+      createdAt: "2026-08-24T12:00:00.000Z",
+      updatedAt: "2026-08-24T12:00:00.000Z"
+    }]);
+  });
 });
 
 describe("Fable schedules round-trip through the runtime snapshot", () => {

@@ -2,7 +2,7 @@
  * Real tool execution behind Fable's approval layer.
  *
  * The executor is the concrete implementation of the four registered tools
- * (read-file, write-file, run-shell, web-fetch). It is pure over an injectable
+ * (read-file, write-file, run-shell, web-fetch, cloud-browser). It is pure over an injectable
  * {@link ToolRuntime} — every filesystem/shell/network capability flows through
  * that seam, so production wires it to Tauri commands (Rust owns the actual
  * side effects) and tests inject a fake filesystem. Tools never spawn a shell
@@ -44,6 +44,18 @@ export interface ToolRuntime {
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
   fetchUrl(url: string): Promise<string | null>;
+  /** Open a page in a hosted browser when the runtime supplies that capability. */
+  openBrowser?(url: string): Promise<string>;
+  /** Act on one opaque control ref from the latest hosted-browser observation. */
+  actBrowser?(input: {
+    action: "click" | "fill" | "press" | "select" | "scroll" | "history";
+    observationId: string;
+    elementRef: string;
+    controlRole: string;
+    controlName: string;
+    value?: string;
+    key?: string;
+  }): Promise<string>;
   /** Execute an authenticated Google read without exposing credentials to JS. */
   googleRead?(tool: string, input: Record<string, unknown>): Promise<string>;
 }
@@ -344,6 +356,35 @@ async function dispatch(
         throw new Error(`Fetch failed: ${url}`);
       }
       return text;
+    }
+    case "cloud-browser": {
+      const url = requireString(parsed, toolName, "url");
+      if (!runtime.openBrowser) {
+        throw new Error("The cloud browser is unavailable in this runtime.");
+      }
+      return runtime.openBrowser(url);
+    }
+    case "cloud-browser-action": {
+      if (!runtime.actBrowser) {
+        throw new Error("Cloud browser actions are unavailable in this runtime.");
+      }
+      const action = requireString(parsed, toolName, "action");
+      if (action !== "click" && action !== "fill" && action !== "press" && action !== "select" && action !== "scroll" && action !== "history") {
+        throw new Error("Tool cloud-browser-action requires click, fill, press, select, scroll, or history.");
+      }
+      const observationId = requireString(parsed, toolName, "observationId");
+      const elementRef = requireString(parsed, toolName, "elementRef");
+      const controlRole = requireString(parsed, toolName, "controlRole");
+      const controlName = requireString(parsed, toolName, "controlName");
+      return runtime.actBrowser({
+        action,
+        observationId,
+        elementRef,
+        controlRole,
+        controlName,
+        ...(typeof parsed.value === "string" ? { value: parsed.value } : {}),
+        ...(typeof parsed.key === "string" ? { key: parsed.key } : {})
+      });
     }
     case "google-drive-read":
     case "gmail-read":
