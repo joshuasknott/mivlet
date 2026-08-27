@@ -52,7 +52,7 @@ export interface ToolRuntime {
   observeLocalBrowser?(): Promise<string>;
   /** Act on one exact, single-use local-browser control observation. */
   actLocalBrowser?(input: {
-    action: "click" | "fill" | "press";
+    action: "click" | "fill" | "press" | "select";
     observationId: string;
     elementRef: string;
     controlRole: string;
@@ -396,8 +396,8 @@ async function dispatch(
         throw new Error("Local browser actions are unavailable in this runtime.");
       }
       const action = requireString(parsed, toolName, "action");
-      if (action !== "click" && action !== "fill" && action !== "press") {
-        throw new Error("Tool local-browser-action requires click, fill, or press.");
+      if (action !== "click" && action !== "fill" && action !== "press" && action !== "select") {
+        throw new Error("Tool local-browser-action requires click, fill, press, or select.");
       }
       return runtime.actLocalBrowser({
         action,

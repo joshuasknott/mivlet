@@ -2513,6 +2513,44 @@ fn local_browser_action_approval_binds_every_single_use_control_field() {
     assert!(
         validate_tool_approval_binding("local-browser-action", &substituted, &approval).is_err()
     );
+
+    let selection_arguments = serde_json::json!({
+        "action": "select",
+        "observationId": "observation-1234567890abcdef",
+        "elementRef": "control-1234567890abcdef-1",
+        "controlRole": "combobox",
+        "controlName": "Region",
+        "value": "Europe"
+    });
+    let mut selection_approval = tool_approval(
+        "local-browser-action",
+        "full-access",
+        "critical",
+        Some("approve local-browser-action"),
+    );
+    selection_approval.action = "local-browser-action action: select".to_string();
+    selection_approval.data_used = vec![
+        "action: select".into(),
+        "observationId: observation-1234567890abcdef".into(),
+        "elementRef: control-1234567890abcdef-1".into(),
+        "controlRole: combobox".into(),
+        "controlName: Region".into(),
+        "value: Europe".into(),
+    ];
+    validate_tool_approval_binding(
+        "local-browser-action",
+        &selection_arguments,
+        &selection_approval,
+    )
+    .expect("exact local selection binding");
+    let mut substituted_selection = selection_arguments;
+    substituted_selection["value"] = serde_json::json!("Asia");
+    assert!(validate_tool_approval_binding(
+        "local-browser-action",
+        &substituted_selection,
+        &selection_approval,
+    )
+    .is_err());
 }
 
 #[test]

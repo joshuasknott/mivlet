@@ -1202,8 +1202,8 @@ pub async fn execute_tool_call(
             .clone()
             .ok_or_else(|| "Local browser actions require an active teammate.".to_string())?;
         let action = require_string_argument(&arguments, "action")?;
-        if !matches!(action.as_str(), "click" | "fill" | "press") {
-            return Err("The local browser action must be click, fill, or press.".into());
+        if !matches!(action.as_str(), "click" | "fill" | "press" | "select") {
+            return Err("The local browser action must be click, fill, press, or select.".into());
         }
         let observation_id = require_string_argument(&arguments, "observationId")?;
         let element_ref = require_string_argument(&arguments, "elementRef")?;

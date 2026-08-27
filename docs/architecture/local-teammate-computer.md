@@ -38,10 +38,13 @@ The model receives only the observed final origin, bounded title, opaque
 computer ID, and timestamp—not user information, path, query, fragment, screenshot, page
 contents, profile, cookies, or process details. A separate approved observation
 tool returns at most 40 visible named controls with bounded role/name/action
-metadata. Password, passcode, verification, token, API-key, and payment-shaped
-fields are omitted. Exact, single-use refs support click, non-secret fill, and a
-small key allowlist; refs expire after navigation, takeover, or any attempted
-action. All agent browser actions fail closed while the user has taken control.
+metadata. Native single-select controls may additionally expose up to 50
+visible, enabled option labels, never their internal values. Password, passcode,
+verification, token, API-key, and payment-shaped fields are omitted. Exact,
+single-use refs support click, non-secret fill, exact-label native selection,
+and a small key allowlist; refs expire after navigation, takeover, or any
+attempted action. Duplicate labels and changed controls fail closed. All agent
+browser actions fail closed while the user has taken control.
 
 After an app restart the directories and browser profile remain, but the browser
 process does not. Fable shows **Start** and launches it again with the existing
@@ -120,8 +123,8 @@ application-layer encryption envelope around Chromium's profile files.
 
 - Container or VM isolation for applications, a terminal, processes, networking,
   and resource quotas on Windows, macOS, and Linux.
-- Broader model-facing page understanding, select controls, downloads/uploads,
-  tabs, and submit-specific policy beyond the current bounded named-control
+- Broader model-facing page understanding, downloads/uploads, tabs, and
+  submit-specific policy beyond the current bounded named-control
   actions.
 - File browser UI, bounded downloads/uploads, multiple tabs/popups, clipboard,
   passkeys, proactive crash telemetry, and preservation of in-progress page state
@@ -141,6 +144,7 @@ integration test launches the installed Chromium browser, navigates to a local
 HTTP page, types into a real input, and captures a JPEG frame. A second live test
 uses the agent navigation path and verifies it returns only the bounded metadata
 projection. A third observes real controls, verifies a password field is
-omitted, and fills the exact observed textbox. They are ignored in portable CI
+omitted, fills the exact observed textbox, and chooses a native option by its
+visible label without exposing its internal value. They are ignored in portable CI
 because a browser installation is an external prerequisite, and are run
 explicitly on supported desktop hosts.

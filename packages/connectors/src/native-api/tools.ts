@@ -74,25 +74,25 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "local-browser-observe": {
     name: "local-browser-observe",
-    description: "Observe up to 40 visible, named controls in this teammate's local browser. Returns only bounded role/name/action metadata marked as external untrusted evidence; password, passcode, verification, token, API-key, and payment-shaped fields are omitted. Page text, screenshots, cookies, and hidden state are not returned.",
+    description: "Observe up to 40 visible, named controls in this teammate's local browser. Returns only bounded role/name/action metadata plus up to 50 visible labels for a native single-select, all marked as external untrusted evidence. Internal option values, password, passcode, verification, token, API-key, and payment-shaped fields are omitted. Page text, screenshots, cookies, and hidden state are not returned.",
     defaultMode: "read-only",
     defaultRisk: "medium",
     parameters: JSON.stringify({ type: "object", properties: {}, additionalProperties: false })
   },
   "local-browser-action": {
     name: "local-browser-action",
-    description: "Use one exact control from the latest local-browser-observe result. The observation is single-use and expires after navigation, takeover, or any attempted action. Never fill passwords, passkeys, verification codes, payment details, API keys, tokens, or other secrets.",
+    description: "Use one exact control from the latest local-browser-observe result. Click, fill, press, or choose one exact visible label from a native dropdown. The observation is single-use and expires after navigation, takeover, or any attempted action. Never fill passwords, passkeys, verification codes, payment details, API keys, tokens, or other secrets.",
     defaultMode: "full-access",
     defaultRisk: "critical",
     parameters: JSON.stringify({
       type: "object",
       properties: {
-        action: { type: "string", enum: ["click", "fill", "press"] },
+        action: { type: "string", enum: ["click", "fill", "press", "select"] },
         observationId: { type: "string" },
         elementRef: { type: "string" },
         controlRole: { type: "string" },
         controlName: { type: "string" },
-        value: { type: "string", maxLength: 2000, description: "Required for fill. Do not use for secrets." },
+        value: { type: "string", maxLength: 2000, description: "Required for fill and select. For select, use one exact visible option label from the observation. Do not use for secrets." },
         key: { type: "string", enum: ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"] }
       },
       required: ["action", "observationId", "elementRef", "controlRole", "controlName"]

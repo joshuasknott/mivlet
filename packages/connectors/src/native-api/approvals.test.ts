@@ -78,6 +78,17 @@ describe("buildToolApproval", () => {
       "controlName: Search",
       "value: Fable"
     ]);
+
+    const selection = buildToolApproval("openai", "local-browser-action", JSON.stringify({
+      action: "select",
+      observationId: "observation-1234567890abcdef",
+      elementRef: "control-1234567890abcdef-1",
+      controlRole: "combobox",
+      controlName: "Region",
+      value: "Europe"
+    }));
+    expect(selection.dataUsed).toContain("value: Europe");
+    expect(selection.confirmationPhrase).toBe("approve local-browser-action");
   });
 
   it("fails closed for an unregistered tool — critical risk, refusal consequence", () => {

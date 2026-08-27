@@ -108,6 +108,18 @@ function approvalFor(
       requestedAt: new Date(0).toISOString(),
       decisions: ["once", "modify", "deny"],
       confirmationPhrase: "approve cloud-browser-action"
+    },
+    "local-browser-action": {
+      id,
+      service: "openai",
+      action: "local-browser-action action: select elementRef: control-1234567890abcdef-2",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["action: select", "observationId: observation-1234567890abcdef", "elementRef: control-1234567890abcdef-2", "controlRole: combobox", "controlName: Region", "value: Europe"],
+      consequence: "Use one exact observed local browser control.",
+      requestedAt: new Date(0).toISOString(),
+      decisions: ["once", "modify", "deny"],
+      confirmationPhrase: "approve local-browser-action"
     }
   };
   return { ...base[tool], ...over };
@@ -133,6 +145,15 @@ function argsFor(tool: string): string {
         controlRole: "button",
         controlName: "Continue"
       });
+    case "local-browser-action":
+      return JSON.stringify({
+        action: "select",
+        observationId: "observation-1234567890abcdef",
+        elementRef: "control-1234567890abcdef-2",
+        controlRole: "combobox",
+        controlName: "Region",
+        value: "Europe"
+      });
     default:
       return "{}";
   }
@@ -146,6 +167,7 @@ function fakeRuntime(): ToolRuntime & {
   fetched: string[];
   opened: string[];
   browserActions: string[];
+  localBrowserActions: string[];
 } {
   const files = new Map<string, string>([["x.txt", "hello world"]]);
   const writes: { path: string; content: string }[] = [];
@@ -153,6 +175,7 @@ function fakeRuntime(): ToolRuntime & {
   const fetched: string[] = [];
   const opened: string[] = [];
   const browserActions: string[] = [];
+  const localBrowserActions: string[] = [];
   return {
     files,
     writes,
@@ -160,6 +183,7 @@ function fakeRuntime(): ToolRuntime & {
     fetched,
     opened,
     browserActions,
+    localBrowserActions,
     async readFile(path) {
       return files.get(path) ?? null;
     },
@@ -183,6 +207,10 @@ function fakeRuntime(): ToolRuntime & {
     async actBrowser(input) {
       browserActions.push(`${input.action}:${input.controlRole}:${input.controlName}`);
       return "browser action complete";
+    },
+    async actLocalBrowser(input) {
+      localBrowserActions.push(`${input.action}:${input.controlRole}:${input.controlName}:${input.value ?? ""}`);
+      return "local browser action complete";
     }
   };
 }
@@ -263,6 +291,15 @@ describe("createToolExecutor — dispatch + grant gating", () => {
       })
     )).resolves.toBe("browser action complete");
     expect(runtime.browserActions).toEqual(["select:combobox:Region"]);
+  });
+
+  it("dispatches an exact native-dropdown selection to the local teammate browser", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(
+      executor(approvalFor("c1", "local-browser-action"), argsFor("local-browser-action"))
+    ).resolves.toBe("local browser action complete");
+    expect(runtime.localBrowserActions).toEqual(["select:combobox:Region:Europe"]);
   });
 
   it("dispatches an observation-scoped page scroll without a selector or script", async () => {
@@ -347,7 +384,6 @@ describe("createToolExecutor — dispatch + grant gating", () => {
     ).rejects.toThrow(/path/i);
   });
 });
-
 describe("Google native read tools", () => {
   it("registers Drive, Gmail, and Calendar read-only tools", () => {
     const tools = registeredToolSpecs().map((tool) => tool.name);

@@ -76,9 +76,11 @@ action architecture above:
   to act during human takeover, and returns only a bounded title plus final
   origin. User information, path, query, and fragment are removed.
 - Approved model observation exposes at most 40 visible named controls as
-  external-untrusted evidence. It omits secret-shaped fields and all page body,
-  screenshot, cookie, clipboard, and hidden-state data. Exact refs are consumed
-  by one approved click, non-secret fill, or allowlisted key action.
+  external-untrusted evidence. A native single-select can expose up to 50
+  visible, enabled labels but never internal option values. It omits
+  secret-shaped fields and all page body, screenshot, cookie, clipboard, and
+  hidden-state data. Exact refs are consumed by one approved click, non-secret
+  fill, exact-label selection, or allowlisted key action.
 - This is browser-process/profile isolation, not a separate OS account,
   container, or VM. See [local teammate computer](local-teammate-computer.md).
 
@@ -86,7 +88,7 @@ action architecture above:
 
 The following capabilities are not implemented locally:
 
-- General page-text/DOM inspection, select controls, explicit submit semantics,
+- General page-text/DOM inspection, explicit submit semantics,
   downloads/uploads, and multi-tab workflows beyond the bounded control layer.
 - A full visible Chromium chrome surface, downloads UI, popup/tab management,
   uploads, passkeys, or system clipboard integration.

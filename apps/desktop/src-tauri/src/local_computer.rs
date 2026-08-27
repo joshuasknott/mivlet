@@ -8,7 +8,7 @@
 //! handles never cross into the renderer.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -57,6 +57,7 @@ struct LocalBrowserObservedControl {
     role: String,
     name: String,
     actions: Vec<String>,
+    options: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -147,6 +148,8 @@ struct LocalBrowserAgentControl {
     role: String,
     name: String,
     actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    options: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -378,6 +381,12 @@ impl LocalComputerState {
             if !control.actions.iter().any(|allowed| allowed == &action) {
                 return Err("That action is not allowed for the observed browser control.".into());
             }
+            validate_observed_control_action(
+                control,
+                &action,
+                value.as_deref(),
+                key.as_deref(),
+            )?;
             perform_agent_control_action(
                 &session,
                 &control_ref,
@@ -387,7 +396,7 @@ impl LocalComputerState {
                 value.as_deref(),
                 key.as_deref(),
             )?;
-            if matches!(action.as_str(), "click" | "press") {
+            if matches!(action.as_str(), "click" | "press" | "select") {
                 let _ = session.tab.wait_until_navigated();
             }
             let snapshot = snapshot_from_session(&scope, &session)?;
@@ -452,13 +461,13 @@ fn observe_agent_controls(
           const prefix = {prefix_json};
           const clean = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
           const roleOf = (el) => {{
-            const explicit = clean(el.getAttribute("role"));
-            if (explicit) return explicit;
             const tag = el.tagName.toLowerCase();
             const type = clean(el.getAttribute("type")).toLowerCase();
+            if (tag === "select") return el.multiple ? "listbox" : "combobox";
+            const explicit = clean(el.getAttribute("role"));
+            if (explicit) return explicit;
             if (tag === "a") return "link";
             if (tag === "button" || type === "button" || type === "submit") return "button";
-            if (tag === "select") return "combobox";
             if (type === "checkbox") return "checkbox";
             if (type === "radio") return "radio";
             return "textbox";
@@ -478,16 +487,25 @@ fn observe_agent_controls(
           const candidates = Array.from(document.querySelectorAll("a[href],button,input,textarea,select,[role=button],[role=link],[role=textbox],[contenteditable=true]"));
           for (const el of candidates) {{
             if (output.length >= 40 || isSecret(el) || el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+            if (el instanceof HTMLSelectElement && el.multiple) continue;
             const rect = el.getBoundingClientRect();
             const style = getComputedStyle(el);
             if (rect.width < 2 || rect.height < 2 || style.visibility === "hidden" || style.display === "none") continue;
             const role = roleOf(el);
             const name = nameOf(el, role);
             if (!name || name.startsWith("Unnamed ")) continue;
-            const actions = role === "textbox" ? ["fill", "press"] : role === "combobox" ? ["click"] : ["click", "press"];
+            const isNativeSelect = el instanceof HTMLSelectElement;
+            const options = isNativeSelect
+              ? Array.from(new Set(Array.from(el.options)
+                  .filter((option) => !option.disabled && !option.hidden && !option.closest("optgroup")?.disabled)
+                  .map((option) => clean(option.label || option.textContent))
+                  .filter(Boolean))).slice(0, 50)
+              : [];
+            if (isNativeSelect && options.length === 0) continue;
+            const actions = isNativeSelect ? ["select"] : role === "textbox" ? ["fill", "press"] : ["click", "press"];
             const ref = `${{prefix}}-${{output.length}}`;
             el.setAttribute("data-fable-control", ref);
-            output.push({{ ref, role, name, actions }});
+            output.push({{ ref, role, name, actions, options }});
           }}
           return JSON.stringify(output);
         }})()"#
@@ -507,20 +525,7 @@ fn observe_agent_controls(
     }
     let mut retained = HashMap::new();
     for control in &controls {
-        if !control.control_ref.starts_with(&control_prefix)
-            || control.role.is_empty()
-            || control.role.chars().count() > 40
-            || control.name.is_empty()
-            || control.name.chars().count() > 120
-            || control.actions.is_empty()
-            || control.actions.len() > 2
-            || control
-                .actions
-                .iter()
-                .any(|action| !matches!(action.as_str(), "click" | "fill" | "press"))
-        {
-            return Err("The local browser returned an invalid control.".into());
-        }
+        validate_agent_control_observation(control, &control_prefix)?;
         if retained
             .insert(
                 control.control_ref.clone(),
@@ -528,6 +533,7 @@ fn observe_agent_controls(
                     role: control.role.clone(),
                     name: control.name.clone(),
                     actions: control.actions.clone(),
+                    options: control.options.clone(),
                 },
             )
             .is_some()
@@ -555,6 +561,71 @@ fn observe_agent_controls(
     })
 }
 
+fn validate_agent_control_observation(
+    control: &LocalBrowserAgentControl,
+    control_prefix: &str,
+) -> Result<(), String> {
+    let actions = control.actions.iter().collect::<HashSet<_>>();
+    let options = control.options.iter().collect::<HashSet<_>>();
+    let has_select = control.actions.iter().any(|action| action == "select");
+    if !control.control_ref.starts_with(control_prefix)
+        || control.role.is_empty()
+        || control.role.chars().count() > 40
+        || control.role.chars().any(char::is_control)
+        || control.name.is_empty()
+        || control.name.chars().count() > 120
+        || control.name.chars().any(char::is_control)
+        || control.actions.is_empty()
+        || control.actions.len() > 2
+        || actions.len() != control.actions.len()
+        || control
+            .actions
+            .iter()
+            .any(|action| !matches!(action.as_str(), "click" | "fill" | "press" | "select"))
+        || control.options.len() > 50
+        || options.len() != control.options.len()
+        || control.options.iter().any(|option| {
+            option.is_empty()
+                || option.chars().count() > 120
+                || option.chars().any(char::is_control)
+        })
+        || has_select == control.options.is_empty()
+        || (has_select
+            && (control.role != "combobox"
+                || control.actions.len() != 1
+                || control.actions[0] != "select"))
+    {
+        return Err("The local browser returned an invalid control.".into());
+    }
+    Ok(())
+}
+
+fn validate_observed_control_action(
+    control: &LocalBrowserObservedControl,
+    action: &str,
+    value: Option<&str>,
+    key: Option<&str>,
+) -> Result<(), String> {
+    if !control.actions.iter().any(|allowed| allowed == action) {
+        return Err("That action is not allowed for the observed browser control.".into());
+    }
+    let valid = match action {
+        "click" => value.is_none() && key.is_none(),
+        "fill" => value.is_some() && key.is_none(),
+        "press" => value.is_none() && key.is_some(),
+        "select" => {
+            key.is_none()
+                && control.role == "combobox"
+                && value.is_some_and(|label| control.options.iter().any(|option| option == label))
+        }
+        _ => false,
+    };
+    if !valid {
+        return Err("The local browser action does not match the observed control.".into());
+    }
+    Ok(())
+}
+
 fn perform_agent_control_action(
     session: &LocalBrowserSession,
     control_ref: &str,
@@ -570,7 +641,7 @@ fn perform_agent_control_action(
                 .chars()
                 .any(|character| character.is_control() && !matches!(character, '\n' | '\t'))
         {
-            return Err("The local browser fill value is invalid.".into());
+            return Err("The local browser action value is invalid.".into());
         }
     }
     let allowed_key = key.is_none_or(|key| {
@@ -586,8 +657,13 @@ fn perform_agent_control_action(
                 | "Space"
         )
     });
-    if !allowed_key || (action == "fill" && value.is_none()) || (action == "press" && key.is_none())
-    {
+    let arguments_valid = match action {
+        "click" => value.is_none() && key.is_none(),
+        "fill" | "select" => value.is_some() && key.is_none(),
+        "press" => value.is_none() && key.is_some(),
+        _ => false,
+    };
+    if !allowed_key || !arguments_valid {
         return Err("The local browser action arguments are incomplete.".into());
     }
     let input = serde_json::json!({
@@ -604,13 +680,13 @@ fn perform_agent_control_action(
           const input = {input_json};
           const clean = (value) => String(value || "").replace(/\s+/g, " ").trim().slice(0, 120);
           const roleOf = (el) => {{
-            const explicit = clean(el.getAttribute("role"));
-            if (explicit) return explicit;
             const tag = el.tagName.toLowerCase();
             const type = clean(el.getAttribute("type")).toLowerCase();
+            if (tag === "select") return el.multiple ? "listbox" : "combobox";
+            const explicit = clean(el.getAttribute("role"));
+            if (explicit) return explicit;
             if (tag === "a") return "link";
             if (tag === "button" || type === "button" || type === "submit") return "button";
-            if (tag === "select") return "combobox";
             if (type === "checkbox") return "checkbox";
             if (type === "radio") return "radio";
             return "textbox";
@@ -638,6 +714,20 @@ fn perform_agent_control_action(
             el.focus();
             setter.call(el, input.value);
             el.dispatchEvent(new InputEvent("input", {{ bubbles: true, inputType: "insertText", data: null }}));
+            el.dispatchEvent(new Event("change", {{ bubbles: true }}));
+            return JSON.stringify({{ ok: true }});
+          }}
+          if (input.action === "select") {{
+            if (!(el instanceof HTMLSelectElement) || el.multiple) return JSON.stringify({{ ok: false }});
+            const matches = Array.from(el.options).filter((option) =>
+              !option.disabled && !option.hidden && !option.closest("optgroup")?.disabled && clean(option.label || option.textContent) === input.value
+            );
+            if (matches.length !== 1) return JSON.stringify({{ ok: false }});
+            const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "selectedIndex")?.set;
+            if (!setter) return JSON.stringify({{ ok: false }});
+            el.focus();
+            setter.call(el, matches[0].index);
+            el.dispatchEvent(new InputEvent("input", {{ bubbles: true, inputType: "insertReplacementText", data: null }}));
             el.dispatchEvent(new Event("change", {{ bubbles: true }}));
             return JSON.stringify({{ ok: true }});
           }}
@@ -1403,6 +1493,62 @@ mod tests {
     }
 
     #[test]
+    fn native_select_observations_are_bounded_and_exact() {
+        let control = LocalBrowserAgentControl {
+            control_ref: "control-1234567890abcdef-0".into(),
+            role: "combobox".into(),
+            name: "Region".into(),
+            actions: vec!["select".into()],
+            options: vec!["Europe".into(), "Asia".into()],
+        };
+        validate_agent_control_observation(&control, "control-1234567890abcdef").unwrap();
+        let retained = LocalBrowserObservedControl {
+            role: control.role,
+            name: control.name,
+            actions: control.actions,
+            options: control.options,
+        };
+        validate_observed_control_action(&retained, "select", Some("Europe"), None).unwrap();
+        assert!(
+            validate_observed_control_action(&retained, "select", Some("Hidden"), None).is_err()
+        );
+        assert!(validate_observed_control_action(
+            &retained,
+            "select",
+            Some("Europe"),
+            Some("Enter")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn malformed_native_select_observations_fail_closed() {
+        let duplicate_options = LocalBrowserAgentControl {
+            control_ref: "control-1234567890abcdef-0".into(),
+            role: "combobox".into(),
+            name: "Region".into(),
+            actions: vec!["select".into()],
+            options: vec!["Europe".into(), "Europe".into()],
+        };
+        assert!(
+            validate_agent_control_observation(&duplicate_options, "control-1234567890abcdef")
+                .is_err()
+        );
+
+        let options_on_button = LocalBrowserAgentControl {
+            control_ref: "control-1234567890abcdef-1".into(),
+            role: "button".into(),
+            name: "Continue".into(),
+            actions: vec!["click".into()],
+            options: vec!["Unexpected".into()],
+        };
+        assert!(
+            validate_agent_control_observation(&options_on_button, "control-1234567890abcdef")
+                .is_err()
+        );
+    }
+
+    #[test]
     #[ignore = "requires an installed Chromium browser"]
     fn real_local_browser_navigates_types_and_captures_a_frame() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1491,7 +1637,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires an installed Chromium browser"]
-    fn real_agent_observation_omits_secrets_and_fills_an_exact_control() {
+    fn real_agent_observation_omits_secrets_and_uses_exact_controls() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let server = std::thread::spawn(move || {
@@ -1499,7 +1645,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut request = [0_u8; 2_048];
                 let _ = stream.read(&mut request);
-                let body = r#"<!doctype html><html><head><title>Controls</title></head><body><label for="query">Query</label><input id="query"><input value="private@example.com"><label for="password">Password</label><input id="password" type="password"><button>Save</button></body></html>"#;
+                let body = r#"<!doctype html><html><head><title>Controls</title></head><body><label for="query">Query</label><input id="query"><input value="private@example.com"><label for="password">Password</label><input id="password" type="password"><label for="region">Region</label><select id="region"><option value="private-eu-code">Europe</option><option value="private-asia-code">Asia</option><option disabled value="private-hidden-code">Hidden</option></select><button>Save</button></body></html>"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -1534,6 +1680,10 @@ mod tests {
         assert!(!serde_json::to_string(&observation.controls)
             .unwrap()
             .contains("private@example.com"));
+        let encoded_observation = serde_json::to_string(&observation.controls).unwrap();
+        assert!(!encoded_observation.contains("private-eu-code"));
+        assert!(!encoded_observation.contains("private-asia-code"));
+        assert!(!encoded_observation.contains("Hidden"));
         let query = observation
             .controls
             .iter()
@@ -1556,6 +1706,33 @@ mod tests {
             .value
             .unwrap();
         assert_eq!(value, serde_json::json!("Fable"));
+        let region = observation
+            .controls
+            .iter()
+            .find(|control| control.name == "Region")
+            .unwrap();
+        assert_eq!(region.actions, vec!["select"]);
+        assert_eq!(region.options, vec!["Europe", "Asia"]);
+        perform_agent_control_action(
+            &session,
+            &region.control_ref,
+            &region.role,
+            &region.name,
+            "select",
+            Some("Asia"),
+            None,
+        )
+        .unwrap();
+        let selected_label = session
+            .tab
+            .evaluate(
+                "document.querySelector('#region').selectedOptions[0].label",
+                false,
+            )
+            .unwrap()
+            .value
+            .unwrap();
+        assert_eq!(selected_label, serde_json::json!("Asia"));
         let _ = server.join();
     }
 }
