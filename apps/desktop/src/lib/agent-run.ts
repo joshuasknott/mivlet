@@ -165,6 +165,19 @@ export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAu
       actingMemberId: member.memberId as never
     };
   }
+  if (status.activeWorkspace.source === "local") {
+    return owner.memberId
+      ? {
+          authority: "local",
+          visibility: "member-private",
+          actingMemberId: owner.memberId as never
+        }
+      : {
+          authority: "local",
+          visibility: "member-private",
+          actingInternalUserId: owner.internalUserId as never
+        };
+  }
   if (status.activeWorkspace.source === "preview" && !owner.memberId) {
     return {
       authority: "local",

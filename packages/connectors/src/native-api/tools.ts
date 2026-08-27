@@ -19,7 +19,7 @@ export const CONNECTED_SOURCE_BRIEF_GUIDANCE = [
 const TOOLS: Record<string, BackendTool> = {
   "read-file": {
     name: "read-file",
-    description: "Read a text file from the workspace.",
+    description: "Read a text file from this teammate's private Fable workspace.",
     defaultMode: "read-only",
     defaultRisk: "low",
     parameters: JSON.stringify({
@@ -30,7 +30,7 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "write-file": {
     name: "write-file",
-    description: "Write or overwrite a workspace file.",
+    description: "Write or overwrite a file in this teammate's private Fable workspace.",
     defaultMode: "full-access",
     defaultRisk: "high",
     parameters: JSON.stringify({
@@ -41,7 +41,7 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "run-shell": {
     name: "run-shell",
-    description: "Run a shell command in the workspace.",
+    description: "Run a shell command only when this teammate has an active isolated computer backend. Fable never falls back to the user's host shell.",
     defaultMode: "full-access",
     defaultRisk: "critical",
     parameters: JSON.stringify({
@@ -59,6 +59,43 @@ const TOOLS: Record<string, BackendTool> = {
       type: "object",
       properties: { url: { type: "string" } },
       required: ["url"]
+    })
+  },
+  "local-browser": {
+    name: "local-browser",
+    description: "Open a credential-free HTTP or HTTPS page in this teammate's isolated local browser and return only the bounded observed title plus the final page origin. The separate browser profile, full path, credentials, and page contents stay on this PC. This cannot act while the user has taken control.",
+    defaultMode: "full-access",
+    defaultRisk: "critical",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: { url: { type: "string", format: "uri" } },
+      required: ["url"]
+    })
+  },
+  "local-browser-observe": {
+    name: "local-browser-observe",
+    description: "Observe up to 40 visible, named controls in this teammate's local browser. Returns only bounded role/name/action metadata marked as external untrusted evidence; password, passcode, verification, token, API-key, and payment-shaped fields are omitted. Page text, screenshots, cookies, and hidden state are not returned.",
+    defaultMode: "read-only",
+    defaultRisk: "medium",
+    parameters: JSON.stringify({ type: "object", properties: {}, additionalProperties: false })
+  },
+  "local-browser-action": {
+    name: "local-browser-action",
+    description: "Use one exact control from the latest local-browser-observe result. The observation is single-use and expires after navigation, takeover, or any attempted action. Never fill passwords, passkeys, verification codes, payment details, API keys, tokens, or other secrets.",
+    defaultMode: "full-access",
+    defaultRisk: "critical",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        action: { type: "string", enum: ["click", "fill", "press"] },
+        observationId: { type: "string" },
+        elementRef: { type: "string" },
+        controlRole: { type: "string" },
+        controlName: { type: "string" },
+        value: { type: "string", maxLength: 2000, description: "Required for fill. Do not use for secrets." },
+        key: { type: "string", enum: ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"] }
+      },
+      required: ["action", "observationId", "elementRef", "controlRole", "controlName"]
     })
   },
   "cloud-browser": {

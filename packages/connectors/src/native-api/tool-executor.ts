@@ -2,7 +2,7 @@
  * Real tool execution behind Fable's approval layer.
  *
  * The executor is the concrete implementation of the four registered tools
- * (read-file, write-file, run-shell, web-fetch, cloud-browser). It is pure over an injectable
+ * (read-file, write-file, run-shell, web-fetch, local-browser, cloud-browser). It is pure over an injectable
  * {@link ToolRuntime} — every filesystem/shell/network capability flows through
  * that seam, so production wires it to Tauri commands (Rust owns the actual
  * side effects) and tests inject a fake filesystem. Tools never spawn a shell
@@ -46,6 +46,20 @@ export interface ToolRuntime {
   fetchUrl(url: string): Promise<string | null>;
   /** Open a page in a hosted browser when the runtime supplies that capability. */
   openBrowser?(url: string): Promise<string>;
+  /** Open a page in the on-device teammate browser when supplied by the runtime. */
+  openLocalBrowser?(url: string): Promise<string>;
+  /** Return a bounded control observation from the on-device teammate browser. */
+  observeLocalBrowser?(): Promise<string>;
+  /** Act on one exact, single-use local-browser control observation. */
+  actLocalBrowser?(input: {
+    action: "click" | "fill" | "press";
+    observationId: string;
+    elementRef: string;
+    controlRole: string;
+    controlName: string;
+    value?: string;
+    key?: string;
+  }): Promise<string>;
   /** Act on one opaque control ref from the latest hosted-browser observation. */
   actBrowser?(input: {
     action: "click" | "fill" | "press" | "select" | "scroll" | "history";
@@ -363,6 +377,37 @@ async function dispatch(
         throw new Error("The cloud browser is unavailable in this runtime.");
       }
       return runtime.openBrowser(url);
+    }
+    case "local-browser": {
+      const url = requireString(parsed, toolName, "url");
+      if (!runtime.openLocalBrowser) {
+        throw new Error("The local teammate browser is unavailable in this runtime.");
+      }
+      return runtime.openLocalBrowser(url);
+    }
+    case "local-browser-observe": {
+      if (!runtime.observeLocalBrowser) {
+        throw new Error("Local browser observation is unavailable in this runtime.");
+      }
+      return runtime.observeLocalBrowser();
+    }
+    case "local-browser-action": {
+      if (!runtime.actLocalBrowser) {
+        throw new Error("Local browser actions are unavailable in this runtime.");
+      }
+      const action = requireString(parsed, toolName, "action");
+      if (action !== "click" && action !== "fill" && action !== "press") {
+        throw new Error("Tool local-browser-action requires click, fill, or press.");
+      }
+      return runtime.actLocalBrowser({
+        action,
+        observationId: requireString(parsed, toolName, "observationId"),
+        elementRef: requireString(parsed, toolName, "elementRef"),
+        controlRole: requireString(parsed, toolName, "controlRole"),
+        controlName: requireString(parsed, toolName, "controlName"),
+        ...(typeof parsed.value === "string" ? { value: parsed.value } : {}),
+        ...(typeof parsed.key === "string" ? { key: parsed.key } : {})
+      });
     }
     case "cloud-browser-action": {
       if (!runtime.actBrowser) {

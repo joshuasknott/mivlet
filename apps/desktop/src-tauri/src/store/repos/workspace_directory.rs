@@ -675,7 +675,7 @@ fn selected_active_workspace(
     Ok(None)
 }
 
-fn current_internal_user_id(conn: &Connection) -> Result<Option<String>> {
+pub(crate) fn current_internal_user_id(conn: &Connection) -> Result<Option<String>> {
     conn.query_row(
         "SELECT u.internal_user_id
          FROM current_internal_user AS current

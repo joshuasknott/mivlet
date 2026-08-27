@@ -238,6 +238,125 @@ describe("hosted computer shell execution", () => {
   });
 });
 
+describe("local computer tool isolation", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("never falls back to the user's host shell", async () => {
+    const shellApproval: ApprovalRequest = {
+      id: "native-local-shell-blocked",
+      service: "openai",
+      action: "run-shell command: pwd",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["command: pwd"],
+      consequence: "Run a command.",
+      requestedAt: "2026-08-27T12:00:00.000Z",
+      decisions: ["once", "deny"],
+      confirmationPhrase: "approve run-shell"
+    };
+    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
+    const executor = createDesktopToolExecutor(gate, {
+      workspaceId: "workspace-local",
+      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+    });
+
+    await expect(executor(shellApproval, JSON.stringify({ command: "pwd" })))
+      .rejects.toThrow(/container or VM/i);
+    expect(gate.waitForDecision).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+
+  it("binds file tools to the active teammate scope", async () => {
+    const fileApproval: ApprovalRequest = {
+      id: "native-local-file-read",
+      service: "openai",
+      action: "read-file path: notes.txt",
+      mode: "read-only",
+      riskLevel: "low",
+      dataUsed: ["path: notes.txt"],
+      consequence: "Read a file.",
+      requestedAt: "2026-08-27T12:00:00.000Z",
+      decisions: ["once", "deny"]
+    };
+    runtime.executeTool.mockResolvedValue({ ok: true, output: "private notes" });
+    const executor = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      {
+        workspaceId: "workspace-local",
+        localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+      }
+    );
+
+    await expect(executor(fileApproval, JSON.stringify({ path: "notes.txt" })))
+      .resolves.toBe("private notes");
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "read-file",
+      workspaceId: "workspace-local",
+      agentId: "agent-research"
+    }));
+  });
+
+  it("routes approved local browser navigation to the active teammate without exposing a frame", async () => {
+    const browserApproval: ApprovalRequest = {
+      id: "native-local-browser",
+      service: "openai",
+      action: "local-browser url: https://example.com/",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["url: https://example.com/"],
+      consequence: "Open one page in the teammate browser.",
+      requestedAt: "2026-08-27T12:00:00.000Z",
+      decisions: ["once", "deny"],
+      confirmationPhrase: "approve local-browser"
+    };
+    const output = JSON.stringify({
+      computerId: "local-opaque",
+      currentUrl: "https://example.com/",
+      title: "Example Domain",
+      updatedAt: "2026-08-27T12:00:01.000Z"
+    });
+    runtime.executeTool.mockResolvedValue({ ok: true, output });
+    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
+    const executor = createDesktopToolExecutor(gate, {
+      workspaceId: "workspace-local",
+      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+    });
+
+    await expect(executor(browserApproval, JSON.stringify({ url: "https://example.com/" })))
+      .resolves.toBe(output);
+    expect(gate.waitForDecision).toHaveBeenCalledWith(browserApproval);
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "local-browser",
+      workspaceId: "workspace-local",
+      agentId: "agent-research",
+      arguments: { url: "https://example.com/" }
+    }));
+    expect(output).not.toContain("data:image");
+  });
+
+  it("rejects local browser navigation before approval when the teammate computer is not set up", async () => {
+    const browserApproval: ApprovalRequest = {
+      id: "native-local-browser-missing",
+      service: "openai",
+      action: "local-browser url: https://example.com/",
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["url: https://example.com/"],
+      consequence: "Open one page in the teammate browser.",
+      requestedAt: "2026-08-27T12:00:00.000Z",
+      decisions: ["once", "deny"],
+      confirmationPhrase: "approve local-browser"
+    };
+    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
+    const executor = createDesktopToolExecutor(gate);
+
+    await expect(executor(browserApproval, JSON.stringify({ url: "https://example.com/" })))
+      .rejects.toThrow(/set up.*local computer/i);
+    expect(gate.waitForDecision).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("hosted cloud browser execution", () => {
   beforeEach(() => vi.clearAllMocks());
 

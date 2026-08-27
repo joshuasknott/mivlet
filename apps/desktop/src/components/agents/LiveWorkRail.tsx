@@ -6,7 +6,7 @@ import { Cloud } from "@phosphor-icons/react/dist/csr/Cloud";
 import { FileArrowDown } from "@phosphor-icons/react/dist/csr/FileArrowDown";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import type { RuntimeMissionProgress } from "../../runtime";
 
 export function LiveWorkRail({
@@ -17,6 +17,7 @@ export function LiveWorkRail({
   runId,
   approvalCount,
   computerUseActive,
+  localComputer,
   hostedComputer,
   missionProgress,
   screenPreviewUrl,
@@ -30,6 +31,30 @@ export function LiveWorkRail({
   runId: string | null;
   approvalCount: number;
   computerUseActive: boolean;
+  localComputer: {
+    available: boolean;
+    status?: "unprovisioned" | "provisioning" | "ready" | "degraded";
+    browserAvailable: boolean;
+    browserActive: boolean;
+    browserProduct?: string;
+    controller: "agent" | "human";
+    loading: boolean;
+    provisioning: boolean;
+    busy: boolean;
+    error: string | null;
+    browserUrl?: string;
+    browserTitle?: string;
+    generation: number;
+    viewport?: { width: number; height: number };
+    onProvision: () => Promise<unknown>;
+    onOpenBrowser: (url: string) => Promise<unknown>;
+    onRefreshBrowser: () => Promise<unknown>;
+    onTakeControl: () => Promise<unknown>;
+    onReturnControl: () => Promise<unknown>;
+    onClick: (x: number, y: number) => Promise<unknown>;
+    onScroll: (x: number, y: number, deltaY: number) => Promise<unknown>;
+    onKey: (key: string) => Promise<unknown>;
+  };
   hostedComputer: {
     available: boolean;
     status?: "provisioning" | "ready" | "degraded" | "destroyed";
@@ -69,6 +94,10 @@ export function LiveWorkRail({
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("");
+  const [localBrowserUrl, setLocalBrowserUrl] = useState("");
+  const localScreenRef = useRef<HTMLDivElement>(null);
+  const localScreenImageRef = useRef<HTMLImageElement>(null);
+  const keyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const needsAttention = approvalCount > 0 || status === "awaiting-approval";
   const activeHostedSchedules = hostedComputer.schedules.filter((schedule) => schedule.lifecycle === "active");
   const nextHostedSchedule = activeHostedSchedules.find((schedule) => schedule.nextRunAt);
@@ -78,14 +107,107 @@ export function LiveWorkRail({
     event.preventDefault();
     void hostedComputer.onOpenBrowser(browserUrl).then(() => setScreenOpen(true)).catch(() => undefined);
   };
+  const submitLocalBrowser = (event: FormEvent) => {
+    event.preventDefault();
+    void (async () => {
+      if (localComputer.controller !== "human") await localComputer.onTakeControl();
+      await localComputer.onOpenBrowser(localBrowserUrl);
+      setScreenOpen(true);
+    })().catch(() => undefined);
+  };
+  const localPoint = (event: MouseEvent<HTMLDivElement> | WheelEvent<HTMLDivElement>) => {
+    const image = localScreenImageRef.current;
+    const viewport = localComputer.viewport;
+    if (!viewport || !image) return null;
+    const rect = image.getBoundingClientRect();
+    const sourceWidth = image.naturalWidth;
+    const sourceHeight = image.naturalHeight;
+    if (rect.width <= 0 || rect.height <= 0 || sourceWidth <= 0 || sourceHeight <= 0) return null;
+    const renderedScale = Math.min(rect.width / sourceWidth, rect.height / sourceHeight);
+    const renderedWidth = sourceWidth * renderedScale;
+    const renderedHeight = sourceHeight * renderedScale;
+    const renderedLeft = rect.left + (rect.width - renderedWidth) / 2;
+    const renderedTop = rect.top + (rect.height - renderedHeight) / 2;
+    const renderedX = event.clientX - renderedLeft;
+    const renderedY = event.clientY - renderedTop;
+    if (renderedX < 0 || renderedY < 0 || renderedX > renderedWidth || renderedY > renderedHeight) return null;
+    return {
+      x: (renderedX / renderedScale / sourceWidth) * viewport.width,
+      y: (renderedY / renderedScale / sourceHeight) * viewport.height
+    };
+  };
+  const handleLocalScreenClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (localComputer.controller !== "human") return;
+    const point = localPoint(event);
+    if (!point) return;
+    localScreenRef.current?.focus();
+    void localComputer.onClick(point.x, point.y).catch(() => undefined);
+  };
+  const handleLocalScreenWheel = (event: WheelEvent<HTMLDivElement>) => {
+    if (localComputer.controller !== "human") return;
+    const point = localPoint(event);
+    if (!point) return;
+    event.preventDefault();
+    void localComputer.onScroll(point.x, point.y, event.deltaY).catch(() => undefined);
+  };
+  const handleLocalScreenKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (localComputer.controller !== "human" || event.ctrlKey || event.metaKey || event.altKey) return;
+    const allowedNamedKey = ["Enter", "Tab", "Escape", "Backspace", "Delete", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Home", "End", "PageUp", "PageDown"].includes(event.key);
+    if (event.key.length !== 1 && !allowedNamedKey) return;
+    event.preventDefault();
+    const key = event.key;
+    keyQueueRef.current = keyQueueRef.current
+      .catch(() => undefined)
+      .then(() => localComputer.onKey(key));
+  };
   return (
     <aside className="live-rail" aria-label="Work">
       <header className="live-rail__header"><div><strong>Work</strong><span>{agentName}</span></div><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
 
-      <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Cloud computer">
+      <section className={`hosted-computer-card local-computer-card${localComputer.status === "ready" ? " is-ready" : localComputer.status === "degraded" || localComputer.error ? " is-attention" : ""}`} aria-label="Computer on this PC">
+        <span className="hosted-computer-card__icon"><Browser size={18} weight={localComputer.status === "ready" ? "fill" : "regular"} /></span>
+        <span className="hosted-computer-card__copy">
+          <strong>Computer on this PC</strong>
+          <small>{localComputer.status === "ready"
+            ? `${localComputer.browserProduct ?? "Private browser"} · separate profile and files`
+            : localComputer.provisioning || localComputer.status === "provisioning"
+              ? "Creating this teammate's private browser and files…"
+              : localComputer.error
+                ? localComputer.error
+                : localComputer.browserAvailable
+                  ? "Free, local, and separate for this teammate"
+                  : "Install Edge, Chrome, or Chromium to enable it"}</small>
+        </span>
+        {localComputer.available && (localComputer.status !== "ready" || !localComputer.browserActive) ? (
+          <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading || !localComputer.browserAvailable}>
+            {localComputer.status === "degraded" || localComputer.error ? "Retry" : localComputer.status === "ready" ? "Start" : "Set up"}
+          </button>
+        ) : localComputer.status === "ready" ? <span className="hosted-computer-card__state">Local</span> : null}
+        {localComputer.status === "ready" && localComputer.browserActive ? (
+          <form className="hosted-browser-launcher" onSubmit={submitLocalBrowser}>
+            <Browser size={16} aria-hidden="true" />
+            <input
+              type="url"
+              value={localBrowserUrl}
+              onChange={(event) => setLocalBrowserUrl(event.target.value)}
+              placeholder="https://example.com"
+              aria-label="Page to open on this teammate's local computer"
+              disabled={localComputer.busy}
+              required
+            />
+            <button type="submit" disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Open"}</button>
+          </form>
+        ) : null}
+        {localComputer.error ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
+        {localComputer.status === "ready" ? (
+          <small className="local-computer-card__boundary">Browser and files are separated per teammate. App and terminal isolation need a container or VM backend and remain off.</small>
+        ) : null}
+      </section>
+
+      <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional cloud computer">
         <span className="hosted-computer-card__icon"><Cloud size={18} weight={hostedComputer.status === "ready" ? "fill" : "regular"} /></span>
         <span className="hosted-computer-card__copy">
-          <strong>Cloud computer</strong>
+          <strong>Optional cloud computer</strong>
           <small>{hostedComputer.status === "ready" && hostedComputer.keepAlive
             ? "Always on and ready"
             : hostedComputer.provisioning || hostedComputer.status === "provisioning"
@@ -184,16 +306,35 @@ export function LiveWorkRail({
 
       {screenOpen && screenPreviewUrl ? (
         <div className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`}>
-          <section className="live-screen-modal__panel">
+          <section className={`live-screen-modal__panel${localComputer.browserActive ? " live-screen-modal__panel--local" : ""}`}>
             <header>
-              <span><strong>{hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{hostedComputer.browserUrl}</small></span>
+              <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s local browser` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>
               <span className="live-screen-modal__actions">
-                <button type="button" onClick={() => void hostedComputer.onRefreshBrowser().catch(() => undefined)} disabled={hostedComputer.browserOpening} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
-                {hostedComputer.liveViewUrl ? <a href={hostedComputer.liveViewUrl} target="_blank" rel="noreferrer" aria-label="Take over in Cloudflare Live View (opens in a new window)">Take over <ArrowSquareOut size={15} /></a> : null}
+                <button type="button" onClick={() => void (localComputer.browserActive ? localComputer.onRefreshBrowser() : hostedComputer.onRefreshBrowser()).catch(() => undefined)} disabled={hostedComputer.browserOpening || localComputer.busy} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
+                {localComputer.browserActive ? (
+                  localComputer.controller === "human"
+                    ? <button type="button" onClick={() => void localComputer.onReturnControl().catch(() => undefined)} disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Return control"}</button>
+                    : <button type="button" onClick={() => void localComputer.onTakeControl().catch(() => undefined)} disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Take control"}</button>
+                ) : null}
+                {!localComputer.browserActive && hostedComputer.liveViewUrl ? <a href={hostedComputer.liveViewUrl} target="_blank" rel="noreferrer" aria-label="Take over in Cloudflare Live View (opens in a new window)">Take over <ArrowSquareOut size={15} /></a> : null}
                 <button type="button" onClick={() => setScreenOpen(false)} aria-label="Close screen"><X size={18} /></button>
               </span>
             </header>
-            <img src={screenPreviewUrl} alt={`${agentName}'s live computer session`} />
+            {localComputer.browserActive ? (
+              <div
+                className={`local-browser-screen${localComputer.controller === "human" ? " is-human" : ""}`}
+                ref={localScreenRef}
+                tabIndex={localComputer.controller === "human" ? 0 : -1}
+                role="group"
+                aria-label={`${agentName}'s interactive local browser`}
+                onClick={handleLocalScreenClick}
+                onWheel={handleLocalScreenWheel}
+                onKeyDown={handleLocalScreenKey}
+              >
+                <img ref={localScreenImageRef} src={screenPreviewUrl} alt={`${agentName}'s local browser`} draggable={false} />
+                <small>{localComputer.controller === "human" ? "Click the screen, then type. Keys are sent directly and are not saved by Fable." : `${agentName} can use approved browser actions. Take control to interact safely.`}</small>
+              </div>
+            ) : <img src={screenPreviewUrl} alt={`${agentName}'s live computer session`} />}
           </section>
         </div>
       ) : null}

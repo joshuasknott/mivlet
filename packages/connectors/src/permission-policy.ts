@@ -130,6 +130,10 @@ export function effectForTool(toolName: string): PermissionEffect | null {
       return "shell-execution";
     case "web-fetch":
       return "web-fetch";
+    case "local-browser-observe":
+      return "browser-read";
+    case "local-browser":
+    case "local-browser-action":
     case "cloud-browser":
     case "cloud-browser-action":
       return "browser-state-mutation";

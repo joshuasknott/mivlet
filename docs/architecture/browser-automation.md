@@ -1,8 +1,16 @@
 # Browser automation architecture
 
 > [!WARNING]
-> **Status: Preview/fixture-only; headless transport deferred**
-> The codebase includes the permission policy architecture, session derivation boundaries, and audit redaction rules. Live browser tool execution (e.g. driving a headless browser via Puppeteer or Playwright) is deferred. Egress remains synthetic fixture-backed in preview. Operations requiring live browser execution fail closed.
+> **Status: local human control and bounded approved agent controls implemented; richer automation remains deferred**
+> The desktop app can start a real local Edge/Chrome/Chromium process per
+> workspace/agent, render an ephemeral screen in Fable, and let the user take
+> and return control. An exact, one-time-approved agent tool can navigate a
+> provisioned local browser and receives only a bounded final title and origin.
+> A separate observation returns only bounded,
+> visible, non-secret named controls; exact single-use refs support approved
+> click, fill, and key actions. Rich page understanding still fails closed; the
+> hosted browser transport remains deployment-gated. Preview egress remains
+> explicitly fixture-backed.
 
 The browser automation boundary is designed as a **consequence-aware, local-first isolation layer** that evaluates browser actions before they are executed. No browser action is allowed to run silently or bypass permission rules.
 
@@ -47,9 +55,40 @@ To preserve user privacy and security, the browser automation boundary implement
 - **No Page-Content Leakage**: HTML DOM dumps, page text, screenshots, and clipboard data are never persisted in the runtime snapshot, ordinary logs, or SQLite databases.
 - **Explicit Fixture Masquerade Prevention**: Preview data results are strictly marked with `source: "fixture"` and summaries are prefixed with `Preview data only:`. Preview adapters never silently masquerade as live production connections.
 
+## Local user-control browser
+
+The native local-computer boundary is deliberately narrower than the automated
+action architecture above:
+
+- Each workspace/agent scope derives an opaque Fable-owned directory. Browser
+  profile paths, cookies, DevTools endpoints, and process handles remain native.
+- User-entered navigation accepts credential-free HTTP(S) URLs only. URL
+  fragments are removed before navigation and credentials in URLs are rejected.
+- The screen is a bounded JPEG frame that is never written to Fable's database,
+  transcript, runtime snapshot, or ordinary logs.
+- Control changes increment a generation fence. Pointer and keyboard input must
+  cite the current generation and fail after control changes or stale frames.
+- The browser launches with its own persistent profile, Chromium's sandbox, and
+  certificate-error bypass disabled. Website sign-in can happen inside that
+  browser, although provider-specific OAuth and passkey compatibility is not yet
+  certified; Fable does not copy cookies or private session tokens.
+- Approved model navigation starts the provisioned browser when needed, refuses
+  to act during human takeover, and returns only a bounded title plus final
+  origin. User information, path, query, and fragment are removed.
+- Approved model observation exposes at most 40 visible named controls as
+  external-untrusted evidence. It omits secret-shaped fields and all page body,
+  screenshot, cookie, clipboard, and hidden-state data. Exact refs are consumed
+  by one approved click, non-secret fill, or allowlisted key action.
+- This is browser-process/profile isolation, not a separate OS account,
+  container, or VM. See [local teammate computer](local-teammate-computer.md).
+
 ## Deferred / Not implemented
 
-The following capabilities are out of scope for the current slice:
-- Live headless browser engine (e.g. Puppeteer/Playwright listeners in Tauri).
-- Multi-session local storage isolation for live browser profiles.
-- Production auth-broker deployment.
+The following capabilities are not implemented locally:
+
+- General page-text/DOM inspection, select controls, explicit submit semantics,
+  downloads/uploads, and multi-tab workflows beyond the bounded control layer.
+- A full visible Chromium chrome surface, downloads UI, popup/tab management,
+  uploads, passkeys, or system clipboard integration.
+- Container/VM-backed application and terminal isolation.
+- Production auth-broker deployment and live provider OAuth certification.

@@ -124,4 +124,25 @@ describe("OnboardingPage account and provider journey", () => {
 
     expect(screen.getByRole("heading", { name: "Start with your Fable account" })).toBeInTheDocument();
   });
+
+  it("opens an unconfigured native install as a real local workspace", () => {
+    renderOnboarding({
+      identityStatus: { enabled: false, state: "disabled", message: "Cloud account setup is not configured.", scopes: [] },
+      accountWorkspaceStatus: {
+        configured: false,
+        state: "ready",
+        message: "Local workspace ready.",
+        accountBound: true,
+        workspaces: [],
+        activeWorkspace: { localWorkspaceId: "default", name: "On this PC", source: "local" },
+        activeContextOwner: { internalUserId: "local-device" },
+        devices: []
+      },
+      allowProviderless: true
+    });
+
+    expect(screen.getByRole("heading", { name: "Add a model provider" })).toBeInTheDocument();
+    expect(screen.getByText("Local workspace")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue without a provider" })).toBeInTheDocument();
+  });
 });

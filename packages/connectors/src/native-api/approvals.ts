@@ -59,6 +59,14 @@ function normalizeCloudBrowserUrl(raw: string): string | null {
   }
 }
 
+function normalizeLocalBrowserUrl(raw: string): string | null {
+  const normalized = normalizeWebFetchUrl(raw);
+  if (!normalized) return null;
+  const url = new URL(normalized);
+  url.hash = "";
+  return url.toString();
+}
+
 /** Build the ApprovalRequest for a model-emitted tool call. */
 export function buildToolApproval(
   providerId: string,
@@ -82,6 +90,10 @@ export function buildToolApproval(
       }
       if (toolName === "cloud-browser" && key === "url" && typeof value === "string") {
         const norm = normalizeCloudBrowserUrl(value);
+        if (norm) vstr = norm;
+      }
+      if (toolName === "local-browser" && key === "url" && typeof value === "string") {
+        const norm = normalizeLocalBrowserUrl(value);
         if (norm) vstr = norm;
       }
       return `${key}: ${vstr}`;

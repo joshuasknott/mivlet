@@ -1240,6 +1240,8 @@ pub struct RuntimeSnapshot {
     /// boundary can re-resolve auth state on recovery.
     pub connected_backend_ids: Vec<String>,
     #[serde(default)]
+    pub onboarding_complete: bool,
+    #[serde(default)]
     pub selected_model_id: String,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,

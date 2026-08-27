@@ -963,6 +963,7 @@ fn runtime_snapshot() -> RuntimeSnapshot {
             "Recover the workspace after restart.",
         )],
         connected_backend_ids: vec!["codex".to_string()],
+        onboarding_complete: true,
         selected_model_id: "gpt-5".to_string(),
         permission_mode: "read-only".to_string(),
         permission_label: Some("Read Only".to_string()),
@@ -2284,6 +2285,7 @@ fn tool_request(
         },
         workspace_id: None,
         project_id: None,
+        agent_id: None,
         mcp_session_id: None,
         mission_worker_tool_execution: None,
         workspace_root: None,
@@ -2452,6 +2454,65 @@ fn cloud_browser_source_approval_binds_to_the_canonical_public_page() {
         &approval,
     )
     .is_err());
+}
+
+#[test]
+fn local_browser_source_approval_binds_to_the_canonical_page() {
+    let mut approval = tool_approval(
+        "local-browser",
+        "full-access",
+        "critical",
+        Some("approve local-browser"),
+    );
+    approval.action = "local-browser url: https://example.com/path".to_string();
+    approval.data_used = vec!["url: https://example.com/path".to_string()];
+
+    validate_tool_approval_binding(
+        "local-browser",
+        &serde_json::json!({ "url": "https://example.com/path#discarded" }),
+        &approval,
+    )
+    .expect("canonical local browser approval binding");
+    assert!(validate_tool_approval_binding(
+        "local-browser",
+        &serde_json::json!({ "url": "https://other.example/path" }),
+        &approval,
+    )
+    .is_err());
+}
+
+#[test]
+fn local_browser_action_approval_binds_every_single_use_control_field() {
+    let arguments = serde_json::json!({
+        "action": "fill",
+        "observationId": "observation-1234567890abcdef",
+        "elementRef": "control-1234567890abcdef-0",
+        "controlRole": "textbox",
+        "controlName": "Search",
+        "value": "Fable"
+    });
+    let mut approval = tool_approval(
+        "local-browser-action",
+        "full-access",
+        "critical",
+        Some("approve local-browser-action"),
+    );
+    approval.action = "local-browser-action action: fill".to_string();
+    approval.data_used = vec![
+        "action: fill".into(),
+        "observationId: observation-1234567890abcdef".into(),
+        "elementRef: control-1234567890abcdef-0".into(),
+        "controlRole: textbox".into(),
+        "controlName: Search".into(),
+        "value: Fable".into(),
+    ];
+    validate_tool_approval_binding("local-browser-action", &arguments, &approval)
+        .expect("exact local control binding");
+    let mut substituted = arguments;
+    substituted["elementRef"] = serde_json::json!("control-1234567890abcdef-1");
+    assert!(
+        validate_tool_approval_binding("local-browser-action", &substituted, &approval).is_err()
+    );
 }
 
 #[test]

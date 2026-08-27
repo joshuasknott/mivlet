@@ -8,6 +8,9 @@ import "../../styles/routes/onboarding.css";
 type AccountStage = "account" | "provider";
 
 function accountStage(identity: IdentityStatus, workspace: AccountWorkspaceStatus): AccountStage {
+  if (workspace.accountBound && workspace.state === "ready" && workspace.activeWorkspace.source === "local") {
+    return "provider";
+  }
   const workspaceUsable = workspace.state === "ready" || (workspace.state === "offline" && workspace.accountBound);
   const identityUsable = identity.state === "signed-in" ||
     (identity.state === "offline" && workspace.state === "offline" && workspace.accountBound);
@@ -76,6 +79,7 @@ export function OnboardingPage({
   const pending = identityPending || accountWorkspacePending;
   const hasAnyConnected = connectedBackendIds.length > 0;
   const display = identityStatus.authentication?.verifiedDisplayAttributes;
+  const localOnly = accountWorkspaceStatus.activeWorkspace.source === "local";
 
   const handleConnect = async (providerId: string, secret: string): Promise<BackendVerifyResult> => {
     if (onConnectWithVerify) return onConnectWithVerify(providerId, secret);
@@ -96,7 +100,7 @@ export function OnboardingPage({
           <ol className="og-progress-steps">
             <li className={step === "account" ? "og-progress-step is-current" : "og-progress-step is-complete"} aria-current={step === "account" ? "step" : undefined}>
               <span aria-hidden="true">{step === "provider" ? <CheckCircle size={14} weight="fill" /> : "1"}</span>
-              Fable account
+              {localOnly ? "Local workspace" : "Fable account"}
             </li>
             <li className={step === "provider" ? "og-progress-step is-current" : "og-progress-step"} aria-current={step === "provider" ? "step" : undefined}>
               <span aria-hidden="true">2</span>
@@ -133,7 +137,9 @@ export function OnboardingPage({
         ) : (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <h1 id="onboarding-title">Add a model provider</h1>
-            <p className="og-lede">Choose a provider you already use. You can connect more later.</p>
+            <p className="og-lede">{localOnly
+              ? "Your private workspace on this PC is ready. Connect a provider you already use, or continue now and add one later."
+              : "Choose a provider you already use. You can connect more later."}</p>
             <div className="og-unified">
               <ProviderCatalogue providers={providers} connectedBackendIds={connectedBackendIds} onConnect={handleConnect} onCheckConnection={onCheckConnection} />
             </div>

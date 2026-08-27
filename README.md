@@ -22,13 +22,24 @@ production-validated service.
 - Named agent profiles, conversations, model selection, learning records, team
   missions, live-work visibility, and a single adaptive voice/send composer.
 - Native provider adapters for OpenAI-compatible, Anthropic, and Gemini wire
-  formats, plus supported local CLI/ACP runtimes and external Ollama.
+  formats, managed ChatGPT browser sign-in through Codex app-server, plus
+  supported advanced local ACP runtimes and external Ollama.
 - Encrypted SQLite persistence for local workspace state, knowledge, memory,
   approvals, schedules, run history, artifacts, and provenance.
 - Approval-gated native tools and connector actions with one-time, session,
   rule, modify, and deny decisions.
 - Local knowledge ingestion/retrieval, connector boundaries, projects, missions,
   and schedules.
+- A credential-free local teammate-computer foundation: each workspace/agent
+  pair gets persistent private files and a separate Edge/Chrome/Chromium
+  profile and process, with an ephemeral screen inside Fable and generation-
+  fenced take/return control. File tools are confined to that teammate's
+  Fable-owned directory, and an exactly approved agent tool can navigate its
+  browser. Agent-visible navigation results retain only the final origin and a
+  bounded title. A bounded observation exposes only visible named non-secret controls
+  through exact single-use refs for approved click, fill, and key actions; page
+  contents and screenshots are not returned to the model. Fable never falls
+  back to the user's host shell.
 - Runtime-detected browser/operating-system dictation. It fails closed when the
   host webview has no speech-recognition API; Fable does not retain raw audio or
   a separate transcript.
@@ -43,7 +54,9 @@ production-validated service.
   configured Clerk/Convex environment, secrets, container availability, and
   live smoke testing.
 - Remote model providers require the user's valid credentials and entitlements;
-  CLI providers require their own installed and authenticated tools.
+  direct API providers use API keys where they expose no supported application
+  OAuth. Advanced ACP runtimes require their own installed and authenticated
+  tools. Fable does not copy provider session tokens.
 - Google connectors require a public desktop OAuth client. Confidential OAuth
   connectors require the separate broker to be configured and deployed.
 - Clerk identity and Convex collaboration paths exist, but production tenancy,
@@ -55,11 +68,15 @@ production-validated service.
   disaster recovery.
 - Secure third-party sign-in/secret handoff inside hosted agent computers.
 - Automatic background continuation of ordinary local chats.
+- Full local OS/app/terminal isolation. The implemented local backend is a
+  browser sandbox plus private files; command execution remains off until a
+  real container or VM backend is available.
 - Mobile remote control, signed installers, updater channels, and supported
   macOS/Linux releases.
 
-See [hosted teammate computer](docs/architecture/hosted-teammate-computer.md)
-for the hosted trust boundary and remaining deployment work.
+See [local teammate computer](docs/architecture/local-teammate-computer.md) and
+[hosted teammate computer](docs/architecture/hosted-teammate-computer.md) for
+their distinct trust boundaries and remaining work.
 
 ## Repository layout
 

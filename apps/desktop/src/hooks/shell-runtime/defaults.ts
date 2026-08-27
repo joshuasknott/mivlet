@@ -33,6 +33,7 @@ export const defaultShellState: PersistedShellState = {
   memoryDisabled: false,
   memoryRecords,
   connectedBackendIds: [],
+  onboardingComplete: false,
   // "" lets Fable pick the first available model. Ask Me is the default
   // approval preset.
   selectedModelId: "",

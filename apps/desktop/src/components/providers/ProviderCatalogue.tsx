@@ -135,9 +135,9 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
 const METHOD_KIND_PRIORITY: Record<ProviderConnectionMethodKind, number> = {
   "oauth-browser": 0,
   "oauth-device": 1,
-  "provider-login": 2,
-  "api-key": 3,
-  local: 4,
+  "api-key": 2,
+  local: 3,
+  "provider-login": 4,
   custom: 5
 };
 
@@ -186,37 +186,7 @@ function providerOwnedMethods(provider: BackendProvider): ProviderConnectionMeth
         id: `${provider.id}:browser`,
         kind: "oauth-browser",
         label: "ChatGPT subscription",
-        description: "Use the Codex CLI and finish sign-in in your browser.",
-        command: "codex login",
-        provider
-      },
-      {
-        id: `${provider.id}:device`,
-        kind: "oauth-device",
-        label: "ChatGPT subscription with a device code",
-        description: "Use the Codex CLI device-code flow on this computer.",
-        command: "codex login --device-auth",
-        provider
-      }
-    ];
-  }
-
-  if (compact === "grok") {
-    return [
-      {
-        id: `${provider.id}:browser`,
-        kind: "oauth-browser",
-        label: "Grok account in your browser",
-        description: "Use the Grok CLI and finish sign-in in your browser.",
-        command: "grok login",
-        provider
-      },
-      {
-        id: `${provider.id}:device`,
-        kind: "oauth-device",
-        label: "Grok account with a device code",
-        description: "Use the Grok CLI device-code flow on this computer.",
-        command: "grok login --device-auth",
+        description: "Sign in through the official ChatGPT browser flow managed by Codex.",
         provider
       }
     ];
@@ -227,24 +197,12 @@ function providerOwnedMethods(provider: BackendProvider): ProviderConnectionMeth
     : compact === "cursor"
       ? "Cursor subscription"
       : `${provider.label} account`;
-  const command = compact === "opencode"
-    ? "opencode auth login"
-    : compact === "copilot"
-      ? "copilot login"
-      : compact === "cursor"
-        ? "agent login"
-        : compact === "kimi"
-          ? "kimi login"
-          : compact === "mistralvibe"
-            ? "vibe --setup"
-            : undefined;
   return [
     {
       id: `${provider.id}:account`,
       kind: "provider-login",
       label,
-      description: "Use the provider's installed app or CLI and its own sign-in.",
-      command,
+      description: "Advanced: use an already installed and signed-in provider runtime. Fable reads only its connection state.",
       provider
     }
   ];
@@ -412,6 +370,7 @@ export interface ProviderCatalogueProps {
   onCheckConnection?: (
     providerId: string
   ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
+  onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
   onStatus?: (message: string) => void;
 }
 
@@ -422,6 +381,7 @@ export function ProviderCatalogue({
   onDisconnect,
   onRefreshModels,
   onCheckConnection,
+  onStartBrowserLogin,
   onStatus
 }: ProviderCatalogueProps) {
   const families = useMemo(() => buildProviderFamilies(providers), [providers]);
@@ -533,6 +493,7 @@ export function ProviderCatalogue({
           onDisconnect={onDisconnect}
           onRefreshModels={onRefreshModels}
           onCheckConnection={onCheckConnection}
+          onStartBrowserLogin={onStartBrowserLogin}
           onStatus={onStatus}
         />
       ) : null}
@@ -566,6 +527,7 @@ function ProviderConnectionModal({
   onDisconnect,
   onRefreshModels,
   onCheckConnection,
+  onStartBrowserLogin,
   onStatus
 }: {
   family: ProviderFamily;
@@ -577,6 +539,7 @@ function ProviderConnectionModal({
   onCheckConnection?: (
     providerId: string
   ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
+  onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
   onStatus?: (message: string) => void;
 }) {
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
@@ -678,6 +641,28 @@ function ProviderConnectionModal({
       onStatus?.(message);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not refresh this connection.";
+      setFeedback({ message, tone: "danger" });
+      onStatus?.(message);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const startBrowserLogin = async (providerId: string) => {
+    if (!onStartBrowserLogin) return;
+    setPending(true);
+    setFeedback(null);
+    try {
+      const result = await onStartBrowserLogin(providerId);
+      if (result.outcome === "ready") {
+        setLocallyReady(providerId);
+        setLocallyRemoved(null);
+      }
+      const copy = connectResultCopy(result.outcome, { detail: result.message });
+      setFeedback({ message: copy.message, tone: copy.tone });
+      onStatus?.(copy.message);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Browser sign-in could not be completed.";
       setFeedback({ message, tone: "danger" });
       onStatus?.(message);
     } finally {
@@ -873,15 +858,17 @@ function ProviderConnectionModal({
             selectedMethod.kind === "oauth-device" ||
             selectedMethod.kind === "provider-login" ? (
               <div className="provider-method-detail__instructions">
-                <TerminalWindow size={19} aria-hidden="true" />
+                {selectedMethod.kind === "oauth-browser"
+                  ? <Browser size={19} aria-hidden="true" />
+                  : <TerminalWindow size={19} aria-hidden="true" />}
                 <div>
-                  <strong>Provider-owned sign-in</strong>
+                  <strong>{selectedMethod.kind === "oauth-browser" ? "Provider-supported browser sign-in" : "Provider-owned sign-in"}</strong>
                   <p>
                     {selectedMethod.kind === "oauth-device"
-                      ? "Start the device-code sign-in from the provider's CLI, then return to Fable when it finishes."
+                      ? "Use the provider's official device authorization and return to Fable when it finishes."
                       : selectedMethod.kind === "oauth-browser"
-                        ? "Start sign-in from the provider's CLI and complete the browser window it opens."
-                        : "Install and sign in through the provider's own app or CLI, then return to Fable."}
+                        ? "Fable opens the official provider page in your browser and waits for the provider-owned flow to finish. OAuth credentials never enter the Fable interface."
+                        : "Sign in through the provider's own installed app or runtime, then return to Fable."}
                   </p>
                   <p>
                     {selectedMethod.provider.installHint ??
@@ -897,8 +884,18 @@ function ProviderConnectionModal({
               </div>
             ) : null}
 
-            {(selectedMethod.kind === "oauth-browser" ||
-              selectedMethod.kind === "oauth-device" ||
+            {selectedMethod.kind === "oauth-browser" && onStartBrowserLogin && !methodConnected ? (
+              <button
+                type="button"
+                className="provider-method-form__primary"
+                disabled={pending}
+                onClick={() => void startBrowserLogin(selectedMethod.provider.id)}
+              >
+                {pending ? <><Spinner size={14} className="og-spinner" /> Waiting for browser</> : "Continue in browser"}
+              </button>
+            ) : null}
+
+            {(selectedMethod.kind === "oauth-device" ||
               selectedMethod.kind === "provider-login") && onCheckConnection ? (
               <button
                 type="button"

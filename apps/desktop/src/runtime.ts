@@ -86,6 +86,15 @@ export {
   snapshotRuntimeHostedBrowser,
   type HostedComputerRuntimePort
 } from "./runtime/domains/hosted-computer";
+export {
+  keyRuntimeLocalBrowser,
+  loadRuntimeLocalComputer,
+  navigateRuntimeLocalBrowser,
+  pointRuntimeLocalBrowser,
+  provisionRuntimeLocalComputer,
+  setRuntimeLocalComputerController,
+  snapshotRuntimeLocalBrowser,
+} from "./runtime/domains/local-computer";
 import { importLocalTextFile } from "@fable/connectors/local-files";
 import { searchKnowledgeSources } from "@fable/connectors/knowledge-search";
 import type { LocalTextFileCandidate } from "@fable/connectors/local-files";
@@ -2600,6 +2609,12 @@ export interface RuntimeCodexStatus {
   message?: string;
 }
 
+export interface RuntimeCodexBrowserLoginResult {
+  providerId: "codex";
+  outcome: "ready";
+  message: string;
+}
+
 export interface RuntimeCodexTurnStartRequest {
   requestId: string;
   providerId: string;
@@ -2641,6 +2656,15 @@ export async function getRuntimeCodexStatus() {
       authenticated: false,
       message: "Fable could not inspect the Codex CLI."
     };
+  }
+}
+
+export async function startRuntimeCodexBrowserLogin() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeCodexBrowserLoginResult>("start_codex_browser_login");
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 
@@ -4506,6 +4530,8 @@ export interface RuntimeToolRequest {
   workspaceId?: string;
   /** Optional active private project scope. */
   projectId?: string;
+  /** Active teammate scope used by native code to resolve isolated local files. */
+  agentId?: string;
   /** Native-owned live MCP session selected from an explicit semantic binding. */
   mcpSessionId?: string;
   /** Exact mission journal binding for one connected-source tool result. */

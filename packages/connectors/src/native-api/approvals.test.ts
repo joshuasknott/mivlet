@@ -37,6 +37,49 @@ describe("buildToolApproval", () => {
     expect(approval.confirmationPhrase).toBe("approve cloud-browser");
   });
 
+  it("binds an on-device browser page to a critical one-time confirmation", () => {
+    const approval = buildToolApproval(
+      "openai",
+      "local-browser",
+      '{"url":"https://example.com/path#section"}'
+    );
+    expect(approval).toMatchObject({
+      mode: "full-access",
+      riskLevel: "critical",
+      dataUsed: ["url: https://example.com/path"],
+      confirmationPhrase: "approve local-browser"
+    });
+    expect(approval.consequence).not.toMatch(/unregistered/i);
+  });
+
+  it("binds every local browser control field and treats observation as a read", () => {
+    const observation = buildToolApproval("openai", "local-browser-observe", "{}");
+    expect(observation).toMatchObject({ mode: "read-only", riskLevel: "medium" });
+    expect(observation.confirmationPhrase).toBeUndefined();
+
+    const action = buildToolApproval("openai", "local-browser-action", JSON.stringify({
+      action: "fill",
+      observationId: "observation-1234567890abcdef",
+      elementRef: "control-1234567890abcdef-0",
+      controlRole: "textbox",
+      controlName: "Search",
+      value: "Fable"
+    }));
+    expect(action).toMatchObject({
+      mode: "full-access",
+      riskLevel: "critical",
+      confirmationPhrase: "approve local-browser-action"
+    });
+    expect(action.dataUsed).toEqual([
+      "action: fill",
+      "observationId: observation-1234567890abcdef",
+      "elementRef: control-1234567890abcdef-0",
+      "controlRole: textbox",
+      "controlName: Search",
+      "value: Fable"
+    ]);
+  });
+
   it("fails closed for an unregistered tool — critical risk, refusal consequence", () => {
     const approval = buildToolApproval("gemini", "delete-everything", "{}");
     expect(approval.riskLevel).toBe("critical");

@@ -53,15 +53,21 @@ function renderCatalogue(providers = catalogueProviders) {
     outcome: "ready" as const
   }));
   const onCheckConnection = vi.fn(async () => {});
+  const onStartBrowserLogin = vi.fn(async (providerId: string) => ({
+    providerId,
+    outcome: "ready" as const,
+    message: "ChatGPT sign-in completed in your browser."
+  }));
   const result = render(
     <ProviderCatalogue
       providers={providers}
       connectedBackendIds={[]}
       onConnect={onConnect}
       onCheckConnection={onCheckConnection}
+      onStartBrowserLogin={onStartBrowserLogin}
     />
   );
-  return { ...result, onConnect, onCheckConnection };
+  return { ...result, onConnect, onCheckConnection, onStartBrowserLogin };
 }
 
 describe("provider families", () => {
@@ -71,28 +77,13 @@ describe("provider families", () => {
     const xai = families.find((family) => family.id === "xai");
 
     expect(openai?.providers.map((entry) => entry.id)).toEqual(["codex", "openai"]);
-    expect(openai?.methods.map((method) => method.kind)).toEqual([
-      "oauth-browser",
-      "oauth-device",
-      "api-key"
-    ]);
-    expect(openai?.methods.map((method) => method.command)).toEqual([
-      "codex login",
-      "codex login --device-auth",
-      undefined
-    ]);
+    expect(openai?.methods.map((method) => method.kind)).toEqual(["oauth-browser", "api-key"]);
+    expect(openai?.methods.map((method) => method.command)).toEqual([undefined, undefined]);
     expect(xai?.providers.map((entry) => entry.id)).toEqual(["grok", "xai"]);
-    expect(xai?.methods.map((method) => method.command)).toEqual([
-      "grok login",
-      "grok login --device-auth",
-      undefined
-    ]);
-    expect(families.find((family) => family.id === "copilot")?.methods[0].command).toBe(
-      "copilot login"
-    );
-    expect(families.find((family) => family.id === "cursor")?.methods[0].command).toBe(
-      "agent login"
-    );
+    expect(xai?.methods.map((method) => method.kind)).toEqual(["api-key", "provider-login"]);
+    expect(xai?.methods.every((method) => method.command === undefined)).toBe(true);
+    expect(families.find((family) => family.id === "copilot")?.methods[0].command).toBeUndefined();
+    expect(families.find((family) => family.id === "cursor")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "zai")?.providers).toHaveLength(1);
     expect(families.find((family) => family.id === "minimax")?.providers).toHaveLength(1);
     expect(families.find((family) => family.id === "alibaba")?.providers).toHaveLength(1);
@@ -164,12 +155,27 @@ describe("ProviderCatalogue", () => {
 
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
     expect(within(dialog).getByText("ChatGPT subscription")).toBeInTheDocument();
-    expect(within(dialog).getByText("ChatGPT subscription with a device code")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/device code/i)).toBeNull();
     expect(within(dialog).getByText("OpenAI API key")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
     expect(within(dialog).getByRole("button", { name: "Back to connection methods" })).toBeInTheDocument();
     expect(within(dialog).getByLabelText("API key for openai / chatgpt")).toBeInTheDocument();
+  });
+
+  it("starts managed ChatGPT sign-in through Fable without showing a terminal command", async () => {
+    const user = userEvent.setup();
+    const { onStartBrowserLogin } = renderCatalogue();
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /ChatGPT subscription/ }));
+
+    expect(dialog).toHaveTextContent("Provider-supported browser sign-in");
+    expect(dialog).not.toHaveTextContent("codex login");
+    await user.click(within(dialog).getByRole("button", { name: "Continue in browser" }));
+
+    expect(onStartBrowserLogin).toHaveBeenCalledWith("codex");
+    expect(await within(dialog).findByText("Connected and verified.")).toBeInTheDocument();
   });
 
   it("adds an API-key provider through verification and clears the uncontrolled field", async () => {

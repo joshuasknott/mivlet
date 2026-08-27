@@ -184,6 +184,7 @@ import {
   syncRuntimeConnector,
   refreshRuntimeIdentity,
   signOutRuntimeIdentity,
+  startRuntimeCodexBrowserLogin,
   verifyRuntimeBackend,
   type RuntimeRoutineRunRequest,
   wireToWorkflowRun
@@ -479,7 +480,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [modelDiscoveryByProvider, setModelDiscoveryByProvider] = useState<
     Record<string, ModelDiscoveryOutcome>
   >({});
-  const [onboardingDismissed, setOnboardingDismissed] = useState(false);
+  const [onboardingDismissed, setOnboardingDismissed] = useState(
+    initialState.onboardingComplete ?? false
+  );
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   // Composer model + permission picker selections, persisted so the next run
   // uses them. The model is re-validated against the connected backend's
@@ -616,6 +619,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memoryDisabled,
       memoryRecords: managedMemoryRecords,
       connectedBackendIds,
+      onboardingComplete: onboardingDismissed,
       selectedModelId,
       permissionMode,
       permissionLabel,
@@ -632,6 +636,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       activeAgentId,
       composerValue,
       connectedBackendIds,
+      onboardingDismissed,
       customApprovalSettings,
       dismissedApprovalIds,
       importedKnowledgeSources,
@@ -853,6 +858,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setMemoryDisabled(recovered.memoryDisabled);
         setManagedMemoryRecords(recovered.memoryRecords.filter((record) => !record.forgottenAt));
         setConnectedBackendIds(recovered.connectedBackendIds);
+        setOnboardingDismissed(recovered.onboardingComplete ?? false);
         setSelectedModelId(recovered.selectedModelId);
         setPermissionMode(recovered.permissionMode);
         setPermissionLabel(
@@ -2455,6 +2461,42 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return result;
   };
 
+  const startBackendBrowserLogin = async (providerId: string): Promise<BackendVerifyResult> => {
+    if (providerId !== "codex") {
+      return {
+        providerId,
+        outcome: "unsupported",
+        message: "This provider does not expose a supported browser sign-in through Fable."
+      };
+    }
+    markProviderState(providerId, "connecting");
+    setBackendStatus("Opening the official ChatGPT sign-in…");
+    try {
+      const started = await startRuntimeCodexBrowserLogin();
+      if (!started) {
+        markProviderState(providerId, "needs-auth");
+        return {
+          providerId,
+          outcome: "unsupported",
+          message: "ChatGPT browser sign-in is available in the Fable desktop app."
+        };
+      }
+      const verified = await checkBackendConnection(providerId);
+      const result = verified.outcome === "ready"
+        ? { providerId, outcome: "ready" as const, message: started.message }
+        : verified;
+      setBackendStatus(result.message ?? "ChatGPT connected.");
+      setLastAction(result.message ?? "ChatGPT connected");
+      return result;
+    } catch (error) {
+      markProviderState(providerId, "needs-auth");
+      const message = error instanceof Error ? error.message : "ChatGPT sign-in could not be completed.";
+      setBackendStatus(message);
+      setLastAction(message);
+      return { providerId, outcome: "failed", message };
+    }
+  };
+
   const disconnectBackend = async (providerId: string) => {
     setBackendStatus(`Disconnecting ${providerId}…`);
     try {
@@ -2498,7 +2540,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const dismissOnboarding = () => {
     setOnboardingDismissed(true);
-    setLastAction("Onboarding skipped (preview)");
+    setLastAction("Local workspace ready");
   };
 
   // Queue a backend-originated tool call until the user decides. This is
@@ -2531,7 +2573,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // use the explicit preview dismissal path.
   const onboardingRequired =
     !activeWorkspaceScope ||
-    (connectedBackendIds.length === 0 && !(ALLOW_PREVIEW_FALLBACKS && onboardingDismissed));
+    (connectedBackendIds.length === 0 && !(
+      onboardingDismissed && (
+        accountWorkspaceStatus.activeWorkspace.source === "local" || ALLOW_PREVIEW_FALLBACKS
+      )
+    ));
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;
@@ -4005,6 +4051,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     connectBackend,
     connectBackendWithVerify,
     checkBackendConnection,
+    startBackendBrowserLogin,
     disconnectBackend,
     refreshBackendProviders,
     modelDiscoveryByProvider,

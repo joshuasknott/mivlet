@@ -746,7 +746,13 @@ describe("useNativeAgent", () => {
     // Real gate + real desktop executor (awaits the gate, then calls the Rust
     // boundary — which is mocked here). This is exactly what App.tsx wires.
     const gate = createApprovalGate();
-    const executor = createDesktopToolExecutor(gate);
+    const executor = createDesktopToolExecutor(gate, {
+      localComputer: {
+        workspaceId: "workspace-test",
+        agentId: "agent-test",
+        ready: true
+      }
+    });
 
     let registeredApproval: Extract<BackendAgentEvent, { type: "tool-call" }>["approval"] | null =
       null;

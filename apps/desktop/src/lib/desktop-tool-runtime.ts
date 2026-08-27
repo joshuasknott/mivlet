@@ -72,6 +72,11 @@ export interface DesktopToolExecutorOptions {
   workspaceId?: string;
   projectId?: string;
   missionWorkerToolExecution?: MissionWorkerToolExecutionBinding;
+  localComputer?: {
+    workspaceId: string;
+    agentId: string;
+    ready: boolean;
+  };
   hostedComputer?: {
     workspaceId: string;
     agentId: string;
@@ -113,6 +118,15 @@ export function createDesktopToolExecutor(
       && !options.hostedComputer?.ready
     ) {
       throw new Error("Set up this teammate's cloud computer before asking it to use hosted work.");
+    }
+    if (toolName === "run-shell" && !options.hostedComputer?.ready) {
+      throw new Error("Local terminal execution is off until Fable has a genuine isolated container or VM backend. Set up the optional cloud computer to run commands safely.");
+    }
+    if ((toolName === "read-file" || toolName === "write-file") && !options.localComputer?.ready) {
+      throw new Error("Set up this teammate's local computer before asking it to use files.");
+    }
+    if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !options.localComputer?.ready) {
+      throw new Error("Set up this teammate's local computer before asking it to use its browser.");
     }
     let mcpRoute: RuntimeResolvedMcpCapabilityRoute | null = null;
     if (toolName === "connection-read") {
@@ -781,8 +795,9 @@ async function runOnDesktop(
     tool: toolName,
     arguments: parsed,
     approval: resolution,
-    workspaceId: options.workspaceId,
+    workspaceId: options.localComputer?.workspaceId ?? options.workspaceId,
     projectId: options.projectId,
+    agentId: options.localComputer?.agentId,
     mcpSessionId,
     ...(options.missionWorkerToolExecution ? { missionWorkerToolExecution: options.missionWorkerToolExecution } : {})
   });

@@ -17,6 +17,7 @@ import {
 import type { CitedBriefMissionPlanSummary } from "../lib/cited-brief-contract";
 import { useNativeAgent } from "../hooks/useNativeAgent";
 import { useHostedComputer } from "../hooks/useHostedComputer";
+import { useLocalComputer } from "../hooks/useLocalComputer";
 import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/useDurableConversation";
 import { useScheduledAgent } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
@@ -36,6 +37,10 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const citedRecoveryScopeRef = useRef<string | null>(null);
   const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId;
   const activeAgentId = runtime.activeAgentId ?? runtime.agents[0]?.id;
+  const localComputer = useLocalComputer({
+    workspaceId: activeWorkspaceId,
+    agentId: activeAgentId ?? "agent-unavailable"
+  });
   const hostedWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.source === "hosted"
     ? runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId ?? null
     : null;
@@ -215,6 +220,13 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     () =>
       createDesktopToolExecutor(approvalGate, {
         workspaceId: runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId,
+        ...(activeWorkspaceId && activeAgentId ? {
+          localComputer: {
+            workspaceId: activeWorkspaceId,
+            agentId: activeAgentId,
+            ready: localComputer.node?.lifecycle === "ready"
+          }
+        } : {}),
         ...(hostedWorkspaceId && activeHostedDeviceId && activeAgentId ? {
           hostedComputer: {
             workspaceId: hostedWorkspaceId,
@@ -233,6 +245,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
       hostedWorkspaceId,
       activeHostedDeviceId,
       activeAgentId,
+      localComputer.node?.lifecycle,
       hostedComputer.node?.status,
       hostedComputer.node?.keepAlive
     ]
@@ -396,6 +409,7 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
     agent,
     durableConversation,
     voice,
+    localComputer,
     hostedComputer: {
       ...hostedComputer,
       createSchedule: createHostedSchedule,

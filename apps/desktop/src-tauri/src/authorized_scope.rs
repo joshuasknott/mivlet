@@ -30,9 +30,25 @@ pub fn resolve(
     project_id: Option<&str>,
     access: ScopeAccess,
 ) -> crate::store::Result<AuthorizedCommandScope> {
-    let context = workspace_directory::require_active_workspace_context_for_current_user(conn)?;
     let requested = requested_workspace_id
         .ok_or_else(|| StoreError::Invalid("Workspace id is required.".into()))?;
+    let context = if requested == crate::store::repos::scope::DEFAULT_WORKSPACE_ID
+        && workspace_directory::current_internal_user_id(conn)?.is_none()
+    {
+        let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
+        workspace_directory::AuthorizedWorkspaceContext {
+            active_workspace: workspace_directory::ActiveWorkspaceSelection {
+                local_workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
+                fable_workspace_id: None,
+                name: "On this PC".into(),
+                source: "local".into(),
+            },
+            internal_user_id,
+            member_id: Some(member_id),
+        }
+    } else {
+        workspace_directory::require_active_workspace_context_for_current_user(conn)?
+    };
     if requested != context.active_workspace.local_workspace_id {
         return Err(StoreError::Invalid(
             "The requested workspace is not active for this account.".into(),
@@ -96,14 +112,14 @@ pub fn active_command_scope(access: ScopeAccess) -> Result<AuthorizedCommandScop
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|conn| {
-            let context =
-                workspace_directory::require_active_workspace_context_for_current_user(conn)?;
-            resolve(
-                conn,
-                Some(&context.active_workspace.local_workspace_id),
-                None,
-                access,
-            )
+            let workspace_id = if workspace_directory::current_internal_user_id(conn)?.is_none() {
+                crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into()
+            } else {
+                workspace_directory::require_active_workspace_context_for_current_user(conn)?
+                    .active_workspace
+                    .local_workspace_id
+            };
+            resolve(conn, Some(&workspace_id), None, access)
         })
         .map_err(|error| error.to_string())
 }
@@ -253,6 +269,49 @@ mod tests {
                 assert!(
                     resolve(tx, Some(&local), Some("deleted-project"), ScopeAccess::Read).is_err()
                 );
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn local_install_scope_uses_the_default_workspace_without_cloud_identity() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        store
+            .with_conn(|conn| {
+                let scope = resolve(
+                    conn,
+                    Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID),
+                    None,
+                    ScopeAccess::Write,
+                )?;
+                assert_eq!(scope.data.workspace_id(), "default");
+                assert_eq!(scope.private.owner_member_id(), scope.member_id.as_deref());
+                assert!(scope.internal_user_id.starts_with("local-user-"));
+                assert!(scope
+                    .member_id
+                    .as_deref()
+                    .is_some_and(|id| id.starts_with("local-member-")));
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn hosted_user_without_an_active_selection_never_falls_back_to_local_authority() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        store
+            .transaction(|tx| {
+                upsert_authoritative_summary(tx, &summary("user-1", "workspace-1", "member-1"))?;
+                set_current_internal_user(tx, "user-1", "t")?;
+                Ok(())
+            })
+            .unwrap();
+        store
+            .with_conn(|conn| {
+                assert!(resolve(conn, Some("default"), None, ScopeAccess::Read).is_err());
                 Ok(())
             })
             .unwrap();

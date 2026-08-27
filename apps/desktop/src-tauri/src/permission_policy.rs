@@ -66,7 +66,10 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         "write-file" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
-        "cloud-browser" | "cloud-browser-action" => Some("browser-state-mutation"),
+        "local-browser-observe" => Some("browser-read"),
+        "local-browser" | "local-browser-action" | "cloud-browser" | "cloud-browser-action" => {
+            Some("browser-state-mutation")
+        }
         "cloud-process-schedule"
         | "cloud-process-schedule-cancel"
         | "cloud-process-schedule-pause"

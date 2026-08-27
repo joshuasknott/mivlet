@@ -949,6 +949,14 @@ fn ensure_install_device_id() -> Option<String> {
     }
 }
 
+pub(crate) fn local_install_principals() -> (String, String) {
+    let install_id = ensure_install_device_id().unwrap_or_else(|| "device-local".into());
+    (
+        format!("local-user-{install_id}"),
+        format!("local-member-{install_id}"),
+    )
+}
+
 fn valid_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 200
@@ -2182,6 +2190,28 @@ fn local_status(
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let unbound = directory::unbound_workspace_selection();
+
+    if identity.state == "disabled" {
+        let (internal_user_id, member_id) = local_install_principals();
+        return Ok(AccountWorkspaceStatus {
+            configured: false,
+            state: "ready".into(),
+            message: "Local workspace ready. A Fable account is optional for cloud sync and collaboration.".into(),
+            account_bound: true,
+            workspaces: Vec::new(),
+            active_workspace: directory::ActiveWorkspaceSelection {
+                local_workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
+                fable_workspace_id: None,
+                name: "On this PC".into(),
+                source: "local".into(),
+            },
+            active_context_owner: Some(ActiveContextOwner {
+                internal_user_id,
+                member_id: Some(member_id),
+            }),
+            devices: Vec::new(),
+        });
+    }
 
     // A signed-out identity has no current internal user yet. Requiring the
     // account-scoped directory queries here would turn that expected state into

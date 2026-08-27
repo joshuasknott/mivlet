@@ -283,6 +283,8 @@ export interface ShellRuntime {
   ) => Promise<BackendVerifyResult>;
   /** Re-check a configured credential or provider-owned runtime without collecting a secret. */
   checkBackendConnection: (providerId: string) => Promise<BackendVerifyResult>;
+  /** Start a provider-supported browser sign-in without exposing OAuth material to React. */
+  startBackendBrowserLogin: (providerId: string) => Promise<BackendVerifyResult>;
   disconnectBackend: (providerId: string) => Promise<void>;
   /** Re-probe provider-owned runtimes after an install or sign-in completes. */
   refreshBackendProviders: () => Promise<BackendProvider[] | null>;

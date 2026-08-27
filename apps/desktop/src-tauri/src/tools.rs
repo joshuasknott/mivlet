@@ -3,16 +3,17 @@
 //! The TypeScript executor (see `@fable/connectors` `tool-executor.ts`) runs only
 //! after the shell grants an approval. This module is the defense-in-depth Rust
 //! layer each tool call must still cross: it re-validates the approval, confines
-//! file paths to the workspace, and performs the actual side effects (read/write
-//! file, run-shell, web-fetch). The shell NEVER spawns a process or writes files
+//! file paths to the teammate's Fable-owned workspace, and performs the actual
+//! side effects (read/write file, web-fetch). The shell NEVER spawns a process or writes files
 //! from JavaScript — every consequential tool routes through these commands.
 //!
 //! Hard invariants:
 //!   - Every command re-checks its own approval before the side effect. A granted
 //!     `once`/`session`/`rule` decision is honored; a `deny` (or missing/reshaped
 //!     approval) fails closed with `approval-required` and performs nothing.
-//!   - File paths are confined to the workspace root (no `..` escapes, no absolute
-//!     escapes). `run-shell` executes in the workspace root.
+//!   - File paths are confined to the teammate's local-computer workspace (no
+//!     `..` escapes or absolute escapes). Host shell execution fails closed;
+//!     process tools require an isolated computer backend.
 //!   - Tool names are a closed set; anything else fails closed.
 
 use std::net::{IpAddr, Ipv6Addr};
@@ -55,6 +56,8 @@ pub struct ToolExecutionRequest {
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
     pub mcp_session_id: Option<String>,
     #[serde(default)]
     pub mission_worker_tool_execution:
@@ -75,11 +78,14 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 13] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 16] = [
     "read-file",
     "write-file",
     "run-shell",
     "web-fetch",
+    "local-browser",
+    "local-browser-observe",
+    "local-browser-action",
     "connection-read",
     "github-read",
     "vercel-read",
@@ -242,6 +248,9 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
+        "local-browser" => Some(("full-access", "critical")),
+        "local-browser-observe" => Some(("read-only", "medium")),
+        "local-browser-action" => Some(("full-access", "critical")),
         "cloud-browser"
         | "cloud-browser-action"
         | "cloud-process-schedule"
@@ -304,8 +313,9 @@ pub(crate) fn validate_tool_approval_binding(
                 .unwrap_or_else(|| value.to_string());
             let rendered = if tool == "web-fetch" && key == "url" {
                 normalize_url_for_fingerprint(&raw_rendered).unwrap_or(raw_rendered)
-            } else if tool == "cloud-browser" && key == "url" {
+            } else if matches!(tool, "cloud-browser" | "local-browser") && key == "url" {
                 crate::hosted_computer::normalize_public_https_url(&raw_rendered)
+                    .or_else(|_| crate::local_computer::normalize_user_navigation(&raw_rendered))
                     .unwrap_or(raw_rendered)
             } else {
                 raw_rendered
@@ -979,6 +989,7 @@ fn semantic_request_from_args(
 pub async fn execute_tool_call(
     app: tauri::AppHandle,
     request: ToolExecutionRequest,
+    local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<ToolResult, String> {
     let tool = request.tool.clone();
     let arguments = request.arguments.clone();
@@ -1022,6 +1033,22 @@ pub async fn execute_tool_call(
                 risk,
                 status: "blocked",
                 error_code: "approval-binding",
+                message: &error,
+            },
+            None,
+        );
+        return Err(error);
+    }
+    if tool == "run-shell" {
+        let error = "Local terminal execution is off until an isolated container or VM backend is available. Set up the optional cloud computer to run commands safely.".to_string();
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "blocked",
+                error_code: "isolation-unavailable",
                 message: &error,
             },
             None,
@@ -1075,6 +1102,165 @@ pub async fn execute_tool_call(
             None,
         );
         return Err(error);
+    }
+    if tool == "local-browser" {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "The local browser requires an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "The local browser requires an active teammate.".to_string())?;
+        let url = require_string_argument(&arguments, "url")?;
+        let result = local_computers
+            .inner()
+            .clone()
+            .navigate_for_agent(workspace_id, agent_id, url)
+            .await
+            .inspect_err(|error| {
+                audit_tool_outcome(
+                    ToolOutcomeAudit {
+                        tool: &tool,
+                        request_id: &request_id,
+                        mode,
+                        risk,
+                        status: "failed",
+                        error_code: "local-browser",
+                        message: error,
+                    },
+                    None,
+                );
+            })?;
+        let output = serde_json::to_string(&result)
+            .map_err(|_| "Fable could not encode the local browser result.".to_string())?;
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "ok",
+                error_code: "",
+                message: "local-browser executed",
+            },
+            None,
+        );
+        return Ok(ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-observe" {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "Local browser observation requires an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "Local browser observation requires an active teammate.".to_string())?;
+        let result = local_computers
+            .inner()
+            .clone()
+            .observe_for_agent(workspace_id, agent_id)
+            .await
+            .inspect_err(|error| {
+                audit_tool_outcome(
+                    ToolOutcomeAudit {
+                        tool: &tool,
+                        request_id: &request_id,
+                        mode,
+                        risk,
+                        status: "failed",
+                        error_code: "local-browser-observe",
+                        message: error,
+                    },
+                    None,
+                );
+            })?;
+        let output = serde_json::to_string(&result)
+            .map_err(|_| "Fable could not encode the local browser observation.".to_string())?;
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "ok",
+                error_code: "",
+                message: "local-browser-observe executed",
+            },
+            None,
+        );
+        return Ok(ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-action" {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "Local browser actions require an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "Local browser actions require an active teammate.".to_string())?;
+        let action = require_string_argument(&arguments, "action")?;
+        if !matches!(action.as_str(), "click" | "fill" | "press") {
+            return Err("The local browser action must be click, fill, or press.".into());
+        }
+        let observation_id = require_string_argument(&arguments, "observationId")?;
+        let element_ref = require_string_argument(&arguments, "elementRef")?;
+        let control_role = require_string_argument(&arguments, "controlRole")?;
+        let control_name = require_string_argument(&arguments, "controlName")?;
+        let value = arguments
+            .get("value")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let key = arguments
+            .get("key")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string);
+        let result = local_computers
+            .inner()
+            .clone()
+            .act_for_agent(
+                workspace_id,
+                agent_id,
+                observation_id,
+                element_ref,
+                control_role,
+                control_name,
+                action,
+                value,
+                key,
+            )
+            .await
+            .inspect_err(|error| {
+                audit_tool_outcome(
+                    ToolOutcomeAudit {
+                        tool: &tool,
+                        request_id: &request_id,
+                        mode,
+                        risk,
+                        status: "failed",
+                        error_code: "local-browser-action",
+                        message: error,
+                    },
+                    None,
+                );
+            })?;
+        let output = serde_json::to_string(&result)
+            .map_err(|_| "Fable could not encode the local browser action result.".to_string())?;
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "ok",
+                error_code: "",
+                message: "local-browser-action executed",
+            },
+            None,
+        );
+        return Ok(ToolResult { ok: true, output });
     }
     if request.tool == "search-notion" || request.tool == "search-slack" {
         let connector_id = if request.tool == "search-notion" {
@@ -1139,10 +1325,24 @@ pub async fn execute_tool_call(
         );
         return Ok(ToolResult { ok: true, output });
     }
-    // The caller may never select its own authority root. Resolve the workspace
-    // at the native boundary so a forged request cannot point at an arbitrary
-    // directory and then appear "confined" beneath it.
-    let root = resolve_workspace_root(&app)?;
+    // The caller may never select a filesystem path. File tools resolve an
+    // opaque workspace/agent scope through the native local-computer state;
+    // no browser profile, host path, or sibling teammate directory crosses IPC.
+    let root = if matches!(tool.as_str(), "read-file" | "write-file") {
+        let workspace_id = request
+            .workspace_id
+            .as_deref()
+            .ok_or_else(|| "File tools require an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .as_deref()
+            .ok_or_else(|| "File tools require an active teammate.".to_string())?;
+        local_computers.tool_workspace_root(workspace_id, agent_id)?
+    } else {
+        // Non-file tools do not use this path, but the pure dispatcher retains
+        // an explicit root for compatibility and unit testing.
+        resolve_workspace_root(&app)?
+    };
     let outcome = execute_tool_outcome(request, &root);
     let result = match outcome {
         ToolOutcome::Done(result) => result,

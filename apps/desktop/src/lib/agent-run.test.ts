@@ -135,6 +135,23 @@ describe("run context audience", () => {
     });
   });
 
+  it("assigns native-confirmed ownership to a local-only workspace", () => {
+    expect(privateRunAudience(accountStatus({
+      configured: false,
+      workspaces: [],
+      activeWorkspace: {
+        localWorkspaceId: "default",
+        name: "On this PC",
+        source: "local"
+      },
+      activeContextOwner: { internalUserId: "local-device", memberId: "local-member" }
+    }))).toEqual({
+      authority: "local",
+      visibility: "member-private",
+      actingMemberId: "local-member"
+    });
+  });
+
   it("excludes private inputs from a synthetic shared audience via the central filter contract", () => {
     const sharedAudience = workspaceSharedRunAudience("member-active");
     const records = recordsVisibleToRunAudience([

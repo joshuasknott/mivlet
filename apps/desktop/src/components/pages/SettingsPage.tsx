@@ -378,6 +378,7 @@ function ProviderAccessView({
           onStatus(`${providerId} connection checked.`);
           return result;
         }}
+        onStartBrowserLogin={(providerId) => runtime.startBackendBrowserLogin(providerId)}
         onStatus={onStatus}
       />
 

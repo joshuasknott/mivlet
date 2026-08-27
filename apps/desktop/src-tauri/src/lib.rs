@@ -44,6 +44,7 @@ mod goals;
 mod google;
 mod hosted_computer;
 mod knowledge;
+mod local_computer;
 mod local_model;
 mod mcp_process;
 mod memory;
@@ -101,6 +102,9 @@ pub fn run() {
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
+            app.manage(std::sync::Arc::new(
+                local_computer::LocalComputerState::initialize(&handle)?,
+            ));
             mission_runs::initialize_recovery_epoch();
             // Load the durable scheduler store once and manage it as process
             // state. The in-process tick leases due entries; because Tauri is
@@ -263,6 +267,7 @@ pub fn run() {
             backends::clear_backend_credential,
             backends::record_backend_event,
             codex_app_server::codex_cli_status,
+            codex_app_server::start_codex_browser_login,
             codex_app_server::start_codex_app_server_turn,
             codex_app_server::respond_codex_app_server_approval,
             codex_app_server::interrupt_codex_app_server_turn,
@@ -350,6 +355,13 @@ pub fn run() {
             hosted_computer::hosted_browser_action_prepare,
             hosted_computer::hosted_browser_action,
             hosted_computer::hosted_browser_snapshot,
+            local_computer::local_computer_status,
+            local_computer::local_computer_provision,
+            local_computer::local_browser_navigate,
+            local_computer::local_browser_snapshot,
+            local_computer::local_computer_set_controller,
+            local_computer::local_browser_pointer,
+            local_computer::local_browser_key,
             cloud_sync::cloud_sync_status,
             cloud_sync::cloud_sync_link_state,
             cloud_sync::cloud_sync_enqueue_shared_mutation,

@@ -170,6 +170,7 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     memoryDisabled: state.memoryDisabled,
     memoryRecords: state.memoryRecords,
     connectedBackendIds: state.connectedBackendIds,
+    onboardingComplete: state.onboardingComplete,
     selectedModelId: state.selectedModelId,
     permissionMode: state.permissionMode,
     permissionLabel: state.permissionLabel,
@@ -204,6 +205,7 @@ export function shellStateFromRuntimeSnapshot(
     memoryDisabled: snapshot.memoryDisabled,
     memoryRecords: snapshot.memoryRecords,
     connectedBackendIds: snapshot.connectedBackendIds,
+    onboardingComplete: snapshot.onboardingComplete ?? defaultShellState.onboardingComplete,
     selectedModelId: snapshot.selectedModelId ?? defaultShellState.selectedModelId,
     permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(

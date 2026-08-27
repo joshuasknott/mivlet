@@ -78,6 +78,7 @@ vi.mock("../runtime", async (importOriginal) => {
     saveRuntimeScheduledJob: vi.fn(async () => null),
     saveRuntimeWorkflowDefinition: vi.fn(async () => null),
     saveRuntimeWorkflowRun: vi.fn(async () => null),
+    startRuntimeCodexBrowserLogin: vi.fn(async () => null),
     enqueueRuntimeJobRun: vi.fn(async () => null),
     reportRuntimeJobAttempt: vi.fn(async () => null),
     reportRuntimeRoutineAttempt: vi.fn(async () => null),
@@ -1081,6 +1082,19 @@ describe("useShellRuntime — backend connect (preview mode)", () => {
 
     expect(health).toMatchObject({ providerId: "openai", outcome: "unsupported" });
     expect(result.current.backendStatus).toMatch(/preview.*synthetic/i);
+  });
+
+  it("does not simulate ChatGPT browser sign-in outside the desktop runtime", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    let login;
+    await act(async () => {
+      login = await result.current.startBackendBrowserLogin("codex");
+    });
+
+    expect(login).toMatchObject({ providerId: "codex", outcome: "unsupported" });
+    expect(result.current.connectedBackendIds).not.toContain("codex");
   });
 });
 

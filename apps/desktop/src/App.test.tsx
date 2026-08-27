@@ -1301,7 +1301,7 @@ describe("Fable onboarding", () => {
     await user.click(screen.getByRole("button", { name: /^xai,/i }));
     const grokModal = screen.getByRole("dialog", { name: "xAI" });
     await user.click(
-      within(grokModal).getByRole("button", { name: /grok account in your browser/i })
+      within(grokModal).getByRole("button", { name: /grok account/i })
     );
     expect(within(grokModal).getByText(/requires the grok cli/i)).toBeInTheDocument();
     expect(within(grokModal).queryByLabelText(/api key for xai/i)).not.toBeInTheDocument();

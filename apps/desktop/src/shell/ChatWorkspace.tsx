@@ -130,7 +130,7 @@ export function ChatWorkspace() {
   selectedConversationThreadIdRef.current = selectedConversationThreadId;
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const controller = useShellAgentController({ onDictation: addDictationToComposer, onVoiceCancel: focusComposerAfterVoice, threadId: selectedConversationThreadId });
-  const { runtime, agent, durableConversation, voice, hostedComputer, hostedBrowser, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
+  const { runtime, agent, durableConversation, voice, localComputer, hostedComputer, hostedBrowser, scheduledActive, citedMissionRunning, runCitedBrief, stopCurrentWork, resetCancellation } = controller;
   const activeAgent = runtime.agents.find((candidate) => candidate.id === runtime.activeAgentId) ?? runtime.agents[0]!;
   const [liveRailOpen, setLiveRailOpen] = useState(false);
   const [teamMissionOpen, setTeamMissionOpen] = useState(false);
@@ -2311,7 +2311,9 @@ export function ChatWorkspace() {
     (runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
   const identityUsable = runtime.identityStatus.state === "signed-in" ||
     (runtime.identityStatus.state === "offline" && runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
-  const accountReady = identityUsable && accountWorkspaceUsable;
+  const localWorkspaceReady = runtime.accountWorkspaceStatus.activeWorkspace.source === "local" &&
+    runtime.accountWorkspaceStatus.accountBound && runtime.accountWorkspaceStatus.state === "ready";
+  const accountReady = localWorkspaceReady || (identityUsable && accountWorkspaceUsable);
   if (!accountReady || runtime.onboardingRequired) {
     return (
       <Suspense fallback={<div className="og-frame" aria-busy="true" />}>
@@ -2337,7 +2339,7 @@ export function ChatWorkspace() {
             await runtime.refreshBackendProviders();
           }}
           onComplete={runtime.dismissOnboarding}
-          allowProviderless={import.meta.env.DEV && !("__TAURI_INTERNALS__" in window)}
+          allowProviderless={localWorkspaceReady || (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window))}
         />
       </Suspense>
     );
@@ -2691,7 +2693,31 @@ export function ChatWorkspace() {
           transcript={agent.state.transcript}
           runId={agent.state.currentRunId}
           approvalCount={runtime.openApprovals.length}
-          computerUseActive={Boolean(hostedBrowser.snapshot) || (!runtime.browserSession.fixtureOnly && runtime.browserSession.lifecycle === "active")}
+          computerUseActive={Boolean(localComputer.snapshot || hostedBrowser.snapshot) || (!runtime.browserSession.fixtureOnly && runtime.browserSession.lifecycle === "active")}
+          localComputer={{
+            available: localComputer.available,
+            status: localComputer.node?.lifecycle,
+            browserAvailable: localComputer.node?.browserAvailable ?? false,
+            browserActive: localComputer.node?.browserActive ?? false,
+            browserProduct: localComputer.node?.browserProduct,
+            controller: localComputer.snapshot?.controller ?? localComputer.node?.controller ?? "agent",
+            loading: localComputer.loading,
+            provisioning: localComputer.provisioning,
+            busy: localComputer.browserBusy,
+            error: localComputer.error,
+            browserUrl: localComputer.snapshot?.currentUrl,
+            browserTitle: localComputer.snapshot?.title,
+            generation: localComputer.snapshot?.generation ?? 0,
+            viewport: localComputer.snapshot?.viewport,
+            onProvision: localComputer.provision,
+            onOpenBrowser: localComputer.navigate,
+            onRefreshBrowser: localComputer.refresh,
+            onTakeControl: localComputer.takeControl,
+            onReturnControl: localComputer.returnControl,
+            onClick: localComputer.click,
+            onScroll: localComputer.scroll,
+            onKey: localComputer.key
+          }}
           hostedComputer={{
             available: hostedComputer.available,
             status: hostedComputer.node?.status,
@@ -2715,7 +2741,7 @@ export function ChatWorkspace() {
             onOpenBrowser: hostedBrowser.open,
             onRefreshBrowser: hostedBrowser.refresh
           }}
-          screenPreviewUrl={hostedBrowser.snapshot?.previewDataUrl}
+          screenPreviewUrl={localComputer.snapshot?.previewDataUrl ?? hostedBrowser.snapshot?.previewDataUrl}
           missionProgress={liveMissionProgress}
           onReviewApprovals={() => {
             setLiveRailOpen(false);

@@ -58,6 +58,9 @@ describe("permission profile policy", () => {
     expect(effectForTool("read-file")).toBe("local-read");
     expect(effectForTool("write-file")).toBe("local-write");
     expect(effectForTool("run-shell")).toBe("shell-execution");
+    expect(effectForTool("local-browser")).toBe("browser-state-mutation");
+    expect(effectForTool("local-browser-observe")).toBe("browser-read");
+    expect(effectForTool("local-browser-action")).toBe("browser-state-mutation");
     expect(effectForTool("cloud-browser")).toBe("browser-state-mutation");
     expect(effectForTool("cloud-browser-action")).toBe("browser-state-mutation");
     expect(effectForTool("cloud-process-schedule")).toBe("schedule-mutation");

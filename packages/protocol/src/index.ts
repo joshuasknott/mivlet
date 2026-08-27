@@ -8,6 +8,7 @@ export * from "./domains/remote-control.js";
 export * from "./domains/hosted-computer.js";
 export * from "./domains/hosted-agent-routine.js";
 export * from "./domains/hosted-execution-capability.js";
+export * from "./domains/local-computer.js";
 
 import type {
   ApprovalAuditEntry,
@@ -1197,6 +1198,8 @@ export interface RuntimeSnapshot {
    * Rust boundary can re-resolve their auth state on recovery.
    */
   connectedBackendIds: string[];
+  /** Provider onboarding was completed or deliberately deferred locally. */
+  onboardingComplete?: boolean;
   /**
    * The model id last chosen in the composer's model picker, so the same model
    * drives the next agent run. Re-validated against the connected backend's

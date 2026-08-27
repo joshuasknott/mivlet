@@ -7,6 +7,15 @@ multi-round agent loop and provider request/response shaping.
 
 ## Setup and Credentials
 
+- ChatGPT subscription access uses Codex app-server's managed browser sign-in.
+  Fable asks the installed app-server to start `account/login/start` with the
+  `chatgpt` mode, validates the returned authorization host, opens it in the
+  system browser, and waits for the matching completion notification. The
+  authorization URL and tokens never enter React state, storage, logs, or the
+  model transcript. The official device-code mode is not presented as a manual
+  CLI workaround while the normal browser callback is available.
+  This follows the provider's documented [Codex app-server authentication
+  surface](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
 - Remote fixed profiles use a user-supplied API key. After submission, the key
   is stored through the OS keyring boundary (with an in-memory test/headless
   fallback), is never returned to the frontend, and is injected into request
@@ -80,13 +89,17 @@ prompts still run without tools.
 Settings and onboarding use one provider-first catalogue rather than separate
 subscription and API-key sections. The initial view shows a small featured set;
 Show all replaces it with an alphabetical, searchable catalogue. Selecting a
-provider opens its implemented connection methods (for example, a provider-owned
-CLI and/or API key) in one modal. The model picker stays minimal: provider logo
-plus model name.
+  provider opens its implemented connection methods in one modal. Managed
+  browser OAuth appears first when the provider runtime exposes it; direct API
+  keys are the normal fallback where no supported application OAuth is
+  available. Installed ACP runtimes are labelled as advanced and do not show
+  copy-paste login commands. The model picker stays minimal: provider logo plus
+  model name.
 
 The view avoids treating key presence as live proof: direct API, local, and
-custom methods read **Configured**, while provider-owned CLI sessions can read
-**Connected** after their runtime probe succeeds. Model discovery still tracks
+  custom methods read **Configured**, while managed browser or advanced
+  provider-owned runtime sessions can read **Connected** after their runtime
+  probe succeeds. Model discovery still tracks
 `loading`, `success`, `empty`, `offline`, `failed`, and `unsupported` internally;
 the merged picker uses live results or curated/explicit fallbacks. Settings can
 refresh models, but the provider tile does not yet expose that full lifecycle.

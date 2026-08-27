@@ -8,6 +8,28 @@ import { AgentTeamMissionDialog, buildAgentTeamMissionCommand } from "./AgentTea
 import { AgentLearningDialog } from "./AgentLearningDialog";
 import { AgentWorkspaceHeader } from "./AgentWorkspaceHeader";
 import { LiveWorkRail } from "./LiveWorkRail";
+
+function unavailableLocalComputer() {
+  return {
+    available: false,
+    browserAvailable: false,
+    browserActive: false,
+    controller: "agent" as const,
+    loading: false,
+    provisioning: false,
+    busy: false,
+    error: null,
+    generation: 0,
+    onProvision: vi.fn().mockResolvedValue(null),
+    onOpenBrowser: vi.fn().mockResolvedValue(null),
+    onRefreshBrowser: vi.fn().mockResolvedValue(null),
+    onTakeControl: vi.fn().mockResolvedValue(null),
+    onReturnControl: vi.fn().mockResolvedValue(null),
+    onClick: vi.fn().mockResolvedValue(null),
+    onScroll: vi.fn().mockResolvedValue(null),
+    onKey: vi.fn().mockResolvedValue(null)
+  };
+}
 import { AgentAvatar, nextAgentColor } from "./agent-icons";
 import { agentExecutionInstructions, suggestTeammateName } from "../../lib/agent-learning";
 
@@ -303,6 +325,7 @@ describe("agent surface", () => {
         runId="run-approval"
         approvalCount={2}
         computerUseActive={false}
+        localComputer={unavailableLocalComputer()}
         hostedComputer={{
           available: false,
           runtimeActive: false,
@@ -339,6 +362,7 @@ describe("agent surface", () => {
         runId={null}
         approvalCount={0}
         computerUseActive={false}
+        localComputer={unavailableLocalComputer()}
         hostedComputer={{
           available: true,
           status: "ready",
@@ -371,6 +395,65 @@ describe("agent surface", () => {
     await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledWith("https://example.com/"));
     expect(screen.getByLabelText("Hosted schedules")).toHaveTextContent(
       "0 agent routines · 1 program schedule"
+    );
+  });
+
+  it("sets up a separate local browser and takes control before user navigation", async () => {
+    const onProvision = vi.fn().mockResolvedValue({ lifecycle: "ready" });
+    const onTakeControl = vi.fn().mockResolvedValue({ controller: "human", generation: 2 });
+    const onOpenBrowser = vi.fn().mockResolvedValue({ currentUrl: "https://example.com/" });
+    const localComputer = {
+      ...unavailableLocalComputer(),
+      available: true,
+      status: "ready" as const,
+      browserAvailable: true,
+      browserActive: true,
+      browserProduct: "Microsoft Edge",
+      controller: "agent" as const,
+      generation: 1,
+      viewport: { width: 1280, height: 800 },
+      onProvision,
+      onTakeControl,
+      onOpenBrowser
+    };
+    render(
+      <LiveWorkRail
+        agentName="Researcher"
+        running={false}
+        status="idle"
+        transcript=""
+        runId={null}
+        approvalCount={0}
+        computerUseActive={false}
+        localComputer={localComputer}
+        hostedComputer={{
+          available: false,
+          runtimeActive: false,
+          keepAlive: false,
+          loading: false,
+          provisioning: false,
+          error: null,
+          onProvision: vi.fn(),
+          browserOpening: false,
+          browserPhase: "idle",
+          browserError: null,
+          schedules: [],
+          schedulesLoading: false,
+          schedulesError: null,
+          onOpenBrowser: vi.fn(),
+          onRefreshBrowser: vi.fn()
+        }}
+        onClose={vi.fn()}
+      />
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Page to open on this teammate's local computer" }), {
+      target: { value: "https://example.com/" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    await waitFor(() => expect(onTakeControl).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onOpenBrowser).toHaveBeenCalledWith("https://example.com/"));
+    expect(screen.getByLabelText("Computer on this PC")).toHaveTextContent(
+      "Microsoft Edge · separate profile and files"
     );
   });
 });

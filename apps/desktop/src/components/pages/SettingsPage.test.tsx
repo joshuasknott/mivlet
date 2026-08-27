@@ -55,6 +55,7 @@ function stubRuntime(over: Partial<ShellRuntime> = {}): ShellRuntime {
     refreshWorkflowRuns: vi.fn().mockResolvedValue(undefined),
     connectBackendWithVerify: vi.fn(),
     checkBackendConnection: vi.fn(async (providerId: string) => ({ providerId, outcome: "ready" as const })),
+    startBackendBrowserLogin: vi.fn(async (providerId: string) => ({ providerId, outcome: "ready" as const })),
     disconnectBackend: vi.fn(),
     refreshBackendProviders: vi.fn().mockResolvedValue([]),
     refreshModels: vi.fn(),
@@ -225,7 +226,7 @@ describe("Settings -> Providers", () => {
 
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
     expect(dialog).toHaveTextContent("ChatGPT subscription");
-    expect(dialog).toHaveTextContent("ChatGPT subscription with a device code");
+    expect(dialog).not.toHaveTextContent("device code");
     expect(dialog).toHaveTextContent("OpenAI API key");
   });
 
@@ -250,11 +251,11 @@ describe("Settings -> Providers", () => {
     expect(dialog).not.toHaveTextContent("sk-settings-secret");
   });
 
-  it("shows exact provider-owned login commands and rechecks the runtime", async () => {
-    const checkBackendConnection = vi.fn(async (providerId: string) => ({
+  it("starts managed ChatGPT browser sign-in without exposing a CLI login command", async () => {
+    const startBackendBrowserLogin = vi.fn(async (providerId: string) => ({
       providerId,
-      outcome: "failed" as const,
-      message: "Sign in through the provider CLI."
+      outcome: "ready" as const,
+      message: "ChatGPT sign-in completed in your browser."
     }));
     const codex: BackendProvider = {
       id: "codex",
@@ -268,16 +269,16 @@ describe("Settings -> Providers", () => {
     renderProviders(
       stubRuntime({
         backendProviders: [codex],
-        checkBackendConnection
+        startBackendBrowserLogin
       })
     );
 
     fireEvent.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
-    fireEvent.click(within(dialog).getByRole("button", { name: /ChatGPT subscription Use/ }));
-    expect(dialog).toHaveTextContent("codex login");
-    fireEvent.click(within(dialog).getByRole("button", { name: "Check connection" }));
-    await waitFor(() => expect(checkBackendConnection).toHaveBeenCalledWith("codex"));
+    fireEvent.click(within(dialog).getByRole("button", { name: /ChatGPT subscription/ }));
+    expect(dialog).not.toHaveTextContent("codex login");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Continue in browser" }));
+    await waitFor(() => expect(startBackendBrowserLogin).toHaveBeenCalledWith("codex"));
   });
 });
 

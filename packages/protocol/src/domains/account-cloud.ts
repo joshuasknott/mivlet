@@ -90,7 +90,7 @@ export interface ActiveWorkspaceSelection {
   localWorkspaceId: string;
   fableWorkspaceId?: string;
   name: string;
-  source: "hosted" | "unbound" | "preview";
+  source: "hosted" | "local" | "unbound" | "preview";
 }
 
 export interface AccountDeviceSummary {
@@ -111,7 +111,7 @@ export interface AccountWorkspaceStatus {
   accountBound: boolean;
   workspaces: AccountWorkspaceSummary[];
   activeWorkspace: ActiveWorkspaceSelection;
-  /** Secret-free native owner used for private local data; member is hosted-only. */
+  /** Secret-free native owner used for private local data. A member id may be a hosted membership or an install-local principal; source disambiguates it. */
   activeContextOwner?: {
     internalUserId: string;
     memberId?: string;
