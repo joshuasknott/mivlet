@@ -364,6 +364,7 @@ pub fn run() {
             local_computer::local_computer_set_controller,
             local_computer::local_browser_pointer,
             local_computer::local_browser_key,
+            local_computer::local_browser_history,
             cloud_sync::cloud_sync_status,
             cloud_sync::cloud_sync_link_state,
             cloud_sync::cloud_sync_enqueue_shared_mutation,

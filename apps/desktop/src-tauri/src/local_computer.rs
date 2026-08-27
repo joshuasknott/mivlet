@@ -19,7 +19,9 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
 use headless_chrome::{
     browser::tab::{point::Point, Tab},
-    protocol::cdp::Page::CaptureScreenshotFormatOption,
+    protocol::cdp::Page::{
+        CaptureScreenshotFormatOption, GetNavigationHistory, NavigateToHistoryEntry,
+    },
     Browser, LaunchOptions,
 };
 use serde::{Deserialize, Serialize};
@@ -110,6 +112,8 @@ pub struct LocalBrowserSnapshot {
     title: String,
     preview_data_url: String,
     viewport: LocalBrowserViewportSnapshot,
+    can_go_back: bool,
+    can_go_forward: bool,
     controller: &'static str,
     generation: u64,
     updated_at: String,
@@ -142,7 +146,7 @@ struct LocalComputerFileEntry {
 }
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalComputerFileRequest {
     workspace_id: String,
     agent_id: String,
@@ -238,6 +242,15 @@ pub struct LocalBrowserKeyRequest {
     agent_id: String,
     expected_generation: u64,
     key: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalBrowserHistoryRequest {
+    workspace_id: String,
+    agent_id: String,
+    expected_generation: u64,
+    direction: String,
 }
 
 impl LocalComputerState {
@@ -1075,6 +1088,7 @@ fn snapshot_from_session(
     session: &LocalBrowserSession,
 ) -> Result<LocalBrowserSnapshot, String> {
     let viewport = viewport_from_session(session)?;
+    let (can_go_back, can_go_forward) = browser_history_availability(session)?;
     let bytes = session
         .tab
         .capture_screenshot(CaptureScreenshotFormatOption::Jpeg, Some(72), None, true)
@@ -1095,10 +1109,33 @@ fn snapshot_from_session(
         title,
         preview_data_url: format!("data:image/jpeg;base64,{}", STANDARD.encode(bytes)),
         viewport,
+        can_go_back,
+        can_go_forward,
         controller: session.controller.as_str(),
         generation: session.generation,
         updated_at: Utc::now().to_rfc3339(),
     })
+}
+
+fn history_availability(current_index: u32, entry_count: usize) -> (bool, bool) {
+    let Ok(current_index) = usize::try_from(current_index) else {
+        return (false, false);
+    };
+    if current_index >= entry_count {
+        return (false, false);
+    }
+    (current_index > 0, current_index + 1 < entry_count)
+}
+
+fn browser_history_availability(session: &LocalBrowserSession) -> Result<(bool, bool), String> {
+    let history = session
+        .tab
+        .call_method(GetNavigationHistory(None))
+        .map_err(|_| "Fable could not inspect the local browser history.".to_string())?;
+    Ok(history_availability(
+        history.current_index,
+        history.entries.len(),
+    ))
 }
 
 fn viewport_from_session(
@@ -1623,6 +1660,55 @@ pub async fn local_browser_key(
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
 }
 
+#[tauri::command]
+pub async fn local_browser_history(
+    request: LocalBrowserHistoryRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<LocalBrowserSnapshot, String> {
+    if !matches!(request.direction.as_str(), "back" | "forward") {
+        return Err("The browser history direction is not supported.".into());
+    }
+    let owned_state = state.inner().clone();
+    let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
+    let session = owned_state
+        .sessions
+        .lock()
+        .map_err(|_| "The local computer state is unavailable.".to_string())?
+        .get(&scope.key)
+        .cloned()
+        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session
+            .lock()
+            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+        require_human_control(&session, request.expected_generation)?;
+        let history = session
+            .tab
+            .call_method(GetNavigationHistory(None))
+            .map_err(|_| "Fable could not inspect the local browser history.".to_string())?;
+        let current_index = usize::try_from(history.current_index)
+            .map_err(|_| "The local browser returned invalid history.".to_string())?;
+        let target_index = match request.direction.as_str() {
+            "back" => current_index.checked_sub(1),
+            "forward" => current_index.checked_add(1),
+            _ => None,
+        }
+        .filter(|index| *index < history.entries.len())
+        .ok_or_else(|| "There is no page in that browser-history direction.".to_string())?;
+        session.observation = None;
+        session
+            .tab
+            .call_method(NavigateToHistoryEntry {
+                entry_id: history.entries[target_index].id,
+            })
+            .map_err(|_| "The local browser could not move through its history.".to_string())?;
+        let _ = session.tab.wait_until_navigated();
+        snapshot_from_session(&scope, &session)
+    })
+    .await
+    .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
+}
+
 fn require_human_control(
     session: &LocalBrowserSession,
     expected_generation: u64,
@@ -1829,6 +1915,16 @@ mod tests {
     }
 
     #[test]
+    fn browser_history_availability_fails_closed_at_every_boundary() {
+        assert_eq!(history_availability(0, 0), (false, false));
+        assert_eq!(history_availability(0, 1), (false, false));
+        assert_eq!(history_availability(0, 2), (false, true));
+        assert_eq!(history_availability(1, 2), (true, false));
+        assert_eq!(history_availability(1, 3), (true, true));
+        assert_eq!(history_availability(4, 2), (false, false));
+    }
+
+    #[test]
     fn native_select_observations_are_bounded_and_exact() {
         let control = LocalBrowserAgentControl {
             control_ref: "control-1234567890abcdef-0".into(),
@@ -1931,6 +2027,20 @@ mod tests {
         assert!(snapshot
             .preview_data_url
             .starts_with("data:image/jpeg;base64,"));
+        assert!(snapshot.can_go_back);
+        assert!(!snapshot.can_go_forward);
+        let history = session.tab.call_method(GetNavigationHistory(None)).unwrap();
+        session
+            .tab
+            .call_method(NavigateToHistoryEntry {
+                entry_id: history.entries[history.current_index as usize - 1].id,
+            })
+            .unwrap();
+        let _ = session.tab.wait_until_navigated();
+        assert_eq!(
+            browser_history_availability(&session).unwrap(),
+            (false, true)
+        );
         drop(session);
         let _ = server.join();
     }

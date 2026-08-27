@@ -30,6 +30,11 @@ from an old frame or before takeover fails closed. Keys go directly from the
 focused screen to the native browser command and are not placed in React state,
 the conversation, SQLite, or ordinary logs.
 
+While the user holds control, bounded Back and Forward actions target only the
+browser's current native navigation-history entries. Availability is projected
+with each ephemeral frame, and every move is fenced to the current browser
+generation; stale, unavailable, or agent-controlled requests fail closed.
+
 The trusted Fable UI can list up to 200 relative workspace entries, including
 folder/file kind and file size. It never receives host paths or file contents,
 does not follow symlinks or junctions, and marks depth or entry truncation

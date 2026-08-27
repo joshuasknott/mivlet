@@ -88,6 +88,8 @@ export interface LocalBrowserSnapshot {
   title: string;
   previewDataUrl: string;
   viewport: LocalBrowserViewportSnapshot;
+  canGoBack: boolean;
+  canGoForward: boolean;
   controller: LocalComputerController;
   generation: number;
   updatedAt: string;
@@ -118,4 +120,9 @@ export interface LocalBrowserPointerRequest extends LocalComputerTarget {
 export interface LocalBrowserKeyRequest extends LocalComputerTarget {
   expectedGeneration: number;
   key: string;
+}
+
+export interface LocalBrowserHistoryRequest extends LocalComputerTarget {
+  expectedGeneration: number;
+  direction: "back" | "forward";
 }

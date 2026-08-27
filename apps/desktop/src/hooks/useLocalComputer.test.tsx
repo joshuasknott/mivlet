@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("../runtime", () => ({
+  historyRuntimeLocalBrowser: vi.fn().mockResolvedValue(null),
   keyRuntimeLocalBrowser: vi.fn(),
   listRuntimeLocalComputerFiles: vi.fn().mockResolvedValue(null),
   loadRuntimeLocalComputer: vi.fn().mockResolvedValue(null),

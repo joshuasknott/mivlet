@@ -5,6 +5,7 @@ import type {
 } from "@fable/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
   listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
@@ -115,6 +116,18 @@ export function useLocalComputer({
     },
     onSuccess: setBrowserSnapshot,
   });
+  const history = useMutation({
+    mutationFn: async (direction: "back" | "forward") => {
+      const snapshot = browser.data;
+      if (!target || !snapshot) throw new Error("The local browser is unavailable.");
+      return historyRuntimeLocalBrowser({
+        ...target,
+        expectedGeneration: snapshot.generation,
+        direction,
+      });
+    },
+    onSuccess: setBrowserSnapshot,
+  });
   const recoveryError = computer.error instanceof Error
     ? computer.error.message
     : provision.error instanceof Error
@@ -136,7 +149,7 @@ export function useLocalComputer({
     filePreviewError: filePreviewMatchesScope && filePreview.error instanceof Error ? filePreview.error.message : null,
     loading: computer.isLoading,
     provisioning: provision.isPending,
-    browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending,
+    browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending || history.isPending,
     recoveryNeeded: recoveryError !== null,
     error: recoveryError
       ?? (navigate.error instanceof Error
@@ -147,7 +160,9 @@ export function useLocalComputer({
             ? pointer.error.message
             : key.error instanceof Error
               ? key.error.message
-              : null),
+              : history.error instanceof Error
+                ? history.error.message
+                : null),
     provision: () => provision.mutateAsync(),
     navigate: (url: string) => navigate.mutateAsync(url),
     refresh: () => browser.refetch().then((result) => result.data ?? null),
@@ -163,5 +178,7 @@ export function useLocalComputer({
     click: (x: number, y: number) => pointer.mutateAsync({ x, y, action: "click" }),
     scroll: (x: number, y: number, deltaY: number) => pointer.mutateAsync({ x, y, action: "scroll", deltaY }),
     key: (value: string) => key.mutateAsync(value),
+    goBack: () => history.mutateAsync("back"),
+    goForward: () => history.mutateAsync("forward"),
   };
 }

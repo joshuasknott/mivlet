@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
   listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
@@ -37,6 +38,7 @@ describe("local computer runtime boundary", () => {
     await expect(listRuntimeLocalComputerFiles(target)).resolves.toBeNull();
     await expect(previewRuntimeLocalComputerFile({ ...target, path: "notes/plan.md" })).resolves.toBeNull();
     await expect(snapshotRuntimeLocalBrowser(target)).resolves.toBeNull();
+    await expect(historyRuntimeLocalBrowser({ ...target, expectedGeneration: 3, direction: "back" })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -67,6 +69,7 @@ describe("local computer runtime boundary", () => {
       y: 240,
     });
     await keyRuntimeLocalBrowser({ ...target, expectedGeneration: 4, key: "Enter" });
+    await historyRuntimeLocalBrowser({ ...target, expectedGeneration: 4, direction: "back" });
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["local_computer_status", target],
@@ -78,6 +81,7 @@ describe("local computer runtime boundary", () => {
       ["local_computer_set_controller", { request: { ...target, controller: "human", expectedGeneration: 3 } }],
       ["local_browser_pointer", { request: { ...target, action: "click", expectedGeneration: 4, x: 320, y: 240 } }],
       ["local_browser_key", { request: { ...target, expectedGeneration: 4, key: "Enter" } }],
+      ["local_browser_history", { request: { ...target, expectedGeneration: 4, direction: "back" } }],
     ]);
     const serialized = JSON.stringify(mocks.invoke.mock.calls);
     expect(serialized).not.toContain("browser-profile");

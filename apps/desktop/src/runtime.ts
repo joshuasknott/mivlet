@@ -87,6 +87,7 @@ export {
   type HostedComputerRuntimePort
 } from "./runtime/domains/hosted-computer";
 export {
+  historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
   listRuntimeLocalComputerFiles,
   previewRuntimeLocalComputerFile,

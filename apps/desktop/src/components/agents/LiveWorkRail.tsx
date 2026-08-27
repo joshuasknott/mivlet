@@ -7,6 +7,8 @@ import { FileArrowDown } from "@phosphor-icons/react/dist/csr/FileArrowDown";
 import { File } from "@phosphor-icons/react/dist/csr/File";
 import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import type { LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
@@ -41,6 +43,8 @@ export function LiveWorkRail({
     browserAvailable: boolean;
     browserActive: boolean;
     browserProduct?: string;
+    canGoBack: boolean;
+    canGoForward: boolean;
     filesAvailable: boolean;
     files: LocalComputerFilesSnapshot | null;
     filesLoading: boolean;
@@ -61,6 +65,8 @@ export function LiveWorkRail({
     onProvision: () => Promise<unknown>;
     onOpenBrowser: (url: string) => Promise<unknown>;
     onRefreshBrowser: () => Promise<unknown>;
+    onGoBack: () => Promise<unknown>;
+    onGoForward: () => Promise<unknown>;
     onRefreshFiles: () => Promise<unknown>;
     onPreviewFile: (path: string) => Promise<unknown>;
     onCloseFilePreview: () => void;
@@ -390,6 +396,12 @@ export function LiveWorkRail({
             <header>
               <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s local browser` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>
               <span className="live-screen-modal__actions">
+                {localComputer.browserActive ? (
+                  <>
+                    <button type="button" onClick={() => void localComputer.onGoBack().catch(() => undefined)} disabled={!localComputer.canGoBack || localComputer.controller !== "human" || localComputer.busy} aria-label="Go back" title={localComputer.controller === "human" ? "Go back" : "Take control to use browser history"}><ArrowLeft size={17} /></button>
+                    <button type="button" onClick={() => void localComputer.onGoForward().catch(() => undefined)} disabled={!localComputer.canGoForward || localComputer.controller !== "human" || localComputer.busy} aria-label="Go forward" title={localComputer.controller === "human" ? "Go forward" : "Take control to use browser history"}><ArrowRight size={17} /></button>
+                  </>
+                ) : null}
                 <button type="button" onClick={() => void (localComputer.browserActive ? localComputer.onRefreshBrowser() : hostedComputer.onRefreshBrowser()).catch(() => undefined)} disabled={hostedComputer.browserOpening || localComputer.busy} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
                 {localComputer.recoveryNeeded ? (
                   <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading}>

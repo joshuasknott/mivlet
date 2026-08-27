@@ -14,6 +14,8 @@ function unavailableLocalComputer() {
     available: false,
     browserAvailable: false,
     browserActive: false,
+    canGoBack: false,
+    canGoForward: false,
     filesAvailable: false,
     files: null,
     filesLoading: false,
@@ -31,6 +33,8 @@ function unavailableLocalComputer() {
     onProvision: vi.fn().mockResolvedValue(null),
     onOpenBrowser: vi.fn().mockResolvedValue(null),
     onRefreshBrowser: vi.fn().mockResolvedValue(null),
+    onGoBack: vi.fn().mockResolvedValue(null),
+    onGoForward: vi.fn().mockResolvedValue(null),
     onRefreshFiles: vi.fn().mockResolvedValue(null),
     onPreviewFile: vi.fn().mockResolvedValue(null),
     onCloseFilePreview: vi.fn(),
@@ -466,6 +470,61 @@ describe("agent surface", () => {
     expect(screen.getByLabelText("Computer on this PC")).toHaveTextContent(
       "Microsoft Edge · separate profile and files"
     );
+  });
+
+  it("uses bounded browser history only while the user has control", async () => {
+    const onGoBack = vi.fn().mockResolvedValue(null);
+    const onGoForward = vi.fn().mockResolvedValue(null);
+    render(
+      <LiveWorkRail
+        agentName="Researcher"
+        running={false}
+        status="idle"
+        transcript=""
+        runId={null}
+        approvalCount={0}
+        computerUseActive
+        localComputer={{
+          ...unavailableLocalComputer(),
+          available: true,
+          status: "ready",
+          browserAvailable: true,
+          browserActive: true,
+          canGoBack: true,
+          canGoForward: true,
+          controller: "human",
+          browserTitle: "Second page",
+          browserUrl: "https://example.com/second",
+          onGoBack,
+          onGoForward
+        }}
+        hostedComputer={{
+          available: false,
+          runtimeActive: false,
+          keepAlive: false,
+          loading: false,
+          provisioning: false,
+          error: null,
+          onProvision: vi.fn(),
+          browserOpening: false,
+          browserPhase: "idle",
+          browserError: null,
+          schedules: [],
+          schedulesLoading: false,
+          schedulesError: null,
+          onOpenBrowser: vi.fn(),
+          onRefreshBrowser: vi.fn()
+        }}
+        screenPreviewUrl="data:image/jpeg;base64,cHJldmlldw=="
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Researcher's screen/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Go back" }));
+    fireEvent.click(screen.getByRole("button", { name: "Go forward" }));
+    await waitFor(() => expect(onGoBack).toHaveBeenCalledOnce());
+    expect(onGoForward).toHaveBeenCalledOnce();
   });
 
   it("shows only relative metadata from the teammate's private files", async () => {

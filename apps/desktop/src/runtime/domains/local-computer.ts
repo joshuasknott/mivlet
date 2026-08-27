@@ -1,5 +1,6 @@
 import type {
   LocalBrowserKeyRequest,
+  LocalBrowserHistoryRequest,
   LocalBrowserNavigateRequest,
   LocalBrowserPointerRequest,
   LocalBrowserSnapshot,
@@ -34,6 +35,9 @@ export interface LocalComputerRuntimePort {
     request: LocalBrowserPointerRequest,
   ): Promise<LocalBrowserSnapshot | null>;
   key(request: LocalBrowserKeyRequest): Promise<LocalBrowserSnapshot | null>;
+  history(
+    request: LocalBrowserHistoryRequest,
+  ): Promise<LocalBrowserSnapshot | null>;
 }
 
 function createPort(adapter: RuntimeAdapter): LocalComputerRuntimePort {
@@ -77,6 +81,10 @@ function createPort(adapter: RuntimeAdapter): LocalComputerRuntimePort {
         : Promise.resolve(null),
     key: (request) =>
       native ? invoke("local_browser_key", { request }) : Promise.resolve(null),
+    history: (request) =>
+      native
+        ? invoke("local_browser_history", { request })
+        : Promise.resolve(null),
   };
 }
 
@@ -112,3 +120,6 @@ export const pointRuntimeLocalBrowser = (request: LocalBrowserPointerRequest) =>
   port().pointer(request);
 export const keyRuntimeLocalBrowser = (request: LocalBrowserKeyRequest) =>
   port().key(request);
+export const historyRuntimeLocalBrowser = (
+  request: LocalBrowserHistoryRequest,
+) => port().history(request);
