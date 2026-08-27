@@ -158,10 +158,11 @@ application-layer encryption envelope around Chromium's profile files.
 Pure native tests pin scope derivation, traversal-resistant identity validation,
 URL policy, directory confinement, and file-root isolation. An ignored live
 integration test launches the installed Chromium browser, navigates to a local
-HTTP page, types into a real input, and captures a JPEG frame. A second live test
-uses the agent navigation path and verifies it returns only the bounded metadata
-projection. A third observes real controls, verifies a password field is
-omitted, fills the exact observed textbox, and chooses a native option by its
-visible label without exposing its internal value. They are ignored in portable CI
-because a browser installation is an external prerequisite, and are run
-explicitly on supported desktop hosts.
+HTTP page, types into a real input, captures a JPEG frame, and verifies native
+Back/Forward availability and navigation. A second live test uses the agent
+navigation path and verifies it returns only the bounded metadata projection. A
+third observes real controls, verifies a password field is omitted, fills the
+exact observed textbox, and chooses a native option by its visible label without
+exposing its internal value. They are ignored in portable CI because a browser
+installation is an external prerequisite, and are run explicitly on supported
+desktop hosts.

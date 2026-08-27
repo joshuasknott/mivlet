@@ -8,9 +8,9 @@
 > provisioned local browser and receives only a bounded final title and origin.
 > A separate observation returns only bounded,
 > visible, non-secret named controls; exact single-use refs support approved
-> click, fill, and key actions. Rich page understanding still fails closed; the
-> hosted browser transport remains deployment-gated. Preview egress remains
-> explicitly fixture-backed.
+> click, fill, select, and key actions. Rich page understanding still fails
+> closed; the hosted browser transport remains deployment-gated. Preview egress
+> remains explicitly fixture-backed.
 
 The browser automation boundary is designed as a **consequence-aware, local-first isolation layer** that evaluates browser actions before they are executed. No browser action is allowed to run silently or bypass permission rules.
 
@@ -68,6 +68,9 @@ action architecture above:
   transcript, runtime snapshot, or ordinary logs.
 - Control changes increment a generation fence. Pointer and keyboard input must
   cite the current generation and fail after control changes or stale frames.
+- While the user holds control, Back and Forward target only the adjacent native
+  history entry and cite the current generation. Unavailable, stale, and
+  agent-controlled requests fail closed.
 - The browser launches with its own persistent profile, Chromium's sandbox, and
   certificate-error bypass disabled. Website sign-in can happen inside that
   browser, although provider-specific OAuth and passkey compatibility is not yet

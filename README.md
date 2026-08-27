@@ -37,15 +37,17 @@ production-validated service.
 - A credential-free local teammate-computer foundation: each workspace/agent
   pair gets persistent private files and a separate Edge/Chrome/Chromium
   profile and process, with an ephemeral screen inside Fable and generation-
-  fenced take/return control. File tools are confined to that teammate's
-  Fable-owned directory, and an exactly approved agent tool can navigate its
-  browser. Agent-visible navigation results retain only the final origin and a
-  bounded title. A bounded observation exposes only visible named non-secret controls
-  through exact single-use refs for approved click, fill, and key actions; page
-  contents and screenshots are not returned to the model. Fable never falls
-  back to the user's host shell. Lost browser connections surface a bounded
-  restart path, and replacement sessions advance the control generation so
-  stale input cannot cross a browser restart.
+  fenced take/return control and bounded human Back/Forward actions. The trusted
+  UI lists only relative private-file metadata and can open an ephemeral,
+  UTF-8-only text preview; file tools remain confined to that teammate's
+  Fable-owned directory. An exactly approved agent tool can navigate its
+  browser, while agent-visible navigation results retain only the final origin
+  and a bounded title. A bounded observation exposes only visible named
+  non-secret controls through exact single-use refs for approved click, fill,
+  select, and key actions; page contents and screenshots are not returned to
+  the model. Fable never falls back to the user's host shell. Lost browser
+  connections surface a bounded restart path, and replacement sessions advance
+  the control generation so stale input cannot cross a browser restart.
 - Runtime-detected browser/operating-system dictation. It fails closed when the
   host webview has no speech-recognition API; Fable does not retain raw audio or
   a separate transcript.
