@@ -35,6 +35,13 @@ folder/file kind and file size. It never receives host paths or file contents,
 does not follow symlinks or junctions, and marks depth or entry truncation
 explicitly. This view remains available when the private browser is stopped.
 
+Selecting a regular file can request an ephemeral, UTF-8-only text preview of
+up to 256 KB. The native boundary re-confines and canonicalizes the selected
+relative path, rejects links, directories, binary/control content, and path
+escapes, and never returns the host path. Preview content remains in transient
+trusted UI state and is not copied into model context, logs, or durable runtime
+records.
+
 An approved `local-browser` agent tool can start the already-provisioned browser
 after an app restart and navigate it to one credential-free HTTP(S) address.
 Agent navigation also rejects authorization-, credential-, and session-shaped
@@ -131,7 +138,7 @@ application-layer encryption envelope around Chromium's profile files.
 - Broader model-facing page understanding, downloads/uploads, tabs, and
   submit-specific policy beyond the current bounded named-control
   actions.
-- File-content preview/editing, bounded downloads/uploads, multiple tabs/popups, clipboard,
+- File editing, bounded downloads/uploads, multiple tabs/popups, clipboard,
   passkeys, proactive crash telemetry, and preservation of in-progress page state
   across a browser-process failure.
 - Teammate-bound local Routines run through the dedicated headless workflow

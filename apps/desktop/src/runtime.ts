@@ -89,6 +89,7 @@ export {
 export {
   keyRuntimeLocalBrowser,
   listRuntimeLocalComputerFiles,
+  previewRuntimeLocalComputerFile,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,

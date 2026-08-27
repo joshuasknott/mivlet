@@ -4,6 +4,8 @@ import type {
   LocalBrowserPointerRequest,
   LocalBrowserSnapshot,
   LocalComputerControlRequest,
+  LocalComputerFilePreview,
+  LocalComputerFileRequest,
   LocalComputerFilesSnapshot,
   LocalComputerSnapshot,
   LocalComputerTarget,
@@ -18,6 +20,9 @@ export interface LocalComputerRuntimePort {
   files(
     target: LocalComputerTarget,
   ): Promise<LocalComputerFilesSnapshot | null>;
+  previewFile(
+    request: LocalComputerFileRequest,
+  ): Promise<LocalComputerFilePreview | null>;
   snapshot(target: LocalComputerTarget): Promise<LocalBrowserSnapshot | null>;
   navigate(
     request: LocalBrowserNavigateRequest,
@@ -49,6 +54,10 @@ function createPort(adapter: RuntimeAdapter): LocalComputerRuntimePort {
     files: (target) =>
       native
         ? invoke("local_computer_files", { target })
+        : Promise.resolve(null),
+    previewFile: (request) =>
+      native
+        ? invoke("local_computer_file_preview", { request })
         : Promise.resolve(null),
     snapshot: (target) =>
       native
@@ -88,6 +97,9 @@ export const provisionRuntimeLocalComputer = (target: LocalComputerTarget) =>
   port().provision(target);
 export const listRuntimeLocalComputerFiles = (target: LocalComputerTarget) =>
   port().files(target);
+export const previewRuntimeLocalComputerFile = (
+  request: LocalComputerFileRequest,
+) => port().previewFile(request);
 export const snapshotRuntimeLocalBrowser = (target: LocalComputerTarget) =>
   port().snapshot(target);
 export const navigateRuntimeLocalBrowser = (

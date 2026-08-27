@@ -5,6 +5,7 @@ import {
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,
+  previewRuntimeLocalComputerFile,
   provisionRuntimeLocalComputer,
   setRuntimeLocalComputerController,
   snapshotRuntimeLocalBrowser,
@@ -34,6 +35,7 @@ describe("local computer runtime boundary", () => {
     await expect(loadRuntimeLocalComputer(target)).resolves.toBeNull();
     await expect(provisionRuntimeLocalComputer(target)).resolves.toBeNull();
     await expect(listRuntimeLocalComputerFiles(target)).resolves.toBeNull();
+    await expect(previewRuntimeLocalComputerFile({ ...target, path: "notes/plan.md" })).resolves.toBeNull();
     await expect(snapshotRuntimeLocalBrowser(target)).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -49,6 +51,7 @@ describe("local computer runtime boundary", () => {
     await loadRuntimeLocalComputer(target);
     await provisionRuntimeLocalComputer(target);
     await listRuntimeLocalComputerFiles(target);
+    await previewRuntimeLocalComputerFile({ ...target, path: "notes/plan.md" });
     await snapshotRuntimeLocalBrowser(target);
     await navigateRuntimeLocalBrowser({ ...target, url: "https://example.com/" });
     await setRuntimeLocalComputerController({
@@ -69,6 +72,7 @@ describe("local computer runtime boundary", () => {
       ["local_computer_status", target],
       ["local_computer_provision", target],
       ["local_computer_files", { target }],
+      ["local_computer_file_preview", { request: { ...target, path: "notes/plan.md" } }],
       ["local_browser_snapshot", { target }],
       ["local_browser_navigate", { request: { ...target, url: "https://example.com/" } }],
       ["local_computer_set_controller", { request: { ...target, controller: "human", expectedGeneration: 3 } }],

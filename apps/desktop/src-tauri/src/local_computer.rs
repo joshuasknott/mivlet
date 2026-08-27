@@ -33,6 +33,7 @@ const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 const MAX_URL_CHARACTERS: usize = 2_048;
 const MAX_FILE_ENTRIES: usize = 200;
 const MAX_FILE_DEPTH: usize = 8;
+const MAX_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
@@ -138,6 +139,25 @@ struct LocalComputerFileEntry {
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalComputerFileRequest {
+    workspace_id: String,
+    agent_id: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalComputerFilePreview {
+    computer_id: String,
+    path: String,
+    content: String,
+    size_bytes: u64,
+    truncated: bool,
+    updated_at: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1222,10 +1242,10 @@ fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesS
             };
             if relative_path.is_empty()
                 || relative_path.chars().count() > 512
-                || relative_path.chars().any(char::is_control)
+                || contains_unsafe_display_characters(&relative_path)
                 || name.is_empty()
                 || name.chars().count() > 160
-                || name.chars().any(char::is_control)
+                || contains_unsafe_display_characters(&name)
             {
                 truncated = true;
                 continue;
@@ -1266,6 +1286,91 @@ fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesS
     })
 }
 
+fn contains_unsafe_display_characters(value: &str) -> bool {
+    value.chars().any(|character| {
+        character.is_control()
+            || matches!(
+                character,
+                '\u{061c}'
+                    | '\u{200e}'
+                    | '\u{200f}'
+                    | '\u{202a}'..='\u{202e}'
+                    | '\u{2066}'..='\u{2069}'
+            )
+    })
+}
+
+fn workspace_file_preview(
+    scope: &ComputerScope,
+    requested_path: &str,
+) -> Result<LocalComputerFilePreview, String> {
+    if requested_path.is_empty()
+        || requested_path.chars().count() > 512
+        || contains_unsafe_display_characters(requested_path)
+    {
+        return Err("Choose a valid relative file path.".into());
+    }
+    let workspace = scope.directory.join("workspace");
+    let canonical_root = crate::paths::strict_canonicalize(&workspace)
+        .map_err(|_| "The teammate computer workspace failed its security check.".to_string())?;
+    let confined = crate::tools::confine_path(requested_path, &workspace)
+        .map_err(|_| "That file is outside this teammate's private workspace.".to_string())?;
+    let canonical_file = crate::paths::strict_canonicalize(&confined)
+        .map_err(|_| "Choose an existing private file.".to_string())?;
+    if !canonical_file.starts_with(&canonical_root) {
+        return Err("That file is outside this teammate's private workspace.".into());
+    }
+    let metadata = std::fs::metadata(&canonical_file)
+        .map_err(|_| "Fable could not inspect that private file.".to_string())?;
+    if !metadata.is_file() {
+        return Err("Choose a regular text file to preview.".into());
+    }
+    let relative = canonical_file
+        .strip_prefix(&canonical_root)
+        .map_err(|_| "That file is outside this teammate's private workspace.".to_string())?;
+    let path = relative
+        .to_str()
+        .map(|value| value.replace('\\', "/"))
+        .filter(|value| {
+            !value.is_empty()
+                && value.chars().count() <= 512
+                && !contains_unsafe_display_characters(value)
+        })
+        .ok_or_else(|| "That private file name cannot be displayed safely.".to_string())?;
+    let mut file = std::fs::File::open(&canonical_file)
+        .map_err(|_| "Fable could not open that private file.".to_string())?;
+    let mut bytes = Vec::with_capacity(MAX_FILE_PREVIEW_BYTES + 1);
+    std::io::Read::read_to_end(
+        &mut std::io::Read::take(&mut file, (MAX_FILE_PREVIEW_BYTES + 1) as u64),
+        &mut bytes,
+    )
+    .map_err(|_| "Fable could not read that private file.".to_string())?;
+    let truncated = bytes.len() > MAX_FILE_PREVIEW_BYTES;
+    bytes.truncate(MAX_FILE_PREVIEW_BYTES);
+    let content = match std::str::from_utf8(&bytes) {
+        Ok(value) => value,
+        Err(error) if error.error_len().is_none() => {
+            std::str::from_utf8(&bytes[..error.valid_up_to()])
+                .map_err(|_| "Only UTF-8 text files can be previewed.".to_string())?
+        }
+        Err(_) => return Err("Only UTF-8 text files can be previewed.".into()),
+    };
+    if content
+        .chars()
+        .any(|value| value.is_control() && !matches!(value, '\n' | '\r' | '\t'))
+    {
+        return Err("Only plain UTF-8 text files can be previewed.".into());
+    }
+    Ok(LocalComputerFilePreview {
+        computer_id: scope.computer_id.clone(),
+        path,
+        content: content.to_string(),
+        size_bytes: metadata.len().min(MAX_SAFE_UI_BYTES),
+        truncated,
+        updated_at: Utc::now().to_rfc3339(),
+    })
+}
+
 #[tauri::command]
 pub async fn local_computer_status(
     workspace_id: String,
@@ -1299,6 +1404,20 @@ pub async fn local_computer_files(
     tauri::async_runtime::spawn_blocking(move || workspace_files_snapshot(&scope))
         .await
         .map_err(|_| "The local file-list task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+pub async fn local_computer_file_preview(
+    request: LocalComputerFileRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<LocalComputerFilePreview, String> {
+    let scope = state.scope(&request.workspace_id, &request.agent_id)?;
+    if !scope.directory.join("workspace").is_dir() {
+        return Err("Set up this teammate's local computer before viewing its files.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || workspace_file_preview(&scope, &request.path))
+        .await
+        .map_err(|_| "The local file-preview task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1655,6 +1774,51 @@ mod tests {
         let snapshot = workspace_files_snapshot(&scope).unwrap();
         assert_eq!(snapshot.entries.len(), MAX_FILE_ENTRIES);
         assert!(snapshot.truncated);
+    }
+
+    #[test]
+    fn workspace_file_preview_is_relative_utf8_and_content_bounded() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-preview", "agent-preview").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let workspace = scope.directory.join("workspace");
+        std::fs::create_dir_all(workspace.join("notes")).unwrap();
+        std::fs::write(workspace.join("notes").join("plan.md"), "hello\nworld").unwrap();
+
+        let preview = workspace_file_preview(&scope, "notes/./plan.md").unwrap();
+        assert_eq!(preview.path, "notes/plan.md");
+        assert_eq!(preview.content, "hello\nworld");
+        assert_eq!(preview.size_bytes, 11);
+        assert!(!preview.truncated);
+        let encoded = serde_json::to_string(&preview).unwrap();
+        assert!(!encoded.contains(temp.path().to_string_lossy().as_ref()));
+
+        std::fs::write(
+            workspace.join("large.txt"),
+            vec![b'a'; MAX_FILE_PREVIEW_BYTES + 10],
+        )
+        .unwrap();
+        let large = workspace_file_preview(&scope, "large.txt").unwrap();
+        assert_eq!(large.content.len(), MAX_FILE_PREVIEW_BYTES);
+        assert!(large.truncated);
+    }
+
+    #[test]
+    fn workspace_file_preview_rejects_escape_binary_and_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-reject", "agent-reject").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let workspace = scope.directory.join("workspace");
+        std::fs::create_dir_all(workspace.join("folder")).unwrap();
+        std::fs::write(workspace.join("binary.bin"), [0_u8, 159, 146, 150]).unwrap();
+        std::fs::write(workspace.join("spoof-\u{202e}txt.md"), "text").unwrap();
+
+        assert!(workspace_file_preview(&scope, "../outside.txt").is_err());
+        assert!(workspace_file_preview(&scope, "binary.bin").is_err());
+        assert!(workspace_file_preview(&scope, "folder").is_err());
+        assert!(workspace_file_preview(&scope, "spoof-\u{202e}txt.md").is_err());
     }
 
     #[test]

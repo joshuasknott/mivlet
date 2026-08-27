@@ -51,12 +51,29 @@ export interface LocalComputerFileEntry {
 
 /**
  * Bounded, read-only projection for the trusted Fable UI. Paths are relative
- * to this teammate's private workspace; host paths and file contents never
- * cross the native boundary.
+ * to this teammate's private workspace; this listing never includes host paths
+ * or file contents.
  */
 export interface LocalComputerFilesSnapshot {
   computerId: string;
   entries: readonly LocalComputerFileEntry[];
+  truncated: boolean;
+  updatedAt: string;
+}
+
+export interface LocalComputerFileRequest extends LocalComputerTarget {
+  path: string;
+}
+
+/**
+ * An ephemeral, explicitly selected text-file preview for the trusted Fable UI.
+ * The content must not enter model context, logs, or persisted runtime state.
+ */
+export interface LocalComputerFilePreview {
+  computerId: string;
+  path: string;
+  content: string;
+  sizeBytes: number;
   truncated: boolean;
   updatedAt: string;
 }

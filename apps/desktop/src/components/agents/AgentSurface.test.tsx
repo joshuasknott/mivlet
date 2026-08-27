@@ -18,6 +18,9 @@ function unavailableLocalComputer() {
     files: null,
     filesLoading: false,
     filesError: null,
+    filePreview: null,
+    filePreviewLoading: false,
+    filePreviewError: null,
     controller: "agent" as const,
     loading: false,
     provisioning: false,
@@ -29,6 +32,8 @@ function unavailableLocalComputer() {
     onOpenBrowser: vi.fn().mockResolvedValue(null),
     onRefreshBrowser: vi.fn().mockResolvedValue(null),
     onRefreshFiles: vi.fn().mockResolvedValue(null),
+    onPreviewFile: vi.fn().mockResolvedValue(null),
+    onCloseFilePreview: vi.fn(),
     onTakeControl: vi.fn().mockResolvedValue(null),
     onReturnControl: vi.fn().mockResolvedValue(null),
     onClick: vi.fn().mockResolvedValue(null),
@@ -465,6 +470,7 @@ describe("agent surface", () => {
 
   it("shows only relative metadata from the teammate's private files", async () => {
     const onRefreshFiles = vi.fn().mockResolvedValue(null);
+    const onPreviewFile = vi.fn().mockResolvedValue(null);
     render(
       <LiveWorkRail
         agentName="Researcher"
@@ -489,7 +495,8 @@ describe("agent surface", () => {
             truncated: false,
             updatedAt: "2026-08-27T12:00:00.000Z"
           },
-          onRefreshFiles
+          onRefreshFiles,
+          onPreviewFile
         }}
         hostedComputer={{
           available: false,
@@ -517,6 +524,64 @@ describe("agent surface", () => {
     expect(screen.getByRole("region", { name: "Researcher's private files" })).toHaveTextContent("notes/plan.md");
     expect(screen.getByRole("region", { name: "Researcher's private files" })).toHaveTextContent("2 KB");
     expect(screen.queryByText(/AppData|local-computers|private plan/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Preview notes/plan.md" }));
+    await waitFor(() => expect(onPreviewFile).toHaveBeenCalledWith("notes/plan.md"));
+  });
+
+  it("renders an ephemeral private text preview and closes it", () => {
+    const onCloseFilePreview = vi.fn();
+    render(
+      <LiveWorkRail
+        agentName="Researcher"
+        running={false}
+        status="idle"
+        transcript=""
+        runId={null}
+        approvalCount={0}
+        computerUseActive={false}
+        localComputer={{
+          ...unavailableLocalComputer(),
+          available: true,
+          status: "ready",
+          browserAvailable: true,
+          filesAvailable: true,
+          filePreview: {
+            computerId: "local-computer-a",
+            path: "notes/plan.md",
+            content: "private <plan>\nsecond line",
+            sizeBytes: 300_000,
+            truncated: true,
+            updatedAt: "2026-08-28T00:00:00.000Z"
+          },
+          onCloseFilePreview
+        }}
+        hostedComputer={{
+          available: false,
+          runtimeActive: false,
+          keepAlive: false,
+          loading: false,
+          provisioning: false,
+          error: null,
+          onProvision: vi.fn(),
+          browserOpening: false,
+          browserPhase: "idle",
+          browserError: null,
+          schedules: [],
+          schedulesLoading: false,
+          schedulesError: null,
+          onOpenBrowser: vi.fn(),
+          onRefreshBrowser: vi.fn()
+        }}
+        onClose={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("dialog", { name: "notes/plan.md preview" })).toHaveTextContent("private <plan>");
+    expect(screen.getByRole("dialog", { name: "notes/plan.md preview" })).toHaveTextContent("Preview stopped at 256 KB");
+    fireEvent.click(screen.getByRole("button", { name: "Close file preview" }));
+    expect(onCloseFilePreview).toHaveBeenCalledOnce();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onCloseFilePreview).toHaveBeenCalledTimes(2);
   });
 
   it("offers a restart when the local browser session loses contact", async () => {

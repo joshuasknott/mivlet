@@ -10,6 +10,7 @@ import {
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,
+  previewRuntimeLocalComputerFile,
   provisionRuntimeLocalComputer,
   setRuntimeLocalComputerController,
   snapshotRuntimeLocalBrowser,
@@ -23,6 +24,7 @@ export function useLocalComputer({
   agentId: string;
 }) {
   const queryClient = useQueryClient();
+  const scopeKey = `${workspaceId ?? "unavailable"}:${agentId}`;
   const target: LocalComputerTarget | null = workspaceId
     ? { workspaceId, agentId }
     : null;
@@ -49,6 +51,12 @@ export function useLocalComputer({
     enabled: false,
     retry: false,
   });
+  const filePreview = useMutation({
+    mutationFn: (input: { target: LocalComputerTarget; scopeKey: string; path: string }) => {
+      return previewRuntimeLocalComputerFile({ ...input.target, path: input.path });
+    },
+  });
+  const filePreviewMatchesScope = filePreview.variables?.scopeKey === scopeKey;
 
   const setBrowserSnapshot = (snapshot: LocalBrowserSnapshot | null) => {
     queryClient.setQueryData(browserQueryKey, snapshot);
@@ -116,13 +124,16 @@ export function useLocalComputer({
         : null;
 
   return {
-    scopeKey: `${workspaceId ?? "unavailable"}:${agentId}`,
+    scopeKey,
     available: Boolean(target),
     node: computer.data ?? null,
     snapshot: browser.data ?? null,
     files: files.data ?? null,
     filesLoading: files.isFetching,
     filesError: files.error instanceof Error ? files.error.message : null,
+    filePreview: filePreviewMatchesScope ? filePreview.data ?? null : null,
+    filePreviewLoading: filePreviewMatchesScope && filePreview.isPending,
+    filePreviewError: filePreviewMatchesScope && filePreview.error instanceof Error ? filePreview.error.message : null,
     loading: computer.isLoading,
     provisioning: provision.isPending,
     browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending,
@@ -141,6 +152,12 @@ export function useLocalComputer({
     navigate: (url: string) => navigate.mutateAsync(url),
     refresh: () => browser.refetch().then((result) => result.data ?? null),
     refreshFiles: () => files.refetch().then((result) => result.data ?? null),
+    previewFile: (path: string) => {
+      if (!target) return Promise.reject(new Error("The private file is unavailable."));
+      filePreview.reset();
+      return filePreview.mutateAsync({ target: { ...target }, scopeKey, path });
+    },
+    closeFilePreview: filePreview.reset,
     takeControl: () => controller.mutateAsync("human"),
     returnControl: () => controller.mutateAsync("agent"),
     click: (x: number, y: number) => pointer.mutateAsync({ x, y, action: "click" }),

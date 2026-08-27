@@ -9,8 +9,9 @@ import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
-import type { LocalComputerFilesSnapshot } from "@fable/protocol";
+import type { LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
 import type { RuntimeMissionProgress } from "../../runtime";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 export function LiveWorkRail({
   agentName,
@@ -44,6 +45,9 @@ export function LiveWorkRail({
     files: LocalComputerFilesSnapshot | null;
     filesLoading: boolean;
     filesError: string | null;
+    filePreview: LocalComputerFilePreview | null;
+    filePreviewLoading: boolean;
+    filePreviewError: string | null;
     controller: "agent" | "human";
     loading: boolean;
     provisioning: boolean;
@@ -58,6 +62,8 @@ export function LiveWorkRail({
     onOpenBrowser: (url: string) => Promise<unknown>;
     onRefreshBrowser: () => Promise<unknown>;
     onRefreshFiles: () => Promise<unknown>;
+    onPreviewFile: (path: string) => Promise<unknown>;
+    onCloseFilePreview: () => void;
     onTakeControl: () => Promise<unknown>;
     onReturnControl: () => Promise<unknown>;
     onClick: (x: number, y: number) => Promise<unknown>;
@@ -107,6 +113,8 @@ export function LiveWorkRail({
   const [filesOpen, setFilesOpen] = useState(false);
   const localScreenRef = useRef<HTMLDivElement>(null);
   const localScreenImageRef = useRef<HTMLImageElement>(null);
+  const filePreviewDialogRef = useRef<HTMLDivElement>(null);
+  const filePreviewCloseRef = useRef<HTMLButtonElement>(null);
   const keyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const needsAttention = approvalCount > 0 || status === "awaiting-approval";
   const activeHostedSchedules = hostedComputer.schedules.filter((schedule) => schedule.lifecycle === "active");
@@ -130,6 +138,16 @@ export function LiveWorkRail({
     setFilesOpen(next);
     if (next) void localComputer.onRefreshFiles().catch(() => undefined);
   };
+  const openLocalFile = (path: string) => {
+    setScreenOpen(false);
+    void localComputer.onPreviewFile(path).catch(() => undefined);
+  };
+  useModalFocusTrap({
+    active: Boolean(localComputer.filePreview),
+    containerRef: filePreviewDialogRef,
+    initialFocusRef: filePreviewCloseRef,
+    onClose: localComputer.onCloseFilePreview
+  });
   const localPoint = (event: MouseEvent<HTMLDivElement> | WheelEvent<HTMLDivElement>) => {
     const image = localScreenImageRef.current;
     const viewport = localComputer.viewport;
@@ -237,14 +255,25 @@ export function LiveWorkRail({
                       <ul>
                         {localComputer.files.entries.map((entry) => (
                           <li key={`${entry.kind}:${entry.path}`}>
-                            {entry.kind === "directory" ? <FolderOpen size={14} aria-hidden="true" /> : <File size={14} aria-hidden="true" />}
-                            <span title={entry.path}>{entry.path}</span>
-                            <small>{entry.kind === "directory" ? "Folder" : formatBytes(entry.sizeBytes ?? 0)}</small>
+                            {entry.kind === "directory" ? (
+                              <span className="local-computer-files__entry">
+                                <FolderOpen size={14} aria-hidden="true" />
+                                <span title={entry.path}>{entry.path}</span>
+                                <small>Folder</small>
+                              </span>
+                            ) : (
+                              <button type="button" className="local-computer-files__entry" onClick={() => openLocalFile(entry.path)} disabled={localComputer.filePreviewLoading} aria-label={`Preview ${entry.path}`}>
+                                <File size={14} aria-hidden="true" />
+                                <span title={entry.path}>{entry.path}</span>
+                                <small>{formatBytes(entry.sizeBytes ?? 0)}</small>
+                              </button>
+                            )}
                           </li>
                         ))}
                       </ul>
                     ) : <small>No files yet. This teammate can create one after you approve a write.</small>}
                 {localComputer.files?.truncated ? <small>Showing the first 200 entries.</small> : null}
+                {localComputer.filePreviewError ? <small role="alert">{localComputer.filePreviewError}</small> : null}
               </div>
             ) : null}
           </div>
@@ -396,6 +425,27 @@ export function LiveWorkRail({
                 <small>{localComputer.controller === "human" ? "Click the screen, then type. Keys are sent directly and are not saved by Fable." : `${agentName} can use approved browser actions. Take control to interact safely.`}</small>
               </div>
             ) : <img src={screenPreviewUrl} alt={`${agentName}'s live computer session`} />}
+          </section>
+        </div>
+      ) : null}
+      {localComputer.filePreview ? (
+        <div ref={filePreviewDialogRef} className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${localComputer.filePreview.path} preview`}>
+          <section className="live-screen-modal__panel local-file-preview__panel">
+            <header>
+              <span>
+                <strong>{localComputer.filePreview.path}</strong>
+                <small>{formatBytes(localComputer.filePreview.sizeBytes)} · private text preview{localComputer.filePreview.truncated ? " · truncated" : ""}</small>
+              </span>
+              <span className="live-screen-modal__actions">
+                <button ref={filePreviewCloseRef} type="button" onClick={localComputer.onCloseFilePreview} aria-label="Close file preview"><X size={18} /></button>
+              </span>
+            </header>
+            <div className="local-file-preview">
+              <pre tabIndex={0}>{localComputer.filePreview.content}</pre>
+              {!localComputer.filePreview.content ? <small>This file is empty.</small>
+                : localComputer.filePreview.truncated ? <small>Preview stopped at 256 KB. The file itself is unchanged.</small>
+                  : null}
+            </div>
           </section>
         </div>
       ) : null}

@@ -358,6 +358,7 @@ pub fn run() {
             local_computer::local_computer_status,
             local_computer::local_computer_provision,
             local_computer::local_computer_files,
+            local_computer::local_computer_file_preview,
             local_computer::local_browser_navigate,
             local_computer::local_browser_snapshot,
             local_computer::local_computer_set_controller,
