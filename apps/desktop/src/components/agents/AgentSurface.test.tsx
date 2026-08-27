@@ -14,6 +14,10 @@ function unavailableLocalComputer() {
     available: false,
     browserAvailable: false,
     browserActive: false,
+    filesAvailable: false,
+    files: null,
+    filesLoading: false,
+    filesError: null,
     controller: "agent" as const,
     loading: false,
     provisioning: false,
@@ -24,6 +28,7 @@ function unavailableLocalComputer() {
     onProvision: vi.fn().mockResolvedValue(null),
     onOpenBrowser: vi.fn().mockResolvedValue(null),
     onRefreshBrowser: vi.fn().mockResolvedValue(null),
+    onRefreshFiles: vi.fn().mockResolvedValue(null),
     onTakeControl: vi.fn().mockResolvedValue(null),
     onReturnControl: vi.fn().mockResolvedValue(null),
     onClick: vi.fn().mockResolvedValue(null),
@@ -456,6 +461,62 @@ describe("agent surface", () => {
     expect(screen.getByLabelText("Computer on this PC")).toHaveTextContent(
       "Microsoft Edge · separate profile and files"
     );
+  });
+
+  it("shows only relative metadata from the teammate's private files", async () => {
+    const onRefreshFiles = vi.fn().mockResolvedValue(null);
+    render(
+      <LiveWorkRail
+        agentName="Researcher"
+        running={false}
+        status="idle"
+        transcript=""
+        runId={null}
+        approvalCount={0}
+        computerUseActive={false}
+        localComputer={{
+          ...unavailableLocalComputer(),
+          available: true,
+          status: "ready",
+          browserAvailable: true,
+          filesAvailable: true,
+          files: {
+            computerId: "local-computer-a",
+            entries: [
+              { path: "notes", name: "notes", kind: "directory" },
+              { path: "notes/plan.md", name: "plan.md", kind: "file", sizeBytes: 1_536 }
+            ],
+            truncated: false,
+            updatedAt: "2026-08-27T12:00:00.000Z"
+          },
+          onRefreshFiles
+        }}
+        hostedComputer={{
+          available: false,
+          runtimeActive: false,
+          keepAlive: false,
+          loading: false,
+          provisioning: false,
+          error: null,
+          onProvision: vi.fn(),
+          browserOpening: false,
+          browserPhase: "idle",
+          browserError: null,
+          schedules: [],
+          schedulesLoading: false,
+          schedulesError: null,
+          onOpenBrowser: vi.fn(),
+          onRefreshBrowser: vi.fn()
+        }}
+        onClose={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Files 2/ }));
+    await waitFor(() => expect(onRefreshFiles).toHaveBeenCalledOnce());
+    expect(screen.getByRole("region", { name: "Researcher's private files" })).toHaveTextContent("notes/plan.md");
+    expect(screen.getByRole("region", { name: "Researcher's private files" })).toHaveTextContent("2 KB");
+    expect(screen.queryByText(/AppData|local-computers|private plan/i)).not.toBeInTheDocument();
   });
 
   it("offers a restart when the local browser session loses contact", async () => {

@@ -2700,6 +2700,14 @@ export function ChatWorkspace() {
             browserAvailable: localComputer.node?.browserAvailable ?? false,
             browserActive: localComputer.node?.browserActive ?? false,
             browserProduct: localComputer.node?.browserProduct,
+            filesAvailable: Boolean(
+              localComputer.node
+              && localComputer.node.lifecycle !== "unprovisioned"
+              && localComputer.node.capabilities.includes("persistent-files")
+            ),
+            files: localComputer.files,
+            filesLoading: localComputer.filesLoading,
+            filesError: localComputer.filesError,
             controller: localComputer.snapshot?.controller ?? localComputer.node?.controller ?? "agent",
             loading: localComputer.loading,
             provisioning: localComputer.provisioning,
@@ -2713,6 +2721,7 @@ export function ChatWorkspace() {
             onProvision: localComputer.provision,
             onOpenBrowser: localComputer.navigate,
             onRefreshBrowser: localComputer.refresh,
+            onRefreshFiles: localComputer.refreshFiles,
             onTakeControl: localComputer.takeControl,
             onReturnControl: localComputer.returnControl,
             onClick: localComputer.click,

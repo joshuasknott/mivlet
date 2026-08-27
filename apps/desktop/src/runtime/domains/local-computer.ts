@@ -4,6 +4,7 @@ import type {
   LocalBrowserPointerRequest,
   LocalBrowserSnapshot,
   LocalComputerControlRequest,
+  LocalComputerFilesSnapshot,
   LocalComputerSnapshot,
   LocalComputerTarget,
 } from "@fable/protocol";
@@ -14,6 +15,9 @@ import type { RuntimeAdapter } from "../ports";
 export interface LocalComputerRuntimePort {
   load(target: LocalComputerTarget): Promise<LocalComputerSnapshot | null>;
   provision(target: LocalComputerTarget): Promise<LocalComputerSnapshot | null>;
+  files(
+    target: LocalComputerTarget,
+  ): Promise<LocalComputerFilesSnapshot | null>;
   snapshot(target: LocalComputerTarget): Promise<LocalBrowserSnapshot | null>;
   navigate(
     request: LocalBrowserNavigateRequest,
@@ -41,6 +45,10 @@ function createPort(adapter: RuntimeAdapter): LocalComputerRuntimePort {
     provision: (target) =>
       native
         ? invoke("local_computer_provision", { ...target })
+        : Promise.resolve(null),
+    files: (target) =>
+      native
+        ? invoke("local_computer_files", { target })
         : Promise.resolve(null),
     snapshot: (target) =>
       native
@@ -78,6 +86,8 @@ export const loadRuntimeLocalComputer = (target: LocalComputerTarget) =>
   port().load(target);
 export const provisionRuntimeLocalComputer = (target: LocalComputerTarget) =>
   port().provision(target);
+export const listRuntimeLocalComputerFiles = (target: LocalComputerTarget) =>
+  port().files(target);
 export const snapshotRuntimeLocalBrowser = (target: LocalComputerTarget) =>
   port().snapshot(target);
 export const navigateRuntimeLocalBrowser = (

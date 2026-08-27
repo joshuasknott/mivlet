@@ -8,7 +8,7 @@
 //! handles never cross into the renderer.
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     ffi::OsStr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -31,6 +31,9 @@ const VIEWPORT_WIDTH: u32 = 1280;
 const VIEWPORT_HEIGHT: u32 = 800;
 const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 const MAX_URL_CHARACTERS: usize = 2_048;
+const MAX_FILE_ENTRIES: usize = 200;
+const MAX_FILE_DEPTH: usize = 8;
+const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
     root: PathBuf,
@@ -116,6 +119,25 @@ pub struct LocalBrowserSnapshot {
 pub struct LocalBrowserViewportSnapshot {
     width: u32,
     height: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalComputerFilesSnapshot {
+    computer_id: String,
+    entries: Vec<LocalComputerFileEntry>,
+    truncated: bool,
+    updated_at: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalComputerFileEntry {
+    path: String,
+    name: String,
+    kind: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1152,6 +1174,98 @@ fn computer_snapshot(
     })
 }
 
+fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesSnapshot, String> {
+    let workspace = scope.directory.join("workspace");
+    let canonical_root = crate::paths::strict_canonicalize(&workspace)
+        .map_err(|_| "The teammate computer workspace failed its security check.".to_string())?;
+    let mut pending = VecDeque::from([(canonical_root.clone(), 0_usize)]);
+    let mut entries = Vec::new();
+    let mut truncated = false;
+
+    while let Some((directory, depth)) = pending.pop_front() {
+        let canonical_directory = crate::paths::strict_canonicalize(&directory)
+            .map_err(|_| "A teammate folder failed its security check.".to_string())?;
+        if !canonical_directory.starts_with(&canonical_root) {
+            return Err("A teammate folder escaped its private workspace.".into());
+        }
+        let mut children = std::fs::read_dir(&canonical_directory)
+            .map_err(|_| "Fable could not list this teammate's files.".to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|_| "Fable could not list this teammate's files.".to_string())?;
+        children.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
+
+        for child in children {
+            if entries.len() >= MAX_FILE_ENTRIES {
+                truncated = true;
+                break;
+            }
+            let path = child.path();
+            if crate::paths::contains_symlink(&path) {
+                continue;
+            }
+            let Ok(metadata) = std::fs::symlink_metadata(&path) else {
+                truncated = true;
+                continue;
+            };
+            if !metadata.is_file() && !metadata.is_dir() {
+                continue;
+            }
+            let relative = path
+                .strip_prefix(&canonical_root)
+                .map_err(|_| "A teammate file escaped its private workspace.".to_string())?;
+            let Some(relative_path) = relative.to_str() else {
+                continue;
+            };
+            let relative_path = relative_path.replace('\\', "/");
+            let Some(name) = child.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if relative_path.is_empty()
+                || relative_path.chars().count() > 512
+                || relative_path.chars().any(char::is_control)
+                || name.is_empty()
+                || name.chars().count() > 160
+                || name.chars().any(char::is_control)
+            {
+                truncated = true;
+                continue;
+            }
+            let is_directory = metadata.is_dir();
+            entries.push(LocalComputerFileEntry {
+                path: relative_path,
+                name,
+                kind: if is_directory { "directory" } else { "file" },
+                size_bytes: metadata
+                    .is_file()
+                    .then_some(metadata.len().min(MAX_SAFE_UI_BYTES)),
+            });
+            if is_directory {
+                if depth < MAX_FILE_DEPTH {
+                    pending.push_back((path, depth + 1));
+                } else {
+                    truncated = true;
+                }
+            }
+        }
+        if entries.len() >= MAX_FILE_ENTRIES {
+            truncated = true;
+            break;
+        }
+    }
+    entries.sort_by(|left, right| {
+        left.path
+            .to_lowercase()
+            .cmp(&right.path.to_lowercase())
+            .then_with(|| left.path.cmp(&right.path))
+    });
+    Ok(LocalComputerFilesSnapshot {
+        computer_id: scope.computer_id.clone(),
+        entries,
+        truncated,
+        updated_at: Utc::now().to_rfc3339(),
+    })
+}
+
 #[tauri::command]
 pub async fn local_computer_status(
     workspace_id: String,
@@ -1171,6 +1285,20 @@ pub async fn local_computer_provision(
     let scope = owned_state.scope(&workspace_id, &agent_id)?;
     ensure_browser_session(owned_state.clone(), scope).await?;
     computer_snapshot(&owned_state, workspace_id, agent_id)
+}
+
+#[tauri::command]
+pub async fn local_computer_files(
+    target: LocalComputerTarget,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<LocalComputerFilesSnapshot, String> {
+    let scope = state.scope(&target.workspace_id, &target.agent_id)?;
+    if !scope.directory.join("workspace").is_dir() {
+        return Err("Set up this teammate's local computer before viewing its files.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || workspace_files_snapshot(&scope))
+        .await
+        .map_err(|_| "The local file-list task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1483,6 +1611,50 @@ mod tests {
         assert!(state
             .tool_workspace_root("workspace-one", "agent-two")
             .is_err());
+    }
+
+    #[test]
+    fn workspace_file_projection_is_relative_bounded_and_content_free() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-files", "agent-files").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let workspace = scope.directory.join("workspace");
+        std::fs::create_dir_all(workspace.join("notes")).unwrap();
+        std::fs::write(workspace.join("notes").join("plan.md"), "private plan").unwrap();
+        std::fs::write(workspace.join("summary.txt"), "ready").unwrap();
+
+        let snapshot = workspace_files_snapshot(&scope).unwrap();
+        assert_eq!(snapshot.computer_id, scope.computer_id);
+        assert!(!snapshot.truncated);
+        assert!(snapshot.entries.iter().any(|entry| {
+            entry.path == "notes" && entry.name == "notes" && entry.kind == "directory"
+        }));
+        assert!(snapshot.entries.iter().any(|entry| {
+            entry.path == "notes/plan.md"
+                && entry.name == "plan.md"
+                && entry.kind == "file"
+                && entry.size_bytes == Some(12)
+        }));
+        let encoded = serde_json::to_string(&snapshot).unwrap();
+        assert!(!encoded.contains(temp.path().to_string_lossy().as_ref()));
+        assert!(!encoded.contains("private plan"));
+    }
+
+    #[test]
+    fn workspace_file_projection_reports_its_entry_limit() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-many", "agent-many").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let workspace = scope.directory.join("workspace");
+        for index in 0..=MAX_FILE_ENTRIES {
+            std::fs::write(workspace.join(format!("file-{index:03}.txt")), "x").unwrap();
+        }
+
+        let snapshot = workspace_files_snapshot(&scope).unwrap();
+        assert_eq!(snapshot.entries.len(), MAX_FILE_ENTRIES);
+        assert!(snapshot.truncated);
     }
 
     #[test]

@@ -6,6 +6,7 @@ import type {
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   keyRuntimeLocalBrowser,
+  listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,
@@ -27,6 +28,7 @@ export function useLocalComputer({
     : null;
   const queryKey = ["local-computer", workspaceId ?? "unavailable", agentId] as const;
   const browserQueryKey = ["local-computer-browser", workspaceId ?? "unavailable", agentId] as const;
+  const filesQueryKey = ["local-computer-files", workspaceId ?? "unavailable", agentId] as const;
   const computer = useQuery({
     queryKey,
     queryFn: () => target ? loadRuntimeLocalComputer(target) : Promise.resolve(null),
@@ -40,6 +42,12 @@ export function useLocalComputer({
     enabled: Boolean(target && computer.data?.browserActive),
     retry: false,
     refetchInterval: computer.data?.browserActive ? 1_500 : false,
+  });
+  const files = useQuery({
+    queryKey: filesQueryKey,
+    queryFn: () => target ? listRuntimeLocalComputerFiles(target) : Promise.resolve(null),
+    enabled: false,
+    retry: false,
   });
 
   const setBrowserSnapshot = (snapshot: LocalBrowserSnapshot | null) => {
@@ -112,6 +120,9 @@ export function useLocalComputer({
     available: Boolean(target),
     node: computer.data ?? null,
     snapshot: browser.data ?? null,
+    files: files.data ?? null,
+    filesLoading: files.isFetching,
+    filesError: files.error instanceof Error ? files.error.message : null,
     loading: computer.isLoading,
     provisioning: provision.isPending,
     browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending,
@@ -129,6 +140,7 @@ export function useLocalComputer({
     provision: () => provision.mutateAsync(),
     navigate: (url: string) => navigate.mutateAsync(url),
     refresh: () => browser.refetch().then((result) => result.data ?? null),
+    refreshFiles: () => files.refetch().then((result) => result.data ?? null),
     takeControl: () => controller.mutateAsync("human"),
     returnControl: () => controller.mutateAsync("agent"),
     click: (x: number, y: number) => pointer.mutateAsync({ x, y, action: "click" }),

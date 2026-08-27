@@ -42,6 +42,25 @@ export interface LocalBrowserViewportSnapshot {
   height: number;
 }
 
+export interface LocalComputerFileEntry {
+  path: string;
+  name: string;
+  kind: "file" | "directory";
+  sizeBytes?: number;
+}
+
+/**
+ * Bounded, read-only projection for the trusted Fable UI. Paths are relative
+ * to this teammate's private workspace; host paths and file contents never
+ * cross the native boundary.
+ */
+export interface LocalComputerFilesSnapshot {
+  computerId: string;
+  entries: readonly LocalComputerFileEntry[];
+  truncated: boolean;
+  updatedAt: string;
+}
+
 /**
  * Ephemeral browser frame. The preview must not be persisted in a runtime
  * snapshot, log, model transcript, or local database.

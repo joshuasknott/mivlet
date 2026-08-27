@@ -88,6 +88,7 @@ export {
 } from "./runtime/domains/hosted-computer";
 export {
   keyRuntimeLocalBrowser,
+  listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,

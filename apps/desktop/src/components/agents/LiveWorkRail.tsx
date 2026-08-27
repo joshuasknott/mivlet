@@ -4,9 +4,12 @@ import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { Cloud } from "@phosphor-icons/react/dist/csr/Cloud";
 import { FileArrowDown } from "@phosphor-icons/react/dist/csr/FileArrowDown";
+import { File } from "@phosphor-icons/react/dist/csr/File";
+import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
+import type { LocalComputerFilesSnapshot } from "@fable/protocol";
 import type { RuntimeMissionProgress } from "../../runtime";
 
 export function LiveWorkRail({
@@ -37,6 +40,10 @@ export function LiveWorkRail({
     browserAvailable: boolean;
     browserActive: boolean;
     browserProduct?: string;
+    filesAvailable: boolean;
+    files: LocalComputerFilesSnapshot | null;
+    filesLoading: boolean;
+    filesError: string | null;
     controller: "agent" | "human";
     loading: boolean;
     provisioning: boolean;
@@ -50,6 +57,7 @@ export function LiveWorkRail({
     onProvision: () => Promise<unknown>;
     onOpenBrowser: (url: string) => Promise<unknown>;
     onRefreshBrowser: () => Promise<unknown>;
+    onRefreshFiles: () => Promise<unknown>;
     onTakeControl: () => Promise<unknown>;
     onReturnControl: () => Promise<unknown>;
     onClick: (x: number, y: number) => Promise<unknown>;
@@ -96,6 +104,7 @@ export function LiveWorkRail({
   const [screenOpen, setScreenOpen] = useState(false);
   const [browserUrl, setBrowserUrl] = useState("");
   const [localBrowserUrl, setLocalBrowserUrl] = useState("");
+  const [filesOpen, setFilesOpen] = useState(false);
   const localScreenRef = useRef<HTMLDivElement>(null);
   const localScreenImageRef = useRef<HTMLImageElement>(null);
   const keyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
@@ -115,6 +124,11 @@ export function LiveWorkRail({
       await localComputer.onOpenBrowser(localBrowserUrl);
       setScreenOpen(true);
     })().catch(() => undefined);
+  };
+  const toggleLocalFiles = () => {
+    const next = !filesOpen;
+    setFilesOpen(next);
+    if (next) void localComputer.onRefreshFiles().catch(() => undefined);
   };
   const localPoint = (event: MouseEvent<HTMLDivElement> | WheelEvent<HTMLDivElement>) => {
     const image = localScreenImageRef.current;
@@ -200,6 +214,40 @@ export function LiveWorkRail({
             />
             <button type="submit" disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Open"}</button>
           </form>
+        ) : null}
+        {localComputer.filesAvailable ? (
+          <div className="local-computer-files">
+            <div className="local-computer-files__toolbar">
+              <button type="button" onClick={toggleLocalFiles} aria-expanded={filesOpen} aria-controls="local-computer-files-list">
+                <FolderOpen size={15} aria-hidden="true" />
+                <span>Files</span>
+                <small>{localComputer.files ? `${localComputer.files.entries.length}${localComputer.files.truncated ? "+" : ""}` : "Private"}</small>
+              </button>
+              {filesOpen ? (
+                <button type="button" onClick={() => void localComputer.onRefreshFiles().catch(() => undefined)} disabled={localComputer.filesLoading} aria-label="Refresh private files">
+                  <ArrowClockwise size={14} />
+                </button>
+              ) : null}
+            </div>
+            {filesOpen ? (
+              <div id="local-computer-files-list" className="local-computer-files__list" role="region" aria-label={`${agentName}'s private files`}>
+                {localComputer.filesLoading && !localComputer.files ? <small>Checking private files…</small>
+                  : localComputer.filesError ? <small role="alert">{localComputer.filesError}</small>
+                    : localComputer.files?.entries.length ? (
+                      <ul>
+                        {localComputer.files.entries.map((entry) => (
+                          <li key={`${entry.kind}:${entry.path}`}>
+                            {entry.kind === "directory" ? <FolderOpen size={14} aria-hidden="true" /> : <File size={14} aria-hidden="true" />}
+                            <span title={entry.path}>{entry.path}</span>
+                            <small>{entry.kind === "directory" ? "Folder" : formatBytes(entry.sizeBytes ?? 0)}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : <small>No files yet. This teammate can create one after you approve a write.</small>}
+                {localComputer.files?.truncated ? <small>Showing the first 200 entries.</small> : null}
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {localComputer.error && !localComputer.recoveryNeeded ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
         {localComputer.status === "ready" ? (

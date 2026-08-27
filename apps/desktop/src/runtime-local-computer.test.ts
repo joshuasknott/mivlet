@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   keyRuntimeLocalBrowser,
+  listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
   pointRuntimeLocalBrowser,
@@ -32,6 +33,7 @@ describe("local computer runtime boundary", () => {
     const target = { workspaceId: "workspace-a", agentId: "agent-a" };
     await expect(loadRuntimeLocalComputer(target)).resolves.toBeNull();
     await expect(provisionRuntimeLocalComputer(target)).resolves.toBeNull();
+    await expect(listRuntimeLocalComputerFiles(target)).resolves.toBeNull();
     await expect(snapshotRuntimeLocalBrowser(target)).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -46,6 +48,7 @@ describe("local computer runtime boundary", () => {
     const target = { workspaceId: "workspace-a", agentId: "agent-a" };
     await loadRuntimeLocalComputer(target);
     await provisionRuntimeLocalComputer(target);
+    await listRuntimeLocalComputerFiles(target);
     await snapshotRuntimeLocalBrowser(target);
     await navigateRuntimeLocalBrowser({ ...target, url: "https://example.com/" });
     await setRuntimeLocalComputerController({
@@ -65,6 +68,7 @@ describe("local computer runtime boundary", () => {
     expect(mocks.invoke.mock.calls).toEqual([
       ["local_computer_status", target],
       ["local_computer_provision", target],
+      ["local_computer_files", { target }],
       ["local_browser_snapshot", { target }],
       ["local_browser_navigate", { request: { ...target, url: "https://example.com/" } }],
       ["local_computer_set_controller", { request: { ...target, controller: "human", expectedGeneration: 3 } }],
