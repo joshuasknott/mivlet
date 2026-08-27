@@ -41,6 +41,7 @@ export function LiveWorkRail({
     loading: boolean;
     provisioning: boolean;
     busy: boolean;
+    recoveryNeeded: boolean;
     error: string | null;
     browserUrl?: string;
     browserTitle?: string;
@@ -164,26 +165,28 @@ export function LiveWorkRail({
     <aside className="live-rail" aria-label="Work">
       <header className="live-rail__header"><div><strong>Work</strong><span>{agentName}</span></div><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
 
-      <section className={`hosted-computer-card local-computer-card${localComputer.status === "ready" ? " is-ready" : localComputer.status === "degraded" || localComputer.error ? " is-attention" : ""}`} aria-label="Computer on this PC">
+      <section className={`hosted-computer-card local-computer-card${localComputer.recoveryNeeded || localComputer.status === "degraded" ? " is-attention" : localComputer.status === "ready" ? " is-ready" : ""}`} aria-label="Computer on this PC">
         <span className="hosted-computer-card__icon"><Browser size={18} weight={localComputer.status === "ready" ? "fill" : "regular"} /></span>
         <span className="hosted-computer-card__copy">
           <strong>Computer on this PC</strong>
-          <small>{localComputer.status === "ready"
-            ? `${localComputer.browserProduct ?? "Private browser"} · separate profile and files`
+          <small>{localComputer.recoveryNeeded
+            ? localComputer.error ?? "The browser session needs to restart."
+            : localComputer.status === "ready"
+              ? localComputer.browserActive
+                ? `${localComputer.browserProduct ?? "Private browser"} · separate profile and files`
+                : "Private files are ready. Start this teammate's browser when needed."
             : localComputer.provisioning || localComputer.status === "provisioning"
               ? "Creating this teammate's private browser and files…"
-              : localComputer.error
-                ? localComputer.error
-                : localComputer.browserAvailable
-                  ? "Free, local, and separate for this teammate"
-                  : "Install Edge, Chrome, or Chromium to enable it"}</small>
+              : localComputer.browserAvailable
+                ? "Free, local, and separate for this teammate"
+                : "Install Edge, Chrome, or Chromium to enable it"}</small>
         </span>
-        {localComputer.available && (localComputer.status !== "ready" || !localComputer.browserActive) ? (
+        {localComputer.available && (localComputer.recoveryNeeded || localComputer.status !== "ready" || !localComputer.browserActive) ? (
           <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading || !localComputer.browserAvailable}>
-            {localComputer.status === "degraded" || localComputer.error ? "Retry" : localComputer.status === "ready" ? "Start" : "Set up"}
+            {localComputer.recoveryNeeded || localComputer.status === "degraded" ? "Retry" : localComputer.status === "ready" ? "Start" : "Set up"}
           </button>
         ) : localComputer.status === "ready" ? <span className="hosted-computer-card__state">Local</span> : null}
-        {localComputer.status === "ready" && localComputer.browserActive ? (
+        {localComputer.status === "ready" && localComputer.browserActive && !localComputer.recoveryNeeded ? (
           <form className="hosted-browser-launcher" onSubmit={submitLocalBrowser}>
             <Browser size={16} aria-hidden="true" />
             <input
@@ -198,7 +201,7 @@ export function LiveWorkRail({
             <button type="submit" disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Open"}</button>
           </form>
         ) : null}
-        {localComputer.error ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
+        {localComputer.error && !localComputer.recoveryNeeded ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
         {localComputer.status === "ready" ? (
           <small className="local-computer-card__boundary">Browser and files are separated per teammate. App and terminal isolation need a container or VM backend and remain off.</small>
         ) : null}
@@ -311,7 +314,11 @@ export function LiveWorkRail({
               <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s local browser` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>
               <span className="live-screen-modal__actions">
                 <button type="button" onClick={() => void (localComputer.browserActive ? localComputer.onRefreshBrowser() : hostedComputer.onRefreshBrowser()).catch(() => undefined)} disabled={hostedComputer.browserOpening || localComputer.busy} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
-                {localComputer.browserActive ? (
+                {localComputer.recoveryNeeded ? (
+                  <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading}>
+                    {localComputer.provisioning ? "Restarting…" : "Restart browser"}
+                  </button>
+                ) : localComputer.browserActive ? (
                   localComputer.controller === "human"
                     ? <button type="button" onClick={() => void localComputer.onReturnControl().catch(() => undefined)} disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Return control"}</button>
                     : <button type="button" onClick={() => void localComputer.onTakeControl().catch(() => undefined)} disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Take control"}</button>
@@ -320,7 +327,13 @@ export function LiveWorkRail({
                 <button type="button" onClick={() => setScreenOpen(false)} aria-label="Close screen"><X size={18} /></button>
               </span>
             </header>
-            {localComputer.browserActive ? (
+            {localComputer.recoveryNeeded ? (
+              <div className="local-browser-recovery" role="alert">
+                <Browser size={28} aria-hidden="true" />
+                <strong>The private browser needs to restart</strong>
+                <small>{localComputer.error ?? "Fable lost contact with this browser session."}</small>
+              </div>
+            ) : localComputer.browserActive ? (
               <div
                 className={`local-browser-screen${localComputer.controller === "human" ? " is-human" : ""}`}
                 ref={localScreenRef}

@@ -737,6 +737,9 @@
 .live-screen-modal__actions button[aria-label] { width: 34px; padding: 0; }
 .live-screen-modal__actions button:disabled { opacity: .5; }
 .live-screen-modal__panel img { display: block; width: 100%; max-height: calc(88vh - 54px); object-fit: contain; background: #0d0d0d; }
+.local-browser-recovery { display: grid; min-height: min(520px, calc(88vh - 54px)); place-items: center; align-content: center; gap: 8px; padding: 32px; color: #d8d8d8; background: #101010; text-align: center; }
+.local-browser-recovery strong { color: #f4f4f4; font-size: 13px; }
+.local-browser-recovery small { max-width: 440px; color: #aaa; font-size: 10px; line-height: 1.5; }
 .local-browser-screen { position: relative; outline: 0; }
 .local-browser-screen > img { height: auto; max-height: none; object-fit: fill; }
 .local-browser-screen.is-human { cursor: crosshair; box-shadow: inset 0 0 0 2px #7a9cff; }

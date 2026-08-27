@@ -99,6 +99,13 @@ export function useLocalComputer({
     },
     onSuccess: setBrowserSnapshot,
   });
+  const recoveryError = computer.error instanceof Error
+    ? computer.error.message
+    : provision.error instanceof Error
+      ? provision.error.message
+      : browser.error instanceof Error
+        ? browser.error.message
+        : null;
 
   return {
     scopeKey: `${workspaceId ?? "unavailable"}:${agentId}`,
@@ -108,21 +115,17 @@ export function useLocalComputer({
     loading: computer.isLoading,
     provisioning: provision.isPending,
     browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending,
-    error: computer.error instanceof Error
-      ? computer.error.message
-      : provision.error instanceof Error
-        ? provision.error.message
-        : browser.error instanceof Error
-          ? browser.error.message
-          : navigate.error instanceof Error
-            ? navigate.error.message
-            : controller.error instanceof Error
-              ? controller.error.message
-              : pointer.error instanceof Error
-                ? pointer.error.message
-                : key.error instanceof Error
-                  ? key.error.message
-                  : null,
+    recoveryNeeded: recoveryError !== null,
+    error: recoveryError
+      ?? (navigate.error instanceof Error
+        ? navigate.error.message
+        : controller.error instanceof Error
+          ? controller.error.message
+          : pointer.error instanceof Error
+            ? pointer.error.message
+            : key.error instanceof Error
+              ? key.error.message
+              : null),
     provision: () => provision.mutateAsync(),
     navigate: (url: string) => navigate.mutateAsync(url),
     refresh: () => browser.refetch().then((result) => result.data ?? null),

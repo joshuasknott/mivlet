@@ -758,13 +758,25 @@ async fn ensure_browser_session(
         let _launch_guard = launch_gate
             .lock()
             .map_err(|_| "The local computer launch state is unavailable.".to_string())?;
-        let needs_launch = !launch_state
+        let existing = launch_state
             .sessions
             .lock()
             .map_err(|_| "The local computer state is unavailable.".to_string())?
-            .contains_key(&key);
-        if needs_launch {
-            let session = launch_browser(&scope)?;
+            .get(&key)
+            .cloned();
+        let (healthy, previous_generation) = existing
+            .as_ref()
+            .map(|session| {
+                let session = session
+                    .lock()
+                    .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                Ok::<_, String>((session.tab.get_target_info().is_ok(), session.generation))
+            })
+            .transpose()?
+            .unwrap_or((false, 0));
+        if !healthy {
+            let generation = next_browser_generation(previous_generation)?;
+            let session = launch_browser(&scope, generation)?;
             launch_state
                 .sessions
                 .lock()
@@ -775,6 +787,12 @@ async fn ensure_browser_session(
     })
     .await
     .map_err(|_| "Fable could not start the local browser.".to_string())?
+}
+
+fn next_browser_generation(previous: u64) -> Result<u64, String> {
+    previous
+        .checked_add(1)
+        .ok_or_else(|| "The teammate browser control generation is exhausted.".to_string())
 }
 
 fn find_browser() -> Option<(PathBuf, String)> {
@@ -884,7 +902,7 @@ fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     Ok(())
 }
 
-fn launch_browser(scope: &ComputerScope) -> Result<LocalBrowserSession, String> {
+fn launch_browser(scope: &ComputerScope, generation: u64) -> Result<LocalBrowserSession, String> {
     ensure_scope_directories(scope)?;
     let (browser_path, browser_product) = find_browser().ok_or_else(|| {
         "Install Microsoft Edge, Google Chrome, or Chromium to use this teammate's local browser."
@@ -913,7 +931,7 @@ fn launch_browser(scope: &ComputerScope) -> Result<LocalBrowserSession, String> 
         _browser: browser,
         tab,
         controller: LocalComputerController::Agent,
-        generation: 1,
+        generation,
         browser_product,
         observation_counter: 0,
         observation: None,
@@ -1378,6 +1396,13 @@ mod tests {
     }
 
     #[test]
+    fn browser_restarts_advance_the_control_generation() {
+        assert_eq!(next_browser_generation(0).unwrap(), 1);
+        assert_eq!(next_browser_generation(41).unwrap(), 42);
+        assert!(next_browser_generation(u64::MAX).is_err());
+    }
+
+    #[test]
     #[ignore = "requires an installed Chromium browser"]
     fn real_local_browser_navigates_types_and_captures_a_frame() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -1399,7 +1424,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
         let scope = state.scope("workspace-live", "agent-live").unwrap();
-        let mut session = launch_browser(&scope).unwrap();
+        let mut session = launch_browser(&scope, 1).unwrap();
         session.controller = LocalComputerController::Human;
         session.generation = 2;
         require_human_control(&session, 2).unwrap();
@@ -1486,7 +1511,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
         let scope = state.scope("workspace-controls", "agent-controls").unwrap();
-        let mut session = launch_browser(&scope).unwrap();
+        let mut session = launch_browser(&scope, 1).unwrap();
         session
             .tab
             .navigate_to(&format!("http://{address}/"))

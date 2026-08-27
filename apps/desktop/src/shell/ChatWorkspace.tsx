@@ -2704,6 +2704,7 @@ export function ChatWorkspace() {
             loading: localComputer.loading,
             provisioning: localComputer.provisioning,
             busy: localComputer.browserBusy,
+            recoveryNeeded: localComputer.recoveryNeeded,
             error: localComputer.error,
             browserUrl: localComputer.snapshot?.currentUrl,
             browserTitle: localComputer.snapshot?.title,

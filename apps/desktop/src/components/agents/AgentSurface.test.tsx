@@ -18,6 +18,7 @@ function unavailableLocalComputer() {
     loading: false,
     provisioning: false,
     busy: false,
+    recoveryNeeded: false,
     error: null,
     generation: 0,
     onProvision: vi.fn().mockResolvedValue(null),
@@ -455,5 +456,52 @@ describe("agent surface", () => {
     expect(screen.getByLabelText("Computer on this PC")).toHaveTextContent(
       "Microsoft Edge · separate profile and files"
     );
+  });
+
+  it("offers a restart when the local browser session loses contact", async () => {
+    const onProvision = vi.fn().mockResolvedValue({ lifecycle: "ready" });
+    render(
+      <LiveWorkRail
+        agentName="Researcher"
+        running={false}
+        status="idle"
+        transcript=""
+        runId={null}
+        approvalCount={0}
+        computerUseActive
+        localComputer={{
+          ...unavailableLocalComputer(),
+          available: true,
+          status: "ready",
+          browserAvailable: true,
+          browserActive: true,
+          browserProduct: "Microsoft Edge",
+          recoveryNeeded: true,
+          error: "Fable could not capture the teammate browser.",
+          onProvision
+        }}
+        hostedComputer={{
+          available: false,
+          runtimeActive: false,
+          keepAlive: false,
+          loading: false,
+          provisioning: false,
+          error: null,
+          onProvision: vi.fn(),
+          browserOpening: false,
+          browserPhase: "idle",
+          browserError: null,
+          schedules: [],
+          schedulesLoading: false,
+          schedulesError: null,
+          onOpenBrowser: vi.fn(),
+          onRefreshBrowser: vi.fn()
+        }}
+        onClose={vi.fn()}
+      />
+    );
+    expect(screen.queryByRole("textbox", { name: "Page to open on this teammate's local computer" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(onProvision).toHaveBeenCalledOnce());
   });
 });

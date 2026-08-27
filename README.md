@@ -39,7 +39,9 @@ production-validated service.
   bounded title. A bounded observation exposes only visible named non-secret controls
   through exact single-use refs for approved click, fill, and key actions; page
   contents and screenshots are not returned to the model. Fable never falls
-  back to the user's host shell.
+  back to the user's host shell. Lost browser connections surface a bounded
+  restart path, and replacement sessions advance the control generation so
+  stale input cannot cross a browser restart.
 - Runtime-detected browser/operating-system dictation. It fails closed when the
   host webview has no speech-recognition API; Fable does not retain raw audio or
   a separate transcript.

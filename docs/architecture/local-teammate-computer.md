@@ -48,6 +48,14 @@ process does not. Fable shows **Start** and launches it again with the existing
 profile. The app currently needs to remain open for this local browser process
 and local agent turns to continue.
 
+Before each new agent navigation or observation, the native boundary checks that
+the retained Chromium target still responds. A lost connection is replaced
+behind the same per-agent launch gate. Replacement sessions advance the previous
+control generation and return to agent control, so input from a stale human frame
+cannot target the new process. If screen polling loses contact first, Fable hides
+the broken browser controls and presents an explicit retry rather than continuing
+to show the session as usable.
+
 ## File and process boundary
 
 Approved `read-file` and `write-file` actions resolve their root from the native
@@ -88,6 +96,8 @@ application-layer encryption envelope around Chromium's profile files.
   independently.
 - Concurrent setup requests share a per-agent launch gate and cannot create
   duplicate retained sessions.
+- Lost Chromium connections are replaced on the next setup or agent browser use;
+  the replacement advances the control generation before accepting input.
 - Browser/process handles and private paths never cross the native IPC boundary.
 - File operations retain Fable's existing exact approval, permit-consumption,
   audit, size-limit, and path-confinement checks.
@@ -104,7 +114,8 @@ application-layer encryption envelope around Chromium's profile files.
   tabs, and submit-specific policy beyond the current bounded named-control
   actions.
 - File browser UI, bounded downloads/uploads, multiple tabs/popups, clipboard,
-  passkeys, and recovery after a browser crash.
+  passkeys, proactive crash telemetry, and preservation of in-progress page state
+  across a browser-process failure.
 - Legacy local schedules already run through the dedicated headless workflow
   driver while Fable remains open. Automatic continuation of ordinary chats and
   routines explicitly bound to the local computer are still missing, followed
