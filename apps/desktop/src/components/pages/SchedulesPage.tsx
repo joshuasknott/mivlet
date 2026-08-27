@@ -87,9 +87,14 @@ export function SchedulesPage({
         onRequestCloseCreateModal={handleCloseCreateModal}
       />
       <RoutinePanel
-        onRun={(instruction) => runtime.submitPrompt(instruction)}
+        onRun={(instruction, agentId) => {
+          if (agentId && agentId !== runtime.activeAgentId) runtime.selectAgent(agentId);
+          runtime.submitPrompt(instruction);
+        }}
         draft={runtime.pendingRoutineDraft}
         onDraftConsumed={runtime.clearRoutineDraft}
+        agents={runtime.agents}
+        activeAgentId={runtime.activeAgentId}
       />
       {runtime.notificationHistory.length > 0 ? (
         <details className="notification-history">

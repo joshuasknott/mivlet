@@ -23,10 +23,11 @@
  * shared approval gate (`options.execute`) exactly as the interactive path does.
  */
 
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalRequest,
   BackendProvider,
+  FableAgentProfile,
   FirstWaveConnectorId,
   ProviderRouteExecutionBinding,
   ScheduledExecutionRoute,
@@ -42,6 +43,7 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
+import { agentExecutionInstructions } from "../lib/agent-learning";
 import { createDesktopTransport } from "../lib/native-transport";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
 import {
@@ -66,6 +68,8 @@ export interface PendingScheduledRun {
   attemptNumber?: number;
   /** Frozen execution route (backend/model/permission). */
   execution?: ScheduledExecutionRoute;
+  /** Teammate identity frozen into a canonical local Routine version. */
+  agentId?: string;
   /** Canonical Routine driver lease; absent for legacy scheduled jobs. */
   routineDriver?: {
     projectId?: string;
@@ -79,6 +83,10 @@ export interface UseScheduledAgentOptions {
   providers: BackendProvider[];
   /** The shared approval-gate-bound tool executor (same one the composer uses). */
   execute: ToolExecutor;
+  /** Current teammate catalogue used to retain each Routine's model and instructions. */
+  agents?: readonly FableAgentProfile[];
+  /** Produces a tool executor scoped to the Routine's frozen teammate computer. */
+  executeForRun?: (run: PendingScheduledRun) => ToolExecutor;
   /** Connected connector ids used by workflow prerequisite checks. */
   connectedConnectorIds?: string[];
   /** Surface every model- or workflow-originated tool call for user approval. */
@@ -102,6 +110,60 @@ export interface UseScheduledAgentOptions {
 
 /** Heartbeat interval for lease renewal (well under RUNNING_LEASE_MS = 15 min). */
 const LEASE_RENEWAL_INTERVAL_MS = 60_000;
+
+export function scheduledAgentForRun(
+  run: Pick<PendingScheduledRun, "agentId">,
+  agents: readonly FableAgentProfile[] = []
+): FableAgentProfile | undefined {
+  return run.agentId ? agents.find((candidate) => candidate.id === run.agentId) : undefined;
+}
+
+export function scheduledProviderForRun(
+  run: Pick<PendingScheduledRun, "execution">,
+  agent: FableAgentProfile | undefined,
+  providers: readonly BackendProvider[],
+  fallback: BackendProvider | undefined
+): BackendProvider | undefined {
+  if (run.execution?.policy === "pinned" && run.execution.backendId) {
+    return providers.find((provider) => provider.id === run.execution?.backendId);
+  }
+  if (!agent) return fallback;
+  // A teammate-bound Routine must never silently drift onto another provider
+  // or model. An unavailable teammate route fails closed and can be retried
+  // after the user reconnects the matching provider.
+  return providers.find(
+    (provider) =>
+      provider.authState === "connected"
+      && provider.capabilities.includes("streaming")
+      && provider.models.some((model) => model.id === agent.modelId && model.available)
+  );
+}
+
+export function scheduledModelForRun(
+  run: Pick<PendingScheduledRun, "execution">,
+  agent: FableAgentProfile | undefined,
+  provider: BackendProvider | undefined
+): string | undefined {
+  if (run.execution?.policy === "pinned" && run.execution.modelId) {
+    return run.execution.modelId;
+  }
+  if (agent && provider?.models.some(
+    (candidate) => candidate.id === agent.modelId && candidate.available
+  )) {
+    return agent.modelId;
+  }
+  return provider?.models.find((candidate) => candidate.available)?.id ?? run.execution?.modelId;
+}
+
+export function scheduledPromptForAgent(
+  prompt: string,
+  agent: FableAgentProfile | undefined
+): string {
+  const instructions = agent ? agentExecutionInstructions(agent) : "";
+  return instructions
+    ? `Agent instructions:\n${instructions}\n\nScheduled request:\n${prompt}`
+    : prompt;
+}
 
 /**
  * Drain `pending` one run at a time through the headless execution path.
@@ -132,6 +194,7 @@ export function useScheduledAgent(
   );
 
   const activeRef = useRef<PendingScheduledRun | null>(null);
+  const [active, setActive] = useState<PendingScheduledRun | null>(null);
   const cancelRef = useRef(false);
   const abortRef = useRef<AbortController | null>(null);
   // The options object is rebuilt on every App render (its callbacks and the
@@ -165,11 +228,15 @@ export function useScheduledAgent(
       // Resolve the backend for the run's route. For a pinned route we prefer
       // the pinned provider; resolveExecutionRoute lives in the pure layer, but
       // here we resolve the live AgentBackend the same way the factory does.
-      const routeProvider =
-        run.execution?.policy === "pinned" && run.execution.backendId
-          ? optionsRef.current.providers.find((p) => p.id === run.execution!.backendId)
-          : connectedProvider;
+      const boundAgent = scheduledAgentForRun(run, optionsRef.current.agents);
+      const routeProvider = scheduledProviderForRun(
+        run,
+        boundAgent,
+        optionsRef.current.providers,
+        connectedProvider
+      );
       const backend: AgentBackend | null = resolveAgentBackend(routeProvider, deps);
+      const execute = optionsRef.current.executeForRun?.(run) ?? optionsRef.current.execute;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -191,15 +258,14 @@ export function useScheduledAgent(
       try {
         let selectedProviderRoute: ProviderRouteExecutionBinding | undefined;
         const executePrompt = async (prompt: string) => {
-          const routeModel = run.execution?.policy === "pinned" && run.execution.modelId
-            ? run.execution.modelId
-            : routeProvider?.models.find((candidate) => candidate.available)?.id ?? run.execution?.modelId;
+          const routeModel = scheduledModelForRun(run, boundAgent, routeProvider);
+          const executionPrompt = scheduledPromptForAgent(prompt, boundAgent);
           const providerRoute = routeProvider?.backendType === "native-api"
             && routeProvider.authState === "connected" && backend && routeModel
             ? await selectNativeProviderRoute({
                 providerId: routeProvider.id,
                 model: routeModel,
-                requiredInputTokens: Math.max(1, Math.ceil(prompt.length / 4)),
+                requiredInputTokens: Math.max(1, Math.ceil(executionPrompt.length / 4)),
                 requiredOutputTokens: 1024,
                 requiresTools: false
               })
@@ -214,10 +280,10 @@ export function useScheduledAgent(
             route: run.execution,
             provider: routeProvider,
             backend,
-            prompt,
+            prompt: executionPrompt,
             maxTokens: 1024,
             ...(providerRoute ? { providerRoute } : {}),
-            execute: optionsRef.current.execute,
+            execute,
             shouldCancel: () => cancelRef.current,
             onToolCall: (event) => optionsRef.current.onToolApproval(event)
           });
@@ -294,7 +360,7 @@ export function useScheduledAgent(
                 arguments: serializedArguments,
                 approval
               });
-              return optionsRef.current.execute(approval, serializedArguments);
+              return execute(approval, serializedArguments);
             }
           }
         );
@@ -350,9 +416,13 @@ export function useScheduledAgent(
     const next = pending[0];
     if (!next || activeRef.current) return;
     activeRef.current = next;
+    setActive(next);
     cancelRef.current = false;
     void runOne(next).finally(() => {
-      activeRef.current = null;
+      if (activeRef.current?.runId === next.runId) {
+        activeRef.current = null;
+        setActive(null);
+      }
     });
   }, [pending, runOne]);
 
@@ -364,5 +434,5 @@ export function useScheduledAgent(
     };
   }, []);
 
-  return { active: activeRef.current };
+  return { active };
 }

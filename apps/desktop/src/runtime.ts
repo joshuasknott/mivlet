@@ -4636,6 +4636,7 @@ export async function listRuntimeRoutineConnectionOptions() {
 
 export async function createRuntimeRoutine(input: {
   projectId?: string;
+  agentId?: string;
   title: string;
   instruction: string;
   trigger: RuntimeRoutineTriggerSpec;
@@ -4650,6 +4651,7 @@ export async function createRuntimeRoutine(input: {
 
 export async function editRuntimeRoutine(input: {
   projectId?: string;
+  agentId?: string;
   routineId: string;
   expectedRevision: number;
   title: string;
@@ -4705,6 +4707,7 @@ export async function listRuntimeRoutineHistory(routineId: string, projectId?: s
 export interface RuntimeRoutineRunRequest {
   workspaceId: string;
   projectId?: string;
+  agentId?: string;
   routineId: string;
   routineVersion: number;
   triggerId: string;

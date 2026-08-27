@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ApprovalResolutionRequest, HostedBrowserSnapshot } from "@fable/protocol";
 import { buildToolApproval } from "@fable/connectors/native-api/approvals";
 import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
@@ -19,7 +19,7 @@ import { useNativeAgent } from "../hooks/useNativeAgent";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
 import { createDesktopDurableRunWriter, useDurableConversation } from "../hooks/useDurableConversation";
-import { useScheduledAgent } from "../hooks/useScheduledAgent";
+import { useScheduledAgent, type PendingScheduledRun } from "../hooks/useScheduledAgent";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
 import { cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, snapshotRuntimeHostedBrowser, verifiedLatestRuntimePendingMissionWait } from "../runtime";
@@ -331,7 +331,36 @@ export function useShellAgentController({ onDictation, onVoiceCancel, threadId }
   const voice = useVoice(voiceProvider, onDictation, { disabled: false, onCancel: onVoiceCancel });
   useEffect(() => { if (!runtime.isChatView) voice.reset(); }, [runtime.isChatView, voice.reset]);
   const connectedConnectorIds = useMemo(() => runtime.connectorManifests.filter((connector) => connector.status === "connected").map((connector) => connector.id), [runtime.connectorManifests]);
-  const scheduledAgent = useScheduledAgent(runtime.pendingWorkflowRuns, { providers: runtime.backendProviders, connectedConnectorIds, execute: executor, onToolApproval: queueToolApproval, onCancelApprovals: cancelApprovals, onComplete: (runId, result, workflowRun) => runtime.completeWorkflowRun(runId, result.ok, result.ok ? result.transcript : result.error, workflowRun) });
+  const scheduledExecutorForRun = useCallback((run: PendingScheduledRun) => {
+    const routineAgentId = run.agentId ?? activeAgentId;
+    const agentStillExists = routineAgentId
+      ? runtime.agents.some((candidate) => candidate.id === routineAgentId)
+      : false;
+    return createDesktopToolExecutor(approvalGate, {
+      workspaceId: activeWorkspaceId,
+      ...(activeWorkspaceId && routineAgentId && agentStillExists ? {
+        localComputer: {
+          workspaceId: activeWorkspaceId,
+          agentId: routineAgentId,
+          // Rust re-checks provisioning and path ownership. This flag only lets
+          // the exact bound call reach that authoritative boundary.
+          ready: true
+        }
+      } : {}),
+      queueApproval: (approval, tool, argumentsJson) =>
+        queueToolApproval({ callId: approval.id, tool, arguments: argumentsJson, approval })
+    });
+  }, [activeAgentId, activeWorkspaceId, approvalGate, runtime.agents]);
+  const scheduledAgent = useScheduledAgent(runtime.pendingWorkflowRuns, {
+    providers: runtime.backendProviders,
+    agents: runtime.agents,
+    connectedConnectorIds,
+    execute: executor,
+    executeForRun: scheduledExecutorForRun,
+    onToolApproval: queueToolApproval,
+    onCancelApprovals: cancelApprovals,
+    onComplete: (runId, result, workflowRun) => runtime.completeWorkflowRun(runId, result.ok, result.ok ? result.transcript : result.error, workflowRun)
+  });
   const runCitedBrief = async (query: string, model: string, projectId?: string, onPlanReady?: (plan: CitedBriefMissionPlanSummary) => void) => {
     if (citedMissionRunningRef.current || agent.state.running) {
       throw new Error("Wait for the current work to finish before starting connected-source research.");

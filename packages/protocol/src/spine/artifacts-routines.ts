@@ -389,6 +389,8 @@ export type ArtifactHandoff = RecordMetadata & RecordScope & {
 
 export interface RoutineScope {
   projectId?: ProjectId;
+  /** Local teammate that owns this Routine's model, instructions, and private computer scope. */
+  agentId?: string;
   departmentId?: DepartmentId;
   pipelineId?: PipelineId;
   goalId?: GoalId;

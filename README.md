@@ -30,6 +30,10 @@ production-validated service.
   rule, modify, and deny decisions.
 - Local knowledge ingestion/retrieval, connector boundaries, projects, missions,
   and schedules.
+- Native local Routines with missed-run recovery and execution leases. Each new
+  Routine binds to one named teammate and uses that teammate's current instructions,
+  selected model, approvals, and private local-computer scope while Fable stays
+  open; unavailable or deleted teammate routes fail closed instead of drifting.
 - A credential-free local teammate-computer foundation: each workspace/agent
   pair gets persistent private files and a separate Edge/Chrome/Chromium
   profile and process, with an ephemeral screen inside Fable and generation-
@@ -70,6 +74,9 @@ production-validated service.
   disaster recovery.
 - Secure third-party sign-in/secret handoff inside hosted agent computers.
 - Automatic background continuation of ordinary local chats.
+- Local Routine execution after the desktop app is closed. Routines do continue
+  through the native scheduler while Fable is open and the PC remains awake,
+  including when the window is minimized.
 - Full local OS/app/terminal isolation. The implemented local backend is a
   browser sandbox plus private files; command execution remains off until a
   real container or VM backend is available.

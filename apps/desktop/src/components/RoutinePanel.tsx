@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from "react";
-import type { ScheduleWeekday, Spine } from "@fable/protocol";
+import type { FableAgentProfile, ScheduleWeekday, Spine } from "@fable/protocol";
 import {
   beginRuntimeRoutineSchedulerShadow,
   createRuntimeRoutine,
@@ -43,6 +43,7 @@ function describeTrigger(trigger: RuntimeRoutineBundle["triggers"][number] | und
 const ROUTINE_WEEKDAYS: ScheduleWeekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 type RoutineCadence = "once" | "daily" | "weekly" | "monthly";
 type RoutineTriggerMode = "time" | "mcp-tools" | "mcp-resources";
+const EMPTY_AGENTS: readonly FableAgentProfile[] = [];
 
 interface RoutineTimeDraft {
   cadence: RoutineCadence;
@@ -187,11 +188,15 @@ function editableConnectionTrigger(
 export function RoutinePanel({
   onRun,
   draft,
-  onDraftConsumed
+  onDraftConsumed,
+  agents = EMPTY_AGENTS,
+  activeAgentId
 }: {
-  onRun: (instruction: string) => void;
+  onRun: (instruction: string, agentId?: string) => void;
   draft?: { title: string; instruction: string } | null;
   onDraftConsumed?: () => void;
+  agents?: readonly FableAgentProfile[];
+  activeAgentId?: string;
 }) {
   const [routines, setRoutines] = useState<RuntimeRoutineBundle[]>([]);
   const [nativeAvailable, setNativeAvailable] = useState<boolean | null>(null);
@@ -216,6 +221,7 @@ export function RoutinePanel({
   const [connectionOptions, setConnectionOptions] = useState<RuntimeRoutineConnectionOption[]>([]);
   const [triggerMode, setTriggerMode] = useState<RoutineTriggerMode>("time");
   const [connectionId, setConnectionId] = useState("");
+  const [agentId, setAgentId] = useState(activeAgentId ?? agents[0]?.id ?? "");
 
   const active = useMemo(
     () => routines.filter((bundle) => bundle.routine.status !== "deleted"),
@@ -263,11 +269,12 @@ export function RoutinePanel({
     setMonthDay(1);
     setTriggerMode("time");
     setConnectionId("");
+    setAgentId(activeAgentId ?? agents[0]?.id ?? "");
     setOriginalTimeDraft(null);
     setTriggerEditable(true);
     setNotice("Choose when this should run, then save it.");
     onDraftConsumed?.();
-  }, [draft, onDraftConsumed]);
+  }, [draft, onDraftConsumed, activeAgentId, agents]);
 
   const closeEditor = () => {
     setCreating(false);
@@ -281,6 +288,7 @@ export function RoutinePanel({
     setMonthDay(1);
     setTriggerMode("time");
     setConnectionId("");
+    setAgentId(activeAgentId ?? agents[0]?.id ?? "");
     setOriginalTimeDraft(null);
     setTriggerEditable(true);
   };
@@ -302,6 +310,7 @@ export function RoutinePanel({
         const updated = await editRuntimeRoutine({
           routineId: editing.routine.id,
           expectedRevision: editing.routine.revision,
+          ...(agentId ? { agentId } : {}),
           title,
           instruction,
           ...(trigger ? { trigger } : {})
@@ -313,7 +322,12 @@ export function RoutinePanel({
         }
         setNotice("Routine updated.");
       } else {
-        const created = await createRuntimeRoutine({ title, instruction, trigger: nextTrigger });
+        const created = await createRuntimeRoutine({
+          ...(agentId ? { agentId } : {}),
+          title,
+          instruction,
+          trigger: nextTrigger
+        });
         if (created) setRoutines((items) => [created, ...items]);
         setNotice("Routine saved locally.");
       }
@@ -449,7 +463,10 @@ export function RoutinePanel({
           <button type="button" className="secondary-button" onClick={() => void migrate()}>
             Import schedules
           </button>
-          <button type="button" className="primary-button" onClick={() => setCreating(true)}>
+          <button type="button" className="primary-button" onClick={() => {
+            setAgentId(activeAgentId ?? agents[0]?.id ?? "");
+            setCreating(true);
+          }}>
             New routine
           </button>
         </div>
@@ -488,6 +505,22 @@ export function RoutinePanel({
               onChange={(event) => setInstruction(event.target.value)}
             />
           </label>
+          {agents.length > 0 ? (
+            <label>
+              Teammate
+              <select
+                required
+                value={agentId}
+                onChange={(event) => setAgentId(event.target.value)}
+                aria-label="Routine teammate"
+              >
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>{agent.name}</option>
+                ))}
+              </select>
+              <small>This uses the teammate's model, instructions, private files, and browser while Fable is open.</small>
+            </label>
+          ) : null}
           {!editing || triggerEditable ? (
             <>
               <label>
@@ -621,12 +654,13 @@ export function RoutinePanel({
             </div>
             <div className="routine-card__meta">
               <span>{describeTrigger(bundle.triggers.find((trigger) => trigger.status === "active"))}</span>
-              <span>Saved locally</span>
+              <span>{agents.find((agent) => agent.id === bundle.currentVersion.scope?.agentId)?.name ?? "Current teammate (legacy)"}</span>
+              <span>Saved locally · runs while Fable is open</span>
             </div>
             <div className="routine-card__actions">
               <button
                 type="button"
-                onClick={() => onRun(bundle.currentVersion.action.instruction)}
+                onClick={() => onRun(bundle.currentVersion.action.instruction, bundle.currentVersion.scope?.agentId)}
                 disabled={bundle.routine.status !== "active"}
               >
                 Run this again
@@ -640,6 +674,7 @@ export function RoutinePanel({
                   const draft = routineTimeDraft(activeTrigger);
                   const connectionDraft = editableConnectionTrigger(activeTrigger);
                   setEditing(bundle);
+                  setAgentId(bundle.currentVersion.scope?.agentId ?? activeAgentId ?? agents[0]?.id ?? "");
                   setTitle(bundle.routine.title);
                   setInstruction(bundle.currentVersion.action.instruction);
                   setTriggerEditable(draft !== null || connectionDraft !== null);

@@ -57,6 +57,7 @@ fn scope_for(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutineCreateInput {
     project_id: Option<String>,
+    agent_id: Option<String>,
     title: String,
     instruction: String,
     trigger: Value,
@@ -66,6 +67,7 @@ pub struct RoutineCreateInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RoutineEditInput {
     project_id: Option<String>,
+    agent_id: Option<String>,
     routine_id: String,
     expected_revision: i64,
     title: String,
@@ -183,6 +185,23 @@ pub struct RoutineSchedulerStatus {
     reconciliation_hash: Option<String>,
 }
 
+fn validate_agent_id(agent_id: Option<&str>) -> crate::store::Result<()> {
+    let Some(agent_id) = agent_id else {
+        return Ok(());
+    };
+    if agent_id.is_empty()
+        || agent_id.len() > 128
+        || !agent_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(crate::store::StoreError::Invalid(
+            "The Routine teammate identity is invalid.".into(),
+        ));
+    }
+    Ok(())
+}
+
 fn validate_trigger_authority(
     tx: &rusqlite::Connection,
     store: &crate::store::Store,
@@ -268,11 +287,15 @@ pub fn routine_create(input: RoutineCreateInput) -> Result<RoutineBundleRow, Str
                     "An active member is required to create a Routine.".into(),
                 )
             })?;
+            validate_agent_id(input.agent_id.as_deref())?;
             validate_trigger_authority(tx, store, &auth, &input.trigger)?;
             let at = now();
             let routine_id = secure_id("routine").map_err(crate::store::StoreError::Invalid)?;
             let trigger_id = secure_id("trigger").map_err(crate::store::StoreError::Invalid)?;
-            let scope = serde_json::json!({"projectId":auth.data.project_id()});
+            let scope = serde_json::json!({
+                "projectId":auth.data.project_id(),
+                "agentId":input.agent_id
+            });
             let routine = serde_json::json!({
                 "id":routine_id,
                 "workspaceId":auth.data.workspace_id(),
@@ -345,6 +368,7 @@ pub fn routine_edit(input: RoutineEditInput) -> Result<RoutineBundleRow, String>
     store
         .transaction(|tx| {
             let auth = scope_for(tx, input.project_id.as_deref(), ScopeAccess::Write)?;
+            validate_agent_id(input.agent_id.as_deref())?;
             let mut existing =
                 routine::get(tx, store, &auth.data, &auth.private, &input.routine_id)?.ok_or_else(
                     || crate::store::StoreError::Invalid("Routine was not found.".into()),
@@ -368,6 +392,10 @@ pub fn routine_edit(input: RoutineEditInput) -> Result<RoutineBundleRow, String>
             version["createdByInternalUserId"] = Value::String(auth.internal_user_id.clone());
             version["action"]["title"] = Value::String(input.title);
             version["action"]["instruction"] = Value::String(input.instruction);
+            if let Some(agent_id) = input.agent_id {
+                existing.routine["scope"]["agentId"] = Value::String(agent_id.clone());
+                version["scope"]["agentId"] = Value::String(agent_id);
+            }
             let mut new_triggers = Vec::new();
             if let Some(spec) = input.trigger {
                 validate_trigger_authority(tx, store, &auth, &spec)?;
@@ -1360,6 +1388,15 @@ mod tests {
             membership_revision: 1,
             updated_at: "2026-07-24T10:00:00.000Z".into(),
         }
+    }
+
+    #[test]
+    fn routine_teammate_identity_is_bounded_and_path_safe() {
+        assert!(validate_agent_id(None).is_ok());
+        assert!(validate_agent_id(Some("agent-research_2")).is_ok());
+        assert!(validate_agent_id(Some("../other-agent")).is_err());
+        assert!(validate_agent_id(Some("")).is_err());
+        assert!(validate_agent_id(Some(&"a".repeat(129))).is_err());
     }
 
     #[test]

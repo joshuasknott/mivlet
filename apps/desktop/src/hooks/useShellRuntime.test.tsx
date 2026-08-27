@@ -877,6 +877,7 @@ describe("useShellRuntime — durable schedule contracts", () => {
 
     expect(created).toEqual({ id: "routine-1", writer: "routine" });
     expect(runtime.createRuntimeRoutine).toHaveBeenCalledWith({
+      agentId: "chief-of-staff",
       title: "Weekly digest",
       instruction: "Summarize work.",
       trigger: {
@@ -893,6 +894,84 @@ describe("useShellRuntime — durable schedule contracts", () => {
     expect(runtime.saveRuntimeScheduledJob).not.toHaveBeenCalled();
     expect(changed).toHaveBeenCalledOnce();
     window.removeEventListener("fable:routines-changed", changed);
+  });
+
+  it("queues a native Routine run with its exact teammate identity", async () => {
+    let onRun: Parameters<typeof runtime.listenRuntimeRoutineRunRequest>[0] | undefined;
+    vi.mocked(runtime.listenRuntimeRoutineRunRequest).mockImplementation(async (listener) => {
+      onRun = listener;
+      return null;
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() => expect(onRun).toBeTypeOf("function"));
+
+    act(() => onRun?.({
+      workspaceId: "workspace-1",
+      agentId: "chief-of-staff",
+      routineId: "routine-digest",
+      routineVersion: 2,
+      triggerId: "trigger-daily",
+      occurrenceId: "occurrence-1",
+      runId: "routine-run-1",
+      scheduledAt: "2026-08-27T09:00:00.000Z",
+      action: {
+        kind: "direct-request",
+        title: "Daily digest",
+        instruction: "Summarize today's work."
+      },
+      routePolicy: { kind: "resolve-at-run" },
+      writerEpoch: 4,
+      leaseToken: "lease-1",
+      attemptNumber: 1
+    }));
+
+    await waitFor(() => expect(result.current.pendingWorkflowRuns).toEqual([
+      expect.objectContaining({
+        runId: "routine-run-1",
+        jobId: "routine-digest",
+        agentId: "chief-of-staff"
+      })
+    ]));
+  });
+
+  it("blocks a native Routine whose assigned teammate was deleted", async () => {
+    let onRun: Parameters<typeof runtime.listenRuntimeRoutineRunRequest>[0] | undefined;
+    vi.mocked(runtime.listenRuntimeRoutineRunRequest).mockImplementation(async (listener) => {
+      onRun = listener;
+      return null;
+    });
+    const { result } = renderHook(() => useShellRuntime());
+    await waitFor(() => expect(onRun).toBeTypeOf("function"));
+
+    act(() => onRun?.({
+      workspaceId: "workspace-1",
+      agentId: "agent-deleted",
+      routineId: "routine-orphaned",
+      routineVersion: 1,
+      triggerId: "trigger-daily",
+      occurrenceId: "occurrence-orphaned",
+      runId: "routine-run-orphaned",
+      scheduledAt: "2026-08-27T09:00:00.000Z",
+      action: {
+        kind: "direct-request",
+        title: "Orphaned routine",
+        instruction: "Do not run as another teammate."
+      },
+      routePolicy: { kind: "resolve-at-run" },
+      writerEpoch: 4,
+      leaseToken: "lease-orphaned",
+      attemptNumber: 1
+    }));
+
+    await waitFor(() => expect(runtime.reportRuntimeRoutineAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({
+        occurrenceId: "occurrence-orphaned",
+        runId: "routine-run-orphaned",
+        status: "blocked"
+      })
+    ));
+    expect(result.current.pendingWorkflowRuns).toEqual([]);
+    expect(result.current.lastAction).toMatch(/assigned teammate no longer exists/i);
   });
 
   it("persists a cancelled workflow run with terminal timestamps", async () => {

@@ -3052,6 +3052,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
             missedRunPolicy: input.missedRunPolicy ?? "run-once"
           };
     const routine = await createRuntimeRoutine({
+      ...(activeAgentId ? { agentId: activeAgentId } : {}),
       title: input.name,
       instruction: input.description,
       trigger
@@ -3460,6 +3461,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   function queueRoutineWorkflowRun(event: {
     projectId?: string;
+    agentId?: string;
     routineId: string;
     routineVersion: number;
     occurrenceId: string;
@@ -3471,6 +3473,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     leaseToken: string;
     attemptNumber: number;
   }) {
+    if (event.agentId && !agents.some((candidate) => candidate.id === event.agentId)) {
+      void reportRuntimeRoutineAttempt({
+        projectId: event.projectId,
+        occurrenceId: event.occurrenceId,
+        writerEpoch: event.writerEpoch,
+        leaseToken: event.leaseToken,
+        runId: event.runId,
+        attemptNumber: event.attemptNumber,
+        status: "blocked"
+      });
+      setLastAction("A Routine could not run because its assigned teammate no longer exists.");
+      return;
+    }
     if (event.routePolicy.kind !== "resolve-at-run") {
       void reportRuntimeRoutineAttempt({
         projectId: event.projectId,
@@ -3578,6 +3593,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
                 leaseToken: event.leaseToken,
                 attemptNumber: event.attemptNumber,
                 execution,
+                ...(event.agentId ? { agentId: event.agentId } : {}),
                 routineDriver: {
                   projectId: event.projectId,
                   occurrenceId: event.occurrenceId,

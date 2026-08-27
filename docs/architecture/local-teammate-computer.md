@@ -56,6 +56,16 @@ cannot target the new process. If screen polling loses contact first, Fable hide
 the broken browser controls and presents an explicit retry rather than continuing
 to show the session as usable.
 
+New local Routines record one exact teammate identity in their native version.
+While Fable remains open (including when its window is minimized), the native
+scheduler detects due and missed occurrences and the dedicated headless runner
+uses that teammate's current instructions, learned responsibilities, selected
+model, and tool executor. Approved file and browser calls are therefore scoped
+to the same private local computer as interactive work. A deleted teammate or
+an unavailable matching provider/model blocks the occurrence instead of
+silently running it as another teammate. Imported legacy schedules have no
+teammate binding until they are edited and are labelled accordingly in the UI.
+
 ## File and process boundary
 
 Approved `read-file` and `write-file` actions resolve their root from the native
@@ -116,10 +126,10 @@ application-layer encryption envelope around Chromium's profile files.
 - File browser UI, bounded downloads/uploads, multiple tabs/popups, clipboard,
   passkeys, proactive crash telemetry, and preservation of in-progress page state
   across a browser-process failure.
-- Legacy local schedules already run through the dedicated headless workflow
-  driver while Fable remains open. Automatic continuation of ordinary chats and
-  routines explicitly bound to the local computer are still missing, followed
-  by a carefully separated optional always-on cloud placement.
+- Teammate-bound local Routines run through the dedicated headless workflow
+  driver while Fable remains open. Automatic continuation of ordinary chats
+  and execution after the desktop app closes are still missing, followed by a
+  carefully separated optional always-on cloud placement.
 - Stronger profile-at-rest protection, retention/deletion controls, resource
   budgets, monitoring, and installer/updater validation.
 

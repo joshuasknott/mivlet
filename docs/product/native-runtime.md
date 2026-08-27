@@ -117,6 +117,16 @@ runs become `interrupted`; the chat surface offers an explicit safe retry from
 the durable user prompt. Retry creates a new run with a `parentRunId`. It never
 replays a prior tool result or side effect.
 
+Canonical local Routines are natively stored and scheduled, including bounded
+missed-run recovery and renewable execution leases. New Routines bind to one
+named teammate. The headless runner resolves that teammate's current
+instructions and selected model and scopes approved file/browser tools to its
+private local computer. It fails closed if the teammate was deleted or no
+connected provider can run that model. Routines continue while Fable is open
+and the PC is awake, including while the window is minimized; they do not run
+after the desktop app is closed. Imported legacy schedules retain their earlier
+current-teammate behaviour until edited.
+
 Terminal states are exclusive: completed, cancelled, failed, or interrupted.
 Provider/parser errors cannot subsequently overwrite a run as completed.
 Provider token counts are retained as reported. Dollar cost is labelled

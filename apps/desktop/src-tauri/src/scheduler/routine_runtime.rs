@@ -648,6 +648,7 @@ pub(crate) fn observe_connection_event(
                 "routineVersion":routine_version,
                 "triggerId":trigger_id,
                 "projectId":input.scope.project_id(),
+                "agentId":input.bundle.current_version.pointer("/scope/agentId"),
                 "scheduledAt":event.received_at,
                 "runId":run_id,
                 "triggerEvidence":{
@@ -797,6 +798,7 @@ fn enqueue_due_for_input(
                 "routineVersion":routine_version,
                 "triggerId":trigger_id,
                 "projectId":input.scope.project_id(),
+                "agentId":input.bundle.current_version.pointer("/scope/agentId"),
                 "scheduledAt":scheduled_for,
                 "runId":run_id,
                 "action":input.bundle.current_version.get("action"),
@@ -846,6 +848,7 @@ fn emit_run_request(app: &AppHandle, lease: &DriverLeaseRow) {
         serde_json::json!({
             "workspaceId":evidence.get("workspaceId"),
             "projectId":evidence.get("projectId"),
+            "agentId":evidence.get("agentId"),
             "routineId":evidence.get("routineId"),
             "routineVersion":evidence.get("routineVersion"),
             "triggerId":evidence.get("triggerId"),
@@ -1155,7 +1158,7 @@ mod tests {
             "routineId":"routine-1","version":1,"createdAt":"2026-01-01T00:00:00Z",
             "createdByInternalUserId":"user-1",
             "action":{"kind":"direct-request","title":"Daily","instruction":"Summarize."},
-            "scope":{},"routePolicy":{"kind":"resolve-at-run"},
+            "scope":{"agentId":"agent-research"},"routePolicy":{"kind":"resolve-at-run"},
             "placementPolicy":{"kind":"resolve-at-run"},
             "budgets":{"capabilityGrantIds":[]},"triggerIds":["trigger-1"]
         });
@@ -1244,6 +1247,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(lease.driver_evidence["action"]["instruction"], "Summarize.");
+        assert_eq!(lease.driver_evidence["agentId"], "agent-research");
         let run_id = lease.driver_evidence["runId"].as_str().unwrap().to_string();
         store
             .transaction(|tx| {

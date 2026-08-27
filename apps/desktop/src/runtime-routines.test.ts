@@ -48,6 +48,7 @@ describe("Routine runtime boundary", () => {
     await listenRuntimeRoutineRunRequest(onRun);
     const request = {
       workspaceId: "workspace-1",
+      agentId: "agent-research",
       routineId: "routine-1",
       routineVersion: 2,
       triggerId: "trigger-1",
@@ -138,6 +139,7 @@ describe("Routine runtime boundary", () => {
     setNative(true);
     mocks.invoke.mockResolvedValue({ routine: { id: "routine-1" } });
     const input = {
+      agentId: "agent-research",
       title: "Daily brief",
       instruction: "Summarize today.",
       trigger: {

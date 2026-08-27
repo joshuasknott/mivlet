@@ -38,6 +38,31 @@ const schedulerStatus = {
   routineDriverOccurrences: 1
 };
 
+const teammates = [
+  {
+    id: "agent-research",
+    name: "Researcher",
+    instructions: "Find and verify evidence.",
+    modelId: "model-research",
+    icon: "agent" as const,
+    iconColor: "#865DFA",
+    connectorIds: [],
+    knowledgeSourceIds: [],
+    permissionLabel: "Ask Me" as const
+  },
+  {
+    id: "agent-operations",
+    name: "Operations",
+    instructions: "Keep recurring work organized.",
+    modelId: "model-operations",
+    icon: "agent" as const,
+    iconColor: "#4F8A8B",
+    connectorIds: [],
+    knowledgeSourceIds: [],
+    permissionLabel: "Ask Me" as const
+  }
+];
+
 function weeklyRoutine() {
   return {
     routine: {
@@ -159,6 +184,33 @@ describe("RoutinePanel", () => {
     );
     expect(runtime.createRuntimeRoutine).not.toHaveBeenCalled();
     expect(consumed).toHaveBeenCalledOnce();
+  });
+
+  it("binds a new local Routine to one exact teammate", async () => {
+    const user = userEvent.setup();
+    vi.mocked(runtime.createRuntimeRoutine).mockResolvedValue(null);
+    render(
+      <RoutinePanel
+        onRun={vi.fn()}
+        agents={teammates}
+        activeAgentId="agent-research"
+      />
+    );
+
+    await user.click(await screen.findByRole("button", { name: "New routine" }));
+    expect(screen.getByLabelText("Routine teammate")).toHaveValue("agent-research");
+    await user.selectOptions(screen.getByLabelText("Routine teammate"), "agent-operations");
+    await user.type(screen.getByLabelText("Name"), "Daily operations check");
+    await user.type(screen.getByLabelText("What should Fable do?"), "Review the current operations notes.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(runtime.createRuntimeRoutine).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "agent-operations",
+        title: "Daily operations check",
+        instruction: "Review the current operations notes."
+      })
+    ));
   });
 
   it("creates an exact tool-server change Routine without exposing event internals", async () => {
