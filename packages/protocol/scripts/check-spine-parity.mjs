@@ -37,7 +37,7 @@ for (const [name, value] of limits) {
   if (owners[0][1][name] !== value) fail(`limit ${name} differs from the manifest`);
 }
 
-const requiredFamilies = ["Identity", "Connections", "Missions", "Conversations", "Projects", "Goals", "ArtifactsAndRoutines"];
+const requiredFamilies = ["Identity", "Connections", "Conversations"];
 if (!Array.isArray(manifest.families) || manifest.families.length !== requiredFamilies.length) fail("missing required family");
 const suppliedFamilies = manifest.families.map(({ name }) => name);
 if (new Set(suppliedFamilies).size !== suppliedFamilies.length || requiredFamilies.some((name) => !suppliedFamilies.includes(name))) {
@@ -65,7 +65,9 @@ const canonical = JSON.stringify({
 });
 const actualSha256 = createHash("sha256").update(canonical).digest("hex");
 if (!/^[a-f0-9]{64}$/.test(manifest.expectedCanonicalSha256)) fail("expectedCanonicalSha256 must be a lowercase SHA-256 digest");
-if (actualSha256 !== manifest.expectedCanonicalSha256) fail("canonical vocabulary, version, or limits drifted from the manifest");
+if (actualSha256 !== manifest.expectedCanonicalSha256) {
+  fail(`canonical vocabulary, version, or limits drifted from the manifest (${actualSha256})`);
+}
 
 const rustParitySource = await readFile(
   path.resolve(packageRoot, "../../apps/desktop/src-tauri/src/product_spine_parity.rs"),

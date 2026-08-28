@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type {
-  AgentRunRequest,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendProvider
 } from "@fable/protocol";
@@ -35,7 +35,7 @@ const okResponder: ScriptedResponder = (req) => {
   return { error: { code: -32601, message: "not found" } };
 };
 
-const baseRunRequest: AgentRunRequest = {
+const baseRunRequest: AgentTurnRequest = {
   model: "cursor-default",
   messages: [{ role: "user", content: "hi" }],
   tools: [],

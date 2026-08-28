@@ -9,7 +9,7 @@
 
 import type {
   AccountWorkspaceStatus,
-  AgentRunRequest,
+  AgentTurnRequest,
   ApprovalPresetLabel,
   BackendModel,
   ContextRecordAuthorityScope,
@@ -17,7 +17,7 @@ import type {
   KnowledgeSource,
   MemoryRecord,
   PermissionMode,
-  RunContextAudience,
+  ExecutionContextAudience,
   Spine
 } from "@fable/protocol";
 import { buildContextPrefix } from "@fable/connectors/native-api/memory-context";
@@ -132,7 +132,7 @@ const PRIVATE_CONTEXT_MEMBER_ERROR =
  * workspaces use the exact active member pair. The explicit development-only
  * preview adapter uses its fixture internal user and never fabricates membership.
  */
-export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAudience {
+export function privateRunAudience(status: AccountWorkspaceStatus): ExecutionContextAudience {
   const activeLocalId = status.activeWorkspace.localWorkspaceId.trim();
   const usableState = status.state === "ready" || status.state === "offline";
   const owner = status.activeContextOwner;
@@ -187,7 +187,7 @@ export function privateRunAudience(status: AccountWorkspaceStatus): RunContextAu
 }
 
 /** Synthetic shared audience for contract tests and future hosted assembly. */
-export function workspaceSharedRunAudience(actingMemberId: string): RunContextAudience {
+export function workspaceSharedRunAudience(actingMemberId: string): ExecutionContextAudience {
   if (!actingMemberId.trim()) throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
   return {
     authority: "convex",
@@ -199,7 +199,7 @@ export function workspaceSharedRunAudience(actingMemberId: string): RunContextAu
 /** Apply the central fail-closed authority contract to run inputs. */
 export function recordsVisibleToRunAudience<T extends { authorityScope?: ContextRecordAuthorityScope }>(
   records: readonly T[],
-  audience: RunContextAudience
+  audience: ExecutionContextAudience
 ): T[] {
   return records.filter((record) => authorityScopeAllowsAudience(record.authorityScope, audience));
 }
@@ -210,7 +210,7 @@ export function recordsVisibleToRunAudience<T extends { authorityScope?: Context
  */
 export function withPreviewPrivateAuthority<T extends { authorityScope?: ContextRecordAuthorityScope }>(
   records: readonly T[],
-  audience: RunContextAudience
+  audience: ExecutionContextAudience
 ): T[] {
   if (audience.authority !== "local" || audience.visibility !== "member-private") {
     throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
@@ -298,12 +298,12 @@ export interface BuildAgentRequestInput {
 }
 
 /**
- * Shape the composer submission into a provider-neutral {@link AgentRunRequest}.
+ * Shape the composer submission into a provider-neutral {@link AgentTurnRequest}.
  * The providerId is NOT part of the request: the connected backend owns it (it
  * knows which provider it runs for), so the request carries only the model,
  * messages, tools, and token ceiling.
  */
-export function buildAgentRequest(input: BuildAgentRequestInput): AgentRunRequest {
+export function buildAgentRequest(input: BuildAgentRequestInput): AgentTurnRequest {
   return {
     model: input.model,
     messages: [{ role: "user", content: input.prompt }],
@@ -323,8 +323,8 @@ export function buildContinuationMessages(
     message: Spine.Conversations.Message;
     currentRevision: Spine.Conversations.MessageRevision;
   }[]
-): AgentRunRequest["messages"] {
-  const messages: AgentRunRequest["messages"] = [];
+): AgentTurnRequest["messages"] {
+  const messages: AgentTurnRequest["messages"] = [];
   for (const { message, currentRevision } of [...views].sort((left, right) => left.message.sequence - right.message.sequence)) {
     if (currentRevision.state !== "terminal" || !currentRevision.content) continue;
     if (message.kind === "user" || message.kind === "assistant") {

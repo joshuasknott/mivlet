@@ -2,15 +2,10 @@ import type {
   CapabilityGrantId,
   CapabilityId,
   ConnectionId,
-  DepartmentId,
-  DeviceId,
   ExecutionNodeId,
   InternalUserId,
   IsoDateTime,
   MemberId,
-  MissionId,
-  PipelineId,
-  ProjectId,
   ProviderRouteId,
   ScopedRecordMetadata
 } from "./primitives.js";
@@ -19,7 +14,6 @@ import type {
 export const CONNECTION_KINDS = [
   "native-connector",
   "provider-runtime",
-  "local-service",
   "mcp",
   "router",
   "custom-route"
@@ -106,7 +100,6 @@ export const PROVIDER_ROUTE_KINDS = [
   "api-model",
   "provider-app-server",
   "acp-runtime",
-  "local-model-service",
   "model-router",
   "custom-agent-runtime"
 ] as const;
@@ -241,9 +234,6 @@ export interface ExternalPrincipalReference {
 }
 
 export interface ConnectionEnablementScope {
-  projectIds?: readonly ProjectId[];
-  departmentIds?: readonly DepartmentId[];
-  pipelineIds?: readonly PipelineId[];
   enabledByDefault: boolean;
 }
 
@@ -271,13 +261,6 @@ export interface ProviderRuntimeConnectionDetails {
   kind: "provider-runtime";
   providerFamily: string;
   runtimeProtocol: "provider-api" | "app-server" | "acp" | "other";
-}
-
-export interface LocalServiceConnectionDetails {
-  kind: "local-service";
-  serviceFamily: string;
-  /** A non-secret, local-only configuration reference; do not sync machine paths. */
-  localConfigurationReference: string;
 }
 
 export interface McpToolEnablement {
@@ -318,7 +301,6 @@ export interface CustomRouteConnectionDetails {
 export type ConnectionTransportDetails =
   | NativeConnectorConnectionDetails
   | ProviderRuntimeConnectionDetails
-  | LocalServiceConnectionDetails
   | McpConnectionDetails
   | RouterConnectionDetails
   | CustomRouteConnectionDetails;
@@ -382,7 +364,7 @@ export type ProviderRoute = ScopedRecordMetadata & {
   discoveredAt?: IsoDateTime;
 };
 
-/** A transport-neutral action identity requested by missions, routines, and workers. */
+/** A transport-neutral action identity requested by a conversation tool call. */
 export interface CapabilityDescriptor {
   id: CapabilityId;
   namespace: string;
@@ -427,10 +409,6 @@ export interface CapabilityBudgetConstraint {
 /** Scope constraints are conjunctive: omitted dimensions do not widen another grant. */
 export interface CapabilityGrantConstraints {
   memberIds?: readonly MemberId[];
-  projectIds?: readonly ProjectId[];
-  departmentIds?: readonly DepartmentId[];
-  pipelineIds?: readonly PipelineId[];
-  missionIds?: readonly MissionId[];
   eligibleConnectionIds?: readonly ConnectionId[];
   eligibleProviderRouteIds?: readonly ProviderRouteId[];
   eligibleExecutionNodeIds?: readonly ExecutionNodeId[];
@@ -481,10 +459,6 @@ export type CapabilityFallbackPolicy = (typeof CAPABILITY_FALLBACK_POLICIES)[num
 
 export interface CapabilityResolutionContext {
   memberId: MemberId;
-  projectId?: ProjectId;
-  departmentIds?: readonly DepartmentId[];
-  pipelineId?: PipelineId;
-  missionId?: MissionId;
   executionNodeId?: ExecutionNodeId;
 }
 
@@ -546,7 +520,7 @@ export interface ConnectedSourceSearchResult {
   contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
   capabilityId: "knowledge.content.search";
   query: string;
-  scope: { workspaceId: string; projectId?: string };
+  scope: { workspaceId: string; threadId?: string };
   citations: readonly ConnectedSourceCitation[];
   nextCursor?: string;
   trust: "external-untrusted";

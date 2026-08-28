@@ -54,14 +54,9 @@ pub struct ToolExecutionRequest {
     #[serde(default)]
     pub workspace_id: Option<String>,
     #[serde(default)]
-    pub project_id: Option<String>,
-    #[serde(default)]
     pub agent_id: Option<String>,
     #[serde(default)]
     pub mcp_session_id: Option<String>,
-    #[serde(default)]
-    pub mission_worker_tool_execution:
-        Option<crate::mission_workers::NativeWorkerToolExecutionBinding>,
     /// Retained for wire compatibility and pure helper tests. The Tauri command
     /// deliberately ignores it and resolves authority from the native app.
     #[allow(dead_code)]
@@ -116,7 +111,6 @@ pub(crate) enum ToolOutcome {
     },
     NeedsSemanticRead {
         workspace_id: String,
-        project_id: Option<String>,
         capability_id: String,
         input: std::collections::BTreeMap<String, serde_json::Value>,
         cursor: Option<String>,
@@ -172,7 +166,6 @@ pub(crate) fn execute_tool_outcome(
     let tool = request.tool.clone();
     let arguments = request.arguments.clone();
     let workspace_id = request.workspace_id.clone();
-    let project_id = request.project_id.clone();
     let mcp_session_id = request.mcp_session_id.clone();
 
     // Defense in depth: re-resolve the approval exactly as the shell did. A deny
@@ -204,7 +197,6 @@ pub(crate) fn execute_tool_outcome(
             Ok((capability_id, input, cursor)) => match workspace_id {
                 Some(workspace_id) => ToolOutcome::NeedsSemanticRead {
                     workspace_id,
-                    project_id,
                     capability_id,
                     input,
                     cursor,
@@ -995,7 +987,6 @@ pub async fn execute_tool_call(
     let arguments = request.arguments.clone();
     let request_id = request.approval.request.id.clone();
     let decided_at = request.approval.decided_at.clone();
-    let mission_binding = request.mission_worker_tool_execution.clone();
     let (mode, risk) = tool_policy(&tool).unwrap_or(("read-only", "low"));
     // Audit records the *attempt*; it observes the boundary and never grants
     // authority. Recording is best-effort and never blocks execution.
@@ -1054,35 +1045,6 @@ pub async fn execute_tool_call(
             None,
         );
         return Err(error);
-    }
-    let mission_preflight = if tool == "connection-read" {
-        if let Some(binding) = mission_binding.as_ref() {
-            let (capability_id, input, _) = semantic_request_from_args(&arguments)?;
-            let workspace_id = request.workspace_id.as_deref().ok_or_else(|| {
-                "Mission connected-source search requires its workspace scope.".to_string()
-            })?;
-            Some(crate::mission_workers::preflight_native_connected_search(
-                binding,
-                &request_id,
-                workspace_id,
-                request.project_id.as_deref(),
-                &capability_id,
-                &input,
-            )?)
-        } else {
-            None
-        }
-    } else if mission_binding.is_some() {
-        return Err("Mission tool evidence currently supports only connection-read.".into());
-    } else {
-        None
-    };
-    if let Some(crate::mission_workers::NativeWorkerToolPreflight::AlreadyRecorded(result)) =
-        mission_preflight.as_ref()
-    {
-        return serde_json::to_string(result)
-            .map(|output| ToolResult { ok: true, output })
-            .map_err(|_| "Fable could not encode the mission tool replay.".to_string());
     }
     if let Err(error) = verify_and_consume_execution_approval(
         &execution_approvals_path(&app)?,
@@ -1357,72 +1319,31 @@ pub async fn execute_tool_call(
         }
         ToolOutcome::NeedsSemanticRead {
             workspace_id,
-            project_id,
             capability_id,
             input,
             cursor,
             mcp_session_id,
         } => {
             let output = if let Some(session_id) = mcp_session_id {
-                let continuation = match mission_preflight.as_ref() {
-                    Some(crate::mission_workers::NativeWorkerToolPreflight::Execute(authority)) => {
-                        crate::mcp_process::prepare_mission_semantic_capability_call(
-                            workspace_id,
-                            project_id,
-                            session_id,
-                            capability_id,
-                            input,
-                            cursor,
-                            authority.clone(),
-                        )?
-                    }
-                    _ => crate::mcp_process::prepare_semantic_capability_call(
-                        workspace_id,
-                        project_id,
-                        session_id,
-                        capability_id,
-                        input,
-                        cursor,
-                    )?,
-                };
+                let continuation = crate::mcp_process::prepare_semantic_capability_call(
+                    workspace_id,
+                    session_id,
+                    capability_id,
+                    input,
+                    cursor,
+                )?;
                 serde_json::to_string(&continuation)
             } else {
-                let result = match mission_preflight.as_ref() {
-                    Some(crate::mission_workers::NativeWorkerToolPreflight::Execute(authority)) => {
-                        crate::capability_registry::read_with_exact_grant(
-                            &app,
-                            workspace_id,
-                            project_id,
-                            capability_id,
-                            input,
-                            cursor,
-                            Some(authority.capability_grant_id()),
-                        )
-                        .await
-                    }
-                    _ => {
-                        crate::capability_registry::read(
-                            &app,
-                            workspace_id,
-                            project_id,
-                            capability_id,
-                            input,
-                            cursor,
-                        )
-                        .await
-                    }
-                }
+                let result = crate::capability_registry::read(
+                    &app,
+                    workspace_id,
+                    None,
+                    capability_id,
+                    input,
+                    cursor,
+                )
+                .await
                 .map_err(|error| error.message)?;
-                if let Some(crate::mission_workers::NativeWorkerToolPreflight::Execute(authority)) =
-                    mission_preflight.as_ref()
-                {
-                    let normalized = serde_json::to_value(&result).map_err(|_| {
-                        "Fable could not encode the mission capability result.".to_string()
-                    })?;
-                    crate::mission_workers::settle_native_connected_search(
-                        authority, normalized, "native",
-                    )?;
-                }
                 serde_json::to_string(&result)
             };
             output

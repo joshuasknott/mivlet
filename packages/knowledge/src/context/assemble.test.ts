@@ -4,10 +4,10 @@ import type {
   MemoryRecord,
   NativeMessage,
   PinnedContextEntry,
-  RunContextAudience
+  ExecutionContextAudience
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
-import { artifactFromRun, assembleContext } from "./assemble";
+import { assembleContext } from "./assemble";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 
 const NOW = "2026-06-28T12:00:00.000Z";
@@ -48,12 +48,12 @@ function makeCitation(overrides: Partial<AuthorityScopedKnowledgeCitation> = {})
   };
 }
 
-const PRIVATE_A: RunContextAudience = {
+const PRIVATE_A: ExecutionContextAudience = {
   authority: "local",
   visibility: "member-private",
   actingMemberId: "member-a" as never
 };
-const SHARED_A: RunContextAudience = {
+const SHARED_A: ExecutionContextAudience = {
   authority: "convex",
   visibility: "workspace-shared",
   actingMemberId: "member-a" as never
@@ -71,7 +71,7 @@ const sharedAuthority = {
 describe("assembleContext — deterministic order", () => {
   it("emits system instructions, memory, then sources in order", () => {
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       systemInstructions: "You are Fable.",
       memory: [makeMemory()],
       citations: [makeCitation()]
@@ -86,7 +86,7 @@ describe("assembleContext — deterministic order", () => {
 
   it("records a contribution reason for each contributed item", () => {
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       systemInstructions: "base",
       memory: [makeMemory()],
       citations: [makeCitation()]
@@ -102,7 +102,7 @@ describe("assembleContext — exclusion", () => {
   it("excludes forgotten memory", () => {
     const forgotten = makeMemory({ id: "m-forgotten", forgottenAt: NOW });
     const live = makeMemory({ id: "m-live" });
-    const assembled = assembleContext({ runId: "r1", memory: [forgotten, live], citations: [] });
+    const assembled = assembleContext({ attemptId: "r1", memory: [forgotten, live], citations: [] });
     expect(assembled.systemPrefix).not.toContain("m-forgotten");
     expect(assembled.usage.find((u) => u.id === "m-forgotten")).toBeUndefined();
     expect(assembled.usage.find((u) => u.id === "m-live")).toBeDefined();
@@ -110,23 +110,23 @@ describe("assembleContext — exclusion", () => {
 
   it("excludes disabled memory", () => {
     const disabled = makeMemory({ id: "m-disabled", disabled: true });
-    const assembled = assembleContext({ runId: "r1", memory: [disabled], citations: [] });
+    const assembled = assembleContext({ attemptId: "r1", memory: [disabled], citations: [] });
     expect(assembled.usage.find((u) => u.id === "m-disabled")).toBeUndefined();
   });
 
   it("excludes non-approved memory", () => {
     const suggested = makeMemory({ id: "m-sug", approved: false, approvalState: "suggested" });
-    const assembled = assembleContext({ runId: "r1", memory: [suggested], citations: [] });
+    const assembled = assembleContext({ attemptId: "r1", memory: [suggested], citations: [] });
     expect(assembled.usage.find((u) => u.id === "m-sug")).toBeUndefined();
   });
 
   it("excludes out-of-scope memory", () => {
     const threadMem = makeMemory({
       id: "m-thread",
-      scope: { level: "thread", threadId: "t1", projectId: "p1" }
+      scope: { level: "thread", threadId: "t1" }
     });
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       scope: GLOBAL_SCOPE,
       memory: [threadMem],
       citations: []
@@ -137,7 +137,7 @@ describe("assembleContext — exclusion", () => {
   it("excludes unauthorized sources via the authorization predicate", () => {
     const citation = makeCitation({ sourceId: "source-github-abc", provenance: "Connector: github" });
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       memory: [],
       citations: [citation],
       authorization: { isSourceAuthorized: (connectorId) => connectorId !== "github" }
@@ -180,7 +180,7 @@ describe("assembleContext — exclusion", () => {
       })
     ];
     const assembled = assembleContext({
-      runId: "run-connection-bound",
+      attemptId: "run-connection-bound",
       memory,
       citations,
       authorization: {
@@ -200,7 +200,7 @@ describe("assembleContext — exclusion", () => {
 describe("assembleContext — citations + usage", () => {
   it("surfaces citations the user can inspect", () => {
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       memory: [],
       citations: [makeCitation({ chunkId: "s1#0" })]
     });
@@ -212,12 +212,12 @@ describe("assembleContext — citations + usage", () => {
     const citation = makeCitation({
       sourceId: "s-receipt",
       ranking: { ...ranking },
-      scope: { level: "project", projectId: "p1" }
+      scope: { level: "thread", threadId: "thread-1" }
     });
     const assembled = assembleContext({
-      runId: "run-stable",
+      attemptId: "run-stable",
       assembledAt: NOW,
-      scope: { level: "project", projectId: "p1" },
+      scope: { level: "thread", threadId: "thread-1" },
       systemInstructions: "base",
       memory: [makeMemory()],
       citations: [citation]
@@ -225,13 +225,13 @@ describe("assembleContext — citations + usage", () => {
 
     expect(assembled.receipt).toEqual({
       version: 1,
-      runId: "run-stable",
+      attemptId: "run-stable",
       assembledAt: NOW,
-      scope: { level: "project", projectId: "p1" },
+      scope: { level: "thread", threadId: "thread-1" },
       citations: [expect.objectContaining({
         sourceId: "s-receipt",
         ranking,
-        scope: { level: "project", projectId: "p1" }
+        scope: { level: "thread", threadId: "thread-1" }
       })],
       contributions: expect.arrayContaining([
         expect.objectContaining({ reason: "system-instruction" }),
@@ -250,23 +250,23 @@ describe("assembleContext — citations + usage", () => {
     expect(assembled.receipt.citations[0].ranking.relevance).toBe(2);
   });
 
-  it("labels approved project memory as project context", () => {
+  it("labels approved thread memory as approved memory", () => {
     const assembled = assembleContext({
-      runId: "run-project",
+      attemptId: "run-project",
       assembledAt: NOW,
-      scope: { level: "project", projectId: "p1" },
-      memory: [makeMemory({ scope: { level: "project", projectId: "p1" } })],
+      scope: { level: "thread", threadId: "thread-1" },
+      memory: [makeMemory({ scope: { level: "thread", threadId: "thread-1" } })],
       citations: []
     });
 
     expect(assembled.receipt.contributions).toContainEqual(
-      expect.objectContaining({ id: "m1", kind: "memory", reason: "project-context" })
+      expect.objectContaining({ id: "m1", kind: "memory", reason: "memory-approved" })
     );
   });
 
   it("does not snapshot excluded inputs in the receipt", () => {
     const assembled = assembleContext({
-      runId: "run-exclusions",
+      attemptId: "run-exclusions",
       assembledAt: NOW,
       memory: [
         makeMemory({ id: "disabled", disabled: true }),
@@ -281,9 +281,9 @@ describe("assembleContext — citations + usage", () => {
   });
 
   it("rejects missing receipt identity or an invalid assembly timestamp", () => {
-    expect(() => assembleContext({ runId: " ", memory: [], citations: [] })).toThrow(/run id/i);
+    expect(() => assembleContext({ attemptId: " ", memory: [], citations: [] })).toThrow(/attempt id/i);
     expect(() => assembleContext({
-      runId: "run-valid",
+      attemptId: "run-valid",
       assembledAt: "not-a-date",
       memory: [],
       citations: []
@@ -294,7 +294,7 @@ describe("assembleContext — citations + usage", () => {
 describe("assembleContext — audience privacy", () => {
   it("admits own private and shared memory but excludes another member and missing ownership", () => {
     const assembled = assembleContext({
-      runId: "run-private-a",
+      attemptId: "run-private-a",
       assembledAt: NOW,
       audience: PRIVATE_A,
       memory: [
@@ -314,25 +314,25 @@ describe("assembleContext — audience privacy", () => {
     const privateMemory = makeMemory({
       id: "private-pinned",
       pinned: true,
-      scope: { level: "project", projectId: "p1" },
+      scope: { level: "thread", threadId: "thread-1" },
       authorityScope: privateAuthority("member-a")
     });
     const pin: PinnedContextEntry = {
       id: "pin-private",
-      scope: { level: "project", projectId: "p1" },
+      scope: { level: "thread", threadId: "thread-1" },
       memoryId: privateMemory.id,
       pinnedAt: NOW
     };
     const assembled = assembleContext({
-      runId: "run-shared",
+      attemptId: "run-shared",
       assembledAt: NOW,
-      scope: { level: "project", projectId: "p1" },
+      scope: { level: "thread", threadId: "thread-1" },
       audience: SHARED_A,
       memory: [
         privateMemory,
         makeMemory({
           id: "shared-memory",
-          scope: { level: "project", projectId: "p1" },
+          scope: { level: "thread", threadId: "thread-1" },
           authorityScope: sharedAuthority
         })
       ],
@@ -340,12 +340,12 @@ describe("assembleContext — audience privacy", () => {
       citations: [
         makeCitation({
           sourceId: "private-source",
-          scope: { level: "project", projectId: "p1" },
+          scope: { level: "thread", threadId: "thread-1" },
           authorityScope: privateAuthority("member-a")
         }),
         makeCitation({
           sourceId: "shared-source",
-          scope: { level: "project", projectId: "p1" },
+          scope: { level: "thread", threadId: "thread-1" },
           authorityScope: sharedAuthority
         })
       ]
@@ -370,14 +370,14 @@ describe("assembleContext — audience privacy", () => {
     });
 
     const privateRun = assembleContext({
-      runId: "run-private-promotion",
+      attemptId: "run-private-promotion",
       assembledAt: NOW,
       audience: PRIVATE_A,
       memory: [promoted],
       citations: []
     });
     const sharedRun = assembleContext({
-      runId: "run-shared-promotion",
+      attemptId: "run-shared-promotion",
       assembledAt: NOW,
       audience: SHARED_A,
       memory: [promoted],
@@ -390,7 +390,7 @@ describe("assembleContext — audience privacy", () => {
 
   it("retains v1 legacy behavior only when no audience is supplied", () => {
     const assembled = assembleContext({
-      runId: "run-legacy",
+      attemptId: "run-legacy",
       assembledAt: NOW,
       memory: [makeMemory({ id: "legacy-missing" })],
       citations: [makeCitation({ sourceId: "legacy-source" })]
@@ -407,7 +407,7 @@ describe("assembleContext — conversation", () => {
       content: `msg ${i}`
     }));
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       conversation: messages,
       conversationTurns: 2,
       memory: [],
@@ -430,7 +430,7 @@ describe("assembleContext — pinned", () => {
       pinnedAt: NOW
     };
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       memory: [pinned, approved],
       pinned: [pinnedEntry],
       citations: []
@@ -450,27 +450,11 @@ describe("assembleContext — budget", () => {
       makeCitation({ sourceId: `s${i}`, snippet: longSnippet, chunkId: `s${i}#0` })
     );
     const assembled = assembleContext({
-      runId: "r1",
+      attemptId: "r1",
       memory: [],
       citations,
       prefixBudget: 1500
     });
     expect(assembled.systemPrefix.length).toBeLessThan(4000);
-  });
-});
-
-describe("artifactFromRun", () => {
-  it("builds an artifact with provenance back to the run", () => {
-    const artifact = artifactFromRun({
-      runId: "r1",
-      title: "Summary",
-      content: "A summary of the work.",
-      sourceIds: ["s1"],
-      now: NOW
-    });
-    expect(artifact.id).toBe("art-r1");
-    expect(artifact.provenance.runId).toBe("r1");
-    expect(artifact.provenance.createdAt).toBe(NOW);
-    expect(artifact.provenance.sourceIds).toEqual(["s1"]);
   });
 });

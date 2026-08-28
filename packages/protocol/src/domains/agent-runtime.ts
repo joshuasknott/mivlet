@@ -5,9 +5,9 @@ import type {
   PermissionMode
 } from "./approvals.js";
 import type { InternalUserId, MemberId, WorkspaceId } from "../spine/primitives.js";
-import type { ProviderRouteSelection } from "../spine/missions.js";
+import type { ProviderRouteSelection } from "./provider-routing.js";
 
-export type AgentRunStatus =
+export type ExecutionAttemptStatus =
   | "queued"
   | "streaming"
   | "awaiting-approval"
@@ -17,7 +17,7 @@ export type AgentRunStatus =
   | "failed"
   | "interrupted";
 
-export interface PersistedAgentExchange {
+export interface ExecutionExchange {
   role: "user" | "assistant" | "tool";
   content: string;
   toolCallId?: string;
@@ -25,28 +25,26 @@ export interface PersistedAgentExchange {
   ok?: boolean;
 }
 
-/** Stable, user-visible reason an item entered a run's bounded context. */
-export type RunContextContributionReason =
+/** Stable, user-visible reason an item entered a turn's bounded context. */
+export type ExecutionContextContributionReason =
   | "system-instruction"
   | "conversation"
-  | "project-context"
   | "pinned"
   | "memory-approved"
   | "memory-pinned"
   | "retrieved"
   | "tool-result";
 
-export interface RunContextContribution {
+export interface ExecutionContextContribution {
   id: string;
   kind: "memory" | "source" | "tool-result" | "conversation" | "instruction";
-  reason: RunContextContributionReason;
+  reason: ExecutionContextContributionReason;
   citationId?: string;
 }
 
-/** Scope snapshot used for a run. Authority still comes from the native store. */
-export interface RunContextScope {
-  level: "global" | "project" | "thread";
-  projectId?: string;
+/** Scope snapshot used for one execution attempt. */
+export interface ExecutionContextScope {
+  level: "global" | "thread";
   threadId?: string;
 }
 
@@ -68,7 +66,7 @@ export type ContextRecordAuthorityScope =
     };
 
 /** Audience the context was assembled for; it never expands record authority. */
-export type RunContextAudience =
+export type ExecutionContextAudience =
   | ({
       authority: "local";
       visibility: "member-private";
@@ -83,8 +81,8 @@ export type RunContextAudience =
       actingInternalUserId?: never;
     };
 
-/** Immutable citation snapshot: later source changes cannot rewrite run history. */
-export interface RunContextCitation {
+/** Immutable citation snapshot: later source changes cannot rewrite evidence. */
+export interface ExecutionContextCitation {
   sourceId: string;
   title: string;
   snippet: string;
@@ -104,7 +102,7 @@ export interface RunContextCitation {
   };
   sourcePath?: string;
   mediaType?: string;
-  scope?: RunContextScope;
+  scope?: ExecutionContextScope;
   /** Access facts snapshotted from the authorized source. */
   authorityScope?: ContextRecordAuthorityScope;
 }
@@ -113,47 +111,48 @@ export interface RunContextCitation {
  * Non-secret evidence captured before provider egress. It records what bounded
  * context was selected and why, without storing hidden reasoning.
  */
-export interface RunContextReceiptV1 {
+export interface ExecutionContextReceiptV1 {
   version: 1;
-  runId: string;
+  attemptId: string;
   assembledAt: string;
-  scope: RunContextScope;
-  citations: RunContextCitation[];
-  contributions: RunContextContribution[];
+  scope: ExecutionContextScope;
+  citations: ExecutionContextCitation[];
+  contributions: ExecutionContextContribution[];
 }
 
-export interface RunContextReceiptV2 {
+export interface ExecutionContextReceiptV2 {
   version: 2;
-  runId: string;
+  attemptId: string;
   assembledAt: string;
-  scope: RunContextScope;
-  audience: RunContextAudience;
-  citations: RunContextCitation[];
-  contributions: RunContextContribution[];
+  scope: ExecutionContextScope;
+  audience: ExecutionContextAudience;
+  citations: ExecutionContextCitation[];
+  contributions: ExecutionContextContribution[];
 }
 
-export type RunContextReceipt = RunContextReceiptV1 | RunContextReceiptV2;
+export type ExecutionContextReceipt = ExecutionContextReceiptV1 | ExecutionContextReceiptV2;
 
-/** Transient prepared context handed to the run boundary before egress. */
-export interface PreparedRunContext {
+/** Transient prepared context handed to the execution boundary before egress. */
+export interface PreparedExecutionContext {
   systemPrefix: string;
-  receipt: RunContextReceipt;
+  receipt: ExecutionContextReceipt;
 }
 
-export interface PersistedAgentRun {
+/** Minimal durable checkpoint for one provider-backed conversation turn. */
+export interface ExecutionAttempt {
   id: string;
   providerId: string;
   model: string;
-  status: AgentRunStatus;
+  status: ExecutionAttemptStatus;
   transcript: string;
   /** Active chat thread this exchange belongs to. */
   threadId?: string;
   /** Durable completed/checkpointed user, assistant, and tool exchanges. */
-  exchanges?: PersistedAgentExchange[];
-  /** Prior interrupted/failed run when this run is an explicit retry. */
-  parentRunId?: string;
+  exchanges?: ExecutionExchange[];
+  /** Prior interrupted/failed attempt when this is an explicit retry. */
+  parentAttemptId?: string;
   /** Immutable bounded-context evidence captured before provider egress. */
-  contextReceipt?: RunContextReceipt;
+  contextReceipt?: ExecutionContextReceipt;
   /** Exact portable provider route selected before native provider egress. */
   providerRoute?: ProviderRouteExecutionBinding;
   turn: number;
@@ -182,8 +181,7 @@ export type BackendType =
   | "codex-app-server"
   | "acp"
   | "copilot-sdk"
-  | "native-api"
-  | "local-loopback";
+  | "native-api";
 
 /**
  * Resolved auth state for a backend instance. Fail-closed states declare no
@@ -194,10 +192,6 @@ export type BackendType =
  *   - `sign-in-required` — a provider-owned login (Codex CLI, ACP, Copilot)
  *     is installed but not signed in; Fable never shows a token field here.
  *   - `install-required` — the provider's real runtime (CLI/SDK) is missing.
- *   - `start-required` — the provider runtime is installed but its local
- *     service is not listening.
- *   - `download-required` — the local runtime is reachable but has no local
- *     generation model installed. Fable never downloads a model automatically.
  *   - `connecting` — a verification round-trip is in flight (UI-only; never
  *     persisted by the boundary).
  *   - `expired` — a credential/login was valid before but is no longer.
@@ -216,8 +210,6 @@ export type BackendAuthState =
   | "needs-auth"
   | "sign-in-required"
   | "install-required"
-  | "start-required"
-  | "download-required"
   | "connecting"
   | "expired"
   | "unsupported"
@@ -237,8 +229,6 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
   "needs-auth",
   "sign-in-required",
   "install-required",
-  "start-required",
-  "download-required",
   "connecting",
   "expired",
   "unsupported",
@@ -265,8 +255,6 @@ export const BACKEND_AUTH_STATE_VALUES = [
   "needs-auth",
   "sign-in-required",
   "install-required",
-  "start-required",
-  "download-required",
   "connecting",
   "expired",
   "unsupported",
@@ -282,8 +270,6 @@ const _BACKEND_AUTH_STATE_EXHAUSTIVE: Record<BackendAuthState, true> = {
   "needs-auth": true,
   "sign-in-required": true,
   "install-required": true,
-  "start-required": true,
-  "download-required": true,
   connecting: true,
   expired: true,
   unsupported: true,
@@ -497,54 +483,12 @@ export interface NativeCompletionRequest {
   maxTokens: number;
   /** Exact portable route binding for an ordinary native provider run. */
   providerRoute?: ProviderRouteExecutionBinding;
-  /** Optional native-only completion binding for one already-started mission worker. */
-  missionWorkerExecution?: MissionWorkerExecutionBinding;
 }
 
 /** Workspace-fenced route authority carried unchanged from selection to egress. */
 export interface ProviderRouteExecutionBinding {
   workspaceId: WorkspaceId;
   selection: ProviderRouteSelection;
-}
-
-/** Secret-free journal identity; Rust revalidates every field before provider egress. */
-export interface MissionWorkerExecutionBinding {
-  runId: string;
-  workerId: string;
-  workerStartedEventId: string;
-  routeSelectedEventId: string;
-  usageEventId: string;
-  completionEventId: string;
-  /** Reserved journal identity for a Rust-derived policy evaluation, when the step has one. */
-  evaluationEventId: string;
-  /** Reserved journal identity for a narrowly derived successful run result, when eligible. */
-  resultEventId: string;
-  failureEventId: string;
-  idempotencyKey: string;
-  expectedRunRevision: number;
-  expectedLastSequence: number;
-  /** Exact durable replay boundary immediately preceding provider egress. */
-  checkpointEventId?: string;
-  /** Exact one-attempt restart restoration of `checkpointEventId`, when resumed. */
-  checkpointRestoreEventId?: string;
-  /** Exact native-attested connected-source result consumed by a final cited-brief turn. */
-  toolEvidence?: {
-    toolEventId: string;
-    outputReference: string;
-  };
-}
-
-/** Secret-free identity for one exact mission-owned connected-source tool result. */
-export interface MissionWorkerToolExecutionBinding {
-  runId: string;
-  workerId: string;
-  workerStartedEventId: string;
-  routeSelectedEventId: string;
-  toolEventId: string;
-  callKey: string;
-  idempotencyKey: string;
-  expectedRunRevision: number;
-  expectedLastSequence: number;
 }
 
 /**
@@ -608,22 +552,21 @@ export type BackendAgentEvent =
  * key-free {@link NativeCompletionRequest}; carries NO key, NO token, NO URL.
  * Backend-specific shaping happens inside the adapter, never in this type.
  */
-export interface AgentRunRequest {
+export interface AgentTurnRequest {
   model: string;
   messages: NativeMessage[];
   tools: NativeToolSpec[];
   /** Max output tokens; adapters clamp to the model's known ceiling. */
   maxTokens: number;
   providerRoute?: ProviderRouteExecutionBinding;
-  missionWorkerExecution?: MissionWorkerExecutionBinding;
 }
 
 /**
- * Options for an agent run. Provider-neutral: the execute/shouldCancel/approval
+ * Options for one agent turn. Provider-neutral: the execute/shouldCancel/approval
  * seams are the same ones the native-API loop uses, so any backend that issues
  * tool calls routes through Fable's shared approval queue.
  */
-export interface AgentRunOptions {
+export interface AgentTurnOptions {
   /** Executes an approved tool. Backends call this for each tool-call event. */
   execute: (approval: ApprovalRequest, args: string) => Promise<string>;
   /** Cooperative cancellation hook, checked between events. */
@@ -632,8 +575,8 @@ export interface AgentRunOptions {
   contextPrefix?: string;
   /** The composer's permission level, gating which tools may execute. */
   permissionMode?: PermissionMode;
-  /** Stable run id used to bind approvals and reject cross-run/replayed calls. */
-  runId?: string;
+  /** Stable attempt id used to bind approvals and reject replayed calls. */
+  attemptId?: string;
   /** Max turns before the backend stops (safety). */
   maxTurns?: number;
   /** Maximum accepted tool calls across the whole run. */
@@ -644,7 +587,7 @@ export interface AgentRunOptions {
    * Notifies the shell that the backend's transport is retrying after a
    * transient failure (e.g. HTTP 429/5xx backoff). Provider-neutral: any
    * egress-bound backend may retry. The shell uses this to mark the persisted
-   * run as "retrying" and bump its retry count.
+   * attempt as "retrying" and bump its retry count.
    */
   onRetry?: () => void;
 }

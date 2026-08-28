@@ -208,8 +208,7 @@ pub(crate) fn ensure_record_owner(
 mod tests {
     use super::*;
     use crate::store::repos::{
-        connector_account, knowledge_source, memory_record, preferences, schedule, workflow,
-        workspace,
+        connector_account, knowledge_source, memory_record, preferences, workspace,
     };
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
@@ -400,136 +399,6 @@ mod tests {
             .unwrap();
         assert_eq!(alpha_value["theme"], "light");
         assert_eq!(beta_value["theme"], "dark");
-    }
-
-    #[test]
-    fn project_scope_must_belong_to_workspace() {
-        let store = store();
-        add_workspace(&store, "alpha");
-        add_workspace(&store, "beta");
-        let alpha = DataScope::workspace("alpha").unwrap();
-        let sealed = store.seal_payload(b"{}", "project:p1").unwrap();
-        store
-            .transaction(|tx| {
-                workspace::upsert_project(
-                    tx,
-                    &alpha,
-                    "p1",
-                    "fingerprint",
-                    "now",
-                    &sealed.ciphertext,
-                    &sealed.nonce,
-                )
-            })
-            .unwrap();
-
-        assert!(store
-            .with_conn(|tx| DataScope::new("alpha", Some("p1".into()))?.ensure_exists(tx))
-            .is_ok());
-        assert!(store
-            .with_conn(|tx| DataScope::new("beta", Some("p1".into()))?.ensure_exists(tx))
-            .is_err());
-    }
-
-    #[test]
-    fn knowledge_memory_schedule_and_workflow_do_not_cross_workspace() {
-        let store = store();
-        add_workspace(&store, "alpha");
-        add_workspace(&store, "beta");
-        let alpha = DataScope::workspace("alpha").unwrap();
-        let beta = DataScope::workspace("beta").unwrap();
-
-        store
-            .transaction(|tx| {
-                knowledge_source::upsert_from_value_scoped(
-                    tx,
-                    &store,
-                    &alpha,
-                    serde_json::json!({"id":"k1","title":"Alpha","connectorId":"local-files"}),
-                    "now",
-                )?;
-                memory_record::upsert_from_value_scoped(
-                    tx,
-                    &store,
-                    &alpha,
-                    serde_json::json!({"id":"m1","kind":"fact","title":"Alpha","value":"private"}),
-                    "now",
-                )?;
-                schedule::upsert_from_value_scoped(
-                    tx,
-                    &store,
-                    &alpha,
-                    serde_json::json!({"id":"s1","day":"Mon","time":"09:00","name":"Alpha"}),
-                    "now",
-                )?;
-                workflow::upsert_definition(
-                    tx,
-                    &store,
-                    &alpha,
-                    "wf1",
-                    1,
-                    "now",
-                    "now",
-                    &serde_json::json!({"id":"wf1","secret":"encrypted"}),
-                )?;
-                knowledge_source::upsert_from_value_scoped(
-                    tx,
-                    &store,
-                    &beta,
-                    serde_json::json!({"id":"k1","title":"Beta","connectorId":"local-files"}),
-                    "now",
-                )?;
-                memory_record::upsert_from_value_scoped(
-                    tx,
-                    &store,
-                    &beta,
-                    serde_json::json!({"id":"m1","kind":"fact","title":"Beta","value":"separate"}),
-                    "now",
-                )
-            })
-            .unwrap();
-
-        assert_eq!(
-            store
-                .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &alpha))
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            store
-                .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &beta))
-                .unwrap()
-                .len(),
-            1
-        );
-        assert_eq!(
-            store
-                .with_conn(|tx| memory_record::list_scoped(tx, &store, &beta))
-                .unwrap()
-                .len(),
-            1
-        );
-        assert!(store
-            .with_conn(|tx| schedule::list_scoped(tx, &store, &beta))
-            .unwrap()
-            .is_empty());
-        assert!(store
-            .with_conn(|tx| workflow::list_definitions(tx, &store, &beta))
-            .unwrap()
-            .is_empty());
-
-        // A cross-workspace delete is a no-op and cannot remove alpha's row.
-        store
-            .transaction(|tx| knowledge_source::delete_scoped(tx, &beta, "k1"))
-            .unwrap();
-        assert_eq!(
-            store
-                .with_conn(|tx| knowledge_source::list_scoped(tx, &store, &alpha))
-                .unwrap()
-                .len(),
-            1
-        );
     }
 
     #[test]

@@ -30,19 +30,19 @@ describe("promoteToMemory", () => {
   });
 
   it("honors an explicit scope, confidence, and runId", () => {
-    const projectScope = { level: "project" as const, projectId: "p1" };
+    const threadScope = { level: "thread" as const, threadId: "thread-1" };
     const record = promoteToMemory({
       title: "Uses Postgres",
       value: "The project uses Postgres.",
       kind: "fact",
-      scope: projectScope,
+      scope: threadScope,
       provenance: { origin: "run", runId: "r1", note: "From a completed run." },
       confidence: 0.9,
       runId: "r1",
       now: NOW
     });
 
-    expect(record.scope).toEqual(projectScope);
+    expect(record.scope).toEqual(threadScope);
     expect(record.confidence).toBe(0.9);
     expect(record.runId).toBe("r1");
   });

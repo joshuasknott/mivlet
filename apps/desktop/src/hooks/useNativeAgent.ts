@@ -18,16 +18,16 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  AgentRunRequest,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendModel,
   BackendProvider,
-  PersistedAgentExchange,
-  PersistedAgentRun,
+  ExecutionExchange,
+  ExecutionAttempt,
   PermissionMode,
-  PreparedRunContext,
+  PreparedExecutionContext,
   ProviderRouteExecutionBinding,
-  RunContextReceipt
+  ExecutionContextReceipt
 } from "@fable/protocol";
 import {
   resolveAgentBackend,
@@ -41,9 +41,9 @@ import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
   listRuntimeBackendModels,
-  listRuntimeAgentRuns,
-  recoverRuntimeAgentRuns,
-  saveRuntimeAgentRun
+  listRuntimeExecutionAttempts,
+  recoverRuntimeExecutionAttempts,
+  saveRuntimeExecutionAttempt
 } from "../runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
@@ -67,16 +67,16 @@ export interface NativeAgentState {
   } | null;
   running: boolean;
   lastError: string | null;
-  status: PersistedAgentRun["status"] | "idle";
-  recoverableRuns: PersistedAgentRun[];
-  /** Immutable context evidence keyed by canonical run id, including recovered completed runs. */
-  contextReceipts: Record<string, RunContextReceipt>;
-  /** Secret-free durable provider route evidence keyed by canonical run id. */
+  status: ExecutionAttempt["status"] | "idle";
+  recoverableAttempts: ExecutionAttempt[];
+  /** Immutable context evidence keyed by canonical attempt id, including recovered completed attempts. */
+  contextReceipts: Record<string, ExecutionContextReceipt>;
+  /** Secret-free durable provider route evidence keyed by canonical attempt id. */
   providerRoutes: Record<string, ProviderRouteExecutionBinding>;
-  /** Final provider usage keyed by canonical run id, including restarted history. */
-  usageReceipts: Record<string, NonNullable<PersistedAgentRun["usage"]>>;
-  /** Canonical id for the current or most recently started run. */
-  currentRunId: string | null;
+  /** Final provider usage keyed by canonical attempt id, including restarted history. */
+  usageReceipts: Record<string, NonNullable<ExecutionAttempt["usage"]>>;
+  /** Canonical id for the current or most recently started attempt. */
+  currentAttemptId: string | null;
   /** True when there is no desktop runtime to carry the request. */
   noTransport: boolean;
 }
@@ -106,7 +106,7 @@ export interface UseNativeAgentOptions {
    */
   shouldCancel?: () => boolean;
   /**
-   * Invoked once when a run is cancelled, so the shell can tear down any
+   * Invoked once when an attempt is cancelled, so the shell can tear down any
    * tool-call still awaiting approval on the shared gate (gate.cancelPending()).
    * This prevents cancelled-but-never-granted calls (and their unresolved
    * promises) from lingering for the session. Cooperative cancel + the Rust
@@ -118,7 +118,7 @@ export interface UseNativeAgentOptions {
    * recovery adapter; when a durable thread is active, lifecycle facts flow to
    * this writer with stable per-run idempotency keys.
    */
-  createDurableRunWriter?: (threadId: string, runId: string) => DurableRunWriter;
+  createDurableRunWriter?: (threadId: string, attemptId: string) => DurableRunWriter;
 }
 
 export function useNativeAgent(options: UseNativeAgentOptions) {
@@ -128,19 +128,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     running: false,
     lastError: null,
     status: "idle",
-    recoverableRuns: [],
+    recoverableAttempts: [],
     contextReceipts: {},
     providerRoutes: {},
     usageReceipts: {},
-    currentRunId: null,
+    currentAttemptId: null,
     noTransport: !hasDesktopRuntime()
   });
   // The active backend + run id for the current run. cancel() delegates to the
   // backend; the adapter routes the cancel to the egress boundary (the Rust
   // cancel map for native-API) using the requestId it captured from the transport.
   const activeBackendRef = useRef<AgentBackend | null>(null);
-  const activeRunIdRef = useRef<string | null>(null);
-  const activePersistedRef = useRef<PersistedAgentRun | null>(null);
+  const activeAttemptIdRef = useRef<string | null>(null);
+  const activePersistedRef = useRef<ExecutionAttempt | null>(null);
   const activeWriterRef = useRef<DurableRunWriter | null>(null);
   const onToolCallRef = useRef(options.onToolCall);
   onToolCallRef.current = options.onToolCall;
@@ -161,13 +161,13 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
 
   useEffect(() => {
     void (async () => {
-      const recovered = await recoverRuntimeAgentRuns(new Date().toISOString()).catch(() => null);
-      const listed = await listRuntimeAgentRuns().catch(() => null);
+      const recovered = await recoverRuntimeExecutionAttempts(new Date().toISOString()).catch(() => null);
+      const listed = await listRuntimeExecutionAttempts().catch(() => null);
       const runs = listed ?? recovered;
       if (!runs) return;
       setState((current) => ({
         ...current,
-        contextReceipts: runs.reduce<Record<string, RunContextReceipt>>((receipts, run) => {
+        contextReceipts: runs.reduce<Record<string, ExecutionContextReceipt>>((receipts, run) => {
           if (run.contextReceipt) receipts[run.id] = run.contextReceipt;
           return receipts;
         }, { ...current.contextReceipts }),
@@ -175,11 +175,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (run.providerRoute) routes[run.id] = run.providerRoute;
           return routes;
         }, { ...current.providerRoutes }),
-        usageReceipts: runs.reduce<Record<string, NonNullable<PersistedAgentRun["usage"]>>>((receipts, run) => {
+        usageReceipts: runs.reduce<Record<string, NonNullable<ExecutionAttempt["usage"]>>>((receipts, run) => {
           if (run.usage) receipts[run.id] = run.usage;
           return receipts;
         }, { ...current.usageReceipts }),
-        recoverableRuns: runs.filter(
+        recoverableAttempts: runs.filter(
           (run) =>
             (run.status === "interrupted" || run.status === "failed") && run.recoverable
         )
@@ -233,14 +233,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
 
   const run = useCallback(
     async (
-      request: AgentRunRequest,
-      preparedContext?: PreparedRunContext | string,
+      request: AgentTurnRequest,
+      preparedContext?: PreparedExecutionContext | string,
       requestedPermissionMode?: PermissionMode,
-      parentRunId?: string
+      parentAttemptId?: string
     ) => {
-      let persisted: PersistedAgentRun | null = null;
+      let persisted: ExecutionAttempt | null = null;
       let terminalized = false;
-      if (activeRunIdRef.current) {
+      if (activeAttemptIdRef.current) {
         setState((current) => ({
           ...current,
           lastError: "Wait for the current response to finish before starting another one."
@@ -253,12 +253,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           noTransport: !hasDesktopRuntime(),
           lastError: "Native agent needs the desktop runtime.",
           status: "failed",
-          currentRunId: null
+          currentAttemptId: null
         }));
         return;
       }
       const providerId = backend.providerId;
-      const generatedRunId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const generatedAttemptId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const createdAt = new Date().toISOString();
       const prepared = typeof preparedContext === "object" && preparedContext?.receipt
         ? preparedContext
@@ -266,7 +266,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             systemPrefix: typeof preparedContext === "string" ? preparedContext : "",
             receipt: {
               version: 1 as const,
-              runId: generatedRunId,
+              attemptId: generatedAttemptId,
               assembledAt: createdAt,
               scope: threadIdRef.current
                 ? { level: "thread" as const, threadId: threadIdRef.current }
@@ -275,10 +275,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               contributions: []
             }
           };
-      const runId = prepared.receipt.runId;
-      // Reserve the run before asynchronous route selection so two rapid sends
+      const attemptId = prepared.receipt.attemptId;
+      // Reserve the attempt before asynchronous route selection so two rapid sends
       // cannot both acquire provider authority before either durable write.
-      activeRunIdRef.current = runId;
+      activeAttemptIdRef.current = attemptId;
       let providerRoute: Awaited<ReturnType<typeof selectNativeProviderRoute>> | undefined;
       const provider = options.providers.find((candidate) => candidate.id === providerId);
       if (provider?.backendType === "native-api") {
@@ -296,8 +296,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           });
         } catch (error) {
           const message = error instanceof Error ? error.message : "Fable could not select an authorized provider route.";
-          setState((current) => ({ ...current, lastError: message, status: "failed", currentRunId: null }));
-          activeRunIdRef.current = null;
+          setState((current) => ({ ...current, lastError: message, status: "failed", currentAttemptId: null }));
+          activeAttemptIdRef.current = null;
           return;
         }
       }
@@ -308,17 +308,17 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         running: true,
         lastError: null,
         status: "streaming",
-        recoverableRuns: parentRunId
-          ? current.recoverableRuns.filter((run) => run.id !== parentRunId)
-          : current.recoverableRuns,
-        currentRunId: runId,
-        contextReceipts: { ...current.contextReceipts, [runId]: prepared.receipt },
-        providerRoutes: providerRoute ? { ...current.providerRoutes, [runId]: providerRoute } : current.providerRoutes,
+        recoverableAttempts: parentAttemptId
+          ? current.recoverableAttempts.filter((run) => run.id !== parentAttemptId)
+          : current.recoverableAttempts,
+        currentAttemptId: attemptId,
+        contextReceipts: { ...current.contextReceipts, [attemptId]: prepared.receipt },
+        providerRoutes: providerRoute ? { ...current.providerRoutes, [attemptId]: providerRoute } : current.providerRoutes,
         noTransport: false
       }));
       // Mark active before the first durable write so a second click cannot
-      // start an overlapping run while initial persistence is still pending.
-      const initialExchanges: PersistedAgentExchange[] = request.messages
+      // start an overlapping attempt while initial persistence is still pending.
+      const initialExchanges: ExecutionExchange[] = request.messages
         .filter(
           (message): message is typeof message & { role: "user" | "assistant" | "tool" } =>
             message.role !== "system"
@@ -330,14 +330,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           toolName: message.toolName
         }));
       persisted = {
-        id: runId,
+        id: attemptId,
         providerId,
         model: request.model,
         status: "streaming",
         transcript: "",
         threadId: threadIdRef.current,
         exchanges: initialExchanges,
-        parentRunId,
+        parentAttemptId,
         contextReceipt: prepared.receipt,
         ...(providerRoute ? { providerRoute } : {}),
         turn: 0,
@@ -349,7 +349,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       };
       activePersistedRef.current = persisted;
       const durableWriter = threadIdRef.current
-        ? createDurableRunWriterRef.current?.(threadIdRef.current, runId) ?? null
+        ? createDurableRunWriterRef.current?.(threadIdRef.current, attemptId) ?? null
         : null;
       activeWriterRef.current = durableWriter;
       try {
@@ -360,20 +360,20 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             await durableWriter.record({ kind: "user", content: exchange.content });
           }
         }
-        await saveRuntimeAgentRun(persisted);
+        await saveRuntimeExecutionAttempt(persisted);
       } catch (error) {
         const message = error instanceof Error ? error.message : "Could not save the conversation before it started.";
         const failed = { ...persisted, status: "failed" as const, recoverable: true, error: message, updatedAt: new Date().toISOString() };
         activePersistedRef.current = failed;
         setState((current) => {
           const contextReceipts = { ...current.contextReceipts };
-          delete contextReceipts[runId];
+          delete contextReceipts[attemptId];
           const providerRoutes = { ...current.providerRoutes };
-          delete providerRoutes[runId];
-          return { ...current, running: false, status: "failed", lastError: message, recoverableRuns: [failed, ...current.recoverableRuns], contextReceipts, providerRoutes, currentRunId: null };
+          delete providerRoutes[attemptId];
+          return { ...current, running: false, status: "failed", lastError: message, recoverableAttempts: [failed, ...current.recoverableAttempts], contextReceipts, providerRoutes, currentAttemptId: null };
         });
-        try { await saveRuntimeAgentRun(failed); } catch { /* persistence is already the reported terminal failure */ }
-        activeRunIdRef.current = null;
+        try { await saveRuntimeExecutionAttempt(failed); } catch { /* persistence is already the reported terminal failure */ }
+        activeAttemptIdRef.current = null;
         activePersistedRef.current = null;
         activeWriterRef.current = null;
         return;
@@ -383,9 +383,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const pendingApprovalByCall = new Map<string, string>();
       const toolNameByCall = new Map<string, string>();
       // The shell resolves the visible approval preset (including Custom) down
-      // to one PermissionMode before the run reaches this hook.
+      // to one PermissionMode before the attempt reaches this hook.
       const permissionMode: PermissionMode = requestedPermissionMode ?? "trusted-scope";
-      // Resolve the run through the provider-neutral backend. The adapter
+      // Resolve the attempt through the provider-neutral backend. The adapter
       // (native-API today) builds its egress transport from deps and returns null
       // when no transport is available (browser preview). The event handling below
       // is provider-neutral — it consumes the universal BackendAgentEvent stream.
@@ -403,7 +403,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         shouldCancel: shouldCancelRef.current ?? (() => false),
         contextPrefix: prepared.systemPrefix,
         permissionMode,
-        runId,
+        attemptId,
         onRetry: () => {
           if (!persisted) return;
           persisted = {
@@ -412,7 +412,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             retryCount: persisted.retryCount + 1,
             updatedAt: new Date().toISOString()
           };
-          void saveRuntimeAgentRun(persisted);
+          void saveRuntimeExecutionAttempt(persisted);
         }
       });
       if (!eventStream) {
@@ -423,16 +423,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           running: false,
           status: "failed"
         }));
-        activeRunIdRef.current = null;
+        activeAttemptIdRef.current = null;
         activePersistedRef.current = null;
         activeWriterRef.current = null;
         return;
       }
-      // Capture the active run's backend + id so cancel() reaches the egress
+      // Capture the active attempt's backend + id so cancel() reaches the egress
       // boundary (the Rust cancel map for native-API). The adapter also records
       // the requestId internally from the transport's onRequestStarted callback.
       activeBackendRef.current = backend;
-      activeRunIdRef.current = runId;
+      activeAttemptIdRef.current = attemptId;
       try {
         for await (const event of eventStream) {
           if (activePersistedRef.current?.status === "cancelled") {
@@ -442,7 +442,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
           if (event.type === "text-delta") {
             setState((current) => ({ ...current, transcript: current.transcript + event.text }));
-            const exchanges: PersistedAgentExchange[] = [...(persisted.exchanges ?? [])];
+            const exchanges: ExecutionExchange[] = [...(persisted.exchanges ?? [])];
             const finalExchange = exchanges.at(-1);
             if (finalExchange?.role === "assistant" && !finalExchange.toolCallId) {
               exchanges[exchanges.length - 1] = {
@@ -470,7 +470,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             setState((current) => ({
               ...current,
               usage,
-              usageReceipts: { ...current.usageReceipts, [runId]: usage }
+              usageReceipts: { ...current.usageReceipts, [attemptId]: usage }
             }));
             persisted = {
               ...persisted,
@@ -520,7 +520,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             toolNameByCall.delete(event.callId);
           } else if (event.type === "error") {
             // Classify so a configuration error (rejected/expired key) is
-            // distinguishable from a runtime/provider failure. The structured
+            // distinguishable from an attempttime/provider failure. The structured
             // code travels on the event from the Rust transport boundary.
             const described = describeBackendError(
               event.message,
@@ -533,18 +533,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               error: described.message,
               updatedAt: new Date().toISOString()
             };
-            const terminalRun: PersistedAgentRun = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], updatedAt: new Date().toISOString() };
+            const terminalRun: ExecutionAttempt = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], updatedAt: new Date().toISOString() };
             persisted = terminalRun;
             terminalized = true;
             if (durableWriter) await durableWriter.record({ kind: "error", content: described.message, code: event.code ?? "provider-error", retryable: event.retryable ?? true });
-            setState((current) => ({ ...current, running: false, status: "failed", recoverableRuns: [terminalRun, ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)] }));
+            setState((current) => ({ ...current, running: false, status: "failed", recoverableAttempts: [terminalRun, ...current.recoverableAttempts.filter((run) => run.id !== terminalRun.id)] }));
           } else if (event.type === "done" || event.type === "cancelled") {
             const failed: boolean =
               event.type === "done" &&
               (event.finishReason === "error" || Boolean(persisted.error));
-            const terminalStatus: PersistedAgentRun["status"] =
+            const terminalStatus: ExecutionAttempt["status"] =
               event.type === "cancelled" ? "cancelled" : failed ? "failed" : "completed";
-            const terminalRun: PersistedAgentRun = {
+            const terminalRun: ExecutionAttempt = {
               ...persisted!,
               status: terminalStatus,
               recoverable: terminalStatus === "failed",
@@ -561,13 +561,13 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ...current,
               running: false,
               status: terminalStatus,
-              recoverableRuns:
+              recoverableAttempts:
                 terminalStatus === "failed"
                   ? [
                       terminalRun,
-                      ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)
+                      ...current.recoverableAttempts.filter((run) => run.id !== terminalRun.id)
                     ]
-                  : current.recoverableRuns
+                  : current.recoverableAttempts
             }));
           }
           const terminalOrBoundary =
@@ -575,7 +575,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             persisted.transcript.length - lastPersistedTranscriptLength >= 512 ||
             Date.now() - lastPersistedAt >= 1_000;
           if (terminalOrBoundary) {
-            await saveRuntimeAgentRun(persisted);
+            await saveRuntimeExecutionAttempt(persisted);
             activePersistedRef.current = persisted;
             lastPersistedTranscriptLength = persisted.transcript.length;
             lastPersistedAt = Date.now();
@@ -583,11 +583,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (terminalized) break;
         }
         if (!terminalized && persisted) {
-          const terminalRun: PersistedAgentRun = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], error: "The provider ended without a completion event.", updatedAt: new Date().toISOString() };
+          const terminalRun: ExecutionAttempt = { ...persisted, status: "failed", recoverable: true, pendingApprovalIds: [], error: "The provider ended without a completion event.", updatedAt: new Date().toISOString() };
           persisted = terminalRun;
           if (durableWriter) await durableWriter.record({ kind: "error", content: terminalRun.error!, code: "provider-eof", retryable: true });
-          await saveRuntimeAgentRun(terminalRun);
-          setState((current) => ({ ...current, running: false, status: "failed", lastError: terminalRun.error!, recoverableRuns: [terminalRun, ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)] }));
+          await saveRuntimeExecutionAttempt(terminalRun);
+          setState((current) => ({ ...current, running: false, status: "failed", lastError: terminalRun.error!, recoverableAttempts: [terminalRun, ...current.recoverableAttempts.filter((run) => run.id !== terminalRun.id)] }));
         }
       } catch (error) {
         // A thrown BackendRuntimeError carries the structured code from the
@@ -597,7 +597,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         const described = describeBackendError(rawMessage, thrown.code, thrown.retryable);
         const message = described.message;
         const cancelled = Boolean(shouldCancelRef.current?.());
-        const terminalRun: PersistedAgentRun = {
+        const terminalRun: ExecutionAttempt = {
           ...persisted!,
           status: cancelled ? "cancelled" : "failed",
           recoverable: !cancelled,
@@ -615,17 +615,17 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           running: false,
           lastError: message,
           status: terminalRun.status,
-          recoverableRuns: cancelled
-            ? current.recoverableRuns
+          recoverableAttempts: cancelled
+            ? current.recoverableAttempts
             : [
                 terminalRun,
-                ...current.recoverableRuns.filter((run) => run.id !== terminalRun.id)
+                ...current.recoverableAttempts.filter((run) => run.id !== terminalRun.id)
               ]
         }));
-        try { await saveRuntimeAgentRun(persisted); } catch { /* preserve the original terminal failure */ }
+        try { await saveRuntimeExecutionAttempt(persisted); } catch { /* preserve the original terminal failure */ }
       } finally {
         activeBackendRef.current = null;
-        activeRunIdRef.current = null;
+        activeAttemptIdRef.current = null;
         activePersistedRef.current = null;
         activeWriterRef.current = null;
       }
@@ -634,18 +634,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   );
 
   const retry = useCallback(
-    async (runToRetry: PersistedAgentRun) => {
-      const userExchange = runToRetry.exchanges
+    async (attemptToRetry: ExecutionAttempt) => {
+      const userExchange = attemptToRetry.exchanges
         ?.filter((exchange) => exchange.role === "user")
         .at(-1);
-      if (!runToRetry.recoverable || !userExchange?.content.trim()) {
+      if (!attemptToRetry.recoverable || !userExchange?.content.trim()) {
         setState((current) => ({
           ...current,
           lastError: "This interrupted run does not contain a safe user prompt to retry."
         }));
         return;
       }
-      const model = modelsRef.current.find((candidate) => candidate.id === runToRetry.model);
+      const model = modelsRef.current.find((candidate) => candidate.id === attemptToRetry.model);
       if (!model?.available || model.capabilities?.streaming === false) {
         setState((current) => ({
           ...current,
@@ -654,23 +654,23 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
-      if (backend?.providerId !== runToRetry.providerId) {
+      if (backend?.providerId !== attemptToRetry.providerId) {
         setState((current) => ({
           ...current,
-          lastError: "Select the run's original provider before retrying it."
+          lastError: "Select the attempt's original provider before retrying it."
         }));
         return;
       }
       await run(
         {
-          model: runToRetry.model,
+          model: attemptToRetry.model,
           messages: [{ role: "user", content: userExchange.content }],
           tools: [],
           maxTokens: 2_048
         },
         undefined,
         "read-only",
-        runToRetry.id
+        attemptToRetry.id
       );
     },
     [run]
@@ -681,7 +681,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     // adapter routes it to the Rust cancel map via the requestId it captured from
     // the transport. No-op when no run is active.
     if (activeBackendRef.current) {
-      await activeBackendRef.current.cancel(activeRunIdRef.current ?? "");
+      await activeBackendRef.current.cancel(activeAttemptIdRef.current ?? "");
     }
     // Tear down any tool-call still awaiting approval on the shared gate so a
     // cancelled-but-never-granted call (and its unresolved promise) does not
@@ -689,7 +689,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     onCancelRef.current?.();
     const persisted = activePersistedRef.current;
     if (persisted && persisted.status !== "cancelled") {
-      const terminalRun: PersistedAgentRun = {
+      const terminalRun: ExecutionAttempt = {
         ...persisted,
         status: "cancelled",
         recoverable: false,
@@ -700,7 +700,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       try {
         await activeWriterRef.current?.checkpointAssistant(terminalRun.transcript, true);
         await activeWriterRef.current?.record({ kind: "interruption", content: "The response was stopped.", reason: "user-stop" });
-        await saveRuntimeAgentRun(terminalRun);
+        await saveRuntimeExecutionAttempt(terminalRun);
       } catch {
         // Cancellation is terminal even when a checkpoint cannot be written;
         // the next scoped recovery can surface the adapter state safely.
@@ -712,7 +712,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   /**
    * Surface a pre-run validation error (e.g. an invalid model selection) through
    * the same `lastError` channel the UI renders for run failures, without
-   * starting a run. Used so {@link validateModelSelection} can fail fast before
+   * starting an attempt. Used so {@link validateModelSelection} can fail fast before
    * the loop opens a socket.
    */
   const reportError = useCallback((message: string) => {
@@ -723,7 +723,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       transcript: "",
       usage: null,
       status: "failed",
-      currentRunId: null
+      currentAttemptId: null
     }));
   }, []);
 

@@ -611,9 +611,6 @@ pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result
     if let Ok(mut proofs) = discovery_proofs().lock() {
         proofs.remove(&request.session_id);
     }
-    if let Ok(mut pending) = pending_mission_mcp_searches().lock() {
-        pending.retain(|_, value| value.continuation.proposal.session_id != request.session_id);
-    }
     if session.server_session_id.is_some() {
         delete_remote_mcp_session(&session).await?;
     }
@@ -914,16 +911,6 @@ pub async fn execute_approved_mcp_tool_call(
                 actor: scope.internal_user_id.clone(),
             },
         );
-    if pending_mission_mcp_searches()
-        .lock()
-        .map_err(|_| "Fable could not access pending mission MCP evidence.".to_string())?
-        .contains_key(&request.permit_id)
-    {
-        mission_mcp_response_requests()
-            .lock()
-            .map_err(|_| "Fable could not bind the mission MCP response.".to_string())?
-            .insert(audit_key.clone(), request.permit_id.clone());
-    }
     if context.transport == "stdio" {
         let sender = (|| -> Result<mpsc::Sender<String>, String> {
             let map = process_map()
@@ -1010,7 +997,6 @@ pub async fn execute_approved_mcp_tool_call(
         if is_mcp_response_for(response_frame, &request.request_id) {
             matched = true;
         }
-        observe_mission_mcp_response(&request.proposal.session_id, response_frame);
         audit_mcp_response(&request.proposal.session_id, response_frame);
     }
     if !matched {
@@ -1107,7 +1093,6 @@ pub async fn spawn_mcp_process(
                         if let Ok(text) = String::from_utf8(line) {
                             if valid_mcp_frame(&text) {
                                 observe_discovery_frame(&stdout_session_id, &text);
-                                observe_mission_mcp_response(&stdout_session_id, &text);
                                 audit_mcp_response(&stdout_session_id, &text);
                                 let _ = stdout_app.emit(&stdout_channel, text);
                             }
@@ -1217,9 +1202,6 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
     drain_session_audits(&request.session_id);
     if let Ok(mut permits) = tool_permits().lock() {
         permits.retain(|_, permit| permit.session_id != request.session_id);
-    }
-    if let Ok(mut pending) = pending_mission_mcp_searches().lock() {
-        pending.retain(|_, value| value.continuation.proposal.session_id != request.session_id);
     }
     process.stdin.take();
     match timeout(Duration::from_secs(2), process.child.wait()).await {

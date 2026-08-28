@@ -19,10 +19,7 @@ export type PermissionEffect =
   | "cache-read"
   | "cache-mutation"
   | "app-state-mutation"
-  | "schedule-mutation"
-  | "schedule-execution"
-  | "memory-promotion"
-  | "remote-approval-decision";
+  | "memory-promotion";
 
 export interface PermissionPolicyInput {
   mode?: PermissionMode;
@@ -66,12 +63,9 @@ const TRUSTED_ALLOWED = new Set<PermissionEffect>([
   "connector-write",
   "browser-state-mutation",
   "app-state-mutation",
-  "schedule-mutation",
-  "schedule-execution",
   "delete",
   "publish-external",
-  "memory-promotion",
-  "remote-approval-decision"
+  "memory-promotion"
 ]);
 
 const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>([
@@ -80,10 +74,7 @@ const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>([
   "connector-write",
   "publish-external",
   "cache-mutation",
-  "schedule-mutation",
-  "schedule-execution",
   "memory-promotion",
-  "remote-approval-decision",
   "browser-state-mutation"
 ]);
 
@@ -137,15 +128,6 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "cloud-browser":
     case "cloud-browser-action":
       return "browser-state-mutation";
-    case "cloud-process-schedule":
-    case "cloud-process-schedule-cancel":
-    case "cloud-process-schedule-pause":
-    case "cloud-process-schedule-resume":
-    case "cloud-agent-routine":
-    case "cloud-agent-routine-cancel":
-    case "cloud-agent-routine-pause":
-    case "cloud-agent-routine-resume":
-      return "schedule-mutation";
     case "connection-read":
     case "github-read":
     case "vercel-read":

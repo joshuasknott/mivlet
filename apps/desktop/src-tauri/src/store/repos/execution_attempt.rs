@@ -1,4 +1,4 @@
-//! Agent runs. The transcript and error text may carry sensitive content, so
+//! Execution attempts. The transcript and error text may carry sensitive content, so
 //! they live in the encrypted `payload`; provider/model/status are non-secret
 //! catalog enums stored as plaintext columns for indexing.
 
@@ -9,7 +9,7 @@ use crate::store::repos::scope::DataScope;
 use crate::store::repos::{open_json, seal_json};
 use crate::store::{Result, Store};
 
-/// Upsert a run. `payload` carries transcript, pending approvals, and error.
+/// Upsert an attempt. `payload` carries transcript, pending approvals, and error.
 #[allow(clippy::too_many_arguments)]
 pub fn upsert(
     tx: &Connection,
@@ -69,7 +69,7 @@ pub fn upsert_scoped(
              FROM run WHERE id=?1",
             [id],
             |row| {
-                Ok(ExistingRun {
+                Ok(ExistingAttempt {
                     workspace_id: row.get(0)?,
                     thread_id: row.get(1)?,
                     provider_id: row.get(2)?,
@@ -95,7 +95,7 @@ pub fn upsert_scoped(
             || existing.created_at != created_at
         {
             return Err(crate::store::StoreError::Invalid(
-                "Agent run ownership and creation identity are immutable.".into(),
+                "Execution attempt ownership and creation identity are immutable.".into(),
             ));
         }
 
@@ -113,7 +113,7 @@ pub fn upsert_scoped(
                 return Ok(());
             }
             return Err(crate::store::StoreError::Invalid(
-                "A terminal agent run is immutable.".into(),
+                "A terminal execution attempt is immutable.".into(),
             ));
         }
     }
@@ -127,7 +127,7 @@ pub fn upsert_scoped(
             .optional()?;
         if owner.as_deref() != Some(scope.workspace_id()) {
             return Err(crate::store::StoreError::Invalid(
-                "Run thread does not belong to this workspace.".into(),
+                "Attempt thread does not belong to this workspace.".into(),
             ));
         }
     }
@@ -164,7 +164,7 @@ fn is_terminal_status(status: &str) -> bool {
     matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
 }
 
-struct ExistingRun {
+struct ExistingAttempt {
     workspace_id: String,
     thread_id: Option<String>,
     provider_id: String,
@@ -178,8 +178,8 @@ struct ExistingRun {
     sealed: Sealed,
 }
 
-/// Read a run's metadata + decrypted payload.
-pub struct RunRow {
+/// Read an attempt's metadata + decrypted payload.
+pub struct ExecutionAttemptRow {
     pub id: String,
     pub thread_id: Option<String>,
     pub provider_id: String,
@@ -193,7 +193,7 @@ pub struct RunRow {
     pub payload: Value,
 }
 
-pub fn get(tx: &Connection, store: &Store, id: &str) -> Result<Option<RunRow>> {
+pub fn get(tx: &Connection, store: &Store, id: &str) -> Result<Option<ExecutionAttemptRow>> {
     get_scoped(tx, store, &DataScope::legacy_default(), id)
 }
 pub fn get_scoped(
@@ -201,7 +201,7 @@ pub fn get_scoped(
     store: &Store,
     scope: &DataScope,
     id: &str,
-) -> Result<Option<RunRow>> {
+) -> Result<Option<ExecutionAttemptRow>> {
     scope.ensure_exists(tx)?;
     let row = tx
         .query_row(
@@ -210,7 +210,7 @@ pub fn get_scoped(
              FROM run WHERE id = ?1 AND workspace_id=?2;",
             rusqlite::params![id, scope.workspace_id()],
             |row| {
-                Ok(RunPartial {
+                Ok(ExecutionAttemptPartial {
                     id: row.get(0)?,
                     thread_id: row.get(1)?,
                     provider_id: row.get(2)?,
@@ -233,7 +233,7 @@ pub fn get_scoped(
         None => Ok(None),
         Some(p) => {
             let payload = open_json(store, &p.sealed, &aad(&p.id))?;
-            Ok(Some(RunRow {
+            Ok(Some(ExecutionAttemptRow {
                 id: p.id,
                 thread_id: p.thread_id,
                 provider_id: p.provider_id,
@@ -251,7 +251,7 @@ pub fn get_scoped(
 }
 
 /// Internal partial read carrying the still-sealed payload.
-struct RunPartial {
+struct ExecutionAttemptPartial {
     id: String,
     thread_id: Option<String>,
     provider_id: String,
@@ -267,7 +267,7 @@ struct RunPartial {
 
 use crate::store::vault::Sealed;
 
-/// List runs by status (e.g. recover interrupted runs).
+/// List attempts by status (e.g. recover interrupted attempts).
 pub fn list_by_status(tx: &Connection, statuses: &[&str]) -> Result<Vec<String>> {
     list_by_status_scoped(tx, &DataScope::legacy_default(), statuses)
 }
@@ -294,7 +294,8 @@ pub fn list_by_status_scoped(
     Ok(out)
 }
 
-/// Delete a run (cascades to tool_calls, approvals, artifacts).
+/// Delete an attempt. The physical table name remains `run` for encrypted-store
+/// compatibility with existing installations.
 pub fn delete(tx: &Connection, id: &str) -> Result<()> {
     delete_scoped(tx, &DataScope::legacy_default(), id)
 }
@@ -308,6 +309,8 @@ pub fn delete_scoped(tx: &Connection, scope: &DataScope, id: &str) -> Result<()>
 }
 
 fn aad(id: &str) -> String {
+    // Keep the original associated data so previously encrypted payloads remain
+    // decryptable after the public model was narrowed to ExecutionAttempt.
     format!("run:{id}")
 }
 
@@ -316,7 +319,6 @@ use rusqlite::OptionalExtension as _;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::repos::artifact;
     use crate::store::vault::{MasterKey, Vault};
 
     fn store() -> Store {
@@ -374,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn conflicting_cross_workspace_upsert_fails_and_cannot_expose_linked_artifact() {
+    fn conflicting_cross_workspace_upsert_fails_and_preserves_original_attempt() {
         let store = store();
         let alpha = seed_scope(&store, "alpha", "thread-alpha");
         let beta = seed_scope(&store, "beta", "thread-beta");
@@ -382,7 +384,7 @@ mod tests {
         save(
             &store,
             &alpha,
-            "shared-run",
+            "shared-attempt",
             "thread-alpha",
             "completed",
             "created",
@@ -390,36 +392,10 @@ mod tests {
             &completed,
         )
         .unwrap();
-        store
-            .transaction(|tx| {
-                let sealed = seal_json(
-                    &store,
-                    &serde_json::json!({"secret":"alpha-artifact"}),
-                    "artifact:alpha:user:legacy-test-user:artifact-alpha",
-                )?;
-                tx.execute(
-                    "INSERT INTO artifact(workspace_id,owner_subject,authority,visibility,owner_internal_user_id,
-                      id,run_id,thread_id,kind,status,revision,current_version_id,title_fingerprint,
-                      content_fingerprint,size_bytes,created_at,updated_at,payload,payload_nonce)
-                     VALUES ('alpha','user:legacy-test-user','local','member-private','legacy-test-user',
-                      'artifact-alpha','shared-run','thread-alpha','document','draft',1,'artifact-alpha:v1','title',
-                      'hash',1,'t','t',?1,?2)",
-                    rusqlite::params![sealed.ciphertext, sealed.nonce],
-                )?;
-                let version=seal_json(&store,&serde_json::json!({"id":"artifact-alpha:v1"}),
-                    "artifact_version:alpha:user:legacy-test-user:artifact-alpha:artifact-alpha:v1")?;
-                tx.execute("INSERT INTO artifact_version(workspace_id,owner_subject,artifact_id,id,version,status,
-                  content_fingerprint,size_bytes,created_at,payload,payload_nonce)
-                  VALUES ('alpha','user:legacy-test-user','artifact-alpha','artifact-alpha:v1',1,'available',
-                  'hash',1,'t',?1,?2)",rusqlite::params![version.ciphertext,version.nonce])?;
-                Ok(())
-            })
-            .unwrap();
-
         let takeover = save(
             &store,
             &beta,
-            "shared-run",
+            "shared-attempt",
             "thread-beta",
             "streaming",
             "created",
@@ -428,11 +404,11 @@ mod tests {
         );
         assert!(takeover.is_err());
         assert!(store
-            .with_conn(|tx| artifact::get(tx, &store, &beta, "artifact-alpha"))
+            .with_conn(|tx| get_scoped(tx, &store, &beta, "shared-attempt"))
             .unwrap()
             .is_none());
         let preserved = store
-            .with_conn(|tx| get_scoped(tx, &store, &alpha, "shared-run"))
+            .with_conn(|tx| get_scoped(tx, &store, &alpha, "shared-attempt"))
             .unwrap()
             .unwrap();
         assert_eq!(preserved.thread_id.as_deref(), Some("thread-alpha"));
@@ -440,7 +416,7 @@ mod tests {
     }
 
     #[test]
-    fn run_thread_and_created_at_are_immutable_before_terminal_state() {
+    fn attempt_thread_and_created_at_are_immutable_before_terminal_state() {
         let store = store();
         let scope = seed_scope(&store, "alpha", "thread-one");
         seed_scope(&store, "other", "unused");
@@ -458,7 +434,7 @@ mod tests {
         save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-one",
             "streaming",
             "created",
@@ -469,7 +445,7 @@ mod tests {
         assert!(save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-two",
             "streaming",
             "created",
@@ -480,7 +456,7 @@ mod tests {
         assert!(save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-one",
             "streaming",
             "different-created-at",
@@ -498,7 +474,7 @@ mod tests {
         save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-one",
             "streaming",
             "created",
@@ -509,7 +485,7 @@ mod tests {
         save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-one",
             "completed",
             "created",
@@ -520,7 +496,7 @@ mod tests {
         save(
             &store,
             &scope,
-            "run-1",
+            "attempt-1",
             "thread-one",
             "completed",
             "created",
@@ -545,7 +521,7 @@ mod tests {
             assert!(save(
                 &store,
                 &scope,
-                "run-1",
+                "attempt-1",
                 "thread-one",
                 status,
                 "created",
@@ -555,7 +531,7 @@ mod tests {
             .is_err());
         }
         let preserved = store
-            .with_conn(|tx| get_scoped(tx, &store, &scope, "run-1"))
+            .with_conn(|tx| get_scoped(tx, &store, &scope, "attempt-1"))
             .unwrap()
             .unwrap();
         assert_eq!(preserved.status, "completed");

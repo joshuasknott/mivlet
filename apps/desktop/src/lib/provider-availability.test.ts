@@ -6,8 +6,7 @@ describe("Fable provider availability", () => {
     expect(isFableProviderEnabled("xai")).toBe(true);
   });
 
-  it("does not offer retired local or CLI-only paths", () => {
+  it("does not offer the retired CLI-only Grok path", () => {
     expect(isFableProviderEnabled("grok")).toBe(false);
-    expect(isFableProviderEnabled("ollama")).toBe(false);
   });
 });

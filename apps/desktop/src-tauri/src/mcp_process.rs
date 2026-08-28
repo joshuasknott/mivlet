@@ -28,12 +28,8 @@ use tokio::{
 use url::Url;
 
 const MAX_MCP_FRAME_BYTES: usize = 10 * 1024 * 1024;
-const MAX_MCP_TOOL_RESULT_BYTES: usize = 2 * 1024 * 1024;
-const MAX_MCP_STRUCTURED_CHARACTERS: usize = 256 * 1024;
-const MAX_CONNECTED_SOURCE_CITATIONS: usize = 50;
 const MCP_EVENT_CHANNEL_PREFIX: &str = "fable://mcp/";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
-const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION: &str = "fable.connected-source-search.v1";
 
 struct McpChild {
     child: Child,
@@ -186,33 +182,6 @@ struct McpToolPermit {
 
 fn tool_permits() -> &'static Mutex<HashMap<String, McpToolPermit>> {
     static MAP: OnceLock<Mutex<HashMap<String, McpToolPermit>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-#[derive(Clone)]
-struct PendingMissionMcpSearch {
-    continuation: McpSemanticContinuation,
-    authority: crate::mission_workers::NativeWorkerToolAuthority,
-    issued_at: Instant,
-}
-
-fn pending_mission_mcp_searches() -> &'static Mutex<HashMap<String, PendingMissionMcpSearch>> {
-    static MAP: OnceLock<Mutex<HashMap<String, PendingMissionMcpSearch>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn mission_mcp_response_requests() -> &'static Mutex<HashMap<String, String>> {
-    static MAP: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    MAP.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-struct MissionMcpOutcome {
-    result: Result<Value, String>,
-    observed_at: Instant,
-}
-
-fn mission_mcp_outcomes() -> &'static Mutex<HashMap<String, MissionMcpOutcome>> {
-    static MAP: OnceLock<Mutex<HashMap<String, MissionMcpOutcome>>> = OnceLock::new();
     MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -453,65 +422,11 @@ pub(crate) struct McpSemanticContinuation {
     proposal: McpToolProposal,
     permit_id: String,
     workspace_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
     query: String,
     connection_id: String,
     matched_grant_ids: Vec<String>,
     degraded: bool,
     degradation_reasons: Vec<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NormalizedMcpConnectedSourceCitation {
-    citation_id: String,
-    source_id: String,
-    title: String,
-    snippet: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    uri: Option<String>,
-    provenance: String,
-    freshness: String,
-    trust: &'static str,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NormalizedMcpConnectedSourceScope {
-    workspace_id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_id: Option<String>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct NormalizedMcpConnectedSourceImplementation {
-    kind: &'static str,
-    evidence: &'static str,
-}
-
-/// A server result after the native runtime has removed every opportunity for
-/// MCP-controlled data to claim Fable authority. Fields stay private so future
-/// callers can serialize or inspect this value, but cannot rewrite its trust,
-/// scope, Connection, grant, or implementation facts.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct NormalizedMcpConnectedSourceSearch {
-    contract_version: &'static str,
-    capability_id: &'static str,
-    query: String,
-    scope: NormalizedMcpConnectedSourceScope,
-    citations: Vec<NormalizedMcpConnectedSourceCitation>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    next_cursor: Option<String>,
-    trust: &'static str,
-    instruction_authority: &'static str,
-    degraded: bool,
-    degradation_reasons: Vec<String>,
-    connection_id: String,
-    matched_grant_ids: Vec<String>,
-    implementation: NormalizedMcpConnectedSourceImplementation,
 }
 
 #[derive(serde::Serialize)]
@@ -541,12 +456,6 @@ pub struct ExecuteMcpToolCallRequest {
     proposal: McpToolProposal,
     permit_id: String,
     request_id: String,
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct AttestMissionMcpSearchRequest {
-    permit_id: String,
 }
 
 include!("mcp_process/configuration.rs");

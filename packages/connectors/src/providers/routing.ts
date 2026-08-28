@@ -1,14 +1,16 @@
-import type { Spine } from "@fable/protocol";
+import type {
+  ProviderRouteCostSnapshot,
+  ProviderRouteObservationSnapshot,
+  ProviderRoutePreference,
+  ProviderRoutePricingEvidence,
+  ProviderRouteQualitySnapshot,
+  ProviderRouteSelection,
+  Spine
+} from "@fable/protocol";
 
 type ProviderRoute = Spine.Connections.ProviderRoute;
-type ProviderRoutePreference = Spine.Missions.ProviderRoutePreference;
-type ProviderRouteSelection = Spine.Missions.ProviderRouteSelection;
-type ProviderRouteObservationSnapshot = Spine.Missions.ProviderRouteObservationSnapshot;
-type ProviderRouteQualitySnapshot = Spine.Missions.ProviderRouteQualitySnapshot;
-type ProviderRoutePricingEvidence = Spine.Missions.ProviderRoutePricingEvidence;
-type ProviderRouteCostSnapshot = Spine.Missions.ProviderRouteCostSnapshot;
 
-export interface MissionRouteCandidate {
+export interface ProviderRouteCandidate {
   route: ProviderRoute;
   capabilityIds: readonly string[];
   supportsTools: boolean;
@@ -20,7 +22,7 @@ export interface MissionRouteCandidate {
   risk: "low" | "medium" | "high" | "critical";
 }
 
-export interface MissionRouteRequest {
+export interface ProviderRouteRequest {
   workspaceId: string;
   capabilityId: string;
   requiredInputTokens: number;
@@ -29,7 +31,7 @@ export interface MissionRouteRequest {
   allowedPlacementKinds: readonly Spine.Connections.ExecutionPlacementKind[];
   boundaries: Spine.Connections.CapabilityResolutionBoundary;
   allowDegraded: boolean;
-  maximumRisk: MissionRouteCandidate["risk"];
+  maximumRisk: ProviderRouteCandidate["risk"];
   maxCostMinorUnits?: number;
   currency?: string;
   /** Only an exact matching evaluator cohort may influence this decision. */
@@ -39,25 +41,25 @@ export interface MissionRouteRequest {
   selectedAt: string;
 }
 
-export interface MissionRouteDecision {
+export interface ProviderRouteDecision {
   selection: ProviderRouteSelection;
   score: number;
   reason: string;
   rejected: readonly { providerRouteId: string; reasons: readonly string[] }[];
 }
 
-export class MissionRoutingError extends Error {
-  constructor(message: string, readonly rejected: MissionRouteDecision["rejected"] = []) {
+export class ProviderRoutingError extends Error {
+  constructor(message: string, readonly rejected: ProviderRouteDecision["rejected"] = []) {
     super(message);
-    this.name = "MissionRoutingError";
+    this.name = "ProviderRoutingError";
   }
 }
 
 /** Deterministic, fail-closed selection over already-authorized provider routes. */
-export function selectMissionProviderRoute(
-  request: MissionRouteRequest,
-  candidates: readonly MissionRouteCandidate[]
-): MissionRouteDecision {
+export function selectProviderRoute(
+  request: ProviderRouteRequest,
+  candidates: readonly ProviderRouteCandidate[]
+): ProviderRouteDecision {
   validateRequest(request);
   candidates.forEach((candidate) => {
     validateCandidateObservation(candidate);
@@ -74,13 +76,13 @@ export function selectMissionProviderRoute(
     const cost = candidate.pricing ? estimateCost(request, candidate.pricing) : undefined;
     return [{ candidate, cost, score: score(request, candidate, cost) }];
   });
-  if (!eligible.length) throw new MissionRoutingError("No provider route satisfies the mission boundary.", rejected);
+  if (!eligible.length) throw new ProviderRoutingError("No provider route satisfies the request boundary.", rejected);
   eligible.sort((left, right) => right.score - left.score || left.candidate.route.id.localeCompare(right.candidate.route.id));
   const selected = eligible[0]!;
   const preferred = request.preference?.policy === "prefer" ? new Set(request.preference.providerRouteIds) : undefined;
   const fellBack = preferred && preferred.size > 0 && !preferred.has(selected.candidate.route.id);
   if (fellBack && request.preference?.allowFallback !== true) {
-    throw new MissionRoutingError("The preferred provider route is unavailable and fallback is disabled.", rejected);
+    throw new ProviderRoutingError("The preferred provider route is unavailable and fallback is disabled.", rejected);
   }
   const fallbackFromProviderRouteId = fellBack
     ? request.preference?.providerRouteIds.find((id) => candidates.some((candidate) => candidate.route.id === id))
@@ -104,7 +106,7 @@ export function selectMissionProviderRoute(
   };
 }
 
-function validateCandidateQuality(candidate: MissionRouteCandidate): void {
+function validateCandidateQuality(candidate: ProviderRouteCandidate): void {
   const quality = candidate.quality;
   if (!quality) return;
   if (!quality.reference.startsWith("route-policy-summary:v1:")
@@ -114,11 +116,11 @@ function validateCandidateQuality(candidate: MissionRouteCandidate): void {
     || !Number.isInteger(quality.routingScoreBasisPoints) || quality.routingScoreBasisPoints < 0 || quality.routingScoreBasisPoints > 10_000
     || quality.routingScoreBasisPoints !== Math.floor((quality.passedCount + 1) * 10_000 / (quality.sampleCount + 2))
     || !Number.isFinite(Date.parse(quality.latestEvaluatedAt))) {
-    throw new MissionRoutingError("Route policy evidence requires a valid immutable evaluator-revision snapshot.");
+    throw new ProviderRoutingError("Route policy evidence requires a valid immutable evaluator-revision snapshot.");
   }
 }
 
-function validateCandidatePricing(candidate: MissionRouteCandidate): void {
+function validateCandidatePricing(candidate: ProviderRouteCandidate): void {
   const pricing = candidate.pricing;
   if (!pricing) return;
   if (!pricing.reference.startsWith("route-pricing:v1:")
@@ -128,15 +130,15 @@ function validateCandidatePricing(candidate: MissionRouteCandidate): void {
     || !Number.isInteger(pricing.unitTokens) || pricing.unitTokens < 1
     || !Number.isFinite(Date.parse(pricing.reviewedAt))
     || !isPublicHttpsUrl(pricing.sourceUrl)) {
-    throw new MissionRoutingError("Route cost requires valid source-attributed exact-model pricing evidence.");
+    throw new ProviderRoutingError("Route cost requires valid source-attributed exact-model pricing evidence.");
   }
 }
 
-function estimateCost(request: MissionRouteRequest, pricing: ProviderRoutePricingEvidence): ProviderRouteCostSnapshot {
+function estimateCost(request: ProviderRouteRequest, pricing: ProviderRoutePricingEvidence): ProviderRouteCostSnapshot {
   const numerator = request.requiredInputTokens * pricing.inputRateMinorUnits
     + request.requiredOutputTokens * pricing.outputRateMinorUnits;
   if (!Number.isSafeInteger(numerator)) {
-    throw new MissionRoutingError("Route cost estimate exceeds the safe numeric range.");
+    throw new ProviderRoutingError("Route cost estimate exceeds the safe numeric range.");
   }
   return {
     ...pricing,
@@ -146,7 +148,7 @@ function estimateCost(request: MissionRouteRequest, pricing: ProviderRoutePricin
   };
 }
 
-function validateCandidateObservation(candidate: MissionRouteCandidate): void {
+function validateCandidateObservation(candidate: ProviderRouteCandidate): void {
   if (candidate.estimatedLatencyMs === undefined && candidate.observation === undefined) return;
   const observation = candidate.observation;
   if (!observation
@@ -157,11 +159,11 @@ function validateCandidateObservation(candidate: MissionRouteCandidate): void {
     || !Number.isInteger(observation.usageSampleCount) || observation.usageSampleCount < 0
     || observation.usageSampleCount > observation.sampleCount
     || !Number.isFinite(Date.parse(observation.latestObservedAt))) {
-    throw new MissionRoutingError("Observed route latency requires a valid immutable observation snapshot.");
+    throw new ProviderRoutingError("Observed route latency requires a valid immutable observation snapshot.");
   }
 }
 
-function rejectionReasons(request: MissionRouteRequest, candidate: MissionRouteCandidate): string[] {
+function rejectionReasons(request: ProviderRouteRequest, candidate: ProviderRouteCandidate): string[] {
   const { route } = candidate;
   const reasons: string[] = [];
   if (route.workspaceId !== request.workspaceId) reasons.push("workspace-mismatch");
@@ -186,7 +188,7 @@ function rejectionReasons(request: MissionRouteRequest, candidate: MissionRouteC
   return [...new Set(reasons)];
 }
 
-function score(request: MissionRouteRequest, candidate: MissionRouteCandidate, cost?: ProviderRouteCostSnapshot): number {
+function score(request: ProviderRouteRequest, candidate: ProviderRouteCandidate, cost?: ProviderRouteCostSnapshot): number {
   const weights = request.weights ?? { quality: 0.5, cost: 0.25, speed: 0.25 };
   const costScore = cost === undefined ? 0.5 : 1 / (1 + cost.estimatedCostMinorUnits);
   const speedScore = candidate.estimatedLatencyMs === undefined ? 0.5 : 1 / (1 + candidate.estimatedLatencyMs / 1_000);
@@ -197,27 +199,27 @@ function score(request: MissionRouteRequest, candidate: MissionRouteCandidate, c
   return round(weights.quality * qualityScore + weights.cost * costScore + weights.speed * speedScore + preferenceBonus - healthPenalty);
 }
 
-function validateRequest(request: MissionRouteRequest): void {
+function validateRequest(request: ProviderRouteRequest): void {
   const integers = [request.requiredInputTokens, request.requiredOutputTokens, request.maxCostMinorUnits].filter((value): value is number => value !== undefined);
   if (!request.workspaceId.trim() || !request.capabilityId.trim() || integers.some((value) => !Number.isInteger(value) || value < 0)) {
-    throw new MissionRoutingError("Mission route request is invalid.");
+    throw new ProviderRoutingError("Provider route request is invalid.");
   }
   if (!request.allowedPlacementKinds.length || !Number.isFinite(Date.parse(request.selectedAt))) {
-    throw new MissionRoutingError("Mission route placement or selection time is invalid.");
+    throw new ProviderRoutingError("Provider route placement or selection time is invalid.");
   }
   if (request.qualityPolicyRef !== undefined && (!request.qualityPolicyRef.startsWith("native-policy:") || request.qualityPolicyRef.length > 240)) {
-    throw new MissionRoutingError("Mission route quality policy reference is invalid.");
+    throw new ProviderRoutingError("Provider route quality policy reference is invalid.");
   }
   const weights = request.weights ?? { quality: 0.5, cost: 0.25, speed: 0.25 };
   if ([weights.quality, weights.cost, weights.speed].some((value) => !Number.isFinite(value) || value < 0) || weights.quality + weights.cost + weights.speed <= 0) {
-    throw new MissionRoutingError("Mission route weights are invalid.");
+    throw new ProviderRoutingError("Provider route weights are invalid.");
   }
   if (request.preference && request.preference.policy !== "automatic" && request.preference.providerRouteIds.length === 0) {
-    throw new MissionRoutingError("Mission route preference requires explicit route ids.");
+    throw new ProviderRoutingError("Provider route preference requires explicit route ids.");
   }
 }
 
-function routeReason(request: MissionRouteRequest, candidate: MissionRouteCandidate, cost: ProviderRouteCostSnapshot | undefined, fallback: boolean): string {
+function routeReason(request: ProviderRouteRequest, candidate: ProviderRouteCandidate, cost: ProviderRouteCostSnapshot | undefined, fallback: boolean): string {
   const quality = matchingQuality(request, candidate);
   const parts = [
     `Selected ${candidate.route.displayName} for ${request.capabilityId}`,
@@ -230,7 +232,7 @@ function routeReason(request: MissionRouteRequest, candidate: MissionRouteCandid
   return `${parts.join("; ")}.`;
 }
 
-function matchingQuality(request: MissionRouteRequest, candidate: MissionRouteCandidate): ProviderRouteQualitySnapshot | undefined {
+function matchingQuality(request: ProviderRouteRequest, candidate: ProviderRouteCandidate): ProviderRouteQualitySnapshot | undefined {
   return request.qualityPolicyRef !== undefined && candidate.quality?.policyRevisionRef === request.qualityPolicyRef
     ? candidate.quality
     : undefined;
@@ -254,8 +256,9 @@ function boundaryReference(boundaries: Spine.Connections.CapabilityResolutionBou
   return `boundary:${[boundaries.privacyBoundary, boundaries.billingBoundary, boundaries.providerBoundary, boundaries.placementBoundary].map(encodeURIComponent).join(":")}`;
 }
 
-function riskRank(value: MissionRouteCandidate["risk"]): number {
+function riskRank(value: ProviderRouteCandidate["risk"]): number {
   return ({ low: 0, medium: 1, high: 2, critical: 3 })[value];
 }
 
 function round(value: number): number { return Math.round(value * 1_000_000) / 1_000_000; }
+

@@ -3,12 +3,11 @@ export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
 export * from "./domains/agent-runtime.js";
 export * from "./domains/connectors.js";
-export * from "./domains/scheduling-workflows.js";
-export * from "./domains/remote-control.js";
+export * from "./domains/provider-routing.js";
 export * from "./domains/hosted-computer.js";
-export * from "./domains/hosted-agent-routine.js";
 export * from "./domains/hosted-execution-capability.js";
 export * from "./domains/local-computer.js";
+export * from "./domains/voice.js";
 
 import type {
   ApprovalAuditEntry,
@@ -24,7 +23,6 @@ import type {
 } from "./domains/approvals.js";
 import type { BackendProvider, ContextRecordAuthorityScope } from "./domains/agent-runtime.js";
 import type { ConnectorId, FirstWaveConnectorId } from "./domains/connectors.js";
-import type { AutomationStatus, ScheduleEntry } from "./domains/scheduling-workflows.js";
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
 
@@ -41,12 +39,11 @@ export type MemoryApprovalState = "approved" | "suggested" | "rejected";
  * and so the context assembler can record why each memory entered a run.
  */
 export interface MemoryProvenance {
-  origin: "chat" | "source" | "artifact" | "run" | "manual";
+  origin: "chat" | "source" | "run" | "manual";
   sourceId?: string;
   /** Exact Fable Connection inherited from a connector-backed source. */
   connectionId?: string;
   runId?: string;
-  artifactId?: string;
   note: string;
 }
 
@@ -93,98 +90,6 @@ export interface MemoryRecord {
 export interface MemoryControlState {
   disabled: boolean;
   records: MemoryRecord[];
-}
-
-// ---------------------------------------------------------------------------
-// Fable-owned slash commands.
-//
-// The composer recognizes a small set of Fable-owned commands (/goal, /plan,
-// /mission, /remember, /schedule). These are provider-neutral product features, not
-// composer-text inserts: they create structured Fable state and submit model
-// work through the resolved agent backend when required. Provider-specific
-// slash commands never replace these; unknown slashes fall through to ordinary
-// prompt submission unless a backend explicitly opts into passthrough.
-//
-// These types are wire only. Parsing, validation, redaction, and dispatch live
-// in @fable/connectors; persistence + the shell live in the desktop boundary.
-// ---------------------------------------------------------------------------
-
-/** The Fable-owned commands. Provider-specific slashes never appear here. */
-export type FableCommandName = "goal" | "plan" | "mission" | "remember" | "schedule" | "stop";
-
-/** The canonical, slash-prefixed command tokens Fable owns. */
-export const FABLE_COMMAND_TOKENS: readonly string[] = ["/goal", "/plan", "/mission", "/remember", "/schedule", "/stop"];
-
-/** A parsed, validated command ready for execution. */
-export interface FableCommandRequest {
-  /** The canonical name without the leading slash, e.g. "remember". */
-  name: FableCommandName;
-  /** The raw argument text after the command token, trimmed. */
-  args: string;
-}
-
-/** Outcome of parsing raw composer text into a command or a prompt. */
-export type ParseCommandOutcome =
-  | { status: "command"; request: FableCommandRequest }
-  /** Ordinary prompt text — not a command. Submit unchanged. */
-  | { status: "prompt"; text: string }
-  /** A `/foo` token Fable does not own. Reserved as a seam for backend
-   *  passthrough; treated as ordinary prompt text by default. */
-  | { status: "unknown-command"; token: string; text: string };
-
-/** The lifecycle status of a command execution result. */
-export type FableCommandStatus = "ok" | "validation" | "rejected";
-
-/**
- * The structured result of executing a Fable command. Carries NO secret — the
- * message is safe to surface to the UI and persist in logs/state.
- */
-export interface FableCommandResult {
-  name: FableCommandName;
-  status: FableCommandStatus;
-  /** Human-readable confirmation or error, surfaced through the shell. */
-  message: string;
-  /** Id of the created artifact (memory, schedule, goal, plan), when any. */
-  artifactId?: string;
-  /**
-   * When status is "ok", an optional prompt to additionally submit to the
-   * model through the resolved agent backend. Empty for pure-persistence
-   * commands (e.g. /remember). Fable submits it only when a streaming backend
-   * is connected.
-   */
-  followUpPrompt?: string;
-}
-
-/** A structured workspace goal created by /goal. Non-secret by construction. */
-export interface WorkspaceGoal {
-  id: string;
-  title: string;
-  /** The user's verbatim goal statement. */
-  statement: string;
-  status: "active" | "achieved" | "archived";
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** A single step in a structured plan. */
-export interface PlanStep {
-  id: string;
-  /** 1-based ordering. */
-  order: number;
-  description: string;
-  done: boolean;
-}
-
-/** A structured plan created by /plan. Non-secret by construction. */
-export interface WorkspacePlan {
-  id: string;
-  /** Optional link to the goal this plan decomposes. */
-  goalId?: string;
-  title: string;
-  steps: PlanStep[];
-  status: "draft" | "in-progress" | "complete";
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface MemoryPromotionRequest {
@@ -710,12 +615,10 @@ export interface WorkspaceDirective {
 
 /** Stable local ownership identifiers. They are opaque and never recycled. */
 export type WorkspaceId = string;
-export type ProjectId = string;
 
-/** Explicit persistence scope. A missing project means workspace-owned data. */
+/** Explicit workspace persistence scope. */
 export interface DataScope {
   workspaceId: WorkspaceId;
-  projectId?: ProjectId;
 }
 
 export interface WorkspaceRecord {
@@ -725,29 +628,13 @@ export interface WorkspaceRecord {
   updatedAt: string;
 }
 
-export interface ProjectRecord {
-  id: ProjectId;
-  workspaceId: WorkspaceId;
-  title: string;
-  description?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface ThreadSummary {
   id: string;
   title: string;
-  kind: "chat" | "project";
+  kind: "chat";
   description: string;
   updatedAt: string;
   pinnedContextIds: string[];
-}
-
-export interface ProjectWorkspace {
-  id: string;
-  title: string;
-  description: string;
-  threads: ThreadSummary[];
 }
 
 export type KnowledgeSourceKind = "document" | "folder" | "web" | "memory";
@@ -759,11 +646,10 @@ export type KnowledgeTrust = "trusted" | "untrusted";
  * (a thread-scoped memory is not applied to a global run). `global` is the
  * backward-compatible default for everything that predates scoped knowledge.
  */
-export type KnowledgeScopeLevel = "global" | "project" | "thread";
+export type KnowledgeScopeLevel = "global" | "thread";
 
 export interface KnowledgeScope {
   level: KnowledgeScopeLevel;
-  projectId?: string;
   threadId?: string;
 }
 
@@ -822,7 +708,7 @@ export interface KnowledgeSource {
   authority?: number;
   /** Soft-disable / exclusion flag. Disabled sources never enter a run. */
   disabled?: boolean;
-  /** Minimal deletion tombstone retained to prevent routine resurrection. */
+  /** Minimal deletion tombstone retained to prevent stale-data resurrection. */
   deletedAt?: string;
   /** Lifecycle/health state surfaced in the Knowledge page. */
   status?: SourceStatus;
@@ -907,7 +793,7 @@ export interface KnowledgeSearchResponse {
 // ---------------------------------------------------------------------------
 // Knowledge & memory domain (additive).
 //
-// The chunk/ingestion/memory/context/artifact records below extend the existing
+// The chunk, ingestion, memory, and context records below extend the existing
 // source/memory types so the local-first foundations keep working unchanged.
 // Every new field on an existing interface is optional, so a v1 runtime
 // snapshot still loads. See docs/product/knowledge-lifecycle.md.
@@ -1002,7 +888,7 @@ export interface PinnedContextEntry {
 }
 
 /**
- * Temporary context associated with a thread, project, or run. Captured during
+ * Temporary context associated with a thread or execution attempt. Captured during
  * assembly so the same run can be inspected/cited; it is not durable memory.
  */
 export interface WorkingContext {
@@ -1013,22 +899,6 @@ export interface WorkingContext {
   memoryIds: string[];
   toolResultIds: string[];
   createdAt: string;
-}
-
-/**
- * Useful output produced by completed work, saved with provenance and a link
- * back to the originating run. Artifacts are first-class knowledge citizens
- * that can be promoted into memory.
- */
-export interface Artifact {
-  workspaceId?: WorkspaceId;
-  id: string;
-  title: string;
-  kind: "document" | "code" | "summary" | "other";
-  content: string;
-  provenance: { runId: string; createdAt: string; sourceIds: string[] };
-  scope?: KnowledgeScope;
-  pinned?: boolean;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import type { BackendProvider, BackendAgentEvent } from "@fable/protocol";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { createCodexBackend } from "./adapters/codex";
 import { MockCodexAppServer } from "./testing/fake-backend-utils";
-import type { AgentRunRequest } from "@fable/protocol";
+import type { AgentTurnRequest } from "@fable/protocol";
 
 function mockNativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
   return {
@@ -31,7 +31,7 @@ function mockCodexProvider(overrides: Partial<BackendProvider> = {}): BackendPro
   };
 }
 
-const baseRequest: AgentRunRequest = {
+const baseRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
   tools: [],
@@ -272,7 +272,7 @@ describe("Provider Hardening Tests", () => {
       expect(cancelSpy).toHaveBeenCalledWith("mock-request-id-123");
     });
 
-    it("keeps parallel child requests distinct and cancels both from the parent run", async () => {
+    it("keeps parallel attempts distinct and cancels only the selected attempt", async () => {
       const cancelA = vi.fn(async () => undefined);
       const cancelB = vi.fn(async () => undefined);
       const cancels = [cancelA, cancelB];
@@ -293,16 +293,19 @@ describe("Provider Hardening Tests", () => {
           };
         }
       });
-      const streamA = backend?.run(baseRequest, { runId: "mission-1:worker:a", execute: async () => "" });
-      const streamB = backend?.run(baseRequest, { runId: "mission-1:worker:b", execute: async () => "" });
+      const streamA = backend?.run(baseRequest, { attemptId: "attempt-a", execute: async () => "" });
+      const streamB = backend?.run(baseRequest, { attemptId: "attempt-b", execute: async () => "" });
       const readerA = streamA?.[Symbol.asyncIterator]();
       const readerB = streamB?.[Symbol.asyncIterator]();
       await Promise.all([readerA?.next(), readerB?.next()]);
 
-      await backend?.cancel("mission-1");
+      await backend?.cancel("attempt-a");
 
       expect(cancelA).toHaveBeenCalledOnce();
       expect(cancelA).toHaveBeenCalledWith("request-a");
+      expect(cancelB).not.toHaveBeenCalled();
+
+      await backend?.cancel("attempt-b");
       expect(cancelB).toHaveBeenCalledOnce();
       expect(cancelB).toHaveBeenCalledWith("request-b");
       await Promise.all([readerA?.return?.(), readerB?.return?.()]);
@@ -327,11 +330,11 @@ describe("Provider Hardening Tests", () => {
         }
       });
       const stream = backend?.run(baseRequest, {
-        runId: "mission-early:worker:a", execute: async () => ""
+        attemptId: "attempt-early", execute: async () => ""
       });
       const reader = stream?.[Symbol.asyncIterator]();
 
-      await backend?.cancel("mission-early");
+      await backend?.cancel("attempt-early");
       await reader?.next();
       await Promise.resolve();
 

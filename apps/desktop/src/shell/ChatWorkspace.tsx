@@ -528,7 +528,7 @@ export function ChatWorkspace() {
                 {durableConversation.state.error}
               </p>
             ) : null}
-            {agent.state.recoverableRuns.slice(0, 2).map((attempt) => (
+            {agent.state.recoverableAttempts.slice(0, 2).map((attempt) => (
               <section className="agent-panel__recovery" key={attempt.id}>
                 <p>A previous response was interrupted. Retry it from its original prompt?</p>
                 <button

@@ -70,10 +70,7 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
     out.push({
       id: model.id,
       label: catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
-      // Local loopback models are only selectable after their own probe has
-      // substantiated capabilities. Other providers may still expose a newly
-      // discovered plain-chat model without assuming tool support.
-      available: model.available && (providerId !== "ollama" || capabilities !== undefined),
+      available: model.available,
       capabilities
     });
   }

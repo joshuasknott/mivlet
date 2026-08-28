@@ -85,7 +85,6 @@ export type ActionHistoryCategory =
   | "tool-action"
   | "web-action"
   | "approval"
-  | "schedule"
   | "policy-block";
 
 /**

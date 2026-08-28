@@ -4,7 +4,7 @@ import type {
   CodexAppServerHandlers,
   CodexTurnRequest
 } from "@fable/connectors";
-import type { AgentRunRequest, BackendProvider } from "@fable/protocol";
+import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
 import {
   getRuntimeCodexStatus,
   interruptRuntimeCodexTurn,
@@ -55,7 +55,7 @@ export function createDesktopCodexAppServer(
       handlers.onRequestStarted(currentRequestId);
     },
 
-    async startThread(_request: AgentRunRequest) {
+    async startThread(_request: AgentTurnRequest) {
       activeThreadId = `pending-${currentRequestId}`;
       return { threadId: activeThreadId };
     },

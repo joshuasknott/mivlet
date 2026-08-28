@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MissionRoutingError, selectMissionProviderRoute, type MissionRouteCandidate, type MissionRouteRequest } from "./routing";
+import { ProviderRoutingError, selectProviderRoute, type ProviderRouteCandidate, type ProviderRouteRequest } from "./routing";
 
 const boundaries = { privacyBoundary: "private", billingBoundary: "personal", providerBoundary: "approved", placementBoundary: "local-or-approved-hosted" };
 const policy = "native-policy:cited-brief:v1:test";
@@ -24,7 +24,7 @@ function pricing(id: string, inputRateMinorUnits = 1, outputRateMinorUnits = 3) 
     reviewedAt: "2026-07-13T00:00:00Z"
   };
 }
-function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): MissionRouteCandidate {
+function candidate(id: string, overrides: Partial<ProviderRouteCandidate> = {}): ProviderRouteCandidate {
   const observation = {
     reference: `route-observation-summary:v1:${id}`,
     sampleCount: 2,
@@ -32,7 +32,7 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
     usageSampleCount: 1,
     latestObservedAt: "2026-07-12T00:30:00Z"
   };
-  const result: MissionRouteCandidate = {
+  const result: ProviderRouteCandidate = {
     route: {
       id, recordType: "provider-route", connectionId: `connection-${id}`, kind: "api-model", displayName: id,
       providerFamily: id, modelOrRuntimeReference: "model", state: "available", health: { state: "healthy" },
@@ -54,7 +54,7 @@ function candidate(id: string, overrides: Partial<MissionRouteCandidate> = {}): 
   }
   return result;
 }
-function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequest {
+function request(overrides: Partial<ProviderRouteRequest> = {}): ProviderRouteRequest {
   return {
     workspaceId: "workspace-1", capabilityId: "knowledge.content.search", requiredInputTokens: 2_000,
     requiredOutputTokens: 1_000, requiresTools: true, allowedPlacementKinds: ["fable-managed"], boundaries,
@@ -63,9 +63,9 @@ function request(overrides: Partial<MissionRouteRequest> = {}): MissionRouteRequ
   };
 }
 
-describe("mission provider routing", () => {
+describe("provider routing", () => {
   it("selects deterministically from quality, cost, and speed", () => {
-    const decision = selectMissionProviderRoute(request(), [
+    const decision = selectProviderRoute(request(), [
       candidate("route-slow", { quality: quality("slow", 9, 10), estimatedLatencyMs: 8_000, pricing: pricing("slow", 2, 6) }),
       candidate("route-balanced", { quality: quality("balanced", 8, 10), estimatedLatencyMs: 500, pricing: pricing("balanced", 0, 2) })
     ]);
@@ -74,15 +74,15 @@ describe("mission provider routing", () => {
   });
 
   it("enforces provider pins and exclusions without silent fallback", () => {
-    expect(selectMissionProviderRoute(request({ preference: { policy: "require", providerRouteIds: ["route-pinned"] as never, allowFallback: false } }), [
+    expect(selectProviderRoute(request({ preference: { policy: "require", providerRouteIds: ["route-pinned"] as never, allowFallback: false } }), [
       candidate("route-other"), candidate("route-pinned", { quality: quality("pinned", 0, 3) })
     ]).selection.providerRouteId).toBe("route-pinned");
-    expect(() => selectMissionProviderRoute(request({ preference: { policy: "exclude", providerRouteIds: ["route-only"] as never, allowFallback: false } }), [candidate("route-only")]))
-      .toThrow(MissionRoutingError);
+    expect(() => selectProviderRoute(request({ preference: { policy: "exclude", providerRouteIds: ["route-only"] as never, allowFallback: false } }), [candidate("route-only")]))
+      .toThrow(ProviderRoutingError);
   });
 
   it("permits only explicit same-boundary fallback and reports rejected routes", () => {
-    const decision = selectMissionProviderRoute(request({ preference: { policy: "prefer", providerRouteIds: ["route-offline"] as never, allowFallback: true } }), [
+    const decision = selectProviderRoute(request({ preference: { policy: "prefer", providerRouteIds: ["route-offline"] as never, allowFallback: true } }), [
       candidate("route-offline", { route: { ...candidate("route-offline").route, state: "unavailable" } as never }),
       candidate("route-wrong-boundary", { route: { ...candidate("route-wrong-boundary").route, boundaries: { ...boundaries, privacyBoundary: "public" } } as never }),
       candidate("route-fallback")
@@ -101,18 +101,18 @@ describe("mission provider routing", () => {
       route: { ...candidate("route-denied").route, health: { state: "offline" }, placement: { allowedKinds: ["local-desktop"], requiresCredentialHoldingNode: true } } as never
     });
     try {
-      selectMissionProviderRoute(request(), [constrained]);
+      selectProviderRoute(request(), [constrained]);
       throw new Error("expected failure");
     } catch (error) {
-      expect(error).toBeInstanceOf(MissionRoutingError);
-      expect((error as MissionRoutingError).rejected[0]?.reasons).toEqual(expect.arrayContaining([
+      expect(error).toBeInstanceOf(ProviderRoutingError);
+      expect((error as ProviderRoutingError).rejected[0]?.reasons).toEqual(expect.arrayContaining([
         "route-unhealthy", "tools-unavailable", "context-insufficient", "placement-denied", "risk-exceeded", "cost-exceeded"
       ]));
     }
   });
 
   it("selects without inventing quality, latency, or cost observations", () => {
-    const decision = selectMissionProviderRoute(request({ maxCostMinorUnits: undefined }), [
+    const decision = selectProviderRoute(request({ maxCostMinorUnits: undefined }), [
       candidate("route-unobserved", { quality: undefined, estimatedLatencyMs: undefined, pricing: undefined })
     ]);
     expect(decision.reason).toContain("quality unobserved");
@@ -123,11 +123,11 @@ describe("mission provider routing", () => {
   });
 
   it("uses and binds policy evidence only for an exact requested evaluator revision", () => {
-    const matched = selectMissionProviderRoute(request(), [candidate("route-policy")]);
+    const matched = selectProviderRoute(request(), [candidate("route-policy")]);
     expect(matched.selection.quality).toEqual(candidate("route-policy").quality);
     expect(matched.reason).toContain("policy evidence 4 of 5 outputs passed");
 
-    const unmatched = selectMissionProviderRoute(request({ qualityPolicyRef: "native-policy:other:v1" }), [
+    const unmatched = selectProviderRoute(request({ qualityPolicyRef: "native-policy:other:v1" }), [
       candidate("route-policy")
     ]);
     expect(unmatched.selection.quality).toBeUndefined();
@@ -135,7 +135,7 @@ describe("mission provider routing", () => {
   });
 
   it("binds source-attributed exact-model cost into the immutable selection", () => {
-    const decision = selectMissionProviderRoute(request(), [candidate("route-priced")]);
+    const decision = selectProviderRoute(request(), [candidate("route-priced")]);
     expect(decision.selection.cost).toMatchObject({
       reference: "route-pricing:v1:route-priced",
       estimatedInputTokens: 2_000,
@@ -147,19 +147,20 @@ describe("mission provider routing", () => {
   });
 
   it("rejects cost estimates without valid source-attributed pricing", () => {
-    expect(() => selectMissionProviderRoute(request(), [
+    expect(() => selectProviderRoute(request(), [
       candidate("route-invalid-price", { pricing: { ...pricing("invalid"), sourceUrl: "http://localhost/pricing" } })
     ])).toThrow("Route cost requires valid source-attributed exact-model pricing evidence");
   });
 
   it("binds observed latency evidence into the immutable selection", () => {
-    const decision = selectMissionProviderRoute(request(), [candidate("route-observed")]);
+    const decision = selectProviderRoute(request(), [candidate("route-observed")]);
     expect(decision.selection.observation).toEqual(candidate("route-observed").observation);
   });
 
   it("rejects observed latency without matching evidence", () => {
-    expect(() => selectMissionProviderRoute(request(), [
+    expect(() => selectProviderRoute(request(), [
       candidate("route-invalid", { observation: undefined })
     ])).toThrow("Observed route latency requires a valid immutable observation snapshot");
   });
 });
+

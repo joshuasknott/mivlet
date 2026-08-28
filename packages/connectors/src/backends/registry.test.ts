@@ -21,8 +21,7 @@ import {
   resolveCodexProvider,
   resolveCopilotProvider,
   resolveCursorProvider,
-  resolveGrokProvider,
-  resolveOllamaProvider
+  resolveGrokProvider
 } from "./registry";
 
 describe("backend registry", () => {
@@ -32,7 +31,7 @@ describe("backend registry", () => {
       [
         "alibaba", "anthropic", "cerebras", "codex", "copilot", "cursor", "custom",
         "deepseek", "fireworks", "gemini", "grok", "groq", "huggingface", "meta",
-        "kimi", "kimi-code", "minimax", "mistral", "mistral-vibe", "moonshot", "ollama", "openai", "opencode", "openrouter",
+        "kimi", "kimi-code", "minimax", "mistral", "mistral-vibe", "moonshot", "openai", "opencode", "openrouter",
         "perplexity", "tencent", "together", "xai", "xiaomi", "zai"
       ].sort()
     );
@@ -41,12 +40,6 @@ describe("backend registry", () => {
   it("includes the native-api backend type in the catalog", () => {
     const native = listBackendProviders().find((p) => p.backendType === "native-api");
     expect(native).toBeDefined();
-  });
-
-  it("keeps Ollama on the local-loopback path rather than the API-key path", () => {
-    const ollama = listBackendProviders().find((provider) => provider.id === "ollama");
-    expect(ollama?.backendType).toBe("local-loopback");
-    expect(ollama?.authState).toBe("unavailable");
   });
 
   it("surfaces Claude and Gemini only as native API-key providers, never as subscription options", () => {
@@ -73,7 +66,7 @@ describe("backend registry", () => {
       "codex", "cursor", "copilot", "grok", "opencode", "kimi", "mistral-vibe",
       "openai", "anthropic", "gemini", "xai", "openrouter",
       "deepseek", "zai", "minimax", "alibaba", "fireworks", "huggingface",
-      "moonshot", "kimi-code", "mistral", "meta", "ollama", "perplexity", "tencent",
+      "moonshot", "kimi-code", "mistral", "meta", "perplexity", "tencent",
       "xiaomi", "groq", "together", "cerebras", "custom"
     ]);
   });
@@ -84,8 +77,6 @@ describe("fail-closed capability resolution", () => {
     "needs-auth",
     "sign-in-required",
     "install-required",
-    "start-required",
-    "download-required",
     "connecting",
     "expired",
     "unsupported",
@@ -101,7 +92,6 @@ describe("fail-closed capability resolution", () => {
     expect(resolveAcpProvider("kimi", authState).capabilities).toEqual([]);
     expect(resolveAcpProvider("mistral-vibe", authState).capabilities).toEqual([]);
     expect(resolveCopilotProvider(authState).capabilities).toEqual([]);
-    expect(resolveOllamaProvider(authState).capabilities).toEqual([]);
   });
 
   it("only the connected state advertises capabilities (ready is a UI alias, not capability-bearing)", () => {

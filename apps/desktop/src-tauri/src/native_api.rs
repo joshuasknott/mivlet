@@ -14,7 +14,6 @@
 //!   - No socket is opened in tests; only the pure helpers are unit-tested.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -442,7 +441,6 @@ pub struct BackendStreamRequest {
     pub model: String,
     pub body: serde_json::Value,
     pub provider_route: Option<crate::models::ProviderRouteExecutionBinding>,
-    pub mission_worker_execution: Option<crate::mission_workers::NativeWorkerExecutionBinding>,
 }
 
 #[derive(Default)]
@@ -886,13 +884,13 @@ impl GeminiTerminalObservation {
     }
 }
 
-enum MissionTerminalObservation {
+enum ProviderTerminalObservation {
     OpenAiCompatible(OpenAiCompatibleTerminalObservation),
     Anthropic(AnthropicTerminalObservation),
     Gemini(GeminiTerminalObservation),
 }
 
-impl MissionTerminalObservation {
+impl ProviderTerminalObservation {
     fn new(provider_id: &str, capture_output: bool) -> Self {
         match provider_kind(provider_id) {
             ProviderKind::OpenAiCompat => Self::OpenAiCompatible(
@@ -913,30 +911,6 @@ impl MissionTerminalObservation {
         }
     }
 
-    fn provider_error(&self) -> bool {
-        match self {
-            Self::OpenAiCompatible(observation) => observation.provider_error,
-            Self::Anthropic(observation) => observation.provider_error,
-            Self::Gemini(observation) => observation.provider_error,
-        }
-    }
-
-    fn output_overflow(&self) -> bool {
-        match self {
-            Self::OpenAiCompatible(observation) => observation.output_overflow,
-            Self::Anthropic(observation) => observation.output_overflow,
-            Self::Gemini(observation) => observation.output_overflow,
-        }
-    }
-
-    fn finish_reason(&self) -> Option<&str> {
-        match self {
-            Self::OpenAiCompatible(observation) => observation.finish_reason.as_deref(),
-            Self::Anthropic(observation) => observation.finish_reason.as_deref(),
-            Self::Gemini(observation) => observation.finish_reason.as_deref(),
-        }
-    }
-
     fn clean_stop(&self) -> bool {
         match self {
             Self::OpenAiCompatible(observation) => observation.clean_stop(),
@@ -952,29 +926,6 @@ impl MissionTerminalObservation {
             Self::Gemini(observation) => observation.usage,
         }
     }
-
-    fn captures_output(&self) -> bool {
-        match self {
-            Self::OpenAiCompatible(observation) => observation.capture_output,
-            Self::Anthropic(observation) => observation.capture_output,
-            Self::Gemini(observation) => observation.capture_output,
-        }
-    }
-
-    fn output(&self) -> &str {
-        match self {
-            Self::OpenAiCompatible(observation) => &observation.output,
-            Self::Anthropic(observation) => &observation.output,
-            Self::Gemini(observation) => &observation.output,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct MissionProviderFailure {
-    code: &'static str,
-    message: &'static str,
-    retryable: bool,
 }
 
 /// Cancel map: requestId -> oneshot sender. Dropping/sending cancels the future.
@@ -985,46 +936,15 @@ fn cancel_map() -> &'static Mutex<CancelMap> {
     CANCEL_MAP.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-static MISSION_EXECUTIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
-
-fn mission_executions() -> &'static Mutex<HashSet<String>> {
-    MISSION_EXECUTIONS.get_or_init(|| Mutex::new(HashSet::new()))
-}
-
-struct MissionExecutionLease {
-    key: String,
-}
-
-impl Drop for MissionExecutionLease {
-    fn drop(&mut self) {
-        if let Ok(mut executions) = mission_executions().lock() {
-            executions.remove(&self.key);
+async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<bool>) {
+    loop {
+        if *rx.borrow() {
+            return;
+        }
+        if rx.changed().await.is_err() {
+            futures_util::future::pending::<()>().await;
         }
     }
-}
-
-fn acquire_mission_execution(
-    binding: &crate::mission_workers::NativeWorkerExecutionBinding,
-) -> Result<MissionExecutionLease, String> {
-    let key = format!(
-        "{}\0{}\0{}",
-        binding.run_id, binding.worker_id, binding.worker_started_event_id
-    );
-    let mut executions = mission_executions()
-        .lock()
-        .map_err(|_| "Fable could not access the mission execution registry.".to_string())?;
-    if !executions.insert(key.clone()) {
-        return Err("This mission worker is already executing.".into());
-    }
-    Ok(MissionExecutionLease { key })
-}
-
-pub(crate) fn mission_run_has_active_native_execution(run_id: &str) -> Result<bool, String> {
-    let prefix = format!("{run_id}\0");
-    mission_executions()
-        .lock()
-        .map(|executions| executions.iter().any(|key| key.starts_with(&prefix)))
-        .map_err(|_| "Fable could not access the mission execution registry.".to_string())
 }
 
 /// Look up the key for a provider, preferring the OS keychain and falling back
@@ -1074,10 +994,6 @@ const NATIVE_PROVIDER_IDS: [&str; 22] = [
     "custom",
 ];
 
-pub(crate) fn supports_native_mission_provider(provider_id: &str) -> bool {
-    NATIVE_PROVIDER_IDS.contains(&provider_id)
-}
-
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TransportControlEvent<'a> {
@@ -1121,53 +1037,6 @@ fn retry_after(response: &reqwest::Response, attempt: usize) -> Duration {
         response.headers().get(reqwest::header::RETRY_AFTER),
         attempt,
     )
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum MissionBoundary<T> {
-    Ready(T),
-    Cancelled,
-    DeadlineExceeded,
-}
-
-async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<bool>) {
-    loop {
-        if *rx.borrow() {
-            return;
-        }
-        if rx.changed().await.is_err() {
-            futures_util::future::pending::<()>().await;
-        }
-    }
-}
-
-async fn wait_for_deadline(deadline: Option<tokio::time::Instant>) {
-    match deadline {
-        Some(deadline) => tokio::time::sleep_until(deadline).await,
-        None => futures_util::future::pending::<()>().await,
-    }
-}
-
-async fn await_mission_boundary<T>(
-    future: impl Future<Output = T>,
-    rx: &mut tokio::sync::watch::Receiver<bool>,
-    deadline: Option<tokio::time::Instant>,
-) -> MissionBoundary<T> {
-    tokio::select! {
-        biased;
-        _ = wait_for_cancel(rx) => MissionBoundary::Cancelled,
-        _ = wait_for_deadline(deadline) => MissionBoundary::DeadlineExceeded,
-        result = future => MissionBoundary::Ready(result),
-    }
-}
-
-fn observed_mission_duration_ms(started: Instant, maximum_ms: i64, deadline_exceeded: bool) -> i64 {
-    if deadline_exceeded {
-        return maximum_ms;
-    }
-    i64::try_from(started.elapsed().as_millis())
-        .unwrap_or(i64::MAX)
-        .clamp(0, maximum_ms)
 }
 
 fn status_error_code(status: reqwest::StatusCode) -> &'static str {
@@ -1222,68 +1091,17 @@ pub async fn stream_backend_completion(
     if request.body.to_string().len() > 2 * 1024 * 1024 {
         return Err("Native provider request body exceeds the supported limit.".to_string());
     }
-    match (&request.mission_worker_execution, &request.provider_route) {
-        (Some(_), Some(_)) => {
-            return Err("Native provider egress has ambiguous route authority.".to_string())
-        }
-        (None, Some(binding)) => {
-            crate::backends::validate_current_native_provider_route(
-                &request.provider_id,
-                &request.model,
-                binding,
-            )?;
-        }
-        (None, None) => {
-            return Err("Native provider egress requires an authorized provider route.".to_string())
-        }
-        (Some(_), None) => {}
-    }
+    let route = request.provider_route.as_ref().ok_or_else(|| {
+        "Native provider egress requires an authorized provider route.".to_string()
+    })?;
+    crate::backends::validate_current_native_provider_route(
+        &request.provider_id,
+        &request.model,
+        route,
+    )?;
+
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
-    // Register the mission execution before reading its journal. This closes the
-    // preflight-to-egress race with early cancellation finalization: either the
-    // finalizer observes this lease, or this preflight observes its terminal fact.
-    let _mission_execution_lease = request
-        .mission_worker_execution
-        .as_ref()
-        .map(acquire_mission_execution)
-        .transpose()?;
-    let mission_preflight = request
-        .mission_worker_execution
-        .as_ref()
-        .map(|binding| {
-            crate::mission_workers::preflight_native_worker_completion(
-                binding,
-                &request.provider_id,
-                &request.model,
-                &request.body,
-            )
-        })
-        .transpose()?;
-    let mission_authority = match mission_preflight {
-        Some(crate::mission_workers::NativeWorkerCompletionPreflight::Execute(authority)) => {
-            Some(authority)
-        }
-        Some(crate::mission_workers::NativeWorkerCompletionPreflight::AlreadyCompleted) => {
-            let _ = app.emit(&channel, "[DONE]");
-            return Ok(());
-        }
-        None => None,
-    };
     let observation_started = Instant::now();
-    let mission_duration_limit_ms = mission_authority
-        .as_ref()
-        .map(|authority| authority.max_duration_ms());
-    let mission_deadline = mission_duration_limit_ms
-        .map(|maximum| {
-            u64::try_from(maximum)
-                .ok()
-                .and_then(|milliseconds| {
-                    tokio::time::Instant::from_std(observation_started)
-                        .checked_add(Duration::from_millis(milliseconds))
-                })
-                .ok_or_else(|| "Mission worker duration budget is invalid.".to_string())
-        })
-        .transpose()?;
     let credential = require_key(&request.provider_id)?;
     let connection =
         resolve_provider_connection(&request.provider_id, &credential, &request.model)?;
@@ -1305,54 +1123,28 @@ pub async fn stream_backend_completion(
     let mut cancelled = false;
     let mut completed = false;
     let mut transport_failed = false;
-    let mut duration_budget_exceeded = false;
-    let mut terminal_observation = MissionTerminalObservation::new(
-        &request.provider_id,
-        mission_authority
-            .as_ref()
-            .is_some_and(|authority| authority.expects_output()),
-    );
-    let mut mission_failure: Option<MissionProviderFailure> = None;
+    let mut terminal_observation = ProviderTerminalObservation::new(&request.provider_id, false);
 
     for attempt in 0..MAX_ATTEMPTS {
-        let mut req = client.post(&url).json(&request.body);
+        let mut outbound = client.post(&url).json(&request.body);
         if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
-            req = req.header(auth_name.as_str(), auth_value.as_str());
+            outbound = outbound.header(auth_name.as_str(), auth_value.as_str());
         }
         for (name, value) in extra_headers(&request.provider_id) {
-            req = req.header(name, value);
+            outbound = outbound.header(name, value);
         }
 
-        let response = match await_mission_boundary(req.send(), &mut rx, mission_deadline).await {
-            MissionBoundary::Ready(response) => response,
-            MissionBoundary::Cancelled => {
+        let response = tokio::select! {
+            biased;
+            _ = wait_for_cancel(&mut rx) => {
                 cancelled = true;
-                break;
+                None
             }
-            MissionBoundary::DeadlineExceeded => {
-                duration_budget_exceeded = true;
-                completed = true;
-                mission_failure = Some(MissionProviderFailure {
-                    code: "native-worker-duration-budget-exceeded",
-                    message: "The native provider exceeded the worker duration budget.",
-                    retryable: false,
-                });
-                emit_control(
-                    &app,
-                    &channel,
-                    TransportControlEvent {
-                        kind: "error",
-                        code: "duration-budget-exceeded",
-                        message: "The mission reached its provider-time limit.".to_string(),
-                        retryable: false,
-                        attempt: attempt + 1,
-                        retry_after_ms: None,
-                    },
-                );
-                break;
-            }
+            response = outbound.send() => Some(response)
         };
-
+        let Some(response) = response else {
+            break;
+        };
         let response = match response {
             Ok(response) => response,
             Err(error) if attempt + 1 < MAX_ATTEMPTS => {
@@ -1375,39 +1167,13 @@ pub async fn stream_backend_completion(
                         retry_after_ms: Some(delay.as_millis() as u64),
                     },
                 );
-                match await_mission_boundary(tokio::time::sleep(delay), &mut rx, mission_deadline)
-                    .await
-                {
-                    MissionBoundary::Ready(()) => {}
-                    MissionBoundary::Cancelled => {
+                tokio::select! {
+                    biased;
+                    _ = wait_for_cancel(&mut rx) => {
                         cancelled = true;
                         break;
                     }
-                    MissionBoundary::DeadlineExceeded => {
-                        duration_budget_exceeded = true;
-                        completed = true;
-                        mission_failure = Some(MissionProviderFailure {
-                            code: "native-worker-duration-budget-exceeded",
-                            message: "The native provider exceeded the worker duration budget.",
-                            retryable: false,
-                        });
-                        emit_control(
-                            &app,
-                            &channel,
-                            TransportControlEvent {
-                                kind: "error",
-                                code: "duration-budget-exceeded",
-                                message: "The mission reached its provider-time limit.".to_string(),
-                                retryable: false,
-                                attempt: attempt + 1,
-                                retry_after_ms: None,
-                            },
-                        );
-                        break;
-                    }
-                }
-                if cancelled {
-                    break;
+                    _ = tokio::time::sleep(delay) => {}
                 }
                 continue;
             }
@@ -1431,11 +1197,6 @@ pub async fn stream_backend_completion(
                 );
                 completed = true;
                 transport_failed = true;
-                mission_failure = Some(MissionProviderFailure {
-                    code: "native-provider-transport-failed",
-                    message: "The native provider connection failed after retrying.",
-                    retryable: true,
-                });
                 break;
             }
         };
@@ -1457,39 +1218,13 @@ pub async fn stream_backend_completion(
                         retry_after_ms: Some(delay.as_millis() as u64),
                     },
                 );
-                match await_mission_boundary(tokio::time::sleep(delay), &mut rx, mission_deadline)
-                    .await
-                {
-                    MissionBoundary::Ready(()) => {}
-                    MissionBoundary::Cancelled => {
+                tokio::select! {
+                    biased;
+                    _ = wait_for_cancel(&mut rx) => {
                         cancelled = true;
                         break;
                     }
-                    MissionBoundary::DeadlineExceeded => {
-                        duration_budget_exceeded = true;
-                        completed = true;
-                        mission_failure = Some(MissionProviderFailure {
-                            code: "native-worker-duration-budget-exceeded",
-                            message: "The native provider exceeded the worker duration budget.",
-                            retryable: false,
-                        });
-                        emit_control(
-                            &app,
-                            &channel,
-                            TransportControlEvent {
-                                kind: "error",
-                                code: "duration-budget-exceeded",
-                                message: "The mission reached its provider-time limit.".to_string(),
-                                retryable: false,
-                                attempt: attempt + 1,
-                                retry_after_ms: None,
-                            },
-                        );
-                        break;
-                    }
-                }
-                if cancelled {
-                    break;
+                    _ = tokio::time::sleep(delay) => {}
                 }
                 continue;
             }
@@ -1507,19 +1242,6 @@ pub async fn stream_backend_completion(
             );
             completed = true;
             transport_failed = true;
-            mission_failure = Some(if retryable {
-                MissionProviderFailure {
-                    code: "native-provider-temporarily-unavailable",
-                    message: "The native provider remained unavailable after retrying.",
-                    retryable: true,
-                }
-            } else {
-                MissionProviderFailure {
-                    code: "native-provider-request-rejected",
-                    message: "The native provider rejected the request.",
-                    retryable: false,
-                }
-            });
             break;
         }
 
@@ -1531,21 +1253,6 @@ pub async fn stream_backend_completion(
                 biased;
                 _ = wait_for_cancel(&mut rx) => {
                     cancelled = true;
-                    break;
-                }
-                _ = wait_for_deadline(mission_deadline) => {
-                    duration_budget_exceeded = true;
-                    completed = true;
-                    mission_failure = Some(MissionProviderFailure {
-                        code: "native-worker-duration-budget-exceeded",
-                        message: "The native provider exceeded the worker duration budget.",
-                        retryable: false,
-                    });
-                    emit_control(&app, &channel, TransportControlEvent {
-                        kind: "error", code: "duration-budget-exceeded",
-                        message: "The mission reached its provider-time limit.".to_string(),
-                        retryable: false, attempt: attempt + 1, retry_after_ms: None,
-                    });
                     break;
                 }
                 chunk = stream.next() => {
@@ -1562,46 +1269,36 @@ pub async fn stream_backend_completion(
                                 });
                                 completed = true;
                                 transport_failed = true;
-                                mission_failure = Some(MissionProviderFailure {
-                                    code: "native-provider-response-too-large",
-                                    message: "The native provider response exceeded Fable's limit.",
-                                    retryable: false,
-                                });
                                 break;
                             }
                             let lines = match drain_strict_sse_lines(&mut buffer, false) {
                                 Ok(lines) => lines,
                                 Err(()) => {
                                     emit_control(&app, &channel, TransportControlEvent {
-                                        kind: "error", code: "invalid-utf8",
+                                        kind: "error",
+                                        code: "invalid-utf8",
                                         message: "Provider stream contained invalid UTF-8.".to_string(),
-                                        retryable: false, attempt: attempt + 1, retry_after_ms: None,
+                                        retryable: false,
+                                        attempt: attempt + 1,
+                                        retry_after_ms: None,
                                     });
                                     completed = true;
                                     transport_failed = true;
-                                    mission_failure = Some(MissionProviderFailure {
-                                        code: "native-provider-invalid-utf8",
-                                        message: "The native provider stream contained invalid UTF-8.",
-                                        retryable: false,
-                                    });
                                     buffer.clear();
                                     break;
                                 }
                             };
                             for line in lines {
                                 if let Some(payload) = normalize_sse_line(&line) {
-                                    if mission_authority.is_some() {
-                                        terminal_observation.observe(&payload);
-                                    }
+                                    terminal_observation.observe(&payload);
                                     let _ = app.emit(&channel, payload);
                                 }
                             }
                         }
                         Some(Err(error)) => {
-                            let code = request_error_code(&error);
                             emit_control(&app, &channel, TransportControlEvent {
                                 kind: "error",
-                                code,
+                                code: request_error_code(&error),
                                 message: "Provider stream ended unexpectedly.".to_string(),
                                 retryable: true,
                                 attempt: attempt + 1,
@@ -1609,29 +1306,22 @@ pub async fn stream_backend_completion(
                             });
                             completed = true;
                             transport_failed = true;
-                            mission_failure = Some(MissionProviderFailure {
-                                code: "native-provider-stream-interrupted",
-                                message: "The native provider stream ended unexpectedly.",
-                                retryable: true,
-                            });
                             break;
                         }
                         None => {
                             completed = true;
                             break;
-                        },
+                        }
                     }
                 }
             }
         }
-        if !buffer.is_empty() && !cancelled && !transport_failed && !duration_budget_exceeded {
+        if !buffer.is_empty() && !cancelled && !transport_failed {
             match drain_strict_sse_lines(&mut buffer, true) {
                 Ok(lines) => {
                     for line in lines {
                         if let Some(payload) = normalize_sse_line(&line) {
-                            if mission_authority.is_some() {
-                                terminal_observation.observe(&payload);
-                            }
+                            terminal_observation.observe(&payload);
                             let _ = app.emit(&channel, payload);
                         }
                     }
@@ -1651,11 +1341,6 @@ pub async fn stream_backend_completion(
                     );
                     completed = true;
                     transport_failed = true;
-                    mission_failure = Some(MissionProviderFailure {
-                        code: "native-provider-invalid-utf8",
-                        message: "The native provider stream contained invalid UTF-8.",
-                        retryable: false,
-                    });
                 }
             }
         }
@@ -1667,99 +1352,9 @@ pub async fn stream_backend_completion(
         .map(|mut map| map.remove(&request.request_id));
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
     let _ = app.emit(&channel, terminal);
-    if mission_authority.is_some() && !cancelled && completed && mission_failure.is_none() {
-        mission_failure = if terminal_observation.provider_error() {
-            Some(MissionProviderFailure {
-                code: "native-provider-payload-error",
-                message: "The native provider returned an error payload.",
-                retryable: false,
-            })
-        } else if terminal_observation.output_overflow() {
-            Some(MissionProviderFailure {
-                code: "native-provider-output-too-large",
-                message: "The native provider output exceeded Fable's mission receipt limit.",
-                retryable: false,
-            })
-        } else if terminal_observation.finish_reason() == Some("length") {
-            Some(MissionProviderFailure {
-                code: "native-provider-output-limit",
-                message: "The native provider reached the worker output limit.",
-                retryable: false,
-            })
-        } else if !terminal_observation.clean_stop() {
-            Some(MissionProviderFailure {
-                code: "native-provider-terminal-incomplete",
-                message: "The native provider ended without a successful stop.",
-                retryable: false,
-            })
-        } else {
-            None
-        };
-    }
-    if !cancelled && mission_failure.is_none() {
-        if let (Some(authority), Some((input_tokens, output_tokens))) =
-            (mission_authority.as_ref(), terminal_observation.usage())
-        {
-            if authority.usage_exceeds_budget(input_tokens, output_tokens) {
-                mission_failure = Some(MissionProviderFailure {
-                    code: "native-worker-token-budget-exceeded",
-                    message: "The native provider usage exceeded the worker token budget.",
-                    retryable: false,
-                });
-            }
-        }
-    }
-    let mission_settlement = if let Some(authority) = mission_authority.as_ref() {
-        let duration_ms = observed_mission_duration_ms(
-            observation_started,
-            authority.max_duration_ms(),
-            duration_budget_exceeded,
-        );
-        let attempt_number = authority.attempt_number();
-        let outcome = if cancelled {
-            Some(crate::mission_workers::NativeWorkerTerminalOutcome::Cancelled)
-        } else if completed && mission_failure.is_none() {
-            Some(
-                crate::mission_workers::NativeWorkerTerminalOutcome::Completed {
-                    text: terminal_observation
-                        .captures_output()
-                        .then(|| terminal_observation.output().to_string()),
-                    input_tokens: terminal_observation
-                        .usage()
-                        .map(|usage| usage.0)
-                        .unwrap_or_default(),
-                    output_tokens: terminal_observation
-                        .usage()
-                        .map(|usage| usage.1)
-                        .unwrap_or_default(),
-                    duration_ms,
-                    attempt_number,
-                },
-            )
-        } else {
-            mission_failure.map(|failure| {
-                crate::mission_workers::NativeWorkerTerminalOutcome::Failed {
-                    code: failure.code,
-                    message: failure.message,
-                    retryable: failure.retryable,
-                    usage: terminal_observation.usage(),
-                    duration_ms,
-                    attempt_number,
-                }
-            })
-        };
-        outcome.map_or(Ok(()), |outcome| {
-            crate::mission_workers::settle_native_worker_completion(authority, outcome)
-        })
-    } else {
-        Ok(())
-    };
-    // Record the model-call lifecycle into the unified action-history store
-    // (observation only; no payload content is retained).
+
     let (status, code) = if cancelled {
         ("cancelled", "cancelled")
-    } else if let Some(failure) = mission_failure {
-        ("failed", failure.code)
     } else if transport_failed {
         ("failed", "provider-failed")
     } else if completed {
@@ -1781,41 +1376,23 @@ pub async fn stream_backend_completion(
         request.model, request.provider_id
     ))
     .record();
+
     if !cancelled && !completed {
         return Err("Provider request ended without a terminal state.".to_string());
     }
-    mission_settlement?;
-    if !cancelled
-        && completed
-        && !transport_failed
-        && mission_failure.is_none()
-        && terminal_observation.clean_stop()
-    {
+    if !cancelled && completed && !transport_failed && terminal_observation.clean_stop() {
         let latency_ms =
             u64::try_from(observation_started.elapsed().as_millis()).unwrap_or(u64::MAX);
         let observed_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        if let Some(authority) = mission_authority.as_ref() {
-            let _ = crate::backends::record_native_provider_route_observation(
-                authority.observation_owner(),
-                &request.provider_id,
-                &request.model,
-                authority.provider_route_id(),
-                &request.request_id,
-                latency_ms,
-                terminal_observation.usage(),
-                &observed_at,
-            );
-        } else if let Some(binding) = request.provider_route.as_ref() {
-            let _ = crate::backends::record_current_native_provider_route_observation(
-                &request.provider_id,
-                &request.model,
-                binding,
-                &request.request_id,
-                latency_ms,
-                terminal_observation.usage(),
-                &observed_at,
-            );
-        }
+        let _ = crate::backends::record_current_native_provider_route_observation(
+            &request.provider_id,
+            &request.model,
+            route,
+            &request.request_id,
+            latency_ms,
+            terminal_observation.usage(),
+            &observed_at,
+        );
     }
     Ok(())
 }
@@ -2269,7 +1846,7 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn mission_terminal_observation_requires_one_clean_compatible_stop() {
+    fn terminal_observation_requires_one_clean_compatible_stop() {
         let mut observation = OpenAiCompatibleTerminalObservation::default();
         observation.observe(r#"{"choices":[{"delta":{"content":"ok"},"finish_reason":null}]}"#);
         assert!(!observation.clean_stop());
@@ -2292,7 +1869,7 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn mission_terminal_observation_captures_one_bounded_native_text_output() {
+    fn terminal_observation_captures_one_bounded_native_text_output() {
         let mut observation = OpenAiCompatibleTerminalObservation::new_for_provider("openai", true);
         observation.observe(r#"{"choices":[{"delta":{"content":"Hello "}}]}"#);
         observation
@@ -2307,7 +1884,7 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn minimax_mission_terminal_deduplicates_cumulative_content() {
+    fn minimax_terminal_observation_deduplicates_cumulative_content() {
         let mut observation =
             OpenAiCompatibleTerminalObservation::new_for_provider("minimax", true);
         observation.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
@@ -2327,7 +1904,7 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn anthropic_mission_terminal_requires_start_delta_usage_and_stop() {
+    fn anthropic_terminal_observation_requires_start_delta_usage_and_stop() {
         let mut observation = AnthropicTerminalObservation::new(true);
         observation.observe(r#"{"type":"message_start","message":{"usage":{"input_tokens":7}}}"#);
         observation.observe(
@@ -2369,7 +1946,7 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn gemini_mission_terminal_requires_exact_stop_and_final_usage() {
+    fn gemini_terminal_observation_requires_exact_stop_and_final_usage() {
         let mut observation = GeminiTerminalObservation::new(true);
         observation.observe(r#"{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}"#);
         observation.observe(
@@ -2388,90 +1965,6 @@ mod transport_policy_tests {
         let mut unknown = GeminiTerminalObservation::new(false);
         unknown.observe(r#"{"modelVersion":"gemini-test"}"#);
         assert!(!unknown.clean_stop());
-    }
-
-    #[test]
-    fn mission_execution_lease_rejects_concurrent_provider_egress() {
-        let binding = crate::mission_workers::NativeWorkerExecutionBinding {
-            run_id: "lease-run".into(),
-            worker_id: "lease-worker".into(),
-            worker_started_event_id: "lease-start".into(),
-            route_selected_event_id: "lease-route".into(),
-            usage_event_id: "lease-usage".into(),
-            completion_event_id: "lease-complete".into(),
-            evaluation_event_id: "lease-evaluation".into(),
-            result_event_id: "lease-result".into(),
-            failure_event_id: "lease-fail".into(),
-            idempotency_key: "lease-terminal".into(),
-            expected_run_revision: 3,
-            expected_last_sequence: 3,
-            checkpoint_event_id: None,
-            checkpoint_restore_event_id: None,
-            tool_evidence: None,
-        };
-        let lease = acquire_mission_execution(&binding).expect("first lease");
-        assert!(acquire_mission_execution(&binding).is_err());
-        let mut sibling = binding.clone();
-        sibling.worker_id = "lease-worker-sibling".into();
-        sibling.worker_started_event_id = "lease-start-sibling".into();
-        let sibling_lease = acquire_mission_execution(&sibling)
-            .expect("another worker in the same run owns an independent lease");
-        assert!(mission_run_has_active_native_execution("lease-run").unwrap());
-        drop(sibling_lease);
-        drop(lease);
-        assert!(acquire_mission_execution(&binding).is_ok());
-    }
-
-    #[tokio::test]
-    async fn mission_boundary_enforces_one_deadline_across_work_and_backoff() {
-        let (_tx, mut rx) = tokio::sync::watch::channel(false);
-        let deadline = tokio::time::Instant::now() + Duration::from_millis(5);
-        let delayed = await_mission_boundary(
-            tokio::time::sleep(Duration::from_millis(50)),
-            &mut rx,
-            Some(deadline),
-        )
-        .await;
-        assert_eq!(delayed, MissionBoundary::DeadlineExceeded);
-
-        let (_tx, mut rx) = tokio::sync::watch::channel(false);
-        let ready = await_mission_boundary(
-            async { "ready" },
-            &mut rx,
-            Some(tokio::time::Instant::now() + Duration::from_secs(1)),
-        )
-        .await;
-        assert_eq!(ready, MissionBoundary::Ready("ready"));
-
-        let (tx, mut rx) = tokio::sync::watch::channel(false);
-        drop(tx);
-        let ready_after_sender_close = await_mission_boundary(
-            async { "ready-after-close" },
-            &mut rx,
-            Some(tokio::time::Instant::now() + Duration::from_secs(1)),
-        )
-        .await;
-        assert_eq!(
-            ready_after_sender_close,
-            MissionBoundary::Ready("ready-after-close")
-        );
-    }
-
-    #[tokio::test]
-    async fn mission_boundary_gives_an_observed_cancellation_priority() {
-        let (tx, mut rx) = tokio::sync::watch::channel(false);
-        tx.send(true).unwrap();
-        let outcome = await_mission_boundary(
-            async { "provider-finished" },
-            &mut rx,
-            Some(tokio::time::Instant::now()),
-        )
-        .await;
-        assert_eq!(outcome, MissionBoundary::Cancelled);
-        assert_eq!(
-            observed_mission_duration_ms(Instant::now(), 120_000, true),
-            120_000
-        );
     }
 
     #[test]
@@ -2583,21 +2076,6 @@ mod transport_policy_tests {
             .filter(|id| !matches!(*id, "anthropic" | "gemini" | "custom"))
             .collect();
         assert_eq!(profiled, expected_profiled);
-    }
-
-    #[test]
-    fn mission_provider_family_is_registered_and_fail_closed() {
-        for provider_id in ["openai", "xai", "openrouter", "deepseek", "zai", "custom"] {
-            assert!(supports_native_mission_provider(provider_id));
-            assert_eq!(provider_kind(provider_id), ProviderKind::OpenAiCompat);
-        }
-        for provider_id in ["anthropic", "gemini"] {
-            assert!(supports_native_mission_provider(provider_id));
-            assert_ne!(provider_kind(provider_id), ProviderKind::OpenAiCompat);
-        }
-        for provider_id in ["unknown", ""] {
-            assert!(!supports_native_mission_provider(provider_id));
-        }
     }
 
     #[test]

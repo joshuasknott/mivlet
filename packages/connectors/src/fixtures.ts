@@ -8,12 +8,10 @@
  */
 
 import type {
-  AutomationRule,
   ConnectorManifest,
   ConnectorSearchItem,
   FirstWaveConnectorId,
   KnowledgeSource,
-  ProjectWorkspace,
   ThreadSummary,
   WorkspaceDirective
 } from "@fable/protocol";
@@ -354,8 +352,4 @@ export const directiveFixtures: WorkspaceDirective[] = [];
 
 export const chatThreadFixtures: ThreadSummary[] = [];
 
-export const projectFixtures: ProjectWorkspace[] = [];
-
 export const knowledgeSourceFixtures: KnowledgeSource[] = [];
-
-export const automationFixtures: AutomationRule[] = [];

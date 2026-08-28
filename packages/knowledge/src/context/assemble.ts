@@ -1,14 +1,13 @@
 /**
  * Bounded context assembler.
  *
- * Assembles the agent run's system context in a DETERMINISTIC order:
+ * Assembles the agent turn's system context in a DETERMINISTIC order:
  *   1. system instructions (static prefix)
  *   2. current conversation (latest N turns, budget-boxed)
- *   3. selected project context (project-scoped pinned sources/memory)
- *   4. pinned context (scope-respecting)
- *   5. approved memory (scope-respecting, forgotten/disabled excluded)
- *   6. retrieved source excerpts (from retrieval, with citations)
- *   7. tool results (most recent)
+ *   3. pinned context (scope-respecting)
+ *   4. approved memory (scope-respecting, forgotten/disabled excluded)
+ *   5. retrieved source excerpts (from retrieval, with citations)
+ *   6. tool results (most recent)
  *
  * Every contributed memory/source is recorded with the REASON it entered the
  * run (ContextContribution) so the user can inspect citations and memory usage
@@ -19,15 +18,14 @@
  */
 
 import type {
-  Artifact,
   CitationRanking,
   KnowledgeScope,
   MemoryRecord,
   NativeMessage,
   PinnedContextEntry,
-  PreparedRunContext,
-  RunContextAudience,
-  RunContextReceipt
+  PreparedExecutionContext,
+  ExecutionContextAudience,
+  ExecutionContextReceipt
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
@@ -37,7 +35,6 @@ import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 export type ContextContributionReason =
   | "system-instruction"
   | "conversation"
-  | "project-context"
   | "pinned"
   | "memory-approved"
   | "memory-pinned"
@@ -56,10 +53,10 @@ export interface AssembledCitation extends AuthorityScopedKnowledgeCitation {
   ranking: CitationRanking;
 }
 
-export interface AssembledContext extends PreparedRunContext {
+export interface AssembledContext extends PreparedExecutionContext {
   /** The full system-message prefix text, in deterministic order. */
   systemPrefix: string;
-  /** The conversation messages carried into the run (budget-boxed). */
+  /** The conversation messages carried into the turn (budget-boxed). */
   messages: NativeMessage[];
   /** Citations backing the retrieved excerpts, for inspection. */
   citations: AssembledCitation[];
@@ -70,7 +67,7 @@ export interface AssembledContext extends PreparedRunContext {
 export interface ContextAuthorizationRules {
   /**
    * Predicate over a connector, optional account, and exact Fable Connection.
-   * Return false to exclude that source before it enters the run (for example,
+   * Return false to exclude that source before it enters the turn (for example,
    * after revocation or selection change). Defaults to allow-all.
    */
   isSourceAuthorized?: (
@@ -81,21 +78,19 @@ export interface ContextAuthorizationRules {
 }
 
 export interface AssembleContextInput {
-  runId: string;
+  attemptId: string;
   /** Receipt timestamp; injectable for deterministic tests. */
   assembledAt?: string;
   scope?: KnowledgeScope;
   /** Explicit run audience. Missing record ownership fails closed when supplied. */
-  audience?: RunContextAudience;
+  audience?: ExecutionContextAudience;
   /** Static system instruction text (the agent's base instructions). */
   systemInstructions?: string;
   /** Current conversation messages (assembled in step 2). */
   conversation?: NativeMessage[];
   /** How many latest turns to carry. Default 6. */
   conversationTurns?: number;
-  /** Project-scoped pinned context entries (step 3). */
-  projectPinned?: PinnedContextEntry[];
-  /** All pinned context entries (step 4 filters by scope). */
+  /** Pinned context entries (step 3 filters by scope). */
   pinned?: PinnedContextEntry[];
   /** Approved memory (step 5 filters to scope + live + authorized). */
   memory: MemoryRecord[];
@@ -121,7 +116,7 @@ const MAX_TOOL_RESULT_CHARS = 1_200;
  * reason for every contribution.
  */
 export function assembleContext(input: AssembleContextInput): AssembledContext {
-  if (!input.runId.trim()) throw new Error("Context assembly requires a stable run id.");
+  if (!input.attemptId.trim()) throw new Error("Context assembly requires a stable attempt id.");
   const assembledAt = input.assembledAt ?? new Date().toISOString();
   if (!Number.isFinite(Date.parse(assembledAt))) {
     throw new Error("Context assembly requires a valid assembledAt timestamp.");
@@ -157,14 +152,13 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     });
   }
 
-  // Step 3 + 4: pinned context. Project-scoped pinned first (when the run is
-  // project/thread-scoped), then global pinned. Only entries whose scope is
-  // satisfied by the run scope enter. (Sources resolve via the store; here we
+  // Step 3: pinned context. Only entries whose scope is
+  // satisfied by the turn scope enter. (Sources resolve via the store; here we
   // carry memory pinned entries — source pinned entries are surfaced through
   // retrieval + their explicit pinned boost.)
   const isAuthorized = input.authorization?.isSourceAuthorized ?? (() => true);
 
-  const pinnedEntries = [...(input.projectPinned ?? []), ...(input.pinned ?? [])].filter(
+  const pinnedEntries = (input.pinned ?? []).filter(
     (entry) => scopeSatisfies(entry.scope, scope) && entry.memoryId
   );
   const pinnedMemorySeen = new Set<string>();
@@ -206,9 +200,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
         kind: "memory",
         reason: record.pinned
           ? "memory-pinned"
-          : record.scope?.level === "project"
-            ? "project-context"
-            : "memory-approved"
+          : "memory-approved"
       });
     }
     if (memoryLines.length > 1) pushPart(memoryLines.join("\n"));
@@ -270,7 +262,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   }));
   const receipt = immutableReceipt(input.audience ? {
     version: 2,
-    runId: input.runId,
+    attemptId: input.attemptId,
     assembledAt,
     scope: { ...scope },
     audience: { ...input.audience },
@@ -281,7 +273,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     contributions: usage.map((contribution) => ({ ...contribution }))
   } : {
     version: 1,
-    runId: input.runId,
+    attemptId: input.attemptId,
     assembledAt,
     scope: { ...scope },
     citations: receiptCitations,
@@ -290,7 +282,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
   return { systemPrefix, receipt, messages: conversation, citations, usage };
 }
 
-function immutableReceipt(receipt: RunContextReceipt): RunContextReceipt {
+function immutableReceipt(receipt: ExecutionContextReceipt): ExecutionContextReceipt {
   Object.freeze(receipt.scope);
   if (receipt.version === 2) Object.freeze(receipt.audience);
   for (const citation of receipt.citations) {
@@ -339,30 +331,4 @@ function citationConnector(citation: AuthorityScopedKnowledgeCitation): string {
 function truncate(text: string, max: number): string {
   if (text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}…`;
-}
-
-/** Re-export the artifact helper for callers building artifacts from runs. */
-export function artifactFromRun(input: {
-  runId: string;
-  title: string;
-  content: string;
-  sourceIds?: string[];
-  scope?: KnowledgeScope;
-  kind?: Artifact["kind"];
-  now?: string;
-}): Artifact {
-  const now = input.now ?? new Date().toISOString();
-  return {
-    id: `art-${input.runId}`,
-    title: input.title,
-    kind: input.kind ?? "summary",
-    content: input.content,
-    provenance: {
-      runId: input.runId,
-      createdAt: now,
-      sourceIds: input.sourceIds ?? []
-    },
-    scope: input.scope,
-    pinned: false
-  };
 }

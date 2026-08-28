@@ -31,7 +31,7 @@ describe("local knowledge refresh", () => {
   });
 
   it("preserves identity and controls while replacing searchable content", () => {
-    const source = { ...original, pinned: false, disabled: true, scope: { level: "project" as const, projectId: "p1" } };
+    const source = { ...original, pinned: false, disabled: true, scope: { level: "thread" as const, threadId: "thread-1" } };
     const result = applyLocalKnowledgeRefresh(source, request());
     expect(result.outcome).toBe("updated");
     expect(result.source).toMatchObject({

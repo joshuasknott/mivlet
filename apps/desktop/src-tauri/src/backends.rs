@@ -875,19 +875,6 @@ pub(crate) fn provider_route_observation_snapshot(
     }
 }
 
-pub(crate) fn provider_route_quality_snapshot(
-    summary: &crate::store::repos::provider_route_quality_observation::ProviderRouteQualitySummary,
-) -> crate::models::ProviderRouteQualitySnapshot {
-    crate::models::ProviderRouteQualitySnapshot {
-        reference: summary.reference.clone(),
-        policy_revision_ref: summary.policy_revision_ref.clone(),
-        sample_count: summary.sample_count,
-        passed_count: summary.passed_count,
-        routing_score_basis_points: summary.routing_score_basis_points,
-        latest_evaluated_at: summary.latest_evaluated_at.clone(),
-    }
-}
-
 pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
     format!("boundary:member-private:account-owned-provider:{provider_id}:local-credential-egress")
 }
@@ -1094,70 +1081,6 @@ pub(crate) fn validate_persisted_native_provider_route_selection_for_policy(
         || chrono::DateTime::parse_from_rfc3339(&selection.selected_at).is_err()
     {
         return Err("Native provider route selection is invalid.".into());
-    }
-    Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn validate_native_provider_route_selection_in_tx(
-    tx: &rusqlite::Connection,
-    store: &crate::store::Store,
-    internal_user_id: &str,
-    provider_id: &str,
-    model: &str,
-    expected_route_id: &str,
-    quality_policy_ref: Option<&str>,
-    selection: &crate::models::ProviderRouteSelection,
-) -> Result<(), String> {
-    let observations =
-        crate::store::repos::provider_route_observation::summaries(tx, store, internal_user_id)
-            .map_err(|error| error.to_string())?;
-    let expected_observation = observations
-        .get(expected_route_id)
-        .map(provider_route_observation_snapshot);
-    let expected_quality = match quality_policy_ref {
-        Some(policy_revision_ref) => {
-            crate::store::repos::provider_route_quality_observation::summaries_for_policy(
-                tx,
-                store,
-                internal_user_id,
-                policy_revision_ref,
-            )
-            .map_err(|error| error.to_string())?
-            .get(expected_route_id)
-            .map(provider_route_quality_snapshot)
-        }
-        None => None,
-    };
-    validate_provider_route_observation_snapshot(
-        expected_route_id,
-        selection.observation.as_ref(),
-    )?;
-    validate_provider_route_quality_snapshot(expected_route_id, selection.quality.as_ref())?;
-    let pricing = exact_model_pricing_evidence(provider_id, model);
-    validate_provider_route_cost_snapshot(
-        provider_id,
-        model,
-        pricing.as_ref(),
-        selection.cost.as_ref(),
-    )?;
-    let expected_reason = native_provider_route_reason_with_evidence(
-        provider_id,
-        model,
-        expected_observation.as_ref(),
-        expected_quality.as_ref(),
-        selection.cost.as_ref(),
-    )?;
-    if selection.provider_route_id != expected_route_id
-        || selection.reason != expected_reason
-        || selection.observation != expected_observation
-        || selection.quality != expected_quality
-        || selection.boundary_policy_ref.as_deref()
-            != Some(native_provider_route_boundary(provider_id).as_str())
-        || selection.fallback_from_provider_route_id.is_some()
-        || chrono::DateTime::parse_from_rfc3339(&selection.selected_at).is_err()
-    {
-        return Err("Native provider route selection does not match current evidence.".into());
     }
     Ok(())
 }

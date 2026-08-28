@@ -1,5 +1,5 @@
 import type { ProviderRouteExecutionBinding } from "@fable/protocol";
-import { catalogueCapabilities, selectMissionProviderRoute } from "@fable/connectors";
+import { catalogueCapabilities, selectProviderRoute } from "@fable/connectors";
 import { listRuntimeNativeProviderRoutes } from "../runtime";
 
 export async function selectNativeProviderRoute(input: {
@@ -16,7 +16,7 @@ export async function selectNativeProviderRoute(input: {
   );
   const capabilities = catalogueCapabilities(input.providerId, input.model);
   if (!pinnedRoute || !capabilities) throw new Error("The selected model has no authorized provider route.");
-  const decision = selectMissionProviderRoute({
+  const decision = selectProviderRoute({
     workspaceId: pinnedRoute.workspaceId,
     capabilityId: "model.generate",
     requiredInputTokens: input.requiredInputTokens,

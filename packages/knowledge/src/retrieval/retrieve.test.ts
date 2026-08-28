@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, RunContextAudience, SourceChunk } from "@fable/protocol";
+import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { filterRetrievable, retrieve, type RetrievalSource } from "./retrieve";
 import { cosineSimilarity, type EmbeddingProvider } from "./semantic";
@@ -35,17 +35,17 @@ function src(source: KnowledgeSource, chunks: SourceChunk[]): RetrievalSource {
   return { source, chunks };
 }
 
-const PRIVATE_A: RunContextAudience = {
+const PRIVATE_A: ExecutionContextAudience = {
   authority: "local",
   visibility: "member-private",
   actingMemberId: "member-a" as never
 };
-const SHARED_A: RunContextAudience = {
+const SHARED_A: ExecutionContextAudience = {
   authority: "convex",
   visibility: "workspace-shared",
   actingMemberId: "member-a" as never
 };
-const PRIVATE_USER: RunContextAudience = {
+const PRIVATE_USER: ExecutionContextAudience = {
   authority: "local",
   visibility: "member-private",
   actingInternalUserId: "user-local" as never
@@ -182,7 +182,7 @@ describe("retrieve — scope isolation", () => {
         makeChunk("global", 0, "connector")
       ]),
       src(
-        makeSource({ id: "thread", title: "Thread doc connector", scope: { level: "thread", threadId: "t1", projectId: "p1" } }),
+        makeSource({ id: "thread", title: "Thread doc connector", scope: { level: "thread", threadId: "t1" } }),
         [makeChunk("thread", 0, "connector")]
       )
     ];
@@ -196,47 +196,22 @@ describe("retrieve — scope isolation", () => {
         makeChunk("global", 0, "connector")
       ]),
       src(
-        makeSource({ id: "thread", title: "Thread doc connector", scope: { level: "thread", threadId: "t1", projectId: "p1" } }),
+        makeSource({ id: "thread", title: "Thread doc connector", scope: { level: "thread", threadId: "t1" } }),
         [makeChunk("thread", 0, "connector")]
       ),
       src(
-        makeSource({ id: "other", title: "Other thread connector", scope: { level: "thread", threadId: "t2", projectId: "p1" } }),
+        makeSource({ id: "other", title: "Other thread connector", scope: { level: "thread", threadId: "t2" } }),
         [makeChunk("other", 0, "connector")]
       )
     ];
     const result = await retrieve(sources, {
       query: "connector",
-      scope: { level: "thread", threadId: "t1", projectId: "p1" }
+      scope: { level: "thread", threadId: "t1" }
     });
     const ids = result.citations.map((c) => c.sourceId).sort();
     expect(ids).toEqual(["global", "thread"]);
   });
 
-  it("project run sees global + matching project sources but excludes other projects or thread sources", async () => {
-    const sources = [
-      src(makeSource({ id: "global", title: "Global doc", scope: GLOBAL_SCOPE }), [
-        makeChunk("global", 0, "connector")
-      ]),
-      src(
-        makeSource({ id: "project-match", title: "Project matched doc", scope: { level: "project", projectId: "p1" } }),
-        [makeChunk("project-match", 0, "connector")]
-      ),
-      src(
-        makeSource({ id: "project-other", title: "Project other doc", scope: { level: "project", projectId: "p2" } }),
-        [makeChunk("project-other", 0, "connector")]
-      ),
-      src(
-        makeSource({ id: "thread-match", title: "Thread matched doc", scope: { level: "thread", threadId: "t1", projectId: "p1" } }),
-        [makeChunk("thread-match", 0, "connector")]
-      )
-    ];
-    const result = await retrieve(sources, {
-      query: "connector",
-      scope: { level: "project", projectId: "p1" }
-    });
-    const ids = result.citations.map((c) => c.sourceId).sort();
-    expect(ids).toEqual(["global", "project-match"]);
-  });
 });
 
 describe("retrieve — stale / disabled exclusion", () => {
@@ -346,7 +321,7 @@ describe("filterRetrievable", () => {
       src(makeSource({ id: "disabled", disabled: true }), [makeChunk("disabled", 0, "x")]),
       src(makeSource({ id: "errored", status: "error" }), [makeChunk("errored", 0, "x")]),
       src(
-        makeSource({ id: "thread", scope: { level: "thread", threadId: "t1", projectId: "p1" } }),
+        makeSource({ id: "thread", scope: { level: "thread", threadId: "t1" } }),
         [makeChunk("thread", 0, "x")]
       )
     ];
@@ -508,19 +483,19 @@ describe("retrieve — citation enrichment", () => {
           connectionId: "connection-alpha",
           sourcePath: "docs/alpha.md",
           mediaType: "text/markdown",
-          scope: { level: "project", projectId: "p1" }
+          scope: { level: "thread", threadId: "thread-1" }
         }),
         [makeChunk("s1", 0, "alpha")]
       )
     ];
     const result = await retrieve(sources, {
       query: "alpha",
-      scope: { level: "project", projectId: "p1" }
+      scope: { level: "thread", threadId: "thread-1" }
     });
     expect(result.citations[0].connectionId).toBe("connection-alpha");
     expect(result.citations[0].sourcePath).toBe("docs/alpha.md");
     expect(result.citations[0].mediaType).toBe("text/markdown");
-    expect(result.citations[0].scope).toEqual({ level: "project", projectId: "p1" });
+    expect(result.citations[0].scope).toEqual({ level: "thread", threadId: "thread-1" });
   });
 });
 

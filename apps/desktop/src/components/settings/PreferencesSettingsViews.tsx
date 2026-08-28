@@ -1,12 +1,9 @@
-import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
 import { Moon } from "@phosphor-icons/react/dist/csr/Moon";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
-import { useEffect, useState } from "react";
 import type {
   CustomApprovalSettings,
-  RemoteControlStatusSnapshot,
   VoiceCapability,
 } from "@fable/protocol";
 import {
@@ -16,7 +13,6 @@ import {
   customApprovalToggleLabel,
 } from "../../lib/approval-copy";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
-import { getRuntimeRemoteControlStatus } from "../../runtime";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 
 export function ApprovalsSettingsView({
@@ -26,19 +22,6 @@ export function ApprovalsSettingsView({
   runtime: ShellRuntime;
   onStatus: (message: string) => void;
 }) {
-  const [remoteStatus, setRemoteStatus] =
-    useState<RemoteControlStatusSnapshot | null>();
-
-  useEffect(() => {
-    let active = true;
-    void getRuntimeRemoteControlStatus().then((status) => {
-      if (active) setRemoteStatus(status);
-    });
-    return () => {
-      active = false;
-    };
-  }, []);
-
   const handleToggle = (key: keyof CustomApprovalSettings, value: boolean) => {
     runtime.updateCustomApprovalSetting(key, value);
     onStatus(`${customApprovalToggleLabel(key)} ${value ? "on" : "off"}.`);
@@ -136,38 +119,6 @@ export function ApprovalsSettingsView({
         </p>
       </section>
 
-      <section
-        className="approvals-settings__section"
-        aria-labelledby="mobile-approvals-title"
-      >
-        <div className="profile-section__heading">
-          <span className="settings-panel__icon" aria-hidden="true">
-            <DeviceMobile size={19} />
-          </span>
-          <span>
-            <strong id="mobile-approvals-title">Mobile approvals</strong>
-            <small>
-              A phone can answer a request, but only this computer can run the
-              action.
-            </small>
-          </span>
-        </div>
-        <div className="remote-approval-status" role="status">
-          <strong>
-            {remoteStatus === undefined
-              ? "Checking..."
-              : remoteStatus?.enabled
-                ? "Connected"
-                : "Not connected"}
-          </strong>
-          <span>
-            {remoteStatus === undefined
-              ? "Reading the local connection status."
-              : (remoteStatus?.message ??
-                "Live mobile approvals are not available outside the desktop runtime.")}
-          </span>
-        </div>
-      </section>
     </div>
   );
 }

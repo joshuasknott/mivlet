@@ -1,4 +1,4 @@
-import type { BackendAuthState, BackendCapability, BackendProvider, FirstWaveConnectorId } from "@fable/protocol";
+import type { BackendAuthState, BackendCapability, FirstWaveConnectorId } from "@fable/protocol";
 import { FIRST_WAVE_CONNECTOR_IDS, resolveCapabilities } from "@fable/connectors";
 
 /**
@@ -28,25 +28,6 @@ export function acpAuthStateFor(
     default:
       return { authState: "unavailable", capabilities: [] };
   }
-}
-
-
-export function localLoopbackCapabilities(provider: BackendProvider): BackendCapability[] {
-  const caps = resolveCapabilities("local-loopback", provider.authState);
-  const hasToolModel = provider.models.some(
-    (model) => model.capabilities?.tools === true && model.available
-  );
-  if (provider.authState === "connected" && hasToolModel) {
-    return Array.from(
-      new Set<BackendCapability>([
-        ...caps,
-        "tool-requests",
-        "approvals",
-        "file-changes"
-      ])
-    );
-  }
-  return caps;
 }
 
 

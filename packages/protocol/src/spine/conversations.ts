@@ -1,7 +1,4 @@
-import type { ContractError } from "./missions.js";
 import type {
-  ArtifactId,
-  ArtifactVersionId,
   ConversationTombstoneId,
   DeviceId,
   InternalUserId,
@@ -9,10 +6,7 @@ import type {
   MemberId,
   MessageId,
   MessageRevisionId,
-  MissionId,
-  ProjectId,
   Revision,
-  RunEventId,
   RunId,
   SchemaVersion,
   ScopedRecordMetadata,
@@ -130,79 +124,23 @@ export interface ThreadMessageHead {
   lastMessageId?: MessageId;
 }
 
-/** A workspace-owned conversation. Project context is optional and removable. */
+/** A workspace-owned conversation. */
 export type Thread = Readonly<Omit<ConversationRecordMetadata, "deletedAt">> & {
   readonly deletedAt?: never;
   readonly id: ThreadId;
-  readonly projectId?: ProjectId;
   readonly title: string;
   readonly lifecycle: ThreadLifecycleState;
   readonly messageHead: ThreadMessageHead;
 };
 
-/** A RunEvent is the execution fact; this link adds no duplicate execution truth. */
+/** Optional link to the internal execution attempt that produced a message. */
 export type MessageExecutionLink =
-  | { runId: RunId; runEventId?: RunEventId }
-  | { runId?: never; runEventId?: never };
-
-/** Native-owned linkage for a terminal mission response. */
-export interface ParallelApproachesMessagePlan {
-  title: string;
-  summary: string;
-  executionLabel: string;
-  steps: readonly { title: string; objective: string; output: string }[];
-  acceptance: readonly string[];
-  budget: {
-    maxWorkers: number;
-    maxDurationMs: number;
-    maxOutputTokens: number;
-    maxAttempts: number;
-  };
-}
-
-export type MissionResultMessageDetail = {
-  type: "mission-result";
-  missionId: MissionId;
-  resultEventId: RunEventId;
-} & (
-  | {
-      /** Legacy cited results omit this discriminator. */
-      missionKind?: "cited-brief";
-      outcome: "accepted";
-      artifactId: ArtifactId;
-      artifactVersionId: ArtifactVersionId;
-    }
-  | {
-      missionKind: "structured-intake" | "artifact-revision-brief";
-      outcome: "completed";
-      artifactId: ArtifactId;
-      artifactVersionId: ArtifactVersionId;
-    }
-  | {
-      missionKind: "parallel-approaches";
-      outcome: "completed";
-      artifactId: ArtifactId;
-      artifactVersionId: ArtifactVersionId;
-      plan: ParallelApproachesMessagePlan;
-    }
-  | {
-      missionKind?: "cited-brief";
-      outcome: "partial" | "failed" | "cancelled";
-      artifactId?: never;
-      artifactVersionId?: never;
-    }
-  | {
-      missionKind: "parallel-approaches";
-      outcome: "partial" | "failed" | "cancelled";
-      artifactId?: never;
-      artifactVersionId?: never;
-      plan: ParallelApproachesMessagePlan;
-    }
-);
+  | { runId: RunId }
+  | { runId?: never };
 
 export type MessageKindDetail =
   | { kind: "user"; detail?: never }
-  | { kind: "assistant"; detail?: MissionResultMessageDetail }
+  | { kind: "assistant"; detail?: never }
   | {
       kind: "tool";
       detail:
@@ -298,7 +236,6 @@ export type MessageRevision = Readonly<Omit<ConversationRecordMetadata, "deleted
 
 export interface ThreadCreateInput {
   authorityScope: ConversationAuthorityScope;
-  projectId?: ProjectId;
   title: string;
 }
 
@@ -306,8 +243,6 @@ export interface ThreadUpdateInput {
   threadId: ThreadId;
   title?: string;
   lifecycle?: ThreadLifecycleState;
-  /** Null explicitly removes project context; omission leaves it unchanged. */
-  projectId?: ProjectId | null;
 }
 
 export type InitialMessageRevisionInput = MessageExecutionLink &
@@ -378,6 +313,12 @@ export interface SharedMutationMetadata {
   requestedAt: IsoDateTime;
 }
 
+export interface ConversationMutationError {
+  code: string;
+  message: string;
+  retryable: boolean;
+}
+
 export type SharedConversationMutation =
   | {
       operation: "thread-create";
@@ -400,4 +341,4 @@ export type SharedConversationMutationResult =
       acceptedRecordRevision: Revision;
       acceptedWorkspaceRevision: Revision;
     }
-  | { status: "rejected"; error: ContractError };
+  | { status: "rejected"; error: ConversationMutationError };

@@ -4,20 +4,7 @@ import type {
   MembershipStatus,
   WorkspaceRole,
 } from "../spine/identity.js";
-import type {
-  DeviceId,
-  InternalUserId,
-  IsoDateTime,
-  MemberId,
-  ProjectId,
-  Revision,
-  WorkspaceId,
-} from "../spine/primitives.js";
-import type {
-  Project,
-  ProjectCreateInput,
-  ProjectUpdateInput,
-} from "../spine/projects.js";
+import type { IsoDateTime } from "../spine/primitives.js";
 
 // ---------------------------------------------------------------------------
 // Fable account identity and session status.
@@ -262,97 +249,8 @@ export type AccountWorkspaceMemberChangeOutcome =
 
 export type CloudWorkspaceRole = WorkspaceRole;
 export type CloudSyncState = "disabled" | "unlinked" | "active" | "stale" | "revoked" | "blocked" | "error";
-export type CloudSyncRecordType = "project";
+export type CloudSyncRecordType = "conversation";
 export type CloudSyncOperation = "create" | "update" | "delete";
-
-/** The first useful Convex-owned shared record. Local project commands never write this shape. */
-export type SharedProjectRecord = Readonly<Project> & {
-  readonly authority: "convex";
-  readonly visibility: "workspace-shared";
-  readonly workspaceRevision: Revision;
-};
-
-export interface SharedProjectTombstone {
-  workspaceId: WorkspaceId;
-  recordType: "project";
-  recordId: ProjectId;
-  revision: Revision;
-  deletedAt: IsoDateTime;
-  actorInternalUserId: InternalUserId;
-  actorMemberId: MemberId;
-  actorDeviceId: DeviceId;
-  reasonClass: "user-delete" | "member-removed" | "workspace-deleted";
-}
-
-export type SharedProjectMutation =
-  | {
-      recordType: "project";
-      recordId: ProjectId;
-      operation: "create";
-      baseRevision: 0;
-      payload: ProjectCreateInput;
-    }
-  | {
-      recordType: "project";
-      recordId: ProjectId;
-      operation: "update";
-      baseRevision: Revision;
-      payload: Omit<ProjectUpdateInput, "projectId" | "baseRevision">;
-    }
-  | {
-      recordType: "project";
-      recordId: ProjectId;
-      operation: "delete";
-      baseRevision: Revision;
-      payload?: never;
-    };
-
-/** Closed, fingerprint-bound intent sent from the encrypted outbox to Convex. */
-export type CloudMutationEnvelope = SharedProjectMutation & {
-  workspaceId: WorkspaceId;
-  deviceId: DeviceId;
-  clientMutationId: string;
-  idempotencyKey: string;
-  /** SHA-256 over the canonical operation, scope, revision, and allowed payload. */
-  intentFingerprint: string;
-};
-
-export type CloudMutationResult =
-  | {
-      status: "accepted";
-      workspaceRevision: Revision;
-      record: SharedProjectRecord;
-    }
-  | {
-      status: "accepted";
-      workspaceRevision: Revision;
-      tombstone: SharedProjectTombstone;
-    }
-  | {
-      status: "rejected" | "conflict";
-      code:
-        | "permission-denied"
-        | "membership-inactive"
-        | "device-inactive"
-        | "stale-revision"
-        | "idempotency-conflict"
-        | "backfill-required"
-        | "conflict";
-      message: string;
-      currentRecord?: SharedProjectRecord;
-    };
-
-export type CloudWorkspaceDeltaChange =
-  | { kind: "record"; record: SharedProjectRecord }
-  | { kind: "tombstone"; tombstone: SharedProjectTombstone };
-
-/** Ordered, replay-safe delta. Cursor advancement is atomic with every change. */
-export interface CloudWorkspaceDelta {
-  workspaceId: WorkspaceId;
-  afterRevision: Revision;
-  workspaceRevision: Revision;
-  changes: readonly CloudWorkspaceDeltaChange[];
-}
 
 export interface CloudWorkspaceLinkState {
   localWorkspaceId: string;

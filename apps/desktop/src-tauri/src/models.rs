@@ -21,17 +21,6 @@ pub const MAX_MEMORY_VALUE_CHARACTERS: usize = 2_000;
 pub const MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS: usize = 20_000;
 pub const MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS: usize = 160;
 pub const MAX_RUNTIME_SNAPSHOT_IDS: usize = 200;
-pub const MAX_RUNTIME_SNAPSHOT_AUTOMATIONS: usize = 100;
-pub const MAX_RUNTIME_SNAPSHOT_SCHEDULES: usize = 100;
-pub const MAX_SCHEDULE_FIELD_CHARACTERS: usize = 200;
-pub const MAX_RUNTIME_SNAPSHOT_GOALS: usize = 100;
-pub const MAX_RUNTIME_SNAPSHOT_PLANS: usize = 100;
-pub const MAX_GOAL_FIELD_CHARACTERS: usize = 1_000;
-pub const MAX_PLAN_TITLE_CHARACTERS: usize = 200;
-pub const MAX_PLAN_STEP_DESCRIPTION_CHARACTERS: usize = 500;
-pub const MAX_PLAN_STEPS: usize = 50;
-pub const GOAL_STATUSES: [&str; 3] = ["active", "achieved", "archived"];
-pub const PLAN_STATUSES: [&str; 3] = ["draft", "in-progress", "complete"];
 pub const RUNTIME_SNAPSHOT_VERSION: u8 = 1;
 
 // Controlled vocabularies used for validation.
@@ -41,26 +30,16 @@ pub const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
 pub const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];
 pub const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-access"];
 pub const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
-pub const AUTOMATION_STATUSES: [&str; 3] = ["draft", "active", "paused"];
-pub const SCHEDULE_WEEKDAYS: [&str; 7] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
 // `copilot-sdk` remains a recognized legacy snapshot value; no catalog entry
 // uses it now that GitHub Copilot runs through the live ACP adapter.
-pub const BACKEND_TYPES: [&str; 5] = [
-    "codex-app-server",
-    "acp",
-    "copilot-sdk",
-    "native-api",
-    "local-loopback",
-];
-pub const BACKEND_AUTH_STATES: [&str; 13] = [
+pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
+pub const BACKEND_AUTH_STATES: [&str; 11] = [
     "connected",
     "needs-auth",
     "sign-in-required",
     "install-required",
-    "start-required",
-    "download-required",
     "connecting",
     "expired",
     "unsupported",
@@ -105,7 +84,7 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 30] = [
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 29] = [
     "codex",
     "cursor",
     "copilot",
@@ -128,7 +107,6 @@ pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 30] = [
     "kimi-code",
     "mistral",
     "meta",
-    "ollama",
     "perplexity",
     "tencent",
     "xiaomi",
@@ -221,67 +199,8 @@ pub const MAX_CONNECTOR_QUERY_CHARACTERS: usize = 500;
 pub const MAX_CONNECTOR_RESULT_LIMIT: usize = 50;
 pub const MAX_CONNECTOR_PAYLOAD_FIELDS: usize = 32;
 #[cfg(test)]
-pub const MAX_AGENT_RUNS: usize = 100;
-pub const MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS: usize = 200_000;
-
-// Scheduler constants (durable local automation engine).
-pub const SCHEDULER_STORE_VERSION: u8 = 1;
-pub const MAX_SCHEDULED_JOBS: usize = 100;
-pub const MAX_SCHEDULER_QUEUE_ENTRIES: usize = 500;
-pub const MAX_JOB_ATTEMPTS: usize = 20;
-pub const SCHEDULER_TICK_SECS: u64 = 5;
-pub const SCHEDULER_LEASE_MS: i64 = 30_000;
-/// Lease extension granted when a run acknowledges `running`. Long enough that a
-/// healthy long run is not re-queued by the five-second tick, short enough that a
-/// crashed process recovers the entry within minutes.
-pub const RUNNING_LEASE_MS: i64 = 15 * 60 * 1_000;
-pub const SCHEDULER_MAX_RETRIES: u32 = 2;
-/// Base backoff for transient retry. Each retry waits RETRY_BASE_MS * 2^(n-1).
-pub const RETRY_BASE_MS: i64 = 30_000;
-pub const RETRY_MAX_BACKOFF_MS: i64 = 15 * 60 * 1_000;
-/// Bounded ledger of seen occurrence dedup keys, supplementing the in-queue
-/// check so a completed-then-removed occurrence can never be re-queued.
-pub const MAX_OCCURRENCE_LEDGER: usize = 200;
-pub const SCHEDULED_JOB_STATUSES: [&str; 3] = ["active", "paused", "deleted"];
-pub const MISSED_RUN_POLICIES: [&str; 3] = ["skip", "run-once", "run-all"];
-pub const JOB_ATTEMPT_STATUSES: [&str; 5] = [
-    "running",
-    "succeeded",
-    "failed",
-    "cancelled",
-    "blocked-auth",
-];
-/// Full queue-entry state vocabulary. The Rust store is the authority (entry
-/// states are never accepted from the wire — they are advanced by `run_tick`
-/// and `report_job_attempt`). Kept as a named constant so the vocabulary is
-/// discoverable and stays in lock-step with the TS `SchedulerJobState` mirror.
-#[allow(dead_code)]
-pub const SCHEDULER_QUEUE_STATES: [&str; 9] = [
-    "queued",
-    "leased",
-    "running",
-    "completed",
-    "failed",
-    "blocked-auth",
-    "cancelled",
-    "done",
-    "dead",
-];
-
-// Workflow-run store constants.
-pub const WORKFLOW_RUN_STORE_VERSION: u8 = 1;
-#[cfg(test)]
-pub const MAX_WORKFLOW_RUNS: usize = 200;
-pub const MAX_WORKFLOW_STEPS: usize = 24;
-pub const WORKFLOW_RUN_STATUSES: [&str; 7] = [
-    "queued",
-    "running",
-    "awaiting-approval",
-    "completed",
-    "failed",
-    "blocked-auth",
-    "cancelled",
-];
+pub const MAX_EXECUTION_ATTEMPTS: usize = 100;
+pub const MAX_EXECUTION_ATTEMPT_TRANSCRIPT_CHARACTERS: usize = 200_000;
 
 #[derive(Serialize)]
 pub struct RuntimeStatus {
@@ -412,7 +331,7 @@ pub struct ConnectorAuthResult {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AgentRunUsage {
+pub struct ExecutionAttemptUsage {
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub cost_usd: f64,
@@ -422,7 +341,7 @@ pub struct AgentRunUsage {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PersistedAgentExchange {
+pub struct ExecutionExchange {
     pub role: String,
     pub content: String,
     pub tool_call_id: Option<String>,
@@ -432,7 +351,7 @@ pub struct PersistedAgentExchange {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextRanking {
+pub struct ExecutionContextRanking {
     pub relevance: f64,
     pub recency: f64,
     pub authority: f64,
@@ -442,17 +361,15 @@ pub struct RunContextRanking {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextScope {
+pub struct ExecutionContextScope {
     pub level: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextCitation {
+pub struct ExecutionContextCitation {
     pub source_id: String,
     pub title: String,
     pub snippet: String,
@@ -465,20 +382,20 @@ pub struct RunContextCitation {
     pub chunk_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub account: Option<String>,
-    pub ranking: RunContextRanking,
+    pub ranking: ExecutionContextRanking,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub media_type: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub scope: Option<RunContextScope>,
+    pub scope: Option<ExecutionContextScope>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub authority_scope: Option<ContextRecordAuthorityScope>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextAudience {
+pub struct ExecutionContextAudience {
     pub authority: String,
     pub visibility: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -489,7 +406,7 @@ pub struct RunContextAudience {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextContribution {
+pub struct ExecutionContextContribution {
     pub id: String,
     pub kind: String,
     pub reason: String,
@@ -499,15 +416,16 @@ pub struct RunContextContribution {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RunContextReceipt {
+pub struct ExecutionContextReceipt {
     pub version: u32,
-    pub run_id: String,
+    #[serde(alias = "runId")]
+    pub attempt_id: String,
     pub assembled_at: String,
-    pub scope: RunContextScope,
+    pub scope: ExecutionContextScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub audience: Option<RunContextAudience>,
-    pub citations: Vec<RunContextCitation>,
-    pub contributions: Vec<RunContextContribution>,
+    pub audience: Option<ExecutionContextAudience>,
+    pub citations: Vec<ExecutionContextCitation>,
+    pub contributions: Vec<ExecutionContextContribution>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
@@ -585,7 +503,7 @@ pub struct ProviderRouteExecutionBinding {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PersistedAgentRun {
+pub struct ExecutionAttempt {
     pub id: String,
     pub provider_id: String,
     pub model: String,
@@ -594,15 +512,15 @@ pub struct PersistedAgentRun {
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]
-    pub exchanges: Vec<PersistedAgentExchange>,
-    #[serde(default)]
-    pub parent_run_id: Option<String>,
+    pub exchanges: Vec<ExecutionExchange>,
+    #[serde(default, alias = "parentRunId")]
+    pub parent_attempt_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_receipt: Option<RunContextReceipt>,
+    pub context_receipt: Option<ExecutionContextReceipt>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_route: Option<ProviderRouteExecutionBinding>,
     pub turn: usize,
-    pub usage: Option<AgentRunUsage>,
+    pub usage: Option<ExecutionAttemptUsage>,
     pub pending_approval_ids: Vec<String>,
     pub recoverable: bool,
     pub retry_count: usize,
@@ -1120,58 +1038,6 @@ pub struct MemoryPromotionResponse {
     pub state: MemoryControlState,
 }
 
-/// A user-created schedule carried in the runtime snapshot. Non-secret: only
-/// the task name/description, when it fires, and bookkeeping. Normalization
-/// (weekday/time validation, field caps) lives in `snapshot.rs`.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Schedule {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub day: String,
-    pub time: String,
-    pub enabled: bool,
-    pub created_at: String,
-}
-
-/// A structured workspace goal created by the /goal command. Non-secret by
-/// construction: only a title, the user's statement, and lifecycle bookkeeping.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspaceGoal {
-    pub id: String,
-    pub title: String,
-    pub statement: String,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-/// A single step in a structured plan.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PlanStep {
-    pub id: String,
-    pub order: u32,
-    pub description: String,
-    pub done: bool,
-}
-
-/// A structured plan created by the /plan command. Non-secret by construction.
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkspacePlan {
-    pub id: String,
-    #[serde(default)]
-    pub goal_id: Option<String>,
-    pub title: String,
-    pub steps: Vec<PlanStep>,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CustomApprovalSettings {
@@ -1212,20 +1078,6 @@ pub struct RuntimeSnapshot {
     pub approval_audit: Vec<ApprovalAuditEntry>,
     pub dismissed_approval_ids: Vec<String>,
     pub approval_rules: Vec<ApprovalGrant>,
-    pub automation_statuses: BTreeMap<String, String>,
-    /// User-created schedules. Non-secret state persisted through the snapshot
-    /// so it survives a desktop restart. Defaulted so existing v1 snapshot
-    /// files written before this field existed still parse cleanly.
-    #[serde(default)]
-    pub schedules: Vec<Schedule>,
-    /// Structured workspace goals created by /goal. Non-secret state persisted
-    /// through the snapshot. Defaulted for back-compat with pre-existing files.
-    #[serde(default)]
-    pub goals: Vec<WorkspaceGoal>,
-    /// Structured plans created by /plan. Non-secret state persisted through
-    /// the snapshot. Defaulted for back-compat with pre-existing files.
-    #[serde(default)]
-    pub plans: Vec<WorkspacePlan>,
     /// User-owned agent identities and their non-secret execution preferences.
     #[serde(default)]
     pub agents: Vec<FableAgentProfile>,
@@ -1256,244 +1108,4 @@ pub struct RuntimeSnapshot {
 
 fn default_permission_mode() -> String {
     "trusted-scope".to_string()
-}
-
-// ---------------------------------------------------------------------------
-// Scheduler wire models (durable local automation engine).
-//
-// The trigger is stored as a serde_json::Value (validated shallowly) because
-// the recurrence math lives in the TypeScript layer; Rust only owns durable
-// storage, the lease lock, and the in-process tick that prevents duplicate
-// execution across multiple Fable windows.
-// ---------------------------------------------------------------------------
-
-/// The frozen, non-secret execution route captured when a schedule is created.
-/// Carries only provider/model ids + permission mode — never keys or tokens.
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScheduledExecutionRoute {
-    pub policy: String,
-    pub backend_id: String,
-    pub model_id: String,
-    pub permission_mode: String,
-    #[serde(default)]
-    pub permission_profile: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RetryPolicy {
-    pub max_attempts: u32,
-    pub initial_backoff_ms: i64,
-    pub backoff_multiplier: f64,
-    pub max_backoff_ms: i64,
-}
-
-impl Default for RetryPolicy {
-    fn default() -> Self {
-        Self {
-            max_attempts: SCHEDULER_MAX_RETRIES + 1,
-            initial_backoff_ms: RETRY_BASE_MS,
-            backoff_multiplier: 2.0,
-            max_backoff_ms: RETRY_MAX_BACKOFF_MS,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScheduledJob {
-    pub workspace_id: String,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    /// Native-stamped ownership evidence for jobs created after the Routine
-    /// migration boundary. Empty legacy values remain unresolved and are never
-    /// filled from a later active session.
-    #[serde(default)]
-    pub authority: String,
-    #[serde(default)]
-    pub visibility: String,
-    #[serde(default)]
-    pub owner_member_id: Option<String>,
-    #[serde(default)]
-    pub created_by_internal_user_id: Option<String>,
-    pub id: String,
-    pub schema_version: u8,
-    pub name: String,
-    pub description: String,
-    pub workflow_definition_id: String,
-    /// ScheduleTrigger serialized as JSON (validated shallowly in Rust; the TS
-    /// layer owns the recurrence/next-run math).
-    pub trigger: serde_json::Value,
-    pub missed_run_policy: String,
-    pub status: String,
-    pub next_run_at: String,
-    pub last_run_at: String,
-    pub last_run_id: String,
-    pub created_at: String,
-    pub updated_at: String,
-    /// Frozen execution route (backend/model/permission). Optional for backward
-    /// compatibility with jobs created before this field existed.
-    #[serde(default)]
-    pub execution: Option<ScheduledExecutionRoute>,
-    #[serde(default)]
-    pub retry_policy: RetryPolicy,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct JobAttempt {
-    pub run_id: String,
-    pub status: String,
-    pub attempt_number: u32,
-    pub started_at: String,
-    pub finished_at: Option<String>,
-    pub error: Option<String>,
-    /// Whether a failed attempt is transient (retry) or permanent (dead).
-    #[serde(default)]
-    pub retryable: Option<bool>,
-    /// Fencing token proving this attempt corresponds to the current lease.
-    #[serde(default)]
-    pub lease_token: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SchedulerQueueEntry {
-    pub workspace_id: String,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    /// Copied from the native-owned job when the occurrence is created.
-    /// Missing values on legacy entries remain unresolved migration evidence.
-    #[serde(default)]
-    pub authority: String,
-    #[serde(default)]
-    pub visibility: String,
-    #[serde(default)]
-    pub owner_member_id: Option<String>,
-    #[serde(default)]
-    pub created_by_internal_user_id: Option<String>,
-    pub job_id: String,
-    pub run_id: String,
-    pub scheduled_at: String,
-    pub state: String,
-    pub lease_holder: String,
-    pub lease_expires_at: String,
-    pub attempts: Vec<JobAttempt>,
-    pub deduplication_key: String,
-    /// Fencing token proving a report/renew call corresponds to the current
-    /// lease. Empty on pre-token entries; set whenever a lease is taken.
-    #[serde(default)]
-    pub lease_token: String,
-    /// Earliest retry time (epoch ms ISO) after a transient failure; honored by
-    /// the tick so retries respect exponential backoff.
-    #[serde(default)]
-    pub available_at: String,
-    /// Last error message (truncated, no secrets) for failed/blocked entries.
-    #[serde(default)]
-    pub last_error: String,
-    /// Snapshot of the job's execution route at enqueue time, so the entry is
-    /// self-describing for the run-request event without a job lookup.
-    #[serde(default)]
-    pub execution: Option<ScheduledExecutionRoute>,
-    #[serde(default)]
-    pub retry_policy: RetryPolicy,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SchedulerStore {
-    pub schema_version: u8,
-    pub jobs: Vec<ScheduledJob>,
-    pub queue: Vec<SchedulerQueueEntry>,
-    pub instance_id: String,
-    pub updated_at: String,
-    /// Bounded ledger of seen occurrence dedup keys. Supplements the in-queue
-    /// check so a completed-then-removed occurrence can never be re-queued.
-    #[serde(default)]
-    pub occurrence_ledger: Vec<String>,
-    /// Transient O(1) index over [`occurrence_ledger`], rebuilt whenever the
-    /// store is loaded from SQLite/JSON. Lets enqueue dedup be O(1) instead of
-    /// a linear scan of the (bounded) ledger on every enqueue. Not persisted:
-    /// the Vec is the source of truth and re-derives this on load.
-    #[serde(skip)]
-    pub occurrence_index: std::collections::HashSet<String>,
-}
-
-// ---------------------------------------------------------------------------
-// Workflow-run wire models (durable workflow journal).
-//
-// The per-step records are stored as a serde_json::Value (the rich step record
-// shape is owned by the TS protocol); Rust owns atomic persistence + restart
-// recovery only.
-// ---------------------------------------------------------------------------
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowRunRecord {
-    pub workspace_id: String,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    /// Native-stamped identity for runs created after the migration boundary.
-    #[serde(default)]
-    pub authority: String,
-    #[serde(default)]
-    pub visibility: String,
-    #[serde(default)]
-    pub owner_member_id: Option<String>,
-    #[serde(default)]
-    pub created_by_internal_user_id: Option<String>,
-    pub id: String,
-    pub definition_id: String,
-    pub definition_version: u32,
-    pub status: String,
-    pub trigger: String,
-    pub scheduled_job_id: Option<String>,
-    #[serde(default)]
-    pub permission_profile: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_route: Option<ProviderRouteExecutionBinding>,
-    pub input: serde_json::Value,
-    /// Vec<WorkflowStepRecord> stored as JSON (the step shape is the TS layer's).
-    pub steps: serde_json::Value,
-    pub failure_reason: Option<String>,
-    pub idempotency_key: Option<String>,
-    #[serde(default)]
-    pub attempt_number: Option<u32>,
-    #[serde(default)]
-    pub next_retry_at: Option<String>,
-    pub started_at: String,
-    pub updated_at: String,
-    pub finished_at: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkflowDefinitionRecord {
-    pub workspace_id: String,
-    #[serde(default)]
-    pub project_id: Option<String>,
-    /// Native-stamped identity for immutable versions created after the
-    /// migration boundary. Old versions stay unresolved.
-    #[serde(default)]
-    pub authority: String,
-    #[serde(default)]
-    pub visibility: String,
-    #[serde(default)]
-    pub owner_member_id: Option<String>,
-    #[serde(default)]
-    pub created_by_internal_user_id: Option<String>,
-    pub schema_version: u8,
-    pub id: String,
-    pub version: u32,
-    pub name: String,
-    pub description: String,
-    #[serde(default)]
-    pub status: Option<String>,
-    #[serde(default)]
-    pub permission_profile: Option<String>,
-    pub steps: serde_json::Value,
-    pub notification_prefs: Option<serde_json::Value>,
-    pub created_at: String,
-    pub updated_at: String,
 }

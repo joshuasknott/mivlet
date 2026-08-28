@@ -20,14 +20,13 @@ export type {
   TransportHandle,
   AgentBackendFactory
 } from "./contract";
-export type { AgentRunRequest, AgentRunOptions } from "@fable/protocol";
+export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
 export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // Adapter constructors are exported for direct unit testing; production code
 // reaches them only through resolveAgentBackend.
 export { createNativeApiBackend } from "./adapters/native-api";
 export { createCodexBackend } from "./adapters/codex";
 export { resolveAcpBackend } from "./adapters/acp";
-export { createLocalLoopbackBackend } from "./adapters/local-loopback";
 export {
   ACP_PROVIDERS,
   detectAcpRuntime,

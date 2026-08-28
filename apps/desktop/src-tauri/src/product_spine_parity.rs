@@ -12,17 +12,12 @@ use sha2::{Digest, Sha256};
 const MANIFEST: &str = include_str!("../../../../packages/protocol/spine-parity-manifest.json");
 const IDENTITY: &str = include_str!("../../../../packages/protocol/src/spine/identity.ts");
 const CONNECTIONS: &str = include_str!("../../../../packages/protocol/src/spine/connections.ts");
-const MISSIONS: &str = include_str!("../../../../packages/protocol/src/spine/missions.ts");
 const CONVERSATIONS: &str =
     include_str!("../../../../packages/protocol/src/spine/conversations.ts");
-const PROJECTS: &str = include_str!("../../../../packages/protocol/src/spine/projects.ts");
-const GOALS: &str = include_str!("../../../../packages/protocol/src/spine/goals.ts");
-const ARTIFACTS_AND_ROUTINES: &str =
-    include_str!("../../../../packages/protocol/src/spine/artifacts-routines.ts");
 
 /// Rust's reviewed mirror of the canonical TypeScript vocabulary payload.
 const RUST_CANONICAL_SHA256: &str =
-    "5f8cd5240c8bf7f441ac824b2de44b45c72bf6f892d19c0ad8618db305855e45";
+    "8372516114656add9a0f57fa95b468c55c452d7143e4afe0503361b880578e73";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -141,22 +136,14 @@ fn product_spine_typescript_and_rust_parity_hold() {
         "schema version must be positive"
     );
     assert_eq!(
-        manifest.limits.get("ARTIFACT_MAX_INLINE_CONTENT_BYTES"),
-        Some(&65_536)
+        manifest.limits.get("MESSAGE_CONTENT_MAX_CHARACTERS"),
+        Some(&262_144)
     );
 
     let expected = [
         ("Identity", "identity.ts", IDENTITY),
         ("Connections", "connections.ts", CONNECTIONS),
-        ("Missions", "missions.ts", MISSIONS),
         ("Conversations", "conversations.ts", CONVERSATIONS),
-        ("Projects", "projects.ts", PROJECTS),
-        ("Goals", "goals.ts", GOALS),
-        (
-            "ArtifactsAndRoutines",
-            "artifacts-routines.ts",
-            ARTIFACTS_AND_ROUTINES,
-        ),
     ];
     assert_eq!(
         manifest.families.len(),

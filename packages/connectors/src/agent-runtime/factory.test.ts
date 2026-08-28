@@ -15,7 +15,7 @@ import {
   type BackendDeps,
   type CodexAppServerEvent,
   type CodexAppServerHandle,
-  type AgentRunRequest
+  type AgentTurnRequest
 } from "./index";
 
 /** A connected, streaming native-API provider (openai). */
@@ -94,18 +94,6 @@ function copilotProvider(): BackendProvider {
   };
 }
 
-function localProvider(): BackendProvider {
-  return {
-    id: "ollama",
-    backendType: "local-loopback",
-    label: "Ollama",
-    description: "Local Ollama service",
-    authState: "connected",
-    capabilities: ["streaming", "model-availability", "cancellation"],
-    models: [{ id: "llama3.2", label: "Llama 3.2", available: true }]
-  };
-}
-
 /** Build BackendDeps that serves a fixed fixture transport + a cancel stub. */
 function fixtureDeps(lines: readonly string[]): BackendDeps {
   const transport = new FixtureTransport(lines);
@@ -134,7 +122,7 @@ function codexDeps(handle: CodexAppServerHandle | null): BackendDeps {
   };
 }
 
-const baseRunRequest: AgentRunRequest = {
+const baseRunRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
   tools: [],
@@ -152,7 +140,6 @@ describe("hasRunnableAdapter", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
     expect(hasRunnableAdapter("codex-app-server")).toBe(true);
     expect(hasRunnableAdapter("acp")).toBe(true);
-    expect(hasRunnableAdapter("local-loopback")).toBe(true);
   });
 
   it("keeps the legacy copilot-sdk family non-runnable", () => {
@@ -220,18 +207,6 @@ describe("resolveAgentBackend dispatch", () => {
     expect(backend).toBeNull();
   });
 
-  it("returns a local loopback backend when the local transport is wired", () => {
-    const backend = resolveAgentBackend(localProvider(), {
-      ...fixtureDeps([]),
-      createLocalModelTransport: () => ({
-        transport: new FixtureTransport([]),
-        cancel: async () => {}
-      })
-    });
-    expect(backend).not.toBeNull();
-    expect(backend?.providerId).toBe("ollama");
-  });
-
   it("returns null for undefined provider", () => {
     const backend = resolveAgentBackend(undefined, fixtureDeps([]));
     expect(backend).toBeNull();
@@ -275,7 +250,7 @@ describe("createCodexBackend", () => {
     const handle = new MockCodexAppServer({ events: [{ type: "done", finishReason: "stop" }] });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(
-      { ...baseRunRequest, threadId: "codex-thread-existing" } as AgentRunRequest & {
+      { ...baseRunRequest, threadId: "codex-thread-existing" } as AgentTurnRequest & {
         threadId: string;
       },
       { execute: async () => "ok" }

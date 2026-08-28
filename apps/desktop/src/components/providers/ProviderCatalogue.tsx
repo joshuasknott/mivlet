@@ -2,7 +2,6 @@ import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { Browser } from "@phosphor-icons/react/dist/csr/Browser";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
-import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { Key } from "@phosphor-icons/react/dist/csr/Key";
@@ -33,7 +32,6 @@ export type ProviderConnectionMethodKind =
   | "oauth-browser"
   | "oauth-device"
   | "provider-login"
-  | "local"
   | "custom";
 
 export interface ProviderConnectionMethod {
@@ -91,11 +89,6 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     iconProvider: "openrouter",
     aliases: ["OpenRouter"]
   },
-  ollama: {
-    label: "Ollama",
-    iconProvider: "ollama",
-    aliases: ["Ollama", "Local models", "Local AI"]
-  },
   zai: {
     label: "Z.AI",
     iconProvider: "zai",
@@ -137,9 +130,8 @@ const METHOD_KIND_PRIORITY: Record<ProviderConnectionMethodKind, number> = {
   "oauth-browser": 0,
   "oauth-device": 1,
   "api-key": 2,
-  local: 3,
-  "provider-login": 4,
-  custom: 5
+  "provider-login": 3,
+  custom: 4
 };
 
 function compactProviderId(value: string): string {
@@ -168,7 +160,6 @@ export function providerFamilyIdFor(providerId: string): string {
   if (compact.startsWith("mistral")) return "mistral";
   if (compact === "openrouter") return "openrouter";
   if (compact === "anthropic") return "anthropic";
-  if (compact === "ollama") return "ollama";
   if (
     compact.startsWith("custom") ||
     compact.startsWith("openaicompatible") ||
@@ -213,18 +204,6 @@ export function connectionMethodsForProvider(
   provider: BackendProvider
 ): ProviderConnectionMethod[] {
   const familyId = providerFamilyIdFor(provider.id);
-  if (familyId === "ollama") {
-    return [
-      {
-        id: `${provider.id}:local`,
-        kind: "local",
-        label: "Ollama on this device",
-        description: "Connect to the Ollama service running locally.",
-        provider
-      }
-    ];
-  }
-
   if (familyId === "custom") {
     return [
       {
@@ -510,8 +489,6 @@ function ProviderMethodIcon({ kind }: { kind: ProviderConnectionMethodKind }) {
       return <Browser size={20} />;
     case "oauth-device":
       return <DeviceMobile size={20} />;
-    case "local":
-      return <Desktop size={20} />;
     case "custom":
       return <Globe size={20} />;
     case "provider-login":
@@ -769,20 +746,6 @@ function ProviderConnectionModal({
                   {pending ? <><Spinner size={14} className="og-spinner" /> Verifying</> : replacingCredential ? "Replace key & reconnect" : "Add key & connect"}
                 </button>
               </form>
-            ) : null}
-
-            {selectedMethod.kind === "local" && !methodConnected ? (
-              <div className="provider-method-detail__action">
-                <p>Make sure Ollama is running on this device, then check its connection.</p>
-                <button
-                  type="button"
-                  className="provider-method-form__primary"
-                  disabled={pending || !onCheckConnection}
-                  onClick={() => void checkConnection(selectedMethod.provider.id)}
-                >
-                  {pending ? <><Spinner size={14} className="og-spinner" /> Checking</> : "Check local Ollama"}
-                </button>
-              </div>
             ) : null}
 
             {selectedMethod.kind === "custom" && !methodConnected ? (

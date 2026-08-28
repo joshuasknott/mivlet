@@ -7,7 +7,7 @@ import type {
   ConnectorSearchResult, CustomApprovalSettings,
   FableAgentProfile,
   IdentityStatus, KnowledgeCitation, KnowledgeSource, MemoryControlState,
-  MemoryRecord, PermissionMode, PreparedRunContext, ThreadSummary, WorkspaceDirective
+  MemoryRecord, PermissionMode, PreparedExecutionContext, ThreadSummary, WorkspaceDirective
 } from "@fable/protocol";
 import type { ToolApprovalGate } from "@fable/connectors";
 import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
@@ -137,7 +137,7 @@ export interface ShellRuntime {
    * Assemble context for the authenticated active member. Fails closed when
    * the active workspace has no matching member instead of widening scope.
    */
-  assembleKnowledgeContext: (query: string, context?: KnowledgeRunContext) => Promise<PreparedRunContext>;
+  assembleKnowledgeContext: (query: string, context?: KnowledgeRunContext) => Promise<PreparedExecutionContext>;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];

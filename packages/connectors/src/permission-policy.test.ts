@@ -25,18 +25,16 @@ describe("permission profile policy", () => {
     });
   });
 
-  it("blocks read-only writes, shell execution, sends/deletes, and schedule mutation/execution", () => {
+  it("blocks read-only writes, shell execution, sends, and deletes", () => {
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "local-read" }).allowed).toBe(true);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "local-write" }).allowed).toBe(false);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "shell-execution" }).allowed).toBe(false);
-    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "schedule-execution" }).allowed).toBe(false);
-    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "schedule-mutation" }).allowed).toBe(false);
     expect(evaluatePermissionPolicy({ mode: "read-only", effect: "connector-write" }).allowed).toBe(false);
   });
 
-  it("ensures trusted mode allows reads, safe writes, schedule actions, but requires approvals for consequential actions, while blocking shell", () => {
+  it("ensures trusted mode allows reads and safe writes through approval while blocking shell", () => {
     // Allowed with approval required (consequential)
-    for (const effect of ["local-write", "connector-write", "app-state-mutation", "schedule-mutation", "schedule-execution"] as const) {
+    for (const effect of ["local-write", "connector-write", "app-state-mutation"] as const) {
       const decision = evaluatePermissionPolicy({ mode: "trusted-scope", effect });
       expect(decision.allowed).toBe(true);
       expect(decision.approvalRequired).toBe(true);
@@ -47,7 +45,7 @@ describe("permission profile policy", () => {
   });
 
   it("ensures full-access mode allows consequential actions but still requires approval/permits", () => {
-    for (const effect of ["local-write", "shell-execution", "connector-write", "cache-mutation", "app-state-mutation", "schedule-mutation", "schedule-execution"] as const) {
+    for (const effect of ["local-write", "shell-execution", "connector-write", "cache-mutation", "app-state-mutation"] as const) {
       const decision = evaluatePermissionPolicy({ mode: "full-access", effect });
       expect(decision.allowed).toBe(true);
       expect(decision.approvalRequired).toBe(true);
@@ -63,14 +61,6 @@ describe("permission profile policy", () => {
     expect(effectForTool("local-browser-action")).toBe("browser-state-mutation");
     expect(effectForTool("cloud-browser")).toBe("browser-state-mutation");
     expect(effectForTool("cloud-browser-action")).toBe("browser-state-mutation");
-    expect(effectForTool("cloud-process-schedule")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-process-schedule-cancel")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-process-schedule-pause")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-process-schedule-resume")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-agent-routine")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-agent-routine-cancel")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-agent-routine-pause")).toBe("schedule-mutation");
-    expect(effectForTool("cloud-agent-routine-resume")).toBe("schedule-mutation");
     expect(effectForTool("connection-read")).toBe("connector-read");
     expect(effectForTool("gmail-read")).toBe("connector-read");
   });
@@ -98,10 +88,7 @@ describe("plain approval choices map to one strict policy", () => {
       "connector-write",
       "publish-external",
       "cache-mutation",
-      "schedule-mutation",
-      "schedule-execution",
       "memory-promotion",
-      "remote-approval-decision",
       "browser-state-mutation"
     ] as const) {
       expect(isHighSeverityEffect(effect)).toBe(true);
@@ -131,10 +118,7 @@ describe("plain approval choices map to one strict policy", () => {
       "connector-write",
       "publish-external",
       "cache-mutation",
-      "schedule-mutation",
-      "schedule-execution",
       "memory-promotion",
-      "remote-approval-decision",
       "browser-state-mutation"
     ] as const) {
       expect(

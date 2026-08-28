@@ -128,12 +128,8 @@ pub fn active_command_scope(access: ScopeAccess) -> Result<AuthorizedCommandScop
 mod tests {
     use super::*;
     use crate::store::{
-        repos::{
-            project,
-            workspace_directory::{
-                select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-                WorkspaceDirectoryUpsert,
-            },
+        repos::workspace_directory::{
+                set_current_internal_user, upsert_authoritative_summary, WorkspaceDirectoryUpsert,
         },
         vault::{MasterKey, Vault},
         Store,
@@ -153,125 +149,6 @@ mod tests {
             membership_revision: 1,
             updated_at: "t".into(),
         }
-    }
-
-    #[test]
-    fn active_scope_rejects_other_workspace_member_and_non_active_projects() {
-        let store =
-            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let local = store
-            .transaction(|tx| {
-                let one = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-1", "workspace-1", "member-1"),
-                )?;
-                upsert_authoritative_summary(tx, &summary("user-2", "workspace-1", "member-2"))?;
-                set_current_internal_user(tx, "user-1", "t")?;
-                select_active_workspace(tx, "user-1", "workspace-1", "t")?;
-                let scope = DataScope::workspace(one.local_workspace_id.clone())?;
-                project::create(
-                    tx,
-                    &store,
-                    &scope,
-                    "active-project",
-                    "member-1",
-                    "user-1",
-                    "Active",
-                    None,
-                    None,
-                    "t",
-                )?;
-                project::create(
-                    tx,
-                    &store,
-                    &scope,
-                    "archived-project",
-                    "member-1",
-                    "user-1",
-                    "Archived",
-                    None,
-                    None,
-                    "t",
-                )?;
-                project::transition(
-                    tx,
-                    &store,
-                    &scope,
-                    "member-1",
-                    "archived-project",
-                    1,
-                    "archived",
-                    "t2",
-                )?;
-                project::create(
-                    tx,
-                    &store,
-                    &scope,
-                    "foreign-project",
-                    "member-2",
-                    "user-2",
-                    "Foreign",
-                    None,
-                    None,
-                    "t",
-                )?;
-                project::create(
-                    tx,
-                    &store,
-                    &scope,
-                    "deleted-project",
-                    "member-1",
-                    "user-1",
-                    "Deleted",
-                    None,
-                    None,
-                    "t",
-                )?;
-                project::delete(
-                    tx,
-                    &store,
-                    &scope,
-                    "member-1",
-                    "user-1",
-                    "deleted-project",
-                    1,
-                    "t2",
-                )?;
-                Ok(one.local_workspace_id)
-            })
-            .unwrap();
-        store
-            .with_conn(|tx| {
-                assert!(resolve(tx, Some(&local), None, ScopeAccess::Write).is_ok());
-                assert!(resolve(tx, Some("default"), None, ScopeAccess::Read).is_err());
-                assert!(
-                    resolve(tx, Some(&local), Some("active-project"), ScopeAccess::Write).is_ok()
-                );
-                assert!(
-                    resolve(tx, Some(&local), Some("foreign-project"), ScopeAccess::Read).is_err()
-                );
-                assert!(resolve(
-                    tx,
-                    Some(&local),
-                    Some("archived-project"),
-                    ScopeAccess::Read
-                )
-                .is_ok());
-                assert!(resolve(
-                    tx,
-                    Some(&local),
-                    Some("archived-project"),
-                    ScopeAccess::Write
-                )
-                .unwrap_err()
-                .to_string()
-                .contains("read-only"));
-                assert!(
-                    resolve(tx, Some(&local), Some("deleted-project"), ScopeAccess::Read).is_err()
-                );
-                Ok(())
-            })
-            .unwrap();
     }
 
     #[test]

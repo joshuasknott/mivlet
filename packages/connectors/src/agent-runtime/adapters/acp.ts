@@ -22,8 +22,8 @@
  */
 
 import type {
-  AgentRunOptions,
-  AgentRunRequest,
+  AgentTurnOptions,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendCapability,
   BackendProvider
@@ -66,8 +66,8 @@ export function resolveAcpBackend(
   let active: ActiveRun | null = null;
 
   function run(
-    request: AgentRunRequest,
-    options: AgentRunOptions
+    request: AgentTurnRequest,
+    options: AgentTurnOptions
   ): AsyncIterable<BackendAgentEvent> | null {
     const transport = deps.createAcpTransport!({ id: provider.id });
     if (transport === null) return null;

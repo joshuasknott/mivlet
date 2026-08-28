@@ -19,7 +19,7 @@ describe("priceFor", () => {
   it("does not invent one provider-wide price for model-dependent providers", () => {
     for (const providerId of [
       "deepseek", "zai", "minimax", "alibaba", "fireworks", "huggingface",
-      "moonshot", "kimi-code", "mistral", "meta", "ollama", "perplexity", "tencent",
+      "moonshot", "kimi-code", "mistral", "meta", "perplexity", "tencent",
       "xiaomi", "groq", "together", "cerebras", "custom"
     ]) {
       expect(priceFor(providerId, 1_000_000, 1_000_000), providerId).toBe(0);

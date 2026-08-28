@@ -8,32 +8,10 @@ struct ToolProposalContext {
 
 pub(crate) fn prepare_semantic_capability_call(
     workspace_id: String,
-    project_id: Option<String>,
     session_id: String,
     capability_id: String,
     input: std::collections::BTreeMap<String, Value>,
     cursor: Option<String>,
-) -> Result<McpSemanticContinuation, String> {
-    prepare_semantic_capability_call_with_grant(
-        workspace_id,
-        project_id,
-        session_id,
-        capability_id,
-        input,
-        cursor,
-        None,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn prepare_semantic_capability_call_with_grant(
-    workspace_id: String,
-    project_id: Option<String>,
-    session_id: String,
-    capability_id: String,
-    input: std::collections::BTreeMap<String, Value>,
-    cursor: Option<String>,
-    exact_grant_id: Option<&str>,
 ) -> Result<McpSemanticContinuation, String> {
     if capability_id != "knowledge.content.search" {
         return Err("This MCP semantic capability is not supported.".into());
@@ -61,7 +39,7 @@ fn prepare_semantic_capability_call_with_grant(
         .transpose()?;
     let scope = crate::authorized_scope::command_scope(
         Some(workspace_id.clone()),
-        project_id.clone(),
+        None,
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let session = process_map()
@@ -95,17 +73,12 @@ fn prepare_semantic_capability_call_with_grant(
     };
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let workspace_scope = crate::authorized_scope::command_scope(
-        Some(workspace_id.clone()),
-        None,
-        crate::authorized_scope::ScopeAccess::Read,
-    )?;
     let (binding, connection) = store
         .with_conn(|tx| {
             let binding = crate::store::repos::connection_record::require_mcp_capability_binding(
                 tx,
                 store,
-                &workspace_scope,
+                &scope,
                 &connection_id,
                 connection_revision,
                 &capability_id,
@@ -113,7 +86,7 @@ fn prepare_semantic_capability_call_with_grant(
             let connection = crate::store::repos::connection_record::get(
                 tx,
                 store,
-                &workspace_scope,
+                &scope,
                 &connection_id,
             )?
             .ok_or_else(|| {
@@ -155,7 +128,7 @@ fn prepare_semantic_capability_call_with_grant(
                 crate::store::repos::connection_record::require_mcp_capability_binding(
                     tx,
                     store,
-                    &workspace_scope,
+                    &scope,
                     &connection_id,
                     connection_revision,
                     &capability_id,
@@ -166,31 +139,16 @@ fn prepare_semantic_capability_call_with_grant(
                 ));
             }
             let at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-            if let Some(grant_id) = exact_grant_id {
-                crate::store::repos::capability_grant::authorize_and_consume_exact(
-                    tx,
-                    store,
-                    &scope,
-                    grant_id,
-                    &capability_id,
-                    &connection_id,
-                    "read",
-                    &at,
-                )?
-                .map(|grant| vec![grant])
-                .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
-            } else {
-                crate::store::repos::capability_grant::authorize_and_consume(
-                    tx,
-                    store,
-                    &scope,
-                    &capability_id,
-                    &connection_id,
-                    "read",
-                    &at,
-                )?
-                .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
-            }
+            crate::store::repos::capability_grant::authorize_and_consume(
+                tx,
+                store,
+                &scope,
+                &capability_id,
+                &connection_id,
+                "read",
+                &at,
+            )?
+            .map_err(|failure| crate::store::StoreError::Invalid(failure.message.into()))
         })
         .map_err(|error| error.to_string())?;
     let permit_id = random_session_id()?.replacen("mcp-", "mcp-semantic-permit-", 1);
@@ -214,7 +172,6 @@ fn prepare_semantic_capability_call_with_grant(
         proposal,
         permit_id,
         workspace_id,
-        project_id,
         query,
         connection_id,
         matched_grant_ids: grants.into_iter().map(|grant| grant.id).collect(),
@@ -226,279 +183,9 @@ fn prepare_semantic_capability_call_with_grant(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn prepare_mission_semantic_capability_call(
-    workspace_id: String,
-    project_id: Option<String>,
-    session_id: String,
-    capability_id: String,
-    input: std::collections::BTreeMap<String, Value>,
-    cursor: Option<String>,
-    authority: crate::mission_workers::NativeWorkerToolAuthority,
-) -> Result<McpSemanticContinuation, String> {
-    let continuation = prepare_semantic_capability_call_with_grant(
-        workspace_id,
-        project_id,
-        session_id,
-        capability_id,
-        input,
-        cursor,
-        Some(authority.capability_grant_id()),
-    )?;
-    let mut pending = pending_mission_mcp_searches()
-        .lock()
-        .map_err(|_| "Fable could not access pending mission MCP evidence.".to_string())?;
-    pending.retain(|_, value| value.issued_at.elapsed() <= Duration::from_secs(60));
-    if pending
-        .insert(
-            continuation.permit_id.clone(),
-            PendingMissionMcpSearch {
-                continuation: continuation.clone(),
-                authority,
-                issued_at: Instant::now(),
-            },
-        )
-        .is_some()
-    {
-        return Err("The mission MCP evidence permit already exists.".into());
-    }
-    Ok(continuation)
-}
-
-#[tauri::command]
-pub fn attest_mission_mcp_connected_search(
-    request: AttestMissionMcpSearchRequest,
-) -> Result<Value, String> {
-    let outcome = mission_mcp_outcomes()
-        .lock()
-        .map_err(|_| "Fable could not access native-observed mission MCP evidence.".to_string())?
-        .remove(&request.permit_id)
-        .ok_or_else(|| {
-            "The native-observed mission MCP result is unavailable or already used.".to_string()
-        })?;
-    if outcome.observed_at.elapsed() > Duration::from_secs(60) {
-        return Err("The native-observed mission MCP result expired.".into());
-    }
-    outcome.result
-}
-
-/// Normalizes the raw `tools/call` result while the authoritative semantic
-/// continuation is still held by Rust. Unlike the renderer adapter, this path
-/// never truncates structured data: anything beyond the accepted envelope is
-/// rejected before it can become mission evidence.
-pub(crate) fn normalize_mcp_connected_source_search(
-    result: &Value,
-    continuation: &McpSemanticContinuation,
-) -> Result<NormalizedMcpConnectedSourceSearch, String> {
-    let encoded = serde_json::to_vec(result)
-        .map_err(|_| "MCP cited search returned an invalid result.".to_string())?;
-    if encoded.len() > MAX_MCP_TOOL_RESULT_BYTES {
-        return Err("MCP cited search returned an oversized result.".into());
-    }
-    let result = result
-        .as_object()
-        .ok_or_else(|| "MCP cited search returned an invalid result.".to_string())?;
-    match result.get("isError") {
-        Some(Value::Bool(true)) => return Err("MCP cited search returned an error result.".into()),
-        Some(Value::Bool(false)) | None => {}
-        Some(_) => return Err("MCP cited search returned an invalid error state.".into()),
-    }
-    validate_mcp_tool_result_content(result.get("content"))?;
-    let structured = result
-        .get("structuredContent")
-        .and_then(Value::as_object)
-        .ok_or_else(|| {
-            "MCP cited search did not return a complete structured result.".to_string()
-        })?;
-    let structured_encoded = serde_json::to_string(structured)
-        .map_err(|_| "MCP cited search returned an invalid structured result.".to_string())?;
-    if structured_encoded.encode_utf16().count() > MAX_MCP_STRUCTURED_CHARACTERS {
-        return Err("MCP cited search returned an oversized structured result.".into());
-    }
-    if structured.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "contractVersion" | "query" | "citations" | "nextCursor"
-        )
-    }) {
-        return Err("MCP cited search attempted to supply Fable-owned authority metadata.".into());
-    }
-    if structured.get("contractVersion").and_then(Value::as_str)
-        != Some(CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION)
-    {
-        return Err("MCP cited search returned an unsupported contract version.".into());
-    }
-    if structured.get("query").and_then(Value::as_str) != Some(continuation.query.as_str()) {
-        return Err("MCP cited search returned results for a different query.".into());
-    }
-    let raw_citations = structured
-        .get("citations")
-        .and_then(Value::as_array)
-        .filter(|citations| citations.len() <= MAX_CONNECTED_SOURCE_CITATIONS)
-        .ok_or_else(|| "MCP cited search returned an invalid citation list.".to_string())?;
-    let citations = raw_citations
-        .iter()
-        .enumerate()
-        .map(|(index, raw)| normalize_mcp_connected_source_citation(raw, index))
-        .collect::<Result<Vec<_>, _>>()?;
-    let next_cursor = structured
-        .get("nextCursor")
-        .map(|value| connected_source_text(value, "next cursor", 2_048))
-        .transpose()?;
-
-    Ok(NormalizedMcpConnectedSourceSearch {
-        contract_version: CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION,
-        capability_id: "knowledge.content.search",
-        query: continuation.query.clone(),
-        scope: NormalizedMcpConnectedSourceScope {
-            workspace_id: continuation.workspace_id.clone(),
-            project_id: continuation.project_id.clone(),
-        },
-        citations,
-        next_cursor,
-        trust: "external-untrusted",
-        instruction_authority: "none",
-        degraded: continuation.degraded,
-        degradation_reasons: continuation.degradation_reasons.clone(),
-        connection_id: continuation.connection_id.clone(),
-        matched_grant_ids: continuation.matched_grant_ids.clone(),
-        implementation: NormalizedMcpConnectedSourceImplementation {
-            kind: "mcp",
-            evidence: "adapter-validated",
-        },
-    })
-}
-
-fn normalize_mcp_connected_source_citation(
-    raw: &Value,
-    index: usize,
-) -> Result<NormalizedMcpConnectedSourceCitation, String> {
-    let citation = raw
-        .as_object()
-        .ok_or_else(|| "MCP cited search returned an invalid citation.".to_string())?;
-    if citation.keys().any(|key| {
-        !matches!(
-            key.as_str(),
-            "sourceId" | "title" | "snippet" | "uri" | "provenance" | "freshness"
-        )
-    }) {
-        return Err("MCP cited search citation attempted to supply authority metadata.".into());
-    }
-    Ok(NormalizedMcpConnectedSourceCitation {
-        citation_id: format!("source-{}", index + 1),
-        source_id: connected_source_text(
-            citation.get("sourceId").unwrap_or(&Value::Null),
-            "source id",
-            512,
-        )?,
-        title: connected_source_text(
-            citation.get("title").unwrap_or(&Value::Null),
-            "citation title",
-            512,
-        )?,
-        snippet: connected_source_text(
-            citation.get("snippet").unwrap_or(&Value::Null),
-            "citation snippet",
-            4_096,
-        )?,
-        uri: citation
-            .get("uri")
-            .map(normalize_connected_source_uri)
-            .transpose()?,
-        provenance: connected_source_text(
-            citation.get("provenance").unwrap_or(&Value::Null),
-            "citation provenance",
-            512,
-        )?,
-        freshness: connected_source_text(
-            citation.get("freshness").unwrap_or(&Value::Null),
-            "citation freshness",
-            200,
-        )?,
-        trust: "external-untrusted",
-    })
-}
-
-fn connected_source_text(value: &Value, label: &str, max: usize) -> Result<String, String> {
-    let raw = value
-        .as_str()
-        .ok_or_else(|| format!("MCP cited search returned an invalid {label}."))?;
-    if raw.encode_utf16().count() > max
-        || raw
-            .chars()
-            .any(|character| character <= '\u{001f}' || character == '\u{007f}')
-    {
-        return Err(format!("MCP cited search returned an invalid {label}."));
-    }
-    let trimmed =
-        raw.trim_matches(|character: char| character.is_whitespace() || character == '\u{feff}');
-    if trimmed.is_empty() {
-        return Err(format!("MCP cited search returned an invalid {label}."));
-    }
-    Ok(trimmed.to_string())
-}
-
-fn normalize_connected_source_uri(value: &Value) -> Result<String, String> {
-    let uri = connected_source_text(value, "citation URI", 2_048)?;
-    let parsed = Url::parse(&uri)
-        .map_err(|_| "MCP cited search returned an invalid citation URI.".to_string())?;
-    if !matches!(parsed.scheme(), "https" | "http" | "file")
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-    {
-        return Err("MCP cited search returned an unsafe citation URI.".into());
-    }
-    Ok(uri)
-}
-
-fn validate_mcp_tool_result_content(content: Option<&Value>) -> Result<(), String> {
-    let content = content
-        .and_then(Value::as_array)
-        .filter(|items| items.len() <= 64)
-        .ok_or_else(|| "MCP cited search returned invalid content.".to_string())?;
-    for item in content {
-        let item = item
-            .as_object()
-            .ok_or_else(|| "MCP cited search returned invalid content.".to_string())?;
-        match item.get("type").and_then(Value::as_str) {
-            Some("text") if item.get("text").is_some_and(Value::is_string) => {}
-            Some("resource_link")
-                if item
-                    .get("uri")
-                    .is_some_and(|value| valid_optional_mcp_text(value, 2_048)) => {}
-            Some("resource") => {
-                let resource =
-                    item.get("resource")
-                        .and_then(Value::as_object)
-                        .ok_or_else(|| {
-                            "MCP cited search returned unsupported embedded content.".to_string()
-                        })?;
-                if !resource
-                    .get("uri")
-                    .is_some_and(|value| valid_optional_mcp_text(value, 2_048))
-                    || !resource.get("text").is_some_and(Value::is_string)
-                {
-                    return Err("MCP cited search returned unsupported embedded content.".into());
-                }
-            }
-            Some("image" | "audio") if item.get("data").is_some_and(Value::is_string) => {}
-            _ => return Err("MCP cited search returned unsupported content.".into()),
-        }
-    }
-    Ok(())
-}
-
-fn valid_optional_mcp_text(value: &Value, max: usize) -> bool {
-    value.as_str().is_some_and(|text| {
-        !text.is_empty()
-            && text.encode_utf16().count() <= max
-            && !text
-                .chars()
-                .any(|character| character <= '\u{001f}' || character == '\u{007f}')
-    })
-}
-
-fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalContext, String> {
+fn validate_tool_proposal(
+    proposal: &McpToolProposal,
+) -> Result<ToolProposalContext, String> {
     if !valid_session_id(&proposal.session_id) {
         return Err("The MCP session id is invalid.".into());
     }
@@ -780,7 +467,7 @@ fn observe_discovery_frame(session_id: &str, frame: &str) {
     ) = object.get("method").and_then(Value::as_str)
     {
         mark_discovery_changed(session_id);
-        let _ = observe_routine_discovery_change(session_id, method);
+        let _ = observe_discovery_change(session_id, method);
         return;
     }
     let Some(id) = object.get("id").and_then(discovery_request_id) else {
@@ -867,10 +554,10 @@ fn observe_discovery_frame(session_id: &str, frame: &str) {
     collection.complete = collection.expected_cursor.is_none();
 }
 
-fn observe_routine_discovery_change(session_id: &str, method: &str) -> Result<usize, String> {
-    let event_type = match method {
-        "notifications/tools/list_changed" => "mcp.tools.list_changed",
-        "notifications/resources/list_changed" => "mcp.resources.list_changed",
+fn observe_discovery_change(session_id: &str, method: &str) -> Result<usize, String> {
+    let change = match method {
+        "notifications/tools/list_changed" => "tools",
+        "notifications/resources/list_changed" => "resources",
         _ => return Err("The MCP discovery change event is unsupported.".into()),
     };
     let local = process_map()
@@ -882,11 +569,10 @@ fn observe_routine_discovery_change(session_id: &str, method: &str) -> Result<us
                 process.workspace_id.clone(),
                 process.owner_subject.clone(),
                 process.connection_id.clone(),
-                process.connection_revision,
                 "stdio",
             )
         });
-    let authority = if let Some(local) = local {
+    let (workspace_id, owner_subject, connection_id, transport) = if let Some(local) = local {
         local
     } else {
         remote_sessions()
@@ -898,45 +584,32 @@ fn observe_routine_discovery_change(session_id: &str, method: &str) -> Result<us
                     session.workspace_id.clone(),
                     session.owner_subject.clone(),
                     session.connection_id.clone(),
-                    session.connection_revision,
                     "remote",
                 )
             })
             .ok_or_else(|| "This MCP session is unavailable.".to_string())?
     };
-    let (workspace_id, owner_subject, connection_id, connection_revision, transport) = authority;
     let scope = crate::authorized_scope::command_scope(
         Some(workspace_id),
         None,
-        crate::authorized_scope::ScopeAccess::Write,
+        crate::authorized_scope::ScopeAccess::Read,
     )?;
     if scope.private.owner_subject() != owner_subject {
         return Err("This MCP session belongs to another private owner.".into());
     }
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let received_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-    let payload = serde_json::json!({
-        "transport":transport,
-        "change":if event_type == "mcp.tools.list_changed" {"tools"} else {"resources"}
-    });
-    store
-        .transaction(|tx| {
-            crate::scheduler::observe_connection_event(
-                tx,
-                store,
-                &scope,
-                crate::scheduler::ConnectionEventObservation {
-                    connection_id: &connection_id,
-                    connection_revision,
-                    event_type,
-                    source_reference: session_id,
-                    payload: &payload,
-                    received_at: &received_at,
-                },
-            )
-        })
-        .map_err(|error| error.to_string())
+    crate::action_history::Recorder::new(
+        crate::store::repos::action_history::category::CONNECTOR_ACTION,
+        "MCP",
+        change,
+        "observed",
+    )
+    .actor(scope.private.owner_subject())
+    .correlation(session_id)
+    .summary(&format!(
+        "Observed {change} discovery change for {transport} connection {connection_id}"
+    ))
+    .record();
+    Ok(0)
 }
 
 fn verify_discovery_proof(
@@ -1228,61 +901,6 @@ fn audit_mcp_response(session_id: &str, frame: &str) {
         failed,
         if failed { "mcp-tool-error" } else { "" },
     );
-}
-
-fn observe_mission_mcp_response(session_id: &str, frame: &str) {
-    let Ok(Value::Object(object)) = serde_json::from_str::<Value>(frame) else {
-        return;
-    };
-    let Some(request_id) = object.get("id").and_then(Value::as_str) else {
-        return;
-    };
-    let audit_key = pending_audit_key(session_id, request_id);
-    let permit_id = mission_mcp_response_requests()
-        .lock()
-        .ok()
-        .and_then(|mut requests| requests.remove(&audit_key));
-    let Some(permit_id) = permit_id else {
-        return;
-    };
-    let pending = pending_mission_mcp_searches()
-        .lock()
-        .ok()
-        .and_then(|mut pending| pending.remove(&permit_id));
-    let Some(pending) = pending else {
-        return;
-    };
-    let result = if pending.issued_at.elapsed() > Duration::from_secs(60) {
-        Err("The mission MCP evidence permit expired.".into())
-    } else if object.contains_key("error") {
-        Err("MCP cited search returned an error response.".into())
-    } else if let Some(raw) = object.get("result") {
-        normalize_mcp_connected_source_search(raw, &pending.continuation)
-            .and_then(|normalized| serde_json::to_value(normalized).map_err(|_| "Fable could not encode normalized MCP mission evidence.".to_string()))
-            .and_then(|normalized| {
-                let outer = serde_json::json!({
-                    "capabilityId":"knowledge.content.search",
-                    "availability":if normalized.get("degraded").and_then(Value::as_bool) == Some(true) { "degraded" } else { "available" },
-                    "connectionId":normalized.get("connectionId").cloned().unwrap_or(Value::Null),
-                    "connectorId":"mcp","implementationEvidence":"adapter-validated",
-                    "matchedGrantIds":normalized.get("matchedGrantIds").cloned().unwrap_or(Value::Null),"result":normalized,
-                });
-                crate::mission_workers::settle_native_connected_search(&pending.authority, outer.clone(), "mcp")?;
-                Ok(outer)
-            })
-    } else {
-        Err("MCP cited search returned no correlated result.".into())
-    };
-    if let Ok(mut outcomes) = mission_mcp_outcomes().lock() {
-        outcomes.retain(|_, value| value.observed_at.elapsed() <= Duration::from_secs(60));
-        outcomes.insert(
-            permit_id,
-            MissionMcpOutcome {
-                result,
-                observed_at: Instant::now(),
-            },
-        );
-    }
 }
 
 fn record_mcp_audit(pending: PendingMcpAudit, request_id: &str, failed: bool, error_code: &str) {

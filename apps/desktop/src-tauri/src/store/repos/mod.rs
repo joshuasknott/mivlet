@@ -5,8 +5,8 @@
 //! encrypted into a `payload` BLOB via [`Store::seal_payload`]; plaintext
 //! columns hold only non-secret ids/enums/timestamps/fingerprints.
 //!
-//! These modules are the stable interface the knowledge-retrieval and scheduler
-//! branches (Goal 8) integrate against.
+//! These modules are the stable interface for conversations, connections,
+//! knowledge, approvals, provider routing, and local account state.
 
 use rusqlite::Row;
 use serde_json::Value;
@@ -15,43 +15,27 @@ use crate::store::{Result, Store};
 
 pub mod action_history;
 pub mod approval;
-pub mod artifact;
 pub mod audit_event;
 pub mod backend_connection;
 pub mod capability_evidence;
 pub mod capability_grant;
-pub mod cloud_sync;
 pub mod connection_record;
 pub mod connection_selection;
 pub mod connector_account;
 pub mod connector_cache;
 pub mod connector_cache_settings;
 pub mod draft;
-pub mod goal;
+pub mod execution_attempt;
 pub mod knowledge_source;
 pub mod mcp_local_server;
 pub mod memory_record;
 pub mod message;
-pub mod mission_approval_consumption;
-pub mod mission_checkpoint;
-pub mod mission_plan;
-pub mod mission_run;
-pub mod mission_worker_output;
-pub mod mission_worker_tool;
 pub mod preferences;
-pub mod project;
 pub mod provider_route_observation;
 pub mod provider_route_quality_observation;
-pub mod routine;
-pub mod routine_migration;
-pub mod run;
 pub mod run_state;
-pub mod schedule;
-pub mod scheduled_job;
-pub mod scheduler_queue;
 pub mod scope;
 pub mod thread;
-pub mod workflow;
 pub mod workspace;
 pub mod workspace_directory;
 

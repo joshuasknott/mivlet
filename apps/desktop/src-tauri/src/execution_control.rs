@@ -83,15 +83,6 @@ fn write_state(
     Ok(next)
 }
 
-pub(crate) fn workspace_is_paused(workspace_id: &str) -> Result<bool, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .with_conn(|conn| read_state(conn, store, workspace_id))
-        .map(|state| state.paused)
-        .map_err(|error| error.to_string())
-}
-
 pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
     let Some(store) = crate::store::try_global() else {
         #[cfg(test)]

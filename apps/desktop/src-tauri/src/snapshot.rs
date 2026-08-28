@@ -5,11 +5,7 @@
 //! `list_imported_knowledge_sources`, `import_local_knowledge_source`,
 //! `load_runtime_snapshot`, `save_runtime_snapshot`.
 
-use std::{
-    collections::{BTreeMap, HashSet},
-    fs,
-    path::Path,
-};
+use std::{collections::HashSet, fs, path::Path};
 
 use crate::approvals::{normalize_approval_audit_entry, normalize_approval_grant};
 use crate::authorized_scope::{command_scope, ScopeAccess};
@@ -18,16 +14,12 @@ use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
     ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, FableAgentProfile,
-    LocalFileImport, LocalKnowledgeRefreshResponse, LocalTextFileCandidate, PlanStep,
-    RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot, RuntimeStatus, Schedule, WorkspaceGoal,
-    WorkspacePlan, APPROVAL_MODES, AUTOMATION_STATUSES, GOAL_STATUSES, MAX_APPROVAL_AUDIT_ENTRIES,
-    MAX_GOAL_FIELD_CHARACTERS, MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES,
-    MAX_LOCAL_FILE_PREVIEW_CHARACTERS, MAX_MEMORY_TITLE_CHARACTERS, MAX_PLAN_STEPS,
-    MAX_PLAN_STEP_DESCRIPTION_CHARACTERS, MAX_PLAN_TITLE_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_AUTOMATIONS, MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_GOALS, MAX_RUNTIME_SNAPSHOT_IDS, MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
-    MAX_RUNTIME_SNAPSHOT_PLANS, MAX_RUNTIME_SNAPSHOT_SCHEDULES, MAX_SCHEDULE_FIELD_CHARACTERS,
-    PLAN_STATUSES, RUNTIME_SNAPSHOT_VERSION, SCHEDULE_WEEKDAYS,
+    LocalFileImport, LocalKnowledgeRefreshResponse, LocalTextFileCandidate,
+    RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot, RuntimeStatus, APPROVAL_MODES,
+    MAX_APPROVAL_AUDIT_ENTRIES, MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES,
+    MAX_LOCAL_FILE_PREVIEW_CHARACTERS, MAX_MEMORY_TITLE_CHARACTERS,
+    MAX_RUNTIME_SNAPSHOT_DRAFT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_IDS,
+    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS, RUNTIME_SNAPSHOT_VERSION,
 };
 use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
@@ -431,237 +423,6 @@ fn normalize_snapshot_id_list(values: Vec<String>) -> Vec<String> {
     normalized_values
 }
 
-fn normalize_runtime_automation_statuses(
-    statuses: BTreeMap<String, String>,
-) -> Result<BTreeMap<String, String>, String> {
-    let mut normalized_statuses = BTreeMap::new();
-
-    for (id, status) in statuses {
-        let normalized_id =
-            truncate_characters(&normalize_spaces(&id), MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS);
-        let normalized_status = normalize_spaces(&status).to_ascii_lowercase();
-
-        if normalized_id.is_empty() {
-            continue;
-        }
-
-        if !AUTOMATION_STATUSES.contains(&normalized_status.as_str()) {
-            return Err("Automation status is not recognized.".to_string());
-        }
-
-        normalized_statuses.insert(normalized_id, normalized_status);
-        if normalized_statuses.len() >= MAX_RUNTIME_SNAPSHOT_AUTOMATIONS {
-            break;
-        }
-    }
-
-    Ok(normalized_statuses)
-}
-
-/// Validate and cap the user-created schedules carried by a runtime snapshot.
-/// Schedules are non-secret (name/description/when only); this keeps the field
-/// lengths, weekday vocabulary, and `HH:MM` time shape bounded so a malformed
-/// or hostile snapshot never echoes unvalidated data back into the shell.
-fn normalize_runtime_schedules(schedules: Vec<Schedule>) -> Result<Vec<Schedule>, String> {
-    let mut normalized_schedules = Vec::new();
-
-    for schedule in schedules {
-        let id = truncate_characters(
-            &normalize_spaces(&schedule.id),
-            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
-        );
-        let name = truncate_characters(
-            &normalize_spaces(&schedule.name),
-            MAX_SCHEDULE_FIELD_CHARACTERS,
-        );
-        let description = truncate_characters(
-            &normalize_spaces(&schedule.description),
-            MAX_SCHEDULE_FIELD_CHARACTERS,
-        );
-        let day = normalize_spaces(&schedule.day);
-        let time = normalize_spaces(&schedule.time);
-        let created_at = normalize_spaces(&schedule.created_at);
-
-        if id.is_empty() || name.is_empty() || created_at.is_empty() {
-            return Err("Schedules need stable identifiers, names, and timestamps.".to_string());
-        }
-
-        if !SCHEDULE_WEEKDAYS.contains(&day.as_str()) {
-            return Err("Schedule day is not recognized.".to_string());
-        }
-
-        if !is_valid_schedule_time(&time) {
-            return Err("Schedule time must be 24-hour HH:MM.".to_string());
-        }
-
-        if normalized_schedules
-            .iter()
-            .any(|existing: &Schedule| existing.id == id)
-        {
-            continue;
-        }
-
-        normalized_schedules.push(Schedule {
-            id,
-            name,
-            description,
-            day,
-            time,
-            enabled: schedule.enabled,
-            created_at,
-        });
-
-        if normalized_schedules.len() >= MAX_RUNTIME_SNAPSHOT_SCHEDULES {
-            break;
-        }
-    }
-
-    Ok(normalized_schedules)
-}
-
-/// A valid schedule time is exactly `HH:MM` in 24-hour form (00:00–23:59).
-fn is_valid_schedule_time(value: &str) -> bool {
-    let bytes = value.as_bytes();
-    if bytes.len() != 5 || bytes[2] != b':' {
-        return false;
-    }
-
-    let hour = value[0..2].parse::<u32>().ok();
-    let minute = value[3..5].parse::<u32>().ok();
-    matches!((hour, minute), (Some(h), Some(m)) if h <= 23 && m <= 59)
-}
-
-/// Normalize workspace goals created by /goal. Non-secret: id/title/statement
-/// and lifecycle bookkeeping, each capped and trimmed. Deduped by id, capped
-/// at MAX_RUNTIME_SNAPSHOT_GOALS.
-fn normalize_runtime_goals(goals: Vec<WorkspaceGoal>) -> Result<Vec<WorkspaceGoal>, String> {
-    let mut normalized_goals = Vec::new();
-
-    for goal in goals {
-        let id = truncate_characters(
-            &normalize_spaces(&goal.id),
-            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
-        );
-        let title = truncate_characters(&normalize_spaces(&goal.title), MAX_PLAN_TITLE_CHARACTERS);
-        let statement = truncate_characters(
-            &normalize_spaces(&goal.statement),
-            MAX_GOAL_FIELD_CHARACTERS,
-        );
-        let status = normalize_spaces(&goal.status);
-        let created_at = normalize_spaces(&goal.created_at);
-        let updated_at = normalize_spaces(&goal.updated_at);
-
-        if id.is_empty() || title.is_empty() || statement.is_empty() || created_at.is_empty() {
-            return Err(
-                "Goals need stable identifiers, titles, statements, and timestamps.".to_string(),
-            );
-        }
-
-        if !GOAL_STATUSES.contains(&status.as_str()) {
-            return Err("Goal status is not recognized.".to_string());
-        }
-
-        if normalized_goals
-            .iter()
-            .any(|existing: &WorkspaceGoal| existing.id == id)
-        {
-            continue;
-        }
-
-        normalized_goals.push(WorkspaceGoal {
-            id,
-            title,
-            statement,
-            status,
-            created_at,
-            updated_at,
-        });
-
-        if normalized_goals.len() >= MAX_RUNTIME_SNAPSHOT_GOALS {
-            break;
-        }
-    }
-
-    Ok(normalized_goals)
-}
-
-/// Normalize structured plans created by /plan. Non-secret: id/title/steps
-/// and lifecycle bookkeeping. Steps are capped in count and description
-/// length; plans are deduped by id and capped at MAX_RUNTIME_SNAPSHOT_PLANS.
-fn normalize_runtime_plans(plans: Vec<WorkspacePlan>) -> Result<Vec<WorkspacePlan>, String> {
-    let mut normalized_plans = Vec::new();
-
-    for plan in plans {
-        let id = truncate_characters(
-            &normalize_spaces(&plan.id),
-            MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
-        );
-        let title = truncate_characters(&normalize_spaces(&plan.title), MAX_PLAN_TITLE_CHARACTERS);
-        let status = normalize_spaces(&plan.status);
-        let created_at = normalize_spaces(&plan.created_at);
-        let updated_at = normalize_spaces(&plan.updated_at);
-        let goal_id = plan
-            .goal_id
-            .map(|raw| normalize_spaces(&raw))
-            .filter(|raw| !raw.is_empty());
-
-        if id.is_empty() || title.is_empty() || created_at.is_empty() {
-            return Err("Plans need stable identifiers, titles, and timestamps.".to_string());
-        }
-
-        if !PLAN_STATUSES.contains(&status.as_str()) {
-            return Err("Plan status is not recognized.".to_string());
-        }
-
-        let mut normalized_steps = Vec::new();
-        for step in plan.steps {
-            let step_id = truncate_characters(
-                &normalize_spaces(&step.id),
-                MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
-            );
-            let description = truncate_characters(
-                &normalize_spaces(&step.description),
-                MAX_PLAN_STEP_DESCRIPTION_CHARACTERS,
-            );
-            if step_id.is_empty() || description.is_empty() {
-                continue;
-            }
-            normalized_steps.push(PlanStep {
-                id: step_id,
-                order: step.order,
-                description,
-                done: step.done,
-            });
-            if normalized_steps.len() >= MAX_PLAN_STEPS {
-                break;
-            }
-        }
-
-        if normalized_plans
-            .iter()
-            .any(|existing: &WorkspacePlan| existing.id == id)
-        {
-            continue;
-        }
-
-        normalized_plans.push(WorkspacePlan {
-            id,
-            goal_id,
-            title,
-            steps: normalized_steps,
-            status,
-            created_at,
-            updated_at,
-        });
-
-        if normalized_plans.len() >= MAX_RUNTIME_SNAPSHOT_PLANS {
-            break;
-        }
-    }
-
-    Ok(normalized_plans)
-}
-
 pub(crate) fn normalize_runtime_snapshot(
     snapshot: RuntimeSnapshot,
 ) -> Result<RuntimeSnapshot, String> {
@@ -740,9 +501,6 @@ pub(crate) fn normalize_runtime_snapshot(
         records: snapshot.memory_records,
     })?;
 
-    let schedules = normalize_runtime_schedules(snapshot.schedules)?;
-    let goals = normalize_runtime_goals(snapshot.goals)?;
-    let plans = normalize_runtime_plans(snapshot.plans)?;
     let agents = normalize_runtime_agents(snapshot.agents)?;
     let active_agent_id = snapshot
         .active_agent_id
@@ -779,10 +537,6 @@ pub(crate) fn normalize_runtime_snapshot(
         approval_audit,
         dismissed_approval_ids: normalize_snapshot_id_list(snapshot.dismissed_approval_ids),
         approval_rules,
-        automation_statuses: normalize_runtime_automation_statuses(snapshot.automation_statuses)?,
-        schedules,
-        goals,
-        plans,
         agents,
         active_agent_id,
         pinned_source_ids: normalize_snapshot_id_list(snapshot.pinned_source_ids),
@@ -1016,11 +770,8 @@ pub fn save_runtime_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{PlanStep, WorkspaceGoal, WorkspacePlan};
-    use std::collections::BTreeMap;
 
-    /// Build a minimal valid RuntimeSnapshot, defaulting the unrelated fields
-    /// so goal/plan normalization can be exercised in isolation.
+    /// Build a minimal valid RuntimeSnapshot for focused normalization tests.
     fn base_snapshot() -> RuntimeSnapshot {
         RuntimeSnapshot {
             version: RUNTIME_SNAPSHOT_VERSION,
@@ -1030,10 +781,6 @@ mod tests {
             approval_audit: Vec::new(),
             dismissed_approval_ids: Vec::new(),
             approval_rules: Vec::new(),
-            automation_statuses: BTreeMap::new(),
-            schedules: Vec::new(),
-            goals: Vec::new(),
-            plans: Vec::new(),
             agents: Vec::new(),
             active_agent_id: None,
             pinned_source_ids: Vec::new(),
@@ -1199,137 +946,5 @@ mod tests {
             .iter()
             .any(|source| source.id == tombstone.id && source.deleted_at.is_some()));
         assert!(merge_deleted_imported_tombstones(vec![deleted], vec![tombstone]).is_err());
-    }
-
-    #[test]
-    fn normalizes_and_preserves_goals_through_round_trip() {
-        let mut snapshot = base_snapshot();
-        snapshot.goals = vec![WorkspaceGoal {
-            id: "goal-1".to_string(),
-            title: "Ship v2 onboarding".to_string(),
-            statement: "Ship the v2 onboarding flow by July.".to_string(),
-            status: "active".to_string(),
-            created_at: "2026-06-29T12:00:00Z".to_string(),
-            updated_at: "2026-06-29T12:00:00Z".to_string(),
-        }];
-
-        let normalized = normalize_runtime_snapshot(snapshot).expect("snapshot normalizes");
-
-        assert_eq!(normalized.goals.len(), 1);
-        assert_eq!(normalized.goals[0].id, "goal-1");
-        assert_eq!(normalized.goals[0].title, "Ship v2 onboarding");
-        assert_eq!(normalized.goals[0].status, "active");
-
-        // A second normalization (the round trip through save/load) is stable.
-        let twice = normalize_runtime_snapshot(normalized).expect("re-normalizes");
-        assert_eq!(twice.goals.len(), 1);
-        assert_eq!(twice.goals[0].id, "goal-1");
-    }
-
-    #[test]
-    fn rejects_a_goal_with_an_unrecognized_status() {
-        let mut snapshot = base_snapshot();
-        snapshot.goals = vec![WorkspaceGoal {
-            id: "goal-1".to_string(),
-            title: "Bad status".to_string(),
-            statement: "Statement.".to_string(),
-            status: "unknown".to_string(),
-            created_at: "2026-06-29T12:00:00Z".to_string(),
-            updated_at: "2026-06-29T12:00:00Z".to_string(),
-        }];
-
-        assert!(normalize_runtime_snapshot(snapshot).is_err());
-    }
-
-    #[test]
-    fn normalizes_and_preserves_plans_with_steps() {
-        let mut snapshot = base_snapshot();
-        snapshot.plans = vec![WorkspacePlan {
-            id: "plan-1".to_string(),
-            goal_id: Some("goal-1".to_string()),
-            title: "Migration plan".to_string(),
-            steps: vec![
-                PlanStep {
-                    id: "step-1".to_string(),
-                    order: 1,
-                    description: "Audit the current store.".to_string(),
-                    done: false,
-                },
-                PlanStep {
-                    id: "step-2".to_string(),
-                    order: 2,
-                    description: "Implement the encrypted repo.".to_string(),
-                    done: false,
-                },
-            ],
-            status: "draft".to_string(),
-            created_at: "2026-06-29T12:00:00Z".to_string(),
-            updated_at: "2026-06-29T12:00:00Z".to_string(),
-        }];
-
-        let normalized = normalize_runtime_snapshot(snapshot).expect("snapshot normalizes");
-
-        assert_eq!(normalized.plans.len(), 1);
-        assert_eq!(normalized.plans[0].steps.len(), 2);
-        assert_eq!(normalized.plans[0].goal_id.as_deref(), Some("goal-1"));
-    }
-
-    #[test]
-    fn defaults_goals_and_plans_when_absent_so_old_snapshots_parse() {
-        // A snapshot serialized before goals/plans existed deserializes with the
-        // serde defaults (empty vecs) and normalizes cleanly.
-        let json = r#"{
-            "version": 1,
-            "activeItem": "chat",
-            "composerDraft": "",
-            "voiceEnabled": false,
-            "approvalAudit": [],
-            "dismissedApprovalIds": [],
-            "approvalRules": [],
-            "automationStatuses": {},
-            "schedules": [],
-            "pinnedSourceIds": [],
-            "importedKnowledgeSources": [],
-            "memoryDisabled": false,
-            "memoryRecords": [],
-            "connectedBackendIds": [],
-            "selectedModelId": "",
-            "permissionMode": "read-only",
-            "savedAt": "2026-06-29T12:00:00Z"
-        }"#;
-        let snapshot: RuntimeSnapshot = serde_json::from_str(json).expect("parses old snapshot");
-        assert!(snapshot.goals.is_empty());
-        assert!(snapshot.plans.is_empty());
-
-        let normalized = normalize_runtime_snapshot(snapshot).expect("normalizes");
-        assert!(normalized.goals.is_empty());
-        assert!(normalized.plans.is_empty());
-    }
-
-    #[test]
-    fn dedupes_goals_by_id() {
-        let mut snapshot = base_snapshot();
-        snapshot.goals = vec![
-            WorkspaceGoal {
-                id: "goal-1".to_string(),
-                title: "First".to_string(),
-                statement: "One.".to_string(),
-                status: "active".to_string(),
-                created_at: "2026-06-29T12:00:00Z".to_string(),
-                updated_at: "2026-06-29T12:00:00Z".to_string(),
-            },
-            WorkspaceGoal {
-                id: "goal-1".to_string(),
-                title: "Duplicate".to_string(),
-                statement: "Two.".to_string(),
-                status: "active".to_string(),
-                created_at: "2026-06-29T12:00:00Z".to_string(),
-                updated_at: "2026-06-29T12:00:00Z".to_string(),
-            },
-        ];
-
-        let normalized = normalize_runtime_snapshot(snapshot).expect("snapshot normalizes");
-        assert_eq!(normalized.goals.len(), 1);
-        assert_eq!(normalized.goals[0].title, "First");
     }
 }

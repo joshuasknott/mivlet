@@ -121,17 +121,17 @@ describe("knowledge store", () => {
     const store = createKnowledgeStore("ws-a");
     const entry: PinnedContextEntry = {
       id: "p1",
-      scope: { level: "project", projectId: "proj" },
+      scope: { level: "thread", threadId: "thread-1" },
       sourceId: "s1",
       pinnedAt: "2026-06-28T00:00:00.000Z"
     };
     store.pin(entry);
 
-    expect(store.pinned({ level: "project", projectId: "proj" })).toHaveLength(1);
-    expect(store.pinned({ level: "project", projectId: "other" })).toHaveLength(0);
+    expect(store.pinned({ level: "thread", threadId: "thread-1" })).toHaveLength(1);
+    expect(store.pinned({ level: "thread", threadId: "thread-2" })).toHaveLength(0);
 
     store.unpin("p1");
-    expect(store.pinned({ level: "project", projectId: "proj" })).toHaveLength(0);
+    expect(store.pinned({ level: "thread", threadId: "thread-1" })).toHaveLength(0);
   });
 
   it("export returns live sources and live memories only", () => {
@@ -248,23 +248,14 @@ describe("knowledge store", () => {
 describe("scope helpers", () => {
   it("global scope satisfies every run scope", () => {
     expect(scopeSatisfies(GLOBAL_SCOPE, GLOBAL_SCOPE)).toBe(true);
-    expect(scopeSatisfies(GLOBAL_SCOPE, { level: "project", projectId: "p" })).toBe(true);
-    expect(scopeSatisfies(GLOBAL_SCOPE, { level: "thread", threadId: "t", projectId: "p" })).toBe(true);
-  });
-
-  it("project scope is satisfied only by a matching project/thread run", () => {
-    const projectScope = { level: "project" as const, projectId: "p" };
-    expect(scopeSatisfies(projectScope, GLOBAL_SCOPE)).toBe(false);
-    expect(scopeSatisfies(projectScope, { level: "project", projectId: "p" })).toBe(true);
-    expect(scopeSatisfies(projectScope, { level: "project", projectId: "other" })).toBe(false);
-    expect(scopeSatisfies(projectScope, { level: "thread", threadId: "t", projectId: "p" })).toBe(true);
+    expect(scopeSatisfies(GLOBAL_SCOPE, { level: "thread", threadId: "t" })).toBe(true);
   });
 
   it("thread scope is satisfied only by the same thread", () => {
-    const threadScope = { level: "thread" as const, threadId: "t", projectId: "p" };
+    const threadScope = { level: "thread" as const, threadId: "t" };
     expect(scopeSatisfies(threadScope, GLOBAL_SCOPE)).toBe(false);
-    expect(scopeSatisfies(threadScope, { level: "project", projectId: "p" })).toBe(false);
-    expect(scopeSatisfies(threadScope, { level: "thread", threadId: "t", projectId: "p" })).toBe(true);
-    expect(scopesMatch(threadScope, { level: "thread", threadId: "t", projectId: "p" })).toBe(true);
+    expect(scopeSatisfies(threadScope, { level: "thread", threadId: "other" })).toBe(false);
+    expect(scopeSatisfies(threadScope, { level: "thread", threadId: "t" })).toBe(true);
+    expect(scopesMatch(threadScope, { level: "thread", threadId: "t" })).toBe(true);
   });
 });

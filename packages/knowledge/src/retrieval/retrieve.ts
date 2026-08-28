@@ -25,7 +25,7 @@ import type {
   KnowledgeScope,
   KnowledgeSource,
   KnowledgeSearchResponse,
-  RunContextAudience,
+  ExecutionContextAudience,
   SourceChunk,
   SourceStatus
 } from "@fable/protocol";
@@ -98,7 +98,7 @@ export interface RetrieveOptions {
    */
   isAuthorized?: (source: KnowledgeSource) => boolean;
   /** Explicit run audience. Missing record ownership fails closed when supplied. */
-  audience?: RunContextAudience;
+  audience?: ExecutionContextAudience;
 }
 
 export interface AuthorityScopedKnowledgeCitation extends KnowledgeCitation {
@@ -130,7 +130,7 @@ export interface RetrievalFilterOptions {
   sourceIds?: string[];
   userSelectedSourceIds?: string[];
   isAuthorized?: (source: KnowledgeSource) => boolean;
-  audience?: RunContextAudience;
+  audience?: ExecutionContextAudience;
 }
 
 /**

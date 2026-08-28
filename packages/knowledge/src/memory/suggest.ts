@@ -9,7 +9,6 @@
  */
 
 import type {
-  Artifact,
   KnowledgeSource,
   MemoryKind,
   MemoryProvenance,
@@ -20,7 +19,6 @@ import { detectContradiction, detectDuplicate } from "./duplicate";
 
 export interface MemorySuggestionContext {
   recentMessages?: { role: string; content: string }[];
-  artifacts?: Artifact[];
   sources?: KnowledgeSource[];
   existingMemory: MemoryRecord[];
   /** ISO timestamp; reserved for future freshness tagging. */
@@ -105,27 +103,6 @@ function deriveFromMessage(content: string, origin: MemoryProvenance["origin"]):
   return candidates;
 }
 
-function deriveFromArtifacts(artifacts: Artifact[]): RawCandidate[] {
-  const candidates: RawCandidate[] = [];
-  for (const artifact of artifacts) {
-    if (artifact.pinned) {
-      candidates.push({
-        title: `Pinned artifact: ${artifact.title}`,
-        value: `The user pinned "${artifact.title}" as worth keeping.`,
-        kind: "fact",
-        provenance: {
-          origin: "artifact",
-          artifactId: artifact.id,
-          runId: artifact.provenance.runId,
-          note: "Pinned artifact surfaced as a memory candidate."
-        },
-        confidence: 0.6
-      });
-    }
-  }
-  return candidates;
-}
-
 function deriveFromSources(sources: KnowledgeSource[]): RawCandidate[] {
   const candidates: RawCandidate[] = [];
   for (const source of sources) {
@@ -147,7 +124,7 @@ function deriveFromSources(sources: KnowledgeSource[]): RawCandidate[] {
 }
 
 /**
- * Derive memory suggestions from chat messages, artifacts, and sources. NEVER
+ * Derive memory suggestions from chat messages and sources. NEVER
  * writes: this is a pure function over its inputs. Each candidate is checked
  * against existing memory for duplicates / contradictions and tagged with the
  * matched ids so the UI can show the relationship.
@@ -164,7 +141,6 @@ export function suggestMemories(ctx: MemorySuggestionContext): MemorySuggestion[
       raw.push(...deriveFromMessage(message.content, "chat"));
     }
   }
-  raw.push(...deriveFromArtifacts(ctx.artifacts ?? []));
   raw.push(...deriveFromSources(ctx.sources ?? []));
 
   // De-dupe raw candidates against each other so the same preference isn't

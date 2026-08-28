@@ -1,10 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type {
-  AgentRunRequest,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendProvider,
-  PersistedAgentRun,
-  PreparedRunContext
+  ExecutionAttempt,
+  PreparedExecutionContext
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,7 +25,7 @@ import { useNativeAgent } from "./useNativeAgent";
  *   - noTransport when hasDesktopRuntime() is false
  *
  * No real network, Tauri, or SSE — every Rust-bound wrapper is mocked. The
- * mocked listen callback captures onLine so tests can also hold a run open
+ * mocked listen callback captures onLine so tests can also hold an attempt open
  * (omit [DONE]) to exercise cancellation against a genuinely in-flight loop.
  */
 
@@ -37,7 +37,7 @@ const mocks = vi.hoisted(() => ({
   // a clean stop). This lets multi-turn joined tests script turn 1 (tool-call)
   // and turn 2 (stop) deterministically instead of replaying the same chunks.
   turnTwoLines: null as string[] | null,
-  // When false, the listener does not emit [DONE] — the run stays open/blocked
+  // When false, the listener does not emit [DONE] — the attempt stays open/blocked
   // so cancellation can target an in-flight loop.
   emitDone: true,
   // The most recent onLine callback, captured so a held-open run can be settled
@@ -64,8 +64,8 @@ const mocks = vi.hoisted(() => ({
   savedRuns: [] as unknown[],
   persistenceEvents: [] as string[],
   saveError: null as Error | null,
-  recoveredRuns: [] as PersistedAgentRun[],
-  listedRuns: null as PersistedAgentRun[] | null,
+  recoveredRuns: [] as ExecutionAttempt[],
+  listedRuns: null as ExecutionAttempt[] | null,
   toolResult: { ok: true, output: "Fetched body text from Rust." },
   selectRoute: vi.fn(async (input: { providerId: string; model: string }) => ({
     workspaceId: "workspace-1",
@@ -114,14 +114,14 @@ vi.mock("../runtime", () => ({
     mocks.cancelCalls.push(requestId);
     return null;
   }),
-  saveRuntimeAgentRun: vi.fn(async (run: unknown) => {
+  saveRuntimeExecutionAttempt: vi.fn(async (run: unknown) => {
     if (mocks.saveError) throw mocks.saveError;
     mocks.savedRuns.push(run);
     mocks.persistenceEvents.push("save");
     return run;
   }),
-  recoverRuntimeAgentRuns: vi.fn(async () => mocks.recoveredRuns),
-  listRuntimeAgentRuns: vi.fn(async () => mocks.listedRuns),
+  recoverRuntimeExecutionAttempts: vi.fn(async () => mocks.recoveredRuns),
+  listRuntimeExecutionAttempts: vi.fn(async () => mocks.listedRuns),
   listRuntimeBackendModels: vi.fn(async () => null),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
@@ -151,18 +151,18 @@ function removeDesktopRuntime() {
   (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
 }
 
-const baseRequest: AgentRunRequest = {
+const baseRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "summarize the conversation" }],
   tools: [],
   maxTokens: 1024
 };
 
-const preparedContext: PreparedRunContext = {
+const preparedContext: PreparedExecutionContext = {
   systemPrefix: "Use the selected conversation notes.",
   receipt: {
     version: 1,
-    runId: "019f4f00-0000-7000-8000-contextreceipt",
+    attemptId: "019f4f00-0000-7000-8000-contextreceipt",
     assembledAt: "2026-07-11T12:00:00.000Z",
     scope: { level: "thread", threadId: "thread-1" },
     citations: [],
@@ -252,21 +252,21 @@ describe("useNativeAgent", () => {
     expect(result.current.resolveBackend("missing")).toBeNull();
   });
 
-  it("persists the immutable prepared receipt before egress and uses its canonical run id", async () => {
+  it("persists the immutable prepared receipt before egress and uses its canonical attempt id", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Done"), finishStop];
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await act(async () => { await result.current.run(baseRequest, preparedContext); });
-    const saved = mocks.savedRuns as PersistedAgentRun[];
-    expect(saved[0]).toMatchObject({ id: preparedContext.receipt.runId, contextReceipt: preparedContext.receipt, status: "streaming" });
+    const saved = mocks.savedRuns as ExecutionAttempt[];
+    expect(saved[0]).toMatchObject({ id: preparedContext.receipt.attemptId, contextReceipt: preparedContext.receipt, status: "streaming" });
     expect(mocks.persistenceEvents[0]).toBe("save");
     expect(mocks.persistenceEvents.indexOf("save")).toBeLessThan(mocks.persistenceEvents.indexOf("egress"));
     expect(saved.every((run) => run.contextReceipt === preparedContext.receipt)).toBe(true);
     expect(mocks.streamRequests[0]).toBeDefined();
     expect(saved[0].providerRoute).toMatchObject({ workspaceId: "workspace-1", selection: { providerRouteId: "route-openai-gpt-5" } });
     expect(mocks.streamRequests[0].providerRoute).toEqual(saved[0].providerRoute);
-    expect(result.current.state.providerRoutes[preparedContext.receipt.runId]).toEqual(saved[0].providerRoute);
-    expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toEqual(preparedContext.receipt);
+    expect(result.current.state.providerRoutes[preparedContext.receipt.attemptId]).toEqual(saved[0].providerRoute);
+    expect(result.current.state.contextReceipts[preparedContext.receipt.attemptId]).toEqual(preparedContext.receipt);
   });
 
   it("creates an explicit empty receipt when a caller has no prepared context", async () => {
@@ -274,8 +274,8 @@ describe("useNativeAgent", () => {
     mocks.lines = [finishStop];
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()], threadId: "thread-1" }));
     await act(async () => { await result.current.run(baseRequest); });
-    const first = mocks.savedRuns[0] as PersistedAgentRun;
-    expect(first.contextReceipt).toMatchObject({ runId: first.id, scope: { level: "thread", threadId: "thread-1" }, citations: [], contributions: [] });
+    const first = mocks.savedRuns[0] as ExecutionAttempt;
+    expect(first.contextReceipt).toMatchObject({ attemptId: first.id, scope: { level: "thread", threadId: "thread-1" }, citations: [], contributions: [] });
   });
 
   it("removes optimistic receipt evidence when the pre-egress save fails", async () => {
@@ -284,34 +284,34 @@ describe("useNativeAgent", () => {
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await act(async () => { await result.current.run(baseRequest, preparedContext); });
     expect(mocks.streamCalls).toBe(0);
-    expect(result.current.state.contextReceipts[preparedContext.receipt.runId]).toBeUndefined();
-    expect(result.current.state.providerRoutes[preparedContext.receipt.runId]).toBeUndefined();
-    expect(result.current.state.currentRunId).toBeNull();
+    expect(result.current.state.contextReceipts[preparedContext.receipt.attemptId]).toBeUndefined();
+    expect(result.current.state.providerRoutes[preparedContext.receipt.attemptId]).toBeUndefined();
+    expect(result.current.state.currentAttemptId).toBeNull();
   });
 
   it("hydrates context receipts for completed, failed, and interrupted historical runs", async () => {
     installDesktopRuntime();
     mocks.listedRuns = (["completed", "failed", "interrupted"] as const).map((status, index) => ({
-      id: `run-${status}`,
+      id: `attempt-${status}`,
       providerId: "openai", model: "gpt-5", status, transcript: "response", turn: 0,
       pendingApprovalIds: [], recoverable: status !== "completed", retryCount: 0,
       createdAt: "2026-07-11T12:00:00.000Z", updatedAt: "2026-07-11T12:00:01.000Z",
-      contextReceipt: { ...preparedContext.receipt, runId: `run-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
+      contextReceipt: { ...preparedContext.receipt, attemptId: `attempt-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
       providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } },
       usage: { inputTokens: 40 + index, outputTokens: 5 + index, costUsd: 0, costUnknown: true }
     }));
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
-    expect(result.current.state.contextReceipts["run-interrupted"]?.contributions[0].reason).toBe("retrieved");
-    expect(result.current.state.providerRoutes["run-completed"]?.selection.reason).toBe("Selected route completed.");
-    expect(result.current.state.usageReceipts["run-failed"]).toMatchObject({ inputTokens: 41, outputTokens: 6, costUnknown: true });
+    expect(result.current.state.contextReceipts["attempt-interrupted"]?.contributions[0].reason).toBe("retrieved");
+    expect(result.current.state.providerRoutes["attempt-completed"]?.selection.reason).toBe("Selected route completed.");
+    expect(result.current.state.usageReceipts["attempt-failed"]).toMatchObject({ inputTokens: 41, outputTokens: 6, costUnknown: true });
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {
     installDesktopRuntime();
     mocks.recoveredRuns = [
       {
-        id: "run-interrupted",
+        id: "attempt-interrupted",
         providerId: "openai",
         model: "gpt-5",
         status: "interrupted",
@@ -353,16 +353,16 @@ describe("useNativeAgent", () => {
         ]
       })
     );
-    await waitFor(() => expect(result.current.state.recoverableRuns).toHaveLength(1));
+    await waitFor(() => expect(result.current.state.recoverableAttempts).toHaveLength(1));
 
     await act(async () => {
-      await result.current.retry(result.current.state.recoverableRuns[0]);
+      await result.current.retry(result.current.state.recoverableAttempts[0]);
     });
 
     expect(result.current.state.transcript).toBe("Recovered");
-    expect(result.current.state.recoverableRuns).toHaveLength(0);
-    const finalRun = mocks.savedRuns.at(-1) as PersistedAgentRun;
-    expect(finalRun.parentRunId).toBe("run-interrupted");
+    expect(result.current.state.recoverableAttempts).toHaveLength(0);
+    const finalRun = mocks.savedRuns.at(-1) as ExecutionAttempt;
+    expect(finalRun.parentAttemptId).toBe("attempt-interrupted");
     expect(finalRun.threadId).toBe("thread-1");
     expect(finalRun.exchanges?.[0]).toEqual({
       role: "user",
@@ -393,7 +393,7 @@ describe("useNativeAgent", () => {
     expect(result.current.state.transcript).toBe("Hello world");
     expect(result.current.state.running).toBe(false);
     expect(result.current.state.lastError).toBeNull();
-    const finalRun = mocks.savedRuns.at(-1) as PersistedAgentRun;
+    const finalRun = mocks.savedRuns.at(-1) as ExecutionAttempt;
     expect(finalRun.status).toBe("completed");
     expect(finalRun.exchanges).toEqual([
       {
@@ -425,7 +425,7 @@ describe("useNativeAgent", () => {
     expect(result.current.state.usage).not.toBeNull();
     expect(result.current.state.usage?.inputTokens).toBe(42);
     expect(result.current.state.usage?.outputTokens).toBe(7);
-    expect(result.current.state.usageReceipts[result.current.state.currentRunId ?? ""]).toMatchObject({
+    expect(result.current.state.usageReceipts[result.current.state.currentAttemptId ?? ""]).toMatchObject({
       inputTokens: 42,
       outputTokens: 7
     });
@@ -463,7 +463,7 @@ describe("useNativeAgent", () => {
     expect(toolEvent.approval.service).toBe("openai");
     // The hook never auto-executes: the stub executor throws, which surfaces as
     // a failed tool-result inside the loop — but the tool-call still routes and
-    // the run still finishes.
+    // the attempt still finishes.
     expect(result.current.state.running).toBe(false);
   });
 
@@ -512,7 +512,7 @@ describe("useNativeAgent", () => {
   it("signals real cancellation to the Rust boundary and drops running mid-run", async () => {
     installDesktopRuntime();
     // One text-delta and NO [DONE]: the transport yields the delta, then blocks
-    // awaiting the next line — so the run is genuinely in flight and
+    // awaiting the next line — so the attempt is genuinely in flight and
     // cancelRef.current is still set when we cancel.
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
@@ -538,7 +538,7 @@ describe("useNativeAgent", () => {
     // cancel() read the in-flight cancelRef and signaled the Rust boundary.
     expect(mocks.cancelCalls.length).toBe(1);
     expect(result.current.state.running).toBe(false);
-    expect((mocks.savedRuns.at(-1) as PersistedAgentRun).status).toBe("cancelled");
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe("cancelled");
 
     // Unblock the held-open run so it can settle without rejecting the suite.
     mocks.onLine?.("[DONE]");
@@ -559,7 +559,7 @@ describe("useNativeAgent", () => {
     expect(mocks.streamCalls).toBe(0);
   });
 
-  it("rejects an overlapping run while the active stream is pending", async () => {
+  it("rejects an overlapping attempt while the active stream is pending", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
@@ -598,7 +598,7 @@ describe("useNativeAgent", () => {
     installDesktopRuntime();
     // Mirrors App.tsx exactly: shouldCancel reads a cancel flag, and onCancel
     // (fired by cancel()) sets that flag. This proves the cancel() path drives a
-    // cooperative bail between events — not only the Rust boundary drop. The run
+    // cooperative bail between events — not only the Rust boundary drop. The attempt
     // is held open (no [DONE]) so the loop is genuinely in flight when cancel().
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
@@ -636,7 +636,7 @@ describe("useNativeAgent", () => {
     // The cancel path flipped the flag (onCancel ran).
     expect(cancelRequested).toBe(true);
 
-    // The run bailed cooperatively (shouldCancel returned true between events),
+    // The attempt bailed cooperatively (shouldCancel returned true between events),
     // running dropped, and "more" was consumed by the transport but never
     // accumulated into the transcript (cancelled before the delta was processed).
     await act(async () => {
@@ -685,12 +685,12 @@ describe("useNativeAgent", () => {
     });
   });
 
-  it("threads the permission-level label into the loop and still completes the run", async () => {
+  it("threads the permission-level label into the loop and still completes the attempt", async () => {
     installDesktopRuntime();
     // A write-file tool call (defaultMode full-access). Under read-only the loop
     // refuses it before the (stub) executor runs, then continues to a stop. The
     // deep deny semantics are covered at the agent-loop level; here we verify the
-    // label is accepted, threaded through, and the run completes without throwing.
+    // label is accepted, threaded through, and the attempt completes without throwing.
     mocks.lines = [
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"write-file","arguments":"{\\"path\\":\\"a.txt\\",\\"content\\":\\"x\\"}"}}]}}]}',
       'data: {"choices":[{"finish_reason":"tool_calls"}]}',
@@ -705,12 +705,12 @@ describe("useNativeAgent", () => {
     );
 
     await act(async () => {
-      // Read-only is accepted and threaded into the run.
+      // Read-only is accepted and threaded into the attempt.
       await result.current.run(baseRequest, undefined, "read-only");
     });
 
     // The write-file tool call surfaced to the shell (read-only gates execution,
-    // not visibility), and the run finished cleanly.
+    // not visibility), and the attempt finished cleanly.
     const toolEvent = onToolCall.mock.calls.at(0)?.at(0) as Extract<
       BackendAgentEvent,
       { type: "tool-call" }
@@ -769,7 +769,7 @@ describe("useNativeAgent", () => {
       })
     );
 
-    // Kick off the run, then grant the tool call once it surfaces. The executor
+    // Kick off the attempt, then grant the tool call once it surfaces. The executor
     // blocks on the gate until the grant, so run + grant interleave.
     let runPromise!: Promise<void>;
     act(() => {
@@ -802,7 +802,7 @@ describe("useNativeAgent", () => {
     expect(toolRequest.approval.request.action).toContain("read-file");
     expect(toolRequest.approval.request.service).toBe("openai");
 
-    // The run finished cleanly (the loop continued past the tool turn to done),
+    // The attempt finished cleanly (the loop continued past the tool turn to done),
     // the gate is no longer holding the call, and no error surfaced.
     expect(result.current.state.running).toBe(false);
     expect(result.current.state.lastError).toBeNull();
@@ -929,7 +929,7 @@ describe("useNativeAgent", () => {
         });
       });
 
-      // The desktop transport made exactly one egress call for the run.
+      // The desktop transport made exactly one egress call for the attempt.
       expect(mocks.streamRequests).toHaveLength(1);
       const egress = mocks.streamRequests[0];
       // The providerId + selected model thread through to the Rust boundary
@@ -938,7 +938,7 @@ describe("useNativeAgent", () => {
       expect(egress.model).toBe(model);
       // The body was shaped by this provider's shaper (the assertion above).
       expectBody(egress.body as Record<string, unknown>);
-      // The run completed without surfacing an error.
+      // The attempt completed without surfacing an error.
       expect(result.current.state.running).toBe(false);
       expect(result.current.state.lastError).toBeNull();
     }
@@ -992,7 +992,7 @@ describe("useNativeAgent", () => {
         }
       })
     ];
-    // emitDone stays true, but the transport error short-circuits the run.
+    // emitDone stays true, but the transport error short-circuits the attempt.
 
     const { result } = renderHook(() =>
       useNativeAgent({ providers: [connectedOpenAiProvider()] })
@@ -1004,7 +1004,7 @@ describe("useNativeAgent", () => {
 
     expect(result.current.state.running).toBe(false);
     // The error is classified so a configuration failure (rejected/expired key)
-    // is distinguishable from a runtime/provider failure: the surfaced message
+    // is distinguishable from an attempttime/provider failure: the surfaced message
     // points the user at their key in Settings and preserves the provider detail.
     expect(result.current.state.lastError).toContain("API key");
     expect(result.current.state.lastError).toContain("Settings");
@@ -1013,7 +1013,7 @@ describe("useNativeAgent", () => {
 
   it("runtime provider errors are classified as retryable, not as a key problem", async () => {
     installDesktopRuntime();
-    // A 5xx surfaces as `provider-unavailable` — a runtime failure, not a
+    // A 5xx surfaces as `provider-unavailable` — an attempttime failure, not a
     // configuration one. The surfaced message must not point at the API key.
     mocks.lines = [
       JSON.stringify({

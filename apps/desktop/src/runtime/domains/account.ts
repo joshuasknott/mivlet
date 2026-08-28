@@ -14,9 +14,6 @@ import type {
   CloudSyncStatus,
   CloudWorkspaceLinkState,
   IdentityStatus,
-  RemoteControlPreferenceRequest,
-  RemoteControlStatusSnapshot,
-  RemoteDevice,
 } from "@fable/protocol";
 import { getActiveRuntimeDataScope } from "../../runtime-scope";
 import { getRuntimeAdapter } from "../adapters/select";
@@ -63,15 +60,6 @@ export interface AccountRuntimePort {
   pullCloudSyncAfterCursor(
     workspaceId?: string,
   ): Promise<CloudSyncPullResult | null>;
-  getRemoteControlStatus(): Promise<RemoteControlStatusSnapshot | null>;
-  enableRemoteControl(
-    request?: RemoteControlPreferenceRequest,
-  ): Promise<RemoteControlStatusSnapshot | null>;
-  disableRemoteControl(
-    request?: RemoteControlPreferenceRequest,
-  ): Promise<RemoteControlStatusSnapshot | null>;
-  listRemoteDevices(): Promise<RemoteDevice[] | null>;
-  revokeRemoteDevice(deviceId: string): Promise<RemoteDevice | null>;
 }
 
 function createAccountPort(adapter: RuntimeAdapter): AccountRuntimePort {
@@ -187,36 +175,6 @@ function createAccountPort(adapter: RuntimeAdapter): AccountRuntimePort {
         ? invoke("cloud_sync_pull_after_cursor", { workspaceId: scope })
         : Promise.resolve(null);
     },
-    async getRemoteControlStatus() {
-      if (!native) return null;
-      try {
-        return await adapter.invoke<RemoteControlStatusSnapshot>(
-          "remote_control_status",
-        );
-      } catch {
-        return null;
-      }
-    },
-    enableRemoteControl: (request) =>
-      native
-        ? invoke("remote_control_enable", { request: request ?? null })
-        : Promise.resolve(null),
-    disableRemoteControl: (request) =>
-      native
-        ? invoke("remote_control_disable", { request: request ?? null })
-        : Promise.resolve(null),
-    async listRemoteDevices() {
-      if (!native) return null;
-      try {
-        return await adapter.invoke<RemoteDevice[]>("remote_list_devices");
-      } catch {
-        return null;
-      }
-    },
-    revokeRemoteDevice: (deviceId) =>
-      native
-        ? invoke("remote_revoke_device", { deviceId })
-        : Promise.resolve(null),
   };
 }
 
@@ -274,14 +232,3 @@ export const flushRuntimeCloudSyncOutbox = (workspaceId?: string) =>
   accountPort().flushCloudSyncOutbox(workspaceId);
 export const pullRuntimeCloudSyncAfterCursor = (workspaceId?: string) =>
   accountPort().pullCloudSyncAfterCursor(workspaceId);
-export const getRuntimeRemoteControlStatus = () =>
-  accountPort().getRemoteControlStatus();
-export const enableRuntimeRemoteControl = (
-  request?: RemoteControlPreferenceRequest,
-) => accountPort().enableRemoteControl(request);
-export const disableRuntimeRemoteControl = (
-  request?: RemoteControlPreferenceRequest,
-) => accountPort().disableRemoteControl(request);
-export const listRuntimeRemoteDevices = () => accountPort().listRemoteDevices();
-export const revokeRuntimeRemoteDevice = (deviceId: string) =>
-  accountPort().revokeRemoteDevice(deviceId);

@@ -1,7 +1,7 @@
 /** Drive one ACP v1 prompt turn over an injected stdio/JSON-RPC transport. */
 
-import type { AgentRunRequest, BackendAgentEvent } from "@fable/protocol";
-import type { AgentRunOptions } from "../../contract";
+import type { AgentTurnRequest, BackendAgentEvent } from "@fable/protocol";
+import type { AgentTurnOptions } from "../../contract";
 import {
   MAX_TOOL_ARGUMENT_CHARACTERS,
   MAX_TOOL_CALLS_PER_RUN,
@@ -31,7 +31,7 @@ function object(value: unknown): JsonObject | null {
 /** Options honored by the ACP session adapter. */
 export interface AcpSessionOptions {
   /** Approval-only execution seam for ACP permission requests. */
-  execute: AgentRunOptions["execute"];
+  execute: AgentTurnOptions["execute"];
   shouldCancel?: () => boolean;
   contextPrefix?: string;
   maxToolCalls?: number;
@@ -57,7 +57,7 @@ function sessionIdFrom(result: unknown): string | null {
     : null;
 }
 
-function promptText(request: AgentRunRequest, contextPrefix?: string): string {
+function promptText(request: AgentTurnRequest, contextPrefix?: string): string {
   const messages = request.messages
     .filter((message) => message.role === "user")
     .map((message) => message.content.trim())
@@ -168,7 +168,7 @@ async function sendRequestError(
 export async function* runAcpSession(
   transport: AcpTransport,
   providerId: string,
-  request: AgentRunRequest,
+  request: AgentTurnRequest,
   options: AcpSessionOptions
 ): AsyncIterable<BackendAgentEvent> {
   const maxPermissionRequests = Math.min(

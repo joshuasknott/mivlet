@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentRunRequest, BackendAgentEvent } from "@fable/protocol";
+import type { AgentTurnRequest, BackendAgentEvent } from "@fable/protocol";
 import { FakeAcpTransport, type ScriptedResponder } from "./transport-fakes";
 import { runAcpSession } from "./session";
 
-const baseRequest: AgentRunRequest = {
+const baseRequest: AgentTurnRequest = {
   model: "provider-default",
   messages: [{ role: "user", content: "say hi" }],
   tools: [],

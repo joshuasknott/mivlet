@@ -8,8 +8,8 @@
  */
 
 import type {
-  AgentRunOptions,
-  AgentRunRequest,
+  AgentTurnOptions,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendCapability,
   BackendProvider
@@ -24,12 +24,12 @@ import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
 
-function requestedThreadId(request: AgentRunRequest): string | null {
-  const candidate = (request as AgentRunRequest & { threadId?: unknown; codexThreadId?: unknown })
+function requestedThreadId(request: AgentTurnRequest): string | null {
+  const candidate = (request as AgentTurnRequest & { threadId?: unknown; codexThreadId?: unknown })
     .threadId;
   if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
   const legacyCandidate = (
-    request as AgentRunRequest & { threadId?: unknown; codexThreadId?: unknown }
+    request as AgentTurnRequest & { threadId?: unknown; codexThreadId?: unknown }
   ).codexThreadId;
   return typeof legacyCandidate === "string" && legacyCandidate.trim()
     ? legacyCandidate.trim()
@@ -40,7 +40,7 @@ async function* mapCodexEvents(
   handle: CodexAppServerHandle,
   threadId: string,
   events: AsyncIterable<CodexAppServerEvent>,
-  options: AgentRunOptions,
+  options: AgentTurnOptions,
   capabilities: readonly BackendCapability[]
 ): AsyncIterable<BackendAgentEvent> {
   for await (const event of events) {
@@ -120,8 +120,8 @@ export function createCodexBackend(
   let active: { handle: CodexAppServerHandle; threadId: string | null } | null = null;
 
   function run(
-    request: AgentRunRequest,
-    options: AgentRunOptions
+    request: AgentTurnRequest,
+    options: AgentTurnOptions
   ): AsyncIterable<BackendAgentEvent> | null {
     if (!capabilities.includes("streaming")) {
       return null;
@@ -147,7 +147,7 @@ export function createCodexBackend(
           options: {
             contextPrefix: options.contextPrefix,
             permissionMode: options.permissionMode,
-            runId: options.runId
+            attemptId: options.attemptId
           }
         });
         yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities);

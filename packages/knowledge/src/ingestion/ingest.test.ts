@@ -426,7 +426,7 @@ describe("ingest: metadata preservation", () => {
       mimeType: "text/markdown",
       sourcePath: "docs/notes.md",
       modifiedAt: "2026-06-01T00:00:00.000Z",
-      scope: { level: "project", projectId: "p1" }
+      scope: { level: "thread", threadId: "thread-1" }
     });
     const outcome = ingestCandidate(c, { connectorId: "local-files" });
     expect(outcome.kind).toBe("created");
@@ -434,7 +434,7 @@ describe("ingest: metadata preservation", () => {
     expect(outcome.source.sourcePath).toBe("docs/notes.md");
     expect(outcome.source.mediaType).toBe("text/markdown");
     expect(outcome.source.modifiedAt).toBe("2026-06-01T00:00:00.000Z");
-    expect(outcome.source.scope).toEqual({ level: "project", projectId: "p1" });
+    expect(outcome.source.scope).toEqual({ level: "thread", threadId: "thread-1" });
   });
 
   it("defaults scope to global when unset", () => {

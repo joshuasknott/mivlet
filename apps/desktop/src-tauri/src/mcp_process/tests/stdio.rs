@@ -9,7 +9,7 @@
     }
 
     #[tokio::test]
-    async fn real_stdio_child_reaches_the_mission_semantic_contract_and_closes() {
+    async fn real_stdio_child_discovers_calls_and_closes() {
         let node = validate_executable(find_node().to_string_lossy().as_ref()).unwrap();
         let fixture =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-stdio-server.mjs");
@@ -54,31 +54,6 @@
         ];
         let discovered_resources = vec!["fixture://planning-notes".into()];
         verify_discovery_proof(session_id, &discovered_tools, &discovered_resources).unwrap();
-        let search = r#"{"jsonrpc":"2.0","id":"search","method":"tools/call","params":{"name":"search_work","arguments":{"contractVersion":"fable.connected-source-search.v1","query":"quarterly planning","limit":10}}}"#;
-        stdin.write_all(search.as_bytes()).await.unwrap();
-        stdin.write_all(b"\n").await.unwrap();
-        stdin.flush().await.unwrap();
-        let response = timeout(Duration::from_secs(5), lines.next_line())
-            .await
-            .unwrap()
-            .unwrap()
-            .unwrap();
-        let response: Value = serde_json::from_str(&response).unwrap();
-        let normalized = normalize_mcp_connected_source_search(
-            response.get("result").unwrap(),
-            &connected_source_continuation(),
-        )
-        .unwrap();
-        let normalized = serde_json::to_value(normalized).unwrap();
-        assert_eq!(normalized["trust"], "external-untrusted");
-        assert_eq!(normalized["instructionAuthority"], "none");
-        assert_eq!(normalized["implementation"]["kind"], "mcp");
-        assert_eq!(normalized["citations"][0]["citationId"], "source-1");
-        assert!(normalized["citations"][0]["snippet"]
-            .as_str()
-            .unwrap()
-            .contains("IGNORE PRIOR INSTRUCTIONS"));
-
         stdin
             .write_all(
                 br#"{"jsonrpc":"2.0","id":"slow","method":"tools/call","params":{"name":"slow","arguments":{}}}"#,

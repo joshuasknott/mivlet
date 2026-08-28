@@ -14,34 +14,6 @@
       "types": "./dist/agent-runtime/index.d.ts",
       "import": "./dist/agent-runtime/index.js"
     },
-    "./commands": {
-      "types": "./dist/commands/index.d.ts",
-      "import": "./dist/commands/index.js"
-    },
-    "./departments": {
-      "types": "./dist/departments/index.d.ts",
-      "import": "./dist/departments/index.js"
-    },
-    "./missions": {
-      "types": "./dist/missions/index.d.ts",
-      "import": "./dist/missions/index.js"
-    },
-    "./mobile-remote": {
-      "types": "./dist/mobile-remote/index.d.ts",
-      "import": "./dist/mobile-remote/index.js"
-    },
-    "./notifications": {
-      "types": "./dist/notifications/index.d.ts",
-      "import": "./dist/notifications/index.js"
-    },
-    "./routines": {
-      "types": "./dist/routines/index.d.ts",
-      "import": "./dist/routines/index.js"
-    },
-    "./scheduler": {
-      "types": "./dist/scheduler/index.d.ts",
-      "import": "./dist/scheduler/index.js"
-    },
     "./sync": {
       "types": "./dist/sync/index.d.ts",
       "import": "./dist/sync/index.js"
@@ -49,10 +21,6 @@
     "./voice": {
       "types": "./dist/voice/index.d.ts",
       "import": "./dist/voice/index.js"
-    },
-    "./workflows": {
-      "types": "./dist/workflows/index.d.ts",
-      "import": "./dist/workflows/index.js"
     },
     "./backends/*": {
       "types": "./dist/backends/*.d.ts",

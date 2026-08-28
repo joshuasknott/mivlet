@@ -50,13 +50,11 @@ export {
 
 // data (preview/demo fixtures)
 export {
-  automationFixtures,
   chatThreadFixtures,
   connectorFixtures,
   connectorSearchFixtures,
   directiveFixtures,
-  knowledgeSourceFixtures,
-  projectFixtures
+  knowledgeSourceFixtures
 } from "./fixtures";
 
 // first-wave provider adapters (pure: no network and no credential access)
@@ -90,6 +88,7 @@ export * from "./providers/slack-api";
 export * from "./providers/http";
 export * from "./providers/broker-contract";
 export * from "./providers/google-calendar";
+export * from "./providers/routing";
 export {
   ConnectorRuntime,
   normalizeConnectorError,
@@ -122,9 +121,7 @@ export {
   resolveMistralVibeProvider,
   resolveOpenCodeProvider,
   resolveNativeProvider,
-  resolveOllamaProvider,
-  NATIVE_BACKEND_TYPE,
-  LOCAL_LOOPBACK_BACKEND_TYPE
+  NATIVE_BACKEND_TYPE
 } from "./backends/registry";
 export { hasCapability } from "./backends/capabilities";
 export type {
@@ -161,10 +158,6 @@ export {
   shapeGeminiRequest,
   streamGeminiEvents
 } from "./native-api/gemini";
-export {
-  shapeOllamaChatRequest,
-  streamOllamaEvents
-} from "./native-api/ollama";
 export { buildToolApproval } from "./native-api/approvals";
 export { lookupTool, registeredToolSpecs } from "./native-api/tools";
 export { priceFor } from "./native-api/pricing";
@@ -194,14 +187,13 @@ export {
   hasRunnableAdapter,
   createCodexBackend,
   createNativeApiBackend,
-  createLocalLoopbackBackend,
   resolveAcpBackend,
   ACP_PROVIDERS,
   detectAcpRuntime,
   type AgentBackend,
   type AgentBackendFactory,
-  type AgentRunRequest,
-  type AgentRunOptions,
+  type AgentTurnRequest,
+  type AgentTurnOptions,
   type BackendDeps,
   type CodexAppServerEvent,
   type CodexAppServerHandle,
@@ -252,21 +244,7 @@ export {
   type ToolApprovalGate,
   type ToolRuntime
 } from "./native-api/tool-executor";
-export * from "./scheduler";
-export * from "./workflows";
-export * from "./departments";
-export * from "./notifications";
 export * from "./voice";
-export * from "./routines";
-
-// Fable-owned slash commands (provider-neutral parsing, redaction, dispatch).
-// Pure logic; the shell implements the CommandRuntime seam.
-export * from "./commands";
-
-// Mobile remote-control foundation: pure session/pairing/authorization/dispatch
-// logic for the desktop-side remote-control surface. Secrets (PSK, device keys)
-// live behind the Rust boundary. See docs/architecture/mobile-remote.md.
-export * from "./mobile-remote";
 
 // MCP client core. Process and credential custody stay behind native transport
 // adapters; this package owns protocol lifecycle, discovery, and exact-call
@@ -274,10 +252,6 @@ export * from "./mobile-remote";
 export * from "./mcp/client";
 export * from "./mcp/protocol";
 export * from "./mcp/connected-source-search";
-
-// Portable mission planning: bounded generated-plan validation, dynamic sizing,
-// and immutable plan-revision selection. Persistence/execution remain adapters.
-export * from "./missions";
 
 // Browser automation foundation: pure run/session binding, shared permission
 // policy classification, and redacted audit shaping. Live transport is supplied

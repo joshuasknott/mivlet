@@ -286,7 +286,7 @@ describe("sourceAllowedByConnections", () => {
 });
 
 describe("buildAgentRequest", () => {
-  it("shapes the model/messages into a provider-neutral AgentRunRequest", () => {
+  it("shapes the model/messages into a provider-neutral AgentTurnRequest", () => {
     const request = buildAgentRequest({
       model: "gpt-5",
       prompt: "Summarize the project",

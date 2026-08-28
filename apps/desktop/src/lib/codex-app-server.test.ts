@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentRunRequest, BackendProvider } from "@fable/protocol";
+import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
 import type { RuntimeCodexEvent } from "../runtime";
 import { createDesktopCodexAppServer } from "./codex-app-server";
 
@@ -45,7 +45,7 @@ const provider: BackendProvider = {
   models: [{ id: "gpt-5", label: "GPT-5", available: true }]
 };
 
-const request: AgentRunRequest = {
+const request: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "Say hello." }],
   tools: [],
@@ -73,7 +73,7 @@ describe("desktop Codex app-server client", () => {
     const events = handle!.submitTurn({
       threadId: thread.threadId,
       request,
-      options: { runId: "run-1", permissionMode: "read-only" }
+      options: { attemptId: "attempt-1", permissionMode: "read-only" }
     })[Symbol.asyncIterator]();
 
     const delta = events.next();

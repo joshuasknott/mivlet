@@ -34,7 +34,6 @@ const catalogueProviders: BackendProvider[] = [
   provider("grok", "Grok", "acp", "install-required"),
   provider("xai", "xAI"),
   provider("openrouter", "OpenRouter"),
-  provider("ollama", "Ollama", "local-loopback", "unavailable"),
   provider("z-ai", "Z.AI"),
   provider("deepseek", "DeepSeek"),
   provider("minimax", "MiniMax"),
@@ -81,7 +80,6 @@ describe("provider families", () => {
     expect(openai?.methods.map((method) => method.command)).toEqual([undefined, undefined]);
     expect(xai?.providers.map((entry) => entry.id)).toEqual(["xai"]);
     expect(xai?.methods.map((method) => method.kind)).toEqual(["api-key"]);
-    expect(families.find((family) => family.id === "ollama")).toBeUndefined();
     expect(families.find((family) => family.id === "copilot")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "cursor")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "zai")?.providers).toHaveLength(1);
@@ -216,12 +214,11 @@ describe("ProviderCatalogue", () => {
     expect(dialog).not.toHaveTextContent("sk-test-secret");
   });
 
-  it("omits local models and offers xAI only through its API key", async () => {
+  it("offers xAI only through its API key", async () => {
     const user = userEvent.setup();
     renderCatalogue();
     await user.click(screen.getByRole("button", { name: "Show all providers" }));
 
-    expect(screen.queryByRole("button", { name: /Ollama, / })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /xAI, / }));
     const dialog = screen.getByRole("dialog", { name: "xAI" });
     expect(within(dialog).getByText("xAI API key")).toBeInTheDocument();

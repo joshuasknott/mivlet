@@ -1,15 +1,9 @@
 //! Fable desktop runtime entrypoint.
 //!
-//! Feature logic lives in focused modules (`models`, `paths`, `approvals`,
-//! `knowledge`, `memory`, `snapshot`, `backends`, `scheduler`, `workflows`).
-//! This crate root only declares those modules, registers the Tauri command
-//! handlers, and starts the in-process scheduler tick.
+//! The native shell owns local encrypted storage, provider and connector
+//! boundaries, approvals, conversations, and optional local or hosted
+//! computers. Product orchestration lives nowhere in this crate.
 
-// Native transaction and execution-boundary functions intentionally keep
-// authority, scope, revision, and timing inputs explicit. Collapsing those
-// security-relevant facts into broad bags solely to satisfy shape lints would
-// make call-site review less precise. Large preflight enum variants likewise
-// stay inline because they are short-lived, single-owner boundary values.
 #![allow(
     clippy::large_enum_variant,
     clippy::too_many_arguments,
@@ -19,15 +13,12 @@
 mod account_workspace;
 mod acp_process;
 mod action_history;
-mod agent_runs;
 mod approvals;
-mod artifacts;
 mod authorized_scope;
 mod backends;
 mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
-mod cloud_sync;
 mod codex_app_server;
 mod collaboration_connectors;
 mod connector_api;
@@ -39,42 +30,24 @@ mod connectors;
 mod conversations;
 mod diagnostics;
 mod execution_approvals;
+mod execution_attempts;
 mod execution_control;
-mod goals;
 mod google;
 mod hosted_computer;
 mod knowledge;
 mod local_computer;
-mod local_model;
 mod mcp_process;
 mod memory;
-mod mission_approvals;
-mod mission_artifact_revision_brief;
-mod mission_continuations;
-mod mission_coordination;
-mod mission_human_input;
-mod mission_parallel_approaches;
-mod mission_plans;
-mod mission_runs;
-mod mission_structured_intake;
-mod mission_workers;
 mod models;
 mod native_api;
-mod notifications;
 mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
-pub mod portable;
 #[cfg(test)]
 mod product_spine_parity;
-mod projects;
-mod remote_control;
-mod routines;
-mod scheduler;
 mod snapshot;
 mod store;
 pub mod tools;
-mod workflows;
 mod workspace_directory;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
@@ -83,14 +56,6 @@ pub(crate) fn ensure_rustls_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 }
 
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod store_tests;
-
-use std::time::Duration;
-
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -98,54 +63,19 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            // Use hardened portable-aware data dir resolution (fail-closed).
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
             app.manage(std::sync::Arc::new(
                 local_computer::LocalComputerState::initialize(&handle)?,
             ));
-            mission_runs::initialize_recovery_epoch();
-            // Load the durable scheduler store once and manage it as process
-            // state. The in-process tick leases due entries; because Tauri is
-            // a single shared process, the lease map is the cross-window duplicate-
-            // execution guard (two windows can never lease the same occurrence).
-            // Any entry left leased/running by a prior crash is recovered here.
-            let handle = app.handle().clone();
-            app.manage(scheduler::SchedulerState(std::sync::Mutex::new(
-                std::collections::BTreeMap::new(),
-            )));
-            // Mobile remote-control trust list. In-memory in this foundation
-            // pass; the durable store lands with the transport layer. The
-            // command surface is registered below and fails closed until then.
-            app.manage(remote_control::initialize_state());
-            if let Err(error) = scheduler::initialize_store(&handle) {
-                // Keep the scheduler unavailable rather than inventing a
-                // default workspace authority. Scoped commands surface the
-                // initialization error after account reconciliation.
-                eprintln!("scheduler initialize failed: {error}");
-            }
-            if let Err(error) = workflows::recover_stale_runs(&handle) {
-                eprintln!("workflow recovery failed: {error}");
-            }
-
-            // In-process scheduler tick. Stops when the app exits. An
-            // interrupted tick only ever leaves entries leased until their short
-            // deadline; the next tick re-queues expired leases (crash-safe).
-            let tick_handle = handle.clone();
-            tauri::async_runtime::spawn(async move {
-                loop {
-                    let _ = scheduler::run_tick(&tick_handle);
-                    tokio::time::sleep(Duration::from_secs(models::SCHEDULER_TICK_SECS)).await;
-                }
-            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             snapshot::runtime_status,
-            agent_runs::save_agent_run,
-            agent_runs::list_agent_runs,
-            agent_runs::recover_interrupted_agent_runs,
+            execution_attempts::save_execution_attempt,
+            execution_attempts::list_execution_attempts,
+            execution_attempts::recover_interrupted_execution_attempts,
             conversations::conversation_create_thread,
             conversations::conversation_list_threads,
             conversations::conversation_get_thread,
@@ -156,93 +86,6 @@ pub fn run() {
             conversations::conversation_load_draft,
             conversations::conversation_save_draft,
             conversations::conversation_delete_draft,
-            projects::project_create,
-            projects::project_list,
-            projects::project_get,
-            projects::project_connection_options,
-            projects::project_update,
-            projects::project_archive,
-            projects::project_restore,
-            projects::project_delete,
-            goals::goal_create,
-            goals::goal_list,
-            goals::goal_get,
-            goals::goal_update,
-            goals::goal_achieve,
-            goals::goal_archive,
-            goals::goal_restore,
-            routines::routine_create,
-            routines::routine_edit,
-            routines::routine_pause,
-            routines::routine_resume,
-            routines::routine_delete,
-            routines::routine_get,
-            routines::routine_list,
-            routines::routine_connection_options,
-            routines::routine_occurrence_append,
-            routines::routine_occurrence_history,
-            routines::routine_driver_renew,
-            routines::routine_driver_report,
-            routines::routine_scheduler_status,
-            routines::routine_scheduler_begin_shadow,
-            routines::routine_scheduler_cutover,
-            routines::routine_scheduler_rollback,
-            routines::routine_migration_capture,
-            routines::routine_migration_apply,
-            routines::routine_migration_verify_replay,
-            routines::routine_migration_rollback,
-            mission_plans::mission_plan_create,
-            mission_plans::mission_plan_get,
-            mission_plans::mission_plan_cited_summary_get,
-            mission_plans::mission_plan_cited_summaries_read,
-            mission_plans::mission_plan_revise,
-            mission_runs::mission_run_create,
-            mission_runs::mission_run_get,
-            mission_runs::mission_run_request_cancellation,
-            mission_runs::mission_run_finalize_cancellation,
-            mission_runs::mission_run_recover_interrupted_cited,
-            mission_runs::mission_run_recover_interrupted_general,
-            mission_runs::mission_run_prepare_cited_retry,
-            mission_runs::mission_run_create_checkpoint,
-            mission_runs::mission_run_restore_checkpoint,
-            mission_coordination::mission_coordination_join_open,
-            mission_coordination::mission_coordination_join_resolve,
-            mission_coordination::mission_coordination_aggregation_record,
-            mission_coordination::mission_coordination_progress_read,
-            mission_coordination::mission_coordination_progress_list,
-            mission_coordination::mission_coordination_human_evaluation_record,
-            mission_coordination::mission_coordination_prepare_workers,
-            mission_coordination::mission_coordination_worker_objective,
-            mission_coordination::mission_coordination_advance,
-            mission_coordination::mission_coordination_finalize,
-            mission_approvals::mission_approval_request,
-            mission_approvals::mission_approval_pending_list,
-            mission_approvals::mission_approval_resolve,
-            mission_human_input::mission_human_input_request,
-            mission_human_input::mission_human_input_pending_list,
-            mission_human_input::mission_human_input_receive,
-            mission_parallel_approaches::mission_parallel_approaches_join_open,
-            mission_parallel_approaches::mission_parallel_approaches_finalize,
-            mission_parallel_approaches::mission_parallel_approaches_recover_completed,
-            mission_parallel_approaches::mission_parallel_approaches_reviewer_prepare,
-            mission_parallel_approaches::mission_parallel_approaches_reviewer_recover,
-            mission_structured_intake::mission_structured_intake_start,
-            mission_artifact_revision_brief::mission_artifact_revision_brief_start,
-            mission_workers::mission_worker_create,
-            mission_workers::mission_worker_start,
-            mission_workers::mission_worker_output_read,
-            mission_workers::mission_worker_cited_receipts_read,
-            mission_workers::mission_cited_approval_pending_list,
-            mission_workers::mission_cited_approval_resolve,
-            artifacts::artifact_create_from_response,
-            artifacts::artifact_append_version,
-            artifacts::artifact_review_action,
-            artifacts::artifact_get,
-            artifacts::artifact_list_for_thread,
-            artifacts::artifact_search,
-            artifacts::artifact_export,
-            artifacts::artifact_handoff_propose,
-            artifacts::artifact_handoff_accept,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,
@@ -307,10 +150,6 @@ pub fn run() {
             native_api::cancel_backend_completion,
             native_api::list_backend_models,
             native_api::verify_backend_credential,
-            local_model::detect_local_model_runtime,
-            local_model::list_local_model_models,
-            local_model::stream_local_model_completion,
-            local_model::cancel_local_model_completion,
             clerk_identity::identity_status,
             clerk_identity::identity_begin_sign_in,
             clerk_identity::identity_begin_recovery,
@@ -331,23 +170,6 @@ pub fn run() {
             hosted_computer::hosted_computer_provision,
             hosted_computer::hosted_process_prepare,
             hosted_computer::hosted_process_launch,
-            hosted_computer::hosted_process_schedule_prepare,
-            hosted_computer::hosted_process_schedule_create,
-            hosted_computer::hosted_process_schedule_status,
-            hosted_computer::hosted_process_schedule_list,
-            hosted_computer::hosted_process_schedule_run_list,
-            hosted_computer::hosted_process_schedule_cancel_prepare,
-            hosted_computer::hosted_process_schedule_cancel,
-            hosted_computer::hosted_process_schedule_control_prepare,
-            hosted_computer::hosted_process_schedule_control,
-            hosted_computer::hosted_agent_routine_prepare,
-            hosted_computer::hosted_agent_routine_create,
-            hosted_computer::hosted_agent_routine_list,
-            hosted_computer::hosted_agent_routine_run_list,
-            hosted_computer::hosted_agent_routine_cancel_prepare,
-            hosted_computer::hosted_agent_routine_cancel,
-            hosted_computer::hosted_agent_routine_control_prepare,
-            hosted_computer::hosted_agent_routine_control,
             hosted_computer::hosted_process_status,
             hosted_computer::hosted_process_kill,
             hosted_computer::hosted_browser_prepare,
@@ -365,11 +187,6 @@ pub fn run() {
             local_computer::local_browser_pointer,
             local_computer::local_browser_key,
             local_computer::local_browser_history,
-            cloud_sync::cloud_sync_status,
-            cloud_sync::cloud_sync_link_state,
-            cloud_sync::cloud_sync_enqueue_shared_mutation,
-            cloud_sync::cloud_sync_flush_outbox,
-            cloud_sync::cloud_sync_pull_after_cursor,
             workspace_directory::list_workspace_directory,
             workspace_directory::select_active_workspace,
             acp_process::spawn_acp_process,
@@ -395,7 +212,6 @@ pub fn run() {
             mcp_process::prepare_mcp_tool_call,
             mcp_process::authorize_mcp_tool_call,
             mcp_process::execute_approved_mcp_tool_call,
-            mcp_process::attest_mission_mcp_connected_search,
             capability_grants::prepare_capability_grant,
             capability_grants::commit_capability_grant,
             capability_grants::list_capability_grants,
@@ -410,35 +226,7 @@ pub fn run() {
             diagnostics::local_diagnostics,
             execution_control::execution_control_get,
             execution_control::execution_control_pause,
-            execution_control::execution_control_resume,
-            portable::export_workspace_archive_to_file,
-            portable::export_project_archive_to_file,
-            portable::import_workspace_archive_from_file,
-            portable::portable_format_version,
-            scheduler::list_scheduler_jobs,
-            scheduler::list_scheduler_queue,
-            scheduler::save_scheduled_job,
-            scheduler::delete_scheduled_job,
-            scheduler::set_job_status,
-            scheduler::enqueue_job_run,
-            scheduler::report_job_attempt,
-            scheduler::renew_job_lease,
-            scheduler::requeue_blocked_job_run,
-            scheduler::cancel_job_run,
-            workflows::save_workflow_run,
-            workflows::save_workflow_definition,
-            workflows::list_workflow_definitions,
-            workflows::list_workflow_runs,
-            workflows::list_workflow_runs_for_definition,
-            notifications::deliver_notification,
-            remote_control::remote_control_disable,
-            remote_control::remote_control_enable,
-            remote_control::remote_control_status,
-            remote_control::remote_list_devices,
-            remote_control::remote_pairing_start,
-            remote_control::remote_pairing_status,
-            remote_control::remote_revoke_device,
-            remote_control::remote_handle_command
+            execution_control::execution_control_resume
         ])
         .run(tauri::generate_context!())
         .expect("failed to run Fable desktop runtime");

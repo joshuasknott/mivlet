@@ -121,7 +121,6 @@ export type NativeProviderId =
   | "kimi-code"
   | "mistral"
   | "meta"
-  | "ollama"
   | "perplexity"
   | "tencent"
   | "xiaomi"
@@ -275,13 +274,6 @@ export const nativeFixtures: NativeFixture[] = [
     label: "Meta Llama",
     description: "Reach models available to your Meta Llama API account.",
     authLabel: "Meta Llama API key",
-    models: []
-  },
-  {
-    providerId: "ollama",
-    label: "Ollama",
-    description: "Use models served by Ollama on this device.",
-    authLabel: "Local Ollama",
     models: []
   },
   {

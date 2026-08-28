@@ -27,8 +27,8 @@
  */
 
 import type {
-  AgentRunOptions,
-  AgentRunRequest,
+  AgentTurnOptions,
+  AgentTurnRequest,
   ApprovalRequest,
   BackendAgentEvent,
   BackendCapability,
@@ -61,8 +61,8 @@ export interface AgentBackend {
    * surfaces this as a no-transport notice instead of attempting the run.
    */
   run(
-    request: AgentRunRequest,
-    options: AgentRunOptions
+    request: AgentTurnRequest,
+    options: AgentTurnOptions
   ): AsyncIterable<BackendAgentEvent> | null;
 
   /**
@@ -114,15 +114,6 @@ export interface BackendDeps {
    * inject a scripted fake. Holds no secret because auth is CLI-owned.
    */
   createAcpTransport?: AcpTransportFactory;
-  /**
-   * Build a transport for an explicitly trusted local loopback provider such as
-   * Ollama. This is not general web egress: production validates the endpoint
-   * as literal loopback before any request leaves the process.
-   */
-  createLocalModelTransport?: (
-    provider: BackendProvider,
-    handlers: TransportHandlers
-  ) => TransportHandle | null;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }
@@ -182,14 +173,14 @@ export type CodexAppServerEvent =
 
 export interface CodexTurnRequest {
   threadId: string;
-  request: AgentRunRequest;
-  options: Pick<AgentRunOptions, "contextPrefix" | "permissionMode" | "runId">;
+  request: AgentTurnRequest;
+  options: Pick<AgentTurnOptions, "contextPrefix" | "permissionMode" | "attemptId">;
 }
 
 export interface CodexAppServerHandle {
   initialize(): Promise<void>;
-  startThread(request: AgentRunRequest): Promise<CodexThreadRef>;
-  resumeThread(threadId: string, request: AgentRunRequest): Promise<CodexThreadRef>;
+  startThread(request: AgentTurnRequest): Promise<CodexThreadRef>;
+  resumeThread(threadId: string, request: AgentTurnRequest): Promise<CodexThreadRef>;
   submitTurn(request: CodexTurnRequest): AsyncIterable<CodexAppServerEvent>;
   respondApproval(
     requestId: string,
@@ -213,4 +204,4 @@ export type AgentBackendFactory = (
   deps: BackendDeps
 ) => AgentBackend | null;
 
-export type { AgentRunRequest, AgentRunOptions } from "@fable/protocol";
+export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";

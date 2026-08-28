@@ -13,7 +13,7 @@ import type {
 } from "../contract";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import type { HttpTransport } from "../../native-api/transport";
-import type { AgentRunRequest, NativeCompletionRequest } from "@fable/protocol";
+import type { AgentTurnRequest, NativeCompletionRequest } from "@fable/protocol";
 
 /**
  * A highly configurable mock implementation of CodexAppServerHandle.
@@ -47,12 +47,12 @@ export class MockCodexAppServer implements CodexAppServerHandle {
     this.initialized = true;
   }
 
-  async startThread(request: AgentRunRequest): Promise<CodexThreadRef> {
+  async startThread(request: AgentTurnRequest): Promise<CodexThreadRef> {
     this.started = true;
     return { threadId: "codex-thread-mock-1" };
   }
 
-  async resumeThread(threadId: string, request: AgentRunRequest): Promise<CodexThreadRef> {
+  async resumeThread(threadId: string, request: AgentTurnRequest): Promise<CodexThreadRef> {
     this.resumedThreadId = threadId;
     return { threadId };
   }

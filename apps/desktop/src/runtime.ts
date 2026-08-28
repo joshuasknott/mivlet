@@ -33,12 +33,8 @@ export {
   clearRuntimeAccountWorkspaceSession,
   createRuntimeAccountWorkspace,
   createRuntimeWorkspaceInvitation,
-  disableRuntimeRemoteControl,
-  enableRuntimeRemoteControl,
   enqueueRuntimeCloudSyncMutation,
   flushRuntimeCloudSyncOutbox,
-  getRuntimeRemoteControlStatus,
-  listRuntimeRemoteDevices,
   loadRuntimeAccountWorkspaceStatus,
   loadRuntimeCloudSyncLinkState,
   loadRuntimeCloudSyncStatus,
@@ -49,7 +45,6 @@ export {
   reconcileRuntimeAccountWorkspace,
   refreshRuntimeIdentity,
   revokeRuntimeAccountDevice,
-  revokeRuntimeRemoteDevice,
   selectRuntimeAccountWorkspace,
   signOutRuntimeIdentity,
   type AccountRuntimePort
@@ -90,7 +85,7 @@ import type {
   ApprovalResolutionResponse,
   BackendConsequentialEvent,
   BackendCredentialRequest,
-  AgentRunRequest,
+  AgentTurnRequest,
   BackendProvider,
   BackendVerifyResult,
   ConnectorActionRequest,
@@ -113,7 +108,9 @@ import type {
   MemoryControlState,
   MemoryPromotionRequest,
   MemoryPromotionResponse,
-  PersistedAgentRun,
+  ExecutionAttempt,
+  ProviderRoutePricingEvidence,
+  ProviderRouteQualitySnapshot,
   RecordActionHistoryRequest,
   RuntimeSnapshot
 } from "@fable/protocol";
@@ -309,34 +306,34 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
   }
 }
 
-export async function saveRuntimeAgentRun(run: PersistedAgentRun) {
+export async function saveRuntimeExecutionAttempt(attempt: ExecutionAttempt) {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun>("save_agent_run", { run, ...scope });
+    return await invoke<ExecutionAttempt>("save_execution_attempt", { attempt, ...scope });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function listRuntimeAgentRuns() {
+export async function listRuntimeExecutionAttempts() {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun[]>("list_agent_runs", scope);
+    return await invoke<ExecutionAttempt[]>("list_execution_attempts", scope);
   } catch {
     return null;
   }
 }
 
-export async function recoverRuntimeAgentRuns(recoveredAt: string) {
+export async function recoverRuntimeExecutionAttempts(recoveredAt: string) {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<PersistedAgentRun[]>("recover_interrupted_agent_runs", { recoveredAt, ...scope });
+    return await invoke<ExecutionAttempt[]>("recover_interrupted_execution_attempts", { recoveredAt, ...scope });
   } catch {
     return null;
   }
@@ -597,8 +594,7 @@ export async function updateRuntimeConversationThread(input: RuntimeConversation
     const index = store.threads.findIndex((thread) => thread.id === input.threadId);
     if (index < 0) throw new Error("Conversation thread was not found in this workspace.");
     const previous = store.threads[index];
-    const { projectId: _retiredProjectId, ...changes } = input;
-    const next = { ...previous, ...changes, updatedAt: new Date().toISOString(), revision: previous.revision + 1 } as ConversationThread;
+    const next = { ...previous, ...input, updatedAt: new Date().toISOString(), revision: previous.revision + 1 } as ConversationThread;
     store.threads[index] = next;
     return next;
   }
@@ -1247,8 +1243,8 @@ export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
     usageSampleCount: number;
     latestObservedAt: string;
   };
-  pricingSummary?: Spine.Missions.ProviderRoutePricingEvidence;
-  qualitySummary?: Spine.Missions.ProviderRouteQualitySnapshot;
+  pricingSummary?: ProviderRoutePricingEvidence;
+  qualitySummary?: ProviderRouteQualitySnapshot;
 };
 
 export async function listRuntimeNativeProviderRoutes() {
@@ -1350,7 +1346,7 @@ export interface RuntimeCodexTurnStartRequest {
   requestId: string;
   providerId: string;
   threadId: string | null;
-  request: AgentRunRequest;
+  request: AgentTurnRequest;
   options: {
     contextPrefix?: string;
     permissionMode?: string;

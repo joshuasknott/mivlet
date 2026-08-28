@@ -15,13 +15,12 @@
  */
 
 import type {
-  Artifact,
   ContextRecordAuthorityScope,
   KnowledgeScope,
   KnowledgeSource,
   MemoryRecord,
   PinnedContextEntry,
-  RunContextAudience,
+  ExecutionContextAudience,
   SourceChunk
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
@@ -43,7 +42,7 @@ export function isLiveSource(source: KnowledgeSource): boolean {
  */
 export function authorityScopeAllowsAudience(
   authorityScope: ContextRecordAuthorityScope | undefined,
-  audience?: RunContextAudience
+  audience?: ExecutionContextAudience
 ): boolean {
   if (!audience) return true;
   const actingMemberId = audience.actingMemberId?.trim();
@@ -83,7 +82,6 @@ export function authorityScopeAllowsAudience(
 export function scopesMatch(a: KnowledgeScope, b: KnowledgeScope): boolean {
   if (a.level !== b.level) return false;
   if (a.level === "global") return true;
-  if (a.level === "project") return a.projectId === b.projectId;
   return a.threadId === b.threadId;
 }
 
@@ -91,13 +89,10 @@ export function scopesMatch(a: KnowledgeScope, b: KnowledgeScope): boolean {
  * Whether `entry` scope is satisfied by `run` scope. A tighter entry scope is
  * satisfied by a matching run scope; global entries satisfy every run. The
  * context assembler uses this so thread-scoped material never leaks into a
- * global/project run.
+ * global run.
  */
 export function scopeSatisfies(entry: KnowledgeScope, run: KnowledgeScope): boolean {
   if (entry.level === "global") return true;
-  if (entry.level === "project") {
-    return run.level === "thread" ? run.projectId === entry.projectId : scopesMatch(entry, run);
-  }
   return scopesMatch(entry, run);
 }
 
@@ -136,10 +131,6 @@ export interface KnowledgeStore {
   pin(entry: PinnedContextEntry): void;
   unpin(id: string): void;
 
-  // -- artifacts -----------------------------------------------------------
-  artifacts(): Artifact[];
-  upsertArtifact(artifact: Artifact): void;
-
   // -- export --------------------------------------------------------------
   /** Full export (sources + live memories) for the export action. */
   export(): { workspaceId: string; disabledRecordsIncluded: false; forgottenRecordsIncluded: false; sources: KnowledgeSource[]; memories: MemoryRecord[] };
@@ -153,7 +144,6 @@ export interface KnowledgeStoreState {
   chunksBySource: Record<string, SourceChunk[]>;
   memories: MemoryRecord[];
   pinned: PinnedContextEntry[];
-  artifacts: Artifact[];
   deletedSourceIds: string[];
   forgottenMemoryIds: string[];
 }
@@ -166,7 +156,6 @@ export function emptyKnowledgeStoreState(workspaceId: string): KnowledgeStoreSta
     chunksBySource: {},
     memories: [],
     pinned: [],
-    artifacts: [],
     deletedSourceIds: [],
     forgottenMemoryIds: []
   };
@@ -190,7 +179,6 @@ export function createKnowledgeStore(
     !initial.sources.every((source) => owns(source.workspaceId)) ||
     !initial.memories.every((memory) => owns(memory.workspaceId)) ||
     !initial.pinned.every((entry) => owns(entry.workspaceId)) ||
-    !initial.artifacts.every((artifact) => owns(artifact.workspaceId)) ||
     !Object.values(initial.chunksBySource).flat().every((chunk) => owns(chunk.workspaceId))
   ) {
     throw new Error("Knowledge snapshot contains cross-workspace records.");
@@ -206,7 +194,6 @@ export function createKnowledgeStore(
     ),
     memories: initial.memories.map((memory) => ({ ...memory, workspaceId })),
     pinned: initial.pinned.map((entry) => ({ ...entry, workspaceId })),
-    artifacts: initial.artifacts.map((artifact) => ({ ...artifact, workspaceId })),
     deletedSourceIds: [...(initial.deletedSourceIds ?? [])],
     forgottenMemoryIds: [...(initial.forgottenMemoryIds ?? [])]
   };
@@ -228,7 +215,7 @@ export function createKnowledgeStore(
         throw new Error("Knowledge source belongs to another workspace.");
       }
       if (state.deletedSourceIds.includes(source.id)) {
-        throw new Error("Deleted knowledge cannot be restored by routine import.");
+        throw new Error("Deleted knowledge cannot be restored by a background import.");
       }
       const ownedSource = { ...source, workspaceId };
       const ownedChunks = chunks.map((chunk) => ({ ...chunk, workspaceId }));
@@ -257,7 +244,7 @@ export function createKnowledgeStore(
     upsertMemory(record) {
       if (!owns(record.workspaceId)) throw new Error("Memory belongs to another workspace.");
       if (state.forgottenMemoryIds.includes(record.id) && !record.forgottenAt) {
-        throw new Error("Forgotten memory cannot be restored by a routine write.");
+        throw new Error("Forgotten memory cannot be restored by a background write.");
       }
       if (record.forgottenAt && !state.forgottenMemoryIds.includes(record.id)) {
         state.forgottenMemoryIds.push(record.id);
@@ -292,19 +279,6 @@ export function createKnowledgeStore(
     unpin(id) {
       state.pinned = state.pinned.filter((entry) => entry.id !== id);
     },
-    artifacts() {
-      return state.artifacts;
-    },
-    upsertArtifact(artifact) {
-      if (!owns(artifact.workspaceId)) throw new Error("Artifact belongs to another workspace.");
-      artifact = { ...artifact, workspaceId };
-      const index = state.artifacts.findIndex((existing) => existing.id === artifact.id);
-      if (index >= 0) {
-        state.artifacts[index] = artifact;
-      } else {
-        state.artifacts.push(artifact);
-      }
-    },
     export() {
       return {
         workspaceId,
@@ -321,7 +295,6 @@ export function createKnowledgeStore(
         chunksBySource: { ...state.chunksBySource },
         memories: [...state.memories],
         pinned: [...state.pinned],
-        artifacts: [...state.artifacts],
         deletedSourceIds: [...state.deletedSourceIds],
         forgottenMemoryIds: [...state.forgottenMemoryIds]
       };

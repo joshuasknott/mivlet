@@ -69,7 +69,6 @@ export {
 
 // --- context assembler (additive) -----------------------------------------
 export {
-  artifactFromRun,
   assembleContext,
   type AssembleContextInput,
   type AssembledContext,

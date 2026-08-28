@@ -17,7 +17,6 @@ import type { AgentBackend, BackendDeps } from "./contract";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { resolveCodexBackend } from "./adapters/codex";
 import { resolveAcpBackend } from "./adapters/acp";
-import { createLocalLoopbackBackend } from "./adapters/local-loopback";
 
 /** A backend must be connected AND report streaming to be runnable. */
 function isRunnable(provider: BackendProvider): boolean {
@@ -44,8 +43,7 @@ export function hasRunnableAdapter(backendType: string): boolean {
   return (
     backendType === "native-api" ||
     backendType === "codex-app-server" ||
-    backendType === "acp" ||
-    backendType === "local-loopback"
+    backendType === "acp"
   );
 }
 
@@ -70,9 +68,6 @@ export function resolveAgentBackend(
     case "acp":
       // ACP providers own auth in their CLIs; Fable maps the JSON-RPC stream.
       return resolveAcpBackend(provider, deps);
-    case "local-loopback":
-      // User-managed local services such as Ollama only use literal loopback.
-      return createLocalLoopbackBackend(provider, deps);
     default:
       // Unknown backend type: fail-closed (no execution path).
       return null;

@@ -1,8 +1,8 @@
-//! Durable native-agent run journal.
+//! Durable native-execution attempt journal.
 //!
-//! The journal contains only non-secret run state. It is written atomically so
-//! a process interruption cannot leave a partially encoded run file. On app
-//! restart, in-flight runs are marked `interrupted` and remain recoverable for
+//! The journal contains only non-secret attempt state. It is written atomically so
+//! a process interruption cannot leave a partially encoded attempt file. On app
+//! restart, in-flight attempts are marked `interrupted` and remain recoverable for
 //! explicit resume/retry.
 
 use chrono::{DateTime, SecondsFormat, Utc};
@@ -11,13 +11,14 @@ use std::collections::HashSet;
 use std::{fs, path::Path};
 
 #[cfg(test)]
-use crate::models::MAX_AGENT_RUNS;
+use crate::models::MAX_EXECUTION_ATTEMPTS;
 use crate::models::{
-    PersistedAgentRun, RunContextCitation, RunContextContribution, RunContextReceipt,
-    RunContextScope, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS, MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
+    ExecutionAttempt, ExecutionContextCitation, ExecutionContextContribution,
+    ExecutionContextReceipt, ExecutionContextScope, MAX_EXECUTION_ATTEMPT_TRANSCRIPT_CHARACTERS,
+    MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
 };
 use crate::paths::{normalize_spaces, truncate_characters};
-use crate::store::repos::{run, scope::DataScope, workspace_directory};
+use crate::store::repos::{execution_attempt, scope::DataScope, workspace_directory};
 
 fn runtime_scope() -> Result<DataScope, String> {
     let store = crate::store::try_global()
@@ -30,7 +31,7 @@ fn runtime_scope() -> Result<DataScope, String> {
         .map_err(|e| e.to_string())
 }
 
-const RUN_STATUSES: [&str; 8] = [
+const ATTEMPT_STATUSES: [&str; 8] = [
     "queued",
     "streaming",
     "awaiting-approval",
@@ -52,10 +53,10 @@ const MAX_CONTEXT_PATH: usize = 512;
 fn bounded_id(value: &str, max: usize, label: &str) -> Result<String, String> {
     let normalized = normalize_spaces(value);
     if normalized.is_empty() || normalized.chars().count() > max {
-        return Err(format!("Run context {label} is invalid."));
+        return Err(format!("Attempt context {label} is invalid."));
     }
     if contains_secret_shape(&normalized) {
-        return Err("Run context receipts cannot contain secret-shaped data.".to_string());
+        return Err("Attempt context receipts cannot contain secret-shaped data.".to_string());
     }
     Ok(normalized)
 }
@@ -63,7 +64,7 @@ fn bounded_id(value: &str, max: usize, label: &str) -> Result<String, String> {
 fn bounded_text(value: &str, max: usize, label: &str) -> Result<String, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(format!("Run context {label} is invalid."));
+        return Err(format!("Attempt context {label} is invalid."));
     }
     let safe = if contains_secret_shape(trimmed) {
         "[redacted secret-bearing context]".to_string()
@@ -102,35 +103,34 @@ fn contains_secret_shape(value: &str) -> bool {
     .any(|marker| lower.contains(marker))
 }
 
-fn normalize_context_scope(mut scope: RunContextScope) -> Result<RunContextScope, String> {
+fn normalize_context_scope(
+    mut scope: ExecutionContextScope,
+) -> Result<ExecutionContextScope, String> {
     scope.level = normalize_spaces(&scope.level).to_ascii_lowercase();
-    scope.project_id = optional_bounded(scope.project_id, MAX_CONTEXT_ID, "project id")?;
     scope.thread_id = optional_bounded(scope.thread_id, MAX_CONTEXT_ID, "thread id")?;
     let valid = match scope.level.as_str() {
-        "global" => scope.project_id.is_none() && scope.thread_id.is_none(),
-        "project" => scope.project_id.is_some() && scope.thread_id.is_none(),
+        "global" => scope.thread_id.is_none(),
         "thread" => scope.thread_id.is_some(),
         _ => false,
     };
     if !valid {
-        return Err("Run context scope is invalid.".to_string());
+        return Err("Attempt context scope is invalid.".to_string());
     }
     Ok(scope)
 }
 
-fn scope_is_within(candidate: &RunContextScope, receipt: &RunContextScope) -> bool {
+fn scope_is_within(candidate: &ExecutionContextScope, receipt: &ExecutionContextScope) -> bool {
     match candidate.level.as_str() {
         "global" => true,
-        "project" => receipt.level != "global" && candidate.project_id == receipt.project_id,
         "thread" => receipt.level == "thread" && candidate.thread_id == receipt.thread_id,
         _ => false,
     }
 }
 
 fn normalize_context_citation(
-    mut citation: RunContextCitation,
-    receipt_scope: &RunContextScope,
-) -> Result<RunContextCitation, String> {
+    mut citation: ExecutionContextCitation,
+    receipt_scope: &ExecutionContextScope,
+) -> Result<ExecutionContextCitation, String> {
     citation.source_id = bounded_id(&citation.source_id, MAX_CONTEXT_ID, "source id")?;
     citation.title = bounded_text(&citation.title, MAX_CONTEXT_TITLE, "citation title")?;
     citation.snippet = bounded_text(&citation.snippet, MAX_CONTEXT_SNIPPET, "citation snippet")?;
@@ -142,7 +142,7 @@ fn normalize_context_citation(
     citation.freshness = bounded_text(&citation.freshness, 160, "citation freshness")?;
     citation.trust = normalize_spaces(&citation.trust).to_ascii_lowercase();
     if !matches!(citation.trust.as_str(), "trusted" | "untrusted") {
-        return Err("Run context citation trust is invalid.".to_string());
+        return Err("Attempt context citation trust is invalid.".to_string());
     }
     citation.chunk_id = optional_bounded(citation.chunk_id, MAX_CONTEXT_ID, "chunk id")?;
     citation.account = optional_bounded(citation.account, MAX_CONTEXT_ID, "account")?;
@@ -153,7 +153,7 @@ fn normalize_context_citation(
             || path.contains(":\\")
             || path.contains(":/")
     }) {
-        return Err("Run context source paths must stay relative.".to_string());
+        return Err("Attempt context source paths must stay relative.".to_string());
     }
     citation.media_type = optional_bounded(citation.media_type, 120, "media type")?;
     citation.scope = citation.scope.map(normalize_context_scope).transpose()?;
@@ -162,7 +162,7 @@ fn normalize_context_citation(
         .as_ref()
         .is_some_and(|scope| !scope_is_within(scope, receipt_scope))
     {
-        return Err("Run context citation scope exceeds the run scope.".to_string());
+        return Err("Attempt context citation scope exceeds the attempt scope.".to_string());
     }
     let scores = [
         citation.score,
@@ -176,15 +176,15 @@ fn normalize_context_citation(
         .iter()
         .any(|score| !score.is_finite() || *score < 0.0)
     {
-        return Err("Run context citation ranking is invalid.".to_string());
+        return Err("Attempt context citation ranking is invalid.".to_string());
     }
     Ok(citation)
 }
 
 fn normalize_context_contribution(
-    mut contribution: RunContextContribution,
+    mut contribution: ExecutionContextContribution,
     citation_ids: &HashSet<String>,
-) -> Result<RunContextContribution, String> {
+) -> Result<ExecutionContextContribution, String> {
     contribution.id = bounded_id(&contribution.id, MAX_CONTEXT_ID, "contribution id")?;
     contribution.kind = normalize_spaces(&contribution.kind).to_ascii_lowercase();
     contribution.reason = normalize_spaces(&contribution.reason).to_ascii_lowercase();
@@ -195,14 +195,13 @@ fn normalize_context_contribution(
         contribution.reason.as_str(),
         "system-instruction"
             | "conversation"
-            | "project-context"
             | "pinned"
             | "memory-approved"
             | "memory-pinned"
             | "retrieved"
             | "tool-result"
     ) {
-        return Err("Run context contribution vocabulary is invalid.".to_string());
+        return Err("Attempt context contribution vocabulary is invalid.".to_string());
     }
     contribution.citation_id =
         optional_bounded(contribution.citation_id, MAX_CONTEXT_ID, "citation id")?;
@@ -222,16 +221,16 @@ fn normalize_context_contribution(
 }
 
 fn normalize_context_receipt(
-    mut receipt: RunContextReceipt,
-    run_id: &str,
+    mut receipt: ExecutionContextReceipt,
+    attempt_id: &str,
     thread_id: Option<&str>,
-) -> Result<RunContextReceipt, String> {
-    if !matches!(receipt.version, 1 | 2) || receipt.run_id != run_id {
-        return Err("Run context receipt identity is invalid.".to_string());
+) -> Result<ExecutionContextReceipt, String> {
+    if !matches!(receipt.version, 1 | 2) || receipt.attempt_id != attempt_id {
+        return Err("Attempt context receipt identity is invalid.".to_string());
     }
-    receipt.run_id = bounded_id(&receipt.run_id, MAX_CONTEXT_ID, "run id")?;
+    receipt.attempt_id = bounded_id(&receipt.attempt_id, MAX_CONTEXT_ID, "attempt id")?;
     let assembled = DateTime::parse_from_rfc3339(&receipt.assembled_at)
-        .map_err(|_| "Run context assembly time is invalid.".to_string())?;
+        .map_err(|_| "Attempt context assembly time is invalid.".to_string())?;
     receipt.assembled_at = assembled
         .with_timezone(&Utc)
         .to_rfc3339_opts(SecondsFormat::Millis, true);
@@ -243,12 +242,12 @@ fn normalize_context_receipt(
         return Err("Private context receipts need an audience.".to_string());
     }
     if receipt.scope.level == "thread" && receipt.scope.thread_id.as_deref() != thread_id {
-        return Err("Run context receipt thread does not match the run.".to_string());
+        return Err("Attempt context receipt thread does not match the attempt.".to_string());
     }
     if receipt.citations.len() > MAX_CONTEXT_CITATIONS
         || receipt.contributions.len() > MAX_CONTEXT_CONTRIBUTIONS
     {
-        return Err("Run context receipt exceeds its item limits.".to_string());
+        return Err("Attempt context receipt exceeds its item limits.".to_string());
     }
     receipt.citations = receipt
         .citations
@@ -273,37 +272,44 @@ fn normalize_context_receipt(
     Ok(receipt)
 }
 
-pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<PersistedAgentRun, String> {
-    run.id = truncate_characters(
-        &normalize_spaces(&run.id),
+pub(crate) fn normalize_execution_attempt(
+    mut attempt: ExecutionAttempt,
+) -> Result<ExecutionAttempt, String> {
+    attempt.id = truncate_characters(
+        &normalize_spaces(&attempt.id),
         MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
     );
-    run.provider_id = truncate_characters(&normalize_spaces(&run.provider_id), 80);
-    run.model = truncate_characters(&normalize_spaces(&run.model), 160);
-    run.status = normalize_spaces(&run.status).to_ascii_lowercase();
-    run.transcript = truncate_characters(&run.transcript, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS);
-    run.thread_id = run
+    attempt.provider_id = truncate_characters(&normalize_spaces(&attempt.provider_id), 80);
+    attempt.model = truncate_characters(&normalize_spaces(&attempt.model), 160);
+    attempt.status = normalize_spaces(&attempt.status).to_ascii_lowercase();
+    attempt.transcript = truncate_characters(
+        &attempt.transcript,
+        MAX_EXECUTION_ATTEMPT_TRANSCRIPT_CHARACTERS,
+    );
+    attempt.thread_id = attempt
         .thread_id
         .map(|value| truncate_characters(&normalize_spaces(&value), 160))
         .filter(|value| !value.is_empty());
-    run.parent_run_id = run
-        .parent_run_id
+    attempt.parent_attempt_id = attempt
+        .parent_attempt_id
         .map(|value| truncate_characters(&normalize_spaces(&value), 160))
-        .filter(|value| !value.is_empty() && value != &run.id);
-    run.context_receipt = run
+        .filter(|value| !value.is_empty() && value != &attempt.id);
+    attempt.context_receipt = attempt
         .context_receipt
-        .map(|receipt| normalize_context_receipt(receipt, &run.id, run.thread_id.as_deref()))
+        .map(|receipt| {
+            normalize_context_receipt(receipt, &attempt.id, attempt.thread_id.as_deref())
+        })
         .transpose()?;
-    if let Some(route) = &mut run.provider_route {
+    if let Some(route) = &mut attempt.provider_route {
         normalize_provider_route_binding(route)?;
         crate::backends::validate_persisted_native_provider_route_selection(
-            &run.provider_id,
-            &run.model,
+            &attempt.provider_id,
+            &attempt.model,
             &route.selection.provider_route_id,
             &route.selection,
         )?;
     }
-    run.exchanges = run
+    attempt.exchanges = attempt
         .exchanges
         .into_iter()
         .filter_map(|mut exchange| {
@@ -311,8 +317,10 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
             if !matches!(exchange.role.as_str(), "user" | "assistant" | "tool") {
                 return None;
             }
-            exchange.content =
-                truncate_characters(&exchange.content, MAX_AGENT_RUN_TRANSCRIPT_CHARACTERS);
+            exchange.content = truncate_characters(
+                &exchange.content,
+                MAX_EXECUTION_ATTEMPT_TRANSCRIPT_CHARACTERS,
+            );
             exchange.tool_call_id = exchange
                 .tool_call_id
                 .map(|value| truncate_characters(&normalize_spaces(&value), 160))
@@ -325,35 +333,35 @@ pub(crate) fn normalize_agent_run(mut run: PersistedAgentRun) -> Result<Persiste
         })
         .take(256)
         .collect();
-    run.pending_approval_ids = run
+    attempt.pending_approval_ids = attempt
         .pending_approval_ids
         .into_iter()
         .map(|value| truncate_characters(&normalize_spaces(&value), 160))
         .filter(|value| !value.is_empty())
         .take(100)
         .collect();
-    run.error = run
+    attempt.error = attempt
         .error
         .map(|value| truncate_characters(&normalize_spaces(&value), 2_000))
         .filter(|value| !value.is_empty());
-    run.created_at = normalize_spaces(&run.created_at);
-    run.updated_at = normalize_spaces(&run.updated_at);
+    attempt.created_at = normalize_spaces(&attempt.created_at);
+    attempt.updated_at = normalize_spaces(&attempt.updated_at);
 
-    if run.id.is_empty()
-        || run.provider_id.is_empty()
-        || run.model.is_empty()
-        || run.created_at.is_empty()
-        || run.updated_at.is_empty()
-        || !RUN_STATUSES.contains(&run.status.as_str())
+    if attempt.id.is_empty()
+        || attempt.provider_id.is_empty()
+        || attempt.model.is_empty()
+        || attempt.created_at.is_empty()
+        || attempt.updated_at.is_empty()
+        || !ATTEMPT_STATUSES.contains(&attempt.status.as_str())
     {
-        return Err("Agent run state is incomplete or invalid.".to_string());
+        return Err("Execution attempt state is incomplete or invalid.".to_string());
     }
-    if let Some(usage) = &run.usage {
+    if let Some(usage) = &attempt.usage {
         if !usage.cost_usd.is_finite() || usage.cost_usd < 0.0 {
-            return Err("Agent run usage is invalid.".to_string());
+            return Err("Execution attempt usage is invalid.".to_string());
         }
     }
-    Ok(run)
+    Ok(attempt)
 }
 
 pub(crate) fn normalize_provider_route_binding(
@@ -395,73 +403,82 @@ pub(crate) fn normalize_provider_route_binding(
 }
 
 // These helpers retain focused compatibility coverage for the pre-repository
-// run format. Production uses the owner-qualified run repository below.
+// attempt format. Production uses the owner-qualified attempt repository below.
 #[cfg(test)]
-pub(crate) fn read_agent_runs(path: &Path) -> Result<Vec<PersistedAgentRun>, String> {
-    if let Some(runs) = crate::store::read_document::<Vec<PersistedAgentRun>>(path)? {
-        return runs.into_iter().map(normalize_agent_run).collect();
+pub(crate) fn read_execution_attempts(path: &Path) -> Result<Vec<ExecutionAttempt>, String> {
+    if let Some(attempts) = crate::store::read_document::<Vec<ExecutionAttempt>>(path)? {
+        return attempts
+            .into_iter()
+            .map(normalize_execution_attempt)
+            .collect();
     }
     if !path.exists() {
         return Ok(Vec::new());
     }
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read agent run state.".to_string())?;
+        .map_err(|_| "Fable could not read execution attempt state.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
-    let runs: Vec<PersistedAgentRun> = serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse agent run state.".to_string())?;
-    runs.into_iter().map(normalize_agent_run).collect()
+    let attempts: Vec<ExecutionAttempt> = serde_json::from_str(&contents)
+        .map_err(|_| "Fable could not parse execution attempt state.".to_string())?;
+    attempts
+        .into_iter()
+        .map(normalize_execution_attempt)
+        .collect()
 }
 
 #[cfg(test)]
-fn write_agent_runs(path: &Path, runs: &[PersistedAgentRun]) -> Result<(), String> {
-    if crate::store::write_document(path, &runs)? {
+fn write_execution_attempts(path: &Path, attempts: &[ExecutionAttempt]) -> Result<(), String> {
+    if crate::store::write_document(path, &attempts)? {
         return Ok(());
     }
-    let encoded = serde_json::to_vec_pretty(runs)
-        .map_err(|_| "Fable could not encode agent run state.".to_string())?;
+    let encoded = serde_json::to_vec_pretty(attempts)
+        .map_err(|_| "Fable could not encode execution attempt state.".to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, encoded)
-        .map_err(|_| "Fable could not save agent run state.".to_string())?;
-    fs::rename(&temporary, path).map_err(|_| "Fable could not commit agent run state.".to_string())
+        .map_err(|_| "Fable could not save execution attempt state.".to_string())?;
+    fs::rename(&temporary, path)
+        .map_err(|_| "Fable could not commit execution attempt state.".to_string())
 }
 
 #[cfg(test)]
-pub(crate) fn persist_agent_run(
+pub(crate) fn persist_execution_attempt(
     path: &Path,
-    run: PersistedAgentRun,
-) -> Result<PersistedAgentRun, String> {
-    let run = normalize_agent_run(run)?;
-    let mut runs = read_agent_runs(path)?;
-    if let Some(existing) = runs.iter().find(|existing| existing.id == run.id) {
-        if existing.thread_id != run.thread_id || existing.created_at != run.created_at {
-            return Err("Agent run ownership and creation identity are immutable.".to_string());
+    attempt: ExecutionAttempt,
+) -> Result<ExecutionAttempt, String> {
+    let attempt = normalize_execution_attempt(attempt)?;
+    let mut attempts = read_execution_attempts(path)?;
+    if let Some(existing) = attempts.iter().find(|existing| existing.id == attempt.id) {
+        if existing.thread_id != attempt.thread_id || existing.created_at != attempt.created_at {
+            return Err(
+                "Execution attempt ownership and creation identity are immutable.".to_string(),
+            );
         }
         if is_terminal_status(&existing.status) {
-            if existing == &run {
-                return Ok(run);
+            if existing == &attempt {
+                return Ok(attempt);
             }
-            return Err("A terminal agent run is immutable.".to_string());
+            return Err("A terminal execution attempt is immutable.".to_string());
         }
-        ensure_run_evidence_immutable(existing, &run)?;
+        ensure_attempt_evidence_immutable(existing, &attempt)?;
     }
-    runs.retain(|existing| existing.id != run.id);
-    runs.insert(0, run.clone());
-    runs.truncate(MAX_AGENT_RUNS);
-    write_agent_runs(path, &runs)?;
-    Ok(run)
+    attempts.retain(|existing| existing.id != attempt.id);
+    attempts.insert(0, attempt.clone());
+    attempts.truncate(MAX_EXECUTION_ATTEMPTS);
+    write_execution_attempts(path, &attempts)?;
+    Ok(attempt)
 }
 
-fn ensure_run_evidence_immutable(
-    existing: &PersistedAgentRun,
-    incoming: &PersistedAgentRun,
+fn ensure_attempt_evidence_immutable(
+    existing: &ExecutionAttempt,
+    incoming: &ExecutionAttempt,
 ) -> Result<(), String> {
     if existing.context_receipt.is_some() && existing.context_receipt != incoming.context_receipt {
-        return Err("A run context receipt cannot be changed or removed.".to_string());
+        return Err("A attempt context receipt cannot be changed or removed.".to_string());
     }
     if existing.provider_route != incoming.provider_route {
-        return Err("A run provider route cannot be changed or removed.".to_string());
+        return Err("A attempt provider route cannot be changed or removed.".to_string());
     }
     Ok(())
 }
@@ -472,36 +489,36 @@ fn is_terminal_status(status: &str) -> bool {
 }
 
 #[cfg(test)]
-pub(crate) fn recover_agent_runs_at(
+pub(crate) fn recover_execution_attempts_at(
     path: &Path,
     recovered_at: &str,
-) -> Result<Vec<PersistedAgentRun>, String> {
-    let mut runs = read_agent_runs(path)?;
+) -> Result<Vec<ExecutionAttempt>, String> {
+    let mut attempts = read_execution_attempts(path)?;
     let mut changed = false;
-    for run in &mut runs {
+    for attempt in &mut attempts {
         if matches!(
-            run.status.as_str(),
+            attempt.status.as_str(),
             "queued" | "streaming" | "awaiting-approval" | "retrying"
         ) {
-            run.status = "interrupted".to_string();
-            run.recoverable = true;
-            run.updated_at = recovered_at.to_string();
+            attempt.status = "interrupted".to_string();
+            attempt.recoverable = true;
+            attempt.updated_at = recovered_at.to_string();
             changed = true;
         }
     }
     if changed {
-        write_agent_runs(path, &runs)?;
+        write_execution_attempts(path, &attempts)?;
     }
-    Ok(runs)
+    Ok(attempts)
 }
 
-fn validate_context_receipt_authority(receipt: &RunContextReceipt) -> Result<(), String> {
+fn validate_context_receipt_authority(receipt: &ExecutionContextReceipt) -> Result<(), String> {
     if receipt.version == 1 {
         return if receipt.citations.is_empty() && receipt.contributions.is_empty() {
             Ok(())
         } else {
             Err(
-                "New sourced runs require a version 2 context receipt with an audience."
+                "New sourced attempts require a version 2 context receipt with an audience."
                     .to_string(),
             )
         };
@@ -529,7 +546,7 @@ fn validate_context_receipt_authority(receipt: &RunContextReceipt) -> Result<(),
 }
 
 fn validate_context_receipt_for_owner(
-    receipt: &RunContextReceipt,
+    receipt: &ExecutionContextReceipt,
     internal_user_id: &str,
     member_id: Option<&str>,
 ) -> Result<(), String> {
@@ -557,7 +574,9 @@ fn validate_context_receipt_for_owner(
         }
     };
     if !audience_matches {
-        return Err("Run context audience does not match the active private owner.".to_string());
+        return Err(
+            "Attempt context audience does not match the active private owner.".to_string(),
+        );
     }
     for citation in &receipt.citations {
         let authority = citation.authority_scope.as_ref().ok_or_else(|| {
@@ -578,7 +597,7 @@ fn validate_context_receipt_for_owner(
             || !owner_matches
         {
             return Err(
-                "Run context citation authority does not match the active private owner."
+                "Attempt context citation authority does not match the active private owner."
                     .to_string(),
             );
         }
@@ -587,25 +606,27 @@ fn validate_context_receipt_for_owner(
 }
 
 #[tauri::command]
-pub fn save_agent_run(
+pub fn save_execution_attempt(
     _app: tauri::AppHandle,
-    run: PersistedAgentRun,
-) -> Result<PersistedAgentRun, String> {
-    let run = normalize_agent_run(run)?;
+    attempt: ExecutionAttempt,
+) -> Result<ExecutionAttempt, String> {
+    let attempt = normalize_execution_attempt(attempt)?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
-    if let Some(receipt) = run.context_receipt.as_ref() {
+    if let Some(receipt) = attempt.context_receipt.as_ref() {
         validate_context_receipt_authority(receipt)?;
     }
     store
         .transaction(|tx| {
-            if let Some(existing) = run::get_scoped(tx, store, &scope, &run.id)? {
-                let existing_value: PersistedAgentRun =
+            if let Some(existing) = execution_attempt::get_scoped(tx, store, &scope, &attempt.id)? {
+                let existing_value: ExecutionAttempt =
                     serde_json::from_value(existing.payload.clone()).map_err(|_| {
-                        crate::store::StoreError::Invalid("Agent run payload is invalid.".into())
+                        crate::store::StoreError::Invalid(
+                            "Execution attempt payload is invalid.".into(),
+                        )
                     })?;
-                ensure_run_evidence_immutable(&existing_value, &run)
+                ensure_attempt_evidence_immutable(&existing_value, &attempt)
                     .map_err(crate::store::StoreError::Invalid)?;
                 let terminal = matches!(
                     existing.status.as_str(),
@@ -613,64 +634,65 @@ pub fn save_agent_run(
                 );
                 if terminal
                     && matches!(
-                        run.status.as_str(),
+                        attempt.status.as_str(),
                         "queued" | "streaming" | "awaiting-approval" | "retrying"
                     )
                 {
                     return Err(crate::store::StoreError::Invalid(
-                        "A terminal agent run cannot return to an in-flight state.".into(),
+                        "A terminal execution attempt cannot return to an in-flight state.".into(),
                     ));
                 }
             }
-            let payload = serde_json::to_value(&run).map_err(|_| {
-                crate::store::StoreError::Invalid("Agent run could not be encoded.".into())
+            let payload = serde_json::to_value(&attempt).map_err(|_| {
+                crate::store::StoreError::Invalid("Execution attempt could not be encoded.".into())
             })?;
-            run::upsert_scoped(
+            execution_attempt::upsert_scoped(
                 tx,
                 store,
                 &scope,
-                &run.id,
-                run.thread_id.as_deref(),
-                &run.provider_id,
-                &run.model,
-                &run.status,
-                run.turn,
-                run.recoverable,
-                run.retry_count,
-                &run.created_at,
-                &run.updated_at,
+                &attempt.id,
+                attempt.thread_id.as_deref(),
+                &attempt.provider_id,
+                &attempt.model,
+                &attempt.status,
+                attempt.turn,
+                attempt.recoverable,
+                attempt.retry_count,
+                &attempt.created_at,
+                &attempt.updated_at,
                 &payload,
             )
         })
         .map_err(|e| e.to_string())?;
-    Ok(run)
+    Ok(attempt)
 }
 
 #[tauri::command]
-pub fn list_agent_runs(_app: tauri::AppHandle) -> Result<Vec<PersistedAgentRun>, String> {
+pub fn list_execution_attempts(_app: tauri::AppHandle) -> Result<Vec<ExecutionAttempt>, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     store
         .with_conn(|tx| {
-            let ids = run::list_by_status_scoped(tx, &scope, &RUN_STATUSES)?;
+            let ids = execution_attempt::list_by_status_scoped(tx, &scope, &ATTEMPT_STATUSES)?;
             ids.into_iter()
                 .map(|id| {
-                    run::get_scoped(tx, store, &scope, &id)?
+                    execution_attempt::get_scoped(tx, store, &scope, &id)?
                         .ok_or_else(|| {
                             crate::store::StoreError::Invalid(
-                                "Agent run payload is invalid.".into(),
+                                "Execution attempt payload is invalid.".into(),
                             )
                         })
                         .and_then(|row| {
                             serde_json::from_value(row.payload).map_err(|_| {
                                 crate::store::StoreError::Invalid(
-                                    "Agent run payload is invalid.".into(),
+                                    "Execution attempt payload is invalid.".into(),
                                 )
                             })
                         })
-                        .and_then(|run| {
-                            normalize_agent_run(run).map_err(crate::store::StoreError::Invalid)
+                        .and_then(|attempt| {
+                            normalize_execution_attempt(attempt)
+                                .map_err(crate::store::StoreError::Invalid)
                         })
                 })
                 .collect()
@@ -679,40 +701,47 @@ pub fn list_agent_runs(_app: tauri::AppHandle) -> Result<Vec<PersistedAgentRun>,
 }
 
 #[tauri::command]
-pub fn recover_interrupted_agent_runs(
+pub fn recover_interrupted_execution_attempts(
     _app: tauri::AppHandle,
     recovered_at: String,
-) -> Result<Vec<PersistedAgentRun>, String> {
+) -> Result<Vec<ExecutionAttempt>, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     let recovered_at = normalize_spaces(&recovered_at);
     store
         .transaction(|tx| {
-            let ids = run::list_by_status_scoped(
+            let ids = execution_attempt::list_by_status_scoped(
                 tx,
                 &scope,
                 &["queued", "streaming", "awaiting-approval", "retrying"],
             )?;
             let mut out = Vec::new();
             for id in ids {
-                let row = run::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
-                    crate::store::StoreError::Invalid("Run disappeared during recovery.".into())
-                })?;
-                let value: PersistedAgentRun =
-                    serde_json::from_value(row.payload).map_err(|_| {
-                        crate::store::StoreError::Invalid("Agent run payload is invalid.".into())
+                let row =
+                    execution_attempt::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Attempt disappeared during recovery.".into(),
+                        )
                     })?;
-                let mut value =
-                    normalize_agent_run(value).map_err(crate::store::StoreError::Invalid)?;
+                let value: ExecutionAttempt =
+                    serde_json::from_value(row.payload).map_err(|_| {
+                        crate::store::StoreError::Invalid(
+                            "Execution attempt payload is invalid.".into(),
+                        )
+                    })?;
+                let mut value = normalize_execution_attempt(value)
+                    .map_err(crate::store::StoreError::Invalid)?;
                 value.status = "interrupted".into();
                 value.recoverable = true;
                 value.pending_approval_ids.clear();
                 value.updated_at = recovered_at.clone();
                 let payload = serde_json::to_value(&value).map_err(|_| {
-                    crate::store::StoreError::Invalid("Agent run could not be encoded.".into())
+                    crate::store::StoreError::Invalid(
+                        "Execution attempt could not be encoded.".into(),
+                    )
                 })?;
-                run::upsert_scoped(
+                execution_attempt::upsert_scoped(
                     tx,
                     store,
                     &scope,
@@ -730,18 +759,18 @@ pub fn recover_interrupted_agent_runs(
                 )?;
                 out.push(value);
             }
-            let all = run::list_by_status_scoped(tx, &scope, &RUN_STATUSES)?;
+            let all = execution_attempt::list_by_status_scoped(tx, &scope, &ATTEMPT_STATUSES)?;
             for id in all {
-                if let Some(row) = run::get_scoped(tx, store, &scope, &id)? {
-                    let decoded = serde_json::from_value::<PersistedAgentRun>(row.payload)
-                        .map_err(|_| {
+                if let Some(row) = execution_attempt::get_scoped(tx, store, &scope, &id)? {
+                    let decoded =
+                        serde_json::from_value::<ExecutionAttempt>(row.payload).map_err(|_| {
                             crate::store::StoreError::Invalid(
-                                "Agent run payload is invalid.".into(),
+                                "Execution attempt payload is invalid.".into(),
                             )
                         })?;
-                    let value =
-                        normalize_agent_run(decoded).map_err(crate::store::StoreError::Invalid)?;
-                    if !out.iter().any(|r: &PersistedAgentRun| r.id == value.id) {
+                    let value = normalize_execution_attempt(decoded)
+                        .map_err(crate::store::StoreError::Invalid)?;
+                    if !out.iter().any(|r: &ExecutionAttempt| r.id == value.id) {
                         out.push(value)
                     }
                 }
@@ -755,33 +784,34 @@ pub fn recover_interrupted_agent_runs(
 mod tests {
     use super::*;
     use crate::models::{
-        AgentRunUsage, RunContextCitation, RunContextContribution, RunContextRanking,
-        RunContextReceipt, RunContextScope,
+        ExecutionAttemptUsage, ExecutionContextAudience, ExecutionContextCitation,
+        ExecutionContextContribution, ExecutionContextRanking, ExecutionContextReceipt,
+        ExecutionContextScope,
     };
 
-    fn fixture(status: &str) -> PersistedAgentRun {
-        PersistedAgentRun {
-            id: "run-1".to_string(),
+    fn fixture(status: &str) -> ExecutionAttempt {
+        ExecutionAttempt {
+            id: "attempt-1".to_string(),
             provider_id: "openai".to_string(),
             model: "gpt-5".to_string(),
             status: status.to_string(),
             transcript: "partial response".to_string(),
             turn: 1,
-            usage: Some(AgentRunUsage {
+            usage: Some(ExecutionAttemptUsage {
                 input_tokens: 10,
                 output_tokens: 4,
                 cost_usd: 0.01,
                 cost_estimated: true,
             }),
             thread_id: Some("thread-1".to_string()),
-            exchanges: vec![crate::models::PersistedAgentExchange {
+            exchanges: vec![crate::models::ExecutionExchange {
                 role: "user".to_string(),
                 content: "Summarize this".to_string(),
                 tool_call_id: None,
                 tool_name: None,
                 ok: None,
             }],
-            parent_run_id: None,
+            parent_attempt_id: None,
             context_receipt: None,
             provider_route: None,
             pending_approval_ids: vec!["approval-1".to_string()],
@@ -810,7 +840,7 @@ mod tests {
             },
         };
         initial.provider_route = Some(route.clone());
-        assert!(normalize_agent_run(initial.clone()).is_ok());
+        assert!(normalize_execution_attempt(initial.clone()).is_ok());
         let mut secret_bearing = initial.clone();
         secret_bearing
             .provider_route
@@ -818,26 +848,25 @@ mod tests {
             .unwrap()
             .selection
             .reason = "Authorization: Bearer provider-secret".into();
-        assert!(normalize_agent_run(secret_bearing).is_err());
+        assert!(normalize_execution_attempt(secret_bearing).is_err());
         let mut changed = initial.clone();
         changed.provider_route.as_mut().unwrap().selection.reason = "Changed".into();
-        assert!(ensure_run_evidence_immutable(&initial, &changed).is_err());
+        assert!(ensure_attempt_evidence_immutable(&initial, &changed).is_err());
         let legacy = fixture("streaming");
-        assert!(ensure_run_evidence_immutable(&legacy, &initial).is_err());
+        assert!(ensure_attempt_evidence_immutable(&legacy, &initial).is_err());
     }
 
-    fn receipt() -> RunContextReceipt {
-        RunContextReceipt {
+    fn receipt() -> ExecutionContextReceipt {
+        ExecutionContextReceipt {
             version: 1,
-            run_id: "run-1".into(),
+            attempt_id: "attempt-1".into(),
             assembled_at: "2026-06-27T12:00:00Z".into(),
-            scope: RunContextScope {
+            scope: ExecutionContextScope {
                 level: "thread".into(),
-                project_id: Some("project-1".into()),
                 thread_id: Some("thread-1".into()),
             },
             audience: None,
-            citations: vec![RunContextCitation {
+            citations: vec![ExecutionContextCitation {
                 source_id: "source-1".into(),
                 title: "Launch plan".into(),
                 snippet: "The launch plan prioritizes recovery.".into(),
@@ -848,7 +877,7 @@ mod tests {
                 score: 0.8,
                 chunk_id: Some("source-1#0".into()),
                 account: None,
-                ranking: RunContextRanking {
+                ranking: ExecutionContextRanking {
                     relevance: 0.8,
                     recency: 0.1,
                     authority: 0.2,
@@ -857,14 +886,13 @@ mod tests {
                 },
                 source_path: Some("docs/launch.md".into()),
                 media_type: Some("text/markdown".into()),
-                scope: Some(RunContextScope {
-                    level: "project".into(),
-                    project_id: Some("project-1".into()),
-                    thread_id: None,
+                scope: Some(ExecutionContextScope {
+                    level: "thread".into(),
+                    thread_id: Some("thread-1".into()),
                 }),
                 authority_scope: None,
             }],
-            contributions: vec![RunContextContribution {
+            contributions: vec![ExecutionContextContribution {
                 id: "source-1".into(),
                 kind: "source".into(),
                 reason: "retrieved".into(),
@@ -886,7 +914,7 @@ mod tests {
 
         let mut receipt = receipt();
         receipt.version = 2;
-        receipt.audience = Some(crate::models::RunContextAudience {
+        receipt.audience = Some(ExecutionContextAudience {
             authority: "local".into(),
             visibility: "member-private".into(),
             acting_member_id: Some("member-a".into()),
@@ -913,7 +941,7 @@ mod tests {
                 .contains("Shared")
         );
 
-        receipt.audience = Some(crate::models::RunContextAudience {
+        receipt.audience = Some(ExecutionContextAudience {
             authority: "local".into(),
             visibility: "member-private".into(),
             acting_member_id: None,
@@ -942,13 +970,13 @@ mod tests {
         ));
         let _ = fs::remove_file(&path);
         let base = fixture("streaming");
-        persist_agent_run(&path, base.clone()).unwrap();
+        persist_execution_attempt(&path, base.clone()).unwrap();
         let mut with_receipt = base;
         let mut context_receipt = receipt();
         context_receipt.citations[0].snippet = "First line\n\nSecond line".into();
         with_receipt.context_receipt = Some(context_receipt);
         with_receipt.updated_at = "2026-06-27T12:00:02Z".into();
-        let with_receipt = persist_agent_run(&path, with_receipt).unwrap();
+        let with_receipt = persist_execution_attempt(&path, with_receipt).unwrap();
         assert_eq!(
             with_receipt.context_receipt.as_ref().unwrap().citations[0].snippet,
             "First line\n\nSecond line"
@@ -956,44 +984,44 @@ mod tests {
 
         let mut removed = with_receipt.clone();
         removed.context_receipt = None;
-        assert!(persist_agent_run(&path, removed)
+        assert!(persist_execution_attempt(&path, removed)
             .unwrap_err()
             .contains("cannot be changed"));
         let mut changed = with_receipt.clone();
         changed.context_receipt.as_mut().unwrap().citations[0].title = "Rewritten".into();
-        assert!(persist_agent_run(&path, changed)
+        assert!(persist_execution_attempt(&path, changed)
             .unwrap_err()
             .contains("cannot be changed"));
 
-        let recovered = recover_agent_runs_at(&path, "2026-06-27T12:01:00Z").unwrap();
+        let recovered = recover_execution_attempts_at(&path, "2026-06-27T12:01:00Z").unwrap();
         assert_eq!(recovered[0].context_receipt, with_receipt.context_receipt);
-        let reread = read_agent_runs(&path).unwrap();
+        let reread = read_execution_attempts(&path).unwrap();
         assert_eq!(reread[0].context_receipt, with_receipt.context_receipt);
         let _ = fs::remove_file(path);
     }
 
     #[test]
     fn context_receipt_rejects_invalid_identity_vocab_scores_secrets_and_limits() {
-        let mut run = fixture("streaming");
+        let mut attempt = fixture("streaming");
         let mut invalid = receipt();
-        invalid.run_id = "another-run".into();
-        run.context_receipt = Some(invalid);
-        assert!(normalize_agent_run(run.clone()).is_err());
+        invalid.attempt_id = "another-attempt".into();
+        attempt.context_receipt = Some(invalid);
+        assert!(normalize_execution_attempt(attempt.clone()).is_err());
 
         let mut invalid = receipt();
         invalid.scope.level = "organization".into();
-        run.context_receipt = Some(invalid);
-        assert!(normalize_agent_run(run.clone()).is_err());
+        attempt.context_receipt = Some(invalid);
+        assert!(normalize_execution_attempt(attempt.clone()).is_err());
 
         let mut invalid = receipt();
         invalid.citations[0].ranking.relevance = f64::NAN;
-        run.context_receipt = Some(invalid);
-        assert!(normalize_agent_run(run.clone()).is_err());
+        attempt.context_receipt = Some(invalid);
+        assert!(normalize_execution_attempt(attempt.clone()).is_err());
 
         let mut redacted = receipt();
         redacted.citations[0].snippet = "Authorization: Bearer secret".into();
-        run.context_receipt = Some(redacted);
-        let normalized = normalize_agent_run(run.clone()).unwrap();
+        attempt.context_receipt = Some(redacted);
+        let normalized = normalize_execution_attempt(attempt.clone()).unwrap();
         assert_eq!(
             normalized.context_receipt.unwrap().citations[0].snippet,
             "[redacted secret-bearing context]"
@@ -1001,15 +1029,15 @@ mod tests {
 
         let mut invalid = receipt();
         invalid.assembled_at = "yesterday".into();
-        run.context_receipt = Some(invalid);
-        assert!(normalize_agent_run(run.clone())
+        attempt.context_receipt = Some(invalid);
+        assert!(normalize_execution_attempt(attempt.clone())
             .unwrap_err()
             .contains("assembly time"));
 
         let mut invalid = receipt();
         invalid.citations = vec![invalid.citations[0].clone(); MAX_CONTEXT_CITATIONS + 1];
-        run.context_receipt = Some(invalid);
-        assert!(normalize_agent_run(run)
+        attempt.context_receipt = Some(invalid);
+        assert!(normalize_execution_attempt(attempt)
             .unwrap_err()
             .contains("item limits"));
     }
@@ -1017,10 +1045,11 @@ mod tests {
     #[test]
     fn restart_marks_inflight_run_interrupted_without_losing_state() {
         let path =
-            std::env::temp_dir().join(format!("fable-agent-runs-{}.json", std::process::id()));
+            std::env::temp_dir().join(format!("fable-agent-attempts-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
-        persist_agent_run(&path, fixture("streaming")).expect("persist");
-        let recovered = recover_agent_runs_at(&path, "2026-06-27T12:01:00Z").expect("recover");
+        persist_execution_attempt(&path, fixture("streaming")).expect("persist");
+        let recovered =
+            recover_execution_attempts_at(&path, "2026-06-27T12:01:00Z").expect("recover");
         assert_eq!(recovered[0].status, "interrupted");
         assert_eq!(recovered[0].transcript, "partial response");
         assert_eq!(recovered[0].pending_approval_ids, vec!["approval-1"]);
@@ -1033,24 +1062,24 @@ mod tests {
     #[test]
     fn file_journal_rejects_terminal_replacement_and_late_inflight_writer() {
         let path = std::env::temp_dir().join(format!(
-            "fable-agent-runs-terminal-{}.json",
+            "fable-agent-attempts-terminal-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
         let completed = fixture("completed");
-        persist_agent_run(&path, completed.clone()).expect("persist terminal");
-        persist_agent_run(&path, completed.clone()).expect("exact replay");
+        persist_execution_attempt(&path, completed.clone()).expect("persist terminal");
+        persist_execution_attempt(&path, completed.clone()).expect("exact replay");
 
         let mut replacement = completed.clone();
         replacement.status = "failed".into();
         replacement.error = Some("late failure".into());
-        assert!(persist_agent_run(&path, replacement).is_err());
+        assert!(persist_execution_attempt(&path, replacement).is_err());
 
         let mut stale = completed.clone();
         stale.status = "streaming".into();
         stale.transcript = "stale partial".into();
-        assert!(persist_agent_run(&path, stale).is_err());
-        assert_eq!(read_agent_runs(&path).unwrap(), vec![completed]);
+        assert!(persist_execution_attempt(&path, stale).is_err());
+        assert_eq!(read_execution_attempts(&path).unwrap(), vec![completed]);
         let _ = fs::remove_file(path);
     }
 }

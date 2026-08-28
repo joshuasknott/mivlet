@@ -24,7 +24,6 @@ import type {
 import { catalogueCapabilities } from "./model-catalogue";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
-import { streamOllamaEvents } from "./ollama";
 import { streamOpenAiEvents } from "./openai-compat";
 import { CONNECTED_SOURCE_BRIEF_GUIDANCE, lookupTool, registeredToolSpecs } from "./tools";
 import type { HttpTransport } from "./transport";
@@ -105,7 +104,6 @@ function streamFor(
 ): (transport: HttpTransport, request: NativeCompletionRequest) => AsyncIterable<BackendAgentEvent> {
   if (providerId === "anthropic") return streamAnthropicEvents;
   if (providerId === "gemini") return streamGeminiEvents;
-  if (providerId === "ollama") return streamOllamaEvents;
   return streamOpenAiEvents; // Every supported OpenAI-compatible provider shares this path.
 }
 

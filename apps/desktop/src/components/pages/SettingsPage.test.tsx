@@ -166,6 +166,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("radio", { name: /Ask Me/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Delete local data" })).toBeDisabled();
     expect(view.container.textContent).not.toMatch(/mission|routine|schedule|workflow|run history/i);
-    await screen.findByText(/not available outside the desktop runtime/i);
+    fireEvent.click(screen.getByRole("button", { name: "Check local health" }));
+    await screen.findByText(/local health checks are available in the installed desktop app/i);
   });
 });

@@ -5,7 +5,7 @@ import { createCodexBackend } from "./adapters/codex";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 import { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
-import type { AgentRunRequest, AgentRunOptions } from "@fable/protocol";
+import type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
 import { resolveAcpBackend } from "./adapters/acp";
 import { FakeAcpTransport, type ScriptedResponder } from "./adapters/acp/transport-fakes";
 
@@ -52,7 +52,7 @@ function mockAcpProvider(overrides: Partial<BackendProvider> = {}): BackendProvi
   };
 }
 
-const baseRequest: AgentRunRequest = {
+const baseRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
   tools: [],

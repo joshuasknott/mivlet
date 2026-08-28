@@ -4,7 +4,7 @@ declare const fableIdBrand: unique symbol;
  * Version of the portable product-spine vocabulary. This advances only when a
  * canonical wire contract changes; storage migrations have their own versions.
  */
-export const PRODUCT_SPINE_CONTRACT_VERSION = "1.8.0" as const;
+export const PRODUCT_SPINE_CONTRACT_VERSION = "2.0.0" as const;
 
 /** Initial schema shape for records governed by the product spine. */
 export const PRODUCT_SPINE_SCHEMA_VERSION = 1 as const;
@@ -21,29 +21,16 @@ export type InvitationId = FableId<"invitation">;
 export type RoleId = FableId<"role">;
 export type DeviceId = FableId<"device">;
 export type ExecutionNodeId = FableId<"execution-node">;
-export type ProjectId = FableId<"project">;
 export type ThreadId = FableId<"thread">;
 export type MessageId = FableId<"message">;
 export type MessageRevisionId = FableId<"message-revision">;
 export type ConversationTombstoneId = FableId<"conversation-tombstone">;
-export type GoalId = FableId<"goal">;
-export type DepartmentId = FableId<"department">;
-export type PipelineId = FableId<"pipeline">;
 export type ConnectionId = FableId<"connection">;
 export type ProviderRouteId = FableId<"provider-route">;
 export type CapabilityId = FableId<"capability">;
 export type CapabilityGrantId = FableId<"capability-grant">;
-export type MissionId = FableId<"mission">;
-export type PlanId = FableId<"plan">;
-export type PlanRevisionId = FableId<"plan-revision">;
 export type WorkerId = FableId<"worker">;
 export type RunId = FableId<"run">;
-export type RunEventId = FableId<"run-event">;
-export type ArtifactId = FableId<"artifact">;
-export type ArtifactVersionId = FableId<"artifact-version">;
-export type HandoffId = FableId<"handoff">;
-export type RoutineId = FableId<"routine">;
-export type TriggerId = FableId<"trigger">;
 
 export type IsoDateTime = string;
 export type SchemaVersion = number;

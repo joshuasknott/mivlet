@@ -25,7 +25,7 @@ import type {
   MemoryPromotionRequest,
   MemoryRecord,
   PermissionMode,
-  PreparedRunContext,
+  PreparedExecutionContext,
   RuntimeSnapshot,
   ThreadSummary,
   IdentityStatus,
@@ -198,7 +198,7 @@ export type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types
  * and context views.
  */
 
-function createRunContextId() {
+function createExecutionAttemptId() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return `run-${uuid}`;
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
@@ -1409,8 +1409,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const assembleKnowledgeContext = async (
     query: string,
     context?: KnowledgeRunContext
-  ): Promise<PreparedRunContext> => {
-    const runId = createRunContextId();
+  ): Promise<PreparedExecutionContext> => {
+    const attemptId = createExecutionAttemptId();
     const assembledAt = new Date().toISOString();
     const scope = knowledgeScopeForRun(activeThread?.id);
     const audience = privateRunAudience(accountWorkspaceStatus);
@@ -1436,7 +1436,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setKnowledgeCitations(result.citations);
     setKnowledgeSearchMode(result.mode);
     const assembled = assembleContext({
-      runId,
+      attemptId,
       assembledAt,
       scope,
       audience,

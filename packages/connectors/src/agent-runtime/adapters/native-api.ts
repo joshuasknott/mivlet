@@ -16,8 +16,8 @@
  */
 
 import type {
-  AgentRunOptions,
-  AgentRunRequest,
+  AgentTurnOptions,
+  AgentTurnRequest,
   BackendAgentEvent,
   BackendCapability,
   BackendProvider,
@@ -48,15 +48,13 @@ export function createNativeApiBackend(
 ): AgentBackend | null {
   const capabilities: readonly BackendCapability[] = provider.capabilities;
 
-  // Ordinary shell work still uses one entry. Mission workers use distinct
-  // child execution ids so an authorized parallel plan can share one provider
-  // backend without one worker stealing another worker's cancellation handle.
+  // Each conversation attempt owns one cancellation handle.
   const active = new Map<string, ActiveRun>();
   let anonymousRunSequence = 0;
 
   function run(
-    request: AgentRunRequest,
-    options: AgentRunOptions
+    request: AgentTurnRequest,
+    options: AgentTurnOptions
   ): AsyncIterable<BackendAgentEvent> | null {
     if (!capabilities.includes("streaming")) {
       return null;
@@ -75,7 +73,7 @@ export function createNativeApiBackend(
         yield { type: "done", finishReason: "error" };
       })();
     }
-    const executionId = options.runId ?? `native-anonymous-run-${++anonymousRunSequence}`;
+    const executionId = options.attemptId ?? `native-anonymous-attempt-${++anonymousRunSequence}`;
     const activeRun: ActiveRun = {
       requestId: null,
       cancel: async () => undefined,
@@ -109,8 +107,7 @@ export function createNativeApiBackend(
       messages: request.messages,
       tools: request.tools,
       maxTokens: request.maxTokens,
-      ...(request.providerRoute ? { providerRoute: request.providerRoute } : {}),
-      ...(request.missionWorkerExecution ? { missionWorkerExecution: request.missionWorkerExecution } : {})
+      ...(request.providerRoute ? { providerRoute: request.providerRoute } : {})
     };
     const eventStream = runAgentLoop(handle.transport, nativeRequest, {
       execute,
@@ -118,7 +115,7 @@ export function createNativeApiBackend(
       shouldCancel: options.shouldCancel,
       contextPrefix: options.contextPrefix,
       permissionMode: options.permissionMode,
-      runId: options.runId,
+      runId: options.attemptId,
       maxTurns: options.maxTurns,
       maxToolCalls: options.maxToolCalls,
       maxToolOutputCharacters: options.maxToolOutputCharacters

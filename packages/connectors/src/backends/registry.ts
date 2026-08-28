@@ -13,7 +13,6 @@ import type { BackendProvider } from "@fable/protocol";
 import { resolveCodexProvider } from "./codex";
 import { resolveCopilotProvider } from "./copilot";
 import { resolveAcpProvider } from "./acp";
-import { resolveOllamaProvider } from "./local";
 import { resolveNativeProvider } from "./native";
 
 export const BACKEND_PROVIDER_IDS = [
@@ -39,7 +38,6 @@ export const BACKEND_PROVIDER_IDS = [
   "kimi-code",
   "mistral",
   "meta",
-  "ollama",
   "perplexity",
   "tencent",
   "xiaomi",
@@ -83,7 +81,6 @@ export function listBackendProviders(): BackendProvider[] {
     resolveNativeProvider("kimi-code", "needs-auth"),
     resolveNativeProvider("mistral", "needs-auth"),
     resolveNativeProvider("meta", "needs-auth"),
-    resolveOllamaProvider("unavailable"),
     resolveNativeProvider("perplexity", "needs-auth"),
     resolveNativeProvider("tencent", "needs-auth"),
     resolveNativeProvider("xiaomi", "needs-auth"),
@@ -106,4 +103,3 @@ export {
   resolveMistralVibeProvider
 } from "./acp";
 export { resolveNativeProvider, NATIVE_BACKEND_TYPE } from "./native";
-export { resolveOllamaProvider, LOCAL_LOOPBACK_BACKEND_TYPE } from "./local";
