@@ -17,7 +17,7 @@ const CONVERSATIONS: &str =
 
 /// Rust's reviewed mirror of the canonical TypeScript vocabulary payload.
 const RUST_CANONICAL_SHA256: &str =
-    "8372516114656add9a0f57fa95b468c55c452d7143e4afe0503361b880578e73";
+    "7efc4d77521cd846527d82b1602bb5e1cf684805def0e02bf3dd5529ac4c99db";
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]

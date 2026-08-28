@@ -38,9 +38,11 @@ export function useShellAgentController({
 
   const activeWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.localWorkspaceId;
   const activeAgentId = runtime.activeAgentId ?? runtime.agents[0]?.id;
-  const hostedWorkspaceId = runtime.accountWorkspaceStatus.activeWorkspace?.source === "hosted"
-    ? runtime.accountWorkspaceStatus.activeWorkspace.fableWorkspaceId ?? null
-    : null;
+  const hostedWorkspaceId = runtime.accountWorkspaceStatus.workspaces.find(
+    (workspace) =>
+      workspace.workspaceStatus === "active" &&
+      workspace.membershipStatus === "active"
+  )?.fableWorkspaceId ?? null;
   const activeHostedDeviceId = runtime.accountWorkspaceStatus.devices.find(
     (device) => device.status === "active"
   )?.deviceId ?? null;

@@ -384,42 +384,13 @@ pub fn local_diagnostics(
 mod tests {
     use super::*;
     use crate::store::{
-        repos::workspace_directory::{
-            select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-            WorkspaceDirectoryUpsert,
-        },
         vault::{MasterKey, Vault},
         Store,
     };
 
     fn scope(store: &Store) -> authorized_scope::AuthorizedCommandScope {
         store
-            .transaction(|tx| {
-                let summary = upsert_authoritative_summary(
-                    tx,
-                    &WorkspaceDirectoryUpsert {
-                        internal_user_id: "user-1".into(),
-                        fable_workspace_id: "workspace-1".into(),
-                        name: "Workspace".into(),
-                        workspace_status: "active".into(),
-                        workspace_revision: 1,
-                        policy_revision: 1,
-                        member_id: "member-1".into(),
-                        role: "owner".into(),
-                        membership_status: "active".into(),
-                        membership_revision: 1,
-                        updated_at: "2026-07-23T09:00:00Z".into(),
-                    },
-                )?;
-                set_current_internal_user(tx, "user-1", "2026-07-23T09:00:00Z")?;
-                select_active_workspace(tx, "user-1", "workspace-1", "2026-07-23T09:00:00Z")?;
-                authorized_scope::resolve(
-                    tx,
-                    Some(&summary.local_workspace_id),
-                    None,
-                    ScopeAccess::Read,
-                )
-            })
+            .transaction(|tx| authorized_scope::resolve(tx, None, None, ScopeAccess::Read))
             .unwrap()
     }
 

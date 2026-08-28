@@ -549,43 +549,13 @@ mod tests {
     use crate::store::repos::connection_record::{
         upsert_native_connector, NativeConnectorConnectionWrite,
     };
-    use crate::store::repos::workspace_directory::{
-        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-        WorkspaceDirectoryUpsert,
-    };
     use crate::store::vault::{MasterKey, Vault};
-
-    fn summary() -> WorkspaceDirectoryUpsert {
-        WorkspaceDirectoryUpsert {
-            internal_user_id: "user-a".into(),
-            fable_workspace_id: "workspace-a".into(),
-            name: "Workspace A".into(),
-            workspace_status: "active".into(),
-            workspace_revision: 1,
-            policy_revision: 1,
-            member_id: "member-a".into(),
-            role: "owner".into(),
-            membership_status: "active".into(),
-            membership_revision: 1,
-            updated_at: "2026-07-11T20:00:00Z".into(),
-        }
-    }
 
     fn setup() -> (Store, AuthorizedCommandScope, String) {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = store
-            .transaction(|tx| {
-                let workspace = upsert_authoritative_summary(tx, &summary())?;
-                set_current_internal_user(tx, "user-a", "2026-07-11T20:00:00Z")?;
-                select_active_workspace(tx, "user-a", "workspace-a", "2026-07-11T20:00:00Z")?;
-                resolve(
-                    tx,
-                    Some(&workspace.local_workspace_id),
-                    None,
-                    ScopeAccess::Write,
-                )
-            })
+            .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
             .unwrap();
         let connection = store
             .transaction(|tx| {

@@ -26,26 +26,13 @@ export {
   type RuntimePortableImportReport
 } from "./runtime/domains/local-data";
 export {
-  acceptRuntimePendingInvitation,
   beginRuntimeIdentityRecovery,
   beginRuntimeIdentitySignIn,
-  changeRuntimeWorkspaceMember,
   clearRuntimeAccountWorkspaceSession,
-  createRuntimeAccountWorkspace,
-  createRuntimeWorkspaceInvitation,
-  enqueueRuntimeCloudSyncMutation,
-  flushRuntimeCloudSyncOutbox,
   loadRuntimeAccountWorkspaceStatus,
-  loadRuntimeCloudSyncLinkState,
-  loadRuntimeCloudSyncStatus,
   loadRuntimeIdentityStatus,
-  loadRuntimePendingInvitations,
-  loadRuntimeWorkspaceMembers,
-  pullRuntimeCloudSyncAfterCursor,
   reconcileRuntimeAccountWorkspace,
   refreshRuntimeIdentity,
-  revokeRuntimeAccountDevice,
-  selectRuntimeAccountWorkspace,
   signOutRuntimeIdentity,
   type AccountRuntimePort
 } from "./runtime/domains/account";

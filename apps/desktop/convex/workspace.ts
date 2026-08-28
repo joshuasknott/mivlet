@@ -115,31 +115,6 @@ export const bootstrapAccount = mutationGeneric({
   }
 });
 
-/** Creates an additional isolated workspace for the authenticated Fable account. */
-export const create = mutationGeneric({
-  args: { idempotencyKey: v.string(), name: v.string() },
-  handler: async (ctx, args) => {
-    const { user } = await requireFableUser(ctx);
-    const name = normalizedWorkspaceName(args.name);
-    const fingerprint = JSON.stringify({ name });
-    const replays = await ctx.db.query("workspace_creation_idempotency").withIndex("by_user_key", (q: any) => q.eq("internalUserId", user.internalUserId).eq("idempotencyKey", args.idempotencyKey)).collect();
-    if (replays.length > 1) return { status: "conflict", code: "idempotency-conflict" };
-    const replay = replays[0];
-    if (replay) {
-      if (replay.fingerprint !== fingerprint) return { status: "conflict", code: "idempotency-conflict" };
-      return { ...(replay.result as object), idempotency: { key: args.idempotencyKey, replayed: true } };
-    }
-    const now = Date.now();
-    const workspaceId = opaqueId("ws");
-    const memberId = opaqueId("member");
-    await ctx.db.insert("workspaces", { workspaceId, name, status: "active", revision: 0, policyRevision: 1, createdByInternalUserId: user.internalUserId, createdAt: now, updatedAt: now });
-    await ctx.db.insert("workspace_memberships", { memberId, workspaceId, internalUserId: user.internalUserId, role: "owner", status: "active", revision: 1, createdAt: now, updatedAt: now, activatedAt: now });
-    const result = { status: "created", workspace: { workspaceId, name, revision: 0, policyRevision: 1, memberId, role: "owner", membershipRevision: 1 }, idempotency: { key: args.idempotencyKey, replayed: false } };
-    await ctx.db.insert("workspace_creation_idempotency", { internalUserId: user.internalUserId, idempotencyKey: args.idempotencyKey, fingerprint, result, createdAt: now });
-    return result;
-  }
-});
-
 /** Returns only active, unambiguous Fable workspaces available to this account. */
 export const listMine = queryGeneric({
   args: {},

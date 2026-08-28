@@ -92,10 +92,12 @@ pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
     };
     let paused = store
         .with_conn(|conn| {
-            let context =
-                crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(conn)?;
-            read_state(conn, store, &context.active_workspace.local_workspace_id)
-                .map(|state| state.paused)
+            read_state(
+                conn,
+                store,
+                crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+            )
+            .map(|state| state.paused)
         })
         .map_err(|error| error.to_string())?;
     if paused {

@@ -258,35 +258,18 @@ export function ChatWorkspace() {
     return <main className="og-frame"><p role="alert">Fable could not load a teammate.</p></main>;
   }
 
-  const accountWorkspaceUsable = runtime.accountWorkspaceStatus.state === "ready"
-    || (runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
-  const identityUsable = runtime.identityStatus.state === "signed-in"
-    || (
-      runtime.identityStatus.state === "offline"
-      && runtime.accountWorkspaceStatus.state === "offline"
-      && runtime.accountWorkspaceStatus.accountBound
-    );
   const localWorkspaceReady = runtime.accountWorkspaceStatus.activeWorkspace.source === "local"
     && runtime.accountWorkspaceStatus.accountBound
     && runtime.accountWorkspaceStatus.state === "ready";
-  const accountReady = localWorkspaceReady || (identityUsable && accountWorkspaceUsable);
-  if (!accountReady || runtime.onboardingRequired) {
+  if (!localWorkspaceReady || runtime.onboardingRequired) {
     return (
       <Suspense fallback={<main className="og-frame" aria-busy="true" />}>
         <OnboardingPage
           providers={runtime.backendProviders}
           connectedBackendIds={runtime.connectedBackendIds}
           status={runtime.backendStatus}
-          identityStatus={runtime.identityStatus}
-          identityPending={runtime.identityPending}
           accountWorkspaceStatus={runtime.accountWorkspaceStatus}
           accountWorkspacePending={runtime.accountWorkspacePending}
-          onSignIn={runtime.signInIdentity}
-          onRecover={runtime.recoverIdentity}
-          onRefreshAccount={async () => {
-            await runtime.refreshIdentity();
-            await runtime.reconcileAccountWorkspace();
-          }}
           onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
           onConnectWithVerify={runtime.connectBackendWithVerify}
           onCheckConnection={runtime.checkBackendConnection}

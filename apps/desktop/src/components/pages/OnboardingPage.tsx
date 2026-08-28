@@ -1,57 +1,22 @@
-import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
-import type { AccountWorkspaceStatus, BackendProvider, BackendVerifyResult, IdentityStatus } from "@fable/protocol";
+import type { AccountWorkspaceStatus, BackendProvider, BackendVerifyResult } from "@fable/protocol";
 import { useState } from "react";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import "../../styles/routes/onboarding.css";
 
-type AccountStage = "account" | "provider";
-type OnboardingStage = "welcome" | "account" | "provider" | "teammate";
-
-function accountStage(identity: IdentityStatus, workspace: AccountWorkspaceStatus): AccountStage {
-  if (workspace.accountBound && workspace.state === "ready" && workspace.activeWorkspace.source === "local") {
-    return "provider";
-  }
-  const workspaceUsable = workspace.state === "ready" || (workspace.state === "offline" && workspace.accountBound);
-  const identityUsable = identity.state === "signed-in" ||
-    (identity.state === "offline" && workspace.state === "offline" && workspace.accountBound);
-  return identityUsable && workspaceUsable ? "provider" : "account";
-}
-
-function accountActionLabel(identity: IdentityStatus, workspace: AccountWorkspaceStatus): string {
-  if (!identity.enabled || identity.state === "disabled" || !workspace.configured) return "Account setup required";
-  if (identity.state === "expired" || identity.state === "revoked" || workspace.state === "expired" || workspace.state === "revoked") return "Recover account";
-  if (identity.state === "offline" || workspace.state === "offline") return "Try again";
-  return "Sign in to Fable";
-}
-
-function accountStatusMessage(identity: IdentityStatus, workspace: AccountWorkspaceStatus): string {
-  if (identity.state === "error" || identity.state === "expired" || identity.state === "revoked") {
-    return identity.message;
-  }
-  if (workspace.state === "error" || workspace.state === "expired" || workspace.state === "revoked") {
-    return workspace.message;
-  }
-  return workspace.message || identity.message;
-}
+type OnboardingStage = "welcome" | "provider" | "teammate";
 
 /**
- * The required minimum journey: a Fable account establishes the active
- * workspace, then the user connects a provider. Account credentials are
- * handled in the system browser; this view never collects them.
+ * The required minimum journey starts locally: connect a verified provider,
+ * then name the first teammate. A Fable account remains optional in Settings.
  */
 export function OnboardingPage({
   providers,
   connectedBackendIds,
   status,
-  identityStatus,
-  identityPending,
   accountWorkspaceStatus,
   accountWorkspacePending,
-  onSignIn,
-  onRecover,
-  onRefreshAccount,
   onConnect,
   onConnectWithVerify,
   onCheckConnection,
@@ -64,13 +29,8 @@ export function OnboardingPage({
   providers: BackendProvider[];
   connectedBackendIds: string[];
   status: string | null;
-  identityStatus: IdentityStatus;
-  identityPending: boolean;
   accountWorkspaceStatus: AccountWorkspaceStatus;
   accountWorkspacePending: boolean;
-  onSignIn: () => void | Promise<void>;
-  onRecover: () => void | Promise<void>;
-  onRefreshAccount: () => void | Promise<void>;
   /** Legacy fire-and-forget connect used only when verification is unavailable. */
   onConnect?: (providerId: string, secret?: string) => void;
   /** Credentials cross directly into the verified Rust boundary. */
@@ -91,36 +51,24 @@ export function OnboardingPage({
   const [teammatePurpose, setTeammatePurpose] = useState(initialTeammatePurpose);
   const [finishing, setFinishing] = useState(false);
   const [teammateError, setTeammateError] = useState<string | null>(null);
-  const account = accountStage(identityStatus, accountWorkspaceStatus);
-  const pending = identityPending || accountWorkspacePending;
+  const pending = accountWorkspacePending;
   const hasAnyConnected = connectedBackendIds.length > 0;
-  const display = identityStatus.authentication?.verifiedDisplayAttributes;
-  const localOnly = accountWorkspaceStatus.activeWorkspace.source === "local";
   const steps: Array<{ id: OnboardingStage; label: string }> = [
     { id: "welcome", label: "Welcome" },
-    ...(!localOnly ? [{ id: "account" as const, label: "Fable account" }] : []),
     { id: "provider", label: "Model provider" },
     { id: "teammate", label: "First teammate" }
   ];
   const stage: OnboardingStage = !started
     ? "welcome"
-    : account === "account"
-      ? "account"
-      : !hasAnyConnected
-        ? "provider"
-        : "teammate";
+    : !hasAnyConnected
+      ? "provider"
+      : "teammate";
   const currentStepIndex = Math.max(0, steps.findIndex((entry) => entry.id === stage));
 
   const handleConnect = async (providerId: string, secret: string): Promise<BackendVerifyResult> => {
     if (onConnectWithVerify) return onConnectWithVerify(providerId, secret);
     onConnect?.(providerId, secret);
     return { providerId, outcome: "ready" };
-  };
-
-  const handleAccountAction = () => {
-    const needsRecovery = ["expired", "revoked"].includes(identityStatus.state) ||
-      ["expired", "revoked"].includes(accountWorkspaceStatus.state);
-    void (needsRecovery ? onRecover() : onSignIn());
   };
 
   return (
@@ -173,36 +121,13 @@ export function OnboardingPage({
               </button>
             </div>
           </section>
-        ) : stage === "account" ? (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <h1 id="onboarding-title">Start with your Fable account</h1>
-            <p className="og-lede">
-              Your account securely opens your Fable workspace. Sign-in and recovery happen in your system browser; Fable never asks for your account password.
-            </p>
-            {display?.displayName || display?.email ? (
-              <p className="og-connection-status-msg" role="status">Signed in as {display.displayName ?? display.email}.</p>
-            ) : null}
-            <p className="og-connection-status-msg" role={identityStatus.state === "error" || accountWorkspaceStatus.state === "error" ? "alert" : "status"}>
-              {accountStatusMessage(identityStatus, accountWorkspaceStatus)}
-            </p>
-            <div className="og-primary-cta">
-              <button type="button" className="og-primary-cta__start" disabled={pending || !identityStatus.enabled || !accountWorkspaceStatus.configured} onClick={handleAccountAction}>
-                {pending ? <Spinner size={16} aria-hidden="true" /> : null}
-                {accountActionLabel(identityStatus, accountWorkspaceStatus)}
-              </button>
-              {(identityStatus.state === "offline" || accountWorkspaceStatus.state === "offline" || identityStatus.state === "error" || accountWorkspaceStatus.state === "error") ? (
-                <button type="button" className="button button--ghost" disabled={pending} onClick={() => void onRefreshAccount()}>
-                  <ArrowClockwise size={15} /> Refresh status
-                </button>
-              ) : null}
-            </div>
-          </section>
         ) : stage === "provider" ? (
           <section className="og-hero" aria-labelledby="onboarding-title">
             <h1 id="onboarding-title">Add a model provider</h1>
-            <p className="og-lede">{localOnly
-              ? "Your private workspace on this PC is ready. Connect and verify a provider you already use."
-              : "Choose a provider you already use. You can connect more later."}</p>
+            <p className="og-lede">
+              Your private workspace on this PC is ready. Connect and verify a
+              provider you already use.
+            </p>
             <div className="og-unified">
               <ProviderCatalogue
                 providers={providers}

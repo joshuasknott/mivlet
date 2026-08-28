@@ -1,7 +1,7 @@
 //! Native command boundary for SQLite-authoritative conversations. Webview
 //! callers may name records, but never select their workspace owner.
 
-use crate::store::repos::{message, scope::DataScope, thread, workspace_directory};
+use crate::store::repos::{message, scope::DataScope, thread};
 use chrono::{SecondsFormat, Utc};
 use serde::Deserialize;
 use serde_json::Value;
@@ -10,14 +10,8 @@ fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }
 fn scope() -> Result<DataScope, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .with_conn(|tx| {
-            let active = workspace_directory::require_active_workspace_for_current_user(tx)?;
-            DataScope::workspace(active.local_workspace_id)
-        })
-        .map_err(|e| e.to_string())
+    DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
+        .map_err(|error| error.to_string())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,33 +72,34 @@ pub struct DraftInput {
 }
 #[tauri::command]
 pub fn conversation_create_thread(input: CreateThread) -> Result<thread::ThreadRow, String> {
+    if input.project_id.is_some() {
+        return Err("Project-scoped conversations are no longer part of Fable.".into());
+    }
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
-            let context = workspace_directory::require_active_workspace_context_for_current_user(tx)?;
-            let member_id = context.member_id;
-            let scope = DataScope::workspace(context.active_workspace.local_workspace_id)?;
+            let (_, member_id) = crate::account_workspace::local_install_principals();
+            let scope =
+                DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)?;
             let created = thread::create(
                 tx,
                 store,
                 &scope,
                 &input.id,
-                input.project_id.as_deref(),
+                None,
                 &input.title,
                 &now(),
                 &input.payload,
             )?;
-            if let Some(member_id) = member_id {
-                let changed = tx.execute(
-                    "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL",
-                    rusqlite::params![member_id, scope.workspace_id(), created.id],
-                )?;
-                if changed != 1 {
-                    return Err(crate::store::StoreError::Invalid(
-                        "Conversation ownership could not be established.".into(),
-                    ));
-                }
+            let changed = tx.execute(
+                "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL",
+                rusqlite::params![member_id, scope.workspace_id(), created.id],
+            )?;
+            if changed != 1 {
+                return Err(crate::store::StoreError::Invalid(
+                    "Conversation ownership could not be established.".into(),
+                ));
             }
             Ok(created)
         })

@@ -18,17 +18,11 @@ use crate::models::{
     MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
 };
 use crate::paths::{normalize_spaces, truncate_characters};
-use crate::store::repos::{execution_attempt, scope::DataScope, workspace_directory};
+use crate::store::repos::{execution_attempt, scope::DataScope};
 
 fn runtime_scope() -> Result<DataScope, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .with_conn(|tx| {
-            let active = workspace_directory::require_active_workspace_for_current_user(tx)?;
-            DataScope::workspace(active.local_workspace_id)
-        })
-        .map_err(|e| e.to_string())
+    DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
+        .map_err(|error| error.to_string())
 }
 
 const ATTEMPT_STATUSES: [&str; 8] = [
@@ -533,16 +527,8 @@ fn validate_context_receipt_authority(receipt: &ExecutionContextReceipt) -> Resu
                 .to_string(),
         );
     }
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let context = store
-        .with_conn(workspace_directory::require_active_workspace_context_for_current_user)
-        .map_err(|error| error.to_string())?;
-    validate_context_receipt_for_owner(
-        receipt,
-        &context.internal_user_id,
-        context.member_id.as_deref(),
-    )
+    let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
+    validate_context_receipt_for_owner(receipt, &internal_user_id, Some(&member_id))
 }
 
 fn validate_context_receipt_for_owner(
@@ -833,7 +819,7 @@ mod tests {
                 selected_at: "2026-07-12T12:00:00Z".into(),
                 reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
                 fallback_from_provider_route_id: None,
-                boundary_policy_ref: Some("boundary:member-private:account-owned-provider:openai:local-credential-egress".into()),
+                boundary_policy_ref: Some("boundary:install-private:local-provider:openai:credential-egress".into()),
                 observation: None,
                 quality: None,
                 cost: None,

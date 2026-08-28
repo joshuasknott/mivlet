@@ -114,9 +114,6 @@ import {
   loadRuntimeIdentityStatus,
   loadRuntimeAccountWorkspaceStatus,
   reconcileRuntimeAccountWorkspace,
-  createRuntimeAccountWorkspace,
-  selectRuntimeAccountWorkspace,
-  revokeRuntimeAccountDevice,
   clearRuntimeAccountWorkspaceSession,
   executeRuntimeConnectorAction,
   prepareRuntimeConnectorAction,
@@ -745,9 +742,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const message = error instanceof Error ? error.message : "Fable could not load account workspaces.";
       const failed: AccountWorkspaceStatus = {
         ...accountWorkspaceFallback,
-        state: "error",
-        accountBound: false,
-        message
+        message: `Local workspace ready. Optional account refresh failed: ${message}`
       };
       if (requestGeneration === accountRequestGenerationRef.current) {
         applyAccountWorkspaceStatus(failed);
@@ -844,12 +839,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     try {
       const status = await signOutRuntimeIdentity();
       await clearRuntimeAccountWorkspaceSession();
-      clearActiveRuntimeDataScope();
       applyAccountWorkspaceStatus({
         ...DEFAULT_ACCOUNT_WORKSPACE_STATUS,
-        state: "signed-out",
-        accountBound: false,
-        message: "Signed out. Sign in to access Fable workspaces."
+        message: "Local workspace ready. The optional Fable account is signed out."
       });
       const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
@@ -872,56 +864,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const status = await refreshAccountWorkspace(identityStatus.state === "signed-in");
     setLastAction(status.message);
   }, [identityStatus.state, refreshAccountWorkspace]);
-
-  const createAccountWorkspace = useCallback(async (name: string) => {
-    const requestGeneration = ++accountRequestGenerationRef.current;
-    setAccountWorkspacePending(true);
-    try {
-      const status = await createRuntimeAccountWorkspace(name);
-      if (requestGeneration === accountRequestGenerationRef.current) {
-        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
-        setLastAction((status ?? accountWorkspaceFallback).message);
-      }
-    } finally {
-      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
-    }
-  }, [applyAccountWorkspaceStatus]);
-
-  const selectAccountWorkspace = useCallback(async (fableWorkspaceId: string) => {
-    const requestGeneration = ++accountRequestGenerationRef.current;
-    setAccountWorkspacePending(true);
-    try {
-      clearActiveRuntimeDataScope();
-      setAccountWorkspaceStatus((current) => ({
-        ...current,
-        state: "bootstrapping",
-        accountBound: false,
-        message: "Switching workspace…"
-      }));
-      setWorkspaceScopeGeneration((current) => current + 1);
-      const status = await selectRuntimeAccountWorkspace(fableWorkspaceId);
-      if (requestGeneration === accountRequestGenerationRef.current) {
-        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
-        setLastAction((status ?? accountWorkspaceFallback).message);
-      }
-    } finally {
-      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
-    }
-  }, [applyAccountWorkspaceStatus]);
-
-  const revokeAccountDevice = useCallback(async (deviceId: string) => {
-    const requestGeneration = ++accountRequestGenerationRef.current;
-    setAccountWorkspacePending(true);
-    try {
-      const status = await revokeRuntimeAccountDevice(deviceId);
-      if (requestGeneration === accountRequestGenerationRef.current) {
-        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
-        setLastAction((status ?? accountWorkspaceFallback).message);
-      }
-    } finally {
-      if (requestGeneration === accountRequestGenerationRef.current) setAccountWorkspacePending(false);
-    }
-  }, [applyAccountWorkspaceStatus]);
 
   useEffect(() => {
     let active = true;
@@ -2828,9 +2770,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     refreshIdentity,
     signOutIdentity,
     reconcileAccountWorkspace,
-    createAccountWorkspace,
-    selectAccountWorkspace,
-    revokeAccountDevice,
     clearBackendToolApprovals,
     dismissOnboarding,
     lastAction,

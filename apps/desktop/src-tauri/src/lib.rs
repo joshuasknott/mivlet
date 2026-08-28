@@ -48,7 +48,6 @@ mod product_spine_parity;
 mod snapshot;
 mod store;
 pub mod tools;
-mod workspace_directory;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
 /// the audited ring provider before constructing any native HTTP client.
@@ -157,14 +156,6 @@ pub fn run() {
             clerk_identity::identity_sign_out,
             account_workspace::account_workspace_status,
             account_workspace::account_workspace_reconcile,
-            account_workspace::account_membership_pending_invitations,
-            account_workspace::account_membership_accept_invitation,
-            account_workspace::account_workspace_members,
-            account_workspace::account_workspace_member_change,
-            account_workspace::account_workspace_invitation_create,
-            account_workspace::account_workspace_create,
-            account_workspace::account_workspace_select,
-            account_workspace::account_device_revoke,
             account_workspace::account_workspace_clear_session,
             hosted_computer::hosted_computer_status,
             hosted_computer::hosted_computer_provision,
@@ -187,8 +178,6 @@ pub fn run() {
             local_computer::local_browser_pointer,
             local_computer::local_browser_key,
             local_computer::local_browser_history,
-            workspace_directory::list_workspace_directory,
-            workspace_directory::select_active_workspace,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

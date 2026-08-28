@@ -1,7 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireActiveMembership, requireFableUser } from "./authorization";
-import { ensureDeviceLink } from "./cloudPolicy";
 
 const kind = v.union(v.literal("desktop"), v.literal("mobile"), v.literal("web"));
 
@@ -14,7 +13,12 @@ export const link = mutationGeneric({
     if (devices.length > 1 || links.length > 1) throw new Error("This device is unavailable.");
     const existing = devices[0];
     const linked = links[0];
-    ensureDeviceLink(existing && { internalUserId: existing.internalUserId, status: existing.status }, linked && { internalUserId: linked.internalUserId, memberId: linked.memberId, status: linked.status }, authz.user.internalUserId, authz.membership.memberId);
+    if (existing && (existing.internalUserId !== authz.user.internalUserId || existing.status !== "active")) {
+      throw new Error("This device is unavailable.");
+    }
+    if (linked && (linked.internalUserId !== authz.user.internalUserId || linked.memberId !== authz.membership.memberId || linked.status !== "active")) {
+      throw new Error("This device is unavailable.");
+    }
     const now = Date.now();
     if (existing) await ctx.db.patch(existing._id, { label: args.label, publicKey: args.publicKey, lastSeenAt: now, revision: existing.revision + 1 });
     else await ctx.db.insert("account_devices", { deviceId: args.deviceId, internalUserId: authz.user.internalUserId, kind: args.kind, label: args.label, publicKey: args.publicKey, status: "active", revision: 1, registeredAt: now, lastSeenAt: now });

@@ -1248,22 +1248,14 @@ fn require_connector_workspace(workspace_id: Option<String>) -> Result<(), Conne
 fn connector_authorization_context(
     workspace_id: Option<String>,
     connector_id: &str,
-) -> Result<
-    (
-        crate::clerk_identity::NativeIdentityGenerationSnapshot,
-        crate::authorized_scope::AuthorizedCommandScope,
-    ),
-    ConnectorCommandError,
-> {
-    let identity = crate::clerk_identity::native_identity_generation_snapshot()
-        .map_err(|message| command_error("needs-auth", connector_id, &message, false))?;
+) -> Result<crate::authorized_scope::AuthorizedCommandScope, ConnectorCommandError> {
     let scope = crate::authorized_scope::command_scope(
         workspace_id,
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )
     .map_err(|message| command_error("invalid-request", connector_id, &message, false))?;
-    Ok((identity, scope))
+    Ok(scope)
 }
 
 #[tauri::command]
@@ -1297,15 +1289,8 @@ pub fn start_connector_auth(
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
-    start_auth(
-        entry.id,
-        entry.auth_mode,
-        scopes,
-        request,
-        &identity,
-        &scope,
-    )
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
+    start_auth(entry.id, entry.auth_mode, scopes, request, &scope)
 }
 
 #[tauri::command]
@@ -1315,8 +1300,8 @@ pub async fn complete_connector_auth(
     workspace_id: Option<String>,
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
-    complete_auth(&app, entry.id, request, &identity, &scope).await
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
+    complete_auth(&app, entry.id, request, &scope).await
 }
 
 /// Begin a loopback OAuth flow end-to-end: bind an exact desktop redirect,
@@ -1332,17 +1317,9 @@ pub async fn begin_connector_oauth(
 ) -> Result<ConnectorAuthResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
     let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
-    oauth_loopback::run_loopback_oauth(
-        &app,
-        entry.id,
-        entry.auth_mode,
-        scopes,
-        request,
-        identity,
-        scope,
-    )
-    .await
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
+    oauth_loopback::run_loopback_oauth(&app, entry.id, entry.auth_mode, scopes, request, scope)
+        .await
 }
 
 #[tauri::command]
@@ -1352,8 +1329,8 @@ pub async fn clear_connector_auth(
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
-    disconnect(&app, entry.id, &identity, &scope).await?;
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
+    disconnect(&app, entry.id, &scope).await?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
     Ok(build_manifest(
@@ -1379,10 +1356,6 @@ pub fn list_connector_accounts(
     let entry = require_connector(&connector_id)?;
     let path = connector_connections_path(&app)
         .map_err(|message| command_error("unknown", entry.id, &message, false))?;
-    let identity = crate::clerk_identity::native_identity_generation_snapshot()
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
-    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     let scope = crate::authorized_scope::command_scope(
         workspace_id,
         None,
@@ -1858,10 +1831,8 @@ pub fn switch_connector_account(
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
     let workspace_id = scope.data.workspace_id().to_string();
-    let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     let durable_store = crate::store::try_global().ok_or_else(|| {
         command_error(
             "unknown",
@@ -1930,7 +1901,7 @@ pub async fn refresh_connector_health(
     workspace_id: Option<String>,
 ) -> Result<ConnectorManifest, ConnectorCommandError> {
     let entry = require_connector(&connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
     // Refresh first: this rotates expiring tokens and fails closed when the
     // connection is missing or the refresh is rejected. A failed refresh is a
     // real provider error, not a fixture fallback.
@@ -1942,8 +1913,6 @@ pub async fn refresh_connector_health(
     // fixture or a fake "connected" claim.
     let health = probe_connector_health(&app, entry.id).await;
     if let Some(health) = health.as_ref() {
-        let _guard = crate::clerk_identity::lock_native_identity_generation(&identity)
-            .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
         let current_connection = connection_for(&connections_path, entry.id).ok_or_else(|| {
             command_error(
                 "conflict",
@@ -1998,7 +1967,7 @@ pub async fn search_connector(
     connection_id: Option<String>,
 ) -> Result<ConnectorSearchResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
     let durable_store = crate::store::try_global().ok_or_else(|| {
         command_error(
             "unknown",
@@ -2033,8 +2002,6 @@ pub async fn search_connector(
     } else {
         Err(configuration_required(entry.id))
     }?;
-    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
     Ok(bind_search_result_to_connection(
         result,
@@ -2126,7 +2093,7 @@ pub async fn import_connector_item(
     connection_id: Option<String>,
 ) -> Result<ConnectorImportResult, ConnectorCommandError> {
     let entry = require_connector(&request.connector_id)?;
-    let (identity, scope) = connector_authorization_context(workspace_id, entry.id)?;
+    let scope = connector_authorization_context(workspace_id, entry.id)?;
     let durable_store = crate::store::try_global().ok_or_else(|| {
         command_error(
             "unknown",
@@ -2199,8 +2166,6 @@ pub async fn import_connector_item(
             imported: true,
         })
     }?;
-    let _identity_guard = crate::clerk_identity::lock_native_identity_generation(&identity)
-        .map_err(|message| command_error("needs-auth", entry.id, &message, false))?;
     require_unchanged_connection_evidence(durable_store, &scope, entry.id, &connection)?;
     let bound = bind_source_to_private_connection(result, &scope, &connection.connection_id);
     let source = persist_connector_knowledge_source(&app, &scope.private, bound.source)
@@ -2460,28 +2425,9 @@ mod workspace_scope_tests {
     use super::*;
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;
-    use crate::store::repos::workspace_directory::{
-        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-        WorkspaceDirectoryUpsert,
-    };
+    use crate::store::repos::workspace_directory::clear_current_internal_user;
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
-
-    fn summary(user: &str, workspace: &str, member: &str) -> WorkspaceDirectoryUpsert {
-        WorkspaceDirectoryUpsert {
-            internal_user_id: user.into(),
-            fable_workspace_id: workspace.into(),
-            name: workspace.into(),
-            workspace_status: "active".into(),
-            workspace_revision: 1,
-            policy_revision: 1,
-            member_id: member.into(),
-            role: "owner".into(),
-            membership_status: "active".into(),
-            membership_revision: 1,
-            updated_at: "t".into(),
-        }
-    }
 
     #[test]
     fn connector_commands_fail_closed_for_an_unconfigured_workspace() {
@@ -2567,26 +2513,11 @@ mod workspace_scope_tests {
     }
 
     #[test]
-    fn account_listing_reconciles_canonical_records_idempotently_and_rejects_stale_scope() {
+    fn account_listing_reconciles_canonical_records_with_installation_local_authority() {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let (scope_a, local_b) = store
-            .transaction(|tx| {
-                let a = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-a", "workspace-a", "member-a"),
-                )?;
-                let b = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-b", "workspace-b", "member-b"),
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
-                Ok((
-                    resolve(tx, Some(&a.local_workspace_id), None, ScopeAccess::Write)?,
-                    b.local_workspace_id,
-                ))
-            })
+        let scope_a = store
+            .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
             .unwrap();
         let connection = ConnectorConnection {
             connector_id: "gmail".into(),
@@ -2722,7 +2653,7 @@ mod workspace_scope_tests {
                 .authority_scope
                 .as_ref()
                 .and_then(|authority| authority.owner_member_id.as_deref()),
-            Some("member-a")
+            scope_a.member_id.as_deref()
         );
         let mut unsafe_source = bound.source.clone();
         unsafe_source.content_preview = Some("Bearer ghp_supersecretvalue".into());
@@ -2846,22 +2777,15 @@ mod workspace_scope_tests {
                 .unwrap_err();
         assert_eq!(unavailable.code, "needs-auth");
 
-        store
+        let scope_after_account_change = store
             .transaction(|tx| {
-                set_current_internal_user(tx, "user-b", "t")?;
-                select_active_workspace(tx, "user-b", "workspace-b", "t")?;
-                let scope_b = resolve(tx, Some(&local_b), None, ScopeAccess::Write)?;
-                assert!(
-                    crate::store::repos::connection_record::list(tx, &store, &scope_b)?.is_empty()
-                );
-                Ok(())
+                clear_current_internal_user(tx)?;
+                resolve(tx, None, None, ScopeAccess::Write)
             })
             .unwrap();
-        assert!(
-            reconcile_canonical_connector_accounts(&store, &scope_a, "gmail", &[connection])
-                .is_err()
-        );
-        assert!(persist_connector_health_state(
+        assert_eq!(scope_after_account_change, scope_a);
+        reconcile_canonical_connector_accounts(&store, &scope_a, "gmail", &[connection]).unwrap();
+        persist_connector_health_state(
             &store,
             &scope_a,
             "gmail",
@@ -2873,6 +2797,6 @@ mod workspace_scope_tests {
                 retry_after: Some("later".into()),
             },
         )
-        .is_err());
+        .unwrap();
     }
 }

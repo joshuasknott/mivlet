@@ -1,12 +1,10 @@
 import { BACKEND_AUTH_STATE_VALUES as rootBackendAuthStateValues } from "./index.js";
 import type {
   BackendProvider as RootBackendProvider,
-  CloudWorkspaceLinkState as RootCloudWorkspaceLinkState,
   VoiceCapability as RootVoiceCapability
 } from "./index.js";
 import { BACKEND_AUTH_STATE_VALUES as domainBackendAuthStateValues } from "./domains/agent-runtime.js";
 import type { BackendProvider as DomainBackendProvider } from "./domains/agent-runtime.js";
-import type { CloudWorkspaceLinkState as DomainCloudWorkspaceLinkState } from "./domains/account-cloud.js";
 import type { VoiceCapability as DomainVoiceCapability } from "./domains/voice.js";
 
 type Assert<Condition extends true> = Condition;
@@ -19,9 +17,6 @@ type Exact<Left, Right> =
       : false
     : false;
 
-type _AccountCloudRootCompatibility = Assert<
-  Exact<RootCloudWorkspaceLinkState, DomainCloudWorkspaceLinkState>
->;
 type _AgentRuntimeRootCompatibility = Assert<Exact<RootBackendProvider, DomainBackendProvider>>;
 type _VoiceRootCompatibility = Assert<Exact<RootVoiceCapability, DomainVoiceCapability>>;
 

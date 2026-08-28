@@ -12,5 +12,5 @@
     { "name": "Connections", "source": "connections.ts" },
     { "name": "Conversations", "source": "conversations.ts" }
   ],
-  "expectedCanonicalSha256": "8372516114656add9a0f57fa95b468c55c452d7143e4afe0503361b880578e73"
+  "expectedCanonicalSha256": "7efc4d77521cd846527d82b1602bb5e1cf684805def0e02bf3dd5529ac4c99db"
 }

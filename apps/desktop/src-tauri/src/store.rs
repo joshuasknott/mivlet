@@ -574,15 +574,10 @@ pub fn with_store<R>(
 pub fn read_document<T: serde::de::DeserializeOwned>(
     path: &Path,
 ) -> std::result::Result<Option<T>, String> {
-    let Some(store) = GLOBAL_STORE.get() else {
+    if GLOBAL_STORE.get().is_none() {
         return Ok(None);
-    };
-    let scope = store
-        .with_conn(|conn| {
-            let active =
-                repos::workspace_directory::require_active_workspace_for_current_user(conn)?;
-            repos::scope::DataScope::workspace(active.local_workspace_id)
-        })
+    }
+    let scope = repos::scope::DataScope::workspace(repos::scope::DEFAULT_WORKSPACE_ID)
         .map_err(|error| error.to_string())?;
     read_workspace_document(path, &scope)
 }
@@ -628,15 +623,10 @@ pub fn write_document<T: serde::Serialize>(
     path: &Path,
     value: &T,
 ) -> std::result::Result<bool, String> {
-    let Some(store) = GLOBAL_STORE.get() else {
+    if GLOBAL_STORE.get().is_none() {
         return Ok(false);
-    };
-    let scope = store
-        .with_conn(|conn| {
-            let active =
-                repos::workspace_directory::require_active_workspace_for_current_user(conn)?;
-            repos::scope::DataScope::workspace(active.local_workspace_id)
-        })
+    }
+    let scope = repos::scope::DataScope::workspace(repos::scope::DEFAULT_WORKSPACE_ID)
         .map_err(|error| error.to_string())?;
     write_workspace_document(path, &scope, value)
 }

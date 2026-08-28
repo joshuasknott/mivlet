@@ -15,8 +15,7 @@ import {
   resolveSelectedModel,
   selectMemoryForRun,
   sourceAllowedByConnections,
-  withPreviewPrivateAuthority,
-  workspaceSharedRunAudience
+  withPreviewPrivateAuthority
 } from "./agent-run";
 
 const memory = (over: Partial<MemoryRecord> = {}): MemoryRecord => ({
@@ -47,86 +46,65 @@ const accountStatus = (over: Partial<AccountWorkspaceStatus> = {}): AccountWorks
   state: "ready",
   message: "Workspace ready.",
   accountBound: true,
-  workspaces: [{
-    fableWorkspaceId: "workspace-hosted",
-    localWorkspaceId: "workspace-local",
-    name: "Fable",
-    workspaceStatus: "active",
-    workspaceRevision: 1,
-    policyRevision: 1,
-    memberId: "member-active",
-    role: "owner",
-    membershipStatus: "active",
-    membershipRevision: 1,
-    updatedAt: "2026-07-11T00:00:00.000Z"
-  }],
+  workspaces: [],
   activeWorkspace: {
-    localWorkspaceId: "workspace-local",
-    fableWorkspaceId: "workspace-hosted",
-    name: "Fable",
-    source: "hosted"
+    localWorkspaceId: "default",
+    name: "On this PC",
+    source: "local"
   },
   activeContextOwner: {
-    internalUserId: "user-active",
-    memberId: "member-active"
+    internalUserId: "local-user",
+    memberId: "local-member"
   },
   devices: [],
   ...over
 });
 
 describe("run context audience", () => {
-  it("derives the private audience from the exact active hosted member", () => {
+  it("derives the private audience from the installation-local owner", () => {
     expect(privateRunAudience(accountStatus())).toEqual({
       authority: "local",
       visibility: "member-private",
-      actingMemberId: "member-active"
+      actingMemberId: "local-member"
     });
   });
 
-  it("fails closed instead of using a mismatched or legacy placeholder member", () => {
+  it("fails closed for non-local or unbound workspace assertions", () => {
     expect(() => privateRunAudience(accountStatus({
       activeWorkspace: {
-        localWorkspaceId: "other-local",
+        localWorkspaceId: "hosted-local",
         fableWorkspaceId: "workspace-hosted",
-        name: "Other",
+        name: "Hosted",
         source: "hosted"
       }
-    }))).toThrow(/could not confirm who can use this context/i);
+    }))).toThrow(/installation's private context owner/i);
     expect(() => privateRunAudience(accountStatus({
       activeWorkspace: {
-        localWorkspaceId: "workspace-local",
+        localWorkspaceId: "",
         name: "Unbound",
         source: "unbound"
       },
       activeContextOwner: undefined
-    }))).toThrow(/could not confirm who can use this context/i);
+    }))).toThrow(/installation's private context owner/i);
   });
 
-  it("fails closed for an unbound workspace even when an account owner is present", () => {
+  it("fails closed when local ownership is missing", () => {
     expect(() => privateRunAudience(accountStatus({
-      workspaces: [],
       activeWorkspace: {
-        localWorkspaceId: "",
-        name: "No workspace selected",
-        source: "unbound"
+        localWorkspaceId: "default",
+        name: "On this PC",
+        source: "local"
       },
-      activeContextOwner: { internalUserId: "user-local" }
-    }))).toThrow(/could not confirm who can use this context/i);
+      activeContextOwner: undefined
+    }))).toThrow(/installation's private context owner/i);
   });
 
-  it("assigns explicit preview ownership without mutating fixture records", () => {
-    const preview = privateRunAudience(accountStatus({
-      configured: false,
-      activeWorkspace: {
-        localWorkspaceId: "workspace-local",
-        fableWorkspaceId: "workspace-hosted",
-        name: "Preview",
-        source: "preview"
-      },
+  it("assigns explicit local ownership without mutating fixture records", () => {
+    const audience = privateRunAudience(accountStatus({
       activeContextOwner: { internalUserId: "preview-user" }
     }));
     const original = memory({ authorityScope: undefined });
-    const [owned] = withPreviewPrivateAuthority([original], preview);
+    const [owned] = withPreviewPrivateAuthority([original], audience);
     expect(original.authorityScope).toBeUndefined();
     expect(owned.authorityScope).toEqual({
       authority: "local",
@@ -135,41 +113,28 @@ describe("run context audience", () => {
     });
   });
 
-  it("assigns native-confirmed ownership to a local-only workspace", () => {
-    expect(privateRunAudience(accountStatus({
-      configured: false,
-      workspaces: [],
-      activeWorkspace: {
-        localWorkspaceId: "default",
-        name: "On this PC",
-        source: "local"
-      },
-      activeContextOwner: { internalUserId: "local-device", memberId: "local-member" }
-    }))).toEqual({
-      authority: "local",
-      visibility: "member-private",
-      actingMemberId: "local-member"
-    });
-  });
-
-  it("excludes private inputs from a synthetic shared audience via the central filter contract", () => {
-    const sharedAudience = workspaceSharedRunAudience("member-active");
+  it("filters context to the exact installation-local owner", () => {
+    const audience = privateRunAudience(accountStatus());
     const records = recordsVisibleToRunAudience([
       memory({
-        id: "private",
+        id: "matching",
         authorityScope: {
           authority: "local",
           visibility: "member-private",
-          ownerMemberId: "member-active" as never
+          ownerMemberId: "local-member" as never
         }
       }),
       memory({
-        id: "shared",
-        authorityScope: { authority: "convex", visibility: "workspace-shared" }
+        id: "other",
+        authorityScope: {
+          authority: "local",
+          visibility: "member-private",
+          ownerMemberId: "other-member" as never
+        }
       }),
       memory({ id: "legacy", authorityScope: undefined })
-    ], sharedAudience);
-    expect(records.map((record) => record.id)).toEqual(["shared"]);
+    ], audience);
+    expect(records.map((record) => record.id)).toEqual(["matching"]);
   });
 });
 

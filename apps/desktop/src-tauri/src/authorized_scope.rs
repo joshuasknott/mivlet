@@ -1,13 +1,12 @@
-//! Central authenticated scope boundary for legacy commands that still accept
-//! renderer workspace/project fields. Workspace ids are assertions only; the
-//! active account directory remains authority.
+//! Single installation-local authority boundary for local product data.
+//!
+//! Renderer workspace fields are assertions only. Optional Fable account state
+//! never changes the owner, encryption audience, or workspace of conversations,
+//! memory, provider connections, approvals, or execution attempts.
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::Connection;
 
-use crate::store::repos::{
-    scope::{DataScope, PrivateDataScope},
-    workspace_directory,
-};
+use crate::store::repos::scope::{DataScope, PrivateDataScope, DEFAULT_WORKSPACE_ID};
 use crate::store::StoreError;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -28,70 +27,33 @@ pub fn resolve(
     conn: &Connection,
     requested_workspace_id: Option<&str>,
     project_id: Option<&str>,
-    access: ScopeAccess,
+    _access: ScopeAccess,
 ) -> crate::store::Result<AuthorizedCommandScope> {
-    let requested = requested_workspace_id
-        .ok_or_else(|| StoreError::Invalid("Workspace id is required.".into()))?;
-    let context = if requested == crate::store::repos::scope::DEFAULT_WORKSPACE_ID
-        && workspace_directory::current_internal_user_id(conn)?.is_none()
-    {
-        let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
-        workspace_directory::AuthorizedWorkspaceContext {
-            active_workspace: workspace_directory::ActiveWorkspaceSelection {
-                local_workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
-                fable_workspace_id: None,
-                name: "On this PC".into(),
-                source: "local".into(),
-            },
-            internal_user_id,
-            member_id: Some(member_id),
-        }
-    } else {
-        workspace_directory::require_active_workspace_context_for_current_user(conn)?
-    };
-    if requested != context.active_workspace.local_workspace_id {
+    let requested = requested_workspace_id.unwrap_or(DEFAULT_WORKSPACE_ID);
+    if requested != DEFAULT_WORKSPACE_ID {
         return Err(StoreError::Invalid(
-            "The requested workspace is not active for this account.".into(),
+            "Local Fable data belongs to this installation workspace.".into(),
         ));
     }
-    if let Some(project_id) = project_id {
-        let member = context.member_id.as_deref().ok_or_else(|| {
-            StoreError::Invalid(
-                "An active workspace membership is required for project context.".into(),
-            )
-        })?;
-        let lifecycle=conn.query_row(
-            "SELECT lifecycle FROM project WHERE id=?1 AND workspace_id=?2 AND owner_member_id=?3 AND authority='local' AND visibility='member-private' AND deleted_at IS NULL;",
-            rusqlite::params![project_id,requested,member],
-            |row|row.get::<_,String>(0),
-        ).optional()?;
-        match lifecycle.as_deref() {
-            Some("active") => {}
-            Some("archived") if access == ScopeAccess::Read => {}
-            Some("archived") => {
-                return Err(StoreError::Invalid(
-                    "Archived project context is read-only.".into(),
-                ))
-            }
-            _ => {
-                return Err(StoreError::Invalid(
-                    "Project context is unavailable for this account.".into(),
-                ))
-            }
-        }
+    if project_id.is_some() {
+        return Err(StoreError::Invalid(
+            "Project-scoped data is no longer part of the Fable product.".into(),
+        ));
     }
-    let data = DataScope::new(requested.to_string(), project_id.map(str::to_string))?;
+
+    let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
+    let data = DataScope::new(DEFAULT_WORKSPACE_ID.to_string(), None)?;
     data.ensure_exists(conn)?;
     let private = PrivateDataScope::for_authenticated_user(
         data.clone(),
-        &context.internal_user_id,
-        context.member_id.as_deref(),
+        &internal_user_id,
+        Some(&member_id),
     )?;
     Ok(AuthorizedCommandScope {
         data,
         private,
-        internal_user_id: context.internal_user_id,
-        member_id: context.member_id,
+        internal_user_id,
+        member_id: Some(member_id),
     })
 }
 
@@ -108,87 +70,50 @@ pub fn command_scope(
 }
 
 pub fn active_command_scope(access: ScopeAccess) -> Result<AuthorizedCommandScope, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .with_conn(|conn| {
-            let workspace_id = if workspace_directory::current_internal_user_id(conn)?.is_none() {
-                crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into()
-            } else {
-                workspace_directory::require_active_workspace_context_for_current_user(conn)?
-                    .active_workspace
-                    .local_workspace_id
-            };
-            resolve(conn, Some(&workspace_id), None, access)
-        })
-        .map_err(|error| error.to_string())
+    command_scope(Some(DEFAULT_WORKSPACE_ID.into()), None, access)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::{
-        repos::workspace_directory::{
-                set_current_internal_user, upsert_authoritative_summary, WorkspaceDirectoryUpsert,
-        },
         vault::{MasterKey, Vault},
         Store,
     };
 
-    fn summary(user: &str, workspace: &str, member: &str) -> WorkspaceDirectoryUpsert {
-        WorkspaceDirectoryUpsert {
-            internal_user_id: user.into(),
-            fable_workspace_id: workspace.into(),
-            name: "Workspace".into(),
-            workspace_status: "active".into(),
-            workspace_revision: 1,
-            policy_revision: 1,
-            member_id: member.into(),
-            role: "owner".into(),
-            membership_status: "active".into(),
-            membership_revision: 1,
-            updated_at: "t".into(),
-        }
+    fn store() -> Store {
+        Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
     }
 
     #[test]
-    fn local_install_scope_uses_the_default_workspace_without_cloud_identity() {
-        let store =
-            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        store
+    fn account_state_cannot_change_installation_local_authority() {
+        store()
             .with_conn(|conn| {
-                let scope = resolve(
-                    conn,
-                    Some(crate::store::repos::scope::DEFAULT_WORKSPACE_ID),
-                    None,
-                    ScopeAccess::Write,
-                )?;
-                assert_eq!(scope.data.workspace_id(), "default");
-                assert_eq!(scope.private.owner_member_id(), scope.member_id.as_deref());
+                let scope = resolve(conn, Some(DEFAULT_WORKSPACE_ID), None, ScopeAccess::Write)?;
+                assert_eq!(scope.data.workspace_id(), DEFAULT_WORKSPACE_ID);
                 assert!(scope.internal_user_id.starts_with("local-user-"));
                 assert!(scope
                     .member_id
                     .as_deref()
                     .is_some_and(|id| id.starts_with("local-member-")));
+                assert_eq!(scope.private.owner_member_id(), scope.member_id.as_deref());
                 Ok(())
             })
             .unwrap();
     }
 
     #[test]
-    fn hosted_user_without_an_active_selection_never_falls_back_to_local_authority() {
-        let store =
-            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        store
-            .transaction(|tx| {
-                upsert_authoritative_summary(tx, &summary("user-1", "workspace-1", "member-1"))?;
-                set_current_internal_user(tx, "user-1", "t")?;
-                Ok(())
-            })
-            .unwrap();
-        store
+    fn alternate_workspaces_and_retired_project_scope_fail_closed() {
+        store()
             .with_conn(|conn| {
-                assert!(resolve(conn, Some("default"), None, ScopeAccess::Read).is_err());
+                assert!(resolve(conn, Some("hosted-workspace"), None, ScopeAccess::Read).is_err());
+                assert!(resolve(
+                    conn,
+                    Some(DEFAULT_WORKSPACE_ID),
+                    Some("project"),
+                    ScopeAccess::Read
+                )
+                .is_err());
                 Ok(())
             })
             .unwrap();

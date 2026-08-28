@@ -28,7 +28,6 @@ use std::{
     sync::{Mutex, OnceLock},
 };
 
-use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
 
 use crate::models::{
@@ -549,30 +548,7 @@ fn scoped_credential_key(internal_user_id: &str, provider_id: &str) -> String {
 }
 
 fn require_current_internal_user() -> Result<String, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    store
-        .transaction(|tx| {
-            tx.query_row(
-                "SELECT u.internal_user_id
-                 FROM current_internal_user AS current
-                 JOIN fable_internal_user_mirror AS u
-                   ON u.internal_user_id=current.internal_user_id
-                 WHERE current.singleton=1 AND u.status='active';",
-                [],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .map_err(Into::into)
-            .and_then(|value| {
-                value.ok_or_else(|| {
-                    crate::store::StoreError::Invalid(
-                        "Sign in to a Fable account before using a provider.".into(),
-                    )
-                })
-            })
-        })
-        .map_err(|error| error.to_string())
+    Ok(crate::account_workspace::local_install_principals().0)
 }
 
 impl BackendCredentialStore for CredentialStores {
@@ -876,7 +852,7 @@ pub(crate) fn provider_route_observation_snapshot(
 }
 
 pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
-    format!("boundary:member-private:account-owned-provider:{provider_id}:local-credential-egress")
+    format!("boundary:install-private:local-provider:{provider_id}:credential-egress")
 }
 
 pub(crate) fn validate_current_native_provider_route(
@@ -889,28 +865,25 @@ pub(crate) fn validate_current_native_provider_route(
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let (expected, observation) = store
         .with_conn(|tx| {
-            let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
-            if context.member_id.is_none() {
+            if binding.workspace_id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
                 return Err(crate::store::StoreError::Invalid(
-                    "An active Fable workspace membership is required for provider routing.".into(),
+                    "The selected provider route is not scoped to this installation.".into(),
                 ));
             }
-            let workspace_id = context
-                .active_workspace
-                .fable_workspace_id
-                .clone()
-                .unwrap_or(context.active_workspace.local_workspace_id.clone());
-            if workspace_id != binding.workspace_id {
-                return Err(crate::store::StoreError::Invalid(
-                    "The selected provider route is not scoped to the active workspace.".into(),
-                ));
-            }
-            let expected = validate_account_native_provider_model(tx, &internal_user_id, provider_id, model)
-                .map_err(crate::store::StoreError::Invalid)?;
+            let expected =
+                validate_account_native_provider_model(tx, &internal_user_id, provider_id, model)
+                    .map_err(crate::store::StoreError::Invalid)?;
             let observations = crate::store::repos::provider_route_observation::summaries(
-                tx, store, &internal_user_id,
+                tx,
+                store,
+                &internal_user_id,
             )?;
-            Ok((expected.clone(), observations.get(&expected).map(provider_route_observation_snapshot)))
+            Ok((
+                expected.clone(),
+                observations
+                    .get(&expected)
+                    .map(provider_route_observation_snapshot),
+            ))
         })
         .map_err(|error| error.to_string())?;
     validate_native_provider_route_binding(
@@ -1197,28 +1170,28 @@ fn validate_provider_route_quality_snapshot(
 #[tauri::command]
 pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
+    let (_, member_id) = crate::account_workspace::local_install_principals();
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
-    let (workspace_id, member_id, rows, observations, quality) = store.with_conn(|tx| {
-        let context = crate::store::repos::workspace_directory::require_active_workspace_context_for_current_user(tx)?;
-        let member = context.member_id.clone().ok_or_else(|| crate::store::StoreError::Invalid(
-            "An active Fable workspace membership is required for provider routes.".into()))?;
-        let workspace = context.active_workspace.fable_workspace_id.clone()
-            .unwrap_or(context.active_workspace.local_workspace_id.clone());
-        let rows = crate::store::repos::backend_connection::list_records(tx, &internal_user_id)?;
-        let observations = crate::store::repos::provider_route_observation::summaries(
-            tx,
-            store,
-            &internal_user_id,
-        )?;
-        let quality = crate::store::repos::provider_route_quality_observation::summaries_for_policy(
-            tx,
-            store,
-            &internal_user_id,
-            NATIVE_CITED_BRIEF_POLICY_REVISION,
-        )?;
-        Ok((workspace, member, rows, observations, quality))
-    }).map_err(|error| error.to_string())?;
+    let (rows, observations, quality) = store
+        .with_conn(|tx| {
+            let rows =
+                crate::store::repos::backend_connection::list_records(tx, &internal_user_id)?;
+            let observations = crate::store::repos::provider_route_observation::summaries(
+                tx,
+                store,
+                &internal_user_id,
+            )?;
+            let quality =
+                crate::store::repos::provider_route_quality_observation::summaries_for_policy(
+                    tx,
+                    store,
+                    &internal_user_id,
+                    NATIVE_CITED_BRIEF_POLICY_REVISION,
+                )?;
+            Ok((rows, observations, quality))
+        })
+        .map_err(|error| error.to_string())?;
     let stores = CredentialStores {
         internal_user_id: internal_user_id.clone(),
     };
@@ -1232,7 +1205,7 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
         .collect::<Result<HashMap<_, _>, _>>()?;
     Ok(build_account_native_provider_routes(
         &internal_user_id,
-        &workspace_id,
+        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
         &member_id,
         &rows,
         &availability,
@@ -1289,9 +1262,9 @@ fn build_account_native_provider_routes(
                 "displayName":format!("{} {}",entry.label,label),"providerFamily":row.provider_id,
                 "modelOrRuntimeReference":model,"state":if credential_available{"available"}else{"unavailable"},
                 "health":{"state":if credential_available{"healthy"}else{"unavailable"},"checkedAt":row.updated_at,
-                    "summary":if credential_available{"Account credential is present; live egress rechecks it."}else{"Account credential is unavailable."}},
+                    "summary":if credential_available{"Local credential is present; live egress rechecks it."}else{"Local credential is unavailable."}},
                 "placement":{"allowedKinds":["local-desktop"],"requiresCredentialHoldingNode":true},
-                "boundaries":{"privacyBoundary":"member-private","billingBoundary":"account-owned-provider",
+                "boundaries":{"privacyBoundary":"installation-private","billingBoundary":"user-owned-provider",
                     "providerBoundary":row.provider_id,"placementBoundary":"local-credential-egress"},
                 "credentialBinding":{"custody":"os-secure-store","state":if credential_available{"available"}else{"unavailable"},
                     "bindingReference":format!("credential-binding:v1:{binding_digest:x}"),"lastValidatedAt":row.updated_at,"refreshSupported":false},

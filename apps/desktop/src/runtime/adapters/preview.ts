@@ -3,7 +3,7 @@ import type { RuntimeAdapter } from "../ports";
 /**
  * Preview fixtures are implemented by the relevant domain port. Reaching a
  * native command through this adapter is therefore a boundary error, never an
- * invitation to synthesize native authority.
+ * instruction to synthesize native authority.
  */
 export const previewRuntimeAdapter: RuntimeAdapter = {
   kind: "preview",

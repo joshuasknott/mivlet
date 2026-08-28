@@ -125,75 +125,35 @@ export interface KnowledgeRunContext {
 }
 
 const PRIVATE_CONTEXT_MEMBER_ERROR =
-  "Fable could not confirm who can use this context. Refresh your account workspace and try again.";
+  "Fable could not confirm this installation's private context owner.";
 
 /**
- * Resolve the native-confirmed owner of local private context. Hosted
- * workspaces use the exact active member pair. The explicit development-only
- * preview adapter uses its fixture internal user and never fabricates membership.
+ * Resolve the native-confirmed owner of installation-local private context.
+ * Optional account state never changes this audience.
  */
 export function privateRunAudience(status: AccountWorkspaceStatus): ExecutionContextAudience {
   const activeLocalId = status.activeWorkspace.localWorkspaceId.trim();
-  const usableState = status.state === "ready" || status.state === "offline";
   const owner = status.activeContextOwner;
-  const member = status.workspaces.find((workspace) =>
-    workspace.localWorkspaceId === activeLocalId &&
-    (!status.activeWorkspace.fableWorkspaceId ||
-      workspace.fableWorkspaceId === status.activeWorkspace.fableWorkspaceId)
-  );
   if (
     !status.accountBound ||
-    !usableState ||
+    status.state !== "ready" ||
+    status.activeWorkspace.source !== "local" ||
     !activeLocalId ||
     !owner?.internalUserId.trim()
   ) {
     throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
   }
-  if (
-    status.activeWorkspace.source === "hosted" &&
-    member &&
-    member.workspaceStatus === "active" &&
-    member.membershipStatus === "active" &&
-    Boolean(member.memberId.trim()) &&
-    owner.memberId === member.memberId
-  ) {
-    return {
-      authority: "local",
-      visibility: "member-private",
-      actingMemberId: member.memberId as never
-    };
-  }
-  if (status.activeWorkspace.source === "local") {
-    return owner.memberId
-      ? {
-          authority: "local",
-          visibility: "member-private",
-          actingMemberId: owner.memberId as never
-        }
-      : {
-          authority: "local",
-          visibility: "member-private",
-          actingInternalUserId: owner.internalUserId as never
-        };
-  }
-  if (status.activeWorkspace.source === "preview" && !owner.memberId) {
-    return {
-      authority: "local",
-      visibility: "member-private",
-      actingInternalUserId: owner.internalUserId as never
-    };
-  }
-  throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
-}
-
-/** Synthetic shared audience for contract tests and future hosted assembly. */
-export function workspaceSharedRunAudience(actingMemberId: string): ExecutionContextAudience {
-  if (!actingMemberId.trim()) throw new Error(PRIVATE_CONTEXT_MEMBER_ERROR);
-  return {
-    authority: "convex",
-    visibility: "workspace-shared",
-    actingMemberId: actingMemberId as never
-  };
+  return owner.memberId
+    ? {
+        authority: "local",
+        visibility: "member-private",
+        actingMemberId: owner.memberId as never
+      }
+    : {
+        authority: "local",
+        visibility: "member-private",
+        actingInternalUserId: owner.internalUserId as never
+      };
 }
 
 /** Apply the central fail-closed authority contract to run inputs. */

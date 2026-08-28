@@ -52,17 +52,20 @@ export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   scopes: []
 };
 
-/** Fail-closed native bootstrap state. Never seed production with preview ids or copy. */
+/** Native starts with one installation-local workspace; account state loads separately. */
 export const DEFAULT_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
   configured: false,
-  state: "disabled",
-  message: "Preparing your private workspace on this PC…",
-  accountBound: false,
+  state: "ready",
+  message: "Local workspace ready. A Fable account is optional.",
+  accountBound: true,
   workspaces: [],
   activeWorkspace: {
-    localWorkspaceId: "",
-    name: "No workspace selected",
-    source: "unbound"
+    localWorkspaceId: "default",
+    name: "On this PC",
+    source: "local"
+  },
+  activeContextOwner: {
+    internalUserId: "local-install"
   },
   devices: []
 };
@@ -88,32 +91,17 @@ export const PREVIEW_IDENTITY_STATUS: IdentityStatus = {
   }
 };
 
-/** Deliberate browser/test fixture; native production must reconcile first. */
+/** Deliberate browser/test fixture with the same local-first ownership shape. */
 export const PREVIEW_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
   configured: false,
   state: "ready",
-  message: "Preview workspace ready.",
+  message: "Preview workspace ready on this browser.",
   accountBound: true,
-  workspaces: [
-    {
-      fableWorkspaceId: "preview-workspace",
-      localWorkspaceId: "preview-default",
-      name: "Preview workspace",
-      workspaceStatus: "active",
-      workspaceRevision: 0,
-      policyRevision: 0,
-      memberId: "preview-member",
-      role: "owner",
-      membershipStatus: "active",
-      membershipRevision: 0,
-      updatedAt: "1970-01-01T00:00:00.000Z"
-    }
-  ],
+  workspaces: [],
   activeWorkspace: {
     localWorkspaceId: "preview-default",
-    fableWorkspaceId: "preview-workspace",
-    name: "Preview workspace",
-    source: "preview"
+    name: "On this browser",
+    source: "local"
   },
   activeContextOwner: {
     internalUserId: "preview-user"

@@ -1512,27 +1512,7 @@ const CREDENTIAL_STATES: &[&str] = &[
 mod tests {
     use super::*;
     use crate::authorized_scope::{resolve, ScopeAccess};
-    use crate::store::repos::workspace_directory::{
-        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-        WorkspaceDirectoryUpsert,
-    };
     use crate::store::vault::{MasterKey, Vault};
-
-    fn summary(user: &str, workspace: &str, member: &str) -> WorkspaceDirectoryUpsert {
-        WorkspaceDirectoryUpsert {
-            internal_user_id: user.into(),
-            fable_workspace_id: workspace.into(),
-            name: workspace.into(),
-            workspace_status: "active".into(),
-            workspace_revision: 1,
-            policy_revision: 1,
-            member_id: member.into(),
-            role: "owner".into(),
-            membership_status: "active".into(),
-            membership_revision: 1,
-            updated_at: "t".into(),
-        }
-    }
 
     fn input<'a>(expected_revision: Option<i64>) -> NativeConnectorConnectionWrite<'a> {
         NativeConnectorConnectionWrite {
@@ -1549,26 +1529,11 @@ mod tests {
     }
 
     #[test]
-    fn authenticated_writer_is_workspace_bound_encrypted_and_revision_checked() {
+    fn installation_local_writer_is_encrypted_and_revision_checked() {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
-        let (scope_a, local_b) = store
-            .transaction(|tx| {
-                let a = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-a", "workspace-a", "member-a"),
-                )?;
-                let b = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-b", "workspace-b", "member-b"),
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
-                Ok((
-                    resolve(tx, Some(&a.local_workspace_id), None, ScopeAccess::Write)?,
-                    b.local_workspace_id,
-                ))
-            })
+        let scope_a = store
+            .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
             .unwrap();
         let created = store
             .transaction(|tx| upsert_native_connector(tx, &store, &scope_a, input(None)))
@@ -1648,18 +1613,6 @@ mod tests {
                 )
             })
             .is_err());
-
-        store
-            .transaction(|tx| {
-                set_current_internal_user(tx, "user-b", "t")?;
-                select_active_workspace(tx, "user-b", "workspace-b", "t")?;
-                let scope_b = resolve(tx, Some(&local_b), None, ScopeAccess::Write)?;
-                assert!(list(tx, &store, &scope_a).is_err());
-                assert!(list(tx, &store, &scope_b)?.is_empty());
-                assert!(upsert_native_connector(tx, &store, &scope_b, input(None)).is_err());
-                Ok(())
-            })
-            .unwrap();
     }
 
     #[test]
@@ -1695,20 +1648,7 @@ mod tests {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = store
-            .transaction(|tx| {
-                let workspace = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-a", "workspace-a", "member-a"),
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
-                resolve(
-                    tx,
-                    Some(&workspace.local_workspace_id),
-                    None,
-                    ScopeAccess::Write,
-                )
-            })
+            .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
             .unwrap();
         let created = store
             .transaction(|tx| {
@@ -1763,7 +1703,7 @@ mod tests {
             stored,
             (
                 "member-private".into(),
-                "member-a".into(),
+                scope.member_id.clone().unwrap(),
                 "".into(),
                 None,
                 0

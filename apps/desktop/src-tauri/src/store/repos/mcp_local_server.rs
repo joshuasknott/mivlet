@@ -403,47 +403,14 @@ fn aad(workspace_id: &str, owner_subject: &str, id: &str) -> String {
 mod tests {
     use super::*;
     use crate::authorized_scope::{resolve, ScopeAccess};
-    use crate::store::repos::workspace_directory::{
-        select_active_workspace, set_current_internal_user, upsert_authoritative_summary,
-        WorkspaceDirectoryUpsert,
-    };
     use crate::store::vault::{MasterKey, Vault};
-
-    fn summary(user: &str, workspace: &str, member: &str) -> WorkspaceDirectoryUpsert {
-        WorkspaceDirectoryUpsert {
-            internal_user_id: user.into(),
-            fable_workspace_id: workspace.into(),
-            name: workspace.into(),
-            workspace_status: "active".into(),
-            workspace_revision: 1,
-            policy_revision: 1,
-            member_id: member.into(),
-            role: "owner".into(),
-            membership_status: "active".into(),
-            membership_revision: 1,
-            updated_at: "t".into(),
-        }
-    }
 
     #[test]
     fn launch_config_is_encrypted_owner_bound_and_revision_checked() {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = store
-            .transaction(|tx| {
-                let workspace = upsert_authoritative_summary(
-                    tx,
-                    &summary("user-a", "workspace-a", "member-a"),
-                )?;
-                set_current_internal_user(tx, "user-a", "t")?;
-                select_active_workspace(tx, "user-a", "workspace-a", "t")?;
-                resolve(
-                    tx,
-                    Some(&workspace.local_workspace_id),
-                    None,
-                    ScopeAccess::Write,
-                )
-            })
+            .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
             .unwrap();
         let args = vec!["--stdio".to_string()];
         let created = store

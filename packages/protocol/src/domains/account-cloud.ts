@@ -1,18 +1,12 @@
-import type {
-  ExternalAuthenticationFacts,
-  InvitationAcceptancePresentation,
-  MembershipStatus,
-  WorkspaceRole,
-} from "../spine/identity.js";
-import type { IsoDateTime } from "../spine/primitives.js";
+import type { ExternalAuthenticationFacts, WorkspaceRole } from "../spine/identity.js";
 
 // ---------------------------------------------------------------------------
-// Fable account identity and session status.
+// Optional Fable account state.
 //
-// This is not connector OAuth and not the confidential auth broker. It is a
-// secret-free view of the native account identity boundary. Clerk authenticates
-// an external principal; Fable-owned membership and authorization are resolved
-// separately. Refresh/session credentials remain in the Rust OS-keyring boundary.
+// The account is an opt-in boundary for hosted computers and future sync. It
+// never owns the local conversation workspace, provider credentials, or local
+// execution authority. Refresh/session credentials remain inside the native
+// OS-keyring boundary.
 // ---------------------------------------------------------------------------
 
 export type AccountSessionState =
@@ -31,10 +25,7 @@ export interface VerifiedAccountDisplayAttributes {
   email?: string;
 }
 
-/**
- * Secret-free facts from a validated external account session. These facts
- * identify a principal but grant no Fable workspace access or role.
- */
+/** Secret-free facts from a validated external account session. */
 export interface AccountAuthenticationFacts extends ExternalAuthenticationFacts {
   verifiedDisplayAttributes?: VerifiedAccountDisplayAttributes;
 }
@@ -59,6 +50,7 @@ export type AccountWorkspaceLifecycleState =
   | "revoked"
   | "error";
 
+/** Hosted account workspace available to the optional computer service. */
 export interface AccountWorkspaceSummary {
   fableWorkspaceId: string;
   localWorkspaceId: string;
@@ -90,227 +82,24 @@ export interface AccountDeviceSummary {
   revokedAt?: string;
 }
 
-/** Secret-free account/workspace state exposed by the focused native adapter. */
+/**
+ * Secret-free native state for the always-local workspace plus any optional
+ * hosted account inventory. The active workspace and active context owner are
+ * installation-local even when an account is signed in.
+ */
 export interface AccountWorkspaceStatus {
   configured: boolean;
   state: AccountWorkspaceLifecycleState;
   message: string;
+  /** True when the installation-local workspace is ready. */
   accountBound: boolean;
+  /** Hosted account workspaces; empty while signed out or unconfigured. */
   workspaces: AccountWorkspaceSummary[];
   activeWorkspace: ActiveWorkspaceSelection;
-  /** Secret-free native owner used for private local data. A member id may be a hosted membership or an install-local principal; source disambiguates it. */
   activeContextOwner?: {
     internalUserId: string;
     memberId?: string;
   };
+  /** Hosted account devices; empty while signed out or unconfigured. */
   devices: AccountDeviceSummary[];
-}
-
-/** A server-selected invitation addressed to the current authenticated user. */
-export interface AccountPendingInvitation {
-  invitation: {
-    invitationId: string;
-    workspaceId: string;
-    status: "pending";
-    role: WorkspaceRole;
-    expiresAt: IsoDateTime;
-    displayHint?: string;
-  };
-  selection: Extract<InvitationAcceptancePresentation, { kind: "direct-inbox" }>;
-  /** Server-owned display name for the exact invitation workspace. */
-  workspaceName: string;
-}
-
-/** Secret-free inbox state; the renderer cannot choose another recipient. */
-export interface AccountPendingInvitationList {
-  invitations: readonly AccountPendingInvitation[];
-}
-
-export type AccountInvitationAcceptanceDecision =
-  | {
-      status: "accepted";
-      invitationId: string;
-      workspaceId: string;
-      role: WorkspaceRole;
-    }
-  | {
-      status: "conflict" | "rejected";
-      code: string;
-      message: string;
-    };
-
-/**
- * Native composes the hosted decision with the refreshed local workspace
- * directory. React supplies only the invitation id and never supplies
- * presentation evidence, identity facts, authorization, or idempotency.
- */
-export interface AccountInvitationAcceptanceOutcome {
-  result: AccountInvitationAcceptanceDecision;
-  accountWorkspace: AccountWorkspaceStatus;
-  reconciliation: {
-    status: "refreshed" | "refresh-needed" | "not-needed";
-    message: string;
-  };
-}
-
-export const ACCOUNT_WORKSPACE_MEMBER_ACTIONS = [
-  "change-role",
-  "suspend",
-  "reactivate",
-  "remove",
-] as const;
-export type AccountWorkspaceMemberAction =
-  (typeof ACCOUNT_WORKSPACE_MEMBER_ACTIONS)[number];
-
-export const ACCOUNT_WORKSPACE_MEMBER_BLOCKED_REASONS = [
-  "current-member",
-  "last-active-owner",
-  "owner-protected",
-  "permission-denied",
-  "unavailable",
-] as const;
-export type AccountWorkspaceMemberBlockedReason =
-  (typeof ACCOUNT_WORKSPACE_MEMBER_BLOCKED_REASONS)[number];
-
-/**
- * Server-projected affordances. They improve the UI but never replace the
- * hosted authorization and revision checks performed for the exact action.
- */
-export interface AccountWorkspaceMemberManagement {
-  allowedRoles: readonly WorkspaceRole[];
-  allowedActions: readonly Exclude<AccountWorkspaceMemberAction, "change-role">[];
-  blockedReason?: AccountWorkspaceMemberBlockedReason;
-}
-
-/** Display-only roster projection. Profile hints never grant workspace access. */
-export interface AccountWorkspaceMemberSummary {
-  /** Opaque, process-local reference. Raw hosted member ids never reach React. */
-  memberActionRef: string;
-  role: WorkspaceRole;
-  status: MembershipStatus;
-  revision: number;
-  displayName?: string;
-  emailHint?: string;
-  isCurrentUser: boolean;
-  management: AccountWorkspaceMemberManagement;
-}
-
-export interface AccountWorkspaceMemberList {
-  workspaceId: string;
-  actorRole: WorkspaceRole;
-  invitationManagement: {
-    available: boolean;
-    allowedRoles: readonly WorkspaceRole[];
-    message: string;
-    invitationActionRef?: string;
-  };
-  members: readonly AccountWorkspaceMemberSummary[];
-}
-
-/** Ephemeral verified-email intent. Native and hosted code must never retain the raw email. */
-export interface AccountWorkspaceInvitationCreateRequest {
-  invitationActionRef: string;
-  email: string;
-  role: WorkspaceRole;
-}
-
-export type AccountWorkspaceInvitationCreateOutcome =
-  | {
-      status: "accepted";
-      role: WorkspaceRole;
-      expiresAt: IsoDateTime;
-      displayHint: string;
-      message: string;
-    }
-  | {
-      status: "conflict" | "rejected";
-      code: string;
-      message: string;
-    };
-
-/** React supplies intent and optimistic revision, never hosted authority or ids. */
-export interface AccountWorkspaceMemberChangeRequest {
-  memberActionRef: string;
-  action: AccountWorkspaceMemberAction;
-  expectedRevision: number;
-  role?: WorkspaceRole;
-}
-
-export type AccountWorkspaceMemberChangeOutcome =
-  | {
-      status: "accepted";
-      message: string;
-    }
-  | {
-      status: "conflict" | "rejected";
-      code: string;
-      message: string;
-    };
-
-export type CloudWorkspaceRole = WorkspaceRole;
-export type CloudSyncState = "disabled" | "unlinked" | "active" | "stale" | "revoked" | "blocked" | "error";
-export type CloudSyncRecordType = "conversation";
-export type CloudSyncOperation = "create" | "update" | "delete";
-
-export interface CloudWorkspaceLinkState {
-  localWorkspaceId: string;
-  cloudWorkspaceId: string;
-  internalUserId: string;
-  memberId: string;
-  role: CloudWorkspaceRole;
-  syncState: CloudSyncState;
-  linkedDeviceId: string;
-  lastAcceptedRevision: number;
-  linkedAt: string;
-  updatedAt: string;
-}
-
-export interface CloudSyncStatus {
-  configured: boolean;
-  linked: boolean;
-  state: CloudSyncState | string;
-  message: string;
-  link?: CloudWorkspaceLinkState | null;
-  queuedCount: number;
-}
-
-export interface CloudSyncEnqueueRequest {
-  localWorkspaceId: string;
-  localMutationId: string;
-  clientMutationId: string;
-  baseRevision: number;
-  recordType: CloudSyncRecordType;
-  recordId: string;
-  operation: CloudSyncOperation;
-  payload: unknown;
-}
-
-export interface CloudMutationOutboxRow {
-  localMutationId: string;
-  idempotencyKey: string;
-  localWorkspaceId: string;
-  cloudWorkspaceId: string;
-  deviceId: string;
-  clientMutationId: string;
-  baseRevision: number;
-  recordType: CloudSyncRecordType;
-  recordId: string;
-  operation: CloudSyncOperation;
-  status: "queued" | "flushing" | "accepted" | "rejected" | "conflict";
-  attemptCount: number;
-  createdAt: string;
-  updatedAt: string;
-  payload: unknown;
-}
-
-export interface CloudSyncFlushResult {
-  phase: "disabled" | "unlinked" | "blocked" | "adapter-unavailable" | string;
-  queuedCount: number;
-  message: string;
-}
-
-export interface CloudSyncPullResult {
-  phase: "disabled" | "unlinked" | "blocked" | "adapter-unavailable" | string;
-  lastPulledRevision: number;
-  message: string;
 }

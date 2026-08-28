@@ -216,11 +216,7 @@ export interface ShellRuntime {
   }) => void;
   /** Remove cancelled backend tool calls from the transient approval queue. */
   clearBackendToolApprovals: () => void;
-  /**
-   * Fable account identity. It remains separate from connector OAuth and from
-   * agent/backend credentials while the configuration-gated foundation is
-   * being replaced by the required hosted sign-in flow.
-   */
+  /** Optional hosted identity, separate from local data and provider credentials. */
   identityStatus: IdentityStatus;
   identityPending: boolean;
   accountWorkspaceStatus: AccountWorkspaceStatus;
@@ -230,9 +226,6 @@ export interface ShellRuntime {
   refreshIdentity: () => Promise<void>;
   signOutIdentity: () => Promise<void>;
   reconcileAccountWorkspace: () => Promise<void>;
-  createAccountWorkspace: (name: string) => Promise<void>;
-  selectAccountWorkspace: (fableWorkspaceId: string) => Promise<void>;
-  revokeAccountDevice: (deviceId: string) => Promise<void>;
   /**
    * Inspectable action history (model calls, connector actions, tool/shell
    * actions, web actions, approvals, and blocked policy decisions).
