@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import type { AccountWorkspaceStatus, BackendProvider, ConnectorManifest, IdentityStatus, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import { defaultShellState } from "./hooks/shell-runtime/defaults";
+import {
+  CURRENT_ONBOARDING_VERSION,
+  defaultShellState
+} from "./hooks/shell-runtime/defaults";
 import { resolveDetailedStatus } from "./components/PluginPanel";
 import { appendRuntimeConversationMessage, cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, reviseRuntimeConversationMessage, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
@@ -651,7 +654,11 @@ describe("Fable home", () => {
     window.localStorage.clear();
     window.localStorage.setItem(
       "fable.shell.v1",
-      JSON.stringify({ ...defaultShellState, onboardingComplete: true })
+      JSON.stringify({
+        ...defaultShellState,
+        onboardingComplete: true,
+        onboardingVersion: CURRENT_ONBOARDING_VERSION
+      })
     );
     runtimeMocks.identityStatus = structuredClone(defaultIdentityStatus);
     runtimeMocks.accountStatus = structuredClone(defaultAccountStatus);
@@ -791,6 +798,7 @@ describe("Fable home", () => {
       memoryRecords: [],
       connectedBackendIds: [],
       onboardingComplete: true,
+      onboardingVersion: CURRENT_ONBOARDING_VERSION,
       selectedModelId: "",
       permissionMode: "full-access",
       savedAt: "2026-06-26T10:30:00.000Z"
@@ -1022,6 +1030,7 @@ describe("Fable home", () => {
       memoryRecords: [],
       connectedBackendIds: ["codex"],
       onboardingComplete: true,
+      onboardingVersion: CURRENT_ONBOARDING_VERSION,
       selectedModelId: "",
       permissionMode: "full-access",
       savedAt: "2026-06-26T10:30:00.000Z"

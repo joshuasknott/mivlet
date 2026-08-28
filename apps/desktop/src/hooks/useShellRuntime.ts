@@ -238,6 +238,7 @@ import {
 } from "../lib/provider-availability";
 import {
   ALLOW_PREVIEW_FALLBACKS,
+  CURRENT_ONBOARDING_VERSION,
   DEFAULT_ACCOUNT_WORKSPACE_STATUS,
   DEFAULT_IDENTITY_STATUS,
   PREVIEW_ACCOUNT_WORKSPACE_STATUS,
@@ -526,6 +527,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     initialState.onboardingComplete ?? false
   );
+  const [onboardingVersion, setOnboardingVersion] = useState(
+    initialState.onboardingVersion ?? 0
+  );
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   // Composer model + permission picker selections, persisted so the next run
   // uses them. The model is re-validated against the connected backend's
@@ -663,6 +667,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memoryRecords: managedMemoryRecords,
       connectedBackendIds,
       onboardingComplete: onboardingDismissed,
+      onboardingVersion,
       selectedModelId,
       permissionMode,
       permissionLabel,
@@ -680,6 +685,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       composerValue,
       connectedBackendIds,
       onboardingDismissed,
+      onboardingVersion,
       customApprovalSettings,
       dismissedApprovalIds,
       importedKnowledgeSources,
@@ -855,6 +861,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setPlans([]);
       setAgents(defaultShellState.agents ?? []);
       setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
+      setOnboardingDismissed(false);
+      setOnboardingVersion(0);
       setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
       setImportStatus(null);
@@ -909,6 +917,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           );
         }
         setOnboardingDismissed(recovered.onboardingComplete ?? false);
+        setOnboardingVersion(recovered.onboardingVersion ?? 0);
         setSelectedModelId(recovered.selectedModelId);
         setPermissionMode(recovered.permissionMode);
         setPermissionLabel(
@@ -2599,6 +2608,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return;
     }
     setOnboardingDismissed(true);
+    setOnboardingVersion(CURRENT_ONBOARDING_VERSION);
     setLastAction("Fable setup complete");
   };
 
@@ -2633,7 +2643,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const onboardingRequired =
     !activeWorkspaceScope ||
     connectedBackendIds.length === 0 ||
-    !onboardingDismissed;
+    !onboardingDismissed ||
+    onboardingVersion < CURRENT_ONBOARDING_VERSION;
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;

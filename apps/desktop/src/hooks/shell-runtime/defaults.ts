@@ -4,6 +4,8 @@ import { knowledgeSources, memoryRecords } from "../../data/workspace";
 import { DEFAULT_PERMISSION_LABEL } from "../../lib/agent-run";
 import type { PersistedShellState } from "../../lib/types";
 
+export const CURRENT_ONBOARDING_VERSION = 1;
+
 export const defaultShellState: PersistedShellState = {
   activeItem: "new-chat",
   composerValue: "",
@@ -34,6 +36,7 @@ export const defaultShellState: PersistedShellState = {
   memoryRecords,
   connectedBackendIds: [],
   onboardingComplete: false,
+  onboardingVersion: 0,
   // "" lets Fable pick the first available model. Ask Me is the default
   // approval preset.
   selectedModelId: "",

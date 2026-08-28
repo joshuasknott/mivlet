@@ -1198,8 +1198,10 @@ export interface RuntimeSnapshot {
    * Rust boundary can re-resolve their auth state on recovery.
    */
   connectedBackendIds: string[];
-  /** Provider onboarding was completed or deliberately deferred locally. */
+  /** Provider onboarding was completed. */
   onboardingComplete?: boolean;
+  /** Version of the complete first-run journey the user finished. */
+  onboardingVersion?: number;
   /**
    * The model id last chosen in the composer's model picker, so the same model
    * drives the next agent run. Re-validated against the connected backend's

@@ -171,6 +171,7 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     memoryRecords: state.memoryRecords,
     connectedBackendIds: state.connectedBackendIds,
     onboardingComplete: state.onboardingComplete,
+    onboardingVersion: state.onboardingVersion,
     selectedModelId: state.selectedModelId,
     permissionMode: state.permissionMode,
     permissionLabel: state.permissionLabel,
@@ -206,6 +207,7 @@ export function shellStateFromRuntimeSnapshot(
     memoryRecords: snapshot.memoryRecords,
     connectedBackendIds: snapshot.connectedBackendIds,
     onboardingComplete: snapshot.onboardingComplete ?? defaultShellState.onboardingComplete,
+    onboardingVersion: snapshot.onboardingVersion ?? defaultShellState.onboardingVersion ?? 0,
     selectedModelId: snapshot.selectedModelId ?? defaultShellState.selectedModelId,
     permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(
@@ -224,6 +226,7 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
     ...state,
     activeItem: normalizeActiveItem(state.activeItem),
     voiceEnabled: state.voiceEnabled !== false,
+    onboardingVersion: state.onboardingVersion ?? 0,
     agents: normalizeAgentProfiles(state.agents),
     permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(state.permissionLabel, permissionMode),

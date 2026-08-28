@@ -151,6 +151,23 @@ describe("Fable schedules round-trip through the runtime snapshot", () => {
   });
 });
 
+describe("Fable onboarding journey version", () => {
+  it("preserves the current journey and invalidates legacy completion", () => {
+    const current = shellStateToRuntimeSnapshot({
+      ...defaultState,
+      onboardingComplete: true,
+      onboardingVersion: 1
+    });
+    expect(shellStateFromRuntimeSnapshot(current, defaultState)).toMatchObject({
+      onboardingComplete: true,
+      onboardingVersion: 1
+    });
+
+    delete current.onboardingVersion;
+    expect(shellStateFromRuntimeSnapshot(current, defaultState).onboardingVersion).toBe(0);
+  });
+});
+
 describe("Fable approval choices round-trip through the runtime snapshot", () => {
   it("preserves Custom as the visible choice and saves both toggles", () => {
     const state: PersistedShellState = {

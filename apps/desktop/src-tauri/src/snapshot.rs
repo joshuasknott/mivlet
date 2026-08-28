@@ -792,6 +792,7 @@ pub(crate) fn normalize_runtime_snapshot(
         // Provider ids only — secrets are never persisted into the snapshot.
         connected_backend_ids: normalize_snapshot_id_list(snapshot.connected_backend_ids),
         onboarding_complete: snapshot.onboarding_complete,
+        onboarding_version: snapshot.onboarding_version,
         selected_model_id: truncate_characters(
             &normalize_spaces(&snapshot.selected_model_id),
             MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
@@ -1041,6 +1042,7 @@ mod tests {
             memory_records: Vec::new(),
             connected_backend_ids: Vec::new(),
             onboarding_complete: false,
+            onboarding_version: 0,
             selected_model_id: String::new(),
             permission_mode: "read-only".to_string(),
             permission_label: Some("Read Only".to_string()),

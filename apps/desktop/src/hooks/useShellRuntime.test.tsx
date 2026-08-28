@@ -8,7 +8,10 @@ import { STORAGE_KEY, LEGACY_STORAGE_KEYS } from "../lib/constants";
 import type { PersistedShellState } from "../lib/types";
 import { FableQueryProvider } from "../lib/query-client";
 import { shellStateToRuntimeSnapshot } from "../lib/persistence";
-import { defaultShellState } from "./shell-runtime/defaults";
+import {
+  CURRENT_ONBOARDING_VERSION,
+  defaultShellState
+} from "./shell-runtime/defaults";
 
 /**
  * Isolated unit coverage for useShellRuntime's pure orchestration logic. All
@@ -1143,8 +1146,24 @@ describe("useShellRuntime — backend connect (preview mode)", () => {
     expect(result.current.backendStatus).toMatch(/connect and verify/i);
   });
 
-  it("enters the workspace only after provider connection and explicit completion", async () => {
+  it("requires the current journey after a legacy onboarding completion", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...defaultShellState,
+        connectedBackendIds: ["openai"],
+        onboardingComplete: true
+      })
+    );
     const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    expect(result.current.connectedBackendIds).toContain("openai");
+    expect(result.current.onboardingRequired).toBe(true);
+  });
+
+  it("enters the workspace only after provider connection and explicit completion", async () => {
+    const { result, unmount } = renderHook(() => useShellRuntime());
     await awaitMountEffects();
 
     await act(async () => {
@@ -1154,6 +1173,11 @@ describe("useShellRuntime — backend connect (preview mode)", () => {
 
     act(() => result.current.dismissOnboarding());
     expect(result.current.onboardingRequired).toBe(false);
+    unmount();
+    expect(
+      JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}")
+        .onboardingVersion
+    ).toBe(CURRENT_ONBOARDING_VERSION);
   });
 
   it("drops the connection on disconnect in preview mode", async () => {

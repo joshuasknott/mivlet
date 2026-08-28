@@ -964,6 +964,7 @@ fn runtime_snapshot() -> RuntimeSnapshot {
         )],
         connected_backend_ids: vec!["codex".to_string()],
         onboarding_complete: true,
+        onboarding_version: 1,
         selected_model_id: "gpt-5".to_string(),
         permission_mode: "read-only".to_string(),
         permission_label: Some("Read Only".to_string()),
@@ -1811,6 +1812,7 @@ fn legacy_snapshot_without_schedules_still_parses() {
 
     let read = read_runtime_snapshot(&path).expect("read").expect("exists");
     assert!(read.schedules.is_empty());
+    assert_eq!(read.onboarding_version, 0);
     assert_eq!(read.active_item, "Automations");
 
     let _ = fs::remove_file(&path);

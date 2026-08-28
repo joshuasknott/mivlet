@@ -1242,6 +1242,8 @@ pub struct RuntimeSnapshot {
     #[serde(default)]
     pub onboarding_complete: bool,
     #[serde(default)]
+    pub onboarding_version: u8,
+    #[serde(default)]
     pub selected_model_id: String,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,

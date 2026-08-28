@@ -81,8 +81,10 @@ export interface PersistedShellState {
   memoryRecords: MemoryRecord[];
   /** Provider ids of connected agent-runtime backends. Secrets never persist here. */
   connectedBackendIds: string[];
-  /** The user has completed or deliberately deferred provider onboarding. */
+  /** The user has completed provider onboarding. */
   onboardingComplete?: boolean;
+  /** Version of the complete first-run journey the user finished. */
+  onboardingVersion?: number;
   /** Model id last chosen in the composer's model picker (re-validated before use). */
   selectedModelId: string;
   /** Composer permission level driving agent-run tool gating. */
