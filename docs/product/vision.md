@@ -34,9 +34,9 @@ top-level clutter or prerequisites for ordinary work.
 - One workspace authorization model that can support one or many members without
   delegating Fable tenancy to an identity vendor.
 
-Grok Bot is a capability benchmark, not a brand or implementation source. Fable
-must not copy proprietary names, visuals, code, or wording, and it must not claim
-parity without measured live evidence.
+External products may inform capability research, but Fable is its own product.
+It must not copy proprietary names, visuals, code, or wording, and it must not
+claim parity without measured live evidence.
 
 ## Trust model
 

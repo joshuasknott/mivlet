@@ -5,10 +5,12 @@
 //! for `getAuthStatus`, because that response can include auth tokens.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env,
+    ffi::OsString,
+    fs,
     io::{BufRead, BufReader, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
     sync::{mpsc, Arc, Mutex, OnceLock},
     thread,
@@ -29,7 +31,6 @@ pub struct CodexCliStatus {
     pub(crate) installed: bool,
     pub(crate) authenticated: bool,
     pub(crate) auth_method: Option<String>,
-    pub(crate) executable_path: Option<String>,
     pub(crate) version: Option<String>,
     pub(crate) message: Option<String>,
 }
@@ -128,29 +129,95 @@ fn active_runs() -> &'static Mutex<HashMap<String, ActiveCodexRun>> {
     ACTIVE_RUNS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn codex_candidates() -> Vec<PathBuf> {
+fn push_unique_candidate(
+    candidates: &mut Vec<PathBuf>,
+    seen: &mut HashSet<PathBuf>,
+    candidate: PathBuf,
+) {
+    if seen.insert(candidate.clone()) {
+        candidates.push(candidate);
+    }
+}
+
+fn modified_time(path: &Path) -> Option<std::time::SystemTime> {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
+
+fn codex_candidates_from(
+    path: Option<OsString>,
+    app_data: Option<PathBuf>,
+    local_app_data: Option<PathBuf>,
+) -> Vec<PathBuf> {
     let mut candidates = Vec::new();
-    if let Some(paths) = env::var_os("PATH") {
+    let mut seen = HashSet::new();
+    if let Some(paths) = path {
         for dir in env::split_paths(&paths) {
             #[cfg(windows)]
             {
-                candidates.push(dir.join("codex.cmd"));
-                candidates.push(dir.join("codex.exe"));
-                candidates.push(dir.join("codex"));
+                for name in ["codex.cmd", "codex.exe", "codex"] {
+                    push_unique_candidate(&mut candidates, &mut seen, dir.join(name));
+                }
             }
             #[cfg(not(windows))]
             {
-                candidates.push(dir.join("codex"));
+                push_unique_candidate(&mut candidates, &mut seen, dir.join("codex"));
             }
         }
     }
+
+    #[cfg(windows)]
+    {
+        // GUI apps do not inherit later user PATH updates. Check the official
+        // Codex desktop and common npm install locations without opening auth
+        // files or copying any provider session material.
+        if let Some(root) = app_data {
+            for name in ["codex.cmd", "codex.exe"] {
+                push_unique_candidate(&mut candidates, &mut seen, root.join("npm").join(name));
+            }
+        }
+        if let Some(root) = local_app_data {
+            let bin_root = root.join("OpenAI").join("Codex").join("bin");
+            push_unique_candidate(&mut candidates, &mut seen, bin_root.join("codex.exe"));
+            let mut desktop_candidates = fs::read_dir(&bin_root)
+                .ok()
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path().join("codex.exe"))
+                .filter(|candidate| candidate.is_file())
+                .collect::<Vec<_>>();
+            desktop_candidates.sort_by_key(|candidate| std::cmp::Reverse(modified_time(candidate)));
+            for candidate in desktop_candidates {
+                push_unique_candidate(&mut candidates, &mut seen, candidate);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    let _ = (app_data, local_app_data);
+
     candidates
+}
+
+fn codex_candidates() -> Vec<PathBuf> {
+    codex_candidates_from(
+        env::var_os("PATH"),
+        env::var_os("APPDATA").map(PathBuf::from),
+        env::var_os("LOCALAPPDATA").map(PathBuf::from),
+    )
 }
 
 fn find_codex_executable() -> Option<PathBuf> {
     codex_candidates()
         .into_iter()
         .find(|candidate| candidate.is_file())
+}
+
+fn missing_codex_runtime_message() -> String {
+    "The official Codex runtime was not found. Install the Codex desktop app or Codex CLI, then reopen Fable."
+        .to_string()
 }
 
 fn codex_command(path: &PathBuf) -> Command {
@@ -266,8 +333,7 @@ fn chatgpt_login_details(value: &Value) -> Result<(String, String), String> {
 }
 
 fn start_codex_browser_login_blocking() -> Result<CodexBrowserLoginResult, String> {
-    let path =
-        find_codex_executable().ok_or_else(|| "Codex CLI was not found on PATH.".to_string())?;
+    let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
     let mut command = codex_command(&path);
     command
         .arg("app-server")
@@ -380,9 +446,8 @@ pub fn codex_cli_status() -> CodexCliStatus {
             installed: false,
             authenticated: false,
             auth_method: None,
-            executable_path: None,
             version: None,
-            message: Some("Codex CLI was not found on PATH.".to_string()),
+            message: Some(missing_codex_runtime_message()),
         };
     };
 
@@ -428,12 +493,11 @@ pub fn codex_cli_status() -> CodexCliStatus {
         installed: true,
         authenticated,
         auth_method,
-        executable_path: Some(path.display().to_string()),
         version,
         message: if authenticated {
             None
         } else {
-            Some("Codex CLI is installed but not signed in.".to_string())
+            Some("The Codex runtime is installed but not signed in.".to_string())
         },
     }
 }
@@ -444,8 +508,7 @@ pub fn codex_cli_status() -> CodexCliStatus {
 /// at the native process boundary avoids stale hardcoded model IDs without
 /// exposing any auth material to JavaScript.
 pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, String> {
-    let path =
-        find_codex_executable().ok_or_else(|| "Codex CLI was not found on PATH.".to_string())?;
+    let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
     let mut command = codex_command(&path);
     command
         .arg("app-server")
@@ -577,7 +640,7 @@ pub fn start_codex_app_server_turn(
         return Err("Codex app-server can only run the Codex provider.".to_string());
     }
     let Some(path) = find_codex_executable() else {
-        return Err("Codex CLI was not found on PATH.".to_string());
+        return Err(missing_codex_runtime_message());
     };
 
     let mut command = codex_command(&path);
@@ -983,7 +1046,8 @@ pub fn shutdown_codex_app_server_turn(request_id: String) -> Result<(), String> 
 #[cfg(test)]
 mod tests {
     use super::{
-        chatgpt_login_details, find_codex_executable, validated_codex_auth_url, CodexCliStatus,
+        chatgpt_login_details, codex_candidates_from, find_codex_executable,
+        validated_codex_auth_url, CodexCliStatus,
     };
     use serde_json::json;
 
@@ -993,13 +1057,32 @@ mod tests {
             installed: false,
             authenticated: false,
             auth_method: None,
-            executable_path: None,
             version: None,
             message: Some("missing".to_string()),
         };
         let encoded = serde_json::to_string(&status).expect("status serializes");
         assert!(!encoded.contains("token"));
         assert!(!encoded.contains("authToken"));
+        assert!(!encoded.contains("executablePath"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn desktop_install_is_discovered_without_path_inheritance() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let binary = directory
+            .path()
+            .join("OpenAI")
+            .join("Codex")
+            .join("bin")
+            .join("desktop-build")
+            .join("codex.exe");
+        std::fs::create_dir_all(binary.parent().expect("binary parent"))
+            .expect("create desktop bin directory");
+        std::fs::write(&binary, b"test binary").expect("write desktop binary");
+
+        let candidates = codex_candidates_from(None, None, Some(directory.path().to_path_buf()));
+        assert!(candidates.contains(&binary));
     }
 
     #[test]

@@ -3572,7 +3572,8 @@
   color: var(--ink-muted);
 }
 
-.og-field input {
+.og-field input,
+.og-field textarea {
   padding: 11px 14px;
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
@@ -3584,7 +3585,14 @@
   transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
 }
 
-.og-field input:focus {
+.og-field textarea {
+  min-height: 112px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.og-field input:focus,
+.og-field textarea:focus {
   outline: none;
   border-color: var(--accent);
   background: var(--surface-overlay);
@@ -4276,6 +4284,11 @@ button.og-path--primary .og-path__icon {
   opacity: 0.9;
 }
 
+.og-primary-cta__start:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .og-primary-cta__secondary {
   background: none;
   border: none;
@@ -4331,7 +4344,8 @@ button.og-path--primary .og-path__icon {
     font-size: var(--text-15);
   }
 
-  .og-field input {
+  .og-field input,
+  .og-field textarea {
     min-height: 44px;
     padding: 12px 16px;
     font-size: var(--text-15);

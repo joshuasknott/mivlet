@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import type { AccountWorkspaceStatus, BackendProvider, ConnectorManifest, IdentityStatus, PersistedAgentRun, RuntimeSnapshot } from "@fable/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
+import { defaultShellState } from "./hooks/shell-runtime/defaults";
 import { resolveDetailedStatus } from "./components/PluginPanel";
 import { appendRuntimeConversationMessage, cancelRuntimeCitedApproval, cancelRuntimeMissionApproval, cancelRuntimeMissionHumanInput, getRuntimeArtifact, getRuntimeConversationThread, listRuntimeConnectorStatuses, listRuntimePendingCitedApprovals, listRuntimePendingMissionApprovals, listRuntimePendingMissionHumanInputs, listRuntimeThreadArtifacts, listRuntimeThreadMissionProgress, prepareRuntimeConnectorAction, readRuntimeCitedMissionPlanSummaries, readRuntimeCitedMissionReceipts, readRuntimeMissionProgress, receiveRuntimeMissionHumanInput, resolveRuntimeMissionApproval, reviseRuntimeConversationMessage, searchRuntimeArtifacts, startRuntimeArtifactRevisionBrief, startRuntimeStructuredIntake } from "./runtime";
 import { executeCitedBriefMission } from "./lib/cited-brief-mission";
@@ -648,6 +649,10 @@ async function waitForScheduleNewButton() {
 describe("Fable home", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    window.localStorage.setItem(
+      "fable.shell.v1",
+      JSON.stringify({ ...defaultShellState, onboardingComplete: true })
+    );
     runtimeMocks.identityStatus = structuredClone(defaultIdentityStatus);
     runtimeMocks.accountStatus = structuredClone(defaultAccountStatus);
     runtimeMocks.snapshot = null;
@@ -785,6 +790,7 @@ describe("Fable home", () => {
       memoryDisabled: false,
       memoryRecords: [],
       connectedBackendIds: [],
+      onboardingComplete: true,
       selectedModelId: "",
       permissionMode: "full-access",
       savedAt: "2026-06-26T10:30:00.000Z"
@@ -1015,6 +1021,7 @@ describe("Fable home", () => {
       memoryDisabled: false,
       memoryRecords: [],
       connectedBackendIds: ["codex"],
+      onboardingComplete: true,
       selectedModelId: "",
       permissionMode: "full-access",
       savedAt: "2026-06-26T10:30:00.000Z"
@@ -1212,6 +1219,8 @@ describe("Fable onboarding", () => {
   });
 
   const showProviderStep = async () => {
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Set up Fable" }));
     expect(await screen.findByRole("heading", { name: /add a model provider/i })).toBeInTheDocument();
   };
 
@@ -1224,7 +1233,7 @@ describe("Fable onboarding", () => {
     expect(screen.queryByLabelText(/^password$/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/skip onboarding/i)).not.toBeInTheDocument();
     expect(screen.getByRole("navigation", { name: /onboarding progress/i })).toHaveTextContent(
-      /step 2 of 2/i
+      /step 3 of 4/i
     );
   });
 
@@ -1241,9 +1250,10 @@ describe("Fable onboarding", () => {
       /anthropic,/i,
       /google gemini,/i,
       /github copilot,/i,
-      /xai,/i,
       /deepseek,/i,
-      /z\.ai,/i
+      /openrouter,/i,
+      /z\.ai,/i,
+      /minimax,/i
     ]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
@@ -1301,17 +1311,10 @@ describe("Fable onboarding", () => {
     expect(within(cursorModal).getByText(/requires the cursor cli/i)).toBeInTheDocument();
     await user.click(within(cursorModal).getByRole("button", { name: /close provider setup/i }));
 
-    // Grok's CLI and xAI's API key are choices inside the same xAI family.
-    await user.click(screen.getByRole("button", { name: /^xai,/i }));
-    const grokModal = screen.getByRole("dialog", { name: "xAI" });
-    await user.click(
-      within(grokModal).getByRole("button", { name: /grok account/i })
-    );
-    expect(within(grokModal).getByText(/requires the grok cli/i)).toBeInTheDocument();
-    expect(within(grokModal).queryByLabelText(/api key for xai/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^xai,/i })).not.toBeInTheDocument();
   });
 
-  it("clears the gate when a real capability-bearing runtime is connected", async () => {
+  it("requires explicit setup completion after a real runtime connects", async () => {
     // The real runtime (not an onboarding click) resolves Codex to genuinely
     // connected + capability-bearing. Nothing on the onboarding screen fakes
     // this; the boundary is what flips the gate.
@@ -1328,10 +1331,12 @@ describe("Fable onboarding", () => {
       },
       ...failClosedBackends.filter((provider) => provider.id !== "codex")
     ];
+    const user = userEvent.setup();
     render(<App />);
 
-    // Once the real runtime is capability-bearing, the workspace becomes available
-    // without any one-click connect from onboarding.
+    await user.click(await screen.findByRole("button", { name: "Set up Fable" }));
+    expect(screen.getByRole("heading", { name: "Create your first teammate" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Enter Fable" }));
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
@@ -1380,7 +1385,7 @@ describe("Fable onboarding", () => {
     expect(geminiModal).not.toHaveTextContent(/google ai (pro|ultra)/i);
   });
 
-  it("connects a native API-key backend via the verified path and clears the gate", async () => {
+  it("connects a native API-key backend, configures a teammate, and clears the gate", async () => {
     const user = userEvent.setup();
     render(<App />);
 
@@ -1393,18 +1398,21 @@ describe("Fable onboarding", () => {
 
     // Simulate the credential boundary resolving OpenAI to connected after the
     // store + verify call records the key.
-    runtimeMocks.backends = [
-      {
-        id: "openai",
-        backendType: "native-api",
-        label: "OpenAI",
-        description: "OpenAI native",
-        authState: "connected",
-        capabilities: ["authentication", "threads", "streaming"],
-        models: [{ id: "gpt-5", label: "GPT-5", available: true }]
-      },
-      ...failClosedBackends.filter((provider) => provider.id !== "openai")
-    ];
+    connectRuntimeBackendSpy.mockImplementationOnce(async () => {
+      runtimeMocks.backends = [
+        {
+          id: "openai",
+          backendType: "native-api",
+          label: "OpenAI",
+          description: "OpenAI native",
+          authState: "connected",
+          capabilities: ["authentication", "threads", "streaming"],
+          models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+        },
+        ...failClosedBackends.filter((provider) => provider.id !== "openai")
+      ];
+      return "openai";
+    });
 
     const keyInput = within(modal).getByLabelText(/api key for openai/i);
     await user.type(keyInput, "sk-test-key");
@@ -1422,18 +1430,18 @@ describe("Fable onboarding", () => {
     expect(keyInput).toHaveValue("");
     expect(window.localStorage.getItem("fable.shell.v1") ?? "").not.toContain("sk-test-key");
 
-    // A verified provider completes the minimum journey immediately.
+    expect(await screen.findByRole("heading", { name: "Create your first teammate" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Enter Fable" }));
     expect(await screen.findByLabelText(/universal composer/i)).toBeInTheDocument();
   });
 
-  it("does not promise any tier includes grok build entitlements", async () => {
+  it("does not render paused provider foundations", async () => {
     const user = userEvent.setup();
     render(<App />);
 
     await showProviderStep();
-    const shell = screen.getByRole("heading", { name: /add a model provider/i });
-    const frame = shell.closest("main");
-    expect(frame?.textContent?.toLowerCase()).not.toMatch(/grok build.*included|premium.*grok/i);
+    expect(screen.queryByRole("button", { name: /^xai,/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^ollama,/i })).not.toBeInTheDocument();
   });
 
   it("does not render a preview skip control", async () => {

@@ -2607,7 +2607,6 @@ export interface RuntimeCodexStatus {
   installed: boolean;
   authenticated: boolean;
   authMethod?: "chatgpt" | "api-key" | "provider-login";
-  executablePath?: string;
   version?: string;
   message?: string;
 }

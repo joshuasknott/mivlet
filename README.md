@@ -5,10 +5,9 @@ primary experience is a quiet desktop conversation with named agents; providers,
 knowledge, connections, approvals, routines, and execution details appear when
 they are useful rather than defining the navigation.
 
-The long-term direction is Grok-Bot-class capability: selectable model providers
-and isolated computers that let agents continue bounded work. Fable does not
-claim exact parity, and this repository contains no proprietary Grok branding,
-assets, or code.
+The long-term direction is dependable, inspectable teamwork: selectable model
+providers and isolated computers that let agents continue bounded work without
+taking over the user's desktop.
 
 ## Maturity
 
@@ -23,7 +22,9 @@ production-validated service.
   missions, live-work visibility, and a single adaptive voice/send composer.
 - Native provider adapters for OpenAI-compatible, Anthropic, and Gemini wire
   formats, managed ChatGPT browser sign-in through Codex app-server, plus
-  supported advanced local ACP runtimes and external Ollama.
+  supported provider-owned runtimes where their official sign-in is available.
+- A required first-run journey that prepares the local workspace, verifies a
+  model provider, creates the first named teammate, and only then opens chat.
 - Encrypted SQLite persistence for local workspace state, knowledge, memory,
   approvals, schedules, run history, artifacts, and provenance.
 - Approval-gated native tools and connector actions with one-time, session,
@@ -63,7 +64,7 @@ production-validated service.
   live smoke testing.
 - Remote model providers require the user's valid credentials and entitlements;
   direct API providers use API keys where they expose no supported application
-  OAuth. Advanced ACP runtimes require their own installed and authenticated
+  OAuth. Provider-owned runtimes require their own installed and authenticated
   tools. Fable does not copy provider session tokens.
 - Google connectors require a public desktop OAuth client. Confidential OAuth
   connectors require the separate broker to be configured and deployed.
@@ -109,6 +110,8 @@ docs                current architecture, ADRs, security, and operations notes
 - pnpm 10 (the repository pins `pnpm@10.15.0`)
 - Rust stable and platform Tauri prerequisites for native checks/builds
 - Windows WebView2 for the current desktop preview target
+- The Codex desktop app or Codex CLI for ChatGPT subscription sign-in; Fable
+  discovers either supported installation and uses its official browser flow
 
 Docker and Cloudflare credentials are needed only for container-backed local or
 deployment validation. They are not required for the ordinary TypeScript test
@@ -126,6 +129,10 @@ pnpm dev
 ```bash
 pnpm tauri:dev
 ```
+
+The browser-only development surface uses clearly labelled preview state. Use
+the Tauri app to verify native credentials, persistent storage, and the isolated
+local-computer experience.
 
 Configuration templates live beside the app that owns them:
 

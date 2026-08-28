@@ -2304,9 +2304,7 @@ export function ChatWorkspace() {
     return () => window.removeEventListener("keydown", handleShortcut);
   }, []);
 
-  // The account establishes the active workspace before provider setup.
-  // Preview runtimes report a synthetic ready account, so they enter the
-  // provider stage without a production-only bypass.
+  // A local or account-bound workspace must resolve before provider setup.
   const accountWorkspaceUsable = runtime.accountWorkspaceStatus.state === "ready" ||
     (runtime.accountWorkspaceStatus.state === "offline" && runtime.accountWorkspaceStatus.accountBound);
   const identityUsable = runtime.identityStatus.state === "signed-in" ||
@@ -2335,11 +2333,17 @@ export function ChatWorkspace() {
           onConnectWithVerify={(providerId, secret) =>
             runtime.connectBackendWithVerify(providerId, secret)
           }
-          onCheckConnection={async () => {
-            await runtime.refreshBackendProviders();
+          onCheckConnection={runtime.checkBackendConnection}
+          onStartBrowserLogin={runtime.startBackendBrowserLogin}
+          initialTeammateName={activeAgent.name}
+          initialTeammatePurpose={activeAgent.instructions}
+          onConfigureTeammate={({ name, purpose }) => {
+            runtime.updateAgent(activeAgent.id, {
+              name,
+              instructions: purpose
+            });
           }}
           onComplete={runtime.dismissOnboarding}
-          allowProviderless={localWorkspaceReady || (import.meta.env.DEV && !("__TAURI_INTERNALS__" in window))}
         />
       </Suspense>
     );

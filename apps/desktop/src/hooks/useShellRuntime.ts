@@ -233,7 +233,12 @@ import {
 import type { ModelDiscoveryOutcome } from "../lib/backend-state";
 import { createRuntimeGoal } from "../lib/goal-runtime";
 import {
+  enabledFableProviders,
+  isFableProviderEnabled
+} from "../lib/provider-availability";
+import {
   ALLOW_PREVIEW_FALLBACKS,
+  DEFAULT_ACCOUNT_WORKSPACE_STATUS,
   DEFAULT_IDENTITY_STATUS,
   PREVIEW_ACCOUNT_WORKSPACE_STATUS,
   PREVIEW_IDENTITY_STATUS,
@@ -260,6 +265,42 @@ function createRunContextId() {
   const uuid = globalThis.crypto?.randomUUID?.();
   if (uuid) return `run-${uuid}`;
   return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+async function resolveUsableBackendProviders(
+  providers: BackendProvider[]
+): Promise<BackendProvider[]> {
+  const withAcp = await mergeAcpProbeResults(enabledFableProviders(providers));
+  const resolved = await mergeLocalLoopbackProbeResults(withAcp);
+  const nativeVerification = new Map<string, BackendVerifyResult | null>();
+
+  await Promise.all(
+    resolved
+      .filter(
+        (provider) =>
+          provider.backendType === "native-api" && provider.authState === "connected"
+      )
+      .map(async (provider) => {
+        nativeVerification.set(provider.id, await verifyRuntimeBackend(provider.id));
+      })
+  );
+
+  return resolved.map((provider) => {
+    const verification = nativeVerification.get(provider.id);
+    if (verification === undefined || verification?.outcome === "ready") {
+      return provider;
+    }
+    const authState = verification?.outcome === "auth-failed" ? "needs-auth" : "unavailable";
+    return {
+      ...provider,
+      authState,
+      capabilities: [],
+      models: provider.models.map((model) => ({ ...model, available: false })),
+      installHint:
+        verification?.message ??
+        "Fable could not verify this saved provider. Check the connection and try again."
+    };
+  });
 }
 
 export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRuntime {
@@ -290,12 +331,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [accountWorkspaceStatus, setAccountWorkspaceStatus] = useState<AccountWorkspaceStatus>(
     () =>
       hasTauriRuntime()
-        ? { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, state: "disabled", accountBound: false }
+        ? DEFAULT_ACCOUNT_WORKSPACE_STATUS
         : PREVIEW_ACCOUNT_WORKSPACE_STATUS
   );
   const [accountWorkspacePending, setAccountWorkspacePending] = useState(hasTauriRuntime());
   const accountWorkspaceFallback = hasTauriRuntime()
-    ? { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, state: "disabled" as const, accountBound: false }
+    ? DEFAULT_ACCOUNT_WORKSPACE_STATUS
     : PREVIEW_ACCOUNT_WORKSPACE_STATUS;
   const [workspaceScopeGeneration, setWorkspaceScopeGeneration] = useState(0);
   const accountRequestGenerationRef = useRef(0);
@@ -422,7 +463,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   });
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(initialState.pinnedSourceIds);
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
-    initialState.connectedBackendIds
+    hasTauriRuntime()
+      ? []
+      : initialState.connectedBackendIds.filter(isFableProviderEnabled)
   );
   const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<LocalFileImport[]>(
     initialState.importedKnowledgeSources
@@ -464,10 +507,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Agent-runtime backends. The Rust credential boundary resolves auth state
   // + capabilities; outside Tauri the preview registry is used so the onboarding
-  // shell stays testable. `onboardingDismissed` lets users reach the preview
-  // workspace without a connected backend.
+  // shell stays testable. Preview connections remain visibly synthetic, while
+  // the same provider gate is enforced in preview and native builds.
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(() =>
-    listBackendProviders()
+    enabledFableProviders(listBackendProviders())
   );
   // Dynamically discovered model ids per native provider id, plus whether
   // discovery actually ran for that provider (so the catalogue fallback is
@@ -857,7 +900,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
         setManagedMemoryRecords(recovered.memoryRecords.filter((record) => !record.forgottenAt));
-        setConnectedBackendIds(recovered.connectedBackendIds);
+        // A saved snapshot records the user's previous provider choice, not
+        // proof that credentials are still valid. Native connected state is
+        // restored only by the live provider probes above.
+        if (!hasTauriRuntime()) {
+          setConnectedBackendIds(
+            recovered.connectedBackendIds.filter(isFableProviderEnabled)
+          );
+        }
         setOnboardingDismissed(recovered.onboardingComplete ?? false);
         setSelectedModelId(recovered.selectedModelId);
         setPermissionMode(recovered.permissionMode);
@@ -1041,7 +1091,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       await clearRuntimeAccountWorkspaceSession();
       clearActiveRuntimeDataScope();
       applyAccountWorkspaceStatus({
-        ...PREVIEW_ACCOUNT_WORKSPACE_STATUS,
+        ...DEFAULT_ACCOUNT_WORKSPACE_STATUS,
         state: "signed-out",
         accountBound: false,
         message: "Signed out. Sign in to access Fable workspaces."
@@ -1244,8 +1294,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // through the Rust boundary (detect_acp_cli — never reads a secret) and
       // merge the truthful auth state + capabilities so a signed-in CLI reaches
       // connected. Native + other backends keep their resolved state as-is.
-      const withAcp = await mergeAcpProbeResults(providers);
-      const resolved = await mergeLocalLoopbackProbeResults(withAcp);
+      const resolved = await resolveUsableBackendProviders(providers);
 
       if (!active) {
         return;
@@ -1255,9 +1304,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         .filter((provider) => provider.authState === "connected")
         .map((provider) => provider.id);
       setConnectedBackendIds(connectedIds);
-      if (connectedIds.length > 0) {
-        setOnboardingDismissed(true);
-      }
     });
 
     return () => {
@@ -2311,7 +2357,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const refreshBackendProviders = async () => {
     const refreshed = await listRuntimeBackends();
     if (refreshed) {
-      const resolved = await mergeAcpProbeResults(refreshed);
+      const resolved = await resolveUsableBackendProviders(refreshed);
       setBackendProviders(resolved);
       setConnectedBackendIds(
         resolved
@@ -2342,6 +2388,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     providerId: string,
     secret: string
   ): Promise<BackendVerifyResult> => {
+    if (!isFableProviderEnabled(providerId)) {
+      const message = "This provider is not available in the current Fable release.";
+      setBackendStatus(message);
+      return { providerId, outcome: "unsupported", message };
+    }
     setBackendStatus(`Connecting ${providerId}…`);
     // Surface the connecting state on the provider card while the round-trip
     // is in flight. This is a transient UI state; the boundary re-resolves to
@@ -2365,10 +2416,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // Key stored in the keychain. Verify it against the provider inside the
       // Rust boundary — the secret never crosses back into JS.
       const result = await verifyRuntimeBackend(providerId);
-      // null means the verify command is unavailable (older runtime). Treat it
-      // as ready so a real connection is not blocked by a missing command.
-      const outcome: BackendVerifyOutcome = result?.outcome ?? "ready";
-      const message = result?.message;
+      // A missing verification command must never turn key storage into proof
+      // of a usable provider. Browser preview returned earlier above.
+      if (!result) {
+        await clearRuntimeBackend(providerId);
+        await refreshBackendProviders();
+        markProviderState(providerId, "needs-auth");
+        const message = "Fable could not verify this provider in the desktop runtime. Update Fable and try again.";
+        setBackendStatus(message);
+        setLastAction(message);
+        return { providerId, outcome: "failed", message };
+      }
+      const outcome: BackendVerifyOutcome = result.outcome;
+      const message = result.message;
 
       if (outcome === "auth-failed") {
         // The provider rejected the key: clear it so the bad credential does
@@ -2389,11 +2449,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         return { providerId, outcome };
       }
 
-      // offline / unsupported / failed: the stored key may still be good, so
-      // keep it but reflect a non-blocking warning. Re-read the boundary so the
-      // provider shows connected (key present) with a status note.
+      // offline / unsupported / failed: retain the key so the user can retry,
+      // but do not let key presence clear onboarding or claim readiness.
       await refreshBackendProviders();
-      const status = message ?? `${providerId} could not be verified right now. It is connected; try a run to confirm.`;
+      setConnectedBackendIds((current) => current.filter((id) => id !== providerId));
+      markProviderState(providerId, "unavailable");
+      const status = message ?? `${providerId} could not be verified. Retry before entering Fable.`;
       setBackendStatus(status);
       setLastAction(status);
       return { providerId, outcome, message };
@@ -2520,15 +2581,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         return;
       }
 
-      const refreshed = await listRuntimeBackends();
-      if (refreshed) {
-        setBackendProviders(refreshed);
-        setConnectedBackendIds(
-          refreshed
-            .filter((provider) => provider.authState === "connected")
-            .map((provider) => provider.id)
-        );
-      }
+      await refreshBackendProviders();
       setBackendStatus(`${providerId} disconnected.`);
       setLastAction(`${providerId} disconnected`);
     } catch (error) {
@@ -2539,8 +2592,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const dismissOnboarding = () => {
+    if (!activeWorkspaceScope || connectedBackendIds.length === 0) {
+      const message = "Connect and verify a model provider before entering Fable.";
+      setBackendStatus(message);
+      setLastAction(message);
+      return;
+    }
     setOnboardingDismissed(true);
-    setLastAction("Local workspace ready");
+    setLastAction("Fable setup complete");
   };
 
   // Queue a backend-originated tool call until the user decides. This is
@@ -2568,16 +2627,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setBackendToolApprovals([]);
   };
 
-  // The product gate has no production bypass: a verified account workspace
-  // and one connected provider are both required. Browser fixtures may still
-  // use the explicit preview dismissal path.
+  // A usable workspace, a verified provider, and explicit completion of the
+  // first-run journey are all required. Persisted preview/local dismissal can
+  // never bypass a missing provider.
   const onboardingRequired =
     !activeWorkspaceScope ||
-    (connectedBackendIds.length === 0 && !(
-      onboardingDismissed && (
-        accountWorkspaceStatus.activeWorkspace.source === "local" || ALLOW_PREVIEW_FALLBACKS
-      )
-    ));
+    connectedBackendIds.length === 0 ||
+    !onboardingDismissed;
 
   const runCommand = (command: string) => {
     const prompt = `${command} `;

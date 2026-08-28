@@ -15,14 +15,11 @@ multi-round agent loop and provider request/response shaping.
   model transcript. The official device-code mode is not presented as a manual
   CLI workaround while the normal browser callback is available.
   This follows the provider's documented [Codex app-server authentication
-  surface](https://learn.chatgpt.com/docs/app-server#auth-endpoints).
+  surface](https://developers.openai.com/codex/app-server#auth-endpoints).
 - Remote fixed profiles use a user-supplied API key. After submission, the key
   is stored through the OS keyring boundary (with an in-memory test/headless
   fallback), is never returned to the frontend, and is injected into request
   headers only inside Rust.
-- Ollama is the local exception: Fable stores only a local connection marker
-  and connects to the existing loopback service at `localhost:11434`. Fable
-  does not install Ollama or download/manage models.
 - Custom stores a versioned OpenAI-compatible base URL, explicit model ID, and
   optional bearer key in the same secure credential record. HTTPS is required for remote hosts;
   plain HTTP is accepted only for `localhost` or another loopback address.
@@ -44,7 +41,6 @@ externally validated in this checkout.
 | OpenAI | OpenAI-compatible | API key | Dynamic |
 | Anthropic | Anthropic Messages | API key | Dynamic |
 | Gemini | Google AI Gemini | API key | Dynamic |
-| xAI | OpenAI-compatible | API key | Dynamic |
 | OpenRouter | OpenAI-compatible | API key | Dynamic |
 | DeepSeek | OpenAI-compatible | API key | Dynamic |
 | Z.AI | OpenAI-compatible | API key | Curated fallback |
@@ -56,7 +52,6 @@ externally validated in this checkout.
 | Moonshot (Kimi API) | OpenAI-compatible | API key | Dynamic |
 | Mistral AI | OpenAI-compatible | API key | Dynamic |
 | Meta Llama API | OpenAI-compatible | API key; availability-limited | Dynamic when account access exists |
-| Ollama | OpenAI-compatible loopback | Existing local service; no API key | Dynamic from local service |
 | Perplexity | OpenAI-compatible | API key | Curated fallback |
 | Tencent TokenHub | OpenAI-compatible | API key | Curated fallback |
 | Xiaomi MiMo | OpenAI-compatible | API key | Curated fallback |
@@ -70,19 +65,6 @@ tool/function calls, bounded retries, and cancellation. The native payload path
 does not yet support image/file attachments. OpenAI-compatible providers can
 still differ in model naming and tool-call behavior, so repository conformance
 tests are not a substitute for live-provider validation.
-
-## Local Loopback Runtime
-
-Ollama is integrated as a separate `local-loopback` backend, not as an API-key
-provider. The Rust boundary probes and streams only to an `http` literal
-loopback base URL, defaulting to `http://127.0.0.1:11434`. Fable does not
-install Ollama, start its service, pull models, or use the webview for local
-model egress.
-
-Local model states are explicit: `install-required`, `start-required`,
-`download-required`, `connected`, `failed`, or `unavailable`. Tool schemas are
-sent only when the selected discovered model reports tool support; ordinary
-prompts still run without tools.
 
 ## Settings provider UX states
 
@@ -147,8 +129,7 @@ interrupted stream or completed tool side effect is not replayed automatically.
 ## External requirements
 
 Remote execution requires provider network access and the applicable
-user-supplied credential. Ollama requires its local server to be running.
-Custom requires an endpoint that implements the expected OpenAI-compatible
+user-supplied credential. Custom requires an endpoint that implements the expected OpenAI-compatible
 `/chat/completions` route; its explicit model ID removes any `/models` requirement. Tests use fixtures
 and mocks; they do not validate provider account entitlements or live billing.
 
@@ -158,9 +139,6 @@ and mocks; they do not validate provider account entitlements or live billing.
   and bearer authentication. Anthropic uses `x-api-key` plus
   `anthropic-version: 2023-06-01`. Gemini uses `x-goog-api-key` and a validated
   model ID in the Google AI `streamGenerateContent` route.
-- xAI API-key execution and Grok Build ACP execution are separate connection
-  methods. Grok's provider-owned CLI login does not turn a consumer session
-  into an xAI API key.
 - Kimi Code membership API-key execution, Moonshot platform API-key execution,
   and Kimi ACP execution are separate methods. Mistral API-key execution and Mistral Vibe ACP execution are
   separate methods.

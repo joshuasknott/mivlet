@@ -73,6 +73,15 @@
   line-height: 1.55;
 }
 
+.og-eyebrow {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--text-12);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* Scale up onboarding presence on desktop screens */
 @media (min-width: 769px) {
   .og-form {

@@ -101,7 +101,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         backend_type: "codex-app-server",
         label: "Codex",
         description: "Continue with ChatGPT/Codex via the Codex app-server. Supports subscription and OpenAI API-key auth.",
-        install_hint: "Requires the Codex CLI. Install it, then connect.",
+        install_hint: "Requires the official Codex desktop app or Codex CLI.",
         models: &[
             ("gpt-5", "GPT-5"),
             ("gpt-5-thinking", "GPT-5 Thinking"),
@@ -1436,8 +1436,8 @@ pub(crate) fn apply_codex_cli_status(
             model.available = false;
         }
         provider.install_hint = Some(match version {
-            Some(version) => format!("Codex CLI {version} - sign in required"),
-            None => "Codex CLI installed - sign in required".to_string(),
+            Some(version) => format!("Codex runtime {version} - sign in required"),
+            None => "Codex runtime installed - sign in required".to_string(),
         });
         return;
     }
@@ -1453,10 +1453,10 @@ pub(crate) fn apply_codex_cli_status(
         model.available = true;
     }
     provider.install_hint = match (version, auth_label) {
-        (Some(version), Some(auth)) => Some(format!("Codex CLI {version} - {auth}")),
-        (Some(version), None) => Some(format!("Codex CLI {version}")),
-        (None, Some(auth)) => Some(format!("Codex CLI - {auth}")),
-        (None, None) => Some("Codex CLI".to_string()),
+        (Some(version), Some(auth)) => Some(format!("Codex runtime {version} - {auth}")),
+        (Some(version), None) => Some(format!("Codex runtime {version}")),
+        (None, Some(auth)) => Some(format!("Codex runtime - {auth}")),
+        (None, None) => Some("Codex runtime".to_string()),
     };
 }
 

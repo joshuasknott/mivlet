@@ -52,6 +52,21 @@ export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   scopes: []
 };
 
+/** Fail-closed native bootstrap state. Never seed production with preview ids or copy. */
+export const DEFAULT_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
+  configured: false,
+  state: "disabled",
+  message: "Preparing your private workspace on this PC…",
+  accountBound: false,
+  workspaces: [],
+  activeWorkspace: {
+    localWorkspaceId: "",
+    name: "No workspace selected",
+    source: "unbound"
+  },
+  devices: []
+};
+
 /** Deliberate browser/test fixture; production native identity starts disabled. */
 export const PREVIEW_IDENTITY_STATUS: IdentityStatus = {
   enabled: true,

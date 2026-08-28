@@ -13,6 +13,7 @@ import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BackendAuthState, BackendProvider, BackendVerifyResult } from "@fable/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
+import { enabledFableProviders } from "../../lib/provider-availability";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { ProviderIcon } from "../ProviderIcon";
 
@@ -21,10 +22,10 @@ export const FEATURED_PROVIDER_FAMILY_IDS = [
   "anthropic",
   "gemini",
   "copilot",
-  "xai",
   "deepseek",
-  "ollama",
-  "zai"
+  "openrouter",
+  "zai",
+  "minimax"
 ] as const;
 
 export type ProviderConnectionMethodKind =
@@ -253,7 +254,7 @@ export function connectionMethodsForProvider(
 
 export function buildProviderFamilies(providers: BackendProvider[]): ProviderFamily[] {
   const grouped = new Map<string, BackendProvider[]>();
-  for (const provider of providers) {
+  for (const provider of enabledFableProviders(providers)) {
     const familyId = providerFamilyIdFor(provider.id);
     grouped.set(familyId, [...(grouped.get(familyId) ?? []), provider]);
   }
@@ -884,7 +885,24 @@ function ProviderConnectionModal({
               </div>
             ) : null}
 
-            {selectedMethod.kind === "oauth-browser" && onStartBrowserLogin && !methodConnected ? (
+            {selectedMethod.kind === "oauth-browser" &&
+            selectedMethod.provider.authState === "install-required" &&
+            onCheckConnection &&
+            !methodConnected ? (
+              <button
+                type="button"
+                className="provider-method-detail__check"
+                disabled={pending}
+                onClick={() => void checkConnection(selectedMethod.provider.id)}
+              >
+                {pending ? <><Spinner size={14} className="og-spinner" /> Checking</> : "Check for Codex"}
+              </button>
+            ) : null}
+
+            {selectedMethod.kind === "oauth-browser" &&
+            selectedMethod.provider.authState !== "install-required" &&
+            onStartBrowserLogin &&
+            !methodConnected ? (
               <button
                 type="button"
                 className="provider-method-form__primary"

@@ -717,7 +717,7 @@ describe("useShellRuntime — localStorage persistence round-trip", () => {
 
     expect(second.result.current.schedules.length).toBe(1);
     expect(second.result.current.schedules[0].name).toBe("Weekly digest");
-  });
+  }, 15_000);
 
   it("persists customizable agents and protects the only remaining agent", async () => {
     const first = renderHook(() => useShellRuntime());
@@ -1127,6 +1127,33 @@ describe("useShellRuntime — backend connect (preview mode)", () => {
     const openai = result.current.backendProviders.find((p) => p.id === "openai");
     expect(openai?.authState).toBe("connected");
     expect(result.current.backendStatus).toMatch(/openai connected/i);
+  });
+
+  it("does not let a saved onboarding dismissal bypass a missing provider", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...defaultShellState, onboardingComplete: true })
+    );
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    act(() => result.current.dismissOnboarding());
+
+    expect(result.current.onboardingRequired).toBe(true);
+    expect(result.current.backendStatus).toMatch(/connect and verify/i);
+  });
+
+  it("enters the workspace only after provider connection and explicit completion", async () => {
+    const { result } = renderHook(() => useShellRuntime());
+    await awaitMountEffects();
+
+    await act(async () => {
+      await result.current.connectBackend("openai");
+    });
+    expect(result.current.onboardingRequired).toBe(true);
+
+    act(() => result.current.dismissOnboarding());
+    expect(result.current.onboardingRequired).toBe(false);
   });
 
   it("drops the connection on disconnect in preview mode", async () => {

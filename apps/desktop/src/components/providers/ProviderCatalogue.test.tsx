@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { BackendProvider } from "@fable/protocol";
@@ -71,7 +71,7 @@ function renderCatalogue(providers = catalogueProviders) {
 }
 
 describe("provider families", () => {
-  it("groups Codex with OpenAI and Grok with xAI while retaining unknown backends", () => {
+  it("groups Codex with OpenAI while omitting paused provider foundations", () => {
     const families = buildProviderFamilies(catalogueProviders);
     const openai = families.find((family) => family.id === "openai");
     const xai = families.find((family) => family.id === "xai");
@@ -79,9 +79,8 @@ describe("provider families", () => {
     expect(openai?.providers.map((entry) => entry.id)).toEqual(["codex", "openai"]);
     expect(openai?.methods.map((method) => method.kind)).toEqual(["oauth-browser", "api-key"]);
     expect(openai?.methods.map((method) => method.command)).toEqual([undefined, undefined]);
-    expect(xai?.providers.map((entry) => entry.id)).toEqual(["grok", "xai"]);
-    expect(xai?.methods.map((method) => method.kind)).toEqual(["api-key", "provider-login"]);
-    expect(xai?.methods.every((method) => method.command === undefined)).toBe(true);
+    expect(xai).toBeUndefined();
+    expect(families.find((family) => family.id === "ollama")).toBeUndefined();
     expect(families.find((family) => family.id === "copilot")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "cursor")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "zai")?.providers).toHaveLength(1);
@@ -120,10 +119,10 @@ describe("ProviderCatalogue", () => {
       "anthropic",
       "gemini",
       "copilot",
-      "xai",
       "deepseek",
-      "ollama",
-      "zai"
+      "openrouter",
+      "zai",
+      "minimax"
     ]);
     expect(container.querySelector('[data-provider-family-id="cursor"]')).toBeNull();
     expect(screen.queryByText("API keys")).toBeNull();
@@ -143,9 +142,9 @@ describe("ProviderCatalogue", () => {
     expect(labels).toContain("Mistral AI");
 
     const search = screen.getByRole("searchbox", { name: "Search providers" });
-    await user.type(search, "grok");
+    await user.type(search, "mistral");
     expect(container.querySelectorAll('.provider-catalogue__list [data-provider-family-id]')).toHaveLength(1);
-    expect(container.querySelector('[data-provider-family-id="xai"]')).toBeInTheDocument();
+    expect(container.querySelector('[data-provider-family-id="mistral"]')).toBeInTheDocument();
   });
 
   it("lists every OpenAI connection method before showing method detail", async () => {
@@ -178,6 +177,27 @@ describe("ProviderCatalogue", () => {
     expect(await within(dialog).findByText("Connected and verified.")).toBeInTheDocument();
   });
 
+  it("does not offer browser sign-in until the Codex runtime is installed", async () => {
+    const user = userEvent.setup();
+    const missingCodex = {
+      ...provider("codex", "Codex", "codex-app-server", "install-required"),
+      installHint: "Install the Codex desktop app or Codex CLI, then reopen Fable."
+    };
+    const { onCheckConnection, onStartBrowserLogin } = renderCatalogue([
+      missingCodex,
+      provider("openai", "OpenAI")
+    ]);
+
+    await user.click(screen.getByRole("button", { name: /OpenAI \/ ChatGPT, / }));
+    const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
+    await user.click(within(dialog).getByRole("button", { name: /ChatGPT subscription/ }));
+
+    expect(within(dialog).queryByRole("button", { name: "Continue in browser" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Check for Codex" }));
+    expect(onCheckConnection).toHaveBeenCalledWith("codex");
+    expect(onStartBrowserLogin).not.toHaveBeenCalled();
+  });
+
   it("adds an API-key provider through verification and clears the uncontrolled field", async () => {
     const user = userEvent.setup();
     const { onConnect } = renderCatalogue();
@@ -193,15 +213,13 @@ describe("ProviderCatalogue", () => {
     expect(dialog).not.toHaveTextContent("sk-test-secret");
   });
 
-  it("checks the local Ollama runtime without creating a credential", async () => {
+  it("does not offer paused local or incomplete provider paths", async () => {
     const user = userEvent.setup();
-    const { onConnect, onCheckConnection } = renderCatalogue();
-    await user.click(screen.getByRole("button", { name: /Ollama, / }));
-    const dialog = screen.getByRole("dialog", { name: "Ollama" });
-    await user.click(within(dialog).getByRole("button", { name: /Ollama on this device/ }));
-    await user.click(within(dialog).getByRole("button", { name: "Check local Ollama" }));
-    expect(onCheckConnection).toHaveBeenCalledWith("ollama");
-    expect(onConnect).not.toHaveBeenCalled();
+    renderCatalogue();
+    await user.click(screen.getByRole("button", { name: "Show all providers" }));
+
+    expect(screen.queryByRole("button", { name: /Ollama, / })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /xAI, / })).not.toBeInTheDocument();
   });
 
   it("keeps a chat-only custom endpoint runnable with an explicit model ID", async () => {
@@ -220,16 +238,18 @@ describe("ProviderCatalogue", () => {
     await user.type(within(dialog).getByLabelText("API key for custom provider"), "secret");
     await user.click(within(dialog).getByRole("button", { name: "Connect endpoint" }));
 
-    expect(onConnect).toHaveBeenCalledWith(
-      "custom",
-      JSON.stringify({
-        version: 1,
-        kind: "openai-compatible",
-        baseUrl: "https://models.example/v1",
-        modelId: "example-chat",
-        apiKey: "secret"
-      })
-    );
+    await waitFor(() => {
+      expect(onConnect).toHaveBeenCalledWith(
+        "custom",
+        JSON.stringify({
+          version: 1,
+          kind: "openai-compatible",
+          baseUrl: "https://models.example/v1",
+          modelId: "example-chat",
+          apiKey: "secret"
+        })
+      );
+    });
   });
 
   it("labels stored direct credentials as configured rather than verified", async () => {
