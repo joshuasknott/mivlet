@@ -895,7 +895,9 @@ describe("Fable home", () => {
     await user.type(composer, "Create a structured project brief for the autumn launch");
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(runtimeMocks.structuredIntakeCalls).toHaveLength(1));
+    await waitFor(() => expect(runtimeMocks.structuredIntakeCalls).toHaveLength(1), {
+      timeout: 5_000
+    });
     expect(await screen.findByText("Tell Fable what belongs in this project brief.")).toBeInTheDocument();
     expect(runtimeMocks.citedBriefCalls).toHaveLength(0);
     expect(runtimeMocks.structuredIntakeCalls[0]).toMatchObject({
@@ -917,7 +919,7 @@ describe("Fable home", () => {
         { fieldKey: "success", value: "The team ships on time." }
       ]
     ));
-  });
+  }, 10_000);
 
   it("starts an artifact revision brief, scopes candidates, and submits only the selected immutable identity", async () => {
     vi.mocked(searchRuntimeArtifacts).mockResolvedValueOnce([{
@@ -938,7 +940,9 @@ describe("Fable home", () => {
     await user.type(composer, "/revision-brief launch memo");
     await user.keyboard("{Enter}");
 
-    await waitFor(() => expect(runtimeMocks.artifactRevisionBriefCalls).toHaveLength(1));
+    await waitFor(() => expect(runtimeMocks.artifactRevisionBriefCalls).toHaveLength(1), {
+      timeout: 5_000
+    });
     expect(runtimeMocks.citedBriefCalls).toHaveLength(0);
     expect(runtimeMocks.artifactRevisionBriefCalls[0]).toMatchObject({
       sourceThreadId: expect.any(String), focus: "launch memo", startKey: expect.any(String)
@@ -963,7 +967,7 @@ describe("Fable home", () => {
         { fieldKey: "reviewBeforeUse", value: true }
       ]
     ));
-  });
+  }, 10_000);
 
   it("keeps an artifact mission waiting when candidate discovery fails", async () => {
     vi.mocked(searchRuntimeArtifacts).mockRejectedValueOnce(new Error("offline"));

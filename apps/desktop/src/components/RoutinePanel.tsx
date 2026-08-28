@@ -53,6 +53,17 @@ interface RoutineTimeDraft {
   monthDay: number;
 }
 
+function timeTriggerDraftIdentity(draft: RoutineTimeDraft) {
+  return JSON.stringify({ mode: "time", ...draft });
+}
+
+function connectionTriggerDraftIdentity(
+  mode: Exclude<RoutineTriggerMode, "time">,
+  connectionId: string
+) {
+  return JSON.stringify({ mode, connectionId });
+}
+
 function localDateTimeValue(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.valueOf())) return "";
@@ -212,7 +223,7 @@ export function RoutinePanel({
   const [onceAt, setOnceAt] = useState("");
   const [weekday, setWeekday] = useState<ScheduleWeekday>("Mon");
   const [monthDay, setMonthDay] = useState(1);
-  const [originalTimeDraft, setOriginalTimeDraft] = useState<string | null>(null);
+  const [originalTriggerDraft, setOriginalTriggerDraft] = useState<string | null>(null);
   const [triggerEditable, setTriggerEditable] = useState(true);
   const [historyFor, setHistoryFor] = useState<string | null>(null);
   const [history, setHistory] = useState<RuntimeRoutineOccurrence[]>([]);
@@ -270,7 +281,7 @@ export function RoutinePanel({
     setTriggerMode("time");
     setConnectionId("");
     setAgentId(activeAgentId ?? agents[0]?.id ?? "");
-    setOriginalTimeDraft(null);
+    setOriginalTriggerDraft(null);
     setTriggerEditable(true);
     setNotice("Choose when this should run, then save it.");
     onDraftConsumed?.();
@@ -289,7 +300,7 @@ export function RoutinePanel({
     setTriggerMode("time");
     setConnectionId("");
     setAgentId(activeAgentId ?? agents[0]?.id ?? "");
-    setOriginalTimeDraft(null);
+    setOriginalTriggerDraft(null);
     setTriggerEditable(true);
   };
 
@@ -303,8 +314,11 @@ export function RoutinePanel({
         ? routineTimeTrigger(draft)
         : routineConnectionTrigger(triggerMode, connectionId);
       if (editing) {
+        const nextTriggerDraft = triggerMode === "time"
+          ? timeTriggerDraftIdentity(draft)
+          : connectionTriggerDraftIdentity(triggerMode, connectionId);
         const trigger =
-          triggerEditable && originalTimeDraft !== JSON.stringify(nextTrigger)
+          triggerEditable && originalTriggerDraft !== nextTriggerDraft
             ? nextTrigger
             : undefined;
         const updated = await editRuntimeRoutine({
@@ -686,13 +700,18 @@ export function RoutinePanel({
                     setOnceAt(draft.onceAt);
                     setWeekday(draft.weekday);
                     setMonthDay(draft.monthDay);
-                    setOriginalTimeDraft(JSON.stringify(activeTrigger?.spec));
+                    setOriginalTriggerDraft(timeTriggerDraftIdentity(draft));
                   } else if (connectionDraft) {
                     setTriggerMode(connectionDraft.mode);
                     setConnectionId(connectionDraft.connectionId);
-                    setOriginalTimeDraft(JSON.stringify(activeTrigger?.spec));
+                    setOriginalTriggerDraft(
+                      connectionTriggerDraftIdentity(
+                        connectionDraft.mode,
+                        connectionDraft.connectionId
+                      )
+                    );
                   } else {
-                    setOriginalTimeDraft(null);
+                    setOriginalTriggerDraft(null);
                   }
                 }}
               >

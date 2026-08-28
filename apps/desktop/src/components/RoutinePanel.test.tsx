@@ -63,6 +63,12 @@ const teammates = [
   }
 ];
 
+function timezoneDifferentFromHost() {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone === "UTC"
+    ? "Europe/London"
+    : "UTC";
+}
+
 function weeklyRoutine() {
   return {
     routine: {
@@ -84,7 +90,7 @@ function weeklyRoutine() {
         status: "active",
         spec: {
           kind: "time-recurring",
-          timezone: "Europe/London",
+          timezone: timezoneDifferentFromHost(),
           recurrence: {
             frequency: "weekly",
             expression:
