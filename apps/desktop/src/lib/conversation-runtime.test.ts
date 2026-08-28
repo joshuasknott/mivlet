@@ -98,9 +98,8 @@ function transportFixture(): ConversationTransport & { views: ConversationMessag
 }
 
 describe("conversation runtime", () => {
-  it("uses stable standalone and thread draft keys", () => {
-    expect(newThreadDraftKey()).toBe("new-thread:standalone");
-    expect(newThreadDraftKey("project-1")).toBe("new-thread:project-1");
+  it("uses stable new-conversation and thread draft keys", () => {
+    expect(newThreadDraftKey()).toBe("new-thread");
     expect(threadDraftKey("thread-1")).toBe("thread:thread-1");
   });
 

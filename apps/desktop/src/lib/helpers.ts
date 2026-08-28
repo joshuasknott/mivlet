@@ -5,7 +5,6 @@ import type {
   WorkspaceDirective
 } from "@fable/protocol";
 import { MAX_APPROVAL_AUDIT_ENTRIES } from "./constants";
-import type { Schedule, Weekday } from "./types";
 
 /**
  * Pure helper functions shared across the shell. None of these touch React
@@ -31,12 +30,8 @@ export function normalizeActiveItem(activeItem: string) {
     return "fable-memory";
   }
 
-  if (activeItem === "Plugins") {
-    return "Connectors";
-  }
-
-  if (activeItem === "Automations") {
-    return "Schedules";
+  if (["Plugins", "Connectors", "Automations", "Schedules", "Knowledge"].includes(activeItem)) {
+    return "Settings";
   }
 
   return activeItem;
@@ -95,32 +90,4 @@ export function toSlug(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "source";
-}
-
-const WEEKDAY_FULL: Record<Weekday, string> = {
-  Mon: "Monday",
-  Tue: "Tuesday",
-  Wed: "Wednesday",
-  Thu: "Thursday",
-  Fri: "Friday",
-  Sat: "Saturday",
-  Sun: "Sunday"
-};
-
-/**
- * Format a schedule's day/time into a human-readable "when", e.g.
- * "Fridays at 9:00 AM". Kept pure so the list and the (future) runtime
- * scheduler render the same string.
- */
-export function formatScheduleWhen(schedule: Pick<Schedule, "day" | "time">) {
-  const day = WEEKDAY_FULL[schedule.day];
-  const [hourStr, minuteStr] = schedule.time.split(":");
-  const hour = Number(hourStr);
-  const minute = minuteStr ?? "00";
-  if (Number.isNaN(hour)) {
-    return `${day}`;
-  }
-  const period = hour < 12 ? "AM" : "PM";
-  const displayHour = hour % 12 === 0 ? 12 : hour % 12;
-  return `${day}s at ${displayHour}:${minute} ${period}`;
 }

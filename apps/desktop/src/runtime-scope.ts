@@ -5,12 +5,10 @@
  */
 export type RuntimeDataScope = Record<string, unknown> & {
   workspaceId: string;
-  projectId: null;
 };
 
 export const PREVIEW_RUNTIME_DATA_SCOPE: RuntimeDataScope = {
-  workspaceId: "preview-default",
-  projectId: null
+  workspaceId: "preview-default"
 };
 
 let activeScope: RuntimeDataScope | null = null;
@@ -29,7 +27,7 @@ export function getActiveRuntimeDataScope(): RuntimeDataScope | null {
 }
 
 export function setActiveRuntimeDataScope(workspaceId: string): RuntimeDataScope {
-  activeScope = { workspaceId, projectId: null };
+  activeScope = { workspaceId };
   return activeScope;
 }
 

@@ -1167,23 +1167,6 @@ export interface RuntimeSnapshot {
   approvalAudit: ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
   approvalRules: ApprovalGrant[];
-  automationStatuses: Record<string, AutomationStatus>;
-  /**
-   * User-created schedules. Non-secret state persisted through the snapshot so
-   * it survives a desktop restart (the snapshot is the source of truth for
-   * non-secret state in Tauri). LocalStorage carries them in preview only.
-   */
-  schedules: ScheduleEntry[];
-  /**
-   * Structured workspace goals created by /goal. Non-secret state persisted
-   * through the snapshot so it survives a desktop restart.
-   */
-  goals: WorkspaceGoal[];
-  /**
-   * Structured workspace plans created by /plan. Non-secret state persisted
-   * through the snapshot so it survives a desktop restart.
-   */
-  plans: WorkspacePlan[];
   /** User-defined agent identities and their non-secret execution preferences. */
   agents?: FableAgentProfile[];
   /** The agent currently owning the conversation surface. */

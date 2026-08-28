@@ -27,7 +27,6 @@ export interface UseDurableConversationOptions {
   /** Changes whenever account reconciliation selects another workspace. */
   workspaceId?: string;
   threadId?: string;
-  projectId?: string | null;
 }
 
 export interface DurableConversationState {
@@ -83,14 +82,14 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
   const generation = useRef(0);
   const workspaceRef = useRef(options.workspaceId);
   workspaceRef.current = options.workspaceId;
-  const draftKey = options.threadId ? threadDraftKey(options.threadId) : newThreadDraftKey(options.projectId);
+  const draftKey = options.threadId ? threadDraftKey(options.threadId) : newThreadDraftKey();
 
   const refresh = useCallback(async () => {
     const request = ++generation.current;
     setState((current) => ({ ...current, loading: true, error: null }));
     try {
       const [threads, conversation, draft] = await Promise.all([
-        runtime.listThreads(options.projectId),
+        runtime.listThreads(),
         options.threadId ? runtime.hydrate(options.threadId) : Promise.resolve(null),
         runtime.loadDraft(draftKey)
       ]);
@@ -104,7 +103,7 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
         error: error instanceof Error ? error.message : "Could not load this conversation."
       }));
     }
-  }, [draftKey, options.projectId, options.threadId, options.workspaceId]);
+  }, [draftKey, options.threadId, options.workspaceId]);
 
   useEffect(() => {
     void refresh();

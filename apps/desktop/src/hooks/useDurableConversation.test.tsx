@@ -54,10 +54,10 @@ describe("useDurableConversation", () => {
 
   it("uses a stable draft key before a thread exists", async () => {
     const { result } = renderHook(() =>
-      useDurableConversation({ workspaceId: "workspace", projectId: "project-a" })
+      useDurableConversation({ workspaceId: "workspace" })
     );
     await act(async () => {});
-    expect(result.current.draftKey).toBe("new-thread:project-a");
-    expect(mocks.loadDraft).toHaveBeenCalledWith("new-thread:project-a");
+    expect(result.current.draftKey).toBe("new-thread");
+    expect(mocks.loadDraft).toHaveBeenCalledWith("new-thread");
   });
 });

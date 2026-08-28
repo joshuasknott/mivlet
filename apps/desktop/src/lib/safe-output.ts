@@ -1,8 +1,8 @@
 /**
  * Safe connector-result inspection helpers.
  *
- * Run detail renders structured outputs (workflow step inputs/outputs, connector
- * read results, tool call arguments). Those values originate outside the app's
+ * Structured output surfaces render connector read results and tool-call
+ * arguments. Those values originate outside the app's
  * trust boundary and may transitively carry secrets a connector leaked into a
  * response — API keys, bearer tokens, credentials. This module is the single
  * funnel that turns an arbitrary `unknown` value into something safe to render:

@@ -13,9 +13,6 @@ export const defaultShellState: PersistedShellState = {
   approvalAudit: [],
   dismissedApprovalIds: [],
   approvalRules: [],
-  schedules: [],
-  goals: [],
-  plans: [],
   agents: [
     {
       id: "chief-of-staff",

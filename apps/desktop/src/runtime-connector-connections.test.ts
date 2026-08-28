@@ -68,24 +68,21 @@ describe("connector Connection runtime boundary", () => {
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["list_connector_knowledge_sources", {
-        workspaceId: "default",
-        projectId: null
+        workspaceId: "default"
       }],
       ["set_connector_knowledge_source_disabled", {
         sourceId: "source-1",
         disabled: true,
-        workspaceId: "default",
-        projectId: null
+        workspaceId: "default"
       }],
       ["delete_connector_knowledge_source", {
         sourceId: "source-1",
-        workspaceId: "default",
-        projectId: null
+        workspaceId: "default"
       }]
     ]);
   });
 
-  it("passes an exact Project and Connection through search, import, and lifecycle calls", async () => {
+  it("passes one exact Connection through workspace search and import calls", async () => {
     setNative(true);
     mocks.invoke
       .mockResolvedValueOnce({ connectorId: "github", query: "release", items: [] })
@@ -93,7 +90,6 @@ describe("connector Connection runtime boundary", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce({ id: "source-1", disabled: true })
       .mockResolvedValueOnce({ id: "source-1", deletedAt: "now" });
-    const scope = { workspaceId: "default", projectId: "project-1" };
     const item = {
       id: "issue-42",
       connectorId: "github" as const,
@@ -109,23 +105,21 @@ describe("connector Connection runtime boundary", () => {
 
     await searchRuntimeConnector(
       { connectorId: "github", query: "release", limit: 20 },
-      scope,
       "connection-1"
     );
     await importRuntimeConnectorItem({
       connectorId: "github",
       item,
       importedAt: "2026-07-25T10:00:00.000Z"
-    }, scope, "connection-1");
-    await listRuntimeConnectorKnowledgeSources(scope);
-    await setRuntimeConnectorKnowledgeSourceDisabled("source-1", true, scope);
-    await deleteRuntimeConnectorKnowledgeSource("source-1", scope);
+    }, "connection-1");
+    await listRuntimeConnectorKnowledgeSources();
+    await setRuntimeConnectorKnowledgeSourceDisabled("source-1", true);
+    await deleteRuntimeConnectorKnowledgeSource("source-1");
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["search_connector", {
         request: { connectorId: "github", query: "release", limit: 20 },
         workspaceId: "default",
-        projectId: "project-1",
         connectionId: "connection-1"
       }],
       ["import_connector_item", {
@@ -135,32 +129,26 @@ describe("connector Connection runtime boundary", () => {
           importedAt: "2026-07-25T10:00:00.000Z"
         },
         workspaceId: "default",
-        projectId: "project-1",
         connectionId: "connection-1"
       }],
       ["list_connector_knowledge_sources", {
-        workspaceId: "default",
-        projectId: "project-1"
+        workspaceId: "default"
       }],
       ["set_connector_knowledge_source_disabled", {
         sourceId: "source-1",
         disabled: true,
-        workspaceId: "default",
-        projectId: "project-1"
+        workspaceId: "default"
       }],
       ["delete_connector_knowledge_source", {
         sourceId: "source-1",
-        workspaceId: "default",
-        projectId: "project-1"
+        workspaceId: "default"
       }]
     ]);
   });
 
   it("never exposes Connector search or import through browser preview", async () => {
-    const scope = { workspaceId: "default", projectId: "project-1" };
     await expect(searchRuntimeConnector(
       { connectorId: "github", query: "release" },
-      scope,
       "connection-1"
     )).resolves.toBeNull();
     await expect(importRuntimeConnectorItem({
@@ -178,7 +166,7 @@ describe("connector Connection runtime boundary", () => {
         providerMetadata: {}
       },
       importedAt: "2026-07-25T10:00:00.000Z"
-    }, scope, "connection-1")).resolves.toBeNull();
+    }, "connection-1")).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 });

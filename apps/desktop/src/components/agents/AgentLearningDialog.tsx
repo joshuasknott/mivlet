@@ -32,7 +32,6 @@ export function AgentLearningDialog({
   source,
   onClose,
   onChange,
-  onMakeRoutine,
   onRun
 }: {
   open: boolean;
@@ -40,7 +39,6 @@ export function AgentLearningDialog({
   source: AgentLearningSource | null;
   onClose: () => void;
   onChange: (tasks: FableLearnedTask[]) => void;
-  onMakeRoutine: (draft: LearningDraft) => void;
   onRun: (task: FableLearnedTask) => void;
 }) {
   const modalRef = useRef<HTMLDivElement>(null);
@@ -48,14 +46,12 @@ export function AgentLearningDialog({
   const titleRef = useRef<HTMLInputElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<LearningDraft>({ title: "", instruction: "" });
-  const [makeRoutine, setMakeRoutine] = useState(false);
 
   const tasks = agent.learnedTasks ?? [];
   const teaching = source !== null || editingId !== null;
 
   useEffect(() => {
     if (!open) return;
-    setMakeRoutine(false);
     if (source) {
       setEditingId(null);
       setDraft(suggestedLearnedTask(source.prompt));
@@ -77,7 +73,6 @@ export function AgentLearningDialog({
   const editTask = (task: FableLearnedTask) => {
     setEditingId(task.id);
     setDraft({ title: task.title, instruction: task.instruction });
-    setMakeRoutine(false);
     window.setTimeout(() => titleRef.current?.focus(), 0);
   };
 
@@ -96,7 +91,6 @@ export function AgentLearningDialog({
       updatedAt: now
     };
     onChange(upsertLearnedTask(tasks, task));
-    if (makeRoutine) onMakeRoutine({ title, instruction });
     if (source) {
       onClose();
       return;
@@ -164,17 +158,6 @@ export function AgentLearningDialog({
                 <p>{source.response}</p>
               </details>
             ) : null}
-            <label className="agent-learning-dialog__routine">
-              <input
-                type="checkbox"
-                checked={makeRoutine}
-                onChange={(event) => setMakeRoutine(event.target.checked)}
-              />
-              <span>
-                <strong>Also make this a routine</strong>
-                <small>Choose its timing before anything is scheduled.</small>
-              </span>
-            </label>
             <footer>
               <button type="button" onClick={() => source ? onClose() : setEditingId(null)}>Cancel</button>
               <button className="agent-learning-dialog__save" type="submit">

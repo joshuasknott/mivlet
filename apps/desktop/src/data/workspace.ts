@@ -6,8 +6,8 @@
  * things:
  *
  * 1. Re-exports the shared fixture catalogs owned by `@fable/connectors`
- *    (connector manifests, directives, threads, projects, knowledge sources,
- *    and automations) under the plain names the shell components use.
+ *    (connector manifests, directives, threads, and knowledge sources) under
+ *    the plain names the shell components use.
  * 2. Owns the desktop-local fixtures that have no place in the connectors
  *    package: durable `memoryRecords` and `pendingApprovals`.
  *
@@ -20,8 +20,7 @@ import {
   chatThreadFixtures,
   connectorFixtures,
   directiveFixtures,
-  knowledgeSourceFixtures,
-  projectFixtures
+  knowledgeSourceFixtures
 } from "@fable/connectors";
 import type { ApprovalRequest, MemoryRecord } from "@fable/protocol";
 
@@ -30,23 +29,7 @@ import type { ApprovalRequest, MemoryRecord } from "@fable/protocol";
 export const workspaceDirectives = directiveFixtures;
 export const connectors = connectorFixtures;
 export const chatThreads = chatThreadFixtures;
-export const projects = projectFixtures;
 export const knowledgeSources = knowledgeSourceFixtures;
-
-export type ProfileFixture = {
-  name: string;
-  email: string;
-  photoInitials: string;
-  photoUrl?: string;
-  photoTone: string;
-};
-
-export const profileFixture: ProfileFixture = {
-  name: "Josh",
-  email: "josh@example.com",
-  photoInitials: "J",
-  photoTone: "sage"
-};
 
 // Desktop-local preview fixtures — owned here (no connector equivalent).
 // Memory and approvals start empty; they populate as the user promotes sources

@@ -4,7 +4,6 @@ import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 
 const runtime = vi.hoisted(() => ({
-  attestMissionMcp: vi.fn(),
   prepareGrant: vi.fn(),
   commitGrant: vi.fn(),
   executeTool: vi.fn(),
@@ -15,24 +14,11 @@ const runtime = vi.hoisted(() => ({
   navigateBrowser: vi.fn(),
   prepareBrowserAction: vi.fn(),
   actBrowser: vi.fn(),
-  prepareSchedule: vi.fn(),
-  createSchedule: vi.fn(),
-  prepareScheduleCancel: vi.fn(),
-  cancelSchedule: vi.fn(),
-  prepareScheduleControl: vi.fn(),
-  controlSchedule: vi.fn(),
-  prepareAgentRoutine: vi.fn(),
-  createAgentRoutine: vi.fn(),
-  prepareAgentRoutineCancel: vi.fn(),
-  cancelAgentRoutine: vi.fn(),
-  prepareAgentRoutineControl: vi.fn(),
-  controlAgentRoutine: vi.fn(),
   resolveRoute: vi.fn()
 }));
 const mcpFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime", () => ({
-  attestRuntimeMissionMcpConnectedSearch: runtime.attestMissionMcp,
   prepareRuntimeCapabilityGrant: runtime.prepareGrant,
   commitRuntimeCapabilityGrant: runtime.commitGrant,
   executeRuntimeToolCall: runtime.executeTool,
@@ -43,18 +29,6 @@ vi.mock("../runtime", () => ({
   navigateRuntimeHostedBrowser: runtime.navigateBrowser,
   prepareRuntimeHostedBrowserAction: runtime.prepareBrowserAction,
   actRuntimeHostedBrowser: runtime.actBrowser,
-  prepareRuntimeHostedProcessSchedule: runtime.prepareSchedule,
-  createRuntimeHostedProcessSchedule: runtime.createSchedule,
-  prepareRuntimeHostedProcessScheduleCancel: runtime.prepareScheduleCancel,
-  cancelRuntimeHostedProcessSchedule: runtime.cancelSchedule,
-  prepareRuntimeHostedProcessScheduleControl: runtime.prepareScheduleControl,
-  controlRuntimeHostedProcessSchedule: runtime.controlSchedule,
-  prepareRuntimeHostedAgentRoutine: runtime.prepareAgentRoutine,
-  createRuntimeHostedAgentRoutine: runtime.createAgentRoutine,
-  prepareRuntimeHostedAgentRoutineCancel: runtime.prepareAgentRoutineCancel,
-  cancelRuntimeHostedAgentRoutine: runtime.cancelAgentRoutine,
-  prepareRuntimeHostedAgentRoutineControl: runtime.prepareAgentRoutineControl,
-  controlRuntimeHostedAgentRoutine: runtime.controlAgentRoutine,
   resolveRuntimeMcpCapabilityRoute: runtime.resolveRoute
 }));
 vi.mock("./mcp-transport", () => ({
@@ -644,263 +618,6 @@ describe("hosted cloud browser execution", () => {
   });
 });
 
-describe("durable hosted process schedules", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("uses two exact approvals and returns a credential-free schedule projection", async () => {
-    const args = {
-      scheduleId: "schedule-digest-123",
-      runId: "scheduled-digest",
-      argv: ["node", "digest.mjs"],
-      firstRunAt: "2026-08-25T18:00:00.000Z",
-      intervalSeconds: 3600
-    };
-    const sourceApproval: ApprovalRequest = {
-      id: "native-cloud-process-schedule",
-      service: "openai",
-      action: "cloud-process-schedule scheduleId: schedule-digest-123",
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: [],
-      consequence: "Schedule the program.",
-      requestedAt: "2026-08-25T16:00:00.000Z",
-      decisions: ["once", "modify", "deny"],
-      confirmationPhrase: "approve cloud-process-schedule"
-    };
-    const hostedApproval: ApprovalRequest = {
-      id: "approval-hosted-schedule-a",
-      service: "Fable cloud computer",
-      action: "Schedule node on this teammate's cloud computer",
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: ["schedule: schedule-digest-123"],
-      consequence: "Runs repeatedly.",
-      requestedAt: "2026-08-25T16:00:01.000Z",
-      decisions: ["once", "deny"],
-      confirmationPhrase: "schedule on cloud computer"
-    };
-    const proposal = {
-      requestKey: "schedule-request-a",
-      workspaceId: "workspace-hosted",
-      agentId: "agent-research",
-      deviceId: "device-desktop",
-      ...args
-    };
-    runtime.prepareSchedule.mockResolvedValue({
-      proposal,
-      proposalFingerprint: "schedule-fingerprint-a",
-      approval: hostedApproval
-    });
-    runtime.createSchedule.mockResolvedValue({
-      scheduleId: args.scheduleId,
-      requestKey: proposal.requestKey,
-      runId: args.runId,
-      lifecycle: "active",
-      firstRunAt: args.firstRunAt,
-      intervalSeconds: args.intervalSeconds,
-      nextRunAt: args.firstRunAt,
-      generation: 2,
-      updatedAt: "2026-08-25T16:00:02.000Z"
-    });
-    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
-    const queueApproval = vi.fn();
-    const executor = createDesktopToolExecutor(gate, {
-      hostedComputer: {
-        workspaceId: "workspace-hosted",
-        agentId: "agent-research",
-        deviceId: "device-desktop",
-        ready: true
-      },
-      queueApproval
-    });
-
-    const output = await executor(sourceApproval, JSON.stringify(args));
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(1, sourceApproval);
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(2, hostedApproval);
-    expect(runtime.createSchedule).toHaveBeenCalledWith(
-      proposal,
-      expect.objectContaining({ request: hostedApproval, decision: "once" }),
-      expect.objectContaining({ request: sourceApproval, decision: "once" })
-    );
-    expect(queueApproval).toHaveBeenCalledWith(
-      hostedApproval,
-      "cloud-process-schedule",
-      JSON.stringify({
-        scheduleId: args.scheduleId,
-        firstRunAt: args.firstRunAt,
-        intervalSeconds: args.intervalSeconds,
-        computer: "agent-research"
-      })
-    );
-    expect(output).toContain('"lifecycle":"active"');
-    expect(output).toContain('"instructionAuthority":"none"');
-    expect(output).not.toContain("argv");
-  });
-
-  it("cancels future launches through a second exact approval", async () => {
-    const scheduleId = "schedule-digest-123";
-    const sourceApproval: ApprovalRequest = {
-      id: "native-cloud-process-schedule-cancel",
-      service: "openai",
-      action: `cloud-process-schedule-cancel scheduleId: ${scheduleId}`,
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: [`scheduleId: ${scheduleId}`],
-      consequence: "Cancel the schedule.",
-      requestedAt: "2026-08-25T16:10:00.000Z",
-      decisions: ["once", "modify", "deny"],
-      confirmationPhrase: "approve cloud-process-schedule-cancel"
-    };
-    const cancelApproval: ApprovalRequest = {
-      id: "approval-hosted-schedule-cancel-a",
-      service: "Fable cloud computer",
-      action: `Cancel hosted schedule ${scheduleId}`,
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: [`schedule: ${scheduleId}`],
-      consequence: "Stops future launches.",
-      requestedAt: "2026-08-25T16:10:01.000Z",
-      decisions: ["once", "deny"],
-      confirmationPhrase: "cancel cloud schedule"
-    };
-    const proposal = {
-      requestKey: "schedule-cancel-a",
-      workspaceId: "workspace-hosted",
-      agentId: "agent-research",
-      deviceId: "device-desktop",
-      scheduleId
-    };
-    runtime.prepareScheduleCancel.mockResolvedValue({
-      proposal,
-      proposalFingerprint: "schedule-cancel-fingerprint-a",
-      approval: cancelApproval
-    });
-    runtime.cancelSchedule.mockResolvedValue({
-      scheduleId,
-      requestKey: "schedule-request-a",
-      runId: "scheduled-digest",
-      lifecycle: "cancelled",
-      firstRunAt: "2026-08-25T18:00:00.000Z",
-      intervalSeconds: 3600,
-      generation: 2,
-      updatedAt: "2026-08-25T16:10:02.000Z"
-    });
-    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
-    const executor = createDesktopToolExecutor(gate, {
-      hostedComputer: {
-        workspaceId: "workspace-hosted",
-        agentId: "agent-research",
-        deviceId: "device-desktop",
-        ready: true
-      }
-    });
-
-    const output = await executor(sourceApproval, JSON.stringify({ scheduleId }));
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(1, sourceApproval);
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(2, cancelApproval);
-    expect(runtime.cancelSchedule).toHaveBeenCalledWith(
-      proposal,
-      expect.objectContaining({ request: cancelApproval, decision: "once" }),
-      expect.objectContaining({ request: sourceApproval, decision: "once" })
-    );
-    expect(output).toContain('"lifecycle":"cancelled"');
-  });
-});
-
-describe("durable hosted agent routines", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("uses source and exact standing-authority approvals and returns a bounded routine projection", async () => {
-    const args = {
-      routineId: "routine-research-digest-123",
-      runId: "routine-research-digest",
-      title: "Research digest",
-      instruction: "Review the workspace notes and write a concise weekly digest.",
-      firstRunAt: "2026-08-26T18:00:00.000Z",
-      intervalSeconds: 86_400,
-      capabilities: ["workspace-read", "workspace-write"],
-      maxSteps: 6
-    };
-    const sourceApproval: ApprovalRequest = {
-      id: "native-cloud-agent-routine",
-      service: "openai",
-      action: `cloud-agent-routine routineId: ${args.routineId}`,
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: [],
-      consequence: "Create the cloud routine.",
-      requestedAt: "2026-08-26T16:00:00.000Z",
-      decisions: ["once", "modify", "deny"],
-      confirmationPhrase: "approve cloud-agent-routine"
-    };
-    const hostedApproval: ApprovalRequest = {
-      id: "approval-hosted-agent-routine-a",
-      service: "Fable cloud computer",
-      action: `Create hosted routine ${args.title}`,
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: [
-        `routine: ${args.routineId}`,
-        "standing capability: workspace-read",
-        "standing capability: workspace-write"
-      ],
-      consequence: "Reinterprets the approved instruction on every recurrence.",
-      requestedAt: "2026-08-26T16:00:01.000Z",
-      decisions: ["once", "deny"],
-      confirmationPhrase: "create cloud routine"
-    };
-    const proposal = {
-      requestKey: "routine-request-a",
-      workspaceId: "workspace-hosted",
-      agentId: "agent-research",
-      deviceId: "device-desktop",
-      ...args
-    };
-    runtime.prepareAgentRoutine.mockResolvedValue({
-      proposal,
-      proposalFingerprint: "routine-fingerprint-a",
-      approval: hostedApproval
-    });
-    runtime.createAgentRoutine.mockResolvedValue({
-      ...proposal,
-      lifecycle: "active",
-      nextRunAt: args.firstRunAt,
-      generation: 1,
-      updatedAt: "2026-08-26T16:00:02.000Z"
-    });
-    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
-    const queueApproval = vi.fn();
-    const executor = createDesktopToolExecutor(gate, {
-      hostedComputer: {
-        workspaceId: "workspace-hosted",
-        agentId: "agent-research",
-        deviceId: "device-desktop",
-        ready: true
-      },
-      queueApproval
-    });
-
-    const output = await executor(sourceApproval, JSON.stringify(args));
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(1, sourceApproval);
-    expect(gate.waitForDecision).toHaveBeenNthCalledWith(2, hostedApproval);
-    expect(runtime.createAgentRoutine).toHaveBeenCalledWith(
-      proposal,
-      expect.objectContaining({ request: hostedApproval, decision: "once" }),
-      expect.objectContaining({ request: sourceApproval, decision: "once" })
-    );
-    expect(queueApproval).toHaveBeenCalledWith(
-      hostedApproval,
-      "cloud-agent-routine",
-      JSON.stringify({ routineId: args.routineId, title: args.title, computer: "agent-research" })
-    );
-    expect(output).toContain('"lifecycle":"active"');
-    expect(output).toContain('"capabilities":["workspace-read","workspace-write"]');
-    expect(output).toContain("including while Fable is closed");
-    expect(output).not.toContain(args.instruction);
-    expect(output).not.toContain("requestKey");
-  });
-});
-
 const connectionApproval: ApprovalRequest = {
   id: "connection-search-once",
   service: "openai",
@@ -940,7 +657,6 @@ describe("desktop semantic capability grants", () => {
     runtime.commitGrant.mockResolvedValue({ id: "grant-1" });
     runtime.executeTool.mockResolvedValue({ ok: true, output: "cited results" });
     runtime.resolveRoute.mockResolvedValue(null);
-    runtime.attestMissionMcp.mockResolvedValue(null);
     mcpFactory.mockReset();
   });
 
@@ -971,7 +687,6 @@ describe("desktop semantic capability grants", () => {
     expect(runtime.commitGrant).toHaveBeenCalledWith(
       {
         workspaceId: "workspace-1",
-        projectId: undefined,
         capabilityId: "knowledge.content.search",
         connectionId: undefined
       },
@@ -1049,36 +764,6 @@ describe("desktop semantic capability grants", () => {
       implementation: { kind: "mcp", evidence: "adapter-validated" },
       citations: [{ citationId: "source-1", trust: "external-untrusted" }]
     });
-  });
-
-  it("uses the same native mission receipt boundary for an MCP substitution", async () => {
-    const missionBinding = {
-      runId: "run-1", workerId: "worker-1", workerStartedEventId: "event-start", routeSelectedEventId: "event-route",
-      toolEventId: "event-tool", callKey: "connection-search-once", idempotencyKey: "tool-1",
-      expectedRunRevision: 4, expectedLastSequence: 3
-    };
-    runtime.resolveRoute.mockResolvedValue({
-      configurationReference: "work-search", transport: "stdio", connectionId: "connection-mcp",
-      connectionRevision: 2, capabilityId: "knowledge.content.search", toolName: "search_work"
-    });
-    runtime.prepareGrant.mockResolvedValue({ status: "granted", grant: { id: "grant-mcp" } });
-    mcpFactory.mockResolvedValue(new SemanticMcpTransport());
-    runtime.executeTool.mockResolvedValue({ ok: true, output: JSON.stringify({
-      kind: "mcp-connected-source-search",
-      proposal: { workspaceId: "workspace-1", sessionId: "mcp-session-1", toolName: "search_work", arguments: { contractVersion: "fable.connected-source-search.v1", query: "Q3" } },
-      permitId: "permit-1", workspaceId: "workspace-1", query: "Q3", connectionId: "connection-mcp",
-      matchedGrantIds: ["grant-mcp"], degraded: false, degradationReasons: []
-    }) });
-    const attested = { capabilityId: "knowledge.content.search", connectionId: "connection-mcp", result: { trust: "external-untrusted" } };
-    runtime.attestMissionMcp.mockResolvedValue(attested);
-    const executor = createDesktopToolExecutor(
-      { waitForDecision: async () => "granted" },
-      { workspaceId: "workspace-1", missionWorkerToolExecution: missionBinding }
-    );
-    await expect(executor(connectionApproval, JSON.stringify({ capability: "knowledge.content.search", input: { query: "Q3" } })))
-      .resolves.toBe(JSON.stringify(attested));
-    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ missionWorkerToolExecution: missionBinding }));
-    expect(runtime.attestMissionMcp).toHaveBeenCalledWith("permit-1");
   });
 
   it("does not silently fall back to native when the selected MCP route is unavailable", async () => {

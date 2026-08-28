@@ -38,7 +38,6 @@ import {
 import { describeBackendError } from "../lib/backend-errors";
 import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
-import { createDesktopLocalModelTransport } from "../lib/local-model-transport";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
   listRuntimeBackendModels,
@@ -198,7 +197,6 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       createTransport: createDesktopTransport,
       createCodexAppServer: createDesktopCodexAppServer,
       createAcpTransport: createDesktopAcpTransport,
-      createLocalModelTransport: createDesktopLocalModelTransport,
       discoverModels: async (providerId) => {
         const result = await listRuntimeBackendModels(providerId);
         return result;

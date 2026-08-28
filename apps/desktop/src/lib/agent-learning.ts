@@ -6,7 +6,7 @@ const teammateNameRules: Array<[RegExp, string]> = [
   [/\b(research|brief|analyse|analyze)\b/i, "Research Partner"],
   [/\b(daily|priorit(?:y|ies)|calendar|inbox|organis|organiz)\b/i, "Daily Coordinator"],
   [/\b(sales|outbound|lead|prospect)\b/i, "Sales Partner"],
-  [/\b(project|roadmap|delivery)\b/i, "Project Lead"],
+  [/\b(project|roadmap|delivery)\b/i, "Delivery Lead"],
   [/\b(code|coding|software|developer|engineering|build the app)\b/i, "Developer"],
   [/\b(write|writing|content|newsletter|social|draft)\b/i, "Content Partner"],
   [/\b(finance|financial|expense|budget|invoice)\b/i, "Finance Partner"],

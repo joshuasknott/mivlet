@@ -114,15 +114,13 @@ export interface BuildContextPrefixForRunInput {
   memoryDisabled: boolean;
 }
 
-/** Optional durable project context supplied by the conversation shell. */
-export interface ProjectMemoryRunContext {
-  projectId?: string | null;
-  projectMemoryRecords?: MemoryRecord[];
-  /** Exact workspace Connections selected for this Project; grants nothing. */
+/** Optional agent-level filters applied before retrieval. */
+export interface KnowledgeRunContext {
+  /** Exact connected accounts this teammate may read from; grants nothing. */
   allowedConnectionIds?: readonly string[];
-  /** Agent-level connector allowlist using connector manifest ids. */
+  /** Connector manifest ids this teammate may read from. */
   allowedConnectorIds?: readonly string[];
-  /** Agent-level knowledge pool. When present, only these source ids enter retrieval. */
+  /** Knowledge source ids this teammate may include. */
   allowedKnowledgeSourceIds?: readonly string[];
 }
 
@@ -240,70 +238,30 @@ function isLiveMemoryRecord(record: MemoryRecord) {
   return !record.disabled && !record.forgottenAt;
 }
 
-/**
- * Select memory for one run without copying project records into workspace
- * state. Workspace-global records remain authoritative when ids collide;
- * project input is accepted only for the exact explicitly selected project.
- */
+/** Select live workspace memory for one response. */
 export function selectMemoryForRun(
-  workspaceMemoryRecords: readonly MemoryRecord[],
-  context?: ProjectMemoryRunContext
+  workspaceMemoryRecords: readonly MemoryRecord[]
 ): MemoryRecord[] {
-  if (context === undefined) {
-    return workspaceMemoryRecords.filter(isLiveMemoryRecord);
-  }
-  const selected = workspaceMemoryRecords.filter(
-    (record) =>
-      isLiveMemoryRecord(record) &&
-      (!record.scope || record.scope.level === "global")
-  );
-  const projectId = context.projectId?.trim();
-  if (!projectId) return selected;
-
-  const seen = new Set(selected.map((record) => record.id));
-  for (const record of context.projectMemoryRecords ?? []) {
-    if (
-      seen.has(record.id) ||
-      !isLiveMemoryRecord(record) ||
-      record.scope?.level !== "project" ||
-      record.scope.projectId !== projectId
-    ) {
-      continue;
-    }
-    selected.push(record);
-    seen.add(record.id);
-  }
-  return selected;
+  return workspaceMemoryRecords.filter(isLiveMemoryRecord);
 }
 
-/** Resolve run scope from the durable context supplied by the caller. */
+/** Resolve one response to either the active conversation or global workspace. */
 export function knowledgeScopeForRun(
-  activeThreadId: string | undefined,
-  context?: ProjectMemoryRunContext
+  activeThreadId: string | undefined
 ): KnowledgeScope {
-  const projectId = context?.projectId?.trim();
-  if (!activeThreadId) {
-    return projectId ? { level: "project", projectId } : { level: "global" };
-  }
-  return {
-    level: "thread",
-    threadId: activeThreadId,
-    projectId: projectId || "workspace"
-  };
+  return activeThreadId
+    ? { level: "thread", threadId: activeThreadId }
+    : { level: "global" };
 }
 
-/**
- * Project Connection selection is an allowlist applied before chunking or
- * ranking. Local files use the Project's own scope and need no Connection;
- * every connector-backed source needs its exact selected canonical id.
- */
-export function sourceAllowedByProjectConnections(
+/** Apply an optional exact Connection allowlist before retrieval. */
+export function sourceAllowedByConnections(
   source: Pick<KnowledgeSource, "connectorId" | "connectionId">,
-  context?: ProjectMemoryRunContext
+  context?: KnowledgeRunContext
 ): boolean {
-  if (!context?.projectId?.trim() || source.connectorId === "local-files") return true;
+  if (!context?.allowedConnectionIds || source.connectorId === "local-files") return true;
   if (!source.connectionId) return false;
-  return (context.allowedConnectionIds ?? []).includes(source.connectionId);
+  return context.allowedConnectionIds.includes(source.connectionId);
 }
 
 /**

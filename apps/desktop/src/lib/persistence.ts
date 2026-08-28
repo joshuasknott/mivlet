@@ -5,8 +5,7 @@ import type {
   LocalFileImport,
   MemoryRecord,
   PermissionMode,
-  RuntimeSnapshot,
-  ScheduleEntry
+  RuntimeSnapshot
 } from "@fable/protocol";
 import { normalizeCustomApprovalSettings } from "@fable/connectors";
 import {
@@ -42,12 +41,6 @@ const MAX_AGENT_LEARNED_TASK_INSTRUCTION = 4_000;
  *   it is read exactly once, on first launch, to import legacy values via
  *   `importLegacyShellStateOnce`, and never read again.
  * - **Preview (no Tauri runtime):** `localStorage` remains the sole store.
- *
- * Schedules persist through the runtime snapshot so they survive a desktop
- * restart (the snapshot is the source of truth for non-secret state in Tauri);
- * localStorage carries them in preview only. The snapshot still carries the
- * legacy `automationStatuses` field for protocol compatibility, defaulted to
- * an empty record on round-trip.
  */
 
 /** True inside the Tauri desktop runtime (mirrors `runtime.ts`). */
@@ -157,12 +150,6 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     approvalAudit: state.approvalAudit,
     dismissedApprovalIds: state.dismissedApprovalIds,
     approvalRules: state.approvalRules,
-    // The legacy automation field is kept defaulted empty for protocol
-    // compatibility; live schedules live in `schedules` below.
-    automationStatuses: {},
-    schedules: state.schedules,
-    goals: state.goals,
-    plans: state.plans,
     agents: state.agents,
     activeAgentId: state.activeAgentId,
     pinnedSourceIds: state.pinnedSourceIds,
@@ -192,13 +179,6 @@ export function shellStateFromRuntimeSnapshot(
     approvalAudit: snapshot.approvalAudit,
     dismissedApprovalIds: snapshot.dismissedApprovalIds,
     approvalRules: snapshot.approvalRules,
-    // Schedules are the source of truth in the snapshot; fall back to the
-    // default shell state's schedules when a snapshot omits them.
-    schedules: snapshot.schedules ?? defaultShellState.schedules,
-    // Goals/plans are non-secret structured state persisted through the
-    // snapshot; fall back to defaults when a snapshot omits them.
-    goals: snapshot.goals ?? defaultShellState.goals,
-    plans: snapshot.plans ?? defaultShellState.plans,
     agents: normalizeAgentProfiles(snapshot.agents?.length ? snapshot.agents : defaultShellState.agents),
     activeAgentId: snapshot.activeAgentId ?? defaultShellState.activeAgentId,
     pinnedSourceIds: snapshot.pinnedSourceIds,
@@ -284,11 +264,10 @@ function normalizeApprovalPresetLabel(
   return label && isApprovalPresetLabel(label) ? label : permissionLabelFor(mode);
 }
 
-// re-export protocol array types referenced by callers
+// Re-export protocol array types referenced by callers.
 export type {
   ApprovalAuditEntry,
   ApprovalGrant,
   LocalFileImport,
-  MemoryRecord,
-  ScheduleEntry
+  MemoryRecord
 };

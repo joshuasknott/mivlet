@@ -24,7 +24,7 @@ export interface ConversationDraft {
 /** The renderer-facing part of the native conversation boundary. */
 export interface ConversationTransport {
   createThread(input: ConversationThreadCreate): Promise<ConversationThread>;
-  listThreads(projectId?: string | null): Promise<ConversationThread[]>;
+  listThreads(): Promise<ConversationThread[]>;
   getThread(threadId: string): Promise<ConversationThread | null>;
   updateThread(input: ConversationThreadUpdate): Promise<ConversationThread>;
   listMessages(threadId: string): Promise<ConversationMessageView[]>;
@@ -42,8 +42,8 @@ export interface HydratedConversation {
 
 export const NEW_THREAD_DRAFT_PREFIX = "new-thread";
 
-export function newThreadDraftKey(projectId?: string | null) {
-  return `${NEW_THREAD_DRAFT_PREFIX}:${projectId ?? "standalone"}`;
+export function newThreadDraftKey() {
+  return NEW_THREAD_DRAFT_PREFIX;
 }
 
 export function threadDraftKey(threadId: string) {
@@ -57,7 +57,7 @@ export function threadDraftKey(threadId: string) {
  */
 export function createConversationRuntime(transport: ConversationTransport) {
   return {
-    listThreads: (projectId?: string | null) => transport.listThreads(projectId),
+    listThreads: () => transport.listThreads(),
     createThread: (input: ConversationThreadCreate) => transport.createThread(input),
     updateThread: (input: ConversationThreadUpdate) => transport.updateThread(input),
     getThread: (threadId: string) => transport.getThread(threadId),

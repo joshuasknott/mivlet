@@ -14,7 +14,7 @@ import {
   recordsVisibleToRunAudience,
   resolveSelectedModel,
   selectMemoryForRun,
-  sourceAllowedByProjectConnections,
+  sourceAllowedByConnections,
   withPreviewPrivateAuthority,
   workspaceSharedRunAudience
 } from "./agent-run";
@@ -240,116 +240,45 @@ describe("buildContextPrefixForRun", () => {
 });
 
 describe("selectMemoryForRun", () => {
-  it("keeps workspace-global memory and includes only the exact project", () => {
-    const workspace = memory({ id: "workspace", scope: { level: "global" } });
-    const exact = memory({ id: "exact", scope: { level: "project", projectId: "project-a" } });
-    const foreign = memory({ id: "foreign", scope: { level: "project", projectId: "project-b" } });
-    const unscopedProjectInput = memory({ id: "unscoped", scope: undefined });
-
-    expect(selectMemoryForRun([workspace], {
-      projectId: "project-a",
-      projectMemoryRecords: [exact, foreign, unscopedProjectInput]
-    }).map((record) => record.id)).toEqual(["workspace", "exact"]);
-  });
-
-  it("does not admit project memory for a standalone run", () => {
-    const workspace = memory({ id: "workspace", scope: undefined });
-    const legacyScopedWorkspace = memory({
-      id: "legacy-scoped-workspace",
-      scope: { level: "project", projectId: "project-a" }
-    });
-    const project = memory({ id: "project", scope: { level: "project", projectId: "project-a" } });
-
-    expect(selectMemoryForRun([workspace, legacyScopedWorkspace], {
-      projectId: null,
-      projectMemoryRecords: [project]
-    }).map((record) => record.id)).toEqual(["workspace"]);
-  });
-
-  it("excludes disabled and forgotten records from both inputs", () => {
-    const projectScope = { level: "project" as const, projectId: "project-a" };
+  it("keeps only live workspace memory", () => {
     expect(selectMemoryForRun([
-      memory({ id: "workspace-live" }),
-      memory({ id: "workspace-disabled", disabled: true }),
-      memory({ id: "workspace-forgotten", forgottenAt: "2026-07-11T00:00:00.000Z" })
-    ], {
-      projectId: "project-a",
-      projectMemoryRecords: [
-        memory({ id: "project-live", scope: projectScope }),
-        memory({ id: "project-disabled", scope: projectScope, disabled: true }),
-        memory({ id: "project-forgotten", scope: projectScope, forgottenAt: "2026-07-11T00:00:00.000Z" })
-      ]
-    }).map((record) => record.id)).toEqual(["workspace-live", "project-live"]);
-  });
-
-  it("does not let project input replace workspace authority on an id collision", () => {
-    const workspace = memory({ id: "shared", value: "workspace value" });
-    const project = memory({
-      id: "shared",
-      value: "project value",
-      scope: { level: "project", projectId: "project-a" }
-    });
-
-    expect(selectMemoryForRun([workspace], {
-      projectId: "project-a",
-      projectMemoryRecords: [project]
-    })).toEqual([workspace]);
-  });
-
-  it("keeps the existing workspace-only call path", () => {
-    const workspace = memory({ id: "workspace" });
-    const scoped = memory({ id: "scoped", scope: { level: "project", projectId: "project-a" } });
-
-    expect(selectMemoryForRun([workspace, scoped])).toEqual([workspace, scoped]);
+      memory({ id: "live" }),
+      memory({ id: "disabled", disabled: true }),
+      memory({ id: "forgotten", forgottenAt: "2026-07-11T00:00:00.000Z" })
+    ]).map((record) => record.id)).toEqual(["live"]);
   });
 });
 
 describe("knowledgeScopeForRun", () => {
-  it("uses the explicit durable project rather than inferred fixture membership", () => {
-    expect(knowledgeScopeForRun("thread-1", { projectId: "project-durable" })).toEqual({
-      level: "thread",
-      threadId: "thread-1",
-      projectId: "project-durable"
-    });
-    expect(knowledgeScopeForRun(undefined, { projectId: "project-durable" })).toEqual({
-      level: "project",
-      projectId: "project-durable"
-    });
-  });
-
-  it("keeps the existing one-argument workspace call path", () => {
+  it("uses the active conversation or the global workspace", () => {
     expect(knowledgeScopeForRun(undefined)).toEqual({ level: "global" });
     expect(knowledgeScopeForRun("thread-1")).toEqual({
       level: "thread",
-      threadId: "thread-1",
-      projectId: "workspace"
+      threadId: "thread-1"
     });
   });
 });
 
-describe("sourceAllowedByProjectConnections", () => {
-  it("filters connector sources by exact Project selection before retrieval", () => {
-    const context = {
-      projectId: "project-a",
-      allowedConnectionIds: ["connection-a"]
-    };
-    expect(sourceAllowedByProjectConnections(source(), context)).toBe(true);
-    expect(sourceAllowedByProjectConnections(source({
+describe("sourceAllowedByConnections", () => {
+  it("applies an exact optional Connection allowlist before retrieval", () => {
+    const context = { allowedConnectionIds: ["connection-a"] };
+    expect(sourceAllowedByConnections(source(), context)).toBe(true);
+    expect(sourceAllowedByConnections(source({
       connectorId: "github",
       connectionId: "connection-a"
     }), context)).toBe(true);
-    expect(sourceAllowedByProjectConnections(source({
+    expect(sourceAllowedByConnections(source({
       connectorId: "github",
       connectionId: "connection-b"
     }), context)).toBe(false);
-    expect(sourceAllowedByProjectConnections(source({
+    expect(sourceAllowedByConnections(source({
       connectorId: "github",
       connectionId: undefined
     }), context)).toBe(false);
   });
 
-  it("keeps standalone workspace retrieval unchanged", () => {
-    expect(sourceAllowedByProjectConnections(source({
+  it("does not narrow retrieval when no allowlist is configured", () => {
+    expect(sourceAllowedByConnections(source({
       connectorId: "github",
       connectionId: "connection-b"
     }))).toBe(true);

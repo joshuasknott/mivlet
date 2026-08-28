@@ -1,9 +1,6 @@
 import type { BackendProvider } from "@fable/protocol";
-import { detectRuntimeAcpCli, detectRuntimeLocalModel } from "../../runtime";
-import {
-  acpAuthStateFor,
-  localLoopbackCapabilities,
-} from "./backend-normalization";
+import { detectRuntimeAcpCli } from "../../runtime";
+import { acpAuthStateFor } from "./backend-normalization";
 
 async function safeDetectAcpCli(
   providerId: string,
@@ -43,33 +40,6 @@ export async function mergeAcpProbeResults(
           ...model,
           available: authState === "connected",
         })),
-      };
-    }),
-  );
-}
-
-export async function mergeLocalLoopbackProbeResults(
-  providers: BackendProvider[],
-): Promise<BackendProvider[]> {
-  if (
-    providers.every((provider) => provider.backendType !== "local-loopback")
-  ) {
-    return providers;
-  }
-  return Promise.all(
-    providers.map(async (provider) => {
-      if (provider.backendType !== "local-loopback") return provider;
-      const probe = await detectRuntimeLocalModel(provider.id);
-      if (!probe) return provider;
-      const next: BackendProvider = {
-        ...provider,
-        authState: probe.authState,
-        models: probe.models,
-        installHint: probe.message,
-      };
-      return {
-        ...next,
-        capabilities: localLoopbackCapabilities(next),
       };
     }),
   );

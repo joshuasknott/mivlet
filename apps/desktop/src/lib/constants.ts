@@ -1,6 +1,3 @@
-import { Lightning } from "@phosphor-icons/react/dist/csr/Lightning";
-import { PuzzlePiece } from "@phosphor-icons/react/dist/csr/PuzzlePiece";
-import { Stack } from "@phosphor-icons/react/dist/csr/Stack";
 import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors/local-files";
 
 /**
@@ -36,9 +33,3 @@ export const ACCEPTED_COMPOSER_ATTACHMENTS = [
   "image/webp",
   "image/gif"
 ].join(",");
-
-export const utilityItems = [
-  { label: "Connectors", icon: PuzzlePiece },
-  { label: "Knowledge", icon: Stack },
-  { label: "Schedules", icon: Lightning }
-] as const;

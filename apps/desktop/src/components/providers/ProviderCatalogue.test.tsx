@@ -71,7 +71,7 @@ function renderCatalogue(providers = catalogueProviders) {
 }
 
 describe("provider families", () => {
-  it("groups Codex with OpenAI while omitting paused provider foundations", () => {
+  it("groups Codex with OpenAI while keeping xAI API-only", () => {
     const families = buildProviderFamilies(catalogueProviders);
     const openai = families.find((family) => family.id === "openai");
     const xai = families.find((family) => family.id === "xai");
@@ -79,7 +79,8 @@ describe("provider families", () => {
     expect(openai?.providers.map((entry) => entry.id)).toEqual(["codex", "openai"]);
     expect(openai?.methods.map((method) => method.kind)).toEqual(["oauth-browser", "api-key"]);
     expect(openai?.methods.map((method) => method.command)).toEqual([undefined, undefined]);
-    expect(xai).toBeUndefined();
+    expect(xai?.providers.map((entry) => entry.id)).toEqual(["xai"]);
+    expect(xai?.methods.map((method) => method.kind)).toEqual(["api-key"]);
     expect(families.find((family) => family.id === "ollama")).toBeUndefined();
     expect(families.find((family) => family.id === "copilot")?.methods[0].command).toBeUndefined();
     expect(families.find((family) => family.id === "cursor")?.methods[0].command).toBeUndefined();
@@ -205,21 +206,26 @@ describe("ProviderCatalogue", () => {
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
     await user.click(within(dialog).getByRole("button", { name: /OpenAI API key/ }));
     const input = within(dialog).getByLabelText("API key for openai / chatgpt") as HTMLInputElement;
-    await user.type(input, "sk-test-secret");
+    fireEvent.change(input, { target: { value: "sk-test-secret" } });
     await user.click(within(dialog).getByRole("button", { name: "Add key & connect" }));
 
-    expect(onConnect).toHaveBeenCalledWith("openai", "sk-test-secret");
+    await waitFor(() => {
+      expect(onConnect).toHaveBeenCalledWith("openai", "sk-test-secret");
+    });
     expect(input.value).toBe("");
     expect(dialog).not.toHaveTextContent("sk-test-secret");
   });
 
-  it("does not offer paused local or incomplete provider paths", async () => {
+  it("omits local models and offers xAI only through its API key", async () => {
     const user = userEvent.setup();
     renderCatalogue();
     await user.click(screen.getByRole("button", { name: "Show all providers" }));
 
     expect(screen.queryByRole("button", { name: /Ollama, / })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /xAI, / })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /xAI, / }));
+    const dialog = screen.getByRole("dialog", { name: "xAI" });
+    expect(within(dialog).getByText("xAI API key")).toBeInTheDocument();
+    expect(within(dialog).queryByText("Grok account")).not.toBeInTheDocument();
   });
 
   it("keeps a chat-only custom endpoint runnable with an explicit model ID", async () => {

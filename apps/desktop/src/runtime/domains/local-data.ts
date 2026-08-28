@@ -45,9 +45,6 @@ export interface RuntimeLocalDiagnosticCategory {
     | "providers"
     | "connections"
     | "mcp"
-    | "runs"
-    | "routines"
-    | "queues"
     | "migrations"
     | "sync";
   label: string;
@@ -85,11 +82,6 @@ export interface LocalDataRuntimePort {
   exportWorkspaceArchive(
     destination: string,
     workspaceId: string,
-  ): Promise<RuntimePortableExportReceipt | null>;
-  exportProjectArchive(
-    destination: string,
-    workspaceId: string,
-    projectId: string,
   ): Promise<RuntimePortableExportReceipt | null>;
   importWorkspaceArchive(
     source: string,
@@ -143,12 +135,6 @@ function createLocalDataPort(adapter: RuntimeAdapter): LocalDataRuntimePort {
         destination,
         workspaceId,
       }),
-    exportProjectArchive: (destination, workspaceId, projectId) =>
-      nativeOnly(adapter, "export_project_archive_to_file", {
-        destination,
-        workspaceId,
-        projectId,
-      }),
     importWorkspaceArchive: (source, workspaceId, confirmation) =>
       nativeOnly(adapter, "import_workspace_archive_from_file", {
         source,
@@ -201,12 +187,6 @@ export const exportRuntimeWorkspaceArchive = (
   destination: string,
   workspaceId: string,
 ) => localDataPort().exportWorkspaceArchive(destination, workspaceId);
-
-export const exportRuntimeProjectArchive = (
-  destination: string,
-  workspaceId: string,
-  projectId: string,
-) => localDataPort().exportProjectArchive(destination, workspaceId, projectId);
 
 export const importRuntimeWorkspaceArchive = (
   source: string,

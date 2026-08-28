@@ -23,8 +23,7 @@
 import type {
   ApprovalRequest,
   ApprovalResolutionRequest,
-  HostedBrowserSnapshot,
-  MissionWorkerToolExecutionBinding
+  HostedBrowserSnapshot
 } from "@fable/protocol";
 import {
   ACP_PERMISSION_TOOL,
@@ -35,15 +34,8 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import {
-  attestRuntimeMissionMcpConnectedSearch,
   actRuntimeHostedBrowser,
-  cancelRuntimeHostedAgentRoutine,
-  cancelRuntimeHostedProcessSchedule,
-  controlRuntimeHostedProcessSchedule,
-  controlRuntimeHostedAgentRoutine,
   commitRuntimeCapabilityGrant,
-  createRuntimeHostedProcessSchedule,
-  createRuntimeHostedAgentRoutine,
   executeRuntimeToolCall,
   inspectRuntimeHostedProcess,
   launchRuntimeHostedProcess,
@@ -52,12 +44,6 @@ import {
   prepareRuntimeHostedBrowser,
   prepareRuntimeHostedBrowserAction,
   prepareRuntimeHostedProcess,
-  prepareRuntimeHostedProcessSchedule,
-  prepareRuntimeHostedProcessScheduleCancel,
-  prepareRuntimeHostedProcessScheduleControl,
-  prepareRuntimeHostedAgentRoutine,
-  prepareRuntimeHostedAgentRoutineCancel,
-  prepareRuntimeHostedAgentRoutineControl,
   resolveRuntimeMcpCapabilityRoute,
   type RuntimeCapabilityGrantProposal
 } from "../runtime";
@@ -70,8 +56,6 @@ import {
 
 export interface DesktopToolExecutorOptions {
   workspaceId?: string;
-  projectId?: string;
-  missionWorkerToolExecution?: MissionWorkerToolExecutionBinding;
   localComputer?: {
     workspaceId: string;
     agentId: string;
@@ -106,15 +90,7 @@ export function createDesktopToolExecutor(
     const parsed = safeParseArgs(args);
     if (
       (toolName === "cloud-browser"
-        || toolName === "cloud-browser-action"
-        || toolName === "cloud-process-schedule"
-        || toolName === "cloud-process-schedule-cancel"
-        || toolName === "cloud-process-schedule-pause"
-        || toolName === "cloud-process-schedule-resume"
-        || toolName === "cloud-agent-routine"
-        || toolName === "cloud-agent-routine-cancel"
-        || toolName === "cloud-agent-routine-pause"
-        || toolName === "cloud-agent-routine-resume")
+        || toolName === "cloud-browser-action")
       && !options.hostedComputer?.ready
     ) {
       throw new Error("Set up this teammate's cloud computer before asking it to use hosted work.");
@@ -164,155 +140,8 @@ export function createDesktopToolExecutor(
     if (toolName === "cloud-browser-action") {
       return runHostedBrowserAction(gate, approval, parsed, options);
     }
-    if (toolName === "cloud-process-schedule") {
-      return runHostedProcessSchedule(gate, approval, parsed, options);
-    }
-    if (toolName === "cloud-process-schedule-cancel") {
-      return cancelHostedProcessSchedule(gate, approval, parsed, options);
-    }
-    if (toolName === "cloud-process-schedule-pause" || toolName === "cloud-process-schedule-resume") {
-      return controlHostedProcessSchedule(gate, approval, parsed, options, toolName.endsWith("pause") ? "pause" : "resume");
-    }
-    if (toolName === "cloud-agent-routine") {
-      return runHostedAgentRoutine(gate, approval, parsed, options);
-    }
-    if (toolName === "cloud-agent-routine-cancel") {
-      return cancelHostedAgentRoutine(gate, approval, parsed, options);
-    }
-    if (toolName === "cloud-agent-routine-pause" || toolName === "cloud-agent-routine-resume") {
-      return controlHostedAgentRoutine(gate, approval, parsed, options, toolName.endsWith("pause") ? "pause" : "resume");
-    }
     return runOnDesktop(approval, parsed, options);
   };
-}
-
-async function runHostedAgentRoutine(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const routineId = typeof parsed.routineId === "string" ? parsed.routineId : "";
-  const runId = typeof parsed.runId === "string" ? parsed.runId : "";
-  const title = typeof parsed.title === "string" ? parsed.title : "";
-  const instruction = typeof parsed.instruction === "string" ? parsed.instruction : "";
-  const firstRunAt = typeof parsed.firstRunAt === "string" ? parsed.firstRunAt : "";
-  const intervalSeconds = parsed.intervalSeconds;
-  const maxSteps = parsed.maxSteps;
-  const capabilities = Array.isArray(parsed.capabilities) && parsed.capabilities.every((value) => typeof value === "string")
-    ? parsed.capabilities as string[]
-    : [];
-  if (
-    !computer?.ready
-    || !/^routine-[A-Za-z0-9_-]{8,120}$/u.test(routineId)
-    || !runId
-    || !title.trim()
-    || title.length > 120
-    || !instruction.trim()
-    || instruction.length > 12_000
-    || !firstRunAt
-    || typeof intervalSeconds !== "number"
-    || !Number.isInteger(intervalSeconds)
-    || typeof maxSteps !== "number"
-    || !Number.isInteger(maxSteps)
-    || maxSteps < 1
-    || maxSteps > 8
-    || capabilities.length < 1
-    || capabilities.length > 3
-    || capabilities[0] !== "workspace-read"
-    || capabilities.some((value, index) => !["workspace-read", "workspace-write", "process-run"].includes(value) || capabilities.indexOf(value) !== index)
-  ) {
-    throw new Error("The hosted agent routine is unavailable or malformed.");
-  }
-  const sourceResolution = sourceResolutionFor(sourceApproval);
-  const prepared = await prepareRuntimeHostedAgentRoutine({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    routineId,
-    runId,
-    title,
-    instruction,
-    firstRunAt,
-    intervalSeconds,
-    capabilities: capabilities as ("workspace-read" | "workspace-write" | "process-run")[],
-    maxSteps
-  });
-  if (!prepared) throw new Error("Hosted agent routines require the desktop runtime.");
-  options.queueApproval?.(prepared.approval, "cloud-agent-routine", JSON.stringify({ routineId, title, computer: computer.agentId }));
-  if (await gate.waitForDecision(prepared.approval) !== "granted") throw new Error("Hosted agent routine creation was denied.");
-  const snapshot = await createRuntimeHostedAgentRoutine(prepared.proposal, resolutionFor(prepared.approval), sourceResolution);
-  if (!snapshot) throw new Error("Hosted agent routines require the desktop runtime.");
-  return JSON.stringify({
-    routineId: snapshot.routineId,
-    title: snapshot.title,
-    lifecycle: snapshot.lifecycle,
-    firstRunAt: snapshot.firstRunAt,
-    intervalSeconds: snapshot.intervalSeconds,
-    nextRunAt: snapshot.nextRunAt,
-    capabilities: snapshot.capabilities,
-    maxSteps: snapshot.maxSteps,
-    warning: "This teammate will reinterpret the approved instruction and may use only the displayed standing workspace capabilities at every run, including while Fable is closed.",
-    updatedAt: snapshot.updatedAt
-  });
-}
-
-async function cancelHostedAgentRoutine(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const routineId = typeof parsed.routineId === "string" ? parsed.routineId : "";
-  if (!computer?.ready || !/^routine-[A-Za-z0-9_-]{8,120}$/u.test(routineId)) {
-    throw new Error("The hosted agent routine cancellation is unavailable or malformed.");
-  }
-  const prepared = await prepareRuntimeHostedAgentRoutineCancel({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    routineId
-  });
-  if (!prepared) throw new Error("Hosted agent routine cancellation requires the desktop runtime.");
-  options.queueApproval?.(prepared.approval, "cloud-agent-routine-cancel", JSON.stringify({ routineId, computer: computer.agentId }));
-  if (await gate.waitForDecision(prepared.approval) !== "granted") throw new Error("Hosted agent routine cancellation was denied.");
-  const snapshot = await cancelRuntimeHostedAgentRoutine(prepared.proposal, resolutionFor(prepared.approval), sourceResolutionFor(sourceApproval));
-  if (!snapshot) throw new Error("Hosted agent routine cancellation requires the desktop runtime.");
-  return JSON.stringify({ routineId: snapshot.routineId, lifecycle: snapshot.lifecycle, lastRunAt: snapshot.lastRunAt, updatedAt: snapshot.updatedAt });
-}
-
-async function controlHostedAgentRoutine(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions,
-  action: "pause" | "resume"
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const routineId = typeof parsed.routineId === "string" ? parsed.routineId : "";
-  if (!computer?.ready || !/^routine-[A-Za-z0-9_-]{8,120}$/u.test(routineId)) {
-    throw new Error(`The hosted agent routine ${action} request is unavailable or malformed.`);
-  }
-  const tool = `cloud-agent-routine-${action}`;
-  const prepared = await prepareRuntimeHostedAgentRoutineControl({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    routineId,
-    action
-  });
-  if (!prepared) throw new Error(`Hosted agent routine ${action} requires the desktop runtime.`);
-  options.queueApproval?.(prepared.approval, tool, JSON.stringify({ routineId, computer: computer.agentId }));
-  if (await gate.waitForDecision(prepared.approval) !== "granted") throw new Error(`Hosted agent routine ${action} was denied.`);
-  const snapshot = await controlRuntimeHostedAgentRoutine(prepared.proposal, resolutionFor(prepared.approval), sourceResolutionFor(sourceApproval));
-  if (!snapshot) throw new Error(`Hosted agent routine ${action} requires the desktop runtime.`);
-  return JSON.stringify({ routineId: snapshot.routineId, lifecycle: snapshot.lifecycle, nextRunAt: snapshot.nextRunAt, updatedAt: snapshot.updatedAt });
-}
-
-function sourceResolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {
-  return resolutionFor(approval);
 }
 
 function resolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {
@@ -322,185 +151,6 @@ function resolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {
     decidedAt: new Date().toISOString(),
     confirmationText: approval.confirmationPhrase
   };
-}
-
-async function controlHostedProcessSchedule(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions,
-  action: "pause" | "resume"
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const scheduleId = typeof parsed.scheduleId === "string" ? parsed.scheduleId : "";
-  if (!computer?.ready || !/^schedule-[A-Za-z0-9_-]{8,120}$/u.test(scheduleId)) {
-    throw new Error(`The hosted process schedule ${action} request is unavailable or malformed.`);
-  }
-  const tool = `cloud-process-schedule-${action}`;
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
-  const prepared = await prepareRuntimeHostedProcessScheduleControl({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    scheduleId,
-    action
-  });
-  if (!prepared) throw new Error(`Hosted schedule ${action} requires the desktop runtime.`);
-  options.queueApproval?.(prepared.approval, tool, JSON.stringify({ scheduleId, computer: computer.agentId }));
-  if (await gate.waitForDecision(prepared.approval) !== "granted") {
-    throw new Error(`Hosted schedule ${action} was denied.`);
-  }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
-  const snapshot = await controlRuntimeHostedProcessSchedule(prepared.proposal, resolution, sourceResolution);
-  if (!snapshot) throw new Error(`Hosted schedule ${action} requires the desktop runtime.`);
-  return JSON.stringify({
-    scheduleId: snapshot.scheduleId,
-    lifecycle: snapshot.lifecycle,
-    nextRunAt: snapshot.nextRunAt,
-    instructionAuthority: "none",
-    updatedAt: snapshot.updatedAt
-  });
-}
-
-async function cancelHostedProcessSchedule(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const scheduleId = typeof parsed.scheduleId === "string" ? parsed.scheduleId : "";
-  if (!computer?.ready || !/^schedule-[A-Za-z0-9_-]{8,120}$/u.test(scheduleId)) {
-    throw new Error("The hosted process schedule cancellation is unavailable or malformed.");
-  }
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
-  const prepared = await prepareRuntimeHostedProcessScheduleCancel({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    scheduleId
-  });
-  if (!prepared) throw new Error("Hosted schedule cancellation requires the desktop runtime.");
-  options.queueApproval?.(
-    prepared.approval,
-    "cloud-process-schedule-cancel",
-    JSON.stringify({ scheduleId, computer: computer.agentId })
-  );
-  if (await gate.waitForDecision(prepared.approval) !== "granted") {
-    throw new Error("Hosted schedule cancellation was denied.");
-  }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
-  const snapshot = await cancelRuntimeHostedProcessSchedule(
-    prepared.proposal,
-    resolution,
-    sourceResolution
-  );
-  if (!snapshot) throw new Error("Hosted schedule cancellation requires the desktop runtime.");
-  return JSON.stringify({
-    scheduleId: snapshot.scheduleId,
-    lifecycle: snapshot.lifecycle,
-    lastRunAt: snapshot.lastRunAt,
-    instructionAuthority: "none",
-    updatedAt: snapshot.updatedAt
-  });
-}
-
-async function runHostedProcessSchedule(
-  gate: ApprovalGate,
-  sourceApproval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions
-): Promise<string> {
-  const computer = options.hostedComputer;
-  const scheduleId = typeof parsed.scheduleId === "string" ? parsed.scheduleId : "";
-  const runId = typeof parsed.runId === "string" ? parsed.runId : "";
-  const firstRunAt = typeof parsed.firstRunAt === "string" ? parsed.firstRunAt : "";
-  const intervalSeconds = parsed.intervalSeconds;
-  const argv = Array.isArray(parsed.argv) && parsed.argv.every((value) => typeof value === "string")
-    ? parsed.argv as string[]
-    : [];
-  if (
-    !computer?.ready
-    || !/^schedule-[A-Za-z0-9_-]{8,120}$/u.test(scheduleId)
-    || !runId
-    || argv.length < 1
-    || argv.length > 20
-    || argv.some((value) => !value || value.length > 200 || /[\u0000-\u001f\u007f]/u.test(value))
-    || !firstRunAt
-    || typeof intervalSeconds !== "number"
-    || !Number.isInteger(intervalSeconds)
-  ) {
-    throw new Error("The hosted process schedule is unavailable or malformed.");
-  }
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
-  const prepared = await prepareRuntimeHostedProcessSchedule({
-    workspaceId: computer.workspaceId,
-    agentId: computer.agentId,
-    deviceId: computer.deviceId,
-    scheduleId,
-    runId,
-    argv: argv as [string, ...string[]],
-    ...(typeof parsed.cwd === "string" ? { cwd: parsed.cwd } : {}),
-    ...(typeof parsed.timeoutMs === "number" ? { timeoutMs: parsed.timeoutMs } : {}),
-    firstRunAt,
-    intervalSeconds
-  });
-  if (!prepared) throw new Error("Hosted schedules require the desktop runtime.");
-  options.queueApproval?.(
-    prepared.approval,
-    "cloud-process-schedule",
-    JSON.stringify({ scheduleId, firstRunAt, intervalSeconds, computer: computer.agentId })
-  );
-  if (await gate.waitForDecision(prepared.approval) !== "granted") {
-    throw new Error("Hosted process scheduling was denied.");
-  }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
-  const snapshot = await createRuntimeHostedProcessSchedule(
-    prepared.proposal,
-    resolution,
-    sourceResolution
-  );
-  if (!snapshot) throw new Error("Hosted schedules require the desktop runtime.");
-  return JSON.stringify({
-    scheduleId: snapshot.scheduleId,
-    lifecycle: snapshot.lifecycle,
-    firstRunAt: snapshot.firstRunAt,
-    intervalSeconds: snapshot.intervalSeconds,
-    nextRunAt: snapshot.nextRunAt,
-    instructionAuthority: "none",
-    warning: "This schedule repeatedly runs the exact approved hosted program until cancelled or the cloud computer is deleted.",
-    updatedAt: snapshot.updatedAt
-  });
 }
 
 async function runOnHostedBrowser(
@@ -733,7 +383,6 @@ async function ensureCapabilityGrant(
   }
   const proposal: RuntimeCapabilityGrantProposal = {
     workspaceId,
-    projectId: options.projectId,
     capabilityId,
     connectionId
   };
@@ -796,10 +445,8 @@ async function runOnDesktop(
     arguments: parsed,
     approval: resolution,
     workspaceId: options.localComputer?.workspaceId ?? options.workspaceId,
-    projectId: options.projectId,
     agentId: options.localComputer?.agentId,
-    mcpSessionId,
-    ...(options.missionWorkerToolExecution ? { missionWorkerToolExecution: options.missionWorkerToolExecution } : {})
+    mcpSessionId
   });
   if (result === null) {
     // No Tauri runtime: nothing executed (preview/test path).
@@ -818,7 +465,6 @@ interface McpSemanticContinuation {
   proposal: RuntimeMcpToolProposal;
   permitId: string;
   workspaceId: string;
-  projectId?: string;
   query: string;
   connectionId: string;
   matchedGrantIds: string[];
@@ -882,17 +528,8 @@ async function runMcpSemanticRead(
       continuation.proposal,
       continuation.permitId
     ) as McpUntrustedToolResult;
-    if (options.missionWorkerToolExecution) {
-      if (!untrusted.structuredJson || untrusted.structuredTruncated) {
-        throw new Error("MCP mission evidence requires one complete structured cited-search result.");
-      }
-      const attested = await attestRuntimeMissionMcpConnectedSearch(continuation.permitId);
-      if (!attested) throw new Error("Mission MCP evidence requires the desktop runtime.");
-      return JSON.stringify(attested);
-    }
     const result = normalizeMcpConnectedSourceSearch(untrusted, {
       workspaceId: continuation.workspaceId,
-      projectId: continuation.projectId,
       query: continuation.query,
       connectionId: continuation.connectionId,
       matchedGrantIds: continuation.matchedGrantIds,

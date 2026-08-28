@@ -370,96 +370,6 @@
   position: relative;
 }
 
-.project-create-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  z-index: 30;
-  display: grid;
-  gap: 3px;
-  min-width: 178px;
-  padding: 6px;
-  background: var(--surface-overlay);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-2);
-  box-shadow: var(--shadow-2);
-}
-
-.project-create-menu button {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 34px;
-  padding: 0 8px;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-1);
-  font-size: var(--text-13);
-  text-align: left;
-}
-
-.project-create-menu button:hover,
-.project-create-menu button:focus-visible {
-  background: var(--surface-hover);
-  outline: none;
-}
-
-.project-create-form {
-  width: min(310px, calc(100vw - 32px));
-  gap: 10px;
-  padding: 12px;
-}
-
-.project-create-form label {
-  display: grid;
-  gap: 5px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.project-create-form input,
-.project-create-form textarea {
-  width: 100%;
-  padding: 8px 9px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-1);
-  font: inherit;
-}
-
-.project-create-form textarea {
-  min-height: 58px;
-  resize: vertical;
-}
-
-.project-create-form details {
-  display: grid;
-  gap: 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.project-create-form details[open] summary {
-  margin-bottom: 8px;
-}
-
-.project-create-form__actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.project-create-menu .project-create-form__actions button {
-  display: inline-flex;
-  width: auto;
-  min-height: 30px;
-  padding: 0 10px;
-}
-
 .nav-group-heading:hover {
   color: var(--ink);
   background: var(--surface-raised);
@@ -526,21 +436,13 @@
   border-bottom-color: var(--ink);
 }
 
-.departments-coming-soon {
-  display: grid;
-  justify-items: center;
-  gap: 5px;
-}
-
 .thread-list,
-.project-list,
 .nested-thread-list {
   display: grid;
   gap: 2px;
 }
 
 .thread-row,
-.project-row,
 .utility-row {
   width: 100%;
   min-height: 34px;
@@ -555,7 +457,6 @@
 }
 
 .thread-row:hover,
-.project-row:hover,
 .utility-row:hover {
   color: var(--accent-strong);
   background: var(--surface-raised);
@@ -595,192 +496,6 @@
 
 .thread-row--active::before {
   background: currentColor;
-}
-
-.project-block {
-  display: grid;
-  gap: 4px;
-}
-
-.project-row-shell,
-.thread-row-shell {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-}
-
-.project-row-shell {
-  position: relative;
-}
-
-.project-expand-button {
-  display: grid;
-  width: 24px;
-  height: 28px;
-  flex: 0 0 auto;
-  place-items: center;
-  padding: 0;
-  color: var(--ink-soft);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-1);
-}
-
-.project-expand-button svg {
-  transition: transform 140ms ease;
-}
-
-.project-expand-button[aria-expanded="true"] svg {
-  transform: rotate(90deg);
-}
-
-.project-expand-button:hover,
-.project-expand-button:focus-visible {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
-
-.project-row-shell > .project-row,
-.thread-row-shell > .thread-row {
-  min-width: 0;
-  flex: 1;
-}
-
-.project-row-actions {
-  display: flex;
-  gap: 1px;
-  position: absolute;
-  top: 50%;
-  right: 3px;
-  padding-left: 6px;
-  background: var(--canvas);
-  opacity: 0;
-  pointer-events: none;
-  transform: translateY(-50%);
-  transition: opacity 120ms ease;
-}
-
-.project-row-shell:hover .project-row-actions,
-.project-row-shell:focus-within .project-row-actions {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.project-row-actions button,
-.conversation-message-action {
-  display: grid;
-  width: 25px;
-  height: 25px;
-  place-items: center;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-1);
-}
-
-.project-row-actions button:hover,
-.project-row-actions button:focus-visible,
-.conversation-message-action:hover:not(:disabled),
-.conversation-message-action:focus-visible {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
-
-.project-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px 0 3px;
-}
-
-.project-row[aria-current="page"] {
-  background: var(--surface-raised);
-  font-weight: 500;
-}
-
-.thread-row-shell select {
-  max-width: 28px;
-  min-height: 27px;
-  color: transparent;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-1);
-  cursor: pointer;
-}
-
-.thread-row-shell select:hover,
-.thread-row-shell select:focus-visible {
-  max-width: 112px;
-  color: var(--ink-muted);
-  background: var(--surface-hover);
-  outline: 1px solid var(--line);
-}
-
-.project-list-state {
-  margin: 4px 8px 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.project-list-state--error {
-  color: var(--danger, #a33b32);
-}
-
-.archived-projects {
-  display: grid;
-  gap: 3px;
-  margin-top: 8px;
-}
-
-.archived-projects__toggle,
-.archived-project-row button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 4px 8px;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-1);
-  font-size: var(--text-12);
-}
-
-.archived-project-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-left: 9px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.archived-project-row .archived-project-row__title {
-  min-width: 0;
-  flex: 1;
-  justify-content: flex-start;
-  overflow: hidden;
-  color: var(--ink-secondary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-caret {
-  color: var(--ink-soft);
-  transform: rotate(0deg);
-  transition: transform 160ms ease;
-}
-
-.project-row[aria-expanded="true"] .project-caret {
-  transform: rotate(90deg);
-}
-
-.project-row span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .nested-thread-list {
@@ -939,7 +654,6 @@
 .desktop-frame[data-theme="dark"] .new-chat-button,
 .desktop-frame[data-theme="dark"] .sidebar-action-card,
 .desktop-frame[data-theme="dark"] .thread-row,
-.desktop-frame[data-theme="dark"] .project-row,
 .desktop-frame[data-theme="dark"] .utility-row,
 .desktop-frame[data-theme="dark"] .workspace-switcher__name {
   color: var(--ink);
@@ -951,7 +665,6 @@
 .desktop-frame[data-theme="dark"] .new-chat-button:active,
 .desktop-frame[data-theme="dark"] .sidebar-action-card:hover,
 .desktop-frame[data-theme="dark"] .thread-row:hover,
-.desktop-frame[data-theme="dark"] .project-row:hover,
 .desktop-frame[data-theme="dark"] .utility-row:hover {
   color: var(--ink);
   background: var(--surface-hover);

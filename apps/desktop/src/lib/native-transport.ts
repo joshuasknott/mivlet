@@ -127,8 +127,7 @@ function tauriTransport(
         requestId,
         model: request.model,
         body: shapeBodyFor(request),
-        ...(request.providerRoute ? { providerRoute: request.providerRoute } : {}),
-        ...(request.missionWorkerExecution ? { missionWorkerExecution: request.missionWorkerExecution } : {})
+        ...(request.providerRoute ? { providerRoute: request.providerRoute } : {})
       }).catch((error) => {
         if (!transportError) {
           const message =

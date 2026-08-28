@@ -1,5 +1,4 @@
 import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
-import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import type { FableAgentProfile } from "@fable/protocol";
@@ -18,7 +17,6 @@ export function AgentSidebar({
   profileName,
   onSelectAgent,
   onCreateAgent,
-  onOpenSearch,
   onEditAgent,
   onOpenSettings
 }: {
@@ -28,22 +26,14 @@ export function AgentSidebar({
   profileName: string;
   onSelectAgent: (agent: FableAgentProfile) => void;
   onCreateAgent: () => void;
-  onOpenSearch: () => void;
   onEditAgent: (agent: FableAgentProfile) => void;
   onOpenSettings: () => void;
 }) {
   return (
     <aside className="agent-sidebar" aria-label="Agents">
       <div className="agent-sidebar__topline">
-        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent} aria-label="New agent" title="New agent">
+        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent} aria-label="Create teammate" title="Create teammate">
           <Plus size={17} aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="agent-sidebar__actions">
-        <button className="agent-search" type="button" onClick={onOpenSearch} aria-label="Search">
-          <MagnifyingGlass size={15} aria-hidden="true" />
-          <span>Search</span>
         </button>
       </div>
 

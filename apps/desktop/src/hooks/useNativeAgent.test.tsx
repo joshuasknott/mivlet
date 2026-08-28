@@ -153,18 +153,18 @@ function removeDesktopRuntime() {
 
 const baseRequest: AgentRunRequest = {
   model: "gpt-5",
-  messages: [{ role: "user", content: "summarize the project" }],
+  messages: [{ role: "user", content: "summarize the conversation" }],
   tools: [],
   maxTokens: 1024
 };
 
 const preparedContext: PreparedRunContext = {
-  systemPrefix: "Use the selected project notes.",
+  systemPrefix: "Use the selected conversation notes.",
   receipt: {
     version: 1,
     runId: "019f4f00-0000-7000-8000-contextreceipt",
     assembledAt: "2026-07-11T12:00:00.000Z",
-    scope: { level: "project", projectId: "project-1" },
+    scope: { level: "thread", threadId: "thread-1" },
     citations: [],
     contributions: [{ id: "memory-1", kind: "memory", reason: "memory-approved" }]
   }
@@ -398,7 +398,7 @@ describe("useNativeAgent", () => {
     expect(finalRun.exchanges).toEqual([
       {
         role: "user",
-        content: "summarize the project",
+        content: "summarize the conversation",
         toolCallId: undefined,
         toolName: undefined
       },

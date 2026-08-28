@@ -114,9 +114,7 @@ textarea:focus-visible {
 .settings-field input,
 .knowledge-search input,
 .knowledge-pin-filter input,
-.connector-search-bar__input-wrapper,
-.schedule-form__input,
-.schedule-edit input {
+.connector-search-bar__input-wrapper {
   border-color: transparent;
 }
 
@@ -128,9 +126,7 @@ textarea:focus-visible {
 .settings-field input:focus,
 .knowledge-search input:focus,
 .knowledge-pin-filter input:focus,
-.connector-search-bar__input-wrapper:focus-within,
-.schedule-form__input:focus,
-.schedule-edit input:focus {
+.connector-search-bar__input-wrapper:focus-within {
   border-color: transparent;
   box-shadow: none;
 }

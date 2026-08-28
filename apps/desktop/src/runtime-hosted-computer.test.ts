@@ -1,21 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   inspectRuntimeHostedProcess,
-  inspectRuntimeHostedProcessSchedule,
-  listRuntimeHostedProcessSchedules,
-  listRuntimeHostedProcessScheduleRuns,
-  cancelRuntimeHostedProcessSchedule,
   actRuntimeHostedBrowser,
   killRuntimeHostedProcess,
   launchRuntimeHostedProcess,
-  createRuntimeHostedProcessSchedule,
   loadRuntimeHostedComputer,
   navigateRuntimeHostedBrowser,
   prepareRuntimeHostedBrowser,
   prepareRuntimeHostedBrowserAction,
   prepareRuntimeHostedProcess,
-  prepareRuntimeHostedProcessSchedule,
-  prepareRuntimeHostedProcessScheduleCancel,
   provisionRuntimeHostedComputer,
   snapshotRuntimeHostedBrowser
 } from "./runtime";
@@ -57,32 +50,6 @@ describe("hosted computer runtime boundary", () => {
       controlRole: "button",
       controlName: "Continue",
       action: "click"
-    })).resolves.toBeNull();
-    await expect(prepareRuntimeHostedProcessSchedule({
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a",
-      scheduleId: "schedule-example-123",
-      runId: "scheduled-example",
-      argv: ["node", "worker.mjs"],
-      firstRunAt: "2026-08-25T13:00:00.000Z",
-      intervalSeconds: 3600
-    })).resolves.toBeNull();
-    await expect(prepareRuntimeHostedProcessScheduleCancel({
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a",
-      scheduleId: "schedule-example-123"
-    })).resolves.toBeNull();
-    await expect(listRuntimeHostedProcessSchedules({
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a"
-    })).resolves.toBeNull();
-    await expect(listRuntimeHostedProcessScheduleRuns({
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a"
     })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -250,91 +217,4 @@ describe("hosted computer runtime boundary", () => {
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain("runnerUrl");
   });
 
-  it("keeps durable hosted schedules behind fixed native commands", async () => {
-    setNative(true);
-    const draft = {
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a",
-      scheduleId: "schedule-example-123",
-      runId: "scheduled-example",
-      argv: ["node", "worker.mjs"] as [string, ...string[]],
-      firstRunAt: "2026-08-25T17:00:00.000Z",
-      intervalSeconds: 3600
-    };
-    const proposal = { ...draft, requestKey: "schedule-request-a" };
-    const approval = {
-      id: "approval-schedule-a",
-      service: "Fable cloud computer",
-      action: "Schedule node on this teammate's cloud computer",
-      mode: "full-access" as const,
-      riskLevel: "critical" as const,
-      dataUsed: ["schedule: schedule-example-123"],
-      consequence: "Runs repeatedly.",
-      requestedAt: "2026-08-25T16:00:00.000Z",
-      decisions: ["once" as const, "deny" as const],
-      confirmationPhrase: "schedule on cloud computer"
-    };
-    const resolution = {
-      request: approval,
-      decision: "once" as const,
-      decidedAt: "2026-08-25T16:00:01.000Z",
-      confirmationText: "schedule on cloud computer"
-    };
-    const target = {
-      workspaceId: "workspace-a",
-      agentId: "agent-a",
-      deviceId: "device-a",
-      scheduleId: "schedule-example-123"
-    };
-    mocks.invoke.mockResolvedValue({ scheduleId: "schedule-example-123", lifecycle: "active" });
-
-    await prepareRuntimeHostedProcessSchedule(draft);
-    await createRuntimeHostedProcessSchedule(proposal, resolution, resolution);
-    await inspectRuntimeHostedProcessSchedule(target);
-    await listRuntimeHostedProcessSchedules({
-      workspaceId: target.workspaceId,
-      agentId: target.agentId,
-      deviceId: target.deviceId
-    });
-    await listRuntimeHostedProcessScheduleRuns({
-      workspaceId: target.workspaceId,
-      agentId: target.agentId,
-      deviceId: target.deviceId
-    });
-    await prepareRuntimeHostedProcessScheduleCancel(target);
-    await cancelRuntimeHostedProcessSchedule(
-      { ...target, requestKey: "schedule-cancel-a" },
-      resolution,
-      resolution
-    );
-
-    expect(mocks.invoke.mock.calls).toEqual([
-      ["hosted_process_schedule_prepare", { draft }],
-      ["hosted_process_schedule_create", { request: { proposal, resolution, sourceResolution: resolution } }],
-      ["hosted_process_schedule_status", { target }],
-      ["hosted_process_schedule_list", {
-        target: {
-          workspaceId: target.workspaceId,
-          agentId: target.agentId,
-          deviceId: target.deviceId
-        }
-      }],
-      ["hosted_process_schedule_run_list", {
-        target: {
-          workspaceId: target.workspaceId,
-          agentId: target.agentId,
-          deviceId: target.deviceId
-        }
-      }],
-      ["hosted_process_schedule_cancel_prepare", { target }],
-      ["hosted_process_schedule_cancel", {
-        request: {
-          proposal: { ...target, requestKey: "schedule-cancel-a" },
-          resolution,
-          sourceResolution: resolution
-        }
-      }]
-    ]);
-  });
 });

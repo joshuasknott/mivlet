@@ -6,11 +6,7 @@ import type {
   CustomApprovalSettings,
   LocalFileImport,
   MemoryRecord,
-  PermissionMode,
-  ScheduleEntry,
-  ScheduleWeekday,
-  WorkspaceGoal,
-  WorkspacePlan
+  PermissionMode
 } from "@fable/protocol";
 
 /**
@@ -19,25 +15,8 @@ import type {
  * shapes without App.tsx owning them.
  */
 
-export type UtilityItem =
-  | "Connectors"
-  | "Knowledge"
-  | "Schedules";
 export type AccountPage = "Profile" | "Settings";
-export type WorkspacePage = UtilityItem | AccountPage;
-
-/**
- * A user-created schedule. Shell-local alias for the shared `ScheduleEntry`
- * contract: the `name` is the queryable task name, the `description` tells the
- * agent what to do when it fires, and `day`/`time` define when it runs.
- * Execution is linked up so a connected model can pick it up; nothing
- * auto-runs. Now persisted through the runtime snapshot so it survives a
- * desktop restart (localStorage carries it in preview only).
- */
-export type Weekday = ScheduleWeekday;
-export type Schedule = ScheduleEntry;
-
-export const WEEKDAYS: Weekday[] = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+export type WorkspacePage = AccountPage;
 
 export type ApprovalModificationDraft = {
   mode: ApprovalModification["mode"];
@@ -67,11 +46,6 @@ export interface PersistedShellState {
   approvalAudit: import("@fable/protocol").ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
   approvalRules: import("@fable/protocol").ApprovalGrant[];
-  schedules: Schedule[];
-  /** Structured workspace goals created by /goal. */
-  goals: WorkspaceGoal[];
-  /** Structured plans created by /plan. */
-  plans: WorkspacePlan[];
   /** User-owned agents. Optional only for snapshots created before agents existed. */
   agents?: import("@fable/protocol").FableAgentProfile[];
   activeAgentId?: string;

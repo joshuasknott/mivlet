@@ -1,14 +1,5 @@
 import type {
   ApprovalResolutionRequest,
-  HostedAgentRoutineDraft,
-  HostedAgentRoutineProposal,
-  HostedAgentRoutineSnapshot,
-  HostedAgentRoutineRunSnapshot,
-  HostedAgentRoutineTarget,
-  HostedAgentRoutineListTarget,
-  HostedAgentRoutineCancelProposal,
-  HostedAgentRoutineControlDraft,
-  HostedAgentRoutineControlProposal,
   HostedBrowserActionDraft,
   HostedBrowserActionProposal,
   HostedBrowserNavigateDraft,
@@ -19,26 +10,11 @@ import type {
   HostedExecutionNodeSnapshot,
   HostedProcessDraft,
   HostedProcessLaunchProposal,
-  HostedProcessScheduleDraft,
-  HostedProcessScheduleCancelProposal,
-  HostedProcessScheduleControlDraft,
-  HostedProcessScheduleControlProposal,
-  HostedProcessScheduleListTarget,
-  HostedProcessScheduleProposal,
-  HostedProcessScheduleRunSnapshot,
-  HostedProcessScheduleSnapshot,
-  HostedProcessScheduleTarget,
   HostedProcessSnapshot,
   HostedProcessTarget,
-  PreparedHostedBrowserNavigation,
-  PreparedHostedAgentRoutine,
-  PreparedHostedAgentRoutineCancel,
-  PreparedHostedAgentRoutineControl,
   PreparedHostedBrowserAction,
+  PreparedHostedBrowserNavigation,
   PreparedHostedProcessLaunch,
-  PreparedHostedProcessSchedule,
-  PreparedHostedProcessScheduleCancel,
-  PreparedHostedProcessScheduleControl,
 } from "@fable/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
@@ -68,69 +44,6 @@ export interface HostedComputerRuntimePort {
   killProcess(
     target: HostedProcessTarget,
   ): Promise<HostedProcessSnapshot | null>;
-  prepareSchedule(
-    draft: HostedProcessScheduleDraft,
-  ): Promise<PreparedHostedProcessSchedule | null>;
-  createSchedule(
-    proposal: HostedProcessScheduleProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedProcessScheduleSnapshot | null>;
-  inspectSchedule(
-    target: HostedProcessScheduleTarget,
-  ): Promise<HostedProcessScheduleSnapshot | null>;
-  listSchedules(
-    target: HostedProcessScheduleListTarget,
-  ): Promise<HostedProcessScheduleSnapshot[] | null>;
-  listScheduleRuns(
-    target: HostedProcessScheduleListTarget,
-  ): Promise<HostedProcessScheduleRunSnapshot[] | null>;
-  prepareScheduleCancel(
-    target: HostedProcessScheduleTarget,
-  ): Promise<PreparedHostedProcessScheduleCancel | null>;
-  cancelSchedule(
-    proposal: HostedProcessScheduleCancelProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedProcessScheduleSnapshot | null>;
-  prepareScheduleControl(
-    draft: HostedProcessScheduleControlDraft,
-  ): Promise<PreparedHostedProcessScheduleControl | null>;
-  controlSchedule(
-    proposal: HostedProcessScheduleControlProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedProcessScheduleSnapshot | null>;
-  prepareAgentRoutine(
-    draft: HostedAgentRoutineDraft,
-  ): Promise<PreparedHostedAgentRoutine | null>;
-  createAgentRoutine(
-    proposal: HostedAgentRoutineProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedAgentRoutineSnapshot | null>;
-  listAgentRoutines(
-    target: HostedAgentRoutineListTarget,
-  ): Promise<HostedAgentRoutineSnapshot[] | null>;
-  listAgentRoutineRuns(
-    target: HostedAgentRoutineListTarget,
-  ): Promise<HostedAgentRoutineRunSnapshot[] | null>;
-  prepareAgentRoutineCancel(
-    target: HostedAgentRoutineTarget,
-  ): Promise<PreparedHostedAgentRoutineCancel | null>;
-  cancelAgentRoutine(
-    proposal: HostedAgentRoutineCancelProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedAgentRoutineSnapshot | null>;
-  prepareAgentRoutineControl(
-    draft: HostedAgentRoutineControlDraft,
-  ): Promise<PreparedHostedAgentRoutineControl | null>;
-  controlAgentRoutine(
-    proposal: HostedAgentRoutineControlProposal,
-    resolution: ApprovalResolutionRequest,
-    sourceResolution: ApprovalResolutionRequest,
-  ): Promise<HostedAgentRoutineSnapshot | null>;
   prepareBrowser(
     draft: HostedBrowserNavigateDraft,
   ): Promise<PreparedHostedBrowserNavigation | null>;
@@ -189,86 +102,6 @@ function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
       native
         ? invoke("hosted_process_kill", { target })
         : Promise.resolve(null),
-    prepareSchedule: (draft) =>
-      native
-        ? invoke("hosted_process_schedule_prepare", { draft })
-        : Promise.resolve(null),
-    createSchedule: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_process_schedule_create", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
-    inspectSchedule: (target) =>
-      native
-        ? invoke("hosted_process_schedule_status", { target })
-        : Promise.resolve(null),
-    listSchedules: (target) =>
-      native
-        ? invoke("hosted_process_schedule_list", { target })
-        : Promise.resolve(null),
-    listScheduleRuns: (target) =>
-      native
-        ? invoke("hosted_process_schedule_run_list", { target })
-        : Promise.resolve(null),
-    prepareScheduleCancel: (target) =>
-      native
-        ? invoke("hosted_process_schedule_cancel_prepare", { target })
-        : Promise.resolve(null),
-    cancelSchedule: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_process_schedule_cancel", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
-    prepareScheduleControl: (draft) =>
-      native
-        ? invoke("hosted_process_schedule_control_prepare", { draft })
-        : Promise.resolve(null),
-    controlSchedule: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_process_schedule_control", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
-    prepareAgentRoutine: (draft) =>
-      native
-        ? invoke("hosted_agent_routine_prepare", { draft })
-        : Promise.resolve(null),
-    createAgentRoutine: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_agent_routine_create", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
-    listAgentRoutines: (target) =>
-      native
-        ? invoke("hosted_agent_routine_list", { target })
-        : Promise.resolve(null),
-    listAgentRoutineRuns: (target) =>
-      native
-        ? invoke("hosted_agent_routine_run_list", { target })
-        : Promise.resolve(null),
-    prepareAgentRoutineCancel: (target) =>
-      native
-        ? invoke("hosted_agent_routine_cancel_prepare", { target })
-        : Promise.resolve(null),
-    cancelAgentRoutine: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_agent_routine_cancel", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
-    prepareAgentRoutineControl: (draft) =>
-      native
-        ? invoke("hosted_agent_routine_control_prepare", { draft })
-        : Promise.resolve(null),
-    controlAgentRoutine: (proposal, resolution, sourceResolution) =>
-      native
-        ? invoke("hosted_agent_routine_control", {
-            request: { proposal, resolution, sourceResolution },
-          })
-        : Promise.resolve(null),
     prepareBrowser: (draft) =>
       native
         ? invoke("hosted_browser_prepare", { draft })
@@ -301,6 +134,7 @@ function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
 }
 
 const ports = new WeakMap<RuntimeAdapter, HostedComputerRuntimePort>();
+
 function port() {
   const adapter = getRuntimeAdapter();
   const existing = ports.get(adapter);
@@ -330,69 +164,6 @@ export const inspectRuntimeHostedProcess = (target: HostedProcessTarget) =>
   port().inspectProcess(target);
 export const killRuntimeHostedProcess = (target: HostedProcessTarget) =>
   port().killProcess(target);
-export const prepareRuntimeHostedProcessSchedule = (
-  draft: HostedProcessScheduleDraft,
-) => port().prepareSchedule(draft);
-export const createRuntimeHostedProcessSchedule = (
-  proposal: HostedProcessScheduleProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().createSchedule(proposal, resolution, sourceResolution);
-export const inspectRuntimeHostedProcessSchedule = (
-  target: HostedProcessScheduleTarget,
-) => port().inspectSchedule(target);
-export const listRuntimeHostedProcessSchedules = (
-  target: HostedProcessScheduleListTarget,
-) => port().listSchedules(target);
-export const listRuntimeHostedProcessScheduleRuns = (
-  target: HostedProcessScheduleListTarget,
-) => port().listScheduleRuns(target);
-export const prepareRuntimeHostedProcessScheduleCancel = (
-  target: HostedProcessScheduleTarget,
-) => port().prepareScheduleCancel(target);
-export const cancelRuntimeHostedProcessSchedule = (
-  proposal: HostedProcessScheduleCancelProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().cancelSchedule(proposal, resolution, sourceResolution);
-export const prepareRuntimeHostedProcessScheduleControl = (
-  draft: HostedProcessScheduleControlDraft,
-) => port().prepareScheduleControl(draft);
-export const controlRuntimeHostedProcessSchedule = (
-  proposal: HostedProcessScheduleControlProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().controlSchedule(proposal, resolution, sourceResolution);
-export const prepareRuntimeHostedAgentRoutine = (
-  draft: HostedAgentRoutineDraft,
-) => port().prepareAgentRoutine(draft);
-export const createRuntimeHostedAgentRoutine = (
-  proposal: HostedAgentRoutineProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().createAgentRoutine(proposal, resolution, sourceResolution);
-export const listRuntimeHostedAgentRoutines = (
-  target: HostedAgentRoutineListTarget,
-) => port().listAgentRoutines(target);
-export const listRuntimeHostedAgentRoutineRuns = (
-  target: HostedAgentRoutineListTarget,
-) => port().listAgentRoutineRuns(target);
-export const prepareRuntimeHostedAgentRoutineCancel = (
-  target: HostedAgentRoutineTarget,
-) => port().prepareAgentRoutineCancel(target);
-export const cancelRuntimeHostedAgentRoutine = (
-  proposal: HostedAgentRoutineCancelProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().cancelAgentRoutine(proposal, resolution, sourceResolution);
-export const prepareRuntimeHostedAgentRoutineControl = (
-  draft: HostedAgentRoutineControlDraft,
-) => port().prepareAgentRoutineControl(draft);
-export const controlRuntimeHostedAgentRoutine = (
-  proposal: HostedAgentRoutineControlProposal,
-  resolution: ApprovalResolutionRequest,
-  sourceResolution: ApprovalResolutionRequest,
-) => port().controlAgentRoutine(proposal, resolution, sourceResolution);
 export const prepareRuntimeHostedBrowser = (
   draft: HostedBrowserNavigateDraft,
 ) => port().prepareBrowser(draft);

@@ -4,18 +4,16 @@ import type {
   AccountWorkspaceStatus, ActionHistoryEvent, ApprovalAuditEntry, ApprovalDecision, ApprovalGrant, ApprovalModification,
   ApprovalRequest, BackendProvider, BackendVerifyResult, BrowserSessionState, ConnectorActionKind,
   ConnectorAccountOption, ConnectorManifest, ConnectorSearchItem, ConnectorSearchRequest,
-  ConnectorSearchResult, CustomApprovalSettings, FableCommandRequest, FableCommandResult,
+  ConnectorSearchResult, CustomApprovalSettings,
   FableAgentProfile,
-  IdentityStatus, KnowledgeCitation, KnowledgeSource, LocalFileImport, MemoryControlState,
-  MemoryRecord, MissedRunPolicy, NotificationRecord, PermissionMode, ScheduledExecutionRoute,
-  PreparedRunContext, ScheduledJob, SchedulerQueueEntry, ScheduleTrigger, ThreadSummary, WorkflowDefinition,
-  WorkflowRun, WorkspaceDirective, WorkspaceGoal, WorkspacePlan
+  IdentityStatus, KnowledgeCitation, KnowledgeSource, MemoryControlState,
+  MemoryRecord, PermissionMode, PreparedRunContext, ThreadSummary, WorkspaceDirective
 } from "@fable/protocol";
 import type { ToolApprovalGate } from "@fable/connectors";
 import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
 import type { ProviderModelOption } from "../../lib/provider-models";
-import type { ProjectMemoryRunContext } from "../../lib/agent-run";
-import type { ApprovalModificationDraft, ComposerAttachment, PendingApprovalConfirmation, Schedule, Weekday, WorkspacePage } from "../../lib/types";
+import type { KnowledgeRunContext } from "../../lib/agent-run";
+import type { ApprovalModificationDraft, ComposerAttachment, PendingApprovalConfirmation, WorkspacePage } from "../../lib/types";
 
 export interface ShellRuntime {
   // navigation
@@ -23,16 +21,6 @@ export interface ShellRuntime {
   setActiveItem: (value: string) => void;
   activeUtility: string | undefined;
   activePage: WorkspacePage | null;
-  /**
-   * A pending Run History job filter, set when navigating from a schedule's
-   * "View runs" link. Run History consumes then clears it on mount so the link
-   * is one-shot — the recurring definition → executions navigation target.
-   */
-  runHistoryJobId: string | null;
-  /** Open Run History pre-filtered to a schedule's executions. */
-  openRunHistoryForJob: (jobId: string) => void;
-  /** Clear the one-shot Run History job filter (consumed on mount). */
-  clearRunHistoryJobId: () => void;
   isChatView: boolean;
   activeThread: ThreadSummary | undefined;
   allThreads: ThreadSummary[];
@@ -149,120 +137,7 @@ export interface ShellRuntime {
    * Assemble context for the authenticated active member. Fails closed when
    * the active workspace has no matching member instead of widening scope.
    */
-  assembleKnowledgeContext: (query: string, context?: ProjectMemoryRunContext) => Promise<PreparedRunContext>;
-  // schedules
-  schedules: Schedule[];
-  createSchedule: (input: { name: string; description: string; day: Weekday; time: string }) => void;
-  toggleSchedule: (job: ScheduledJob) => void;
-  deleteSchedule: (job: ScheduledJob) => Promise<void>;
-  /**
-   * Create a durable scheduled job from a fully-formed trigger (daily/weekly/
-   * monthly/once). The Schedules UI uses this so the form can express every
-   * recurrence the /schedule command supports. Returns the created job, or
-   * throws when the captured permission profile blocks the mutation.
-   */
-  createScheduleFromTrigger: (input: {
-    name: string;
-    description: string;
-    trigger: ScheduleTrigger;
-    missedRunPolicy?: MissedRunPolicy;
-    /** Connected connector ids whose data the workflow should read first. */
-    connectorIds?: string[];
-  }) => ScheduledJob;
-  /**
-   * Create scheduled work through the currently fenced writer. Before cutover
-   * this creates a legacy schedule; after cutover it creates a canonical
-   * Routine with the same time semantics.
-   */
-  createScheduledWork: (input: {
-    name: string;
-    description: string;
-    trigger: ScheduleTrigger;
-    missedRunPolicy?: MissedRunPolicy;
-    connectorIds?: string[];
-  }) => Promise<{ id: string; writer: "legacy" | "routine" }>;
-  /** Transient chat-to-Routine draft; never persisted until the user saves. */
-  pendingRoutineDraft: { title: string; instruction: string } | null;
-  openRoutineDraft: (draft: { title: string; instruction: string }) => void;
-  clearRoutineDraft: () => void;
-  /**
-   * Edit an existing job's name/prompt/trigger in place. Reuses the durable
-   * store path and re-enqueues the next occurrence. The Schedules UI uses this
-   * so edits can change the recurrence frequency, not just the weekday.
-   */
-  editScheduleFromTrigger: (input: {
-    jobId: string;
-    name: string;
-    description: string;
-    trigger: ScheduleTrigger;
-    missedRunPolicy?: MissedRunPolicy;
-    /** Connected connector ids whose data the workflow should read first. */
-    connectorIds?: string[];
-  }) => Promise<void>;
-  // goals + plans (structured Fable state created by /goal and /plan)
-  goals: WorkspaceGoal[];
-  plans: WorkspacePlan[];
-  createGoal: (input: { title: string; statement: string }) => Promise<WorkspaceGoal>;
-  createPlan: (input: { title: string; steps: string[]; goalId?: string }) => WorkspacePlan;
-  /** Execute a parsed Fable command; returns the result + any follow-up prompt. */
-  runFableCommand: (
-    request: FableCommandRequest,
-    options?: { backendConnected?: boolean; activeGoalId?: string; stopCurrentWork?: () => Promise<boolean> }
-  ) => Promise<FableCommandResult>;
-  scheduledJobs: ScheduledJob[];
-  workflowRuns: WorkflowRun[];
-  notificationHistory: NotificationRecord[];
-  pendingWorkflowRuns: Array<{
-    runId: string;
-    jobId: string;
-    prompt: string;
-    definition: WorkflowDefinition;
-    previous?: WorkflowRun;
-    leaseToken?: string;
-    attemptNumber?: number;
-    execution?: ScheduledExecutionRoute;
-    routineDriver?: {
-      projectId?: string;
-      occurrenceId: string;
-      writerEpoch: number;
-    };
-  }>;
-  runScheduleNow: (job: ScheduledJob) => void;
-  completeWorkflowRun: (
-    runId: string,
-    ok: boolean,
-    result?: string,
-    authoritativeRun?: WorkflowRun
-  ) => void;
-  /** Cancel a queued/leased/running scheduled run. */
-  cancelScheduledRun: (runId: string) => void;
-  /** The durable scheduler queue (Rust authority), surfaced for the Schedules UI. */
-  schedulerQueue: SchedulerQueueEntry[];
-  /** Re-fetch the scheduler queue from Rust (poll on demand). */
-  refreshSchedulerQueue: () => void;
-  /** True once persisted scheduled jobs have been hydrated from the Rust store. */
-  schedulesReady: boolean;
-  /** Error from the schedule hydration query, if Rust could not load the domain. */
-  scheduleLoadError: string | null;
-  /** Retry the schedule hydration query without depending on network state. */
-  retryScheduleLoad: () => void;
-  /** Versioned workflow definitions, for linking runs to their source workflow. */
-  workflowDefinitions: WorkflowDefinition[];
-  /**
-   * Re-fetch persisted workflow runs from the Rust authority and merge them into
-   * the in-memory run list. Used by Run History so the list reflects durable
-   * history rather than only the runs created this session.
-   */
-  refreshWorkflowRuns: () => Promise<void>;
-  /** Run ids currently being retried; UI shows a pending state per id. */
-  retryingRunIds: string[];
-  /**
-   * Retry a failed/blocked/cancelled run by re-queuing its job occurrence.
-   * Guards: only runs with a scheduled job that is still active can be retried.
-   * Reports success/failure through `lastAction` and tracks pending state in
-   * `retryingRunIds` until the queue acknowledges.
-   */
-  retryWorkflowRun: (runId: string) => void;
+  assembleKnowledgeContext: (query: string, context?: KnowledgeRunContext) => Promise<PreparedRunContext>;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -360,7 +235,7 @@ export interface ShellRuntime {
   revokeAccountDevice: (deviceId: string) => Promise<void>;
   /**
    * Inspectable action history (model calls, connector actions, tool/shell
-   * actions, web actions, approvals, schedules, blocked policy decisions).
+   * actions, web actions, approvals, and blocked policy decisions).
    * Audit observes actions and never carries secrets. Surfaced for the
    * Settings / Privacy / History view.
    */

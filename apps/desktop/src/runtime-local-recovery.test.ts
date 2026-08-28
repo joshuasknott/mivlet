@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeLocalBackup,
   deleteRuntimeLocalData,
-  exportRuntimeProjectArchive,
   exportRuntimeWorkspaceArchive,
   importRuntimeWorkspaceArchive,
   loadRuntimeExecutionControl,
@@ -35,9 +34,6 @@ describe("local recovery runtime boundary", () => {
     await expect(createRuntimeLocalBackup("C:\\backup.db")).resolves.toBeNull();
     await expect(
       exportRuntimeWorkspaceArchive("C:\\workspace.json", "workspace-1")
-    ).resolves.toBeNull();
-    await expect(
-      exportRuntimeProjectArchive("C:\\project.json", "workspace-1", "project-1")
     ).resolves.toBeNull();
     await expect(
       importRuntimeWorkspaceArchive(
@@ -94,7 +90,6 @@ describe("local recovery runtime boundary", () => {
     mocks.invoke
       .mockResolvedValueOnce(backup)
       .mockResolvedValueOnce(portable)
-      .mockResolvedValueOnce({ ...portable, path: "C:\\project.json" })
       .mockResolvedValueOnce(imported)
       .mockResolvedValueOnce(restore)
       .mockResolvedValueOnce(deleted);
@@ -103,9 +98,6 @@ describe("local recovery runtime boundary", () => {
     await expect(
       exportRuntimeWorkspaceArchive(portable.path, "workspace-1")
     ).resolves.toEqual(portable);
-    await expect(
-      exportRuntimeProjectArchive("C:\\project.json", "workspace-1", "project-1")
-    ).resolves.toEqual({ ...portable, path: "C:\\project.json" });
     await expect(
       importRuntimeWorkspaceArchive(
         portable.path,
@@ -122,11 +114,6 @@ describe("local recovery runtime boundary", () => {
       ["export_workspace_archive_to_file", {
         destination: portable.path,
         workspaceId: "workspace-1"
-      }],
-      ["export_project_archive_to_file", {
-        destination: "C:\\project.json",
-        workspaceId: "workspace-1",
-        projectId: "project-1"
       }],
       ["import_workspace_archive_from_file", {
         source: portable.path,

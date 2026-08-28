@@ -1,7 +1,5 @@
 import { ArrowSquareOut } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { Browser } from "@phosphor-icons/react/dist/csr/Browser";
-import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
-import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { Cloud } from "@phosphor-icons/react/dist/csr/Cloud";
 import { FileArrowDown } from "@phosphor-icons/react/dist/csr/FileArrowDown";
 import { File } from "@phosphor-icons/react/dist/csr/File";
@@ -10,33 +8,20 @@ import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type WheelEvent } from "react";
 import type { LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
-import type { RuntimeMissionProgress } from "../../runtime";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 export function LiveWorkRail({
   agentName,
-  running,
-  status,
-  transcript,
-  runId,
-  approvalCount,
-  computerUseActive,
+  approvalPanel,
   localComputer,
   hostedComputer,
-  missionProgress,
   screenPreviewUrl,
-  onReviewApprovals,
   onClose
 }: {
   agentName: string;
-  running: boolean;
-  status: string;
-  transcript: string;
-  runId: string | null;
-  approvalCount: number;
-  computerUseActive: boolean;
+  approvalPanel?: ReactNode;
   localComputer: {
     available: boolean;
     status?: "unprovisioned" | "provisioning" | "ready" | "degraded";
@@ -84,7 +69,7 @@ export function LiveWorkRail({
     loading: boolean;
     provisioning: boolean;
     error: string | null;
-    onProvision: () => void;
+    onProvision: () => Promise<unknown>;
     browserOpening: boolean;
     browserPhase: "idle" | "preparing" | "awaiting-approval" | "opening" | "refreshing";
     browserError: string | null;
@@ -92,25 +77,10 @@ export function LiveWorkRail({
     browserTitle?: string;
     liveViewUrl?: string;
     browserDownload?: { fileName: string; workspacePath: string; bytesWritten: number };
-    schedules: Array<{
-      scheduleId: string;
-      lifecycle: "active" | "paused" | "cancelled" | "stale";
-      nextRunAt?: string;
-    }>;
-    schedulesLoading: boolean;
-    schedulesError: string | null;
-    agentRoutines?: Array<{
-      routineId: string;
-      lifecycle: "active" | "paused" | "cancelled" | "stale";
-      nextRunAt?: string;
-      title: string;
-    }>;
     onOpenBrowser: (url: string) => Promise<unknown>;
     onRefreshBrowser: () => Promise<unknown>;
   };
-  missionProgress?: RuntimeMissionProgress;
   screenPreviewUrl?: string;
-  onReviewApprovals?: () => void;
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
@@ -122,11 +92,6 @@ export function LiveWorkRail({
   const filePreviewDialogRef = useRef<HTMLDivElement>(null);
   const filePreviewCloseRef = useRef<HTMLButtonElement>(null);
   const keyQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const needsAttention = approvalCount > 0 || status === "awaiting-approval";
-  const activeHostedSchedules = hostedComputer.schedules.filter((schedule) => schedule.lifecycle === "active");
-  const nextHostedSchedule = activeHostedSchedules.find((schedule) => schedule.nextRunAt);
-  const activeAgentRoutines = (hostedComputer.agentRoutines ?? []).filter((routine) => routine.lifecycle === "active");
-  const nextAgentRoutine = activeAgentRoutines.find((routine) => routine.nextRunAt);
   const submitBrowser = (event: FormEvent) => {
     event.preventDefault();
     void hostedComputer.onOpenBrowser(browserUrl).then(() => setScreenOpen(true)).catch(() => undefined);
@@ -202,6 +167,7 @@ export function LiveWorkRail({
   return (
     <aside className="live-rail" aria-label="Work">
       <header className="live-rail__header"><div><strong>Work</strong><span>{agentName}</span></div><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
+      {approvalPanel}
 
       <section className={`hosted-computer-card local-computer-card${localComputer.recoveryNeeded || localComputer.status === "degraded" ? " is-attention" : localComputer.status === "ready" ? " is-ready" : ""}`} aria-label="Computer on this PC">
         <span className="hosted-computer-card__icon"><Browser size={18} weight={localComputer.status === "ready" ? "fill" : "regular"} /></span>
@@ -290,10 +256,10 @@ export function LiveWorkRail({
         ) : null}
       </section>
 
-      <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional cloud computer">
+      {hostedComputer.available ? <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional hosted computer">
         <span className="hosted-computer-card__icon"><Cloud size={18} weight={hostedComputer.status === "ready" ? "fill" : "regular"} /></span>
         <span className="hosted-computer-card__copy">
-          <strong>Optional cloud computer</strong>
+          <strong>Optional hosted computer</strong>
           <small>{hostedComputer.status === "ready" && hostedComputer.keepAlive
             ? "Always on and ready"
             : hostedComputer.provisioning || hostedComputer.status === "provisioning"
@@ -331,7 +297,7 @@ export function LiveWorkRail({
           </form>
         ) : null}
         {hostedComputer.browserDownload ? (
-          <div className="hosted-schedule-summary" aria-label="Latest cloud browser download">
+          <div className="hosted-download-summary" aria-label="Latest cloud browser download">
             <FileArrowDown size={15} aria-hidden="true" />
             <span>
               <strong>{hostedComputer.browserDownload.fileName}</strong>
@@ -340,55 +306,14 @@ export function LiveWorkRail({
           </div>
         ) : null}
         {hostedComputer.browserError ? <small className="hosted-browser-launcher__error" role="alert">{hostedComputer.browserError}</small> : null}
-        {hostedComputer.status === "ready" ? (
-          <div className="hosted-schedule-summary" aria-label="Hosted schedules">
-            <Clock size={15} aria-hidden="true" />
-            <span>
-              <strong>{activeAgentRoutines.length} agent routine{activeAgentRoutines.length === 1 ? "" : "s"} · {activeHostedSchedules.length} program schedule{activeHostedSchedules.length === 1 ? "" : "s"}</strong>
-              <small>{hostedComputer.schedulesLoading
-                ? "Checking hosted schedules…"
-                : hostedComputer.schedulesError
-                  ? "Schedule status needs attention"
-                  : nextAgentRoutine?.nextRunAt
-                    ? `${nextAgentRoutine.title} runs ${new Date(nextAgentRoutine.nextRunAt).toLocaleString()}`
-                    : nextHostedSchedule?.nextRunAt
-                      ? `Next program ${new Date(nextHostedSchedule.nextRunAt).toLocaleString()}`
-                      : "Give this teammate a recurring cloud outcome."}</small>
-            </span>
-          </div>
-        ) : null}
-      </section>
+      </section> : null}
 
-      {computerUseActive ? (
+      {screenPreviewUrl ? (
         <button className="live-screen" type="button" onClick={() => screenPreviewUrl && setScreenOpen(true)} disabled={!screenPreviewUrl}>
           {screenPreviewUrl ? <img src={screenPreviewUrl} alt={`${agentName}'s live screen`} /> : <span className="live-screen__empty"><Browser size={24} /><span>Computer use is active</span><small>The live screen will appear when the runtime publishes a frame.</small></span>}
           <span className="live-screen__label"><span>{agentName}&apos;s screen</span>{screenPreviewUrl ? <ArrowSquareOut size={14} /> : null}</span>
         </button>
       ) : null}
-
-      <h3 className="live-rail__section-label">{needsAttention ? "Awaiting approval" : running ? "In progress" : "Ready"}</h3>
-      <section className={`live-run-card${needsAttention ? " live-run-card--attention" : ""}`}>
-        <div className="live-run-card__status">{running ? <span className="live-pulse" /> : <CheckCircle size={16} weight="fill" />}<strong>{needsAttention ? "Needs your approval" : running ? "In progress" : "Ready"}</strong></div>
-        <p>{transcript.trim() || (running ? "Starting this run…" : "Send a message to begin work.")}</p>
-        {runId ? <small>Run {runId.slice(0, 12)}</small> : null}
-        {needsAttention && onReviewApprovals ? (
-          <button type="button" className="live-run-card__review" onClick={onReviewApprovals}>
-            Review {approvalCount || 1} approval{(approvalCount || 1) === 1 ? "" : "s"}
-          </button>
-        ) : null}
-      </section>
-
-      <section className="live-rail__timeline">
-        <h3>{missionProgress ? "Team activity" : "Activity"}</h3>
-        {missionProgress ? missionProgress.steps.map((step) => (
-          <div key={step.stepKey}>
-            <span className={step.state === "running" || step.state === "ready" ? "is-active" : ""}>
-              {step.state === "completed" ? <CheckCircle size={14} weight="fill" /> : <Clock size={14} />}
-            </span>
-            <p><strong>{step.title}</strong><small>{step.detail}</small></p>
-          </div>
-        )) : <div><span className={running ? "is-active" : ""}><Clock size={14} /></span><p><strong>{running ? "Agent is working" : "No active run"}</strong><small>{needsAttention ? `${approvalCount} approval${approvalCount === 1 ? "" : "s"} waiting` : "Progress and tool activity appear here."}</small></p></div>}
-      </section>
 
       {screenOpen && screenPreviewUrl ? (
         <div className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`}>

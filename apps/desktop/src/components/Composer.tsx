@@ -29,7 +29,7 @@ const PERMISSION_PRESENTATION = {
   },
   "Ask Me": {
     label: "Approve for me",
-    description: "Fable handles routine work and asks before sensitive actions.",
+    description: "Fable handles everyday work and asks before sensitive actions.",
     icon: ShieldCheck
   },
   "Work Freely": {
@@ -100,7 +100,7 @@ export function Composer({
   permissionsOpen: boolean;
   onToggleAddMenu: () => void;
   onTogglePermissions: () => void;
-  onOpenTool: (tool: "Connectors" | "Knowledge" | "Schedules") => void;
+  onOpenTool: (tool: "Connectors" | "Knowledge") => void;
   onRunCommand: (command: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   importStatus?: string | null;
