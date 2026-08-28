@@ -1,10 +1,7 @@
 import type {
-  HostedAgentRoutineCapability,
-  HostedAgentRoutineRequest,
   HostedBrowserActionRequest,
   HostedBrowserNavigateRequest,
-  HostedProcessLaunchRequest,
-  HostedProcessScheduleRequest
+  HostedProcessLaunchRequest
 } from "@fable/protocol";
 
 const COMPUTER_ID = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])?$/;
@@ -16,10 +13,6 @@ const MAX_ARGV_ITEMS = 128;
 const MAX_ARG_LENGTH = 16_384;
 const MIN_TIMEOUT_MS = 1_000;
 const MAX_TIMEOUT_MS = 15 * 60_000;
-const MIN_SCHEDULE_DELAY_MS = 10_000;
-const MAX_SCHEDULE_DELAY_MS = 30 * 24 * 60 * 60_000;
-const MIN_SCHEDULE_INTERVAL_SECONDS = 5 * 60;
-const MAX_SCHEDULE_INTERVAL_SECONDS = 7 * 24 * 60 * 60;
 
 export class HostedRunnerRequestError extends Error {
   constructor(
@@ -42,78 +35,6 @@ export function validateComputerId(value: string): string {
 export function validateProcessId(value: string): string {
   if (!/^[A-Za-z0-9][A-Za-z0-9_-]{2,159}$/.test(value)) {
     throw new HostedRunnerRequestError("The process id is invalid.", "invalid-process-id");
-  }
-  return value;
-}
-
-export function validateScheduleId(value: string): string {
-  if (!/^schedule-[A-Za-z0-9][A-Za-z0-9_-]{7,119}$/u.test(value)) {
-    throw new HostedRunnerRequestError("The schedule id is invalid.", "invalid-schedule-id");
-  }
-  return value;
-}
-
-export function validateRoutineId(value: string): string {
-  if (!/^routine-[A-Za-z0-9][A-Za-z0-9_-]{7,119}$/u.test(value)) {
-    throw new HostedRunnerRequestError("The routine id is invalid.", "invalid-routine-id");
-  }
-  return value;
-}
-
-export function validateAgentRoutineRequest(value: unknown, now = Date.now()): HostedAgentRoutineRequest {
-  if (!isRecord(value)) {
-    throw new HostedRunnerRequestError("The hosted agent routine is invalid.", "invalid-agent-routine");
-  }
-  if (typeof value.requestKey !== "string" || !REQUEST_KEY.test(value.requestKey)) {
-    throw new HostedRunnerRequestError("The request key is invalid.", "invalid-request-key");
-  }
-  if (typeof value.runId !== "string" || !RUN_ID.test(value.runId)) {
-    throw new HostedRunnerRequestError("The run id is invalid.", "invalid-run-id");
-  }
-  const routineId = validateRoutineId(typeof value.routineId === "string" ? value.routineId : "");
-  const title = validateBoundedText(value.title, 1, 120, "The routine title is invalid.");
-  const instruction = validateBoundedText(value.instruction, 1, 12_000, "The routine instruction is invalid.");
-  const firstRunAt = validateFutureScheduleTime(value.firstRunAt, now);
-  const intervalSeconds = validateScheduleInterval(value.intervalSeconds);
-  const capabilities = validateAgentRoutineCapabilities(value.capabilities);
-  if (!Number.isInteger(value.maxSteps) || Number(value.maxSteps) < 1 || Number(value.maxSteps) > 8) {
-    throw new HostedRunnerRequestError("The routine step limit is invalid.", "invalid-agent-routine-steps");
-  }
-  return {
-    requestKey: value.requestKey,
-    routineId,
-    runId: value.runId,
-    title,
-    instruction,
-    firstRunAt,
-    intervalSeconds,
-    capabilities,
-    maxSteps: Number(value.maxSteps)
-  };
-}
-
-export function validateAgentRoutineCapabilities(value: unknown): HostedAgentRoutineCapability[] {
-  if (!Array.isArray(value) || value.length < 1 || value.length > 3) {
-    throw new HostedRunnerRequestError("The routine capabilities are invalid.", "invalid-agent-routine-capabilities");
-  }
-  const allowed = new Set<HostedAgentRoutineCapability>(["workspace-read", "workspace-write", "process-run"]);
-  const normalized: HostedAgentRoutineCapability[] = [];
-  for (const capability of value) {
-    if (typeof capability !== "string" || !allowed.has(capability as HostedAgentRoutineCapability)) {
-      throw new HostedRunnerRequestError("The routine capabilities are invalid.", "invalid-agent-routine-capabilities");
-    }
-    const typed = capability as HostedAgentRoutineCapability;
-    if (!normalized.includes(typed)) normalized.push(typed);
-  }
-  if (!normalized.includes("workspace-read")) {
-    throw new HostedRunnerRequestError("Hosted agent routines require workspace read access.", "invalid-agent-routine-capabilities");
-  }
-  return normalized;
-}
-
-function validateBoundedText(value: unknown, min: number, max: number, message: string): string {
-  if (typeof value !== "string" || value !== value.trim() || value.length < min || value.length > max || hasUnsafeTextControl(value)) {
-    throw new HostedRunnerRequestError(message, "invalid-agent-routine");
   }
   return value;
 }
@@ -277,70 +198,6 @@ export function validateLaunchRequest(value: unknown): HostedProcessLaunchReques
     ...(cwd === undefined ? {} : { cwd }),
     ...(typeof timeoutMs === "number" ? { timeoutMs } : {})
   };
-}
-
-export function validateProcessScheduleRequest(
-  value: unknown,
-  now = Date.now()
-): HostedProcessScheduleRequest {
-  if (!isRecord(value)) {
-    throw new HostedRunnerRequestError("The process schedule is invalid.", "invalid-schedule");
-  }
-  const launch = validateLaunchRequest(value);
-  const scheduleId = typeof value.scheduleId === "string" ? validateScheduleId(value.scheduleId) : null;
-  let firstRunAt: string;
-  let intervalSeconds: number;
-  try {
-    firstRunAt = validateFutureScheduleTime(value.firstRunAt, now);
-    intervalSeconds = validateScheduleInterval(value.intervalSeconds);
-  } catch {
-    throw new HostedRunnerRequestError(
-      "The process schedule timing is outside the allowed range.",
-      "invalid-schedule"
-    );
-  }
-  if (
-    !scheduleId
-    || launch.runId.length > 100
-  ) {
-    throw new HostedRunnerRequestError(
-      "The process schedule timing is outside the allowed range.",
-      "invalid-schedule"
-    );
-  }
-  return {
-    ...launch,
-    scheduleId,
-    firstRunAt,
-    intervalSeconds
-  };
-}
-
-function validateFutureScheduleTime(value: unknown, now: number): string {
-  const parsed = typeof value === "string" ? new Date(value) : null;
-  const milliseconds = parsed?.getTime() ?? Number.NaN;
-  if (
-    !parsed
-    || !Number.isFinite(milliseconds)
-    || parsed.toISOString() !== value
-    || milliseconds < now + MIN_SCHEDULE_DELAY_MS
-    || milliseconds > now + MAX_SCHEDULE_DELAY_MS
-  ) {
-    throw new HostedRunnerRequestError("The schedule time is outside the allowed range.", "invalid-schedule");
-  }
-  return parsed.toISOString();
-}
-
-function validateScheduleInterval(value: unknown): number {
-  if (
-    typeof value !== "number"
-    || !Number.isInteger(value)
-    || value < MIN_SCHEDULE_INTERVAL_SECONDS
-    || value > MAX_SCHEDULE_INTERVAL_SECONDS
-  ) {
-    throw new HostedRunnerRequestError("The schedule interval is outside the allowed range.", "invalid-schedule");
-  }
-  return value;
 }
 
 function isWorkspacePath(value: string): boolean {

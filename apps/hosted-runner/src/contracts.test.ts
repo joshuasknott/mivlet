@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   HostedRunnerRequestError,
-  validateAgentRoutineRequest,
   validateBrowserActionRequest,
   validateBrowserNavigateRequest,
   validateComputerId,
   validateLaunchRequest,
   validateProcessId,
-  validateProcessScheduleRequest,
-  validatePublicHttpsUrl,
-  validateScheduleId
+  validatePublicHttpsUrl
 } from "./contracts";
 
 describe("hosted runner contracts", () => {
@@ -54,64 +51,6 @@ describe("hosted runner contracts", () => {
     expect(validateProcessId("process_123")).toBe("process_123");
     expect(() => validateComputerId("Workspace Agent")).toThrowError(/computer id/i);
     expect(() => validateProcessId("../process")).toThrowError(/process id/i);
-    expect(validateScheduleId("schedule-quarterly-123")).toBe("schedule-quarterly-123");
-    expect(() => validateScheduleId("../schedule")).toThrowError(/schedule id/i);
-  });
-
-  it("accepts only bounded future recurring hosted processes", () => {
-    const now = Date.UTC(2026, 7, 25, 12, 0, 0);
-    const request = {
-      requestKey: "schedule-request-123",
-      scheduleId: "schedule-quarterly-123",
-      runId: "scheduled-quarterly",
-      argv: ["node", "worker.mjs"],
-      cwd: "/workspace/project",
-      timeoutMs: 30_000,
-      firstRunAt: new Date(now + 60_000).toISOString(),
-      intervalSeconds: 3_600
-    };
-    expect(validateProcessScheduleRequest(request, now)).toEqual(request);
-    expect(() => validateProcessScheduleRequest({ ...request, intervalSeconds: 60 }, now))
-      .toThrowError(/timing/i);
-    expect(() => validateProcessScheduleRequest({ ...request, firstRunAt: new Date(now).toISOString() }, now))
-      .toThrowError(/timing/i);
-  });
-
-  it("accepts bounded natural-language routines with explicit standing capabilities", () => {
-    const now = Date.UTC(2026, 7, 25, 12, 0, 0);
-    const request = {
-      requestKey: "routine-request-123",
-      routineId: "routine-weekly-review-123",
-      runId: "routine-weekly-review",
-      title: "Weekly workspace review",
-      instruction: "Review the workspace notes and update the weekly summary.",
-      firstRunAt: new Date(now + 60_000).toISOString(),
-      intervalSeconds: 86_400,
-      capabilities: ["workspace-read", "workspace-write"],
-      maxSteps: 5
-    };
-    expect(validateAgentRoutineRequest(request, now)).toEqual(request);
-  });
-
-  it("rejects overbroad or ambiguous hosted-agent authority", () => {
-    const now = Date.UTC(2026, 7, 25, 12, 0, 0);
-    const base = {
-      requestKey: "routine-request-123",
-      routineId: "routine-weekly-review-123",
-      runId: "routine-weekly-review",
-      title: "Weekly workspace review",
-      instruction: "Review the workspace notes.",
-      firstRunAt: new Date(now + 60_000).toISOString(),
-      intervalSeconds: 86_400,
-      capabilities: ["workspace-read"],
-      maxSteps: 5
-    };
-    expect(() => validateAgentRoutineRequest({ ...base, capabilities: ["process-run"] }, now))
-      .toThrowError(/workspace read/i);
-    expect(() => validateAgentRoutineRequest({ ...base, capabilities: ["workspace-read", "network-anywhere"] }, now))
-      .toThrowError(/capabilities/i);
-    expect(() => validateAgentRoutineRequest({ ...base, maxSteps: 100 }, now))
-      .toThrowError(/step limit/i);
   });
 
   it("accepts a replay-safe public HTTPS browser navigation", () => {

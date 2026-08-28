@@ -138,28 +138,4 @@ describe("hosted execution capabilities", () => {
       .resolves.toEqual({ authorized: false });
   });
 
-  it("keeps durable schedule management on a distinct capability scope", async () => {
-    const now = Date.now();
-    const token = await signHostedExecutionCapability(secret, payload({
-      issuedAt: now,
-      expiresAt: now + 120_000,
-      scopes: ["schedule:manage"]
-    }));
-    const request = new Request(
-      "https://runner.example/v1/computers/computer-workspace-agent/schedules/schedule-quarterly-123",
-      { method: "POST", headers: { Authorization: `FableCapability ${token}` } }
-    );
-    await expect(authorizeCapabilityRequest(
-      request,
-      secret,
-      "computer-workspace-agent",
-      "schedule:manage"
-    )).resolves.toEqual({ authorized: true, expectedGeneration: 3 });
-    await expect(authorizeCapabilityRequest(
-      request,
-      secret,
-      "computer-workspace-agent",
-      "process:launch"
-    )).resolves.toEqual({ authorized: false });
-  });
 });

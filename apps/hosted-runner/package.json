@@ -15,7 +15,6 @@
     "worker:deploy": "wrangler deploy --config wrangler.jsonc --containers-rollout=immediate"
   },
   "dependencies": {
-    "@cloudflare/ai-utils": "1.0.1",
     "@cloudflare/sandbox": "0.13.0-next.738.2",
     "@fable/protocol": "workspace:*"
   },

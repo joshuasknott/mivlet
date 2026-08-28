@@ -1,26 +1,19 @@
 import { Sandbox } from "@cloudflare/sandbox";
 import {
-  type HostedAgentRoutineRequest,
   type HostedExecutionCapabilityScope,
-  type HostedProcessLaunchRequest,
-  type HostedProcessScheduleRequest
+  type HostedProcessLaunchRequest
 } from "@fable/protocol";
 import {
   HostedRunnerRequestError,
   validateComputerId,
-  validateAgentRoutineRequest,
   validateLaunchRequest,
-  validateProcessId,
-  validateProcessScheduleRequest,
-  validateScheduleId,
-  validateRoutineId
+  validateProcessId
 } from "./contracts";
-import { AgentRoutineAuthority } from "./agent-routine-authority";
 import { BrowserAuthority } from "./browser-authority";
 import { ComputerAuthority } from "./computer-authority";
 import { authorizeCapabilityRequest, serviceAuthorized } from "./request-auth";
 
-export { AgentRoutineAuthority, BrowserAuthority, ComputerAuthority, Sandbox };
+export { BrowserAuthority, ComputerAuthority, Sandbox };
 
 const MAX_BODY_BYTES = 64 * 1024;
 
@@ -60,8 +53,7 @@ export default {
       if (parts.length === 3 && request.method === "DELETE") {
         route = "computer.destroy";
         const browser = env.BROWSER_AUTHORITY.getByName(computerId);
-        const routines = env.AGENT_ROUTINE_AUTHORITY.getByName(computerId);
-        const [, , snapshot] = await Promise.all([browser.destroy(computerId), routines.destroy(), authority.destroy(computerId)]);
+        const [, snapshot] = await Promise.all([browser.destroy(computerId), authority.destroy(computerId)]);
         return json(snapshot);
       }
       if (parts[3] === "browser") {
@@ -78,91 +70,6 @@ export default {
         if (parts.length === 5 && parts[4] === "snapshot" && request.method === "GET") {
           route = "browser.snapshot";
           return json(await browser.snapshot(computerId, generation));
-        }
-        return json({ error: "not-found" }, 404);
-      }
-      if (parts[3] === "schedules" && parts.length === 4 && request.method === "GET") {
-        route = "schedule.list";
-        return json(await authority.listSchedules(computerId, authorization.expectedGeneration));
-      }
-      if (parts[3] === "schedule-runs" && parts.length === 4 && request.method === "GET") {
-        route = "schedule-runs.list";
-        return json(await authority.listScheduleRuns(computerId, authorization.expectedGeneration));
-      }
-      if (parts[3] === "agent-routines" || parts[3] === "agent-routine-runs") {
-        const generation = await authority.requireReady(computerId, authorization.expectedGeneration);
-        const routines = env.AGENT_ROUTINE_AUTHORITY.getByName(computerId);
-        if (parts[3] === "agent-routine-runs" && parts.length === 4 && request.method === "GET") {
-          route = "agent-routine-runs.list";
-          return json(await routines.listRuns(computerId, generation));
-        }
-        if (parts[3] === "agent-routines" && parts.length === 4 && request.method === "GET") {
-          route = "agent-routine.list";
-          return json(await routines.list(computerId, generation));
-        }
-        if (parts[3] === "agent-routines" && parts[4]) {
-          const routineId = validateRoutineId(parts[4]);
-          if (parts.length === 5 && request.method === "POST") {
-            route = "agent-routine.create";
-            const routine = validateAgentRoutineRequest(await readBoundedJson(request)) satisfies HostedAgentRoutineRequest;
-            return json(await routines.schedule(computerId, routineId, routine, generation), 202);
-          }
-          if (parts.length === 5 && request.method === "GET") {
-            route = "agent-routine.status";
-            return json(await routines.status(computerId, routineId, generation));
-          }
-          if (parts.length === 5 && request.method === "DELETE") {
-            route = "agent-routine.cancel";
-            return json(await routines.cancel(computerId, routineId, generation));
-          }
-          if (parts.length === 6 && parts[5] === "pause" && request.method === "POST") {
-            route = "agent-routine.pause";
-            return json(await routines.pause(computerId, routineId, generation));
-          }
-          if (parts.length === 6 && parts[5] === "resume" && request.method === "POST") {
-            route = "agent-routine.resume";
-            return json(await routines.resume(computerId, routineId, generation));
-          }
-        }
-        return json({ error: "not-found" }, 404);
-      }
-      if (parts[3] === "schedules" && parts[4]) {
-        const scheduleId = validateScheduleId(parts[4]);
-        if (parts.length === 5 && request.method === "POST") {
-          route = "schedule.create";
-          const schedule = validateProcessScheduleRequest(
-            await readBoundedJson(request)
-          ) satisfies HostedProcessScheduleRequest;
-          return json(await authority.schedule(
-            computerId,
-            scheduleId,
-            schedule,
-            authorization.expectedGeneration
-          ), 202);
-        }
-        if (parts.length === 5 && request.method === "GET") {
-          route = "schedule.status";
-          return json(await authority.scheduleStatus(
-            computerId,
-            scheduleId,
-            authorization.expectedGeneration
-          ));
-        }
-        if (parts.length === 5 && request.method === "DELETE") {
-          route = "schedule.cancel";
-          return json(await authority.cancelSchedule(
-            computerId,
-            scheduleId,
-            authorization.expectedGeneration
-          ));
-        }
-        if (parts.length === 6 && parts[5] === "pause" && request.method === "POST") {
-          route = "schedule.pause";
-          return json(await authority.pauseSchedule(computerId, scheduleId, authorization.expectedGeneration));
-        }
-        if (parts.length === 6 && parts[5] === "resume" && request.method === "POST") {
-          route = "schedule.resume";
-          return json(await authority.resumeSchedule(computerId, scheduleId, authorization.expectedGeneration));
         }
         return json({ error: "not-found" }, 404);
       }
@@ -188,8 +95,8 @@ export default {
         return json({ error: error.code, message: error.message }, error.status);
       }
       const code = safeOperationCode(error);
-      const status = code === "process-not-found" || code === "computer-not-found" || code === "schedule-not-found" || code === "routine-not-found" ? 404
-        : code === "computer-not-ready" || code === "capability-stale" || code === "schedule-conflict" || code === "routine-conflict" || code === "routine-limit-reached" ? 409
+      const status = code === "process-not-found" || code === "computer-not-found" ? 404
+        : code === "computer-not-ready" || code === "capability-stale" ? 409
         : 503;
       console.error(JSON.stringify({ level: "error", message: "hosted runner request failed", requestId, route, code }));
       return json({ error: code }, status);
@@ -217,22 +124,6 @@ function requestedCapabilityScope(parts: string[], method: string): HostedExecut
     if (parts.length === 5 && parts[4] === "act" && method === "POST") return "browser:act";
     if (parts.length === 5 && parts[4] === "snapshot" && method === "GET") return "browser:snapshot";
   }
-  if (parts[3] === "schedules") {
-    if (parts.length === 4 && method === "GET") return "schedule:manage";
-    if (parts.length === 5 && parts[4] && (method === "POST" || method === "GET" || method === "DELETE")) {
-      return "schedule:manage";
-    }
-    if (parts.length === 6 && parts[4] && (parts[5] === "pause" || parts[5] === "resume") && method === "POST") {
-      return "schedule:manage";
-    }
-  }
-  if (parts[3] === "schedule-runs" && parts.length === 4 && method === "GET") return "schedule:manage";
-  if (parts[3] === "agent-routines") {
-    if (parts.length === 4 && method === "GET") return "schedule:manage";
-    if (parts.length === 5 && parts[4] && (method === "POST" || method === "GET" || method === "DELETE")) return "schedule:manage";
-    if (parts.length === 6 && parts[4] && (parts[5] === "pause" || parts[5] === "resume") && method === "POST") return "schedule:manage";
-  }
-  if (parts[3] === "agent-routine-runs" && parts.length === 4 && method === "GET") return "schedule:manage";
   return null;
 }
 

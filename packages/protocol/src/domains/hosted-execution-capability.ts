@@ -2,7 +2,6 @@ export type HostedExecutionCapabilityScope =
   | "process:launch"
   | "process:inspect"
   | "process:kill"
-  | "schedule:manage"
   | "browser:navigate"
   | "browser:act"
   | "browser:snapshot";
@@ -33,7 +32,6 @@ const ALLOWED_SCOPES = new Set<HostedExecutionCapabilityScope>([
   "process:launch",
   "process:inspect",
   "process:kill",
-  "schedule:manage",
   "browser:navigate",
   "browser:act",
   "browser:snapshot"

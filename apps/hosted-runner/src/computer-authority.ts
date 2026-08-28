@@ -4,20 +4,14 @@ import type {
   HostedComputerSnapshot,
   HostedProcessLaunchRequest,
   HostedProcessLifecycle,
-  HostedProcessScheduleRunSnapshot,
-  HostedProcessScheduleRequest,
-  HostedProcessScheduleSnapshot,
   HostedProcessSnapshot
 } from "@fable/protocol";
 import { DurableObject } from "cloudflare:workers";
 import {
   validateComputerId,
   validateLaunchRequest,
-  validateProcessId,
-  validateProcessScheduleRequest,
-  validateScheduleId
+  validateProcessId
 } from "./contracts";
-import { nextRecurringOccurrence } from "./schedule-logic";
 
 interface ComputerRow extends Record<string, SqlStorageValue> {
   computer_id: string;
@@ -40,33 +34,6 @@ interface ProcessRow extends Record<string, SqlStorageValue> {
   exit_code: number | null;
   timed_out: number | null;
   error_code: string | null;
-  updated_at: string;
-}
-
-interface ScheduleRow extends Record<string, SqlStorageValue> {
-  schedule_id: string;
-  request_key: string;
-  run_id: string;
-  lifecycle: "active" | "paused" | "cancelled" | "stale";
-  launch_json: string;
-  first_run_at: number;
-  interval_seconds: number;
-  next_run_at: number | null;
-  last_run_at: number | null;
-  last_process_id: string | null;
-  last_error_code: string | null;
-  generation: number;
-  updated_at: string;
-}
-
-interface ScheduleRunRow extends Record<string, SqlStorageValue> {
-  occurrence_id: string;
-  schedule_id: string;
-  scheduled_at: number;
-  request_key: string;
-  run_id: string;
-  error_code: string | null;
-  generation: number;
   updated_at: string;
 }
 
@@ -171,222 +138,6 @@ export class ComputerAuthority extends DurableObject<Env> {
     }
   }
 
-  async schedule(
-    rawComputerId: string,
-    rawScheduleId: string,
-    rawRequest: unknown,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot> {
-    const computerId = validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    const scheduleId = validateScheduleId(rawScheduleId);
-    const request = validateProcessScheduleRequest(rawRequest);
-    if (request.scheduleId !== scheduleId) throw this.operationError("schedule-id-mismatch");
-    const replay = this.readScheduleByRequestKey(request.requestKey);
-    if (replay) {
-      if (replay.schedule_id !== scheduleId) throw this.operationError("schedule-conflict");
-      return scheduleSnapshot(replay);
-    }
-    if (this.readSchedule(scheduleId)) throw this.operationError("schedule-conflict");
-    const computer = this.readComputer();
-    if (!computer || computer.lifecycle !== "ready" || !computer.keep_alive) {
-      throw this.operationError("computer-not-ready");
-    }
-    const now = new Date().toISOString();
-    const firstRunAt = Date.parse(request.firstRunAt);
-    this.ctx.storage.sql.exec(
-      `INSERT INTO schedules (schedule_id, request_key, run_id, lifecycle, launch_json, first_run_at,
-       interval_seconds, next_run_at, generation, updated_at)
-       VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
-      scheduleId,
-      request.requestKey,
-      request.runId,
-      JSON.stringify(request),
-      firstRunAt,
-      request.intervalSeconds,
-      firstRunAt,
-      computer.generation,
-      now
-    );
-    await this.resetAlarm();
-    return scheduleSnapshot(this.readRequiredSchedule(scheduleId));
-  }
-
-  async scheduleStatus(
-    rawComputerId: string,
-    rawScheduleId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot> {
-    validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    return scheduleSnapshot(this.readRequiredSchedule(validateScheduleId(rawScheduleId)));
-  }
-
-  async listSchedules(
-    rawComputerId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot[]> {
-    validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    return this.ctx.storage.sql.exec<ScheduleRow>(
-      "SELECT * FROM schedules ORDER BY updated_at DESC, schedule_id LIMIT 100"
-    ).toArray().map(scheduleSnapshot);
-  }
-
-  async listScheduleRuns(
-    rawComputerId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleRunSnapshot[]> {
-    const computerId = validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    const recent = this.readRecentScheduleRuns();
-    let refreshed = 0;
-    for (const row of recent) {
-      const process = this.readProcessByRequestKey(row.request_key);
-      if (
-        refreshed < 20
-        && process?.process_id
-        && (process.lifecycle === "launching" || process.lifecycle === "running" || process.lifecycle === "cancelling")
-      ) {
-        refreshed += 1;
-        await this.refreshProcessStatus(computerId, process).catch(() => undefined);
-      }
-    }
-    return this.readRecentScheduleRuns().map((row) =>
-      scheduleRunSnapshot(row, this.readProcessByRequestKey(row.request_key))
-    );
-  }
-
-  async cancelSchedule(
-    rawComputerId: string,
-    rawScheduleId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot> {
-    validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    const scheduleId = validateScheduleId(rawScheduleId);
-    this.readRequiredSchedule(scheduleId);
-    this.ctx.storage.sql.exec(
-      "UPDATE schedules SET lifecycle = 'cancelled', next_run_at = NULL, updated_at = ? WHERE schedule_id = ?",
-      new Date().toISOString(),
-      scheduleId
-    );
-    await this.resetAlarm();
-    return scheduleSnapshot(this.readRequiredSchedule(scheduleId));
-  }
-
-  async pauseSchedule(
-    rawComputerId: string,
-    rawScheduleId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot> {
-    validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    const scheduleId = validateScheduleId(rawScheduleId);
-    const schedule = this.readRequiredSchedule(scheduleId);
-    if (schedule.lifecycle === "cancelled" || schedule.lifecycle === "stale") {
-      throw this.operationError("schedule-not-controllable");
-    }
-    if (schedule.lifecycle === "active") {
-      this.ctx.storage.sql.exec(
-        "UPDATE schedules SET lifecycle = 'paused', next_run_at = NULL, updated_at = ? WHERE schedule_id = ? AND lifecycle = 'active'",
-        new Date().toISOString(),
-        scheduleId
-      );
-      await this.resetAlarm();
-    }
-    return scheduleSnapshot(this.readRequiredSchedule(scheduleId));
-  }
-
-  async resumeSchedule(
-    rawComputerId: string,
-    rawScheduleId: string,
-    expectedGeneration?: number
-  ): Promise<HostedProcessScheduleSnapshot> {
-    validateComputerId(rawComputerId);
-    this.requireCapabilityGeneration(expectedGeneration);
-    const scheduleId = validateScheduleId(rawScheduleId);
-    const schedule = this.readRequiredSchedule(scheduleId);
-    if (schedule.lifecycle === "cancelled" || schedule.lifecycle === "stale") {
-      throw this.operationError("schedule-not-controllable");
-    }
-    if (schedule.lifecycle === "paused") {
-      const computer = this.readComputer();
-      if (!computer || computer.lifecycle !== "ready" || !computer.keep_alive || computer.generation !== schedule.generation) {
-        throw this.operationError("computer-not-ready");
-      }
-      const nextRunAt = nextRecurringOccurrence(schedule.first_run_at, schedule.interval_seconds, Date.now());
-      this.ctx.storage.sql.exec(
-        "UPDATE schedules SET lifecycle = 'active', next_run_at = ?, updated_at = ? WHERE schedule_id = ? AND lifecycle = 'paused'",
-        nextRunAt,
-        new Date().toISOString(),
-        scheduleId
-      );
-      await this.resetAlarm();
-    }
-    return scheduleSnapshot(this.readRequiredSchedule(scheduleId));
-  }
-
-  async alarm(): Promise<void> {
-    const computer = this.readComputer();
-    if (!computer || computer.lifecycle !== "ready" || !computer.keep_alive) return;
-    const now = Date.now();
-    const due = this.ctx.storage.sql.exec<ScheduleRow>(
-      "SELECT * FROM schedules WHERE lifecycle = 'active' AND generation = ? AND next_run_at <= ? ORDER BY next_run_at LIMIT 10",
-      computer.generation,
-      now
-    ).toArray();
-    for (const row of due) {
-      const scheduledAt = row.next_run_at;
-      if (scheduledAt === null) continue;
-      const occurrenceId = `occurrence-${scheduledAt}`;
-      const requestKey = `scheduled:${row.schedule_id}:${scheduledAt}`;
-      const runId = `${row.run_id}:${scheduledAt}`;
-      this.insertScheduleRun(row, occurrenceId, scheduledAt, requestKey, runId);
-      let nextRunAt: number;
-      try {
-        nextRunAt = nextRecurringOccurrence(scheduledAt, row.interval_seconds, now);
-      } catch {
-        this.markScheduleRun(row.schedule_id, occurrenceId, "invalid-schedule-state");
-        this.ctx.storage.sql.exec(
-          "UPDATE schedules SET lifecycle = 'stale', next_run_at = NULL, last_error_code = 'invalid-schedule-state', updated_at = ? WHERE schedule_id = ?",
-          new Date().toISOString(),
-          row.schedule_id
-        );
-        continue;
-      }
-      let lastProcessId: string | null = null;
-      let lastErrorCode: string | null = null;
-      try {
-        const stored = JSON.parse(row.launch_json) as HostedProcessScheduleRequest;
-        const launch = validateLaunchRequest({
-          requestKey,
-          runId,
-          argv: stored.argv,
-          ...(stored.cwd ? { cwd: stored.cwd } : {}),
-          ...(stored.timeoutMs ? { timeoutMs: stored.timeoutMs } : {})
-        });
-        const process = await this.launchValidated(computer.computer_id, launch);
-        lastProcessId = process.processId ?? null;
-      } catch (error) {
-        lastErrorCode = errorCode(error);
-      }
-      this.markScheduleRun(row.schedule_id, occurrenceId, lastErrorCode);
-      this.ctx.storage.sql.exec(
-        `UPDATE schedules SET next_run_at = ?, last_run_at = ?, last_process_id = ?, last_error_code = ?, updated_at = ?
-         WHERE schedule_id = ? AND lifecycle = 'active' AND generation = ?`,
-        nextRunAt,
-        scheduledAt,
-        lastProcessId,
-        lastErrorCode,
-        new Date().toISOString(),
-        row.schedule_id,
-        computer.generation
-      );
-    }
-    await this.resetAlarm();
-  }
-
   async inspect(rawComputerId: string, rawProcessId: string, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
@@ -453,11 +204,6 @@ export class ComputerAuthority extends DurableObject<Env> {
         new Date().toISOString(),
         new Date().toISOString()
       );
-      this.ctx.storage.sql.exec(
-        "UPDATE schedules SET lifecycle = 'stale', next_run_at = NULL, updated_at = ? WHERE lifecycle IN ('active', 'paused')",
-        new Date().toISOString()
-      );
-      await this.ctx.storage.deleteAlarm();
       this.writeComputer({ computerId, lifecycle: "destroyed", keepAlive: false, generation, updatedAt: new Date().toISOString() });
       return this.snapshot(false);
     } catch (error) {
@@ -514,36 +260,7 @@ export class ComputerAuthority extends DurableObject<Env> {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_process_id ON processes(process_id) WHERE process_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_processes_run_id ON processes(run_id);
-      CREATE TABLE IF NOT EXISTS schedules (
-        schedule_id TEXT PRIMARY KEY,
-        request_key TEXT NOT NULL UNIQUE,
-        run_id TEXT NOT NULL,
-        lifecycle TEXT NOT NULL,
-        launch_json TEXT NOT NULL,
-        first_run_at INTEGER NOT NULL,
-        interval_seconds INTEGER NOT NULL,
-        next_run_at INTEGER,
-        last_run_at INTEGER,
-        last_process_id TEXT,
-        last_error_code TEXT,
-        generation INTEGER NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-      CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(lifecycle, generation, next_run_at);
-      CREATE TABLE IF NOT EXISTS schedule_runs (
-        occurrence_id TEXT NOT NULL,
-        schedule_id TEXT NOT NULL,
-        scheduled_at INTEGER NOT NULL,
-        request_key TEXT NOT NULL UNIQUE,
-        run_id TEXT NOT NULL,
-        error_code TEXT,
-        generation INTEGER NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (schedule_id, occurrence_id)
-      );
-      CREATE INDEX IF NOT EXISTS idx_schedule_runs_recent ON schedule_runs(schedule_id, scheduled_at DESC);
       INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (1);
-      INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2);
     `);
   }
 
@@ -609,106 +326,6 @@ export class ComputerAuthority extends DurableObject<Env> {
     return row;
   }
 
-  private readSchedule(scheduleId: string): ScheduleRow | null {
-    return this.ctx.storage.sql.exec<ScheduleRow>(
-      "SELECT * FROM schedules WHERE schedule_id = ?",
-      scheduleId
-    ).toArray()[0] ?? null;
-  }
-
-  private readScheduleByRequestKey(requestKey: string): ScheduleRow | null {
-    return this.ctx.storage.sql.exec<ScheduleRow>(
-      "SELECT * FROM schedules WHERE request_key = ?",
-      requestKey
-    ).toArray()[0] ?? null;
-  }
-
-  private readRequiredSchedule(scheduleId: string): ScheduleRow {
-    const row = this.readSchedule(scheduleId);
-    if (!row) throw this.operationError("schedule-not-found");
-    return row;
-  }
-
-  private readRecentScheduleRuns(): ScheduleRunRow[] {
-    return this.ctx.storage.sql.exec<ScheduleRunRow>(
-      "SELECT * FROM schedule_runs ORDER BY scheduled_at DESC, schedule_id LIMIT 100"
-    ).toArray();
-  }
-
-  private insertScheduleRun(
-    schedule: ScheduleRow,
-    occurrenceId: string,
-    scheduledAt: number,
-    requestKey: string,
-    runId: string
-  ): void {
-    const updatedAt = new Date().toISOString();
-    this.ctx.storage.sql.exec(
-      `INSERT OR IGNORE INTO schedule_runs
-       (occurrence_id, schedule_id, scheduled_at, request_key, run_id, generation, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      occurrenceId,
-      schedule.schedule_id,
-      scheduledAt,
-      requestKey,
-      runId,
-      schedule.generation,
-      updatedAt
-    );
-    this.ctx.storage.sql.exec(
-      `DELETE FROM schedule_runs WHERE schedule_id = ? AND occurrence_id NOT IN (
-        SELECT occurrence_id FROM schedule_runs WHERE schedule_id = ? ORDER BY scheduled_at DESC LIMIT 20
-      )`,
-      schedule.schedule_id,
-      schedule.schedule_id
-    );
-  }
-
-  private markScheduleRun(scheduleId: string, occurrenceId: string, error: string | null): void {
-    this.ctx.storage.sql.exec(
-      "UPDATE schedule_runs SET error_code = ?, updated_at = ? WHERE schedule_id = ? AND occurrence_id = ?",
-      error,
-      new Date().toISOString(),
-      scheduleId,
-      occurrenceId
-    );
-  }
-
-  private async refreshProcessStatus(computerId: string, stored: ProcessRow): Promise<void> {
-    if (!stored.process_id) return;
-    const process = await this.sandbox(computerId).getProcess(stored.process_id);
-    if (!process) {
-      this.markProcess(stored.request_key, "stale", {
-        errorCode: "process-container-replaced",
-        endedAt: new Date().toISOString()
-      });
-      return;
-    }
-    const status = await process.status();
-    if (status.state === "running") {
-      this.markProcess(stored.request_key, stored.lifecycle === "cancelling" ? "cancelling" : "running", {});
-      return;
-    }
-    if (status.state === "error") {
-      this.markProcess(stored.request_key, "failed", { errorCode: status.error.code, endedAt: status.endedAt });
-      return;
-    }
-    this.markProcess(stored.request_key, status.exit.code === 0 ? "completed" : "failed", {
-      exitCode: status.exit.code,
-      timedOut: status.exit.timedOut,
-      endedAt: status.endedAt,
-      ...(status.exit.code === 0 ? {} : { errorCode: status.exit.timedOut ? "process-timeout" : "process-exit-nonzero" })
-    });
-  }
-
-  private async resetAlarm(): Promise<void> {
-    const next = this.ctx.storage.sql.exec<{ next_run_at: number }>(
-      "SELECT next_run_at FROM schedules WHERE lifecycle = 'active' AND next_run_at IS NOT NULL ORDER BY next_run_at LIMIT 1"
-    ).toArray()[0]?.next_run_at;
-    if (next === undefined) await this.ctx.storage.deleteAlarm();
-    else await this.ctx.storage.setAlarm(next);
-  }
-
   private markProcess(
     requestKey: string,
     lifecycle: HostedProcessLifecycle,
@@ -761,46 +378,6 @@ function processSnapshot(row: ProcessRow): HostedProcessSnapshot {
     ...(row.exit_code === null ? {} : { exitCode: row.exit_code }),
     ...(row.timed_out === null ? {} : { timedOut: row.timed_out === 1 }),
     ...(row.error_code === null ? {} : { errorCode: row.error_code })
-  };
-}
-
-function scheduleSnapshot(row: ScheduleRow): HostedProcessScheduleSnapshot {
-  return {
-    scheduleId: row.schedule_id,
-    requestKey: row.request_key,
-    runId: row.run_id,
-    lifecycle: row.lifecycle,
-    firstRunAt: new Date(row.first_run_at).toISOString(),
-    intervalSeconds: row.interval_seconds,
-    ...(row.next_run_at === null ? {} : { nextRunAt: new Date(row.next_run_at).toISOString() }),
-    ...(row.last_run_at === null ? {} : { lastRunAt: new Date(row.last_run_at).toISOString() }),
-    ...(row.last_process_id === null ? {} : { lastProcessId: row.last_process_id }),
-    ...(row.last_error_code === null ? {} : { lastErrorCode: row.last_error_code }),
-    generation: row.generation,
-    updatedAt: row.updated_at
-  };
-}
-
-function scheduleRunSnapshot(
-  row: ScheduleRunRow,
-  process: ProcessRow | null
-): HostedProcessScheduleRunSnapshot {
-  const fallbackLifecycle: HostedProcessLifecycle = row.error_code ? "failed" : "stale";
-  return {
-    occurrenceId: row.occurrence_id,
-    scheduleId: row.schedule_id,
-    scheduledAt: new Date(row.scheduled_at).toISOString(),
-    requestKey: row.request_key,
-    runId: row.run_id,
-    lifecycle: process?.lifecycle ?? fallbackLifecycle,
-    ...(process?.process_id ? { processId: process.process_id } : {}),
-    ...(process?.started_at ? { startedAt: process.started_at } : {}),
-    ...(process?.ended_at ? { endedAt: process.ended_at } : {}),
-    ...(process?.exit_code === null || process?.exit_code === undefined ? {} : { exitCode: process.exit_code }),
-    ...(process?.timed_out === null || process?.timed_out === undefined ? {} : { timedOut: process.timed_out === 1 }),
-    ...(process?.error_code || row.error_code ? { errorCode: process?.error_code ?? row.error_code ?? "unknown" } : {}),
-    generation: row.generation,
-    updatedAt: process && process.updated_at > row.updated_at ? process.updated_at : row.updated_at
   };
 }
 
