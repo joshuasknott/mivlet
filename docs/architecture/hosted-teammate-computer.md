@@ -1,38 +1,61 @@
 # Hosted teammate computer
 
-> **Status: implemented foundation; deployment and live-account validation remain external.**
+> **Status: deployment-gated foundation.** The repository implements bounded
+> Cloudflare computer and browser endpoints, but this checkout has not
+> provisioned or live-validated their production dependencies.
 
-Fable can assign a hosted execution node to a workspace/teammate pair. Convex owns provisioning state and issues short-lived, generation-fenced capabilities. The desktop's Rust boundary owns the account credential and exchanges those capabilities with a Cloudflare Worker; bearer credentials do not enter the renderer or model transcript.
+## Boundary
 
-## Current runtime
+Convex records optional provisioning state for a workspace/teammate pair and
+mints short-lived, generation-fenced capabilities. Rust holds the root account
+credential, requests only the needed capability, and calls the hosted runner.
+Bearer credentials, capability tokens, internal URLs, and takeover credentials
+must not enter React state or the model transcript.
 
-- Cloudflare Sandbox supplies a durable `/workspace`, terminal commands, and process inspection inside a Container-backed Durable Object.
-- Cloudflare Browser Run supplies a persistent browser session coordinated by a second Durable Object.
-- A teammate can run an approved `run-shell` call, request an approved public HTTPS navigation through `cloud-browser`, and use one observed page control at a time through `cloud-browser-action`.
-- A teammate can create, pause, resume, or cancel up to 50 live recurring natural-language routines through explicit `cloud-agent-routine*` tools. Each occurrence uses the runner's managed Workers AI binding to reinterpret the approved instruction and may expose only the approved standing capabilities: workspace read, optional atomic workspace write, and optional explicit-argv process execution. Runs are limited to 1–8 tool steps, results are bounded, and recurrence advances before inference so an interrupted alarm cannot replay the same turn indefinitely.
-- A teammate can create, pause, resume, or cancel a bounded recurring hosted process through explicit `cloud-process-schedule*` tools. Durable Object alarms advance missed occurrences without replaying an unbounded backlog, so approved programs can run after the desktop closes. Resuming preserves the original recurrence grid rather than drifting from the resume time.
-- The live-work rail shows computer state, browser URL/title, a bounded JPEG preview, refresh, and a temporary Live View takeover link for human-only steps.
-- The Schedules page presents natural-language `Agent routines` first and keeps exact-program schedules in an advanced section. A routine form makes the outcome, first run, repeat interval, 1–8 step limit, and standing read/write/process authority visible before approval. Routine cards show lifecycle, next/last run, bounded result, and the last 20 occurrences with tool evidence. Exact-program creation accepts only a named JavaScript, Python, or shell program already below `/workspace`, explicit one-per-line arguments, a future first run, and one of four bounded repeat intervals; it derives an argv without shell parsing and warns against secrets. Each program schedule also retains its 20 most recent occurrence records. A deliberate `View output` action fetches currently retained stdout/stderr through the native inspection boundary and keeps it only in transient page state.
-- Deleting the computer closes both browser and computer authority state.
+The runner exposes only these capability families:
 
-## Approval and network boundary
+- process launch, inspection, and termination in a container workspace;
+- public-HTTPS browser navigation;
+- bounded browser observation and exact control actions; and
+- trusted snapshot/live-view metadata for the human UI.
 
-Model-originated shell and browser actions require the ordinary exact tool approval plus a second approval bound to the prepared hosted proposal. Rust consumes both one-time execution permits and requests a scope-specific capability from Convex. The runner accepts only that capability and rechecks computer id, runner generation, request key, scope, expiry, and one-time use.
+There is no hosted recurring-work or background-conversation contract in the
+current protocol.
 
-Hosted process schedules use that same two-approval chain and a separate `schedule:manage` capability. A schedule stores only an explicit argument list, `/workspace`-confined working directory, bounded timeout, first run, and 5-minute-to-7-day recurrence. It cannot contain environment credentials. Creation, pause, resume, and cancellation are replay-safe state transitions; deleting a computer makes active or paused schedules stale and removes the next alarm.
+## Approval and authorization
 
-Hosted agent routines use the same two-approval chain and `schedule:manage` capability, but the prepared approval additionally binds the complete natural-language instruction, recurrence, step limit, and ordered standing capability set. The Cloudflare runner owns the managed model binding; local provider API keys and CLI sessions never cross into the Worker or stored routine. Workspace paths remain confined below `/workspace`, writes use a temporary file and atomic move, and process execution accepts an argument vector rather than a shell command string. Deleting a computer stales its routines and removes their next alarms.
+A model-originated process or browser effect needs Fable's normal exact tool
+approval and the prepared hosted proposal. The native boundary consumes the
+single-use permit, obtains a scope-specific hosted capability, and sends it to
+the runner. The runner rechecks the computer, generation, scope, expiry, nonce,
+and one-time use.
 
-Browser navigation accepts only public HTTPS URLs, rejects embedded credentials, loopback/private/reserved targets, strips fragments, and intercepts subrequests that resolve to non-public hosts. Each observation exposes bounded top-level viewport position/dimensions, Back/Forward availability, and at most 40 opaque, observation-scoped controls: one synthetic Page document plus up to 39 controls that actually intersect the viewport. Click, fill, exact-label native dropdown selection, a closed set of key presses, half/full viewport scrolling, Back/Forward movement, and explicit downloads must bind the reference, accessible role/name, observation, and exact action through both approvals; stale or changed controls fail closed. Approved downloads stream at most 25 MB through a temporary file and are atomically retained below `/workspace/downloads`; only the safe filename, workspace path, and byte count return to the model. Scrolling accepts only four fixed distances and exposes no selector or script channel. Navigation history is a runner-owned, 32-entry list of previously validated public HTTPS pages; it never delegates to an opaque browser-native target, truncates its forward branch after a new navigation, and updates an approved target to its final validated redirect. Password, one-time-code, card, transaction, and WebAuthn fields are excluded or blocked. The model receives bounded metadata and controls only; the JPEG data URL and temporary `live.browser.run` takeover credential stay in the trusted UI path.
+Browser navigation accepts only public HTTPS targets, rejects embedded
+credentials and private or reserved destinations, strips fragments, and
+revalidates redirects and subrequests. Observations and actions are bounded to
+opaque current references; password, one-time-code, payment, transaction, and
+WebAuthn fields are excluded or blocked. Screens and temporary human takeover
+credentials stay in the trusted UI path.
 
-## What this does not yet claim
+Deleting a hosted computer invalidates its computer and browser authority. A
+stale generation or capability cannot target its replacement.
 
-- No Worker, Container, Browser Run binding, Convex deployment, Clerk tenant, or production secret has been provisioned from this checkout.
-- Ordinary chat turns and device-local prompt schedules still stop with the desktop. Only an explicitly approved hosted natural-language routine or exact-program schedule continues independently; there is no automatic migration of existing local routines.
-- Browser automation has a bounded web-control vocabulary, including observation-scoped viewport scrolling, safe Back/Forward movement, and bounded downloads into the hosted workspace, but not arbitrary selectors/scripts, element-targeted scrolling, file uploads, multi-tab orchestration, secure login/secret handoff, or native desktop application control.
-- The hosted computer has no completed secure sign-in/secret-handoff flow or live third-party application validation.
-- Hosted routines do not yet have secure connector/OAuth delegation, browser tools, generated Artifact promotion, custom cron/calendar rules, editing in place, or cross-routine memory. The managed model and every tool path have unit/build coverage but have not been live-validated against deployed Workers AI, Durable Object, and Container bindings. Exact-program stdout/stderr is available only through explicit transient inspection. Recovery, upgrade, reset, metering, quotas, production observability, and cross-device/mobile control are not complete product surfaces.
+## Deployment prerequisites
 
-## Deployment inputs
+The path requires configured identity and Convex state, a deployed Cloudflare
+Worker, Container/Sandbox and Browser Rendering bindings, Durable Objects,
+secrets, quotas, and a live smoke test. A build or Wrangler dry-run verifies
+source compatibility and packaging only.
 
-The hosted path requires a configured Clerk/Convex deployment, `FABLE_HOSTED_RUNNER_URL`, the Worker capability HMAC secret, Cloudflare Sandbox/Container bindings, the Browser Run binding, the Workers AI binding, and a production deploy/smoke-test pass. These are operational prerequisites, not repository-local tests.
+## Not claimed
+
+- No production Worker, container, browser, Convex tenant, account recovery,
+  metering, quota, monitoring, or disaster-recovery path is proven here.
+- Ordinary conversations do not automatically move to a hosted computer or
+  continue after the desktop closes.
+- Secure third-party sign-in, secret handoff, connector credential delegation,
+  file upload, multi-tab automation, and native desktop applications are not
+  complete.
+- A deployed service would need live authorization, network-isolation,
+  retention, reset, upgrade, billing, abuse, and cross-device validation before
+  product claims expand.

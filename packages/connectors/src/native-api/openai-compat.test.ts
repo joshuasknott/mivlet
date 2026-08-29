@@ -103,28 +103,7 @@ describe("openai-compatible shaping", () => {
     ]);
   });
 
-  it("emits only unseen suffixes for MiniMax cumulative content frames", async () => {
-    const transport = new FixtureTransport([
-      'data: {"choices":[{"delta":{"content":"Hello"}}]}',
-      'data: {"choices":[{"delta":{"content":"Hello world"}}]}',
-      'data: {"choices":[{"delta":{"content":"Hello world"}}]}',
-      'data: {"choices":[{"delta":{"content":"Hello"}}]}',
-      'data: {"choices":[{"delta":{"content":"Hello world!"}}]}',
-      'data: {"choices":[{"finish_reason":"stop"}]}'
-    ]);
-    const minimaxRequest = { ...request, providerId: "minimax", model: "MiniMax-M2.7" };
-    const events = [];
-    for await (const event of streamOpenAiEvents(transport, minimaxRequest)) events.push(event);
-
-    expect(events).toEqual([
-      { type: "text-delta", text: "Hello" },
-      { type: "text-delta", text: " world" },
-      { type: "text-delta", text: "!" },
-      { type: "done", finishReason: "stop" }
-    ]);
-  });
-
-  it("preserves incremental content behavior for other OpenAI-compatible providers", async () => {
+  it("preserves incremental content from an OpenAI-compatible stream", async () => {
     const transport = new FixtureTransport([
       'data: {"choices":[{"delta":{"content":"Hello"}}]}',
       'data: {"choices":[{"delta":{"content":"Hello world"}}]}',

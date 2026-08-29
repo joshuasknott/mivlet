@@ -38,13 +38,9 @@
       "types": "./dist/providers/*.d.ts",
       "import": "./dist/providers/*.js"
     },
-    "./browser-session": {
-      "types": "./dist/browser-session.d.ts",
-      "import": "./dist/browser-session.js"
-    },
-    "./fixtures": {
-      "types": "./dist/fixtures.d.ts",
-      "import": "./dist/fixtures.js"
+    "./catalog": {
+      "types": "./dist/catalog.d.ts",
+      "import": "./dist/catalog.js"
     },
     "./knowledge-search": {
       "types": "./dist/knowledge-search.d.ts",

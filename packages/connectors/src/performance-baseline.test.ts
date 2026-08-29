@@ -1,11 +1,16 @@
 import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent, KnowledgeSource, NativeCompletionRequest } from "@fable/protocol";
+import type {
+  BackendAgentEvent,
+  ConnectorSearchItem,
+  KnowledgeSource,
+  NativeCompletionRequest
+} from "@fable/protocol";
 import {
-  importFixtureConnectorItem,
-  prepareFixtureConnectorAction,
-  searchFixtureConnector
-} from "./providers/registry";
+  importConnectorSearchItem,
+  prepareConnectorAction,
+  shapeConnectorSearchRequest
+} from "./providers/shared";
 import { searchKnowledgeSources } from "./knowledge-search";
 import { SequencedFixtureTransport } from "./native-api/transport";
 import { runAgentLoop, type ToolExecutor } from "./native-api/agent-loop";
@@ -51,31 +56,45 @@ describe("performance baseline guardrails", () => {
     expect(value.citations[0].title).toMatch(/connector/i);
   });
 
-  it("shapes connector fixture search, import, and approval requests locally", () => {
-    const { value: result } = timed("connector fixture search", () =>
-      searchFixtureConnector({ connectorId: "github", query: "fable", limit: 10 })
-    );
-    expect(result.source).toBe("fixture");
-    expect(result.items.length).toBeGreaterThan(0);
+  it("shapes bounded connector requests without network or credentials", () => {
+    const shaped = timed("connector search request", () =>
+      shapeConnectorSearchRequest("github", "  fable  ", 10)
+    ).value;
+    expect(shaped).toMatchObject({ connectorId: "github", query: "fable", limit: 10 });
 
-    const imported = timed("connector fixture import", () =>
-      importFixtureConnectorItem({
+    const item: ConnectorSearchItem = {
+      id: "repo-fable",
+      connectorId: "github",
+      connectionId: "connection-test",
+      title: "fable",
+      kind: "repository",
+      summary: "Repository metadata",
+      provenance: "GitHub",
+      freshness: "now",
+      trust: "untrusted",
+      providerMetadata: { owner: "acme" }
+    };
+    const imported = timed("connector import shaping", () =>
+      importConnectorSearchItem({
         connectorId: "github",
-        item: result.items[0],
+        item,
         importedAt: "2026-07-02T00:00:00.000Z"
       })
     ).value;
     expect(imported.source.origin).toBe("connector-import");
 
     const action = timed("connector action shaping", () =>
-      prepareFixtureConnectorAction("github.comment", {
-        repository: "acme/fable",
-        targetId: "42",
-        body: "Prepared local fixture comment."
-      })
+      prepareConnectorAction(
+        "github",
+        "GitHub",
+        "github.comment",
+        { repository: "acme/fable", targetId: "42", body: "Prepared comment." },
+        "high",
+        "Posts the exact reviewed comment."
+      )
     ).value;
     expect(action.approval.decisions).toContain("once");
-    expect(action.payload.body).toBe("Prepared local fixture comment.");
+    expect(action.payload.body).toBe("Prepared comment.");
   });
 
   it("runs a multi-turn native provider loop from fixture streams", async () => {

@@ -2,9 +2,8 @@ import type * as React from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import type {
   AccountWorkspaceStatus, ActionHistoryEvent, ApprovalAuditEntry, ApprovalDecision, ApprovalGrant, ApprovalModification,
-  ApprovalRequest, BackendProvider, BackendVerifyResult, BrowserSessionState, ConnectorActionKind,
-  ConnectorAccountOption, ConnectorManifest, ConnectorSearchItem, ConnectorSearchRequest,
-  ConnectorSearchResult, CustomApprovalSettings,
+  ApprovalRequest, BackendProvider, BackendVerifyResult,
+  ConnectorAccountOption, ConnectorManifest, CustomApprovalSettings,
   FableAgentProfile,
   IdentityStatus, KnowledgeCitation, KnowledgeSource, MemoryControlState,
   MemoryRecord, PermissionMode, PreparedExecutionContext, ThreadSummary, WorkspaceDirective
@@ -58,24 +57,16 @@ export interface ShellRuntime {
   useDirective: (directive: WorkspaceDirective) => void;
   useConnector: (connector: ConnectorManifest) => void;
   runCommand: (command: string) => void;
-  // first-wave connectors
+  // connected apps
   connectorManifests: ConnectorManifest[];
-  browserSession: BrowserSessionState;
   connectorAccounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
-  connectorSearchResult: ConnectorSearchResult | null;
   connectorImportedSources: KnowledgeSource[];
   connectConnector: (connector: ConnectorManifest) => Promise<void>;
   disconnectConnector: (connectorId: string) => Promise<void>;
   refreshConnector: (connectorId: string) => Promise<void>;
   loadConnectorAccounts: (connectorId: string) => Promise<void>;
   switchConnectorAccount: (connectorId: string, accountId: string) => Promise<void>;
-  searchConnector: (request: ConnectorSearchRequest) => Promise<void>;
-  importConnectorItem: (item: ConnectorSearchItem) => Promise<void>;
-  prepareConnectorAction: (
-    action: ConnectorActionKind,
-    payload: Record<string, string>
-  ) => Promise<void>;
   // approvals
   openApprovals: ApprovalRequest[];
   approvalAudit: ApprovalAuditEntry[];

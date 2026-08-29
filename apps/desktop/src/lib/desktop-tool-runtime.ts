@@ -26,7 +26,6 @@ import type {
   HostedBrowserSnapshot
 } from "@fable/protocol";
 import {
-  ACP_PERMISSION_TOOL,
   McpClient,
   normalizeMcpConnectedSourceSearch,
   type ApprovalGate,
@@ -121,13 +120,6 @@ export function createDesktopToolExecutor(
     const decision = await gate.waitForDecision(approval);
     if (decision !== "granted") {
       throw new Error(`Tool call denied: ${approval.action}.`);
-    }
-    // ACP agents execute their own tools. This reserved approval-only action
-    // must never cross into Rust's Fable-owned tool dispatcher (which would
-    // duplicate the side effect). Resolving here tells the ACP session that the
-    // existing gate granted one permission; it then selects only `allow_once`.
-    if (approval.action.split(/\s+/)[0] === ACP_PERMISSION_TOOL) {
-      return "ACP permission granted once.";
     }
     if (mcpRoute) {
       return runMcpSemanticRead(approval, parsed, options, mcpRoute);

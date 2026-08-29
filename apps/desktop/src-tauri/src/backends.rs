@@ -1,8 +1,7 @@
 //! Agent-runtime backend credential boundary.
 //!
-//! Rust owns credential access for native API-key agent backends. Catalog-only
-//! subscription/CLI providers remain gated until their real runtime adapter is
-//! available. Secrets live in the
+//! Rust owns credential access for native API-key agent backends and the
+//! secret-free status boundary for official Codex browser sign-in. Secrets live in the
 //! OS-secure store (Windows Credential Manager / macOS Keychain / Linux Secret
 //! Service) via the `keyring` crate, with a process-scoped `Mutex<HashMap>`
 //! kept as the test/headless fallback. Both are reached through the
@@ -64,16 +63,6 @@ const CODEX_CAPS: &[&str] = &[
     "cancellation",
 ];
 
-const ACP_CAPS: &[&str] = &[
-    "authentication",
-    "threads",
-    "streaming",
-    "tool-requests",
-    "approvals",
-    "file-changes",
-    "cancellation",
-];
-
 /// Native-API providers declare the full capability set when connected: Fable
 /// owns the loop, so it honors streaming, tool-requests + approvals, file
 /// changes, usage-cost (metered against the API key), model availability, and
@@ -90,86 +79,19 @@ const NATIVE_API_CAPS: &[&str] = &[
     "cancellation",
 ];
 
-/// Local runtimes are reachable only through an explicitly configured literal
-/// loopback service. They never accept or retain an API key in Fable.
-const LOCAL_LOOPBACK_CAPS: &[&str] = &["streaming", "model-availability", "cancellation"];
-
 const CATALOG: &[BackendCatalogEntry] = &[
     BackendCatalogEntry {
         id: "codex",
         backend_type: "codex-app-server",
         label: "Codex",
-        description: "Continue with ChatGPT/Codex via the Codex app-server. Supports subscription and OpenAI API-key auth.",
-        install_hint: "Requires the official Codex desktop app or Codex CLI.",
+        description: "Continue with ChatGPT through the official Codex browser sign-in flow.",
+        install_hint: "Requires the official Codex desktop app components.",
         models: &[
             ("gpt-5", "GPT-5"),
             ("gpt-5-thinking", "GPT-5 Thinking"),
             ("gpt-4.1", "GPT-4.1"),
         ],
         capabilities: CODEX_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "cursor",
-        backend_type: "acp",
-        label: "Cursor",
-        description: "Reaches your Cursor subscription over ACP (stdio/JSON-RPC) using your installed Cursor CLI.",
-        install_hint: "Requires the Cursor CLI. Install it, then connect.",
-        models: &[("cursor-default", "Cursor default")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "copilot",
-        backend_type: "acp",
-        label: "GitHub Copilot",
-        description: "Reaches Copilot over ACP using the installed GitHub Copilot CLI and its existing login or token configuration.",
-        install_hint: "Requires GitHub Copilot CLI. Install it and run copilot login.",
-        models: &[("copilot-default", "Copilot default")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "grok",
-        backend_type: "acp",
-        label: "Grok Build",
-        description: "Reaches your Grok account over ACP (stdio/JSON-RPC) using your installed Grok CLI. Entitlements are checked after login.",
-        install_hint: "Requires the Grok CLI. Install it, then connect.",
-        models: &[("grok-default", "Grok")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "opencode",
-        backend_type: "acp",
-        label: "OpenCode",
-        description: "Uses your installed OpenCode agent over ACP, including the providers and models already configured in OpenCode.",
-        install_hint: "Requires the OpenCode CLI. Install it and configure at least one provider.",
-        models: &[("opencode-default", "OpenCode default")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "kimi",
-        backend_type: "acp",
-        label: "Kimi Code",
-        description: "Uses your Kimi Code subscription through the official Kimi ACP runtime and its provider-owned device login.",
-        install_hint: "Requires Kimi Code CLI. Install it and run kimi login.",
-        models: &[("kimi-default", "Kimi default")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "mistral-vibe",
-        backend_type: "acp",
-        label: "Mistral Vibe",
-        description: "Uses your configured Mistral Vibe account or API profile through the official Vibe ACP runtime.",
-        install_hint: "Requires Mistral Vibe. Install it and run vibe --setup.",
-        models: &[("mistral-vibe-default", "Vibe default")],
-        capabilities: ACP_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "ollama",
-        backend_type: "local-loopback",
-        label: "Ollama",
-        description: "Use an externally managed Ollama service on 127.0.0.1. Fable never bundles models or downloads them automatically.",
-        install_hint: "Install Ollama, start its local service, then pull a model with Ollama before returning to Fable.",
-        models: &[],
-        capabilities: LOCAL_LOOPBACK_CAPS,
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
@@ -219,165 +141,6 @@ const CATALOG: &[BackendCatalogEntry] = &[
         description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[("grok-4", "Grok 4")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "openrouter",
-        backend_type: "native-api",
-        label: "OpenRouter",
-        description: "Reach many models through OpenRouter with an OpenRouter API key. Fable owns the agent loop.",
-        install_hint: "",
-        models: &[("openrouter/auto", "OpenRouter Auto")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "deepseek",
-        backend_type: "native-api",
-        label: "DeepSeek",
-        description: "Reach DeepSeek models directly with a DeepSeek API key.",
-        install_hint: "",
-        models: &[
-            ("deepseek-v4-pro", "DeepSeek V4 Pro"),
-            ("deepseek-v4-flash", "DeepSeek V4 Flash"),
-        ],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "zai",
-        backend_type: "native-api",
-        label: "Z.AI",
-        description: "Reach GLM models through the general Z.AI API.",
-        install_hint: "",
-        models: &[("glm-5.1", "GLM-5.1")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "minimax",
-        backend_type: "native-api",
-        label: "MiniMax",
-        description: "Reach MiniMax text and coding models with a MiniMax API key.",
-        install_hint: "",
-        models: &[
-            ("MiniMax-M2.7", "MiniMax M2.7"),
-            ("MiniMax-M2.7-highspeed", "MiniMax M2.7 Highspeed"),
-        ],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "alibaba",
-        backend_type: "native-api",
-        label: "Alibaba Cloud",
-        description: "Reach Qwen models through Alibaba Cloud Model Studio's international API.",
-        install_hint: "",
-        models: &[("qwen3.7-plus", "Qwen 3.7 Plus")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "fireworks",
-        backend_type: "native-api",
-        label: "Fireworks AI",
-        description: "Reach serverless and deployed models through Fireworks AI.",
-        install_hint: "",
-        models: &[("accounts/fireworks/models/deepseek-v3p1", "DeepSeek V3.1")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "huggingface",
-        backend_type: "native-api",
-        label: "Hugging Face",
-        description: "Reach models routed by Hugging Face Inference Providers.",
-        install_hint: "",
-        models: &[],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "moonshot",
-        backend_type: "native-api",
-        label: "Moonshot AI",
-        description: "Reach Kimi models through the Moonshot AI platform API.",
-        install_hint: "",
-        models: &[("kimi-k2.6", "Kimi K2.6")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "kimi-code",
-        backend_type: "native-api",
-        label: "Kimi Code",
-        description: "Use a Kimi Code membership API key through Kimi's official coding endpoint.",
-        install_hint: "",
-        models: &[("kimi-for-coding", "Kimi for Coding")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "mistral",
-        backend_type: "native-api",
-        label: "Mistral AI",
-        description: "Reach Mistral models directly with a Mistral API key.",
-        install_hint: "",
-        models: &[],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "meta",
-        backend_type: "native-api",
-        label: "Meta Llama",
-        description: "Reach models available to your Meta Llama API account.",
-        install_hint: "",
-        models: &[],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "perplexity",
-        backend_type: "native-api",
-        label: "Perplexity",
-        description: "Reach Perplexity Sonar through its OpenAI-compatible API.",
-        install_hint: "",
-        models: &[("sonar", "Sonar")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "tencent",
-        backend_type: "native-api",
-        label: "Tencent TokenHub",
-        description: "Reach models through Tencent TokenHub's international endpoint.",
-        install_hint: "",
-        models: &[("hy3", "Hy3")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "xiaomi",
-        backend_type: "native-api",
-        label: "Xiaomi MiMo",
-        description: "Reach MiMo models through Xiaomi's API platform.",
-        install_hint: "",
-        models: &[("mimo-v2.5-pro", "MiMo V2.5 Pro")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "groq",
-        backend_type: "native-api",
-        label: "Groq",
-        description: "Reach supported models through Groq's low-latency inference API.",
-        install_hint: "",
-        models: &[("openai/gpt-oss-120b", "GPT OSS 120B")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "together",
-        backend_type: "native-api",
-        label: "Together AI",
-        description: "Reach open and partner models through Together AI.",
-        install_hint: "",
-        models: &[("openai/gpt-oss-20b", "GPT OSS 20B")],
-        capabilities: NATIVE_API_CAPS,
-    },
-    BackendCatalogEntry {
-        id: "cerebras",
-        backend_type: "native-api",
-        label: "Cerebras",
-        description: "Reach supported models through Cerebras Inference.",
-        install_hint: "",
-        models: &[("gpt-oss-120b", "GPT OSS 120B")],
         capabilities: NATIVE_API_CAPS,
     },
     BackendCatalogEntry {
@@ -632,9 +395,10 @@ fn validate_backend_secret(secret: &str) -> Result<String, String> {
     Ok(normalized)
 }
 
-/// Resolve auth state from the credential store. Only native API-key providers
-/// can become connected through this boundary. Catalog-only subscription/CLI
-/// providers stay gated until a real runtime adapter reports capabilities.
+/// Resolve auth state from the credential store. Direct API providers become
+/// connected only when the native credential boundary has a stored secret.
+/// Codex uses its official browser sign-in path and remains gated until that
+/// runtime reports a connection.
 fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -> String {
     let entry = catalog_entry(provider_id);
     let is_native = entry
@@ -644,22 +408,7 @@ fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -
         return "connected".to_string();
     }
 
-    let is_local_loopback = entry
-        .map(|entry| entry.backend_type == "local-loopback")
-        .unwrap_or(false);
-    if is_local_loopback {
-        return "unavailable".to_string();
-    }
-
-    let is_acp = entry
-        .map(|entry| entry.backend_type == "acp")
-        .unwrap_or(false);
-
-    if is_acp {
-        "install-required".to_string()
-    } else {
-        "needs-auth".to_string()
-    }
+    "needs-auth".to_string()
 }
 
 /// Build the provider shape served to JavaScript (auth state + caps, no secret).
@@ -723,16 +472,29 @@ pub(crate) fn validate_account_native_provider_model(
 ) -> Result<String, String> {
     let entry = catalog_entry(provider_id)
         .filter(|entry| entry.backend_type == "native-api")
-        .ok_or_else(|| "Mission routing requires a registered native API provider.".to_string())?;
+        .ok_or_else(|| "Provider routing requires a registered native API provider.".to_string())?;
     if !crate::store::repos::backend_connection::list(tx, internal_user_id)
         .map_err(|error| error.to_string())?
         .iter()
         .any(|id| id == provider_id)
     {
-        return Err("Mission routing requires this account's connected provider.".into());
+        return Err("Provider routing requires this installation's connected provider.".into());
     }
-    if !entry.models.iter().any(|(id, _)| *id == model) {
-        return Err("Mission routing requires an available catalog model.".into());
+    let model_available = if provider_id == "custom" {
+        CredentialStores {
+            internal_user_id: internal_user_id.to_string(),
+        }
+        .get(provider_id)?
+        .map(|credential| {
+            crate::native_api::configured_custom_provider_model_id(&credential)
+                .is_ok_and(|configured_model| configured_model == model)
+        })
+        .unwrap_or(false)
+    } else {
+        entry.models.iter().any(|(id, _)| *id == model)
+    };
+    if !model_available {
+        return Err("Provider routing requires an available catalog model.".into());
     }
     Ok(account_native_provider_route_id(
         internal_user_id,
@@ -761,13 +523,22 @@ pub(crate) fn native_provider_route_reason(
 ) -> Result<String, String> {
     let entry = catalog_entry(provider_id)
         .filter(|entry| entry.backend_type == "native-api")
-        .ok_or_else(|| "Mission routing requires a registered native API provider.".to_string())?;
+        .ok_or_else(|| "Provider routing requires a registered native API provider.".to_string())?;
     let label = entry
         .models
         .iter()
         .find(|(id, _)| *id == model)
         .map(|(_, label)| *label)
-        .ok_or_else(|| "Mission routing requires an available catalog model.".to_string())?;
+        .map(str::to_string)
+        .or_else(|| {
+            if provider_id != "custom" {
+                return None;
+            }
+            crate::native_api::normalize_custom_model_id(model)
+                .ok()
+                .filter(|normalized| normalized == model)
+        })
+        .ok_or_else(|| "Provider routing requires an available catalog model.".to_string())?;
     Ok(format!("Selected {} {} for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.", entry.label, label))
 }
 
@@ -852,7 +623,9 @@ pub(crate) fn provider_route_observation_snapshot(
 }
 
 pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
-    format!("boundary:install-private:local-provider:{provider_id}:credential-egress")
+    format!(
+        "boundary:installation-private:user-owned-provider:{provider_id}:local-credential-egress"
+    )
 }
 
 pub(crate) fn validate_current_native_provider_route(
@@ -1195,20 +968,32 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let stores = CredentialStores {
         internal_user_id: internal_user_id.clone(),
     };
-    let availability = rows
-        .iter()
-        .map(|row| {
-            stores
-                .get(&row.provider_id)
-                .map(|value| (row.provider_id.clone(), value.is_some()))
-        })
-        .collect::<Result<HashMap<_, _>, _>>()?;
+    let mut availability = HashMap::new();
+    let mut configured_models = HashMap::new();
+    for row in &rows {
+        let credential = stores.get(&row.provider_id)?;
+        let mut credential_available = credential.is_some();
+        if row.provider_id == "custom" {
+            credential_available = credential
+                .as_deref()
+                .and_then(|secret| {
+                    crate::native_api::configured_custom_provider_model_id(secret).ok()
+                })
+                .map(|model| {
+                    configured_models.insert(row.provider_id.clone(), model);
+                    true
+                })
+                .unwrap_or(false);
+        }
+        availability.insert(row.provider_id.clone(), credential_available);
+    }
     Ok(build_account_native_provider_routes(
         &internal_user_id,
         crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
         &member_id,
         &rows,
         &availability,
+        &configured_models,
         &observations,
         &quality,
     ))
@@ -1220,6 +1005,7 @@ fn build_account_native_provider_routes(
     member_id: &str,
     rows: &[crate::store::repos::backend_connection::BackendConnectionRow],
     availability: &HashMap<String, bool>,
+    configured_models: &HashMap<String, String>,
     observations: &std::collections::BTreeMap<
         String,
         crate::store::repos::provider_route_observation::ProviderRouteObservationSummary,
@@ -1241,7 +1027,15 @@ fn build_account_native_provider_routes(
         let binding_digest = Sha256::digest(
             format!("{}:{}:credential", internal_user_id, row.provider_id).as_bytes(),
         );
-        for (model, label) in entry.models {
+        let configured_model = (row.provider_id == "custom")
+            .then(|| configured_models.get(&row.provider_id))
+            .flatten();
+        for (model, label) in entry
+            .models
+            .iter()
+            .copied()
+            .chain(configured_model.map(|model| (model.as_str(), model.as_str())))
+        {
             let route_id =
                 account_native_provider_route_id(internal_user_id, &row.provider_id, model);
             let route_updated_at = observations
@@ -1783,6 +1577,7 @@ mod provider_route_tests {
             "member-1",
             &rows,
             &availability,
+            &HashMap::new(),
             &observations,
             &quality,
         );
@@ -1808,6 +1603,41 @@ mod provider_route_tests {
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"
         );
+    }
+
+    #[test]
+    fn configured_custom_model_projects_one_exact_local_route() {
+        let rows = [
+            crate::store::repos::backend_connection::BackendConnectionRow {
+                provider_id: "custom".into(),
+                connected_at: "2026-08-29T10:00:00Z".into(),
+                updated_at: "2026-08-29T10:01:00Z".into(),
+            },
+        ];
+        let routes = build_account_native_provider_routes(
+            "user-1",
+            "workspace-1",
+            "member-1",
+            &rows,
+            &HashMap::from([("custom".to_string(), true)]),
+            &HashMap::from([("custom".to_string(), "fable-smoke".to_string())]),
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
+        );
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0]["providerFamily"], "custom");
+        assert_eq!(routes[0]["modelOrRuntimeReference"], "fable-smoke");
+        assert_eq!(routes[0]["displayName"], "Custom provider fable-smoke");
+        assert_eq!(routes[0]["state"], "available");
+        assert_eq!(
+            native_provider_route_boundary("custom"),
+            "boundary:installation-private:user-owned-provider:custom:local-credential-egress"
+        );
+        assert!(native_provider_route_reason("custom", "fable-smoke")
+            .unwrap()
+            .contains("Custom provider fable-smoke"));
+        assert!(native_provider_route_reason("custom", "  ").is_err());
     }
 
     #[test]

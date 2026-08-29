@@ -17,7 +17,11 @@
  * that carry auth state + capabilities only.
  */
 
-import type { BackendAuthState, BackendProvider, BackendVerifyOutcome } from "@fable/protocol";
+import type {
+  BackendAuthState,
+  BackendProvider,
+  BackendVerifyOutcome,
+} from "@fable/protocol";
 
 /** How a provider authenticates. Determines the onboarding affordance. */
 export type BackendAuthKind = "api-key" | "provider-login" | "install-gated";
@@ -25,17 +29,18 @@ export type BackendAuthKind = "api-key" | "provider-login" | "install-gated";
 /**
  * Derive the auth kind from backend type. This is structural, not stored:
  *   - native-api → `api-key` (Fable owns the loop; the user supplies a key)
- *   - codex-app-server / acp / copilot-sdk → `provider-login`
+ *   - codex-app-server → `provider-login`
  *
  * `install-gated` is reserved for providers whose runtime is missing
  * (resolved from auth state in `actionForProvider`).
  */
-export function authKindForProvider(provider: BackendProvider): BackendAuthKind {
+export function authKindForProvider(
+  provider: BackendProvider,
+): BackendAuthKind {
   switch (provider.backendType) {
     case "native-api":
       return "api-key";
     case "codex-app-server":
-    case "acp":
       return "provider-login";
     default:
       return "provider-login";
@@ -43,7 +48,8 @@ export function authKindForProvider(provider: BackendProvider): BackendAuthKind 
 }
 
 /** The visual tone of a state badge / status note. */
-export type BackendStateTone = "ready" | "neutral" | "info" | "caution" | "danger";
+export type BackendStateTone =
+  "ready" | "neutral" | "info" | "caution" | "danger";
 
 export interface BackendStateView {
   /** Short, plain label for the badge (e.g. "Connected", "Install required"). */
@@ -78,19 +84,19 @@ export function stateViewFor(state: BackendAuthState): BackendStateView {
       return {
         label: "Connecting",
         tone: "info",
-        hint: "Checking the key with the provider…"
+        hint: "Checking the key with the provider…",
       };
     case "sign-in-required":
       return {
         label: "Sign in required",
         tone: "caution",
-        hint: "This provider is installed but not signed in. Use its own app to sign in."
+        hint: "This provider is installed but not signed in. Use its own app to sign in.",
       };
     case "install-required":
       return {
         label: "Install required",
         tone: "caution",
-        hint: "Install this provider's app or CLI, then come back."
+        hint: "Install this provider's app or CLI, then come back.",
       };
     case "needs-auth":
       return { label: "Not connected", tone: "neutral" };
@@ -98,32 +104,26 @@ export function stateViewFor(state: BackendAuthState): BackendStateView {
       return {
         label: "Expired",
         tone: "danger",
-        hint: "This sign-in has expired. Sign in again from the provider."
+        hint: "This sign-in has expired. Sign in again from the provider.",
       };
     case "unsupported":
       return {
         label: "Not supported here",
         tone: "danger",
-        hint: "This provider can't be used from this build of Fable."
+        hint: "This provider can't be used from this build of Fable.",
       };
     case "failed":
       return {
         label: "Couldn't connect",
         tone: "danger",
-        hint: "We couldn't reach the provider. Your key is saved — try again in a moment."
-      };
-    case "entitlement-pending":
-      return {
-        label: "Checking access",
-        tone: "info",
-        hint: "Signed in. Confirming what this account can access."
+        hint: "We couldn't reach the provider. Your key is saved — try again in a moment.",
       };
     case "unavailable":
     default:
       return {
         label: "Unavailable",
         tone: "danger",
-        hint: "Something went wrong reading this provider's status."
+        hint: "Something went wrong reading this provider's status.",
       };
   }
 }
@@ -195,14 +195,14 @@ export type ModelDiscoveryOutcome =
  * Settings refresh affordance and the connected-but-degraded hint never drift.
  */
 export function modelDiscoveryView(
-  outcome: ModelDiscoveryOutcome
+  outcome: ModelDiscoveryOutcome,
 ): BackendStateView {
   switch (outcome) {
     case "loading":
       return {
         label: "Refreshing models",
         tone: "info",
-        hint: "Checking which models this account can use…"
+        hint: "Checking which models this account can use…",
       };
     case "success":
       return { label: "Models available", tone: "ready" };
@@ -210,28 +210,25 @@ export function modelDiscoveryView(
       return {
         label: "No models found",
         tone: "caution",
-        hint:
-          "This account surfaced no usable models. Check your plan or billing with the provider."
+        hint: "This account surfaced no usable models. Check your plan or billing with the provider.",
       };
     case "offline":
       return {
         label: "Models unavailable",
         tone: "caution",
-        hint:
-          "Couldn't reach the provider to load models. Your key is fine — try refreshing in a moment."
+        hint: "Couldn't reach the provider to load models. Your key is fine — try refreshing in a moment.",
       };
     case "failed":
       return {
         label: "Couldn't load models",
         tone: "caution",
-        hint:
-          "Model loading failed. Your key is fine — refresh to try again."
+        hint: "Model loading failed. Your key is fine — refresh to try again.",
       };
     case "unsupported":
       return {
         label: "Model list not supported",
         tone: "danger",
-        hint: "This provider doesn't expose a model list. Pick a model manually."
+        hint: "This provider doesn't expose a model list. Pick a model manually.",
       };
     case "idle":
     default:
@@ -272,7 +269,7 @@ export interface ConnectResultCopy {
  */
 export function connectResultCopy(
   outcome: BackendVerifyOutcome,
-  options: { missingKey?: boolean; detail?: string } = {}
+  options: { missingKey?: boolean; detail?: string } = {},
 ): ConnectResultCopy {
   const detail = options.detail ? ` (${options.detail})` : "";
   switch (outcome) {
@@ -280,7 +277,13 @@ export function connectResultCopy(
       return {
         message: "Connected and verified.",
         tone: "ready",
-        retryable: false
+        retryable: false,
+      };
+    case "configured":
+      return {
+        message: `Configured. Fable will check this endpoint when you send a message.${detail}`,
+        tone: "ready",
+        retryable: false,
       };
     case "auth-failed":
       // Missing key is a configuration gap, not a wrong key. Rejected key is a
@@ -289,31 +292,31 @@ export function connectResultCopy(
         ? {
             message: `No API key stored for this provider yet. Add a key to connect.${detail}`,
             tone: "danger",
-            retryable: false
+            retryable: false,
           }
         : {
             message: `The API key was rejected or has expired. Check the key and try again.${detail}`,
             tone: "danger",
-            retryable: false
+            retryable: false,
           };
     case "offline":
       return {
         message: `Couldn't reach the provider to confirm the connection. Try again in a moment.${detail}`,
         tone: "caution",
-        retryable: true
+        retryable: true,
       };
     case "unsupported":
       return {
         message: `This provider can't be verified from this build of Fable.${detail}`,
         tone: "danger",
-        retryable: false
+        retryable: false,
       };
     case "failed":
     default:
       return {
         message: `Couldn't verify the connection right now. Try again in a moment.${detail}`,
         tone: "caution",
-        retryable: true
+        retryable: true,
       };
   }
 }

@@ -887,15 +887,15 @@ describe("useNativeAgent", () => {
       }
     },
     {
-      name: "openrouter (openai-compat shaper)",
-      providerId: "openrouter",
-      model: "openrouter/auto",
+      name: "custom endpoint (openai-compat shaper)",
+      providerId: "custom",
+      model: "custom-chat",
       lines: [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
         'data: {"choices":[{"finish_reason":"stop"}]}'
       ],
       expectBody: (body: Record<string, unknown>) => {
-        expect(body.model).toBe("openrouter/auto");
+        expect(body.model).toBe("custom-chat");
         expect(body.stream).toBe(true);
         expect(Array.isArray(body.messages)).toBe(true);
       }

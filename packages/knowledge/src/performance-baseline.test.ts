@@ -23,7 +23,7 @@ function retrievalSources(sourceCount: number, chunksPerSource: number): Retriev
       text:
         sourceIndex % 12 === 0
           ? `Connector OAuth approval boundary cache search local first chunk ${chunkIndex}.`
-          : `General workspace memory and schedule note ${chunkIndex}.`,
+          : `General workspace memory and reference note ${chunkIndex}.`,
       ordinal: chunkIndex,
       charStart: chunkIndex * 120,
       charEnd: chunkIndex * 120 + 90,

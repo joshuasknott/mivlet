@@ -4,7 +4,7 @@ import {
   provisionRuntimeHostedComputer
 } from "../runtime";
 
-/** Optional hosted computer state. No background work or scheduler is attached. */
+/** Optional hosted computer state. No background conversation is attached. */
 export function useHostedComputer({
   workspaceId,
   agentId,

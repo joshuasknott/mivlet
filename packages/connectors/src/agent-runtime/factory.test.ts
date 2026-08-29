@@ -47,53 +47,6 @@ function codexProvider(overrides: Partial<BackendProvider> = {}): BackendProvide
   };
 }
 
-/** ACP provider (Cursor) — install-required, metadata-only. */
-function acpProvider(): BackendProvider {
-  return {
-    id: "cursor",
-    backendType: "acp",
-    label: "Cursor",
-    description: "ACP CLI",
-    authState: "install-required",
-    capabilities: [],
-    models: [],
-    installHint: "Install the Cursor CLI"
-  };
-}
-
-/** Copilot provider — live ACP family, but not yet authenticated. */
-function connectedAcpProvider(): BackendProvider {
-  return {
-    id: "cursor",
-    backendType: "acp",
-    label: "Cursor",
-    description: "ACP CLI",
-    authState: "connected",
-    capabilities: [
-      "authentication",
-      "threads",
-      "streaming",
-      "tool-requests",
-      "approvals",
-      "file-changes",
-      "cancellation"
-    ],
-    models: [{ id: "cursor-default", label: "Cursor default", available: true }]
-  };
-}
-
-function copilotProvider(): BackendProvider {
-  return {
-    id: "copilot",
-    backendType: "acp",
-    label: "Copilot",
-    description: "Copilot ACP CLI",
-    authState: "needs-auth",
-    capabilities: [],
-    models: []
-  };
-}
-
 /** Build BackendDeps that serves a fixed fixture transport + a cancel stub. */
 function fixtureDeps(lines: readonly string[]): BackendDeps {
   const transport = new FixtureTransport(lines);
@@ -139,11 +92,6 @@ describe("hasRunnableAdapter", () => {
   it("returns true for every executable backend family", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
     expect(hasRunnableAdapter("codex-app-server")).toBe(true);
-    expect(hasRunnableAdapter("acp")).toBe(true);
-  });
-
-  it("keeps the legacy copilot-sdk family non-runnable", () => {
-    expect(hasRunnableAdapter("copilot-sdk")).toBe(false);
   });
 
   it("returns false for an unknown backend type", () => {
@@ -179,32 +127,6 @@ describe("resolveAgentBackend dispatch", () => {
     const backend = resolveAgentBackend(codexProvider(), codexDeps(new MockCodexAppServer({ events: [] })));
     expect(backend).not.toBeNull();
     expect(backend?.providerId).toBe("codex");
-  });
-
-  it("returns null for an install-required ACP/Cursor provider", () => {
-    const backend = resolveAgentBackend(acpProvider(), fixtureDeps([]));
-    expect(backend).toBeNull();
-  });
-
-  it("returns null for a connected ACP provider when no ACP transport is wired", () => {
-    const backend = resolveAgentBackend(connectedAcpProvider(), fixtureDeps([]));
-    expect(backend).toBeNull();
-  });
-
-  it("returns a live ACP backend for a connected provider when the ACP transport is wired", () => {
-    const deps: BackendDeps = {
-      ...fixtureDeps([]),
-      createAcpTransport: () => null
-    };
-    const backend = resolveAgentBackend(connectedAcpProvider(), deps);
-    expect(backend).not.toBeNull();
-    expect(backend?.providerId).toBe("cursor");
-    expect(backend?.capabilities).toContain("streaming");
-  });
-
-  it("returns null for Copilot until its ACP CLI is authenticated", () => {
-    const backend = resolveAgentBackend(copilotProvider(), fixtureDeps([]));
-    expect(backend).toBeNull();
   });
 
   it("returns null for undefined provider", () => {

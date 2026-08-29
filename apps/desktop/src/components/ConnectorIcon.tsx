@@ -1,5 +1,5 @@
 /**
- * Brand SVG icons for Fable's first-wave connectors.
+ * Brand SVG icons for Fable's supported connectors.
  *
  * Shared by the home connector rail and the Connectors page so both surfaces
  * render the real provider mark for a connected connector. One icon per

@@ -1,14 +1,9 @@
 /**
  * Public barrel for the @fable/connectors package.
  *
- * Re-exports two concerns kept in separate modules:
- *   - logic: local-file import + lexical knowledge search (local-files.ts,
- *     knowledge-search.ts)
- *   - data: fixture-only connector/directive/thread/project/knowledge/automation
- *     catalogs (fixtures.ts)
- *
- * The desktop shell imports these via @fable/connectors; this surface is the
- * package's public protocol and must stay stable.
+ * The desktop shell imports provider-neutral connector logic and the
+ * secret-free disconnected catalogue from this surface. Live status, content,
+ * and actions always come from the native credential and API boundary.
  */
 
 // logic
@@ -23,15 +18,6 @@ export {
 export type { LocalFileValidation, LocalTextFileCandidate } from "./local-files";
 export { searchKnowledgeSources } from "./knowledge-search";
 export type { KnowledgeSearchOptions } from "./knowledge-search";
-export {
-  assertBrowserSessionMetadataSafe,
-  canUseBrowserSession,
-  createFixtureBrowserSession,
-  createUnavailableBrowserSession,
-  deriveBrowserSessionFromConnectors,
-  labelFixtureSearchResult,
-  resolveBrowserSessionAction
-} from "./browser-session";
 export {
   DEFAULT_CUSTOM_APPROVAL_SETTINGS,
   effectForConnectorAction,
@@ -48,28 +34,17 @@ export {
   type PermissionPolicyInput
 } from "./permission-policy";
 
-// data (preview/demo fixtures)
 export {
-  chatThreadFixtures,
-  connectorFixtures,
-  connectorSearchFixtures,
-  directiveFixtures,
-  knowledgeSourceFixtures
-} from "./fixtures";
+  connectorCatalog,
+  listSupportedConnectors,
+  SUPPORTED_CONNECTOR_IDS
+} from "./catalog";
 
-// first-wave provider adapters (pure: no network and no credential access)
-export {
-  FIRST_WAVE_CONNECTOR_IDS,
-  importFixtureConnectorItem,
-  listFirstWaveConnectors,
-  prepareFixtureConnectorAction,
-  searchFixtureConnector
-} from "./providers/registry";
+// Provider adapters are pure: no network and no credential access.
 export {
   classifyConnectorError,
   importConnectorSearchItem,
   prepareConnectorAction,
-  searchConnectorFixtures,
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./providers/shared";
@@ -111,15 +86,8 @@ export * from "./sync";
 export {
   BACKEND_PROVIDER_IDS,
   listBackendProviders,
-  resolveAcpProvider,
   resolveCapabilities,
   resolveCodexProvider,
-  resolveCopilotProvider,
-  resolveCursorProvider,
-  resolveGrokProvider,
-  resolveKimiProvider,
-  resolveMistralVibeProvider,
-  resolveOpenCodeProvider,
   resolveNativeProvider,
   NATIVE_BACKEND_TYPE
 } from "./backends/registry";
@@ -128,11 +96,9 @@ export type {
   CapabilitySet
 } from "./backends/capabilities";
 export type {
-  AcpProviderId,
   BackendProviderId,
   NativeProviderId
 } from "./backends/registry";
-export { COPILOT_AUTH_MODES, type CopilotAuthMode } from "./backends/copilot";
 
 // native-API agent loop (pure shaping + orchestration; the transport seam
 // injects egress — Rust owns the key + HTTP/SSE in production). No network, no
@@ -177,19 +143,13 @@ export {
 export { runAgentLoop, type ToolExecutor, type RunAgentLoopOptions } from "./native-api/agent-loop";
 export { buildContextPrefix } from "./native-api/memory-context";
 
-// provider-neutral agent-runtime contract. One interface every backend family
-// (native-API, Codex, ACP, Copilot) implements; the shell resolves one
-// AgentBackend per run via resolveAgentBackend. Native-API, Codex, and ACP
-// (including Copilot) have live adapters. No secret crosses this boundary — auth lives behind the Rust
-// boundary / provider-owned auth caches (CLI-owned for ACP).
+// Provider-neutral agent-runtime contract. Native API and Codex implement the
+// same interface, and no secret crosses this boundary.
 export {
   resolveAgentBackend,
   hasRunnableAdapter,
   createCodexBackend,
   createNativeApiBackend,
-  resolveAcpBackend,
-  ACP_PROVIDERS,
-  detectAcpRuntime,
   type AgentBackend,
   type AgentBackendFactory,
   type AgentTurnRequest,
@@ -206,34 +166,8 @@ export {
   backendErrorEvent,
   classifyBackendError,
   normalizeBackendErrorEvent,
-  type BackendErrorMetadata,
-  type AcpProviderDefinition,
-  type AcpCliProbe,
-  type AcpCliProbeOutcome,
-  type AcpRuntimeDetection
+  type BackendErrorMetadata
 } from "./agent-runtime";
-// Generic ACP protocol surface (provider-neutral JSON-RPC over stdio). Exposed so
-// the desktop transport factory can frame/correlate frames; tests drive it via
-// the FakeAcpTransport. No provider-specific executable logic lives here.
-export {
-  parseAcpLine,
-  encodeAcpFrame,
-  isAcpRequest,
-  isAcpResponse,
-  isAcpNotification,
-  ACP_PERMISSION_TOOL,
-  MAX_ACP_FRAME_CHARACTERS,
-  type AcpFrame,
-  type AcpRequest,
-  type AcpResponse,
-  type AcpNotification,
-  type AcpError,
-  type AcpTransport,
-  type AcpTransportFactory,
-  type AcpTransportProvider,
-  type AcpInboundFrame,
-  type AcpReply
-} from "./agent-runtime/adapters/acp/index";
 export {
   createApprovalGate,
   createToolExecutor,

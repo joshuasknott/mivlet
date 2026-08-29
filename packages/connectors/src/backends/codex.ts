@@ -3,7 +3,7 @@
  *
  * This module is the *logic* side of the logic/data split. It declares the
  * Codex provider shape and resolves its capabilities from auth state. The
- * fixture/preview catalog (models, install hint) lives in `./fixtures`.
+ * static catalog (models, install hint) lives in `./catalog`.
  *
  * Two auth paths are supported, both routed through the Rust credential
  * boundary:
@@ -17,7 +17,7 @@
 
 import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
-import { codexFixtures, type CodexFixture } from "./fixtures";
+import { codexCatalog, type CodexCatalogEntry } from "./catalog";
 
 export const CODEX_PROVIDER_ID = "codex";
 export const CODEX_BACKEND_TYPE = "codex-app-server" as const;
@@ -25,9 +25,9 @@ export const CODEX_BACKEND_TYPE = "codex-app-server" as const;
 /** Build the Codex provider for a given auth state. */
 export function resolveCodexProvider(
   authState: BackendProvider["authState"],
-  options: { usingApiKey?: boolean; models?: CodexFixture["models"] } = {}
+  options: { usingApiKey?: boolean; models?: CodexCatalogEntry["models"] } = {}
 ): BackendProvider {
-  const fixture = codexFixtures;
+  const provider = codexCatalog;
   const withUsageCost = Boolean(options.usingApiKey);
   const capabilities = resolveCapabilities(
     CODEX_BACKEND_TYPE,
@@ -38,15 +38,15 @@ export function resolveCodexProvider(
   return {
     id: CODEX_PROVIDER_ID,
     backendType: CODEX_BACKEND_TYPE,
-    label: fixture.label,
-    description: fixture.description,
+    label: provider.label,
+    description: provider.description,
     authState,
     capabilities,
-    models: (options.models ?? fixture.models).map((model) => ({
+    models: (options.models ?? provider.models).map((model) => ({
       id: model.id,
       label: model.label,
       available: authState === "connected"
     })),
-    installHint: fixture.installHint
+    installHint: provider.installHint
   };
 }

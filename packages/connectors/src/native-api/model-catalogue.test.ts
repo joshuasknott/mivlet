@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BackendModel } from "@fable/protocol";
-import { nativeFixtures } from "../backends/fixtures";
+import { nativeProviderCatalog } from "../backends/catalog";
 import {
   catalogueCapabilities,
   defaultDiscoveredCapabilities,
@@ -19,18 +19,6 @@ describe("catalogueCapabilities", () => {
     expect(caps?.tools).toBe(true);
   });
 
-  it("pins the fixed Kimi Code membership model capabilities", () => {
-    expect(catalogueCapabilities("kimi-code", "kimi-for-coding")).toEqual({
-      contextWindow: 262_144,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: true,
-      reasoning: true,
-      structuredOutput: false
-    });
-  });
-
   it("returns undefined for an unknown model (never fabricated)", () => {
     expect(catalogueCapabilities("openai", "no-such-model")).toBeUndefined();
   });
@@ -39,14 +27,14 @@ describe("catalogueCapabilities", () => {
     expect(catalogueCapabilities("made-up", "gpt-5")).toBeUndefined();
   });
 
-  it("covers every native fixture model id", () => {
-    // Every model surfaced in the native fixtures must have a curated entry, so
+  it("covers every supported native catalogue model id", () => {
+    // Every model surfaced in the current catalogue must have a curated entry, so
     // the fallback catalogue is truthful for the models the UI advertises.
-    for (const fixture of nativeFixtures) {
-      for (const model of fixture.models) {
+    for (const provider of nativeProviderCatalog) {
+      for (const model of provider.models) {
         expect(
-          catalogueCapabilities(fixture.providerId, model.id),
-          `${fixture.providerId}/${model.id}`
+          catalogueCapabilities(provider.providerId, model.id),
+          `${provider.providerId}/${model.id}`
         ).toBeDefined();
       }
     }

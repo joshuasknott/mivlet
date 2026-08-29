@@ -1,7 +1,5 @@
 /* ---------------------------------------------------------------------------
- * Onboarding gate shell (two-path AI backend) — visually mirrors the main
- * workspace: warm radial-gradient canvas, large centered hero, and
- * frosted-glass surface treatment. The `.og-` namespace (onboarding-gate) is
+ * Local-first onboarding shell. The `.og-` namespace (onboarding-gate) is
  * deliberately separate from the `.onboarding-` classes shared with the
  * Settings page panel.
  * ------------------------------------------------------------------------- */
@@ -94,6 +92,9 @@
     max-width: 680px;
     margin-bottom: 34px;
   }
+  .og-progress-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
   .og-progress-step {
     padding: 14px 18px;
     font-size: var(--text-15);
@@ -131,6 +132,12 @@
     font-size: var(--text-16);
     margin-top: 16px;
     max-width: 64ch;
+  }
+}
+
+@media (min-width: 960px) {
+  .og-unified .provider-catalogue__grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 

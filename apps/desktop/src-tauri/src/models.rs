@@ -32,10 +32,8 @@ pub const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-acces
 pub const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
-// `copilot-sdk` remains a recognized legacy snapshot value; no catalog entry
-// uses it now that GitHub Copilot runs through the live ACP adapter.
-pub const BACKEND_TYPES: [&str; 4] = ["codex-app-server", "acp", "copilot-sdk", "native-api"];
-pub const BACKEND_AUTH_STATES: [&str; 11] = [
+pub const BACKEND_TYPES: [&str; 2] = ["codex-app-server", "native-api"];
+pub const BACKEND_AUTH_STATES: [&str; 10] = [
     "connected",
     "needs-auth",
     "sign-in-required",
@@ -45,7 +43,6 @@ pub const BACKEND_AUTH_STATES: [&str; 11] = [
     "unsupported",
     "failed",
     "ready",
-    "entitlement-pending",
     "unavailable",
 ];
 /// Backend auth states that fail closed: the adapter declares no capabilities
@@ -53,17 +50,14 @@ pub const BACKEND_AUTH_STATES: [&str; 11] = [
 /// as a contract constant — asserted by the vocabulary test in `tests.rs` (which
 /// is the only non-test reference), so it is allowed as dead code in the lib.
 #[allow(dead_code)]
-pub const BACKEND_AUTH_FAIL_CLOSED_STATES: [&str; 12] = [
+pub const BACKEND_AUTH_FAIL_CLOSED_STATES: [&str; 9] = [
     "needs-auth",
     "sign-in-required",
     "install-required",
-    "start-required",
-    "download-required",
     "connecting",
     "expired",
     "unsupported",
     "failed",
-    "entitlement-pending",
     "ready",
     "unavailable",
 ];
@@ -84,37 +78,8 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 29] = [
-    "codex",
-    "cursor",
-    "copilot",
-    "grok",
-    "opencode",
-    "kimi",
-    "mistral-vibe",
-    "openai",
-    "anthropic",
-    "gemini",
-    "xai",
-    "openrouter",
-    "deepseek",
-    "zai",
-    "minimax",
-    "alibaba",
-    "fireworks",
-    "huggingface",
-    "moonshot",
-    "kimi-code",
-    "mistral",
-    "meta",
-    "perplexity",
-    "tencent",
-    "xiaomi",
-    "groq",
-    "together",
-    "cerebras",
-    "custom",
-];
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 6] =
+    ["codex", "openai", "anthropic", "gemini", "xai", "custom"];
 /// Marker that backend credential storage is pre-release. Now that the OS
 /// keychain is wired (`backends::KeyringStore`, with an in-memory fallback),
 /// this is `false` — secrets persist across restarts in the platform-secure
@@ -125,8 +90,8 @@ pub const MAX_BACKEND_SECRET_CHARACTERS: usize = 8_000;
 pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
-// First-wave connector vocabularies.
-pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 8] = [
+// Supported connector vocabularies.
+pub const SUPPORTED_CONNECTOR_IDS: [&str; 8] = [
     "github",
     "vercel",
     "google-drive",
@@ -136,8 +101,7 @@ pub const FIRST_WAVE_CONNECTOR_IDS: [&str; 8] = [
     "google-calendar",
     "linear",
 ];
-pub const CONNECTOR_AUTH_STATES: [&str; 10] = [
-    "fixture",
+pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "needs-auth",
     "unconfigured",
     "configured",

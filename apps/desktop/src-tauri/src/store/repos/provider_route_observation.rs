@@ -76,7 +76,7 @@ pub fn record(
     )?;
     if connected != 1 {
         return Err(StoreError::Invalid(
-            "Provider route observation requires the account's connected provider.".into(),
+            "Provider route observation requires this installation's connected provider.".into(),
         ));
     }
     let payload = json!(ProviderRouteObservationPayload {

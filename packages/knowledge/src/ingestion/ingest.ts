@@ -183,7 +183,7 @@ export interface ReindexResult {
 export interface ReindexOptions {
   /**
    * Ids of sources deliberately deleted by the user. A candidate that would
-   * re-create one of these ids is skipped instead, so a routine refresh never
+   * re-create one of these ids is skipped instead, so a later refresh never
    * silently restores deliberately deleted content. The caller persists this
    * tombstone list; the knowledge layer only honors it.
    */

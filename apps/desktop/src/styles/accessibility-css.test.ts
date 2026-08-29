@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const indexPath = join(__dirname, "..", "styles.css");
+const composerPath = join(__dirname, "composer.css");
 const responsivePath = join(__dirname, "responsive.css");
 const tokensPath = join(__dirname, "tokens.css");
 
@@ -16,8 +17,8 @@ function themeVariables(source: string, selector: RegExp) {
   return new Map(
     [...block.matchAll(/--([\w-]+):\s*(#[a-f\d]{6});/gi)].map((match) => [
       match[1],
-      match[2].toLowerCase()
-    ])
+      match[2].toLowerCase(),
+    ]),
   );
 }
 
@@ -27,11 +28,10 @@ function relativeLuminance(hex: string) {
     .match(/../g)
     ?.map((channel) => Number.parseInt(channel, 16) / 255)
     .map((channel) =>
-      channel <= 0.04045
-        ? channel / 12.92
-        : ((channel + 0.055) / 1.055) ** 2.4
+      channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
     );
-  if (!channels || channels.length !== 3) throw new Error(`Invalid colour ${hex}`);
+  if (!channels || channels.length !== 3)
+    throw new Error(`Invalid colour ${hex}`);
   return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
 }
 
@@ -44,6 +44,15 @@ function contrastRatio(foreground: string, background: string) {
 }
 
 describe("desktop motion accessibility", () => {
+  it("keeps every composer menu above the bottom-docked control row", () => {
+    const composer = readFileSync(composerPath, "utf8");
+
+    expect(composer).toContain("bottom: calc(100% - 1px)");
+    expect(composer).not.toMatch(
+      /\.composer-glow--new-thread\s+\.composer-menu\s*\{[^}]*top:\s*calc\(100%/s,
+    );
+  });
+
   it("loads a global reduced-motion policy after every product style layer", () => {
     const index = readFileSync(indexPath, "utf8");
     const responsive = readFileSync(responsivePath, "utf8");
@@ -63,7 +72,7 @@ describe("desktop motion accessibility", () => {
     const light = themeVariables(source, /:root\s*\{([\s\S]*?)\n\}/);
     const dark = themeVariables(
       source,
-      /:root\[data-theme="dark"\],[\s\S]*?\{([\s\S]*?)\n\}/
+      /:root\[data-theme="dark"\],[\s\S]*?\{([\s\S]*?)\n\}/,
     );
     const requiredPairs = [
       [light, "light", "ink-soft", "surface"],
@@ -77,18 +86,25 @@ describe("desktop motion accessibility", () => {
       [dark, "dark", "ink-soft", "surface-hover"],
       [dark, "dark", "positive", "surface-raised"],
       [dark, "dark", "caution", "surface-raised"],
-      [dark, "dark", "destructive", "surface-raised"]
+      [dark, "dark", "destructive", "surface-raised"],
     ] as const;
 
-    for (const [tokens, theme, foregroundName, backgroundName] of requiredPairs) {
+    for (const [
+      tokens,
+      theme,
+      foregroundName,
+      backgroundName,
+    ] of requiredPairs) {
       const foreground = tokens.get(foregroundName);
       const background = tokens.get(backgroundName);
       if (!foreground || !background) {
-        throw new Error(`Missing ${theme} ${foregroundName}/${backgroundName} token`);
+        throw new Error(
+          `Missing ${theme} ${foregroundName}/${backgroundName} token`,
+        );
       }
       expect(
         contrastRatio(foreground, background),
-        `${theme} ${foregroundName} on ${backgroundName}`
+        `${theme} ${foregroundName} on ${backgroundName}`,
       ).toBeGreaterThanOrEqual(4.5);
     }
   });

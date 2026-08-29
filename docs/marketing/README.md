@@ -7,7 +7,6 @@ Cloudflare signup Worker. Neither is deployed by repository tests or builds.
 
 - Root `README.md`: current product maturity and verified capability categories.
 - `docs/product/vision.md`: product direction and non-goals.
-- `docs/brand.md`: Fable identity and asset usage.
 - `docs/product/connectors.md`: connector boundaries.
 - `docs/security/threat-model.md`: security assumptions.
 - `waitlist-api.schema.json`: waitlist request/response contract.

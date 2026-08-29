@@ -23,30 +23,8 @@ export interface RuntimeLocalDataDeletionReceipt {
   providerCredentialsRevoked: false;
 }
 
-export interface RuntimePortableExportReceipt {
-  path: string;
-  formatVersion: number;
-  schemaVersion: number;
-  bytes: number;
-  sha256: string;
-  credentialsIncluded: false;
-}
-
-export interface RuntimePortableImportReport {
-  inserted: Record<string, number>;
-  skipped: Record<string, number>;
-  warnings: string[];
-  errors: string[];
-}
-
 export interface RuntimeLocalDiagnosticCategory {
-  id:
-    | "storage"
-    | "providers"
-    | "connections"
-    | "mcp"
-    | "migrations"
-    | "sync";
+  id: "storage" | "providers" | "connections" | "mcp" | "migrations" | "sync";
   label: string;
   status: "healthy" | "attention" | "unavailable";
   summary: string;
@@ -79,15 +57,6 @@ export interface LocalDataRuntimePort {
     confirmation: "resume execution",
   ): Promise<RuntimeExecutionControlState | null>;
   createBackup(destination: string): Promise<RuntimeLocalBackupReceipt | null>;
-  exportWorkspaceArchive(
-    destination: string,
-    workspaceId: string,
-  ): Promise<RuntimePortableExportReceipt | null>;
-  importWorkspaceArchive(
-    source: string,
-    workspaceId: string,
-    confirmation: "import workspace copy",
-  ): Promise<RuntimePortableImportReport | null>;
   prepareRestore(
     source: string,
     confirmation: "restore local data",
@@ -130,17 +99,6 @@ function createLocalDataPort(adapter: RuntimeAdapter): LocalDataRuntimePort {
       }),
     createBackup: (destination) =>
       nativeOnly(adapter, "backup_local_data", { destination }),
-    exportWorkspaceArchive: (destination, workspaceId) =>
-      nativeOnly(adapter, "export_workspace_archive_to_file", {
-        destination,
-        workspaceId,
-      }),
-    importWorkspaceArchive: (source, workspaceId, confirmation) =>
-      nativeOnly(adapter, "import_workspace_archive_from_file", {
-        source,
-        workspaceId,
-        confirmation,
-      }),
     prepareRestore: (source, confirmation) =>
       nativeOnly(adapter, "prepare_local_data_restore", {
         source,
@@ -182,17 +140,6 @@ export const resumeRuntimeExecution = (
 
 export const createRuntimeLocalBackup = (destination: string) =>
   localDataPort().createBackup(destination);
-
-export const exportRuntimeWorkspaceArchive = (
-  destination: string,
-  workspaceId: string,
-) => localDataPort().exportWorkspaceArchive(destination, workspaceId);
-
-export const importRuntimeWorkspaceArchive = (
-  source: string,
-  workspaceId: string,
-  confirmation: "import workspace copy",
-) => localDataPort().importWorkspaceArchive(source, workspaceId, confirmation);
 
 export const prepareRuntimeLocalRestore = (
   source: string,

@@ -1,8 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import type {
   ConnectorAccountOption,
-  ConnectorActionKind,
-  ConnectorManifest
+  ConnectorManifest,
 } from "@fable/protocol";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { X } from "@phosphor-icons/react/dist/csr/X";
@@ -22,7 +21,6 @@ export function PluginPanel({
   onSelect,
   accounts,
   onSwitchAccount,
-  onPrepareAction
 }: {
   manifests: ConnectorManifest[];
   onUseConnector: (connector: ConnectorManifest) => void;
@@ -32,44 +30,58 @@ export function PluginPanel({
   onSelect: (connector: ConnectorManifest) => void;
   accounts: Record<string, ConnectorAccountOption[]>;
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
-  onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
 }) {
   const [query, setQuery] = useState("");
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
-    null
+    null,
   );
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
   const selectedConnector = useMemo(
-    () => manifests.find((connector) => connector.id === selectedConnectorId) ?? null,
-    [manifests, selectedConnectorId]
+    () =>
+      manifests.find((connector) => connector.id === selectedConnectorId) ??
+      null,
+    [manifests, selectedConnectorId],
   );
 
   useModalFocusTrap({
     active: selectedConnector !== null,
     containerRef: detailModalRef,
     initialFocusRef: detailCloseRef,
-    onClose: () => setSelectedConnectorId(null)
+    onClose: () => setSelectedConnectorId(null),
   });
 
   const visibleManifests = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     if (!normalized) return manifests;
-    return manifests.filter((connector) => [
-      connector.name,
-      connector.setupMessage,
-      connector.healthSummary,
-      ...connector.permissions
-    ].filter(Boolean).join(" ").toLocaleLowerCase().includes(normalized));
+    return manifests.filter((connector) =>
+      [
+        connector.name,
+        connector.setupMessage,
+        connector.healthSummary,
+        ...connector.permissions,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(normalized),
+    );
   }, [manifests, query]);
-  const installedManifests = visibleManifests.filter((connector) => connector.status === "connected");
-  const availableManifests = visibleManifests.filter((connector) => connector.status !== "connected");
+  const installedManifests = visibleManifests.filter(
+    (connector) => connector.status === "connected",
+  );
+  const availableManifests = visibleManifests.filter(
+    (connector) => connector.status !== "connected",
+  );
 
   const renderConnector = (connector: ConnectorManifest) => {
     const connected = connector.status === "connected";
     const selected = selectedConnector?.id === connector.id;
     const cardDetail = resolveDetailedStatus(connector);
-    const needsReconnect = cardDetail.className === "expired" || cardDetail.className === "revoked" || cardDetail.className === "failed";
+    const needsReconnect =
+      cardDetail.className === "expired" ||
+      cardDetail.className === "revoked" ||
+      cardDetail.className === "failed";
 
     return (
       <article
@@ -99,7 +111,9 @@ export function PluginPanel({
         }}
       >
         <span className="sr-only">{connector.status}</span>
-        <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
+        <span
+          className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}
+        >
           <ConnectorIcon id={connector.id} />
         </span>
         <strong>{connector.name}</strong>
@@ -121,7 +135,10 @@ export function PluginPanel({
   };
 
   return (
-    <section className="context-panel connectors-panel" aria-label="Connections">
+    <section
+      className="context-panel connectors-panel"
+      aria-label="Connections"
+    >
       <label className="connections-search">
         <MagnifyingGlass size={17} aria-hidden="true" />
         <span className="sr-only">Search connections</span>
@@ -133,29 +150,43 @@ export function PluginPanel({
         />
       </label>
 
-      <section className="connections-group" aria-labelledby="installed-connections-title">
+      <section
+        className="connections-group"
+        aria-labelledby="installed-connections-title"
+      >
         <div className="connections-group__heading">
           <h2 id="installed-connections-title">Installed</h2>
           <span>{installedManifests.length}</span>
         </div>
         {installedManifests.length ? (
-          <div className="connector-grid connector-grid--installed">{installedManifests.map(renderConnector)}</div>
+          <div className="connector-grid connector-grid--installed">
+            {installedManifests.map(renderConnector)}
+          </div>
         ) : (
           <p className="connections-group__empty">
-            {query.trim() ? "No installed connections match this search." : "No connections installed yet."}
+            {query.trim()
+              ? "No installed connections match this search."
+              : "No connections installed yet."}
           </p>
         )}
       </section>
 
-      <section className="connections-group" aria-labelledby="all-connections-title">
+      <section
+        className="connections-group"
+        aria-labelledby="all-connections-title"
+      >
         <div className="connections-group__heading">
           <h2 id="all-connections-title">All connections</h2>
           <span>{availableManifests.length}</span>
         </div>
         {availableManifests.length ? (
-          <div className="connector-grid">{availableManifests.map(renderConnector)}</div>
+          <div className="connector-grid">
+            {availableManifests.map(renderConnector)}
+          </div>
         ) : (
-          <p className="connections-group__empty">No connections match “{query}”.</p>
+          <p className="connections-group__empty">
+            No connections match “{query}”.
+          </p>
         )}
       </section>
 
@@ -173,7 +204,10 @@ export function PluginPanel({
             }
           }}
         >
-          <div className="connector-detail-modal__panel" onMouseDown={(event) => event.stopPropagation()}>
+          <div
+            className="connector-detail-modal__panel"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
             <button
               ref={detailCloseRef}
               type="button"
@@ -190,7 +224,6 @@ export function PluginPanel({
               onRefresh={onRefresh}
               accounts={accounts[selectedConnector.id] ?? []}
               onSwitchAccount={onSwitchAccount}
-              onPrepareAction={onPrepareAction}
               onConnect={onConnect}
               titleId={`connector-detail-${selectedConnector.id}`}
             />
@@ -208,9 +241,8 @@ function ConnectorDetails({
   onRefresh,
   accounts,
   onSwitchAccount,
-  onPrepareAction,
   onConnect,
-  titleId
+  titleId,
 }: {
   connector: ConnectorManifest;
   onUseConnector: (connector: ConnectorManifest) => void;
@@ -218,25 +250,31 @@ function ConnectorDetails({
   onRefresh: (connectorId: string) => void;
   accounts: ConnectorAccountOption[];
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
-  onPrepareAction: (action: ConnectorActionKind, payload: Record<string, string>) => void;
   onConnect: (connector: ConnectorManifest) => void;
   titleId?: string;
 }) {
-  const firstAction = connector.supportedActions?.[0];
-  const permissions = connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
+  const permissions =
+    connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
   const detail = resolveDetailedStatus(connector);
 
   return (
-    <article className="connector-detail" aria-label={`${connector.name} details`}>
+    <article
+      className="connector-detail"
+      aria-label={`${connector.name} details`}
+    >
       <div className="connector-detail__header">
-        <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}>
+        <span
+          className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}
+        >
           <ConnectorIcon id={connector.id} />
         </span>
         <div>
           <h2 id={titleId}>{connector.name}</h2>
           <p>{connector.setupMessage ?? detail.summary}</p>
         </div>
-        <span className={`connector-detail__status connector-detail__status--${detail.className}`}>
+        <span
+          className={`connector-detail__status connector-detail__status--${detail.className}`}
+        >
           {detail.label}
         </span>
       </div>
@@ -265,7 +303,9 @@ function ConnectorDetails({
           <span>Active connection</span>
           <select
             value={accounts.find((option) => option.active)?.connectionId ?? ""}
-            onChange={(event) => onSwitchAccount(connector.id, event.target.value)}
+            onChange={(event) =>
+              onSwitchAccount(connector.id, event.target.value)
+            }
           >
             {accounts.map(({ account, connectionId }) => (
               <option key={connectionId} value={connectionId}>
@@ -276,12 +316,13 @@ function ConnectorDetails({
         </label>
       ) : connector.status === "connected" && connector.account ? (
         <p className="connector-detail__account">
-          Active connection: {connector.account.email ?? connector.account.displayName}
+          Active connection:{" "}
+          {connector.account.email ?? connector.account.displayName}
         </p>
       ) : null}
 
       <div className="connector-detail__actions">
-        {connector.status === "connected" || connector.status === "fixture" ? (
+        {connector.status === "connected" ? (
           <button type="button" onClick={() => onUseConnector(connector)}>
             Use in composer
           </button>
@@ -292,7 +333,9 @@ function ConnectorDetails({
             className="button button--primary"
             onClick={() => onConnect(connector)}
           >
-            {detail.className === "expired" || detail.className === "revoked" || detail.className === "failed"
+            {detail.className === "expired" ||
+            detail.className === "revoked" ||
+            detail.className === "failed"
               ? "Reconnect"
               : "Connect"}
           </button>
@@ -304,18 +347,6 @@ function ConnectorDetails({
             onClick={() => onRefresh(connector.id)}
           >
             {connector.sync?.phase === "syncing" ? "Syncing…" : "Sync now"}
-          </button>
-        ) : null}
-        {firstAction ? (
-          <button
-            type="button"
-            onClick={() =>
-              onPrepareAction(firstAction, {
-                targetId: `${connector.id}-fixture-selection`
-              })
-            }
-          >
-            Prepare {actionLabel(firstAction)}
           </button>
         ) : null}
         {connector.status === "connected" && connector.authMode !== "none" ? (
@@ -331,8 +362,10 @@ function ConnectorDetails({
 function syncLabel(connector: ConnectorManifest) {
   const sync = connector.sync;
   if (!sync || sync.phase === "idle") return "Not synced";
-  if (sync.phase === "succeeded") return `Last synced ${sync.completedAt ?? "recently"}`;
-  if (sync.phase === "partial") return `Partial: ${sync.failure?.message ?? "some items were skipped"}`;
+  if (sync.phase === "succeeded")
+    return `Last synced ${sync.completedAt ?? "recently"}`;
+  if (sync.phase === "partial")
+    return `Partial: ${sync.failure?.message ?? "some items were skipped"}`;
   if (sync.phase === "failed") return sync.failure?.message ?? "Sync failed";
   if (sync.phase === "cancelled") return "Cancelled";
   return "Syncing";
@@ -349,13 +382,17 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
   const setupMessage = connector.setupMessage;
 
   // 1. Permission Limited (missing required scopes)
-  const hasMissingRequiredScopes = connector.scopes?.some((scope) => scope.required && !scope.granted) ?? false;
-  const isStale = healthSummary.toLowerCase().includes("missing required") || healthSummary.toLowerCase().includes("stale");
+  const hasMissingRequiredScopes =
+    connector.scopes?.some((scope) => scope.required && !scope.granted) ??
+    false;
+  const isStale =
+    healthSummary.toLowerCase().includes("missing required") ||
+    healthSummary.toLowerCase().includes("stale");
   if (status === "connected" && (hasMissingRequiredScopes || isStale)) {
     return {
       label: "Permission Limited",
       className: "permission-limited",
-      summary: `${connector.name} is missing required scopes or permissions.`
+      summary: `${connector.name} is missing required scopes or permissions.`,
     };
   }
 
@@ -364,7 +401,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Syncing",
       className: "syncing",
-      summary: `Verifying connection with ${connector.name}...`
+      summary: `Verifying connection with ${connector.name}...`,
     };
   }
 
@@ -379,7 +416,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Connected",
       className: "connected",
-      summary
+      summary,
     };
   }
 
@@ -388,7 +425,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Expired",
       className: "expired",
-      summary: `${connector.name} authorization expired; reconnect or refresh is required.`
+      summary: `${connector.name} authorization expired; reconnect or refresh is required.`,
     };
   }
 
@@ -401,26 +438,31 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Revoked",
       className: "revoked",
-      summary: `${connector.name} was disconnected or revoked.`
+      summary: `${connector.name} was disconnected or revoked.`,
     };
   }
 
   // 6. Configuration Required / Unconfigured
   const isUnconfigured =
-    status === "unconfigured" || status === "unavailable" || status === "needs-auth";
-  const hasConfigMsg = setupMessage?.toLowerCase().includes("broker") ||
+    status === "unconfigured" ||
+    status === "unavailable" ||
+    status === "needs-auth";
+  const hasConfigMsg =
+    setupMessage?.toLowerCase().includes("broker") ||
     setupMessage?.toLowerCase().includes("config") ||
     setupMessage?.toLowerCase().includes("client_id") ||
     healthSummary.toLowerCase().includes("configuration");
 
   if (status === "unconfigured" || (isUnconfigured && hasConfigMsg)) {
-    const summary = connector.authMode === "oauth-pkce"
-      ? setupMessage ?? `${connector.name} requires a desktop OAuth client configuration.`
-      : `${connector.name} is not configured on the Fable auth broker.`;
+    const summary =
+      connector.authMode === "oauth-pkce"
+        ? (setupMessage ??
+          `${connector.name} requires a desktop OAuth client configuration.`)
+        : `${connector.name} is not configured on the Fable auth broker.`;
     return {
       label: "Configuration Required",
       className: "configuration-required",
-      summary
+      summary,
     };
   }
 
@@ -429,7 +471,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Unavailable",
       className: "unavailable",
-      summary: `${connector.name} service is temporarily unavailable.`
+      summary: `${connector.name} service is temporarily unavailable.`,
     };
   }
 
@@ -443,16 +485,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Failed",
       className: "failed",
-      summary: healthSummary || `Connection to ${connector.name} failed.`
-    };
-  }
-
-  // 9. Fixture / Preview
-  if (status === "fixture") {
-    return {
-      label: "Preview",
-      className: "fixture",
-      summary: healthSummary || "Preview mode active."
+      summary: healthSummary || `Connection to ${connector.name} failed.`,
     };
   }
 
@@ -460,7 +493,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     return {
       label: "Ready",
       className: "configured",
-      summary: setupMessage ?? healthSummary
+      summary: setupMessage ?? healthSummary,
     };
   }
 
@@ -468,13 +501,9 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
   return {
     label: "Needs Authorization",
     className: "needs-auth",
-    summary: setupMessage ?? healthSummary ?? `Connect your ${connector.name} account.`
+    summary:
+      setupMessage ??
+      healthSummary ??
+      `Connect your ${connector.name} account.`,
   };
-}
-
-function actionLabel(action: ConnectorActionKind) {
-  return action
-    .split(".")
-    .at(-1)!
-    .replaceAll("-", " ");
 }

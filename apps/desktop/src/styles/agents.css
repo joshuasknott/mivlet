@@ -806,9 +806,9 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 @media (max-width: 650px) {
   .desktop-frame--agents,
   .desktop-frame--agents.desktop-frame--live-closed { display: grid; grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .agent-sidebar { display: grid; grid-template-columns: minmax(0, 1fr) 40px; grid-template-rows: 40px auto; min-height: auto; gap: 6px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
-  .agent-sidebar__topline { grid-column: 2; grid-row: 1; min-height: 40px; padding: 0; }
-  .agent-sidebar__new { width: 40px; height: 40px; }
+  .agent-sidebar { display: grid; grid-template-columns: minmax(0, 1fr) 44px; grid-template-rows: 44px auto; min-height: auto; gap: 6px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .agent-sidebar__topline { grid-column: 2; grid-row: 1; min-height: 44px; padding: 0; }
+  .agent-sidebar__new { width: 44px; height: 44px; }
   .agent-sidebar__actions { grid-column: 1; grid-row: 1; margin: 0; }
   .agent-team-backdrop,
   .agent-learning-backdrop { align-items: end; padding: 0; }
@@ -817,7 +817,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .agent-team-dialog footer { align-items: flex-start; flex-direction: column; }
   .agent-team-dialog footer > div { width: 100%; }
   .agent-team-dialog footer button { flex: 1; }
-  .agent-search { min-height: 40px; }
+  .agent-search { min-height: 44px; }
   .agent-list { display: flex; grid-column: 1 / -1; grid-row: 2; gap: 5px; overflow-x: auto; padding: 3px 0 5px; }
   .agent-row { flex: 0 0 112px; }
   .agent-row__select { grid-template-columns: minmax(0, 1fr); justify-items: center; min-height: 62px; padding: 5px; }
@@ -830,8 +830,29 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .agent-row__line strong { display: -webkit-box; width: 100%; max-width: 102px; overflow: hidden; font-size: 10px; line-height: 1.15; text-align: center; white-space: normal; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
   .agent-sidebar__profile { display: none; }
   .desktop-frame--agents > .workspace { height: 100%; min-height: 0; border-right: 0; }
-  .agent-workspace-header button { width: 40px; height: 40px; }
-  .live-rail__header button { width: 40px; height: 40px; }
+  .agent-workspace-header button { width: 44px; height: 44px; }
+  .live-rail__header button { width: 44px; height: 44px; }
+  .desktop-frame--agents .composer {
+    grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 44px;
+    grid-template-rows: auto 44px;
+    min-height: 104px;
+    column-gap: 6px;
+    row-gap: 6px;
+  }
+  .desktop-frame--agents .composer-field { grid-column: 1 / -1; grid-row: 1; }
+  .desktop-frame--agents .composer-controls > .composer-control-group,
+  .desktop-frame--agents .composer-control-group--end { display: contents; }
+  .desktop-frame--agents .composer-controls > .composer-control-group:first-child > .composer-control-anchor:first-child { grid-column: 1; grid-row: 2; }
+  .desktop-frame--agents .composer-control-anchor--permissions { grid-column: 2; grid-row: 2; min-width: 0; }
+  .desktop-frame--agents .composer-control-anchor--model { grid-column: 3; grid-row: 2; min-width: 0; }
+  .desktop-frame--agents .voice-actions,
+  .desktop-frame--agents .send-button { grid-column: 4; grid-row: 2; }
+  .desktop-frame--agents .composer-chip,
+  .desktop-frame--agents .composer-model,
+  .desktop-frame--agents .composer-permissions-card { height: 44px; }
+  .desktop-frame--agents .composer-chip { width: 44px; }
+  .desktop-frame--agents .composer-model,
+  .desktop-frame--agents .composer-permissions-card { width: 100%; padding-inline: 9px; font-size: var(--text-13); }
   .desktop-frame--agents .composer-control-group--end,
   .desktop-frame--agents .voice-actions,
   .desktop-frame--agents .voice-actions .composer-chip,
@@ -843,7 +864,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .desktop-frame--agents .workspace-center--composer { width: min(100% - 24px, 760px); }
   .agent-welcome { margin-bottom: 20px; }
   .agent-welcome__suggestions { padding-left: 0; }
-  .agent-welcome__suggestions button { min-height: 40px; }
+  .agent-welcome__suggestions button { min-height: 44px; }
   .hosted-browser-launcher input { height: 40px; }
   .hosted-browser-launcher button { min-height: 40px; padding-inline: 11px; }
   .local-computer-apps button { min-height: 40px; }

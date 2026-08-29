@@ -113,7 +113,6 @@ export const requestExecutionCapability = action({
       v.literal("process:launch"),
       v.literal("process:inspect"),
       v.literal("process:kill"),
-      v.literal("schedule:manage"),
       v.literal("browser:navigate"),
       v.literal("browser:act"),
       v.literal("browser:snapshot")

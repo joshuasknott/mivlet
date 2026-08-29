@@ -1,8 +1,8 @@
 /**
  * Shared OpenAI-compatible request shaping + SSE parsing.
  *
- * OpenAI, OpenRouter, and xAI all speak the Chat Completions wire format, so
- * they share this path. Anthropic Messages and Gemini have their own shapers
+ * OpenAI, xAI, and explicit custom endpoints share the Chat Completions wire
+ * format. Anthropic Messages and Gemini have their own shapers
  * (anthropic.ts / gemini.ts) but produce the same BackendAgentEvent stream.
  *
  * Pure functions: no network, no key. The transport seam owns egress; the API
@@ -73,42 +73,10 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
 
 interface OpenAiStreamState {
   toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
-  /** MiniMax's OpenAI-compatible stream reports cumulative `delta.content`. */
-  minimaxContent: string;
 }
 
 function newOpenAiStreamState(): OpenAiStreamState {
-  return { toolCalls: new Map(), minimaxContent: "" };
-}
-
-/**
- * Most OpenAI-compatible providers send an incremental text fragment in each
- * `delta.content`. MiniMax is the documented exception: every frame contains
- * the full text accumulated so far. Emit only its unseen suffix so downstream
- * transcript concatenation does not repeat the already-rendered prefix.
- */
-function textDeltaForProvider(
-  providerId: string,
-  content: string,
-  state: OpenAiStreamState
-): string {
-  if (providerId !== "minimax") return content;
-
-  const previous = state.minimaxContent;
-  if (content.startsWith(previous)) {
-    state.minimaxContent = content;
-    return content.slice(previous.length);
-  }
-
-  // A shorter repeated snapshot can arrive around provider-side buffering.
-  // It contains no new text, so do not replay it into the transcript.
-  if (previous.startsWith(content)) return "";
-
-  // The provider departed from its cumulative contract. Preserve the frame
-  // rather than silently dropping user-visible text; the normal path above is
-  // the one MiniMax documents and the one covered by the stream invariant.
-  state.minimaxContent = content;
-  return content;
+  return { toolCalls: new Map() };
 }
 
 function parseOpenAiStreamLine(
@@ -130,8 +98,7 @@ function parseOpenAiStreamLine(
   const events: BackendAgentEvent[] = [];
   const choice = chunk.choices?.[0];
   if (choice?.delta?.content) {
-    const text = textDeltaForProvider(providerId, choice.delta.content, state);
-    if (text) events.push({ type: "text-delta", text });
+    events.push({ type: "text-delta", text: choice.delta.content });
   }
   for (const fragment of choice?.delta?.tool_calls ?? []) {
     const buffered = state.toolCalls.get(fragment.index) ?? {

@@ -245,16 +245,7 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "local-browser" => Some(("full-access", "critical")),
         "local-browser-observe" => Some(("read-only", "medium")),
         "local-browser-action" => Some(("full-access", "critical")),
-        "cloud-browser"
-        | "cloud-browser-action"
-        | "cloud-process-schedule"
-        | "cloud-process-schedule-cancel"
-        | "cloud-process-schedule-pause"
-        | "cloud-process-schedule-resume"
-        | "cloud-agent-routine"
-        | "cloud-agent-routine-cancel"
-        | "cloud-agent-routine-pause"
-        | "cloud-agent-routine-resume" => Some(("full-access", "critical")),
+        "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
         "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
         }
@@ -812,12 +803,6 @@ impl WebFetchOutcome {
                 output: format!("web-fetch transport error: {message}"),
             },
         }
-    }
-
-    /// The failure output for a non-success/transport outcome (test helper).
-    #[cfg(test)]
-    pub(crate) fn into_tool_result_err(self) -> String {
-        self.into_tool_result().output
     }
 }
 

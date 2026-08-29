@@ -180,19 +180,12 @@ pub(crate) fn ensure_record_owner(
         "memory_record" => {
             "SELECT workspace_id, project_id FROM memory_record WHERE id=?1 AND workspace_id=?2;"
         }
-        "schedule" => "SELECT workspace_id, project_id FROM schedule WHERE id=?1;",
         _ => return Err(StoreError::Invalid("Unknown ownership table.".into())),
     };
     let owner = conn
-        .query_row(
-            sql,
-            rusqlite::params_from_iter(if table == "schedule" {
-                vec![id]
-            } else {
-                vec![id, scope.workspace_id()]
-            }),
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
-        )
+        .query_row(sql, rusqlite::params![id, scope.workspace_id()], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+        })
         .optional()?;
     if owner.as_ref().is_some_and(|(workspace, project)| {
         workspace != scope.workspace_id() || project.as_deref() != scope.project_id()

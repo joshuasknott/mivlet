@@ -3,9 +3,8 @@
  *
  * One interface, every backend family. The shell resolves one AgentBackend per
  * run and consumes its `BackendAgentEvent` stream uniformly — it never branches
- * on provider ids or `BackendType`. Native API, Codex app-server, and ACP
- * providers have concrete adapters; GitHub Copilot runs through the generic
- * ACP adapter rather than a provider-specific SDK path.
+ * on provider ids or `BackendType`. Native API and Codex app-server have
+ * concrete adapters.
  *
  * The contract is deliberately minimal and shaped to match the seams the
  * native-API loop already proved out:
@@ -36,11 +35,10 @@ import type {
 } from "@fable/protocol";
 import type { HttpTransport } from "../native-api/transport";
 import type { ModelDiscoveryResult } from "../native-api/discovery";
-import type { AcpTransportFactory } from "./adapters/acp/transport";
 
 /**
- * A provider-neutral agent runtime. Native-API, Codex, ACP, and Copilot each
- * implement this. The shell resolves one AgentBackend per run via the factory
+ * A provider-neutral agent runtime. Native API and Codex implement this. The
+ * shell resolves one AgentBackend per run via the factory
  * and consumes its events uniformly.
  */
 export interface AgentBackend {
@@ -74,7 +72,7 @@ export interface AgentBackend {
 
   /**
    * Discover selectable models. Optional: a backend may report a fixed
-   * entitlement set (Codex subscription) or none at all (ACP CLI). The outcome
+   * entitlement set (Codex subscription) or none at all. The outcome
    * is always truthful (success/empty/unsupported/offline/failed).
    */
   listModels?(): Promise<ModelDiscoveryResult>;
@@ -107,13 +105,6 @@ export interface BackendDeps {
     provider: BackendProvider,
     handlers: CodexAppServerHandlers
   ) => CodexAppServerHandle | null;
-  /**
-   * Build the stdio/JSON-RPC transport for a connected ACP CLI provider
-   * backend, or null when there is no egress path. The desktop supplies a
-   * Tauri-bound factory that owns the CLI child process on the Rust side; tests
-   * inject a scripted fake. Holds no secret because auth is CLI-owned.
-   */
-  createAcpTransport?: AcpTransportFactory;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }

@@ -115,7 +115,7 @@ export function formatViolationReport(violations, budget) {
     "Recorded baseline (for comparison):",
     `- total JS+CSS: ${formatBytes(budget.recordedBaseline.totalJsCss.rawBytes)} raw / ${formatBytes(budget.recordedBaseline.totalJsCss.gzipBytes)} gzip`,
     `- CSS: ${formatBytes(budget.recordedBaseline.css.rawBytes)} raw`,
-    `- Schedules route: ${formatBytes(budget.recordedBaseline.routeChunks.SchedulesPage.rawBytes)} raw`,
+    `- Settings route: ${formatBytes(budget.recordedBaseline.routeChunks.SettingsPage.rawBytes)} raw`,
     "",
     "Ceilings guard material regression above the current recorded repository build.",
     "Hash suffixes are ignored; gzip tolerance is intentionally wider than raw."

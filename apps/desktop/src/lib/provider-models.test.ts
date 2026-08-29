@@ -29,7 +29,7 @@ describe("provider model choices", () => {
         ]
       },
       {
-        provider: provider("openrouter", "OpenRouter"),
+        provider: provider("xai", "xAI"),
         models: [{ id: "shared", label: "Shared", available: true }]
       }
     ]);
@@ -37,7 +37,7 @@ describe("provider model choices", () => {
     expect(options.map((option) => option.id)).toEqual([
       "openai::gpt-5",
       "openai::shared",
-      "openrouter::shared"
+      "xai::shared"
     ]);
   });
 
@@ -48,13 +48,13 @@ describe("provider model choices", () => {
         models: [{ id: "shared", label: "Shared", available: true }]
       },
       {
-        provider: provider("openrouter", "OpenRouter"),
+        provider: provider("xai", "xAI"),
         models: [{ id: "different", label: "Different", available: true }]
       }
     ]);
 
     expect(resolveProviderModelOption(options, "shared")?.providerId).toBe("openai");
-    expect(modelsForProvider(options, "openrouter")).toEqual([
+    expect(modelsForProvider(options, "xai")).toEqual([
       { id: "different", label: "Different", available: true }
     ]);
   });
@@ -66,7 +66,7 @@ describe("provider model choices", () => {
         models: [{ id: "shared", label: "Shared", available: false }]
       },
       {
-        provider: provider("openrouter", "OpenRouter"),
+        provider: provider("xai", "xAI"),
         models: [{ id: "shared", label: "Shared", available: true }]
       }
     ]);
@@ -81,7 +81,7 @@ describe("provider model choices", () => {
         models: [{ id: "shared", label: "Shared", available: true }]
       },
       {
-        provider: provider("openrouter", "OpenRouter"),
+        provider: provider("xai", "xAI"),
         models: [{ id: "shared", label: "Shared", available: true }]
       }
     ]);

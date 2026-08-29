@@ -187,7 +187,7 @@ fn append_imported_knowledge_source(
         .iter()
         .any(|existing| existing.id == source.id && existing.deleted_at.is_some())
     {
-        return Err("Deleted knowledge cannot be restored by routine import.".to_string());
+        return Err("Deleted knowledge cannot be restored by an import.".to_string());
     }
     sources.retain(|existing| existing.id != source.id);
     sources.insert(0, source);
@@ -321,7 +321,7 @@ fn merge_deleted_imported_tombstones(
     {
         if let Some(incoming) = sources.iter().find(|source| source.id == tombstone.id) {
             if incoming.deleted_at.is_none() {
-                return Err("Deleted knowledge cannot be restored by routine import.".to_string());
+                return Err("Deleted knowledge cannot be restored by an import.".to_string());
             }
             continue;
         }
@@ -630,30 +630,6 @@ fn normalize_runtime_agents(
     Ok(normalized)
 }
 
-// Retained for legacy-file compatibility tests. Production restores through
-// the private owner-qualified snapshot repository.
-#[cfg(test)]
-pub(crate) fn read_runtime_snapshot(path: &Path) -> Result<Option<RuntimeSnapshot>, String> {
-    if let Some(snapshot) = crate::store::read_document(path)? {
-        return normalize_runtime_snapshot(snapshot).map(Some);
-    }
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read runtime snapshot.".to_string())?;
-
-    if contents.trim().is_empty() {
-        return Ok(None);
-    }
-
-    let parsed = serde_json::from_str::<RuntimeSnapshot>(&contents)
-        .map_err(|_| "Fable could not parse runtime snapshot.".to_string())?;
-
-    normalize_runtime_snapshot(parsed).map(Some)
-}
-
 pub(crate) fn write_runtime_snapshot(
     path: &Path,
     snapshot: RuntimeSnapshot,
@@ -770,33 +746,6 @@ pub fn save_runtime_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Build a minimal valid RuntimeSnapshot for focused normalization tests.
-    fn base_snapshot() -> RuntimeSnapshot {
-        RuntimeSnapshot {
-            version: RUNTIME_SNAPSHOT_VERSION,
-            active_item: "chat".to_string(),
-            composer_draft: String::new(),
-            voice_enabled: false,
-            approval_audit: Vec::new(),
-            dismissed_approval_ids: Vec::new(),
-            approval_rules: Vec::new(),
-            agents: Vec::new(),
-            active_agent_id: None,
-            pinned_source_ids: Vec::new(),
-            imported_knowledge_sources: Vec::new(),
-            memory_disabled: false,
-            memory_records: Vec::new(),
-            connected_backend_ids: Vec::new(),
-            onboarding_complete: false,
-            onboarding_version: 0,
-            selected_model_id: String::new(),
-            permission_mode: "read-only".to_string(),
-            permission_label: Some("Read Only".to_string()),
-            custom_approval_settings: None,
-            saved_at: "2026-06-29T12:00:00Z".to_string(),
-        }
-    }
 
     fn refresh_source(name: &str, content: &str) -> LocalFileImport {
         import_local_text_file(LocalTextFileCandidate {

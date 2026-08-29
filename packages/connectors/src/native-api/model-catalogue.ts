@@ -1,37 +1,9 @@
-/**
- * Curated per-model capability catalogue for the native-API providers.
- *
- * This is the **fallback catalogue** used when dynamic discovery is unavailable
- * (offline, preview/test runtime, discovery failure, or a provider that does
- * not expose a list-models endpoint). Values are conservative public ceilings
- * from each provider's model documentation — used only for capability truth and
- * context-budget decisions, never for billing (usage stays provider-reported).
- *
- * Hard invariant: an unknown model id returns `undefined`. Callers must treat
- * `undefined` as "capabilities unknown" and fail conservatively — this module
- * NEVER fabricates a capability it does not have evidence for.
- *
- * Compliance: this catalogue does not assert pricing, entitlements, or tier
- * availability — only technical capability ceilings. It is pure data (no
- * network, no key) and therefore fixture-testable.
- */
+/** Honest capability fallback for the direct providers Fable currently ships. */
 
 import type { BackendModel, ModelCapabilities } from "@fable/protocol";
 
-/**
- * The default max-tokens value the agent loop requests when a model's output
- * ceiling is unknown. Kept conservative so it stays under typical provider
- * limits; the loop clamps it down when {@link ModelCapabilities.maxOutputTokens}
- * is known.
- */
 export const MAX_TOKENS_DEFAULT = 2_048;
 
-/**
- * Per-provider, per-model capability entries. Model ids match the ids surfaced
- * in the native fixtures and (when discovery runs) the provider's own list. A
- * provider that is missing from this map simply has no curated entries — its
- * models return `undefined` (unknown) until discovery supplies metadata.
- */
 const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
   openai: {
     "gpt-5.2": {
@@ -112,189 +84,9 @@ const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
       reasoning: true,
       structuredOutput: false
     }
-  },
-  openrouter: {
-    // OpenRouter routes to upstream models, so the catalogue only records the
-    // official automatic router surfaced in the fixtures. Real upstream limits
-    // are honored from discovery when available; these are conservative.
-    "openrouter/auto": {
-      contextWindow: 128_000,
-      maxOutputTokens: 16_384,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: false,
-      structuredOutput: false
-    }
-  },
-  deepseek: {
-    "deepseek-v4-pro": {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 384_000,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    },
-    "deepseek-v4-flash": {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 384_000,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  zai: {
-    "glm-5.1": {
-      contextWindow: 200_000,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  minimax: {
-    "MiniMax-M2.7": {
-      contextWindow: 204_800,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    },
-    "MiniMax-M2.7-highspeed": {
-      contextWindow: 204_800,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  alibaba: {
-    "qwen3.7-plus": {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 64_000,
-      streaming: true,
-      tools: true,
-      vision: true,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  fireworks: {
-    "accounts/fireworks/models/deepseek-v3p1": {
-      contextWindow: 128_000,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  moonshot: {
-    "kimi-k2.6": {
-      contextWindow: 256_000,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: true,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  "kimi-code": {
-    "kimi-for-coding": {
-      contextWindow: 262_144,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: true,
-      reasoning: true,
-      structuredOutput: false
-    }
-  },
-  perplexity: {
-    sonar: {
-      contextWindow: 128_000,
-      maxOutputTokens: 8_192,
-      streaming: true,
-      tools: false,
-      vision: false,
-      reasoning: false,
-      structuredOutput: false
-    }
-  },
-  tencent: {
-    hy3: {
-      contextWindow: 256_000,
-      maxOutputTokens: 128_000,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  xiaomi: {
-    "mimo-v2.5-pro": {
-      contextWindow: 1_000_000,
-      maxOutputTokens: 128_000,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  groq: {
-    "openai/gpt-oss-120b": {
-      contextWindow: 131_072,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  together: {
-    "openai/gpt-oss-20b": {
-      contextWindow: 131_072,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
-  },
-  cerebras: {
-    "gpt-oss-120b": {
-      contextWindow: 131_072,
-      maxOutputTokens: 32_768,
-      streaming: true,
-      tools: true,
-      vision: false,
-      reasoning: true,
-      structuredOutput: true
-    }
   }
 };
 
-/**
- * Look up the curated capabilities for a (providerId, modelId) pair. Returns
- * `undefined` when the model is not in the catalogue — callers must treat that
- * as "unknown", never fabricate a capability set.
- */
 export function catalogueCapabilities(
   providerId: string,
   modelId: string
@@ -302,16 +94,11 @@ export function catalogueCapabilities(
   return CATALOGUE[providerId]?.[modelId];
 }
 
-/**
- * Conservative execution ceilings for generation models returned by a live
- * provider list but not yet present in the curated catalogue. Rust filters the
- * list-models response down to generation-capable ids first; these defaults let
- * newly released chat models run while keeping token/tool assumptions modest.
- */
+/** Conservative ceilings for new models returned by live discovery. */
 export function defaultDiscoveredCapabilities(
   providerId: string
 ): ModelCapabilities | undefined {
-  if (!["openai", "anthropic", "gemini", "xai", "openrouter"].includes(providerId)) {
+  if (!["openai", "anthropic", "gemini", "xai"].includes(providerId)) {
     return undefined;
   }
   return {
@@ -325,11 +112,6 @@ export function defaultDiscoveredCapabilities(
   };
 }
 
-/**
- * Resolve the capabilities to use for a run. Prefers the model entry's own
- * capabilities (set from discovery metadata) and falls back to the curated
- * catalogue. Returns `undefined` when neither source knows the model.
- */
 export function resolveModelCapabilities(
   providerId: string,
   model: BackendModel | undefined
@@ -339,40 +121,20 @@ export function resolveModelCapabilities(
   return undefined;
 }
 
-/** The result of validating a model selection before a run starts. */
 export interface ModelValidation {
-  /** True when the model may be used for a run. */
   ok: boolean;
-  /** A normalized, user-facing reason when `ok` is false. */
   error?: string;
-  /** The resolved capabilities, if any were found. */
   capabilities?: ModelCapabilities;
-  /**
-   * The maxTokens value clamped to the model's output ceiling (or the request's
-   * value when capabilities are unknown). Always finite and >= 1.
-   */
   maxTokens: number;
 }
 
-/**
- * Validate a model selection before a run starts. Empty, unknown-to-the-live-
- * provider, unavailable, and explicitly non-streaming models are rejected.
- * Newly discovered generation models without curated metadata are allowed with
- * conservative request defaults; richer capabilities remain unknown.
- *
- * @param providerId  The native provider id.
- * @param modelId     The model id the run would use.
- * @param models      The provider's selectable models (from the registry /
- *                    discovery merge) so availability is checked truthfully.
- * @param requestedMaxTokens  The caller's requested max output tokens.
- */
 export function validateModelForRun(
   providerId: string,
   modelId: string,
   models: BackendModel[],
   requestedMaxTokens = MAX_TOKENS_DEFAULT
 ): ModelValidation {
-  if (!modelId || modelId.trim().length === 0) {
+  if (!modelId.trim()) {
     return { ok: false, error: "No model selected for this run.", maxTokens: requestedMaxTokens };
   }
   const model = models.find((entry) => entry.id === modelId);
@@ -392,10 +154,7 @@ export function validateModelForRun(
   }
   const capabilities = resolveModelCapabilities(providerId, model);
   if (!capabilities) {
-    return {
-      ok: true,
-      maxTokens: requestedMaxTokens
-    };
+    return { ok: true, maxTokens: requestedMaxTokens };
   }
   if (!capabilities.streaming) {
     return {
@@ -405,9 +164,9 @@ export function validateModelForRun(
       maxTokens: requestedMaxTokens
     };
   }
-  const maxTokens = Math.min(
-    capabilities.maxOutputTokens,
-    Math.max(1, requestedMaxTokens)
-  );
-  return { ok: true, capabilities, maxTokens };
+  return {
+    ok: true,
+    capabilities,
+    maxTokens: Math.min(capabilities.maxOutputTokens, Math.max(1, requestedMaxTokens))
+  };
 }

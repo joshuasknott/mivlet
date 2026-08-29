@@ -43,16 +43,6 @@ const CODEX_API_KEY_CAPS: CapabilitySet = [
   "usage-cost"
 ];
 
-const ACP_CAPS: CapabilitySet = [
-  "authentication",
-  "threads",
-  "streaming",
-  "tool-requests",
-  "approvals",
-  "file-changes",
-  "cancellation"
-];
-
 /**
  * Native-API providers declare the full capability set when connected: Fable owns
  * the loop, so it honors streaming, tool-requests + approvals, file-changes,
@@ -75,9 +65,8 @@ const NO_CAPS: CapabilitySet = [];
 
 /**
  * Resolve the capability set a backend can honor for its `backendType` and
- * current `authState`. Only `connected` (and the transitional
- * `entitlement-pending` for Grok) yields capabilities; every other state fails
- * closed.
+ * current `authState`. Only `connected` yields capabilities; every other state
+ * fails closed.
  *
  * @param withUsageCost When true, the resolved set may include `usage-cost`
  *   (used for Codex's BYOK/API-key path). Subscription paths never get it.
@@ -88,22 +77,13 @@ export function resolveCapabilities(
   withUsageCost = false
 ): BackendCapability[] {
   // Fail closed for every state that cannot actually serve requests.
-  if (authState !== "connected" && authState !== "entitlement-pending") {
+  if (authState !== "connected") {
     return [...NO_CAPS];
-  }
-
-  // entitlement-pending (Grok post-login, pre-entitlement-check) only allows
-  // authentication until the entitlement resolves. It must not advertise
-  // streaming/tool/file capabilities it cannot yet back.
-  if (authState === "entitlement-pending") {
-    return ["authentication"];
   }
 
   switch (backendType) {
     case "codex-app-server":
       return withUsageCost ? [...CODEX_API_KEY_CAPS] : [...CODEX_SUBSCRIPTION_CAPS];
-    case "acp":
-      return [...ACP_CAPS];
     case "native-api":
       return [...NATIVE_API_CAPS];
     default:

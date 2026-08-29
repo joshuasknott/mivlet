@@ -1,4 +1,12 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type {
   ActionHistoryEvent,
   ApprovalAuditEntry,
@@ -9,13 +17,8 @@ import type {
   BackendProvider,
   BackendVerifyOutcome,
   BackendVerifyResult,
-  ConnectorActionKind,
-  ConnectorActionRequest,
   ConnectorAccountOption,
   ConnectorManifest,
-  ConnectorSearchItem,
-  ConnectorSearchRequest,
-  ConnectorSearchResult,
   CustomApprovalSettings,
   FableAgentProfile,
   KnowledgeCitation,
@@ -30,7 +33,7 @@ import type {
   ThreadSummary,
   IdentityStatus,
   AccountWorkspaceStatus,
-  WorkspaceDirective
+  WorkspaceDirective,
 } from "@fable/protocol";
 import {
   assembleContext,
@@ -41,28 +44,20 @@ import {
   forgetMemory as forgetMemoryRecord,
   isLiveMemory,
   isLiveSource,
-  retrieve
+  retrieve,
 } from "@fable/knowledge";
 import {
-  canUseBrowserSession,
-  createFixtureBrowserSession,
-  createUnavailableBrowserSession,
-  deriveBrowserSessionFromConnectors,
   hasRunnableAdapter,
-  importFixtureConnectorItem,
   importLocalTextFile,
-  labelFixtureSearchResult,
   listBackendProviders,
   mergeDiscoveredModels,
-  prepareFixtureConnectorAction,
-  resolveBrowserSessionAction,
-  searchFixtureConnector,
+  resolveCapabilities,
   SUPPORTED_LOCAL_FILE_EXTENSIONS,
   normalizeCustomApprovalSettings,
   resolvePermissionModeFromCustom,
   type ToolApprovalGate,
   type ModelDiscoveryResult,
-  type LocalTextFileCandidate
+  type LocalTextFileCandidate,
 } from "@fable/connectors";
 import {
   isApprovalPresetLabel,
@@ -74,19 +69,18 @@ import {
   selectMemoryForRun,
   sourceAllowedByConnections,
   withPreviewPrivateAuthority,
-  type KnowledgeRunContext
+  type KnowledgeRunContext,
 } from "../lib/agent-run";
 import {
   modelsForProvider,
   providerModelOptions,
-  resolveProviderModelOption
+  resolveProviderModelOption,
 } from "../lib/provider-models";
 import {
   chatThreads,
   connectors,
   knowledgeSources,
-  pendingApprovals,
-  workspaceDirectives
+  workspaceDirectives,
 } from "../data/workspace";
 import {
   beginRuntimeConnectorOAuth,
@@ -97,7 +91,6 @@ import {
   connectRuntimeBackend,
   exportRuntimeMemoryState,
   deleteRuntimeConnectorKnowledgeSource,
-  importRuntimeConnectorItem,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorStatuses,
   listRuntimeConnectorSyncStates,
@@ -115,8 +108,6 @@ import {
   loadRuntimeAccountWorkspaceStatus,
   reconcileRuntimeAccountWorkspace,
   clearRuntimeAccountWorkspaceSession,
-  executeRuntimeConnectorAction,
-  prepareRuntimeConnectorAction,
   promoteRuntimeKnowledgeSourceToMemory,
   refreshRuntimeLocalKnowledgeSource,
   refreshRuntimeConnectorHealth,
@@ -124,19 +115,18 @@ import {
   saveRuntimeMemoryState,
   saveRuntimeImportedKnowledgeSources,
   saveRuntimeSnapshot,
-  searchRuntimeConnector,
   setRuntimeConnectorKnowledgeSourceDisabled,
   switchRuntimeConnectorAccount,
   syncRuntimeConnector,
   refreshRuntimeIdentity,
   signOutRuntimeIdentity,
   startRuntimeCodexBrowserLogin,
-  verifyRuntimeBackend
+  verifyRuntimeBackend,
 } from "../runtime";
 import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
 import {
   clearActiveRuntimeDataScope,
-  setActiveRuntimeDataScope
+  setActiveRuntimeDataScope,
 } from "../runtime-scope";
 import { MAX_IMPORTED_KNOWLEDGE_SOURCES } from "../lib/constants";
 import {
@@ -145,7 +135,7 @@ import {
   type ApprovalModificationDraft,
   type PendingApprovalConfirmation,
   type PersistedShellState,
-  type ComposerAttachment
+  type ComposerAttachment,
 } from "../lib/types";
 import {
   importedSourceDirective,
@@ -153,11 +143,11 @@ import {
   prependAuditEntry,
   readFileAsDataUrl,
   readFileAsText,
-  toSlug
+  toSlug,
 } from "../lib/helpers";
 import {
   promoteKnowledgeSourceFallback,
-  resolveApprovalFallback
+  resolveApprovalFallback,
 } from "../lib/approval-fallbacks";
 import {
   hasTauriRuntime,
@@ -165,12 +155,12 @@ import {
   persistShellState,
   readPersistedShellState,
   shellStateFromRuntimeSnapshot,
-  shellStateToRuntimeSnapshot
+  shellStateToRuntimeSnapshot,
 } from "../lib/persistence";
 import type { ModelDiscoveryOutcome } from "../lib/backend-state";
 import {
   enabledFableProviders,
-  isFableProviderEnabled
+  isFableProviderEnabled,
 } from "../lib/provider-availability";
 import {
   ALLOW_PREVIEW_FALLBACKS,
@@ -180,13 +170,18 @@ import {
   PREVIEW_ACCOUNT_WORKSPACE_STATUS,
   PREVIEW_IDENTITY_STATUS,
   defaultShellState,
-  runtimeOrPreview
+  runtimeOrPreview,
 } from "./shell-runtime/defaults";
-import { isFirstWaveConnectorId } from "./shell-runtime/backend-normalization";
-import { mergeAcpProbeResults } from "./shell-runtime/provider-probes";
-import type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types";
+import { isSupportedConnectorId } from "./shell-runtime/backend-normalization";
+import type {
+  ShellRuntime,
+  UseShellRuntimeOptions,
+} from "./shell-runtime/types";
 
-export type { ShellRuntime, UseShellRuntimeOptions } from "./shell-runtime/types";
+export type {
+  ShellRuntime,
+  UseShellRuntimeOptions,
+} from "./shell-runtime/types";
 
 /**
  * Owns all workspace shell state and the runtime-backed effects (snapshot
@@ -202,28 +197,37 @@ function createExecutionAttemptId() {
 }
 
 async function resolveUsableBackendProviders(
-  providers: BackendProvider[]
+  providers: BackendProvider[],
 ): Promise<BackendProvider[]> {
-  const resolved = await mergeAcpProbeResults(enabledFableProviders(providers));
+  const resolved = enabledFableProviders(providers);
   const nativeVerification = new Map<string, BackendVerifyResult | null>();
 
   await Promise.all(
     resolved
       .filter(
         (provider) =>
-          provider.backendType === "native-api" && provider.authState === "connected"
+          provider.backendType === "native-api" &&
+          provider.authState === "connected",
       )
       .map(async (provider) => {
-        nativeVerification.set(provider.id, await verifyRuntimeBackend(provider.id));
-      })
+        nativeVerification.set(
+          provider.id,
+          await verifyRuntimeBackend(provider.id),
+        );
+      }),
   );
 
   return resolved.map((provider) => {
     const verification = nativeVerification.get(provider.id);
-    if (verification === undefined || verification?.outcome === "ready") {
+    if (
+      verification === undefined ||
+      verification?.outcome === "ready" ||
+      verification?.outcome === "configured"
+    ) {
       return provider;
     }
-    const authState = verification?.outcome === "auth-failed" ? "needs-auth" : "unavailable";
+    const authState =
+      verification?.outcome === "auth-failed" ? "needs-auth" : "unavailable";
     return {
       ...provider,
       authState,
@@ -231,13 +235,17 @@ async function resolveUsableBackendProviders(
       models: provider.models.map((model) => ({ ...model, available: false })),
       installHint:
         verification?.message ??
-        "Fable could not verify this saved provider. Check the connection and try again."
+        "Fable could not verify this saved provider. Check the connection and try again.",
     };
   });
 }
 
-export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRuntime {
-  const approvalGateRef = useRef<ToolApprovalGate | null>(options.approvalGate ?? null);
+export function useShellRuntime(
+  options: UseShellRuntimeOptions = {},
+): ShellRuntime {
+  const approvalGateRef = useRef<ToolApprovalGate | null>(
+    options.approvalGate ?? null,
+  );
   approvalGateRef.current = options.approvalGate ?? null;
   const initialState = useMemo(
     () =>
@@ -247,25 +255,28 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       hasTauriRuntime()
         ? importLegacyShellStateOnce(defaultShellState)
         : readPersistedShellState(defaultShellState),
-    []
+    [],
   );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
-  const [composerValue, setComposerValue] = useState(initialState.composerValue);
+  const [composerValue, setComposerValue] = useState(
+    initialState.composerValue,
+  );
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(() =>
-    hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS
+    hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS,
   );
   const [identityPending, setIdentityPending] = useState(false);
-  const [accountWorkspaceStatus, setAccountWorkspaceStatus] = useState<AccountWorkspaceStatus>(
-    () =>
+  const [accountWorkspaceStatus, setAccountWorkspaceStatus] =
+    useState<AccountWorkspaceStatus>(() =>
       hasTauriRuntime()
         ? DEFAULT_ACCOUNT_WORKSPACE_STATUS
-        : PREVIEW_ACCOUNT_WORKSPACE_STATUS
-  );
-  const [accountWorkspacePending, setAccountWorkspacePending] = useState(hasTauriRuntime());
+        : PREVIEW_ACCOUNT_WORKSPACE_STATUS,
+    );
+  const [accountWorkspacePending, setAccountWorkspacePending] =
+    useState(hasTauriRuntime());
   const accountWorkspaceFallback = hasTauriRuntime()
     ? DEFAULT_ACCOUNT_WORKSPACE_STATUS
     : PREVIEW_ACCOUNT_WORKSPACE_STATUS;
@@ -273,65 +284,85 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const accountRequestGenerationRef = useRef(0);
   const activeWorkspaceScope =
     accountWorkspaceStatus.accountBound &&
-    (accountWorkspaceStatus.state === "ready" || accountWorkspaceStatus.state === "offline")
+    (accountWorkspaceStatus.state === "ready" ||
+      accountWorkspaceStatus.state === "offline")
       ? { workspaceId: accountWorkspaceStatus.activeWorkspace.localWorkspaceId }
       : null;
-  const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(initialState.approvalAudit);
-  const [backendToolApprovals, setBackendToolApprovals] = useState<ApprovalRequest[]>([]);
+  const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(
+    initialState.approvalAudit,
+  );
+  const [backendToolApprovals, setBackendToolApprovals] = useState<
+    ApprovalRequest[]
+  >([]);
   const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
-  const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(initialState.dismissedApprovalIds);
-  const [approvalRules, setApprovalRules] = useState<ApprovalGrant[]>(initialState.approvalRules);
-  const [sessionApprovalGrants, setSessionApprovalGrants] = useState<ApprovalGrant[]>([]);
-  const [editingApprovalId, setEditingApprovalId] = useState<string | null>(null);
+  const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(
+    initialState.dismissedApprovalIds,
+  );
+  const [approvalRules, setApprovalRules] = useState<ApprovalGrant[]>(
+    initialState.approvalRules,
+  );
+  const [sessionApprovalGrants, setSessionApprovalGrants] = useState<
+    ApprovalGrant[]
+  >([]);
+  const [editingApprovalId, setEditingApprovalId] = useState<string | null>(
+    null,
+  );
   const [approvalModificationDraft, setApprovalModificationDraft] =
     useState<ApprovalModificationDraft>(EMPTY_APPROVAL_MODIFICATION);
   const [pendingApprovalConfirmation, setPendingApprovalConfirmation] =
     useState<PendingApprovalConfirmation | null>(null);
   const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
   const [agents, setAgents] = useState<FableAgentProfile[]>(
-    initialState.agents?.length ? initialState.agents : defaultShellState.agents ?? []
+    initialState.agents?.length
+      ? initialState.agents
+      : (defaultShellState.agents ?? []),
   );
   const [activeAgentId, setActiveAgentId] = useState(
-    initialState.activeAgentId ?? initialState.agents?.[0]?.id ?? "chief-of-staff"
+    initialState.activeAgentId ??
+      initialState.agents?.[0]?.id ??
+      "chief-of-staff",
   );
-  const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(initialState.pinnedSourceIds);
+  const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(
+    initialState.pinnedSourceIds,
+  );
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
     hasTauriRuntime()
       ? []
-      : initialState.connectedBackendIds.filter(isFableProviderEnabled)
+      : initialState.connectedBackendIds.filter(isFableProviderEnabled),
   );
-  const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<LocalFileImport[]>(
-    initialState.importedKnowledgeSources
-  );
-  const [knowledgeCitations, setKnowledgeCitations] = useState<KnowledgeCitation[]>([]);
-  const [knowledgeSearchMode, setKnowledgeSearchMode] = useState("lexical-fallback");
+  const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<
+    LocalFileImport[]
+  >(initialState.importedKnowledgeSources);
+  const [knowledgeCitations, setKnowledgeCitations] = useState<
+    KnowledgeCitation[]
+  >([]);
+  const [knowledgeSearchMode, setKnowledgeSearchMode] =
+    useState("lexical-fallback");
   const [importStatus, setImportStatus] = useState<string | null>(null);
-  const [composerAttachments, setComposerAttachments] = useState<ComposerAttachment[]>([]);
+  const [composerAttachments, setComposerAttachments] = useState<
+    ComposerAttachment[]
+  >([]);
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
-  const [connectorAccounts, setConnectorAccounts] = useState<Record<string, ConnectorAccountOption[]>>({});
+  const [connectorAccounts, setConnectorAccounts] = useState<
+    Record<string, ConnectorAccountOption[]>
+  >({});
   const [connectorStatus, setConnectorStatus] = useState<string | null>(null);
-  const [connectorSearchResult, setConnectorSearchResult] =
-    useState<ConnectorSearchResult | null>(null);
-  const [connectorImportedSources, setConnectorImportedSources] = useState<KnowledgeSource[]>([]);
-  const [preparedConnectorActions, setPreparedConnectorActions] =
-    useState<ConnectorActionRequest[]>([]);
-  const browserSession = useMemo(() => {
-    if (hasTauriRuntime()) {
-      return deriveBrowserSessionFromConnectors(connectorManifests);
-    }
-    return ALLOW_PREVIEW_FALLBACKS
-      ? createFixtureBrowserSession()
-      : createUnavailableBrowserSession("Browser sessions require the desktop runtime.");
-  }, [connectorManifests]);
-  const [managedMemoryRecords, setManagedMemoryRecords] = useState<MemoryRecord[]>(
-    initialState.memoryRecords
+  const [connectorImportedSources, setConnectorImportedSources] = useState<
+    KnowledgeSource[]
+  >([]);
+  const [managedMemoryRecords, setManagedMemoryRecords] = useState<
+    MemoryRecord[]
+  >(initialState.memoryRecords);
+  const [memoryDisabled, setMemoryDisabled] = useState(
+    initialState.memoryDisabled,
   );
-  const [memoryDisabled, setMemoryDisabled] = useState(initialState.memoryDisabled);
   const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
-  const [editingMemoryDraft, setEditingMemoryDraft] = useState<Pick<MemoryRecord, "title" | "value">>({
+  const [editingMemoryDraft, setEditingMemoryDraft] = useState<
+    Pick<MemoryRecord, "title" | "value">
+  >({
     title: "",
-    value: ""
+    value: "",
   });
   const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
@@ -342,8 +373,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // + capabilities; outside Tauri the preview registry is used so the onboarding
   // shell stays testable. Preview connections remain visibly synthetic, while
   // the same provider gate is enforced in preview and native builds.
-  const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(() =>
-    enabledFableProviders(listBackendProviders())
+  const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(
+    () => enabledFableProviders(listBackendProviders()),
   );
   // Dynamically discovered model ids per native provider id, plus whether
   // discovery actually ran for that provider (so the catalogue fallback is
@@ -357,25 +388,29 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     Record<string, ModelDiscoveryOutcome>
   >({});
   const [onboardingDismissed, setOnboardingDismissed] = useState(
-    initialState.onboardingComplete ?? false
+    initialState.onboardingComplete ?? false,
   );
   const [onboardingVersion, setOnboardingVersion] = useState(
-    initialState.onboardingVersion ?? 0
+    initialState.onboardingVersion ?? 0,
   );
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
   // Composer model + permission picker selections, persisted so the next run
   // uses them. The model is re-validated against the connected backend's
   // available models before each run (see resolveSelectedModel).
-  const [selectedModelId, setSelectedModelId] = useState(initialState.selectedModelId);
-  const [permissionMode, setPermissionMode] = useState<PermissionMode>(initialState.permissionMode);
+  const [selectedModelId, setSelectedModelId] = useState(
+    initialState.selectedModelId,
+  );
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(
+    initialState.permissionMode,
+  );
   const [permissionLabel, setPermissionLabel] = useState(
     isApprovalPresetLabel(initialState.permissionLabel)
       ? initialState.permissionLabel
-      : permissionLabelFor(initialState.permissionMode)
+      : permissionLabelFor(initialState.permissionMode),
   );
   const [customApprovalSettings, setCustomApprovalSettings] =
     useState<CustomApprovalSettings>(
-      normalizeCustomApprovalSettings(initialState.customApprovalSettings)
+      normalizeCustomApprovalSettings(initialState.customApprovalSettings),
     );
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -391,9 +426,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     () =>
       mergeKnowledgeSources(hasTauriRuntime() ? [] : knowledgeSources, [
         ...connectorImportedSources,
-        ...importedKnowledgeSources
+        ...importedKnowledgeSources,
       ]).filter((source) => !source.deletedAt),
-    [connectorImportedSources, importedKnowledgeSources]
+    [connectorImportedSources, importedKnowledgeSources],
   );
   // Every runnable connection participates in the model picker. Selection owns
   // routing: Fable no longer silently sends all prompts to the first connection.
@@ -404,9 +439,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           provider.authState === "connected" &&
           provider.capabilities.includes("streaming") &&
           hasRunnableAdapter(provider.backendType) &&
-          (provider.backendType !== "codex-app-server" || hasTauriRuntime())
+          (provider.backendType !== "codex-app-server" || hasTauriRuntime()),
       ),
-    [backendProviders]
+    [backendProviders],
   );
   const modelOptions = useMemo(
     () =>
@@ -420,53 +455,53 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
                 discovered: discovery.models,
                 connected: true,
                 discoveryRan:
-                  discovery.outcome === "success" || discovery.outcome === "empty"
+                  discovery.outcome === "success" ||
+                  discovery.outcome === "empty",
               })
             : provider.models;
           return { provider, models };
-        })
+        }),
       ),
-    [connectedAgentBackends, discoveredModels]
+    [connectedAgentBackends, discoveredModels],
   );
   const resolvedModelOption = useMemo(
     () => resolveProviderModelOption(modelOptions, selectedModelId),
-    [modelOptions, selectedModelId]
+    [modelOptions, selectedModelId],
   );
   const connectedAgentBackend = useMemo(
     () =>
       connectedAgentBackends.find(
-        (provider) => provider.id === resolvedModelOption?.providerId
+        (provider) => provider.id === resolvedModelOption?.providerId,
       ) ?? connectedAgentBackends[0],
-    [connectedAgentBackends, resolvedModelOption?.providerId]
+    [connectedAgentBackends, resolvedModelOption?.providerId],
   );
   const selectableModels = useMemo(
     () => modelsForProvider(modelOptions, connectedAgentBackend?.id),
-    [modelOptions, connectedAgentBackend?.id]
+    [modelOptions, connectedAgentBackend?.id],
   );
   const resolvedSelectedModelId = resolvedModelOption?.modelId ?? "";
   const resolvedModelOptionId = resolvedModelOption?.id ?? "";
   const contextualDirectives = useMemo(
-    () => [
-      ...importedKnowledgeSources.slice(0, 2).map(importedSourceDirective),
-      ...workspaceDirectives
-    ].slice(0, 4),
-    [importedKnowledgeSources]
+    () =>
+      [
+        ...importedKnowledgeSources.slice(0, 2).map(importedSourceDirective),
+        ...workspaceDirectives,
+      ].slice(0, 4),
+    [importedKnowledgeSources],
   );
   const openApprovals = useMemo(
     () =>
-      [
-        ...backendToolApprovals,
-        ...preparedConnectorActions.map((request) => request.approval),
-        ...pendingApprovals
-      ].filter((approval) => !dismissedApprovalIds.includes(approval.id)),
-    [backendToolApprovals, preparedConnectorActions, pendingApprovals, dismissedApprovalIds]
+      backendToolApprovals.filter(
+        (approval) => !dismissedApprovalIds.includes(approval.id),
+      ),
+    [backendToolApprovals, dismissedApprovalIds],
   );
   const memoryState = useMemo<MemoryControlState>(
     () => ({
       disabled: memoryDisabled,
-      records: managedMemoryRecords
+      records: managedMemoryRecords,
     }),
-    [managedMemoryRecords, memoryDisabled]
+    [managedMemoryRecords, memoryDisabled],
   );
   const shellState = useMemo<PersistedShellState>(
     () => ({
@@ -488,7 +523,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       selectedModelId,
       permissionMode,
       permissionLabel,
-      customApprovalSettings
+      customApprovalSettings,
     }),
     [
       activeItem,
@@ -509,8 +544,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       permissionLabel,
       pinnedSourceIds,
       selectedModelId,
-      voiceEnabled
-    ]
+      voiceEnabled,
+    ],
   );
 
   // Keep the latest persisted snapshot in a ref so the debounced persistence
@@ -563,8 +598,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     }
     snapshotTimerRef.current = window.setTimeout(() => {
       snapshotTimerRef.current = null;
-      void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current)).catch((error) => {
-        setLastAction(error instanceof Error ? error.message : "Fable could not save runtime snapshot.");
+      void saveRuntimeSnapshot(
+        shellStateToRuntimeSnapshot(shellStateRef.current),
+      ).catch((error) => {
+        setLastAction(
+          error instanceof Error
+            ? error.message
+            : "Fable could not save runtime snapshot.",
+        );
       });
     }, 300);
   }, [activeWorkspaceScope?.workspaceId, runtimeSnapshotReady, shellState]);
@@ -575,7 +616,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (snapshotTimerRef.current !== null) {
         window.clearTimeout(snapshotTimerRef.current);
         snapshotTimerRef.current = null;
-        void saveRuntimeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current)).catch(() => undefined);
+        void saveRuntimeSnapshot(
+          shellStateToRuntimeSnapshot(shellStateRef.current),
+        ).catch(() => undefined);
       }
     };
   }, [workspaceScopeGeneration]);
@@ -619,8 +662,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setConnectorManifests(connectors);
       setConnectorAccounts({});
       setConnectorStatus(null);
-      setConnectorSearchResult(null);
-      setPreparedConnectorActions([]);
       setKnowledgeCitations([]);
       setKnowledgeSearchMode("lexical-fallback");
       setManagedMemoryRecords([]);
@@ -636,27 +677,38 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           return;
         }
 
-        const recovered = shellStateFromRuntimeSnapshot(snapshot, defaultShellState);
+        const recovered = shellStateFromRuntimeSnapshot(
+          snapshot,
+          defaultShellState,
+        );
         setActiveItem(recovered.activeItem);
         setComposerValue(recovered.composerValue);
         setVoiceEnabled(recovered.voiceEnabled);
         setApprovalAudit(recovered.approvalAudit);
         setDismissedApprovalIds(recovered.dismissedApprovalIds);
         setApprovalRules(recovered.approvalRules);
-        setAgents(recovered.agents?.length ? recovered.agents : defaultShellState.agents ?? []);
+        setAgents(
+          recovered.agents?.length
+            ? recovered.agents
+            : (defaultShellState.agents ?? []),
+        );
         setActiveAgentId(
-          recovered.activeAgentId ?? recovered.agents?.[0]?.id ?? "chief-of-staff"
+          recovered.activeAgentId ??
+            recovered.agents?.[0]?.id ??
+            "chief-of-staff",
         );
         setPinnedSourceIds(recovered.pinnedSourceIds);
         setImportedKnowledgeSources(recovered.importedKnowledgeSources);
         setMemoryDisabled(recovered.memoryDisabled);
-        setManagedMemoryRecords(recovered.memoryRecords.filter((record) => !record.forgottenAt));
+        setManagedMemoryRecords(
+          recovered.memoryRecords.filter((record) => !record.forgottenAt),
+        );
         // A saved snapshot records the user's previous provider choice, not
         // proof that credentials are still valid. Native connected state is
         // restored only by the live provider probes above.
         if (!hasTauriRuntime()) {
           setConnectedBackendIds(
-            recovered.connectedBackendIds.filter(isFableProviderEnabled)
+            recovered.connectedBackendIds.filter(isFableProviderEnabled),
           );
         }
         setOnboardingDismissed(recovered.onboardingComplete ?? false);
@@ -666,10 +718,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setPermissionLabel(
           isApprovalPresetLabel(recovered.permissionLabel)
             ? recovered.permissionLabel
-            : permissionLabelFor(recovered.permissionMode)
+            : permissionLabelFor(recovered.permissionMode),
         );
         setCustomApprovalSettings(
-          normalizeCustomApprovalSettings(recovered.customApprovalSettings)
+          normalizeCustomApprovalSettings(recovered.customApprovalSettings),
         );
         setLastAction("Recovered workspace from local runtime");
       })
@@ -712,52 +764,64 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     refreshActionHistory();
   }, [refreshActionHistory]);
 
-  const applyAccountWorkspaceStatus = useCallback((status: AccountWorkspaceStatus) => {
-    const canUseWorkspace =
-      status.accountBound &&
-      (status.state === "ready" || status.state === "offline") &&
-      status.activeWorkspace.localWorkspaceId.length > 0;
-    if (canUseWorkspace) {
-      setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId);
-    } else {
-      clearActiveRuntimeDataScope();
-    }
-    setAccountWorkspaceStatus(status);
-    setWorkspaceScopeGeneration((current) => current + 1);
-  }, []);
+  const applyAccountWorkspaceStatus = useCallback(
+    (status: AccountWorkspaceStatus) => {
+      const canUseWorkspace =
+        status.accountBound &&
+        (status.state === "ready" || status.state === "offline") &&
+        status.activeWorkspace.localWorkspaceId.length > 0;
+      if (canUseWorkspace) {
+        setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId);
+      } else {
+        clearActiveRuntimeDataScope();
+      }
+      setAccountWorkspaceStatus(status);
+      setWorkspaceScopeGeneration((current) => current + 1);
+    },
+    [],
+  );
 
-  const refreshAccountWorkspace = useCallback(async (reconcile = false) => {
-    const requestGeneration = ++accountRequestGenerationRef.current;
-    setAccountWorkspacePending(true);
-    try {
-      const status = reconcile
-        ? await reconcileRuntimeAccountWorkspace()
-        : await loadRuntimeAccountWorkspaceStatus();
-      if (requestGeneration !== accountRequestGenerationRef.current) {
+  const refreshAccountWorkspace = useCallback(
+    async (reconcile = false) => {
+      const requestGeneration = ++accountRequestGenerationRef.current;
+      setAccountWorkspacePending(true);
+      try {
+        const status = reconcile
+          ? await reconcileRuntimeAccountWorkspace()
+          : await loadRuntimeAccountWorkspaceStatus();
+        if (requestGeneration !== accountRequestGenerationRef.current) {
+          return status ?? accountWorkspaceFallback;
+        }
+        applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
         return status ?? accountWorkspaceFallback;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Fable could not load account workspaces.";
+        const failed: AccountWorkspaceStatus = {
+          ...accountWorkspaceFallback,
+          message: `Local workspace ready. Optional account refresh failed: ${message}`,
+        };
+        if (requestGeneration === accountRequestGenerationRef.current) {
+          applyAccountWorkspaceStatus(failed);
+        }
+        return failed;
+      } finally {
+        if (requestGeneration === accountRequestGenerationRef.current) {
+          setAccountWorkspacePending(false);
+        }
       }
-      applyAccountWorkspaceStatus(status ?? accountWorkspaceFallback);
-      return status ?? accountWorkspaceFallback;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Fable could not load account workspaces.";
-      const failed: AccountWorkspaceStatus = {
-        ...accountWorkspaceFallback,
-        message: `Local workspace ready. Optional account refresh failed: ${message}`
-      };
-      if (requestGeneration === accountRequestGenerationRef.current) {
-        applyAccountWorkspaceStatus(failed);
-      }
-      return failed;
-    } finally {
-      if (requestGeneration === accountRequestGenerationRef.current) {
-        setAccountWorkspacePending(false);
-      }
-    }
-  }, [applyAccountWorkspaceStatus]);
+    },
+    [applyAccountWorkspaceStatus],
+  );
 
   const refreshIdentityStatus = useCallback(async () => {
     const status = await loadRuntimeIdentityStatus();
-    setIdentityStatus(status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS));
+    setIdentityStatus(
+      status ??
+        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS),
+    );
   }, []);
 
   useEffect(() => {
@@ -772,7 +836,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setIdentityPending(true);
     try {
       const status = await beginRuntimeIdentitySignIn();
-      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
+      const next =
+        status ??
+        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
       if (next.state === "signed-in") {
         await refreshAccountWorkspace(true);
@@ -780,11 +846,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setLastAction(next.message);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Fable cloud sign-in is unavailable.";
+        error instanceof Error
+          ? error.message
+          : "Fable cloud sign-in is unavailable.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
-        message
+        message,
       }));
       setLastAction(message);
     } finally {
@@ -796,12 +864,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setIdentityPending(true);
     try {
       const status = await beginRuntimeIdentityRecovery();
-      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
+      const next =
+        status ??
+        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
       if (next.state === "signed-in") await refreshAccountWorkspace(true);
       setLastAction(next.message);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Fable account recovery is unavailable.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Fable account recovery is unavailable.";
       setLastAction(message);
     } finally {
       setIdentityPending(false);
@@ -821,11 +894,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Fable cloud identity could not refresh.";
+        error instanceof Error
+          ? error.message
+          : "Fable cloud identity could not refresh.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
-        message
+        message,
       }));
       setLastAction(message);
     } finally {
@@ -841,18 +916,23 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       await clearRuntimeAccountWorkspaceSession();
       applyAccountWorkspaceStatus({
         ...DEFAULT_ACCOUNT_WORKSPACE_STATUS,
-        message: "Local workspace ready. The optional Fable account is signed out."
+        message:
+          "Local workspace ready. The optional Fable account is signed out.",
       });
-      const next = status ?? (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
+      const next =
+        status ??
+        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
       setLastAction(next.message);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Fable cloud identity could not sign out.";
+        error instanceof Error
+          ? error.message
+          : "Fable cloud identity could not sign out.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
-        message
+        message,
       }));
       setLastAction(message);
     } finally {
@@ -861,7 +941,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }, [applyAccountWorkspaceStatus]);
 
   const reconcileAccountWorkspace = useCallback(async () => {
-    const status = await refreshAccountWorkspace(identityStatus.state === "signed-in");
+    const status = await refreshAccountWorkspace(
+      identityStatus.state === "signed-in",
+    );
     setLastAction(status.message);
   }, [identityStatus.state, refreshAccountWorkspace]);
 
@@ -890,7 +972,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       }
 
       setImportedKnowledgeSources(sources);
-      setPinnedSourceIds((current) => Array.from(new Set([...current, ...sources.map((source) => source.id)])));
+      setPinnedSourceIds((current) =>
+        Array.from(
+          new Set([...current, ...sources.map((source) => source.id)]),
+        ),
+      );
     });
 
     return () => {
@@ -912,7 +998,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
           setImportStatus(
             error instanceof Error
               ? error.message
-              : "Fable could not load connector knowledge."
+              : "Fable could not load connector knowledge.",
           );
         }
       });
@@ -926,7 +1012,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     let active = true;
 
     void loadRuntimeMemoryState().then((state) => {
-      if (!active || !state || (!state.disabled && state.records.length === 0)) {
+      if (
+        !active ||
+        !state ||
+        (!state.disabled && state.records.length === 0)
+      ) {
         return;
       }
 
@@ -947,7 +1037,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
     void Promise.all([
       listRuntimeConnectorStatuses(),
-      listRuntimeConnectorSyncStates()
+      listRuntimeConnectorSyncStates(),
     ]).then(async ([manifests, syncStates]) => {
       if (!active || !manifests) {
         return;
@@ -955,21 +1045,28 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const connectionEntries = await Promise.all(
         manifests
           .filter((manifest) => manifest.status === "connected")
-          .map(async (manifest) => [
-            manifest.id,
-            await listRuntimeConnectorAccounts(manifest.id) ?? []
-          ] as const)
+          .map(
+            async (manifest) =>
+              [
+                manifest.id,
+                (await listRuntimeConnectorAccounts(manifest.id)) ?? [],
+              ] as const,
+          ),
       );
       if (!active) return;
-      const syncById = new Map(syncStates?.map((state) => [state.connectorId, state]) ?? []);
-      const runtimeById = new Map(manifests.map((manifest) => [manifest.id, manifest]));
+      const syncById = new Map(
+        syncStates?.map((state) => [state.connectorId, state]) ?? [],
+      );
+      const runtimeById = new Map(
+        manifests.map((manifest) => [manifest.id, manifest]),
+      );
       setConnectorAccounts(Object.fromEntries(connectionEntries));
       setConnectorManifests((current) =>
         current.map((manifest) => {
           const runtime = runtimeById.get(manifest.id) ?? manifest;
           const sync = syncById.get(manifest.id);
           return sync ? { ...runtime, sync } : runtime;
-        })
+        }),
       );
     });
 
@@ -986,11 +1083,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         return;
       }
 
-      // ACP providers (Cursor/Grok): the Rust list_backends path reports them
-      // install-required by default. Probe each installed CLI's auth state
-      // through the Rust boundary (detect_acp_cli — never reads a secret) and
-      // merge the truthful auth state + capabilities so a signed-in CLI reaches
-      // connected. Native + other backends keep their resolved state as-is.
       const resolved = await resolveUsableBackendProviders(providers);
 
       if (!active) {
@@ -1023,7 +1115,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     async (providerId: string): Promise<void> => {
       setModelDiscoveryByProvider((current) => ({
         ...current,
-        [providerId]: "loading"
+        [providerId]: "loading",
       }));
       const result = await listRuntimeBackendModels(providerId);
       // null means preview/no desktop runtime. Mark this attempt unsupported so
@@ -1032,26 +1124,29 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (result === null) {
         setModelDiscoveryByProvider((current) => ({
           ...current,
-          [providerId]: "unsupported"
+          [providerId]: "unsupported",
         }));
         return;
       }
       setDiscoveredModels((current) => ({
         ...current,
-        [providerId]: result
+        [providerId]: result,
       }));
       // Map the runtime outcome onto the UI lifecycle. `empty`/`offline`/
       // `unsupported`/`failed` are kept distinct so failed/offline never
       // masquerade as an empty account.
       setModelDiscoveryByProvider((current) => ({
         ...current,
-        [providerId]: result.outcome
+        [providerId]: result.outcome,
       }));
       if (result.outcome === "failed") {
-        setBackendStatus(result.message ?? "Model discovery failed; using the curated catalogue.");
+        setBackendStatus(
+          result.message ??
+            "Model discovery failed; using the curated catalogue.",
+        );
       }
     },
-    []
+    [],
   );
 
   // Auto-run discovery for every connected native API provider. Provider-owned
@@ -1075,13 +1170,15 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    */
   const refreshModels = useCallback(
     async (providerId: string): Promise<void> => {
-      const provider = backendProviders.find((entry) => entry.id === providerId);
+      const provider = backendProviders.find(
+        (entry) => entry.id === providerId,
+      );
       if (!provider || provider.authState !== "connected") {
         return;
       }
       await runModelDiscovery(providerId);
     },
-    [backendProviders, runModelDiscovery]
+    [backendProviders, runModelDiscovery],
   );
 
   const focusComposer = (value: string) => {
@@ -1110,15 +1207,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const addImportedKnowledgeSource = (source: LocalFileImport) => {
     setImportedKnowledgeSources((current) =>
-      [source, ...current.filter((existing) => existing.id !== source.id)].slice(
-        0,
-        MAX_IMPORTED_KNOWLEDGE_SOURCES
-      )
+      [
+        source,
+        ...current.filter((existing) => existing.id !== source.id),
+      ].slice(0, MAX_IMPORTED_KNOWLEDGE_SOURCES),
     );
-    setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
+    setPinnedSourceIds((current) =>
+      current.includes(source.id) ? current : [...current, source.id],
+    );
   };
 
-  const importLocalKnowledgeFile = async (file: File, sourceName = file.name) => {
+  const importLocalKnowledgeFile = async (
+    file: File,
+    sourceName = file.name,
+  ) => {
     setImportStatus(`Reading ${sourceName}...`);
 
     try {
@@ -1127,7 +1229,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         name: sourceName,
         content,
         sizeBytes: file.size,
-        importedAt: new Date().toISOString()
+        importedAt: new Date().toISOString(),
       };
       // Surface the indexing state before the (async) native import resolves so
       // the user sees the source move reading -> indexing -> indexed.
@@ -1141,19 +1243,30 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const indexed: LocalFileImport = {
         ...imported,
         status: "ok",
-        statusMessage: undefined
+        statusMessage: undefined,
       };
 
-      if (importedKnowledgeSources.some((source) => source.id === imported.id && source.deletedAt)) {
-        throw new Error("Deleted knowledge cannot be restored by a backup import.");
+      if (
+        importedKnowledgeSources.some(
+          (source) => source.id === imported.id && source.deletedAt,
+        )
+      ) {
+        throw new Error(
+          "Deleted knowledge cannot be restored by a backup import.",
+        );
       }
 
       addImportedKnowledgeSource(indexed);
-      setImportStatus(`Imported ${indexed.title}. It is pinned as untrusted knowledge.`);
+      setImportStatus(
+        `Imported ${indexed.title}. It is pinned as untrusted knowledge.`,
+      );
       setLastAction(`Imported source: ${indexed.title}`);
       return true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Fable could not import that file.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Fable could not import that file.";
       // Import failure must not leave a phantom source or stale optimistic
       // state: nothing was added, so we surface the failure and clear indexing.
       setImportStatus(message);
@@ -1166,13 +1279,18 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const sourceName = `${toSlug(title).slice(0, 72)}.md`;
     return importLocalKnowledgeFile(
       new File([content], sourceName, { type: "text/markdown" }),
-      sourceName
+      sourceName,
     );
   };
 
   const supportedKnowledgeExtensions = useMemo(
-    () => new Set(SUPPORTED_LOCAL_FILE_EXTENSIONS.map((extension) => extension.toLowerCase())),
-    []
+    () =>
+      new Set(
+        SUPPORTED_LOCAL_FILE_EXTENSIONS.map((extension) =>
+          extension.toLowerCase(),
+        ),
+      ),
+    [],
   );
 
   const attachmentIdFor = (file: File) =>
@@ -1183,11 +1301,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     return Boolean(extension && supportedKnowledgeExtensions.has(extension));
   };
 
-  const updateComposerAttachment = (id: string, patch: Partial<ComposerAttachment>) => {
+  const updateComposerAttachment = (
+    id: string,
+    patch: Partial<ComposerAttachment>,
+  ) => {
     setComposerAttachments((current) =>
       current.map((attachment) =>
-        attachment.id === id ? { ...attachment, ...patch } : attachment
-      )
+        attachment.id === id ? { ...attachment, ...patch } : attachment,
+      ),
     );
   };
 
@@ -1198,7 +1319,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       name: file.name,
       type: file.type,
       sizeBytes: file.size,
-      status: file.type.startsWith("image/") ? "Previewing" : "Attached"
+      status: file.type.startsWith("image/") ? "Previewing" : "Attached",
     };
     setComposerAttachments((current) => [attachment, ...current].slice(0, 12));
 
@@ -1208,7 +1329,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         updateComposerAttachment(id, { previewUrl, status: "Attached" });
       } catch (error) {
         updateComposerAttachment(id, {
-          status: error instanceof Error ? error.message : "Preview unavailable"
+          status:
+            error instanceof Error ? error.message : "Preview unavailable",
         });
       }
       setImportStatus(`${file.name} attached.`);
@@ -1219,7 +1341,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       updateComposerAttachment(id, { status: "Indexing" });
       const imported = await importLocalKnowledgeFile(file);
       updateComposerAttachment(id, {
-        status: imported ? "Imported as knowledge" : "Attached"
+        status: imported ? "Imported as knowledge" : "Attached",
       });
       return;
     }
@@ -1227,7 +1349,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setImportStatus(`${file.name} attached.`);
   };
 
-  const handleComposerAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleComposerAttachmentChange = (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
     const files = Array.from(event.currentTarget.files ?? []);
     event.currentTarget.value = "";
     if (files.length === 0) return;
@@ -1236,11 +1360,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const removeComposerAttachment = (attachmentId: string) => {
     setComposerAttachments((current) =>
-      current.filter((attachment) => attachment.id !== attachmentId)
+      current.filter((attachment) => attachment.id !== attachmentId),
     );
   };
 
-  const handleLocalKnowledgeFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleLocalKnowledgeFileChange = (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = event.currentTarget.files?.[0];
     event.currentTarget.value = "";
 
@@ -1251,10 +1377,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     void importLocalKnowledgeFile(file);
   };
 
-  const handleLocalKnowledgeFolderChange = (event: ChangeEvent<HTMLInputElement>) => {
+  const handleLocalKnowledgeFolderChange = (
+    event: ChangeEvent<HTMLInputElement>,
+  ) => {
     const files = Array.from(event.currentTarget.files ?? []).slice(
       0,
-      MAX_IMPORTED_KNOWLEDGE_SOURCES
+      MAX_IMPORTED_KNOWLEDGE_SOURCES,
     );
     event.currentTarget.value = "";
 
@@ -1265,14 +1393,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     void (async () => {
       let importedCount = 0;
       for (const file of files) {
-        if (await importLocalKnowledgeFile(file, file.webkitRelativePath || file.name)) {
+        if (
+          await importLocalKnowledgeFile(
+            file,
+            file.webkitRelativePath || file.name,
+          )
+        ) {
           importedCount += 1;
         }
       }
       setImportStatus(
         importedCount === files.length
           ? `Imported ${importedCount} files from the selected folder.`
-          : `Imported ${importedCount} of ${files.length} files. Unsupported or invalid files were skipped.`
+          : `Imported ${importedCount} of ${files.length} files. Unsupported or invalid files were skipped.`,
       );
     })();
   };
@@ -1282,7 +1415,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       query,
       scope: knowledgeScopeForRun(activeThread?.id),
       limit: 8,
-      budgetChars: 6_000
+      budgetChars: 6_000,
     });
 
     setKnowledgeCitations(result.citations);
@@ -1290,67 +1423,78 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setLastAction(
       result.citations.length > 0
         ? `Found ${result.citations.length} cited workspace sources`
-        : "No matching workspace sources found"
+        : "No matching workspace sources found",
     );
   };
 
   const connectionIsAuthorized = (
     connectorId: string,
     _account?: string,
-    connectionId?: string
+    connectionId?: string,
   ) => {
     if (connectorId === "local-files") return true;
     if (!connectionId) return false;
-    if (!hasTauriRuntime()) {
-      return ALLOW_PREVIEW_FALLBACKS
-        && connectionId === `fixture-preview:${connectorId}`;
-    }
+    if (!hasTauriRuntime()) return false;
     const connection = connectorAccounts[connectorId]?.find(
-      (candidate) => candidate.connectionId === connectionId
+      (candidate) => candidate.connectionId === connectionId,
     );
     return Boolean(
-      connection
-      && connection.lifecycle === "authorized"
-      && connection.authorizationState === "authorized"
-      && connection.credentialState === "available"
-      && connection.healthState !== "unhealthy"
-      && connection.healthState !== "offline"
+      connection &&
+      connection.lifecycle === "authorized" &&
+      connection.authorizationState === "authorized" &&
+      connection.credentialState === "available" &&
+      connection.healthState !== "unhealthy" &&
+      connection.healthState !== "offline",
     );
   };
 
   const sourceIsAuthorized = (source: KnowledgeSource) => {
-    if (source.disabled || source.deletedAt || source.status === "stale" || source.status === "error") return false;
-    return connectionIsAuthorized(source.connectorId, source.account, source.connectionId);
+    if (
+      source.disabled ||
+      source.deletedAt ||
+      source.status === "stale" ||
+      source.status === "error"
+    )
+      return false;
+    return connectionIsAuthorized(
+      source.connectorId,
+      source.account,
+      source.connectionId,
+    );
   };
 
   const knowledgeRetrievalSources = (
     sources: readonly KnowledgeSource[] = workspaceKnowledgeSources,
-    context?: KnowledgeRunContext
+    context?: KnowledgeRunContext,
   ) =>
     sources
       // Only live (non-disabled), authorized, connected-connector sources can
       // enter retrieval. Stale/error statuses are additionally excluded by the
       // retrieval filter; we re-check live here so a
       // disabled source is never even chunked.
-      .filter((source) =>
-        isLiveSource(source)
-        && sourceIsAuthorized(source)
-        && sourceAllowedByConnections(source, context)
-        && (!context?.allowedConnectorIds || source.connectorId === "local-files" || context.allowedConnectorIds.includes(source.connectorId))
-        && (!context?.allowedKnowledgeSourceIds || context.allowedKnowledgeSourceIds.includes(source.id))
+      .filter(
+        (source) =>
+          isLiveSource(source) &&
+          sourceIsAuthorized(source) &&
+          sourceAllowedByConnections(source, context) &&
+          (!context?.allowedConnectorIds ||
+            source.connectorId === "local-files" ||
+            context.allowedConnectorIds.includes(source.connectorId)) &&
+          (!context?.allowedKnowledgeSourceIds ||
+            context.allowedKnowledgeSourceIds.includes(source.id)),
       )
       .map((source) => ({
         source,
         chunks: chunkSourceText(source.contentPreview ?? "", {
           sourceId: source.id,
-          mimeType: source.providerMetadata?.mimeType
-        })
+          mimeType: source.providerMetadata?.mimeType,
+        }),
       }))
       .filter((record) => record.chunks.length > 0);
 
   const assembleKnowledgeContext = async (
     query: string,
-    context?: KnowledgeRunContext
+    context?: KnowledgeRunContext,
   ): Promise<PreparedExecutionContext> => {
     const attemptId = createExecutionAttemptId();
     const assembledAt = new Date().toISOString();
@@ -1366,15 +1510,21 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const governedMemory = hasTauriRuntime()
       ? selectedMemory
       : withPreviewPrivateAuthority(selectedMemory, audience);
-    const visibleSources = recordsVisibleToRunAudience(governedSources, audience);
-    const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
-    const result = await retrieve(knowledgeRetrievalSources(visibleSources, context), {
-      query,
-      scope,
+    const visibleSources = recordsVisibleToRunAudience(
+      governedSources,
       audience,
-      limit: 8,
-      budgetChars: 6_000
-    });
+    );
+    const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
+    const result = await retrieve(
+      knowledgeRetrievalSources(visibleSources, context),
+      {
+        query,
+        scope,
+        audience,
+        limit: 8,
+        budgetChars: 6_000,
+      },
+    );
     setKnowledgeCitations(result.citations);
     setKnowledgeSearchMode(result.mode);
     const assembled = assembleContext({
@@ -1388,12 +1538,12 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       memory: memoryDisabled ? [] : visibleMemory,
       citations: result.citations,
       authorization: {
-        isSourceAuthorized: connectionIsAuthorized
-      }
+        isSourceAuthorized: connectionIsAuthorized,
+      },
     });
     return Object.freeze({
       systemPrefix: assembled.systemPrefix,
-      receipt: assembled.receipt
+      receipt: assembled.receipt,
     });
   };
 
@@ -1409,43 +1559,66 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     void saveRuntimeImportedKnowledgeSources(sources).catch((error) => {
       setImportedKnowledgeSources(previous);
       setImportStatus(
-        error instanceof Error ? error.message : "Fable could not save source changes."
+        error instanceof Error
+          ? error.message
+          : "Fable could not save source changes.",
       );
     });
   };
 
   const refreshKnowledgeSource = async (sourceId: string, file?: File) => {
-    const localTarget = importedKnowledgeSources.find((source) => source.id === sourceId);
+    const localTarget = importedKnowledgeSources.find(
+      (source) => source.id === sourceId,
+    );
     if (localTarget) {
-      if (!file) throw new Error(`Choose the current version of ${localTarget.title}.`);
+      if (!file)
+        throw new Error(`Choose the current version of ${localTarget.title}.`);
       try {
-        const request = await buildLocalKnowledgeRefreshRequest(localTarget, file);
+        const request = await buildLocalKnowledgeRefreshRequest(
+          localTarget,
+          file,
+        );
         const response = await refreshRuntimeLocalKnowledgeSource(request);
         if (!response) throw new Error("Fable could not update that file.");
         if (response.outcome === "updated") {
-          setImportedKnowledgeSources((current) => current.map((source) => source.id === sourceId
-            ? {
-                ...response.source,
-                pinned: source.pinned,
-                disabled: source.disabled,
-                ...(source.deletedAt ? { deletedAt: source.deletedAt } : {})
-              }
-            : source));
+          setImportedKnowledgeSources((current) =>
+            current.map((source) =>
+              source.id === sourceId
+                ? {
+                    ...response.source,
+                    pinned: source.pinned,
+                    disabled: source.disabled,
+                    ...(source.deletedAt
+                      ? { deletedAt: source.deletedAt }
+                      : {}),
+                  }
+                : source,
+            ),
+          );
           setImportStatus(`Updated from ${file.name}.`);
         } else {
           setImportStatus("This source is already up to date.");
         }
-        setLastAction(response.outcome === "updated" ? `Updated from ${file.name}.` : "This source is already up to date.");
+        setLastAction(
+          response.outcome === "updated"
+            ? `Updated from ${file.name}.`
+            : "This source is already up to date.",
+        );
         return;
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Fable could not update that file.";
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Fable could not update that file.";
         setImportStatus(message);
         setLastAction(message);
         throw error;
       }
     }
 
-    const connectorTarget = connectorImportedSources.find((source) => source.id === sourceId);
+    const connectorTarget = connectorImportedSources.find(
+      (source) => source.id === sourceId,
+    );
     if (connectorTarget) {
       const message = `Open Connections and import ${connectorTarget.title} again to refresh it.`;
       setImportStatus(message);
@@ -1456,29 +1629,42 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   };
 
   const toggleKnowledgeSourceDisabled = (sourceId: string) => {
-    const target = workspaceKnowledgeSources.find((source) => source.id === sourceId);
+    const target = workspaceKnowledgeSources.find(
+      (source) => source.id === sourceId,
+    );
     const becomingDisabled = target ? !target.disabled : true;
     const toggle = <T extends KnowledgeSource>(sources: T[]) =>
       sources.map((source) =>
-        source.id === sourceId ? { ...source, disabled: !source.disabled } : source
+        source.id === sourceId
+          ? { ...source, disabled: !source.disabled }
+          : source,
       );
     if (importedKnowledgeSources.some((source) => source.id === sourceId)) {
       persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
-    } else if (connectorImportedSources.some((source) => source.id === sourceId)) {
+    } else if (
+      connectorImportedSources.some((source) => source.id === sourceId)
+    ) {
       const previous = connectorImportedSources;
       setConnectorImportedSources(toggle(previous));
-      void setRuntimeConnectorKnowledgeSourceDisabled(sourceId, becomingDisabled)
+      void setRuntimeConnectorKnowledgeSourceDisabled(
+        sourceId,
+        becomingDisabled,
+      )
         .then((saved) => {
           if (saved) {
             setConnectorImportedSources((current) =>
-              current.map((source) => source.id === sourceId ? saved : source)
+              current.map((source) =>
+                source.id === sourceId ? saved : source,
+              ),
             );
           }
         })
         .catch((error) => {
           setConnectorImportedSources(previous);
           setImportStatus(
-            error instanceof Error ? error.message : "Fable could not save that source change."
+            error instanceof Error
+              ? error.message
+              : "Fable could not save that source change.",
           );
         });
     }
@@ -1487,7 +1673,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     if (becomingDisabled) {
       setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
     }
-    setLastAction(becomingDisabled ? "Knowledge source disabled" : "Knowledge source re-enabled");
+    setLastAction(
+      becomingDisabled
+        ? "Knowledge source disabled"
+        : "Knowledge source re-enabled",
+    );
   };
 
   const deleteKnowledgeSource = (sourceId: string) => {
@@ -1500,18 +1690,22 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         importedKnowledgeSources.map((source) =>
           source.id === sourceId
             ? { ...source, pinned: false, disabled: true, deletedAt }
-            : source
-        )
+            : source,
+        ),
       );
-    } else if (connectorImportedSources.some((source) => source.id === sourceId)) {
+    } else if (
+      connectorImportedSources.some((source) => source.id === sourceId)
+    ) {
       const previous = connectorImportedSources;
       setConnectorImportedSources((current) =>
-        current.filter((source) => source.id !== sourceId)
+        current.filter((source) => source.id !== sourceId),
       );
       void deleteRuntimeConnectorKnowledgeSource(sourceId).catch((error) => {
         setConnectorImportedSources(previous);
         setImportStatus(
-          error instanceof Error ? error.message : "Fable could not delete that source."
+          error instanceof Error
+            ? error.message
+            : "Fable could not delete that source.",
         );
       });
     }
@@ -1525,7 +1719,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const previousDisabled = memoryDisabled;
     const previousRecords = managedMemoryRecords;
     setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(state.records.filter((record) => !record.forgottenAt));
+    setManagedMemoryRecords(
+      state.records.filter((record) => !record.forgottenAt),
+    );
     setMemoryStatus(status);
 
     void saveRuntimeMemoryState(state)
@@ -1543,7 +1739,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         setMemoryDisabled(previousDisabled);
         setManagedMemoryRecords(previousRecords);
         setMemoryStatus(
-          error instanceof Error ? error.message : "Fable could not save memory state."
+          error instanceof Error
+            ? error.message
+            : "Fable could not save memory state.",
         );
       });
   };
@@ -1552,7 +1750,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setEditingMemoryId(record.id);
     setEditingMemoryDraft({
       title: record.title,
-      value: record.value
+      value: record.value,
     });
     setMemoryStatus(`Editing memory: ${record.title}`);
   };
@@ -1569,13 +1767,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     const now = new Date().toISOString();
     const nextRecords = managedMemoryRecords.map((record) =>
       record.id === recordId
-        ? { ...editMemory(record, { title, value }, now), freshness: "Updated now" }
-        : record
+        ? {
+            ...editMemory(record, { title, value }, now),
+            freshness: "Updated now",
+          }
+        : record,
     );
 
     setEditingMemoryId(null);
     setEditingMemoryDraft({ title: "", value: "" });
-    commitMemoryState({ disabled: memoryDisabled, records: nextRecords }, "Memory updated.");
+    commitMemoryState(
+      { disabled: memoryDisabled, records: nextRecords },
+      "Memory updated.",
+    );
   };
 
   const cancelMemoryEdit = () => {
@@ -1586,21 +1790,28 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const forgetMemory = (recordId: string) => {
     const now = new Date().toISOString();
-    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    const target = managedMemoryRecords.find(
+      (record) => record.id === recordId,
+    );
     // Forget is the durable exclusion signal: the record is tombstoned with
     // `forgottenAt` so it disappears from every retrieval / context / export /
     // management read path while remaining auditable. Distinct from a temporary
     // disable (which keeps the record visible in management views).
     const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId ? forgetMemoryRecord(record, now) : record
+      record.id === recordId ? forgetMemoryRecord(record, now) : record,
     );
     setEditingMemoryId((current) => (current === recordId ? null : current));
     // A forgotten memory can no longer be pinned; drop the pin so it cannot
     // bypass exclusion via the pinned-context path.
     setManagedMemoryRecords(nextRecords);
     setMemoryDisabled(memoryDisabled);
-    setMemoryStatus(target ? `Forgot memory: ${target.title}` : "Memory forgotten.");
-    void saveRuntimeMemoryState({ disabled: memoryDisabled, records: nextRecords })
+    setMemoryStatus(
+      target ? `Forgot memory: ${target.title}` : "Memory forgotten.",
+    );
+    void saveRuntimeMemoryState({
+      disabled: memoryDisabled,
+      records: nextRecords,
+    })
       .then((runtimeState) => {
         if (runtimeState) {
           setMemoryDisabled(runtimeState.disabled);
@@ -1609,10 +1820,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       })
       .catch((error) => {
         setMemoryStatus(
-          error instanceof Error ? error.message : "Fable could not forget that memory."
+          error instanceof Error
+            ? error.message
+            : "Fable could not forget that memory.",
         );
       });
-    setLastAction(target ? `Forgot memory: ${target.title}` : "Memory forgotten.");
+    setLastAction(
+      target ? `Forgot memory: ${target.title}` : "Memory forgotten.",
+    );
   };
 
   /**
@@ -1624,7 +1839,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
    */
   const toggleMemoryRecordDisabled = (recordId: string) => {
     const now = new Date().toISOString();
-    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    const target = managedMemoryRecords.find(
+      (record) => record.id === recordId,
+    );
     if (!target) return;
     const becomingDisabled = !target.disabled;
     const nextRecords = managedMemoryRecords.map((record) =>
@@ -1632,16 +1849,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         ? becomingDisabled
           ? disableMemoryRecord(record, now)
           : { ...record, disabled: false, updatedAt: now }
-        : record
+        : record,
     );
     commitMemoryState(
       { disabled: memoryDisabled, records: nextRecords },
-      becomingDisabled ? `Disabled memory: ${target.title}` : `Re-enabled memory: ${target.title}`
+      becomingDisabled
+        ? `Disabled memory: ${target.title}`
+        : `Re-enabled memory: ${target.title}`,
     );
   };
 
   const toggleMemoryPin = (recordId: string) => {
-    const target = managedMemoryRecords.find((record) => record.id === recordId);
+    const target = managedMemoryRecords.find(
+      (record) => record.id === recordId,
+    );
     if (!target) return;
     // Pinning must not bypass exclusion: a disabled or forgotten memory cannot
     // be pinned. Unpinning a currently-pinned record is always allowed so a
@@ -1651,19 +1872,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return;
     }
     const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId ? { ...record, pinned: !record.pinned } : record
+      record.id === recordId ? { ...record, pinned: !record.pinned } : record,
     );
     const changed = nextRecords.find((record) => record.id === recordId);
     commitMemoryState(
       { disabled: memoryDisabled, records: nextRecords },
-      changed?.pinned ? "Memory pinned." : "Memory unpinned."
+      changed?.pinned ? "Memory pinned." : "Memory unpinned.",
     );
   };
 
   const toggleMemoryDisabled = () => {
     commitMemoryState(
       { disabled: !memoryDisabled, records: managedMemoryRecords },
-      memoryDisabled ? "Memory enabled." : "Memory disabled."
+      memoryDisabled ? "Memory enabled." : "Memory disabled.",
     );
   };
 
@@ -1674,11 +1895,16 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // fallback re-applies the same live-only filter so secrets never ride
       // along on a forgotten record's payload and disabled records never leak.
       const liveFallback = exportMemories(memoryState.records);
-      const exported = (await exportRuntimeMemoryState(memoryState)) ?? liveFallback;
+      const exported =
+        (await exportRuntimeMemoryState(memoryState)) ?? liveFallback;
       setMemoryExportText(exported);
       setMemoryStatus("Memory export ready.");
     } catch (error) {
-      setMemoryStatus(error instanceof Error ? error.message : "Fable could not export memory.");
+      setMemoryStatus(
+        error instanceof Error
+          ? error.message
+          : "Fable could not export memory.",
+      );
     }
   };
 
@@ -1706,7 +1932,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
             `freshness: ${source.freshness}`,
             `connector: ${source.connectorId}`,
             source.account ? `account: ${source.account}` : "",
-            source.trust ? `trust: ${source.trust}` : ""
+            source.trust ? `trust: ${source.trust}` : "",
           ].filter(Boolean);
           lines.push(`  _(${meta.join(" | ")})_`);
         }
@@ -1719,7 +1945,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     } catch (error) {
       setKnowledgeExportText("");
       setLastAction(
-        error instanceof Error ? error.message : "Fable could not export knowledge."
+        error instanceof Error
+          ? error.message
+          : "Fable could not export knowledge.",
       );
     }
   };
@@ -1733,28 +1961,40 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       return;
     }
     if (!sourceIsAuthorized(source)) {
-      setMemoryStatus("Connect the source's service before promoting it to memory.");
+      setMemoryStatus(
+        "Connect the source's service before promoting it to memory.",
+      );
       return;
     }
     const request: MemoryPromotionRequest = {
       source,
       decision: "once",
       decidedAt: new Date().toISOString(),
-      state: memoryState
+      state: memoryState,
     };
 
     try {
       const response = runtimeOrPreview(
         await promoteRuntimeKnowledgeSourceToMemory(request),
         () => promoteKnowledgeSourceFallback(request),
-        "Memory changes require the desktop runtime."
+        "Memory changes require the desktop runtime.",
       );
-      setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
-      commitMemoryState(response.state, `Approved memory: ${response.record.title}`);
-      setPinnedSourceIds((current) => (current.includes(source.id) ? current : [...current, source.id]));
+      setApprovalAudit((current) =>
+        prependAuditEntry(current, response.auditEntry),
+      );
+      commitMemoryState(
+        response.state,
+        `Approved memory: ${response.record.title}`,
+      );
+      setPinnedSourceIds((current) =>
+        current.includes(source.id) ? current : [...current, source.id],
+      );
       setLastAction(`Approved ${source.title} into memory`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Fable could not approve that source into memory.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Fable could not approve that source into memory.";
       setMemoryStatus(message);
       setLastAction(message);
     }
@@ -1806,16 +2046,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const replaceConnectorManifest = (manifest: ConnectorManifest) => {
     setConnectorManifests((current) =>
-      current.map((connector) => (connector.id === manifest.id ? manifest : connector))
+      current.map((connector) =>
+        connector.id === manifest.id ? manifest : connector,
+      ),
     );
   };
 
   const connectConnector = async (connector: ConnectorManifest) => {
-    if (!isFirstWaveConnectorId(connector.id)) {
+    if (!isSupportedConnectorId(connector.id)) {
       setConnectorStatus(
         connector.id === "local-files"
           ? "Local Files is already available."
-          : connector.setupMessage ?? `${connector.name} is not in the first connector wave.`
+          : (connector.setupMessage ??
+              `${connector.name} is not in the first connector wave.`),
       );
       return;
     }
@@ -1825,15 +2068,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // Every OAuth connector runs the full loopback flow end-to-end. Public
       // Google clients call Google directly; confidential connectors route
       // exchange through the configured broker and fail closed if it is absent.
-      const result = await beginRuntimeConnectorOAuth({ connectorId: connector.id });
+      const result = await beginRuntimeConnectorOAuth({
+        connectorId: connector.id,
+      });
       if (!result) {
-        // Preview mode (no Tauri runtime): no live OAuth is available. Surface
-        // the configured-auth-required state honestly — never claim a fixture
-        // connection as live.
-        const message =
-          connector.status === "fixture"
-            ? `${connector.name} is using explicit preview data. ${connector.setupMessage ?? "Live provider setup is required."}`
-            : connector.setupMessage ?? `${connector.name} provider setup is required.`;
+        const message = `${connector.name} connections require the installed desktop app.`;
         setConnectorStatus(message);
         setLastAction(message);
         return;
@@ -1851,15 +2090,19 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setLastAction(result.message);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : `${connector.name} authorization is unavailable.`;
+        error instanceof Error
+          ? error.message
+          : `${connector.name} authorization is unavailable.`;
       setConnectorStatus(message);
       setLastAction(message);
     }
   };
 
   const disconnectConnector = async (connectorId: string) => {
-    const connector = connectorManifests.find((manifest) => manifest.id === connectorId);
-    if (!connector || !isFirstWaveConnectorId(connectorId)) {
+    const connector = connectorManifests.find(
+      (manifest) => manifest.id === connectorId,
+    );
+    if (!connector || !isSupportedConnectorId(connectorId)) {
       return;
     }
 
@@ -1869,44 +2112,69 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         replaceConnectorManifest(manifest);
         setConnectorStatus(`${connector.name} disconnected.`);
       } else {
-        setConnectorStatus(`${connector.name} fixture has no live credentials to clear.`);
+        setConnectorStatus(
+          `${connector.name} connections require the installed desktop app.`,
+        );
       }
     } catch (error) {
       setConnectorStatus(
-        error instanceof Error ? error.message : `${connector.name} could not be disconnected.`
+        error instanceof Error
+          ? error.message
+          : `${connector.name} could not be disconnected.`,
       );
     }
   };
 
   const loadConnectorAccounts = async (connectorId: string) => {
-    if (!isFirstWaveConnectorId(connectorId)) return;
+    if (!isSupportedConnectorId(connectorId)) return;
     try {
       const accounts = await listRuntimeConnectorAccounts(connectorId);
       if (accounts) {
-        setConnectorAccounts((current) => ({ ...current, [connectorId]: accounts }));
+        setConnectorAccounts((current) => ({
+          ...current,
+          [connectorId]: accounts,
+        }));
       }
     } catch (error) {
-      setConnectorStatus(error instanceof Error ? error.message : "Connected accounts are unavailable.");
+      setConnectorStatus(
+        error instanceof Error
+          ? error.message
+          : "Connected accounts are unavailable.",
+      );
     }
   };
 
-  const switchConnectorAccount = async (connectorId: string, connectionId: string) => {
-    if (!isFirstWaveConnectorId(connectorId)) return;
+  const switchConnectorAccount = async (
+    connectorId: string,
+    connectionId: string,
+  ) => {
+    if (!isSupportedConnectorId(connectorId)) return;
     try {
-      const manifest = await switchRuntimeConnectorAccount(connectorId, connectionId);
+      const manifest = await switchRuntimeConnectorAccount(
+        connectorId,
+        connectionId,
+      );
       if (manifest) {
         replaceConnectorManifest(manifest);
         await loadConnectorAccounts(connectorId);
-        setConnectorStatus(`Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`);
+        setConnectorStatus(
+          `Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`,
+        );
       }
     } catch (error) {
-      setConnectorStatus(error instanceof Error ? error.message : "The account could not be selected.");
+      setConnectorStatus(
+        error instanceof Error
+          ? error.message
+          : "The account could not be selected.",
+      );
     }
   };
 
   const refreshConnector = async (connectorId: string) => {
-    const connector = connectorManifests.find((manifest) => manifest.id === connectorId);
-    if (!connector || !isFirstWaveConnectorId(connectorId)) {
+    const connector = connectorManifests.find(
+      (manifest) => manifest.id === connectorId,
+    );
+    if (!connector || !isSupportedConnectorId(connectorId)) {
       return;
     }
 
@@ -1914,130 +2182,25 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const sync = await syncRuntimeConnector({
         connectorId,
         workspaceId: activeWorkspaceScope?.workspaceId ?? "",
-        trigger: "manual"
+        trigger: "manual",
       });
       if (sync) {
         replaceConnectorManifest({ ...connector, sync });
         const outcome =
           sync.phase === "succeeded"
             ? "sync complete"
-            : sync.failure?.message ?? `sync ${sync.phase}`;
+            : (sync.failure?.message ?? `sync ${sync.phase}`);
         setConnectorStatus(`${connector.name} ${outcome}.`);
       } else {
-        setConnectorStatus(`${connector.name} sync is unavailable in preview mode.`);
+        setConnectorStatus(
+          `${connector.name} sync is unavailable in preview mode.`,
+        );
       }
     } catch (error) {
       setConnectorStatus(
-        error instanceof Error ? error.message : `${connector.name} health is unavailable.`
-      );
-    }
-  };
-
-  const searchConnector = async (request: ConnectorSearchRequest) => {
-    const connector = connectorManifests.find(
-      (manifest) => manifest.id === request.connectorId
-    );
-    setConnectorStatus(`Searching ${connector?.name ?? request.connectorId}...`);
-    try {
-      const runtimeResult = await searchRuntimeConnector(request);
-      const result = runtimeResult ?? (() => {
-        const sessionGate = canUseBrowserSession(browserSession, request.connectorId, {
-          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
-        });
-        if (!sessionGate.ok) {
-          throw new Error(sessionGate.result.message);
-        }
-        const result = labelFixtureSearchResult(searchFixtureConnector(request));
-        return {
-          ...result,
-          items: result.items.map((item) => ({
-            ...item,
-            connectionId: `fixture-preview:${item.connectorId}`
-          }))
-        };
-      })();
-      setConnectorSearchResult(result);
-      setConnectorStatus(
-        result.items.length > 0
-          ? `Found ${result.items.length} ${result.source} result${result.items.length === 1 ? "" : "s"}.`
-          : `No ${result.source} results matched.`
-      );
-    } catch (error) {
-      setConnectorSearchResult({
-        connectorId: request.connectorId,
-        query: request.query,
-        items: [],
-        source: "live",
-        searchedAt: new Date().toISOString()
-      });
-      setConnectorStatus(
-        error instanceof Error ? error.message : "Connector search is unavailable."
-      );
-    }
-  };
-
-  const importConnectorItem = async (item: ConnectorSearchItem) => {
-    const request = {
-      connectorId: item.connectorId,
-      item,
-      importedAt: new Date().toISOString()
-    };
-
-    try {
-      const runtimeImport = await importRuntimeConnectorItem(request);
-      const imported = runtimeImport ?? (() => {
-        const sessionGate = canUseBrowserSession(browserSession, request.connectorId, {
-          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
-        });
-        if (!sessionGate.ok) {
-          throw new Error(sessionGate.result.message);
-        }
-        return importFixtureConnectorItem(request);
-      })();
-      setConnectorImportedSources((current) => [
-        imported.source,
-        ...current.filter((source) => source.id !== imported.source.id)
-      ]);
-      setConnectorStatus(
-        `Imported ${imported.source.title} as untrusted connector knowledge.`
-      );
-      setLastAction(`Imported connector source: ${imported.source.title}`);
-    } catch (error) {
-      setConnectorStatus(
-        error instanceof Error ? error.message : "Connector import is unavailable."
-      );
-    }
-  };
-
-  const prepareConnectorAction = async (
-    action: ConnectorActionKind,
-    payload: Record<string, string>
-  ) => {
-    try {
-      const fixtureRequest = {
-        ...prepareFixtureConnectorAction(action, payload),
-        permissionMode
-      };
-      const prepared = await prepareRuntimeConnectorAction(fixtureRequest) ?? (() => {
-        const sessionGate = canUseBrowserSession(browserSession, fixtureRequest.connectorId, {
-          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
-        });
-        if (!sessionGate.ok) {
-          throw new Error(sessionGate.result.message);
-        }
-        return fixtureRequest;
-      })();
-      setPreparedConnectorActions((current) => [
-        prepared,
-        ...current.filter((request) => request.id !== prepared.id)
-      ]);
-      setConnectorStatus(
-        `${prepared.approval.service} action prepared. Review it in Memory and approvals.`
-      );
-      setLastAction(`${prepared.approval.service} action needs approval`);
-    } catch (error) {
-      setConnectorStatus(
-        error instanceof Error ? error.message : "Connector action could not be prepared."
+        error instanceof Error
+          ? error.message
+          : `${connector.name} health is unavailable.`,
       );
     }
   };
@@ -2059,34 +2222,45 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setConnectedBackendIds(
         resolved
           .filter((provider) => provider.authState === "connected")
-          .map((provider) => provider.id)
+          .map((provider) => provider.id),
       );
       return resolved;
     }
     return null;
   };
 
-  const markProviderState = (providerId: string, authState: BackendProvider["authState"]) => {
+  const markProviderState = (
+    providerId: string,
+    authState: BackendProvider["authState"],
+  ) => {
     setBackendProviders((current) =>
       current.map((provider) =>
         provider.id === providerId
           ? {
               ...provider,
               authState,
-              // Transient/non-connected states declare no capabilities.
-              capabilities: authState === "connected" ? provider.capabilities : []
+              capabilities: resolveCapabilities(
+                provider.backendType,
+                authState,
+                provider.backendType === "native-api",
+              ),
+              models: provider.models.map((model) => ({
+                ...model,
+                available: authState === "connected",
+              })),
             }
-          : provider
-      )
+          : provider,
+      ),
     );
   };
 
   const connectBackendWithVerify = async (
     providerId: string,
-    secret: string
+    secret: string,
   ): Promise<BackendVerifyResult> => {
     if (!isFableProviderEnabled(providerId)) {
-      const message = "This provider is not available in the current Fable release.";
+      const message =
+        "This provider is not available in the current Fable release.";
       setBackendStatus(message);
       return { providerId, outcome: "unsupported", message };
     }
@@ -2102,7 +2276,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         // The secret is the placeholder preview value, never a real key, so no
         // credential is fabricated.
         setConnectedBackendIds((current) =>
-          current.includes(providerId) ? current : [...current, providerId]
+          current.includes(providerId) ? current : [...current, providerId],
         );
         markProviderState(providerId, "connected");
         setBackendStatus(`${providerId} connected (preview).`);
@@ -2119,7 +2293,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         await clearRuntimeBackend(providerId);
         await refreshBackendProviders();
         markProviderState(providerId, "needs-auth");
-        const message = "Fable could not verify this provider in the desktop runtime. Update Fable and try again.";
+        const message =
+          "Fable could not verify this provider in the desktop runtime. Update Fable and try again.";
         setBackendStatus(message);
         setLastAction(message);
         return { providerId, outcome: "failed", message };
@@ -2133,58 +2308,89 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         await clearRuntimeBackend(providerId);
         await refreshBackendProviders();
         markProviderState(providerId, "needs-auth");
-        const status = message ?? `${providerId} rejected this key. Check the key and try again.`;
+        const status =
+          message ??
+          `${providerId} rejected this key. Check the key and try again.`;
         setBackendStatus(status);
         setLastAction(status);
         return { providerId, outcome, message: status };
       }
 
-      if (outcome === "ready") {
+      if (outcome === "ready" || outcome === "configured") {
         await refreshBackendProviders();
-        setBackendStatus(`${providerId} connected.`);
-        setLastAction(`${providerId} connected`);
+        const status =
+          message ??
+          (outcome === "configured"
+            ? `${providerId} configured. The endpoint will be checked when first used.`
+            : `${providerId} connected.`);
+        setBackendStatus(status);
+        setLastAction(
+          outcome === "configured"
+            ? `${providerId} configured`
+            : `${providerId} connected`,
+        );
         return { providerId, outcome };
       }
 
       // offline / unsupported / failed: retain the key so the user can retry,
       // but do not let key presence clear onboarding or claim readiness.
       await refreshBackendProviders();
-      setConnectedBackendIds((current) => current.filter((id) => id !== providerId));
+      setConnectedBackendIds((current) =>
+        current.filter((id) => id !== providerId),
+      );
       markProviderState(providerId, "unavailable");
-      const status = message ?? `${providerId} could not be verified. Retry before entering Fable.`;
+      const status =
+        message ??
+        `${providerId} could not be verified. Retry before entering Fable.`;
       setBackendStatus(status);
       setLastAction(status);
       return { providerId, outcome, message };
     } catch (error) {
       // Storage itself failed. Fail closed: do not report a connection.
       markProviderState(providerId, "needs-auth");
-      const message = error instanceof Error ? error.message : `Could not connect ${providerId}.`;
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Could not connect ${providerId}.`;
       setBackendStatus(message);
       setLastAction(message);
       return { providerId, outcome: "failed", message };
     }
   };
 
-  const connectBackend = async (providerId: string, secret = "preview-connection") => {
+  const connectBackend = async (
+    providerId: string,
+    secret = "preview-connection",
+  ) => {
     await connectBackendWithVerify(providerId, secret);
   };
 
-  const checkBackendConnection = async (providerId: string): Promise<BackendVerifyResult> => {
+  const checkBackendConnection = async (
+    providerId: string,
+  ): Promise<BackendVerifyResult> => {
     const provider = backendProviders.find((entry) => entry.id === providerId);
     if (!provider) {
-      return { providerId, outcome: "failed", message: "This provider is not in Fable's runtime catalogue." };
+      return {
+        providerId,
+        outcome: "failed",
+        message: "This provider is not in Fable's runtime catalogue.",
+      };
     }
 
     if (provider.backendType !== "native-api") {
       const refreshed = await refreshBackendProviders();
-      const current = refreshed?.find((entry) => entry.id === providerId) ?? provider;
-      const ready = current.authState === "connected" || current.authState === "ready";
+      const current =
+        refreshed?.find((entry) => entry.id === providerId) ?? provider;
+      const ready =
+        current.authState === "connected" || current.authState === "ready";
       const result: BackendVerifyResult = ready
         ? { providerId, outcome: "ready" }
         : {
             providerId,
             outcome: "failed",
-            message: current.installHint ?? "The provider runtime is not connected yet."
+            message:
+              current.installHint ??
+              "The provider runtime is not connected yet.",
           };
       setBackendStatus(result.message ?? `${providerId} connection checked.`);
       return result;
@@ -2195,7 +2401,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       const previewResult: BackendVerifyResult = {
         providerId,
         outcome: "unsupported",
-        message: "Browser preview uses a synthetic provider connection; live health checks run in the desktop app."
+        message:
+          "Browser preview uses a synthetic provider connection; live health checks run in the desktop app.",
       };
       setBackendStatus(previewResult.message ?? null);
       return previewResult;
@@ -2205,7 +2412,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       await clearRuntimeBackend(providerId);
       await refreshBackendProviders();
       markProviderState(providerId, "needs-auth");
-      setBackendStatus(result.message ?? `${providerId} rejected or revoked this key.`);
+      setBackendStatus(
+        result.message ?? `${providerId} rejected or revoked this key.`,
+      );
       return result;
     }
 
@@ -2214,17 +2423,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       result.message ??
         (result.outcome === "ready"
           ? `${providerId} is healthy.`
-          : `${providerId} could not be checked right now.`)
+          : `${providerId} could not be checked right now.`),
     );
     return result;
   };
 
-  const startBackendBrowserLogin = async (providerId: string): Promise<BackendVerifyResult> => {
+  const startBackendBrowserLogin = async (
+    providerId: string,
+  ): Promise<BackendVerifyResult> => {
     if (providerId !== "codex") {
       return {
         providerId,
         outcome: "unsupported",
-        message: "This provider does not expose a supported browser sign-in through Fable."
+        message:
+          "This provider does not expose a supported browser sign-in through Fable.",
       };
     }
     markProviderState(providerId, "connecting");
@@ -2236,19 +2448,24 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
         return {
           providerId,
           outcome: "unsupported",
-          message: "ChatGPT browser sign-in is available in the Fable desktop app."
+          message:
+            "ChatGPT browser sign-in is available in the Fable desktop app.",
         };
       }
       const verified = await checkBackendConnection(providerId);
-      const result = verified.outcome === "ready"
-        ? { providerId, outcome: "ready" as const, message: started.message }
-        : verified;
+      const result =
+        verified.outcome === "ready"
+          ? { providerId, outcome: "ready" as const, message: started.message }
+          : verified;
       setBackendStatus(result.message ?? "ChatGPT connected.");
       setLastAction(result.message ?? "ChatGPT connected");
       return result;
     } catch (error) {
       markProviderState(providerId, "needs-auth");
-      const message = error instanceof Error ? error.message : "ChatGPT sign-in could not be completed.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "ChatGPT sign-in could not be completed.";
       setBackendStatus(message);
       setLastAction(message);
       return { providerId, outcome: "failed", message };
@@ -2260,18 +2477,22 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     try {
       const cleared = await clearRuntimeBackend(providerId);
       if (cleared === null) {
-        setConnectedBackendIds((current) => current.filter((id) => id !== providerId));
+        setConnectedBackendIds((current) =>
+          current.filter((id) => id !== providerId),
+        );
         setBackendProviders((current) =>
           current.map((provider) =>
             provider.id === providerId
               ? {
                   ...provider,
                   authState:
-                    provider.backendType === "acp" ? "install-required" : "needs-auth",
-                  capabilities: []
+                    provider.backendType === "codex-app-server"
+                      ? "sign-in-required"
+                      : "needs-auth",
+                  capabilities: [],
                 }
-              : provider
-          )
+              : provider,
+          ),
         );
         setBackendStatus(`${providerId} disconnected (preview).`);
         setLastAction(`${providerId} disconnected (preview)`);
@@ -2282,7 +2503,10 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       setBackendStatus(`${providerId} disconnected.`);
       setLastAction(`${providerId} disconnected`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : `Could not disconnect ${providerId}.`;
+      const message =
+        error instanceof Error
+          ? error.message
+          : `Could not disconnect ${providerId}.`;
       setBackendStatus(message);
       setLastAction(message);
     }
@@ -2290,7 +2514,8 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const dismissOnboarding = () => {
     if (!activeWorkspaceScope || connectedBackendIds.length === 0) {
-      const message = "Connect and verify a model provider before entering Fable.";
+      const message =
+        "Connect and verify a model provider before entering Fable.";
       setBackendStatus(message);
       setLastAction(message);
       return;
@@ -2311,11 +2536,11 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   }) => {
     setBackendToolApprovals((current) => {
       const existingIndex = current.findIndex(
-        (approval) => approval.id === event.approval.id
+        (approval) => approval.id === event.approval.id,
       );
       if (existingIndex < 0) return [...current, event.approval];
       return current.map((approval, index) =>
-        index === existingIndex ? event.approval : approval
+        index === existingIndex ? event.approval : approval,
       );
     });
     setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
@@ -2347,11 +2572,13 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   // gates tool execution in the agent loop.
   const selectModel = (modelId: string) => {
     const chosen = modelOptions.find(
-      (model) => model.id === modelId || model.modelId === modelId
+      (model) => model.id === modelId || model.modelId === modelId,
     );
     setSelectedModelId(chosen?.id ?? "");
     setLastAction(
-      chosen ? `${chosen.providerLabel} · ${chosen.label} selected` : "Model cleared"
+      chosen
+        ? `${chosen.providerLabel} · ${chosen.label} selected`
+        : "Model cleared",
     );
   };
 
@@ -2363,17 +2590,20 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setPermissionMode(
       label === "Custom"
         ? resolvePermissionModeFromCustom(customApprovalSettings)
-        : permissionModeFor(label)
+        : permissionModeFor(label),
     );
     setLastAction(`Approval preset set to ${label}`);
   };
 
   const updateCustomApprovalSetting = (
     key: keyof CustomApprovalSettings,
-    value: boolean
+    value: boolean,
   ) => {
     setCustomApprovalSettings((current) => {
-      const next = normalizeCustomApprovalSettings({ ...current, [key]: value });
+      const next = normalizeCustomApprovalSettings({
+        ...current,
+        [key]: value,
+      });
       setPermissionLabel("Custom");
       setPermissionMode(resolvePermissionModeFromCustom(next));
       return next;
@@ -2383,7 +2613,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const approvalNeedsConfirmation = (
     approval: ApprovalRequest,
-    modification?: ApprovalModification
+    modification?: ApprovalModification,
   ) => {
     const mode = modification?.mode ?? approval.mode;
     return (
@@ -2404,66 +2634,42 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     approval: ApprovalRequest,
     decision: ApprovalDecision,
     modification?: ApprovalModification,
-    confirmationText?: string
+    confirmationText?: string,
   ) => {
-    const connectorAction = preparedConnectorActions.find(
-      (candidate) => candidate.approval.id === approval.id
-    );
-    if (connectorAction && (decision === "session" || decision === "rule")) {
-      setLastAction("Connected app changes need a fresh approval each time.");
-      return;
-    }
-
     const request = {
       request: approval,
       decision,
       decidedAt: new Date().toISOString(),
       modification,
-      confirmationText
+      confirmationText,
     };
 
     try {
       const response = runtimeOrPreview(
         await resolveRuntimeApprovalRequest(request),
         () => resolveApprovalFallback(request),
-        "Approvals require the desktop runtime."
+        "Approvals require the desktop runtime.",
       );
 
-      setApprovalAudit((current) => prependAuditEntry(current, response.auditEntry));
+      setApprovalAudit((current) =>
+        prependAuditEntry(current, response.auditEntry),
+      );
       if (response.dismissed) {
         setDismissedApprovalIds((current) =>
-          current.includes(approval.id) ? current : [...current, approval.id]
+          current.includes(approval.id) ? current : [...current, approval.id],
         );
       }
       if (response.grant?.scope === "session") {
         setSessionApprovalGrants((current) => [
           response.grant as ApprovalGrant,
-          ...current.filter((grant) => grant.id !== response.grant?.id)
+          ...current.filter((grant) => grant.id !== response.grant?.id),
         ]);
       }
       if (response.grant?.scope === "rule") {
         setApprovalRules((current) => [
           response.grant as ApprovalGrant,
-          ...current.filter((grant) => grant.id !== response.grant?.id)
+          ...current.filter((grant) => grant.id !== response.grant?.id),
         ]);
-      }
-
-      if (connectorAction) {
-        const runtimeResult = await executeRuntimeConnectorAction({
-          action: connectorAction,
-          approval: request
-        });
-        const connectorResult = runtimeResult ?? resolveBrowserSessionAction({
-          session: browserSession,
-          action: connectorAction,
-          decision,
-          permissionMode,
-          allowFixturePreview: ALLOW_PREVIEW_FALLBACKS
-        });
-        setPreparedConnectorActions((current) =>
-          current.filter((candidate) => candidate.id !== connectorAction.id)
-        );
-        setConnectorStatus(connectorResult.message);
       }
 
       // Grant -> execute bridge: drive the matching pending tool call on the
@@ -2475,24 +2681,31 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       if (gate?.hasPending(approval.id)) {
         if (decision === "deny") {
           gate.resolveDeny(approval.id);
-        } else if (decision === "once" || decision === "session" || decision === "rule" || decision === "modify") {
+        } else if (
+          decision === "once" ||
+          decision === "session" ||
+          decision === "rule" ||
+          decision === "modify"
+        ) {
           gate.resolveGrant(approval.id);
         }
       }
 
       setBackendToolApprovals((current) =>
-        current.filter((candidate) => candidate.id !== approval.id)
+        current.filter((candidate) => candidate.id !== approval.id),
       );
 
       clearApprovalInteraction();
       setLastAction(
         decision === "modify"
           ? `Modified approval for ${approval.service}`
-          : `${decision} recorded for ${approval.service}`
+          : `${decision} recorded for ${approval.service}`,
       );
     } catch (error) {
       setLastAction(
-        error instanceof Error ? error.message : "Fable could not resolve that approval."
+        error instanceof Error
+          ? error.message
+          : "Fable could not resolve that approval.",
       );
     }
   };
@@ -2500,10 +2713,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
   const requestApprovalDecision = (
     approval: ApprovalRequest,
     decision: ApprovalDecision,
-    modification?: ApprovalModification
+    modification?: ApprovalModification,
   ) => {
-    if (decision !== "deny" && approvalNeedsConfirmation(approval, modification)) {
-      setPendingApprovalConfirmation({ request: approval, decision, modification });
+    if (
+      decision !== "deny" &&
+      approvalNeedsConfirmation(approval, modification)
+    ) {
+      setPendingApprovalConfirmation({
+        request: approval,
+        decision,
+        modification,
+      });
       setApprovalConfirmationText("");
       return;
     }
@@ -2518,7 +2738,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setApprovalModificationDraft({
       mode: approval.mode,
       dataUsed: approval.dataUsed.join(", "),
-      consequence: approval.consequence
+      consequence: approval.consequence,
     });
   };
 
@@ -2537,7 +2757,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     requestApprovalDecision(approval, "modify", {
       mode: approvalModificationDraft.mode,
       dataUsed,
-      consequence
+      consequence,
     });
   };
 
@@ -2550,7 +2770,7 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       pendingApprovalConfirmation.request,
       pendingApprovalConfirmation.decision,
       pendingApprovalConfirmation.modification,
-      approvalConfirmationText
+      approvalConfirmationText,
     );
   };
 
@@ -2563,7 +2783,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       // Pinning must not bypass exclusion: a disabled source cannot be pinned,
       // and the source must belong to the current workspace + an authorized
       // (connected) connector. Unpinning is always allowed.
-      const source = workspaceKnowledgeSources.find((entry) => entry.id === sourceId);
+      const source = workspaceKnowledgeSources.find(
+        (entry) => entry.id === sourceId,
+      );
       if (!source) {
         setLastAction("That source is no longer available.");
         return current;
@@ -2587,7 +2809,9 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
       ...input,
       id,
       icon: "agent",
-      iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor) ? input.iconColor : "#865DFA"
+      iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor)
+        ? input.iconColor
+        : "#865DFA",
     };
     setAgents((current) => [...current, created]);
     setActiveAgentId(id);
@@ -2599,14 +2823,17 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
 
   const updateAgent = (
     agentId: string,
-    patch: Partial<Omit<FableAgentProfile, "id">>
+    patch: Partial<Omit<FableAgentProfile, "id">>,
   ) => {
-    setAgents((current) => current.map((agent) =>
-      agent.id === agentId ? { ...agent, ...patch } : agent
-    ));
+    setAgents((current) =>
+      current.map((agent) =>
+        agent.id === agentId ? { ...agent, ...patch } : agent,
+      ),
+    );
     if (agentId === activeAgentId) {
       if (patch.modelId !== undefined) selectModel(patch.modelId);
-      if (patch.permissionLabel !== undefined) selectPermissionLabel(patch.permissionLabel);
+      if (patch.permissionLabel !== undefined)
+        selectPermissionLabel(patch.permissionLabel);
     }
   };
 
@@ -2676,19 +2903,14 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     useConnector,
     runCommand,
     connectorManifests,
-    browserSession,
     connectorAccounts,
     connectorStatus,
-    connectorSearchResult,
     connectorImportedSources,
     connectConnector,
     disconnectConnector,
     refreshConnector,
     loadConnectorAccounts,
     switchConnectorAccount,
-    searchConnector,
-    importConnectorItem,
-    prepareConnectorAction,
     openApprovals,
     approvalAudit,
     actionHistory,
@@ -2777,6 +2999,6 @@ export function useShellRuntime(options: UseShellRuntimeOptions = {}): ShellRunt
     setMobileNavOpen,
     startNewChat,
     openThread,
-    setLastAction
+    setLastAction,
   };
 }

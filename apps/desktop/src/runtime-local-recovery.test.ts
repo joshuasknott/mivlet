@@ -2,8 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createRuntimeLocalBackup,
   deleteRuntimeLocalData,
-  exportRuntimeWorkspaceArchive,
-  importRuntimeWorkspaceArchive,
   loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
   pauseRuntimeExecution,
@@ -33,16 +31,6 @@ describe("local recovery runtime boundary", () => {
   it("does not simulate backup or restore in browser preview", async () => {
     await expect(createRuntimeLocalBackup("C:\\backup.db")).resolves.toBeNull();
     await expect(
-      exportRuntimeWorkspaceArchive("C:\\workspace.json", "workspace-1")
-    ).resolves.toBeNull();
-    await expect(
-      importRuntimeWorkspaceArchive(
-        "C:\\workspace.json",
-        "workspace-1",
-        "import workspace copy"
-      )
-    ).resolves.toBeNull();
-    await expect(
       prepareRuntimeLocalRestore("C:\\backup.db", "restore local data")
     ).resolves.toBeNull();
     await expect(loadRuntimeLocalDiagnostics("workspace-1")).resolves.toBeNull();
@@ -68,20 +56,6 @@ describe("local recovery runtime boundary", () => {
       schemaVersion: 35,
       credentialsIncluded: false
     };
-    const portable = {
-      path: "C:\\workspace.json",
-      formatVersion: 1,
-      schemaVersion: 35,
-      bytes: 4096,
-      sha256: "a".repeat(64),
-      credentialsIncluded: false
-    };
-    const imported = {
-      inserted: { projects: 2 },
-      skipped: { artifacts: 1 },
-      warnings: [],
-      errors: []
-    };
     const deleted = {
       restartRequired: true,
       hostedDataDeleted: false,
@@ -89,37 +63,16 @@ describe("local recovery runtime boundary", () => {
     };
     mocks.invoke
       .mockResolvedValueOnce(backup)
-      .mockResolvedValueOnce(portable)
-      .mockResolvedValueOnce(imported)
       .mockResolvedValueOnce(restore)
       .mockResolvedValueOnce(deleted);
 
     await expect(createRuntimeLocalBackup(backup.path)).resolves.toEqual(backup);
-    await expect(
-      exportRuntimeWorkspaceArchive(portable.path, "workspace-1")
-    ).resolves.toEqual(portable);
-    await expect(
-      importRuntimeWorkspaceArchive(
-        portable.path,
-        "workspace-1",
-        "import workspace copy"
-      )
-    ).resolves.toEqual(imported);
     await expect(
       prepareRuntimeLocalRestore(backup.path, "restore local data")
     ).resolves.toEqual(restore);
     await expect(deleteRuntimeLocalData("delete local data")).resolves.toEqual(deleted);
     expect(mocks.invoke.mock.calls).toEqual([
       ["backup_local_data", { destination: backup.path }],
-      ["export_workspace_archive_to_file", {
-        destination: portable.path,
-        workspaceId: "workspace-1"
-      }],
-      ["import_workspace_archive_from_file", {
-        source: portable.path,
-        workspaceId: "workspace-1",
-        confirmation: "import workspace copy"
-      }],
       ["prepare_local_data_restore", {
         source: backup.path,
         confirmation: "restore local data"

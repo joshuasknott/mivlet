@@ -328,9 +328,6 @@ function ConnectionSettings({
           void runtime.switchConnectorAccount(connectorId, accountId)
         }
         onSelect={(connector) => void runtime.loadConnectorAccounts(connector.id)}
-        onPrepareAction={(action, payload) =>
-          void runtime.prepareConnectorAction(action, payload)
-        }
       />
       <LocalMcpSettings
         workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}

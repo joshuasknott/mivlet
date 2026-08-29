@@ -898,8 +898,7 @@
   background: var(--line);
 }
 
-.provider-access-state--install-required,
-.provider-access-state--entitlement-pending {
+.provider-access-state--install-required {
   color: var(--caution);
   background: var(--caution-subtle);
 }
@@ -1821,6 +1820,7 @@
 
 .og-submit {
   margin-top: 6px;
+  min-height: 44px;
   padding: 11px;
   border: 1px solid transparent;
   border-radius: var(--radius-2);
@@ -2489,6 +2489,7 @@ button.og-path--primary .og-path__icon {
 }
 
 .og-primary-cta__start {
+  min-height: 44px;
   padding: 12px 28px;
   border: 1px solid transparent;
   border-radius: var(--radius-2);
@@ -2599,6 +2600,10 @@ button.og-path--primary .og-path__icon {
 
   .og-provider-list {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .og-progress-step:last-child {
+    grid-column: 1 / -1;
   }
 }
 
@@ -2822,7 +2827,7 @@ button.og-path--primary .og-path__icon {
 
 .provider-catalogue__show-all {
   justify-self: center;
-  min-height: 36px;
+  min-height: 44px;
   padding: 0 13px;
   color: var(--ink-muted);
   background: transparent;

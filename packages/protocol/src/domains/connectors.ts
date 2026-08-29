@@ -1,8 +1,5 @@
-/**
- * Connector identity primitives live in a leaf domain so scheduling and other
- * protocol domains never import the root barrel.
- */
-export type FirstWaveConnectorId =
+/** Connector identity primitives live in a leaf domain. */
+export type SupportedConnectorId =
   | "github"
   | "vercel"
   | "google-drive"
@@ -12,4 +9,4 @@ export type FirstWaveConnectorId =
   | "google-calendar"
   | "linear";
 
-export type ConnectorId = "local-files" | FirstWaveConnectorId | (string & {});
+export type ConnectorId = "local-files" | SupportedConnectorId | (string & {});

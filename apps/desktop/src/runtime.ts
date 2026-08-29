@@ -8,8 +8,6 @@ import { toRuntimeError } from "./runtime/errors";
 export {
   createRuntimeLocalBackup,
   deleteRuntimeLocalData,
-  exportRuntimeWorkspaceArchive,
-  importRuntimeWorkspaceArchive,
   loadRuntimeExecutionControl,
   loadRuntimeLocalDiagnostics,
   pauseRuntimeExecution,
@@ -21,9 +19,7 @@ export {
   type RuntimeLocalDataDeletionReceipt,
   type RuntimeLocalDiagnosticCategory,
   type RuntimeLocalDiagnosticsSnapshot,
-  type RuntimeLocalRestorePreparation,
-  type RuntimePortableExportReceipt,
-  type RuntimePortableImportReport
+  type RuntimeLocalRestorePreparation
 } from "./runtime/domains/local-data";
 export {
   beginRuntimeIdentityRecovery,
@@ -805,11 +801,10 @@ export async function recordRuntimeActionHistory(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// First-wave connectors.
+// Supported connectors.
 //
 // The runtime owns auth, credentials, provider health, and future network
-// egress. Browser preview returns null so the shell can use explicit fixture
-// adapters without claiming a live connection.
+// egress. Browser-only development returns null and cannot claim a connection.
 // ---------------------------------------------------------------------------
 
 export async function listRuntimeConnectorStatuses() {
@@ -1107,7 +1102,7 @@ export async function executeRuntimeConnectorAction(request: {
 }
 
 // ---------------------------------------------------------------------------
-// Agent-runtime backends (Codex, Cursor, Copilot, Grok)
+// Agent-runtime backends (Codex browser sign-in and direct provider APIs)
 //
 // The Rust credential boundary owns secrets. These wrappers expose auth state
 // + capabilities only. Outside Tauri they return null so the shell falls back
@@ -1435,100 +1430,6 @@ export async function listenRuntimeCodexEvents(
   try {
     const unlisten = await listen<RuntimeCodexEvent>(`fable://codex/${requestId}`, (event) => {
       onEvent(event.payload);
-    });
-    return unlisten;
-  } catch {
-    return null;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// ACP (Agent Client Protocol) CLI process bridge.
-//
-// Rust owns the CLI child process for catalog-declared ACP providers: it spawns
-// the provider's CLI with piped stdio, emits each stdout line on
-// `arden://acp/<sessionId>`, writes stdin frames on command, and kills the
-// child on close. Auth is provider-owned, so Fable never collects a subscription
-// token. These wrappers are thin invoke/listen seams over those Rust commands;
-// outside Tauri they return null so the transport stays fixture-testable.
-// ---------------------------------------------------------------------------
-
-export interface RuntimeSpawnAcpProcessRequest {
-  providerId: string;
-  extraArgs?: string[];
-}
-
-export interface RuntimeSpawnedAcpProcess {
-  sessionId: string;
-  /** Canonical workspace directory the Rust boundary assigned to the child. */
-  cwd: string;
-}
-
-export async function spawnRuntimeAcpProcess(request: RuntimeSpawnAcpProcessRequest) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<RuntimeSpawnedAcpProcess>("spawn_acp_process", {
-      request: { providerId: request.providerId, extraArgs: request.extraArgs ?? [] }
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function writeRuntimeAcpFrame(sessionId: string, frame: string) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<null>("write_acp_frame", { request: { sessionId, frame } });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function closeRuntimeAcpProcess(sessionId: string) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<boolean>("close_acp_process", { sessionId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export type RuntimeAcpCliProbeResult =
-  | "not-installed"
-  | "signed-out"
-  | "connected"
-  | "auth-failed"
-  | "unavailable";
-
-export async function detectRuntimeAcpCli(
-  providerId: string
-): Promise<RuntimeAcpCliProbeResult | null> {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    return await invoke<RuntimeAcpCliProbeResult>("detect_acp_cli", { providerId });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
-
-export async function listenRuntimeAcpFrames(
-  sessionId: string,
-  onFrame: (line: string) => void
-) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
-  try {
-    const unlisten = await listen<string>(`arden://acp/${sessionId}`, (event) => {
-      onFrame(event.payload as string);
     });
     return unlisten;
   } catch {

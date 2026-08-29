@@ -1470,17 +1470,6 @@ th {
   object-fit: contain;
 }
 
-.brand-logo--opencode {
-  overflow: hidden;
-  border-radius: 8px;
-  background: #4b4646;
-}
-
-.brand-logo--opencode img {
-  width: 31px;
-  height: 38px;
-}
-
 .product-story {
   display: grid;
   grid-template-columns: minmax(300px, 0.72fr) minmax(0, 1.38fr);

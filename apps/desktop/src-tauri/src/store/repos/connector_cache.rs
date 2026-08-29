@@ -1180,7 +1180,7 @@ mod tests {
                     value["contentPreview"] = serde_json::json!(if index % 25 == 0 {
                         "Connector cache approval search target"
                     } else {
-                        "Routine workspace note"
+                        "Workspace reference note"
                     });
                     upsert_from_value(tx, &store, "ws-a", value, "now")?;
                 }

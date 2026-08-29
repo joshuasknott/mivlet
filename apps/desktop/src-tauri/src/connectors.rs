@@ -1,4 +1,4 @@
-//! First-wave connector runtime boundary.
+//! Supported connector runtime boundary.
 //!
 //! Provider adapters plug into this shared command surface. OAuth/token work is
 //! delegated to `connector_auth`; secrets never enter this module or JavaScript.
@@ -24,8 +24,8 @@ use crate::models::{
     ConnectorCapabilityResult, ConnectorCommandError, ConnectorHealth, ConnectorImportRequest,
     ConnectorImportResult, ConnectorKnowledgeSource, ConnectorManifest, ConnectorPermission,
     ConnectorSearchRequest, ConnectorSearchResult, APPROVAL_DECISIONS, CONNECTOR_ACTIONS,
-    CONNECTOR_AUTH_STATES, FIRST_WAVE_CONNECTOR_IDS, MAX_CONNECTOR_PAYLOAD_FIELDS,
-    MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
+    CONNECTOR_AUTH_STATES, MAX_CONNECTOR_PAYLOAD_FIELDS, MAX_CONNECTOR_QUERY_CHARACTERS,
+    MAX_CONNECTOR_RESULT_LIMIT, SUPPORTED_CONNECTOR_IDS,
 };
 use crate::oauth_loopback;
 use crate::paths::{
@@ -333,33 +333,6 @@ fn require_connector(
         .find(|entry| entry.id == normalized)
         .ok_or_else(|| command_error("invalid-request", &normalized, "Unknown connector.", false))
 }
-
-/// The auth boundary a connector sits behind. Public Google desktop OAuth uses
-/// direct loopback PKCE and never needs the broker. Confidential connectors use
-/// the configured HTTPS broker and fail closed until it is deployed. The local
-/// workspace itself remains local-first and has no external auth.
-#[cfg(test)]
-#[derive(Debug, PartialEq, Eq)]
-pub(crate) enum ConnectorAuthBoundary {
-    Public,
-    Confidential,
-}
-
-#[cfg(test)]
-pub(crate) fn connector_auth_boundary(connector_id: &str) -> Option<ConnectorAuthBoundary> {
-    match CATALOG.iter().find(|entry| entry.id == connector_id)? {
-        entry if entry.auth_mode == "oauth-pkce" => Some(ConnectorAuthBoundary::Public),
-        entry if matches!(entry.auth_mode, "oauth-broker" | "provider-installation") => {
-            Some(ConnectorAuthBoundary::Confidential)
-        }
-        _ => None,
-    }
-}
-
-/// Confidential connector ids that require the deployed auth broker.
-#[cfg(test)]
-pub(crate) const BROKER_REQUIRED_CONNECTOR_IDS: &[&str] =
-    &["github", "vercel", "notion", "slack", "linear"];
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {
@@ -1012,7 +985,7 @@ pub(crate) fn list_connector_statuses_with(
 ) -> Vec<ConnectorManifest> {
     debug_assert_eq!(
         CATALOG.iter().map(|entry| entry.id).collect::<Vec<_>>(),
-        FIRST_WAVE_CONNECTOR_IDS
+        SUPPORTED_CONNECTOR_IDS
     );
     CATALOG
         .iter()
@@ -1041,11 +1014,6 @@ fn list_unconfigured_workspace_connector_statuses() -> Vec<ConnectorManifest> {
         }
     }
     manifests
-}
-
-#[cfg(test)]
-pub(crate) fn list_unconfigured_connector_statuses() -> Vec<ConnectorManifest> {
-    list_connector_statuses_with(&UnavailableCredentialBoundary)
 }
 
 pub(crate) fn validate_connector_execution_request(
@@ -1665,7 +1633,7 @@ fn merge_connector_knowledge_source(
         .any(|existing| existing.id == source.id && existing.deleted_at.is_some())
     {
         return Err(
-            "Deleted connector knowledge cannot be restored by routine import.".to_string(),
+            "Deleted connector knowledge cannot be restored by a later import.".to_string(),
         );
     }
     sources.retain(|existing| existing.id != source.id);
@@ -2439,7 +2407,7 @@ mod workspace_scope_tests {
     fn connector_statuses_remain_truthful_for_an_unconfigured_workspace() {
         let manifests = list_unconfigured_workspace_connector_statuses();
 
-        assert_eq!(manifests.len(), FIRST_WAVE_CONNECTOR_IDS.len());
+        assert_eq!(manifests.len(), SUPPORTED_CONNECTOR_IDS.len());
         assert!(manifests
             .iter()
             .all(|manifest| manifest.status == "unconfigured"));

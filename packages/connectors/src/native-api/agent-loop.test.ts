@@ -40,7 +40,7 @@ describe("runAgentLoop", () => {
     await collect(
       runAgentLoop(
         transport,
-        { ...baseRequest, providerId: "perplexity", model: "sonar" },
+        { ...baseRequest, providerId: "custom", model: "plain-chat" },
         { execute: echoExecutor }
       )
     );

@@ -203,17 +203,53 @@ impl Store {
             Self::run_migrations(conn)?;
             Self::apply_schema(conn)?;
         } else {
-            // Fresh databases use the complete schema so every table starts
-            // with its current shape; the migration runner records the version.
+            // Fresh databases use the complete current schema directly. The
+            // historical migration chain is only for existing pre-release
+            // databases and must not recreate retired product storage.
             Self::apply_schema(conn)?;
-            Self::run_migrations(conn)?;
+            write_schema_version(conn, CURRENT_SCHEMA_VERSION)?;
         }
         Ok(())
     }
 
     fn apply_schema(conn: &Connection) -> Result<()> {
-        conn.execute_batch(SCHEMA_V1)?;
-        Ok(())
+        let foreign_keys_enabled =
+            conn.pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))? != 0;
+        if foreign_keys_enabled {
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
+        }
+        let schema_result = (|| -> Result<()> {
+            conn.execute_batch(SCHEMA_V1)?;
+            conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?;
+            conn.execute(
+                "INSERT OR IGNORE INTO workspace(id,name,created_at,updated_at)
+                 VALUES('default','My Workspace','1970-01-01T00:00:00Z','1970-01-01T00:00:00Z');",
+                [],
+            )?;
+            let violation = conn
+                .query_row("PRAGMA foreign_key_check;", [], |row| {
+                    row.get::<_, String>(0)
+                })
+                .optional()?;
+            if violation.is_some() {
+                return Err(StoreError::Corrupt(
+                    "Fable's local database schema could not preserve referential integrity."
+                        .to_string(),
+                ));
+            }
+            Ok(())
+        })();
+        let restore_result = if foreign_keys_enabled {
+            conn.pragma_update(None, "foreign_keys", "ON")
+                .map_err(StoreError::from)
+        } else {
+            Ok(())
+        };
+        match (schema_result, restore_result) {
+            (Err(error), _) => Err(error),
+            (Ok(()), Err(error)) => Err(error),
+            (Ok(()), Ok(())) => Ok(()),
+        }
     }
 
     /// Run pending schema/data migrations inside a transaction.
@@ -1061,13 +1097,8 @@ mod tests {
                     [],
                 )?;
                 tx.execute(
-                    "INSERT INTO routine_record(
-                       workspace_id,owner_subject,id,visibility,status,current_version,revision,
-                       created_by_internal_user_id,created_at,updated_at,payload,payload_nonce
-                     ) VALUES(
-                       'workspace-2','member-2','routine-1','private','paused',1,1,
-                       'user-2','t','t',x'01',x'02'
-                     );",
+                    "INSERT INTO preferences(workspace_id,key,updated_at,payload,payload_nonce)
+                     VALUES('workspace-2','appearance','t',x'01',x'02');",
                     [],
                 )?;
                 Ok(())
@@ -1218,6 +1249,35 @@ mod tests {
             })
             .unwrap();
         assert_eq!(foreign_keys_enabled, 1);
+        store
+            .with_conn(|conn| {
+                for table in [
+                    "mission_record",
+                    "mission_run_record",
+                    "routine_record",
+                    "routine_trigger",
+                    "scheduled_job",
+                    "scheduler_queue_entry",
+                    "workflow_definition",
+                    "workflow_run",
+                    "artifact",
+                    "artifact_version",
+                    "goal",
+                    "run_state",
+                ] {
+                    let exists: bool = conn.query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM sqlite_master
+                           WHERE type='table' AND name=?1
+                         );",
+                        [table],
+                        |row| row.get(0),
+                    )?;
+                    assert!(!exists, "retired table {table} must not exist");
+                }
+                Ok(())
+            })
+            .unwrap();
     }
 
     #[test]

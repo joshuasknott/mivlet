@@ -2,7 +2,7 @@
 //!
 //! A single normalized [`ActionHistoryEvent`] covers every auditable category:
 //! model calls, connector actions, shell/tool actions, browser/web actions,
-//! approvals, schedules, and blocked policy decisions. Audit *observes* actions;
+//! approvals and blocked policy decisions. Audit *observes* actions;
 //! it never grants execution authority (the typed `approval` table and the
 //! path-based execution-permit store remain the only execution authority).
 //!
@@ -32,7 +32,6 @@ pub mod category {
     pub const TOOL_ACTION: &str = "tool-action";
     pub const WEB_ACTION: &str = "web-action";
     pub const APPROVAL: &str = "approval";
-    pub const SCHEDULE: &str = "schedule";
     pub const POLICY_BLOCK: &str = "policy-block";
 }
 

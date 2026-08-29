@@ -25,7 +25,7 @@ use url::{Host, Url};
 /// Which wire family a native provider speaks (selects endpoint + auth header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderKind {
-    /// openai, xai, openrouter — Chat Completions format.
+    /// OpenAI, xAI, and a user-configured compatible endpoint.
     OpenAiCompat,
     Anthropic,
     Gemini,
@@ -36,7 +36,7 @@ pub fn provider_kind(provider_id: &str) -> ProviderKind {
     match provider_id {
         "anthropic" => ProviderKind::Anthropic,
         "gemini" => ProviderKind::Gemini,
-        _ => ProviderKind::OpenAiCompat, // openai, xai, openrouter
+        _ => ProviderKind::OpenAiCompat,
     }
 }
 
@@ -62,108 +62,6 @@ const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
         id: "xai",
         chat_endpoint: "https://api.x.ai/v1/chat/completions",
         models_endpoint: Some("https://api.x.ai/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "openrouter",
-        chat_endpoint: "https://openrouter.ai/api/v1/chat/completions",
-        models_endpoint: Some("https://openrouter.ai/api/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "deepseek",
-        chat_endpoint: "https://api.deepseek.com/chat/completions",
-        models_endpoint: Some("https://api.deepseek.com/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "zai",
-        chat_endpoint: "https://api.z.ai/api/paas/v4/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "minimax",
-        chat_endpoint: "https://api.minimax.io/v1/chat/completions",
-        models_endpoint: Some("https://api.minimax.io/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "alibaba",
-        chat_endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "fireworks",
-        chat_endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "huggingface",
-        chat_endpoint: "https://router.huggingface.co/v1/chat/completions",
-        models_endpoint: Some("https://router.huggingface.co/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "moonshot",
-        chat_endpoint: "https://api.moonshot.ai/v1/chat/completions",
-        models_endpoint: Some("https://api.moonshot.ai/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "kimi-code",
-        chat_endpoint: "https://api.kimi.com/coding/v1/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "mistral",
-        chat_endpoint: "https://api.mistral.ai/v1/chat/completions",
-        models_endpoint: Some("https://api.mistral.ai/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "meta",
-        chat_endpoint: "https://api.llama.com/v1/chat/completions",
-        models_endpoint: Some("https://api.llama.com/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "perplexity",
-        chat_endpoint: "https://api.perplexity.ai/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "tencent",
-        chat_endpoint: "https://tokenhub-intl.tencentmaas.com/v1/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "xiaomi",
-        chat_endpoint: "https://api.xiaomimimo.com/v1/chat/completions",
-        models_endpoint: None,
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "groq",
-        chat_endpoint: "https://api.groq.com/openai/v1/chat/completions",
-        models_endpoint: Some("https://api.groq.com/openai/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "together",
-        chat_endpoint: "https://api.together.ai/v1/chat/completions",
-        models_endpoint: Some("https://api.together.ai/v1/models"),
-        auth_required: true,
-    },
-    OpenAiCompatProfile {
-        id: "cerebras",
-        chat_endpoint: "https://api.cerebras.ai/v1/chat/completions",
-        models_endpoint: Some("https://api.cerebras.ai/v1/models"),
         auth_required: true,
     },
 ];
@@ -269,6 +167,14 @@ fn normalize_custom_base_url(raw: &str) -> Result<String, String> {
     Ok(parsed.as_str().trim_end_matches('/').to_string())
 }
 
+pub(crate) fn normalize_custom_model_id(raw: &str) -> Result<String, String> {
+    let model_id = raw.trim().to_string();
+    if model_id.is_empty() || model_id.len() > 256 || model_id.chars().any(char::is_control) {
+        return Err("Custom provider model ID is invalid.".to_string());
+    }
+    Ok(model_id)
+}
+
 fn parse_custom_provider_credential(secret: &str) -> Result<CustomProviderCredential, String> {
     let value: serde_json::Value = serde_json::from_str(secret)
         .map_err(|_| "Custom provider credential has an invalid shape.".to_string())?;
@@ -284,19 +190,29 @@ fn parse_custom_provider_credential(secret: &str) -> Result<CustomProviderCreden
         return Err("Custom provider credential version or kind is unsupported.".to_string());
     }
     credential.base_url = normalize_custom_base_url(&credential.base_url)?;
-    credential.model_id = credential.model_id.trim().to_string();
-    if credential.model_id.is_empty()
-        || credential.model_id.len() > 256
-        || credential.model_id.chars().any(char::is_control)
-    {
-        return Err("Custom provider model ID is invalid.".to_string());
-    }
+    credential.model_id = normalize_custom_model_id(&credential.model_id)?;
     if let Some(api_key) = credential.api_key.as_deref() {
         if api_key.is_empty() || api_key.chars().any(char::is_control) {
             return Err("Custom provider API key is invalid.".to_string());
         }
     }
     Ok(credential)
+}
+
+pub(crate) fn configured_custom_provider_model_id(secret: &str) -> Result<String, String> {
+    Ok(parse_custom_provider_credential(secret)?.model_id)
+}
+
+fn configured_custom_provider_result(credential: &str) -> Result<BackendVerifyResult, String> {
+    parse_custom_provider_credential(credential)?;
+    Ok(BackendVerifyResult {
+        provider_id: "custom".to_string(),
+        outcome: "configured".to_string(),
+        message: Some(
+            "Custom endpoint configuration saved. Fable will check it when you send a message."
+                .to_string(),
+        ),
+    })
 }
 
 /// Validate structured native credentials before they enter the secure store.
@@ -457,10 +373,10 @@ struct OpenAiCompatibleTerminalObservation {
 }
 
 impl OpenAiCompatibleTerminalObservation {
-    fn new_for_provider(provider_id: &str, capture_output: bool) -> Self {
+    fn new_for_provider(_provider_id: &str, capture_output: bool) -> Self {
         Self {
             capture_output,
-            cumulative_output: provider_id == "minimax",
+            cumulative_output: false,
             ..Self::default()
         }
     }
@@ -969,30 +885,7 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 22] = [
-    "openai",
-    "anthropic",
-    "gemini",
-    "xai",
-    "openrouter",
-    "deepseek",
-    "zai",
-    "minimax",
-    "alibaba",
-    "fireworks",
-    "huggingface",
-    "moonshot",
-    "kimi-code",
-    "mistral",
-    "meta",
-    "perplexity",
-    "tencent",
-    "xiaomi",
-    "groq",
-    "together",
-    "cerebras",
-    "custom",
-];
+const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "gemini", "xai", "custom"];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1718,7 +1611,9 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
 /// Verify a stored native-API credential by hit-testing it against the
 /// provider's list-models endpoint. The key never crosses into JavaScript —
 /// Rust looks it up via the credential boundary, adds the auth header, and
-/// issues a single bounded GET. The HTTP result maps to a
+/// issues a single bounded GET. Custom endpoints have no required discovery
+/// endpoint, so their validated configuration returns `configured`; the first
+/// conversation performs the truthful transport check. The HTTP result maps to a
 /// [`BackendVerifyResult`]:
 ///   - 2xx → `ready`
 ///   - 401/403 → `auth-failed` (the key is bad/expired)
@@ -1726,13 +1621,13 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
 ///   - 404/405/501 → `unsupported`
 ///   - anything else → `failed`
 ///
-/// Non-native providers (Codex/ACP/Copilot) own their own auth and never pass
-/// through this boundary, so they fail closed with `unsupported`.
+/// Codex owns its official browser sign-in and never passes through this API-key
+/// boundary, so it fails closed with `unsupported` here.
 #[tauri::command]
 pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVerifyResult, String> {
     if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
-        // Provider-owned runtimes (Codex CLI, ACP, Copilot SDK) carry their own
-        // auth that Fable must not touch. They cannot be verified here.
+        // Codex app-server owns its browser sign-in. Fable cannot verify it
+        // through the API-key boundary.
         return Ok(BackendVerifyResult {
             provider_id: provider_id.clone(),
             outcome: "unsupported".to_string(),
@@ -1756,6 +1651,10 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
             });
         }
     };
+
+    if provider_id == "custom" {
+        return configured_custom_provider_result(&credential);
+    }
 
     let connection =
         resolve_provider_connection(&provider_id, &credential, "credential-verification")?;
@@ -1884,26 +1783,6 @@ mod transport_policy_tests {
     }
 
     #[test]
-    fn minimax_terminal_observation_deduplicates_cumulative_content() {
-        let mut observation =
-            OpenAiCompatibleTerminalObservation::new_for_provider("minimax", true);
-        observation.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
-        observation
-            .observe(r#"{"choices":[{"delta":{"content":"Hello world"},"finish_reason":null}]}"#);
-        observation.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
-        observation.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
-        observation.observe(r#"{"choices":[],"usage":{"prompt_tokens":7,"completion_tokens":2}}"#);
-        assert!(observation.clean_stop());
-        assert_eq!(observation.output, "Hello world");
-
-        let mut divergent = OpenAiCompatibleTerminalObservation::new_for_provider("minimax", true);
-        divergent.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
-        divergent
-            .observe(r#"{"choices":[{"delta":{"content":"Different"},"finish_reason":null}]}"#);
-        assert!(!divergent.clean_stop());
-    }
-
-    #[test]
     fn anthropic_terminal_observation_requires_start_delta_usage_and_stop() {
         let mut observation = AnthropicTerminalObservation::new(true);
         observation.observe(r#"{"type":"message_start","message":{"usage":{"input_tokens":7}}}"#);
@@ -2015,50 +1894,7 @@ mod transport_policy_tests {
             models_endpoint_for("xai").unwrap(),
             "https://api.x.ai/v1/models"
         );
-        assert_eq!(
-            models_endpoint_for("openrouter").unwrap(),
-            "https://openrouter.ai/api/v1/models"
-        );
-    }
-
-    #[test]
-    fn fixed_openai_compatible_endpoints_match_provider_profiles() {
-        let expected = [
-            ("deepseek", "https://api.deepseek.com/chat/completions"),
-            ("zai", "https://api.z.ai/api/paas/v4/chat/completions"),
-            ("minimax", "https://api.minimax.io/v1/chat/completions"),
-            (
-                "alibaba",
-                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
-            ),
-            (
-                "fireworks",
-                "https://api.fireworks.ai/inference/v1/chat/completions",
-            ),
-            (
-                "huggingface",
-                "https://router.huggingface.co/v1/chat/completions",
-            ),
-            ("moonshot", "https://api.moonshot.ai/v1/chat/completions"),
-            (
-                "kimi-code",
-                "https://api.kimi.com/coding/v1/chat/completions",
-            ),
-            ("mistral", "https://api.mistral.ai/v1/chat/completions"),
-            ("meta", "https://api.llama.com/v1/chat/completions"),
-            ("perplexity", "https://api.perplexity.ai/chat/completions"),
-            (
-                "tencent",
-                "https://tokenhub-intl.tencentmaas.com/v1/chat/completions",
-            ),
-            ("xiaomi", "https://api.xiaomimimo.com/v1/chat/completions"),
-            ("groq", "https://api.groq.com/openai/v1/chat/completions"),
-            ("together", "https://api.together.ai/v1/chat/completions"),
-            ("cerebras", "https://api.cerebras.ai/v1/chat/completions"),
-        ];
-        for (provider_id, endpoint) in expected {
-            assert_eq!(endpoint_for(provider_id), endpoint, "{provider_id}");
-        }
+        assert!(models_endpoint_for("openrouter").is_err());
     }
 
     #[test]
@@ -2076,39 +1912,6 @@ mod transport_policy_tests {
             .filter(|id| !matches!(*id, "anthropic" | "gemini" | "custom"))
             .collect();
         assert_eq!(profiled, expected_profiled);
-    }
-
-    #[test]
-    fn compatible_model_list_endpoints_are_exact_and_unsupported_ones_fail_closed() {
-        let expected = [
-            ("deepseek", "https://api.deepseek.com/models"),
-            ("minimax", "https://api.minimax.io/v1/models"),
-            ("huggingface", "https://router.huggingface.co/v1/models"),
-            ("moonshot", "https://api.moonshot.ai/v1/models"),
-            ("mistral", "https://api.mistral.ai/v1/models"),
-            ("meta", "https://api.llama.com/v1/models"),
-            ("groq", "https://api.groq.com/openai/v1/models"),
-            ("together", "https://api.together.ai/v1/models"),
-            ("cerebras", "https://api.cerebras.ai/v1/models"),
-        ];
-        for (provider_id, endpoint) in expected {
-            assert_eq!(
-                models_endpoint_for(provider_id).unwrap(),
-                endpoint,
-                "{provider_id}"
-            );
-        }
-        for provider_id in [
-            "zai",
-            "alibaba",
-            "fireworks",
-            "kimi-code",
-            "perplexity",
-            "tencent",
-            "xiaomi",
-        ] {
-            assert!(models_endpoint_for(provider_id).is_err(), "{provider_id}");
-        }
     }
 
     fn custom_secret(base_url: &str, api_key: Option<&str>) -> String {
@@ -2143,6 +1946,19 @@ mod transport_policy_tests {
             resolve_provider_connection("custom", &without_key, "example-chat").unwrap();
         assert!(connection.auth_header.is_none());
         assert!(resolve_provider_connection("custom", &without_key, "other-model").is_err());
+    }
+
+    #[test]
+    fn custom_provider_verification_reports_configured_without_claiming_egress() {
+        let result =
+            configured_custom_provider_result(&custom_secret("http://127.0.0.1:17778/v1", None))
+                .unwrap();
+        assert_eq!(result.provider_id, "custom");
+        assert_eq!(result.outcome, "configured");
+        assert!(result
+            .message
+            .as_deref()
+            .is_some_and(|message| message.contains("when you send a message")));
     }
 
     #[test]

@@ -69,7 +69,6 @@ describe("Connector Connection selection", () => {
           ]
         }}
         onSwitchAccount={onSwitch}
-        onPrepareAction={() => {}}
       />
     );
 
@@ -100,7 +99,6 @@ describe("Connector Connection selection", () => {
         onSelect={() => {}}
         accounts={{}}
         onSwitchAccount={() => {}}
-        onPrepareAction={() => {}}
       />
     );
 

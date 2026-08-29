@@ -793,18 +793,6 @@
   }
 }
 
-/* Downward-opening menus for new threads (where input box is in the middle) */
-.composer-glow--new-thread .composer-menu {
-  top: calc(100% - 1px);
-  bottom: auto;
-  border-radius: var(--radius-2) var(--radius-2) var(--radius-2) var(--radius-1);
-  box-shadow: var(--shadow-2);
-}
-
-.composer-glow--new-thread .composer-trigger--open {
-  border-radius: var(--radius-2) var(--radius-2) var(--radius-1) var(--radius-1);
-}
-
 /* Submenu Wrapper & Sidebars */
 .composer-menu-item-wrapper {
   position: relative;

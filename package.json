@@ -2,7 +2,7 @@
   "name": "fable",
   "version": "0.1.0",
   "private": true,
-  "description": "Fable is an agent-native AI workspace for real work.",
+  "description": "Fable is a local-first AI teammate workspace.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "pnpm --filter @fable/desktop dev",
@@ -11,7 +11,7 @@
     "typecheck": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/broker typecheck && pnpm --filter @fable/hosted-runner typecheck && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop typecheck && pnpm --filter @fable/marketing typecheck && pnpm --filter @fable/waitlist typecheck",
     "test": "pnpm --filter @fable/connectors test && pnpm --filter @fable/broker test && pnpm --filter @fable/hosted-runner test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test && pnpm --filter @fable/waitlist test && pnpm --filter @fable/marketing test",
     "lint": "eslint apps packages scripts --max-warnings=0 && node scripts/quality/check-explicit-any.mjs",
-    "format:check": "prettier --check \"eslint.config.mjs\" \"knip.json\" \"scripts/quality/**/*.{mjs,json}\" \"apps/desktop/src/runtime/**/*.{ts,tsx}\" \"apps/desktop/src/hooks/shell-runtime/provider-probes.ts\" \"apps/desktop/src/components/settings/PreferencesSettingsViews.tsx\" \"apps/desktop/src/shell/chat-workspace/**/*.{ts,tsx}\" \"apps/desktop/src/lib/*-contract.ts\" \"apps/desktop/src/styles/routes/*.css\" \"apps/waitlist/src/services.ts\" \"packages/protocol/src/domains/connectors.ts\"",
+    "format:check": "prettier --check \"eslint.config.mjs\" \"knip.json\" \"scripts/quality/**/*.{mjs,json}\" \"apps/desktop/src/runtime/**/*.{ts,tsx}\" \"apps/desktop/src/components/settings/PreferencesSettingsViews.tsx\" \"apps/desktop/src/styles/routes/*.css\" \"apps/waitlist/src/services.ts\" \"packages/protocol/src/domains/connectors.ts\"",
     "dead-code": "knip --no-config-hints --include files,dependencies,devDependencies,unlisted,binaries",
     "cycles": "node scripts/quality/check-cycles.mjs",
     "quality": "pnpm lint && pnpm format:check && pnpm dead-code && pnpm cycles",

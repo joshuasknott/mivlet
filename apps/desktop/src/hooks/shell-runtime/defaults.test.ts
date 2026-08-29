@@ -7,10 +7,7 @@ import {
   defaultShellState,
   runtimeOrPreview
 } from "./defaults";
-import {
-  acpAuthStateFor,
-  isFirstWaveConnectorId
-} from "./backend-normalization";
+import { isSupportedConnectorId } from "./backend-normalization";
 
 describe("shell runtime defaults", () => {
   it("keeps the persisted shell and identity defaults stable", () => {
@@ -45,18 +42,8 @@ describe("shell runtime defaults", () => {
 });
 
 describe("backend normalization", () => {
-  it.each([
-    ["connected", "connected"],
-    ["signed-out", "needs-auth"],
-    ["not-installed", "install-required"],
-    ["auth-failed", "failed"],
-    ["unavailable", "unavailable"]
-  ] as const)("maps ACP %s to %s", (outcome, authState) => {
-    expect(acpAuthStateFor(outcome).authState).toBe(authState);
-  });
-
-  it("recognizes only first-wave connector ids", () => {
-    expect(isFirstWaveConnectorId("github")).toBe(true);
-    expect(isFirstWaveConnectorId("not-a-connector")).toBe(false);
+  it("recognizes only supported connector ids", () => {
+    expect(isSupportedConnectorId("github")).toBe(true);
+    expect(isSupportedConnectorId("not-a-connector")).toBe(false);
   });
 });

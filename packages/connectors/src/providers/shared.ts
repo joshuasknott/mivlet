@@ -8,11 +8,9 @@ import type {
   ConnectorImportResult,
   ConnectorSearchItem,
   ConnectorSearchRequest,
-  ConnectorSearchResult,
-  FirstWaveConnectorId,
+  SupportedConnectorId,
   KnowledgeSource
 } from "@fable/protocol";
-import { connectorSearchFixtures } from "../fixtures";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -25,7 +23,7 @@ export interface ProviderErrorLike {
 }
 
 export function shapeConnectorSearchRequest(
-  connectorId: FirstWaveConnectorId,
+  connectorId: SupportedConnectorId,
   query: string,
   limit = DEFAULT_LIMIT,
   cursor?: string
@@ -35,38 +33,6 @@ export function shapeConnectorSearchRequest(
     query: Array.from(query.trim()).slice(0, MAX_QUERY_CHARACTERS).join(""),
     limit: normalizeLimit(limit),
     ...(cursor ? { cursor } : {})
-  };
-}
-
-export function searchConnectorFixtures(
-  request: ConnectorSearchRequest,
-  searchedAt = new Date().toISOString()
-): ConnectorSearchResult {
-  const shapedRequest = shapeConnectorSearchRequest(
-    request.connectorId,
-    request.query,
-    request.limit,
-    request.cursor
-  );
-  const query = shapedRequest.query.toLocaleLowerCase();
-  const items = connectorSearchFixtures[shapedRequest.connectorId]
-    .filter((item) => {
-      if (!query) {
-        return true;
-      }
-      return [item.title, item.summary, item.contentPreview ?? "", item.provenance]
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(query);
-    })
-    .slice(0, shapedRequest.limit);
-
-  return {
-    connectorId: shapedRequest.connectorId,
-    query: shapedRequest.query,
-    items,
-    source: "fixture",
-    searchedAt
   };
 }
 
@@ -123,7 +89,7 @@ function toKnowledgeSourceKind(kind: ConnectorSearchItem["kind"]): KnowledgeSour
 }
 
 export function classifyConnectorError(
-  connectorId: FirstWaveConnectorId,
+  connectorId: SupportedConnectorId,
   error: ProviderErrorLike
 ): ConnectorError {
   const normalizedCode = (error.code ?? "").toLocaleLowerCase();
@@ -204,7 +170,7 @@ function connectorErrorMessage(code: ConnectorErrorCode) {
 }
 
 export function prepareConnectorAction(
-  connectorId: FirstWaveConnectorId,
+  connectorId: SupportedConnectorId,
   service: string,
   action: ConnectorActionKind,
   payload: Record<string, string>,

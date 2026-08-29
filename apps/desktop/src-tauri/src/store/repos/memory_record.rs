@@ -60,7 +60,7 @@ pub fn upsert_private(
     )?;
     if tombstoned {
         return Err(StoreError::Invalid(
-            "Forgotten memory cannot be restored by a routine write.".into(),
+            "Forgotten memory cannot be restored by a later write.".into(),
         ));
     }
     let kind = value

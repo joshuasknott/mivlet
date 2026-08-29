@@ -67,7 +67,7 @@ export async function collectAssets(distDir, repoRoot) {
 export function logicalChunkId(fileName) {
   // Extract the logical base name before the final -hash.(js|css) suffix.
   // Supports hyphenated known chunks (react-vendor) and handles cases where the hash suffix itself
-  // contains '-' (e.g. "SchedulesPage-BD-qQMfd.js" must yield "SchedulesPage", not "SchedulesPage-BD").
+  // contains '-' (e.g. "SettingsPage-BD-qQMfd.js" must yield "SettingsPage", not "SettingsPage-BD").
   const match = /^(.+)-[A-Za-z0-9_-]+\.(js|css)$/.exec(fileName);
   if (!match) return undefined;
   const name = match[1];

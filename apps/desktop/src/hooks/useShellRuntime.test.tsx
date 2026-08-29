@@ -15,20 +15,22 @@ describe("conversation shell runtime", () => {
     clearActiveRuntimeDataScope();
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
-      value: undefined
+      value: undefined,
     });
   });
 
   it("keeps entry gated until a provider is connected and setup is completed", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
 
-    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    await waitFor(() =>
+      expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
+    );
     expect(result.current.onboardingRequired).toBe(true);
 
     act(() => result.current.dismissOnboarding());
     expect(result.current.onboardingRequired).toBe(true);
     expect(result.current.backendStatus).toBe(
-      "Connect and verify a model provider before entering Fable."
+      "Connect and verify a model provider before entering Fable.",
     );
   });
 
@@ -39,7 +41,13 @@ describe("conversation shell runtime", () => {
       await result.current.connectBackend("xai", "xai-test-key");
     });
     expect(result.current.connectedBackendIds).toContain("xai");
-    expect(JSON.stringify(result.current.backendProviders)).not.toContain("xai-test-key");
+    expect(JSON.stringify(result.current.backendProviders)).not.toContain(
+      "xai-test-key",
+    );
+    expect(result.current.connectedAgentBackend?.id).toBe("xai");
+    expect(result.current.modelOptions.map((model) => model.modelId)).toContain(
+      "grok-4",
+    );
 
     act(() => result.current.dismissOnboarding());
     expect(result.current.onboardingRequired).toBe(false);
@@ -47,13 +55,19 @@ describe("conversation shell runtime", () => {
 
   it("maps custom approval choices onto the existing permission levels", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
-    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    await waitFor(() =>
+      expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
+    );
 
-    act(() => result.current.updateCustomApprovalSetting("allowSmallLocalEdits", true));
+    act(() =>
+      result.current.updateCustomApprovalSetting("allowSmallLocalEdits", true),
+    );
     expect(result.current.permissionLabel).toBe("Custom");
     expect(result.current.permissionMode).toBe("trusted-scope");
 
-    act(() => result.current.updateCustomApprovalSetting("allowPowerfulCommands", true));
+    act(() =>
+      result.current.updateCustomApprovalSetting("allowPowerfulCommands", true),
+    );
     expect(result.current.permissionMode).toBe("full-access");
   });
 });

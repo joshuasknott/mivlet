@@ -1,32 +1,59 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentEditor } from "../components/agents/AgentEditor";
 import {
   AgentLearningDialog,
-  type AgentLearningSource
+  type AgentLearningSource,
 } from "../components/agents/AgentLearningDialog";
-import { AgentSidebar, type AgentSidebarPreview } from "../components/agents/AgentSidebar";
+import {
+  AgentSidebar,
+  type AgentSidebarPreview,
+} from "../components/agents/AgentSidebar";
 import { AgentWelcome } from "../components/agents/AgentWelcome";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
-import { ProfileAgentAvatar, nextAgentColor } from "../components/agents/agent-icons";
+import {
+  ProfileAgentAvatar,
+  nextAgentColor,
+} from "../components/agents/agent-icons";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
-import { buildAgentRequest, PERMISSION_PROFILES, validateModelSelection } from "../lib/agent-run";
+import {
+  buildAgentRequest,
+  PERMISSION_PROFILES,
+  validateModelSelection,
+} from "../lib/agent-run";
 import { agentExecutionInstructions } from "../lib/agent-learning";
 import { insertDictation } from "../lib/insert-dictation";
-import { tabs as settingsTabs, type SettingsTab } from "../components/pages/settings-tabs";
+import {
+  tabs as settingsTabs,
+  type SettingsTab,
+} from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
 import { useShellAgentController } from "./useShellAgentController";
 
 const ApprovalPanel = lazy(() =>
-  import("../components/ApprovalPanel").then((module) => ({ default: module.ApprovalPanel }))
+  import("../components/ApprovalPanel").then((module) => ({
+    default: module.ApprovalPanel,
+  })),
 );
 const OnboardingPage = lazy(() =>
-  import("../components/pages/OnboardingPage").then((module) => ({ default: module.OnboardingPage }))
+  import("../components/pages/OnboardingPage").then((module) => ({
+    default: module.OnboardingPage,
+  })),
 );
 const SettingsPage = lazy(() =>
-  import("../components/pages/SettingsPage").then((module) => ({ default: module.SettingsPage }))
+  import("../components/pages/SettingsPage").then((module) => ({
+    default: module.SettingsPage,
+  })),
 );
 
 interface QueuedPrompt {
@@ -72,7 +99,7 @@ export function ChatWorkspace() {
   const controller = useShellAgentController({
     threadId: selectedThreadId,
     onDictation: addDictationToComposer,
-    onVoiceCancel: focusComposer
+    onVoiceCancel: focusComposer,
   });
   const {
     runtime,
@@ -83,10 +110,12 @@ export function ChatWorkspace() {
     hostedComputer,
     hostedBrowser,
     stopCurrentWork,
-    resetCancellation
+    resetCancellation,
   } = controller;
-  const activeAgent = runtime.agents.find((candidate) => candidate.id === runtime.activeAgentId)
-    ?? runtime.agents[0];
+  const activeAgent =
+    runtime.agents.find(
+      (candidate) => candidate.id === runtime.activeAgentId,
+    ) ?? runtime.agents[0];
 
   useEffect(() => {
     window.localStorage.setItem("fable-theme", theme);
@@ -129,7 +158,7 @@ export function ChatWorkspace() {
     durableConversation.deleteDraft,
     durableConversation.saveDraft,
     durableConversation.state.draft?.content,
-    runtime.composerValue
+    runtime.composerValue,
   ]);
 
   useEffect(() => {
@@ -143,110 +172,133 @@ export function ChatWorkspace() {
   useEffect(() => {
     conversationScrollRef.current?.scrollTo({
       top: conversationScrollRef.current.scrollHeight,
-      behavior: "smooth"
+      behavior: "smooth",
     });
   }, [
     agent.state.transcript,
     durableConversation.state.conversation?.messages.length,
-    optimisticUserMessage
+    optimisticUserMessage,
   ]);
 
   const composerModels = useMemo(
-    () => composerModelsFor(runtime.connectedAgentBackend?.id, runtime.modelOptions),
-    [runtime.connectedAgentBackend?.id, runtime.modelOptions]
+    // The composer is the provider switcher. Passing no provider filter keeps
+    // every connected provider selectable instead of trapping the user on the
+    // provider that owns the currently persisted model.
+    () => composerModelsFor(undefined, runtime.modelOptions),
+    [runtime.modelOptions],
   );
   const selectedModelOptionId = useMemo(() => {
     if (
-      runtime.selectedModelId
-      && composerModels.some((candidate) => candidate.id === runtime.selectedModelId)
+      runtime.selectedModelId &&
+      composerModels.some(
+        (candidate) => candidate.id === runtime.selectedModelId,
+      )
     ) {
       return runtime.selectedModelId;
     }
     return composerModels[0]?.id ?? runtime.resolvedModelOptionId;
   }, [composerModels, runtime.resolvedModelOptionId, runtime.selectedModelId]);
   const selectedModelId = useMemo(
-    () => composerModels.find((candidate) => candidate.id === selectedModelOptionId)?.modelId
-      ?? runtime.resolvedSelectedModelId,
-    [composerModels, runtime.resolvedSelectedModelId, selectedModelOptionId]
+    () =>
+      composerModels.find((candidate) => candidate.id === selectedModelOptionId)
+        ?.modelId ?? runtime.resolvedSelectedModelId,
+    [composerModels, runtime.resolvedSelectedModelId, selectedModelOptionId],
   );
-  const selectedModelLabel = composerModels.find(
-    (candidate) => candidate.id === selectedModelOptionId
-  )?.label ?? "Choose model";
+  const selectedModelLabel =
+    composerModels.find((candidate) => candidate.id === selectedModelOptionId)
+      ?.label ?? "Choose model";
   const connectedConnectors = useMemo(
-    () => runtime.connectorManifests
-      .filter((connector) => connector.status === "connected" && connector.id !== "local-files")
-      .map((connector) => ({ id: connector.id, name: connector.name, status: connector.status })),
-    [runtime.connectorManifests]
+    () =>
+      runtime.connectorManifests
+        .filter(
+          (connector) =>
+            connector.status === "connected" && connector.id !== "local-files",
+        )
+        .map((connector) => ({
+          id: connector.id,
+          name: connector.name,
+          status: connector.status,
+        })),
+    [runtime.connectorManifests],
   );
 
-  const executePrompt = useCallback(async (prompt: string) => {
-    if (!activeAgent || !selectedThreadId || agent.state.running) return;
-    const connected = runtime.connectedAgentBackend;
-    if (!connected) {
-      setSettingsTab("providers");
-      setSettingsOpen(true);
-      setSubmissionError("Connect a model provider before sending a message.");
-      return;
-    }
-    const validation = validateModelSelection(
-      connected.id,
-      selectedModelId,
-      runtime.selectableModels,
-      2_048
-    );
-    if (!validation.ok) {
-      const message = validation.error ?? "The selected model is unavailable.";
-      agent.reportError(message);
-      setSubmissionError(message);
-      return;
-    }
-    setSubmissionError("");
-    setOptimisticUserMessage(prompt);
-    runtime.setComposerValue("");
-    await durableConversation.deleteDraft().catch(() => undefined);
-    resetCancellation();
-    try {
-      const instructions = agentExecutionInstructions(activeAgent);
-      const executionPrompt = instructions
-        ? `Teammate instructions:\n${instructions}\n\nUser request:\n${prompt}`
-        : prompt;
-      const preparedContext = await runtime.assembleKnowledgeContext(prompt, {
-        allowedConnectorIds: activeAgent.connectorIds,
-        allowedKnowledgeSourceIds: activeAgent.knowledgeSourceIds
-      });
-      await agent.run(
-        buildAgentRequest({
-          model: selectedModelId,
-          prompt: executionPrompt,
-          maxTokens: validation.maxTokens
-        }),
-        preparedContext,
-        runtime.permissionMode
+  const executePrompt = useCallback(
+    async (prompt: string) => {
+      if (!activeAgent || !selectedThreadId || agent.state.running) return;
+      const connected = runtime.connectedAgentBackend;
+      if (!connected) {
+        setSettingsTab("providers");
+        setSettingsOpen(true);
+        setSubmissionError(
+          "Connect a model provider before sending a message.",
+        );
+        return;
+      }
+      const validation = validateModelSelection(
+        connected.id,
+        selectedModelId,
+        runtime.selectableModels,
+        2_048,
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Fable could not complete that response.";
-      agent.reportError(message);
-      setSubmissionError(message);
-    } finally {
-      await durableConversation.refresh();
-      setOptimisticUserMessage("");
-    }
-  }, [
-    activeAgent,
-    agent.reportError,
-    agent.run,
-    agent.state.running,
-    durableConversation.deleteDraft,
-    durableConversation.refresh,
-    resetCancellation,
-    runtime.assembleKnowledgeContext,
-    runtime.connectedAgentBackend,
-    runtime.permissionMode,
-    runtime.selectableModels,
-    runtime.setComposerValue,
-    selectedModelId,
-    selectedThreadId
-  ]);
+      if (!validation.ok) {
+        const message =
+          validation.error ?? "The selected model is unavailable.";
+        agent.reportError(message);
+        setSubmissionError(message);
+        return;
+      }
+      setSubmissionError("");
+      setOptimisticUserMessage(prompt);
+      runtime.setComposerValue("");
+      await durableConversation.deleteDraft().catch(() => undefined);
+      resetCancellation();
+      try {
+        const instructions = agentExecutionInstructions(activeAgent);
+        const executionPrompt = instructions
+          ? `Teammate instructions:\n${instructions}\n\nUser request:\n${prompt}`
+          : prompt;
+        const preparedContext = await runtime.assembleKnowledgeContext(prompt, {
+          allowedConnectorIds: activeAgent.connectorIds,
+          allowedKnowledgeSourceIds: activeAgent.knowledgeSourceIds,
+        });
+        await agent.run(
+          buildAgentRequest({
+            model: selectedModelId,
+            prompt: executionPrompt,
+            maxTokens: validation.maxTokens,
+          }),
+          preparedContext,
+          runtime.permissionMode,
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Fable could not complete that response.";
+        agent.reportError(message);
+        setSubmissionError(message);
+      } finally {
+        await durableConversation.refresh();
+        setOptimisticUserMessage("");
+      }
+    },
+    [
+      activeAgent,
+      agent.reportError,
+      agent.run,
+      agent.state.running,
+      durableConversation.deleteDraft,
+      durableConversation.refresh,
+      resetCancellation,
+      runtime.assembleKnowledgeContext,
+      runtime.connectedAgentBackend,
+      runtime.permissionMode,
+      runtime.selectableModels,
+      runtime.setComposerValue,
+      selectedModelId,
+      selectedThreadId,
+    ],
+  );
 
   useEffect(() => {
     if (!queuedPrompt || queuedPrompt.threadId !== selectedThreadId) return;
@@ -255,12 +307,17 @@ export function ChatWorkspace() {
   }, [executePrompt, queuedPrompt, selectedThreadId]);
 
   if (!activeAgent) {
-    return <main className="og-frame"><p role="alert">Fable could not load a teammate.</p></main>;
+    return (
+      <main className="og-frame">
+        <p role="alert">Fable could not load a teammate.</p>
+      </main>
+    );
   }
 
-  const localWorkspaceReady = runtime.accountWorkspaceStatus.activeWorkspace.source === "local"
-    && runtime.accountWorkspaceStatus.accountBound
-    && runtime.accountWorkspaceStatus.state === "ready";
+  const localWorkspaceReady =
+    runtime.accountWorkspaceStatus.activeWorkspace.source === "local" &&
+    runtime.accountWorkspaceStatus.accountBound &&
+    runtime.accountWorkspaceStatus.state === "ready";
   if (!localWorkspaceReady || runtime.onboardingRequired) {
     return (
       <Suspense fallback={<main className="og-frame" aria-busy="true" />}>
@@ -270,14 +327,19 @@ export function ChatWorkspace() {
           status={runtime.backendStatus}
           accountWorkspaceStatus={runtime.accountWorkspaceStatus}
           accountWorkspacePending={runtime.accountWorkspacePending}
-          onConnect={(providerId, secret) => void runtime.connectBackend(providerId, secret)}
+          onConnect={(providerId, secret) =>
+            void runtime.connectBackend(providerId, secret)
+          }
           onConnectWithVerify={runtime.connectBackendWithVerify}
           onCheckConnection={runtime.checkBackendConnection}
           onStartBrowserLogin={runtime.startBackendBrowserLogin}
           initialTeammateName={activeAgent.name}
           initialTeammatePurpose={activeAgent.instructions}
           onConfigureTeammate={({ name, purpose }) => {
-            runtime.updateAgent(activeAgent.id, { name, instructions: purpose });
+            runtime.updateAgent(activeAgent.id, {
+              name,
+              instructions: purpose,
+            });
           }}
           onComplete={runtime.dismissOnboarding}
         />
@@ -293,9 +355,9 @@ export function ChatWorkspace() {
         authorityScope: {
           authority: "local",
           visibility: "member-private",
-          ownerMemberId: "current-member" as never
+          ownerMemberId: "current-member" as never,
         },
-        title: prompt.slice(0, 72)
+        title: prompt.slice(0, 72),
       });
       runtime.updateAgent(activeAgent.id, { threadId: thread.id });
       setSelectedThreadId(thread.id);
@@ -307,7 +369,9 @@ export function ChatWorkspace() {
 
   const selectAgent = (profile: FableAgentProfile) => {
     if (agent.state.running) {
-      runtime.setLastAction("Stop the current response before switching teammates.");
+      runtime.setLastAction(
+        "Stop the current response before switching teammates.",
+      );
       return;
     }
     runtime.selectAgent(profile.id);
@@ -334,27 +398,41 @@ export function ChatWorkspace() {
   };
 
   const threadById = new Map(
-    durableConversation.state.threads.map((thread) => [thread.id as string, thread])
+    durableConversation.state.threads.map((thread) => [
+      thread.id as string,
+      thread,
+    ]),
   );
-  const previews = Object.fromEntries(runtime.agents.map((profile) => {
-    const thread = profile.threadId ? threadById.get(profile.threadId) : undefined;
-    const status: AgentSidebarPreview["status"] = profile.id === activeAgent.id && agent.state.running
-      ? "running"
-      : profile.id === activeAgent.id && runtime.openApprovals.length
-        ? "attention"
-        : "idle";
-    return [profile.id, {
-      message: thread?.title ?? "Start a conversation",
-      time: compactTime(thread?.updatedAt),
-      status
-    } satisfies AgentSidebarPreview];
-  }));
-  const verifiedDisplay = runtime.identityStatus.authentication?.verifiedDisplayAttributes;
-  const profileName = verifiedDisplay?.displayName ?? verifiedDisplay?.email ?? "Local workspace";
+  const previews = Object.fromEntries(
+    runtime.agents.map((profile) => {
+      const thread = profile.threadId
+        ? threadById.get(profile.threadId)
+        : undefined;
+      const status: AgentSidebarPreview["status"] =
+        profile.id === activeAgent.id && agent.state.running
+          ? "running"
+          : profile.id === activeAgent.id && runtime.openApprovals.length
+            ? "attention"
+            : "idle";
+      return [
+        profile.id,
+        {
+          message: thread?.title ?? "Start a conversation",
+          time: compactTime(thread?.updatedAt),
+          status,
+        } satisfies AgentSidebarPreview,
+      ];
+    }),
+  );
+  const verifiedDisplay =
+    runtime.identityStatus.authentication?.verifiedDisplayAttributes;
+  const profileName =
+    verifiedDisplay?.displayName ?? verifiedDisplay?.email ?? "Local workspace";
   const conversation = durableConversation.state.conversation;
   const messages = conversation?.messages ?? [];
-  const screenPreviewUrl = localComputer.snapshot?.previewDataUrl
-    ?? hostedBrowser.snapshot?.previewDataUrl;
+  const screenPreviewUrl =
+    localComputer.snapshot?.previewDataUrl ??
+    hostedBrowser.snapshot?.previewDataUrl;
   const approvalPanel = runtime.openApprovals.length ? (
     <Suspense fallback={null}>
       <ApprovalPanel
@@ -394,28 +472,30 @@ export function ChatWorkspace() {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <section className="agent-workspace">
+      <section className="workspace agent-workspace">
         <AgentWorkspaceHeader
           agent={activeAgent}
           learnedCount={activeAgent.learnedTasks?.length ?? 0}
           learnedOpen={learningDialog !== null}
-          onOpenLearned={() => setLearningDialog({ mode: "manage", source: null })}
+          onOpenLearned={() =>
+            setLearningDialog({ mode: "manage", source: null })
+          }
+          newConversationDisabled={agent.state.running}
+          onNewConversation={startNewConversation}
           attentionCount={runtime.openApprovals.length}
           panelOpen={workPanelOpen}
           onTogglePanel={() => setWorkPanelOpen((open) => !open)}
         />
-        <button
-          type="button"
-          className="agent-workspace__new-conversation"
-          onClick={startNewConversation}
-          disabled={agent.state.running}
-        >
-          New conversation
-        </button>
 
         <div className="workspace-center workspace-center--composer workspace-center--conversation">
-          <div ref={conversationScrollRef} className="conversation-scroll" aria-live="polite">
-            {messages.length === 0 && !optimisticUserMessage && !agent.state.running ? (
+          <div
+            ref={conversationScrollRef}
+            className="conversation-scroll"
+            aria-live="polite"
+          >
+            {messages.length === 0 &&
+            !optimisticUserMessage &&
+            !agent.state.running ? (
               <AgentWelcome
                 agent={activeAgent}
                 onChoose={(prompt) => {
@@ -426,16 +506,28 @@ export function ChatWorkspace() {
             ) : null}
             {messages.map((entry, index) => {
               const revision = entry.currentRevision;
-              const content = revision.state === "redacted"
-                ? "This message was removed."
-                : revision.content;
+              const content =
+                revision.state === "redacted"
+                  ? "This message was removed."
+                  : revision.content;
               const role = entry.message.kind === "user" ? "user" : "assistant";
-              if (!["user", "assistant", "tool", "approval", "interruption", "error"].includes(entry.message.kind)) {
+              if (
+                ![
+                  "user",
+                  "assistant",
+                  "tool",
+                  "approval",
+                  "interruption",
+                  "error",
+                ].includes(entry.message.kind)
+              ) {
                 return null;
               }
-              const priorUser = [...messages.slice(0, index)].reverse().find(
-                (candidate) => candidate.message.kind === "user"
-              )?.currentRevision;
+              const priorUser = [...messages.slice(0, index)]
+                .reverse()
+                .find(
+                  (candidate) => candidate.message.kind === "user",
+                )?.currentRevision;
               return (
                 <article
                   key={entry.message.id}
@@ -449,15 +541,20 @@ export function ChatWorkspace() {
                         {profileName.trim().slice(0, 1).toUpperCase() || "F"}
                       </span>
                     )}
-                    <strong>{role === "assistant" ? activeAgent.name : profileName}</strong>
+                    <strong>
+                      {role === "assistant" ? activeAgent.name : profileName}
+                    </strong>
                   </div>
                   <p>{content}</p>
-                  {entry.message.kind === "assistant" && revision.state !== "redacted" ? (
+                  {entry.message.kind === "assistant" &&
+                  revision.state !== "redacted" ? (
                     <div className="conversation-message-actions">
                       <button
                         type="button"
                         className="conversation-message-action"
-                        onClick={() => void navigator.clipboard?.writeText(content)}
+                        onClick={() =>
+                          void navigator.clipboard?.writeText(content)
+                        }
                       >
                         Copy
                       </button>
@@ -465,13 +562,15 @@ export function ChatWorkspace() {
                         <button
                           type="button"
                           className="conversation-message-action"
-                          onClick={() => setLearningDialog({
-                            mode: "teach",
-                            source: {
-                              prompt: priorUser?.content ?? "",
-                              response: content
-                            }
-                          })}
+                          onClick={() =>
+                            setLearningDialog({
+                              mode: "teach",
+                              source: {
+                                prompt: priorUser?.content ?? "",
+                                response: content,
+                              },
+                            })
+                          }
                         >
                           Teach this
                         </button>
@@ -502,26 +601,39 @@ export function ChatWorkspace() {
               </article>
             ) : null}
             {submissionError || agent.state.lastError ? (
-              <p className="conversation-status conversation-status--error" role="alert">
+              <p
+                className="conversation-status conversation-status--error"
+                role="alert"
+              >
                 {submissionError || agent.state.lastError}
               </p>
             ) : null}
             {durableConversation.state.error ? (
-              <p className="conversation-status conversation-status--error" role="alert">
+              <p
+                className="conversation-status conversation-status--error"
+                role="alert"
+              >
                 {durableConversation.state.error}
               </p>
             ) : null}
             {agent.state.recoverableAttempts.slice(0, 2).map((attempt) => (
               <section className="agent-panel__recovery" key={attempt.id}>
-                <p>A previous response was interrupted. Retry it from its original prompt?</p>
+                <p>
+                  A previous response was interrupted. Retry it from its
+                  original prompt?
+                </p>
                 <button
                   type="button"
                   onClick={() => {
                     setOptimisticUserMessage(
-                      attempt.exchanges?.filter((exchange) => exchange.role === "user").at(-1)?.content ?? ""
+                      attempt.exchanges
+                        ?.filter((exchange) => exchange.role === "user")
+                        .at(-1)?.content ?? "",
                     );
                     resetCancellation();
-                    void agent.retry(attempt).finally(() => durableConversation.refresh());
+                    void agent
+                      .retry(attempt)
+                      .finally(() => durableConversation.refresh());
                   }}
                 >
                   Retry response
@@ -560,7 +672,9 @@ export function ChatWorkspace() {
                 setAddMenuOpen(false);
               }}
               onOpenTool={(tool) => {
-                setSettingsTab(tool === "Connectors" ? "connections" : "general");
+                setSettingsTab(
+                  tool === "Connectors" ? "connections" : "general",
+                );
                 setSettingsOpen(true);
                 setAddMenuOpen(false);
               }}
@@ -579,7 +693,8 @@ export function ChatWorkspace() {
               onSelectPermissionLabel={(label) => {
                 runtime.selectPermissionLabel(label);
                 runtime.updateAgent(activeAgent.id, {
-                  permissionLabel: label as FableAgentProfile["permissionLabel"]
+                  permissionLabel:
+                    label as FableAgentProfile["permissionLabel"],
                 });
               }}
               inThread={Boolean(selectedThreadId)}
@@ -607,9 +722,9 @@ export function ChatWorkspace() {
             canGoBack: localComputer.snapshot?.canGoBack ?? false,
             canGoForward: localComputer.snapshot?.canGoForward ?? false,
             filesAvailable: Boolean(
-              localComputer.node
-              && localComputer.node.lifecycle !== "unprovisioned"
-              && localComputer.node.capabilities.includes("persistent-files")
+              localComputer.node &&
+              localComputer.node.lifecycle !== "unprovisioned" &&
+              localComputer.node.capabilities.includes("persistent-files"),
             ),
             files: localComputer.files,
             filesLoading: localComputer.filesLoading,
@@ -617,7 +732,10 @@ export function ChatWorkspace() {
             filePreview: localComputer.filePreview,
             filePreviewLoading: localComputer.filePreviewLoading,
             filePreviewError: localComputer.filePreviewError,
-            controller: localComputer.snapshot?.controller ?? localComputer.node?.controller ?? "agent",
+            controller:
+              localComputer.snapshot?.controller ??
+              localComputer.node?.controller ??
+              "agent",
             loading: localComputer.loading,
             provisioning: localComputer.provisioning,
             busy: localComputer.browserBusy,
@@ -641,7 +759,7 @@ export function ChatWorkspace() {
             onClick: localComputer.click,
             onScroll: localComputer.scroll,
             onKey: localComputer.key,
-            onLaunchApplication: localComputer.launchApplication
+            onLaunchApplication: localComputer.launchApplication,
           }}
           hostedComputer={{
             available: hostedComputer.available,
@@ -660,7 +778,7 @@ export function ChatWorkspace() {
             liveViewUrl: hostedBrowser.snapshot?.liveViewUrl,
             browserDownload: hostedBrowser.snapshot?.lastDownload,
             onOpenBrowser: hostedBrowser.open,
-            onRefreshBrowser: hostedBrowser.refresh
+            onRefreshBrowser: hostedBrowser.refresh,
           }}
           screenPreviewUrl={screenPreviewUrl}
           onClose={() => setWorkPanelOpen(false)}
@@ -669,13 +787,19 @@ export function ChatWorkspace() {
 
       <AgentEditor
         open={agentEditorOpen}
-        agent={editingAgentId
-          ? runtime.agents.find((profile) => profile.id === editingAgentId) ?? null
-          : null}
+        agent={
+          editingAgentId
+            ? (runtime.agents.find(
+                (profile) => profile.id === editingAgentId,
+              ) ?? null)
+            : null
+        }
         models={runtime.modelOptions}
         connectors={runtime.connectorManifests}
         knowledgeSources={runtime.workspaceKnowledgeSources}
-        suggestedColor={nextAgentColor(runtime.agents.map((profile) => profile.iconColor))}
+        suggestedColor={nextAgentColor(
+          runtime.agents.map((profile) => profile.iconColor),
+        )}
         canDelete={runtime.agents.length > 1}
         onClose={() => {
           setAgentEditorOpen(false);
@@ -704,11 +828,15 @@ export function ChatWorkspace() {
         agent={activeAgent}
         source={learningDialog?.mode === "teach" ? learningDialog.source : null}
         onClose={() => setLearningDialog(null)}
-        onChange={(learnedTasks) => runtime.updateAgent(activeAgent.id, { learnedTasks })}
+        onChange={(learnedTasks) =>
+          runtime.updateAgent(activeAgent.id, { learnedTasks })
+        }
         onRun={(task) => {
           setLearningDialog(null);
           runtime.setComposerValue(task.instruction);
-          window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+          window.requestAnimationFrame(() =>
+            runtime.composerRef.current?.focus(),
+          );
         }}
       />
 
@@ -722,15 +850,20 @@ export function ChatWorkspace() {
             aria-labelledby="settings-modal-title"
             tabIndex={-1}
           >
-            <aside className="settings-modal__nav" aria-label="Settings sections">
+            <aside
+              className="settings-modal__nav"
+              aria-label="Settings sections"
+            >
               <nav className="settings-modal__tab-list" aria-label="Settings">
                 {settingsTabs.map((tab) => (
                   <button
                     key={tab.id}
                     type="button"
-                    className={settingsTab === tab.id
-                      ? "settings-modal__tab settings-modal__tab--active"
-                      : "settings-modal__tab"}
+                    className={
+                      settingsTab === tab.id
+                        ? "settings-modal__tab settings-modal__tab--active"
+                        : "settings-modal__tab"
+                    }
                     aria-current={settingsTab === tab.id ? "page" : undefined}
                     onClick={() => setSettingsTab(tab.id)}
                   >
@@ -755,7 +888,8 @@ export function ChatWorkspace() {
                   onThemeChange={setTheme}
                   activeTab={settingsTab}
                   workspaceName={
-                    runtime.accountWorkspaceStatus.activeWorkspace.name || "Fable workspace"
+                    runtime.accountWorkspaceStatus.activeWorkspace.name ||
+                    "Fable workspace"
                   }
                   dictationCapability={voice.capability}
                   titleId="settings-modal-title"
@@ -778,12 +912,15 @@ export function ChatWorkspace() {
       runtime.composerValue,
       transcript,
       composer?.selectionStart ?? runtime.composerValue.length,
-      composer?.selectionEnd ?? runtime.composerValue.length
+      composer?.selectionEnd ?? runtime.composerValue.length,
     );
     runtime.setComposerValue(insertion.value);
     window.requestAnimationFrame(() => {
       runtime.composerRef.current?.focus();
-      runtime.composerRef.current?.setSelectionRange(insertion.caret, insertion.caret);
+      runtime.composerRef.current?.setSelectionRange(
+        insertion.caret,
+        insertion.caret,
+      );
     });
   }
 }

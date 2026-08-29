@@ -157,6 +157,16 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // original v35 -> v36 parent rebuild. Remaining rows and every
             // child relationship are copied exactly; no authority is inferred.
             36 => apply_v36_to_v37(conn)?,
+            // 37 -> 38: retire the orchestration-era mission, routine,
+            // scheduler, workflow, artifact, and unused run-state stores.
+            37 => {
+                conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?
+            }
+            // 38 -> 39: provider credentials are owned by the stable local
+            // installation principal, so their metadata must not require an
+            // optional hosted-account mirror row. Existing connections and
+            // their observation children are copied exactly.
+            38 => apply_v38_to_v39(conn)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -194,6 +204,49 @@ fn require_foreign_keys_disabled(conn: &Connection, migration: &str) -> super::R
         )));
     }
     Ok(())
+}
+
+fn apply_v38_to_v39(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "backend_connection")?
+        || foreign_key_target(conn, "backend_connection", "internal_user_id")?.as_deref()
+            != Some("fable_internal_user_mirror")
+    {
+        return Ok(());
+    }
+    require_foreign_keys_disabled(conn, "v38 -> v39")?;
+
+    // Keep child tables pointed at the canonical name while the parent is
+    // rebuilt. With legacy rename semantics, their exact rows and foreign keys
+    // remain untouched and are validated by the migration runner before commit.
+    conn.pragma_update(None, "legacy_alter_table", "ON")?;
+    let rebuild = conn.execute_batch(
+        r#"
+        ALTER TABLE backend_connection RENAME TO backend_connection_v38_account_bound;
+        CREATE TABLE backend_connection (
+          internal_user_id TEXT NOT NULL,
+          provider_id TEXT NOT NULL,
+          connected_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (internal_user_id, provider_id)
+        );
+        INSERT INTO backend_connection (
+          internal_user_id,provider_id,connected_at,updated_at
+        )
+        SELECT internal_user_id,provider_id,connected_at,updated_at
+        FROM backend_connection_v38_account_bound;
+        DROP TABLE backend_connection_v38_account_bound;
+        CREATE INDEX idx_backend_connection_user
+          ON backend_connection(internal_user_id,updated_at);
+        "#,
+    );
+    let reset = conn
+        .pragma_update(None, "legacy_alter_table", "OFF")
+        .map_err(super::StoreError::from);
+    match (rebuild.map_err(super::StoreError::from), reset) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+    }
 }
 
 fn apply_v35_to_v36(conn: &Connection) -> super::Result<()> {
@@ -1798,7 +1851,9 @@ fn audit_event_has_column(conn: &Connection, name: &str) -> super::Result<bool> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::store::schema::{CURRENT_SCHEMA_VERSION, SCHEMA_V1, SCHEMA_V1_TO_V2};
+    use crate::store::schema::{
+        CURRENT_SCHEMA_VERSION, LEGACY_ORCHESTRATION_SCHEMA_V37, SCHEMA_V1, SCHEMA_V1_TO_V2,
+    };
     use rusqlite::Connection;
 
     fn conn() -> Connection {
@@ -1832,9 +1887,142 @@ mod tests {
     #[test]
     fn apply_rejects_unregistered_step() {
         let conn = conn();
-        // v37 is current; v37 -> v38 has no registered migration.
-        let err = apply(&conn, 37, 38).unwrap_err();
+        let err = apply(&conn, CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION + 1).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v37_to_v38_removes_retired_orchestration_storage() {
+        let conn = conn();
+        conn.execute_batch(LEGACY_ORCHESTRATION_SCHEMA_V37).unwrap();
+        for table in [
+            "scheduled_job",
+            "scheduler_queue_entry",
+            "workflow_definition",
+            "workflow_run",
+            "schedule",
+            "artifact_handoff",
+            "artifact_review",
+            "artifact_version",
+            "artifact_legacy_unowned",
+            "artifact",
+            "goal",
+            "run_state",
+        ] {
+            conn.execute_batch(&format!(
+                "CREATE TABLE IF NOT EXISTS \"{table}\" (id TEXT);"
+            ))
+            .unwrap();
+        }
+
+        apply(&conn, 37, 38).unwrap();
+
+        for table in [
+            "mission_record",
+            "mission_run_record",
+            "routine_record",
+            "routine_trigger",
+            "scheduled_job",
+            "scheduler_queue_entry",
+            "workflow_definition",
+            "workflow_run",
+            "artifact",
+            "artifact_version",
+            "goal",
+            "run_state",
+        ] {
+            assert!(
+                !table_exists(&conn, table).unwrap(),
+                "retired table {table} must be removed"
+            );
+        }
+        for table in [
+            "workspace",
+            "thread",
+            "message",
+            "run",
+            "tool_call",
+            "approval",
+        ] {
+            assert!(
+                table_exists(&conn, table).unwrap(),
+                "current table {table} must be preserved"
+            );
+        }
+    }
+
+    #[test]
+    fn v38_to_v39_decouples_provider_connections_from_hosted_account_mirrors() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE fable_internal_user_mirror (
+              internal_user_id TEXT PRIMARY KEY,
+              status TEXT NOT NULL,
+              revision INTEGER NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+            CREATE TABLE backend_connection (
+              internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+              provider_id TEXT NOT NULL,
+              connected_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(internal_user_id,provider_id)
+            );
+            CREATE INDEX idx_backend_connection_user
+              ON backend_connection(internal_user_id,updated_at);
+            CREATE TABLE provider_route_observation (
+              internal_user_id TEXT NOT NULL,
+              provider_id TEXT NOT NULL,
+              provider_route_id TEXT NOT NULL,
+              observation_id TEXT NOT NULL,
+              observed_at TEXT NOT NULL,
+              payload BLOB NOT NULL,
+              payload_nonce BLOB NOT NULL,
+              PRIMARY KEY(internal_user_id,observation_id),
+              FOREIGN KEY(internal_user_id,provider_id)
+                REFERENCES backend_connection(internal_user_id,provider_id) ON DELETE CASCADE
+            );
+            INSERT INTO fable_internal_user_mirror VALUES ('old-user','active',1,'t');
+            INSERT INTO backend_connection VALUES ('old-user','openai','t','t');
+            INSERT INTO provider_route_observation VALUES (
+              'old-user','openai','route-1','observation-1','t',x'01',x'02'
+            );
+            "#,
+        )
+        .unwrap();
+
+        apply(&conn, 38, 39).unwrap();
+
+        assert_eq!(
+            foreign_key_target(&conn, "backend_connection", "internal_user_id").unwrap(),
+            None
+        );
+        assert_eq!(
+            foreign_key_target(&conn, "provider_route_observation", "provider_id").unwrap(),
+            Some("backend_connection".into())
+        );
+        let preserved: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM provider_route_observation",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, 1);
+
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        conn.execute(
+            "INSERT INTO backend_connection VALUES ('local-install','custom','t','t')",
+            [],
+        )
+        .unwrap();
+        let violation: Option<String> = conn
+            .query_row("PRAGMA foreign_key_check", [], |row| row.get(0))
+            .optional()
+            .unwrap();
+        assert!(violation.is_none());
     }
 
     #[test]
@@ -2466,7 +2654,7 @@ mod tests {
             .unwrap();
         assert_eq!(count, 2);
         // Running the step anyway is idempotent.
-        apply(&conn, 1, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 1, 2).unwrap();
     }
 
     /// An existing v1 database (no connector-cache tables) is upgraded by the
@@ -2535,7 +2723,7 @@ mod tests {
     #[test]
     fn fresh_database_already_has_audit_history_columns() {
         let conn = conn();
-        apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 2, 3).unwrap();
         assert!(audit_event_has_column(&conn, "category").unwrap());
         assert!(audit_event_has_column(&conn, "correlation_id").unwrap());
         assert!(audit_event_has_column(&conn, "summary").unwrap());
@@ -2589,8 +2777,8 @@ mod tests {
     #[test]
     fn v2_to_v3_step_is_idempotent() {
         let conn = conn();
-        apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
-        apply(&conn, 2, CURRENT_SCHEMA_VERSION).unwrap();
+        apply(&conn, 2, 3).unwrap();
+        apply(&conn, 2, 3).unwrap();
         assert!(audit_event_has_column(&conn, "category").unwrap());
     }
 

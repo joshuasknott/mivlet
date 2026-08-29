@@ -12,15 +12,11 @@ type EcosystemItem = {
 
 const providers: EcosystemItem[] = [
   { name: 'ChatGPT', icon: '/provider-icons/openai.svg', color: '#111111' },
-  { name: 'Cursor', icon: '/provider-icons/cursor.svg', color: '#111111' },
+  { name: 'OpenAI API', icon: '/provider-icons/openai.svg', color: '#111111' },
   { name: 'Claude', icon: '/provider-icons/claude.svg', color: '#d97757' },
-  { name: 'Grok', icon: '/provider-icons/grok.svg', color: '#111111' },
-  { name: 'GitHub Copilot', icon: '/provider-icons/github-copilot.svg', color: '#8534f3' },
   { name: 'Gemini', icon: '/provider-icons/gemini.svg', image: true },
-  { name: 'DeepSeek', icon: '/provider-icons/deepseek.svg', color: '#4d6bfe' },
-  { name: 'MiniMax', icon: '/provider-icons/minimax.svg', color: '#ed2d75' },
-  { name: 'Kimi', icon: '/provider-icons/kimi.svg', color: '#111111' },
-  { name: 'OpenCode', icon: '/provider-icons/opencode.svg', image: true, className: 'brand-logo--opencode' },
+  { name: 'xAI', icon: '/provider-icons/grok.svg', color: '#111111' },
+  { name: 'Custom API', icon: '/provider-icons/custom.svg', image: true },
 ];
 
 const connectors: EcosystemItem[] = [
@@ -50,7 +46,7 @@ const connectors: EcosystemItem[] = [
         </span>
       </h1>
       <p class="hero-body">
-        Ask once. Fable finds the context, coordinates the work, pauses for your judgement, and keeps the result.
+        Talk with a named teammate. Fable keeps the context, asks before consequential actions, and remembers the result.
       </p>
       <div class="hero-actions" aria-label="Primary actions">
         <a class="btn btn-dark" href="#updates">Join the waitlist</a>
@@ -77,8 +73,8 @@ const connectors: EcosystemItem[] = [
     </div>
     <div class="story-copy story-copy--columns">
       <p>Start with an ordinary conversation. Fable understands the workspace, sources, people, tools, and authority that matter.</p>
-      <p>When the work is bigger, it becomes a mission with the right agents, a clear plan, and approval exactly where your judgement is needed.</p>
-      <p>The result stays useful: an artifact with its sources, decisions, history, and a path to run the work again.</p>
+      <p>When work needs tools, your teammate can use approved sources or its isolated computer, pausing exactly where your judgement is needed.</p>
+      <p>The conversation keeps its useful context: sources, decisions, action history, and the result you can keep refining.</p>
     </div>
   </section>
 
@@ -86,7 +82,7 @@ const connectors: EcosystemItem[] = [
     <div class="ecosystem-heading">
       <p class="section-label">Providers</p>
       <h2 id="providers-title">Use the models you choose.</h2>
-      <p>Bring the providers you already use. Fable routes each job through the best connection you permit.</p>
+      <p>Choose ChatGPT browser sign-in or connect a supported API directly.</p>
     </div>
     <div class="ecosystem-rail" data-auto-rail data-speed="7" tabindex="0" aria-label="AI provider ecosystem">
       <div class="ecosystem-set">
@@ -112,26 +108,26 @@ const connectors: EcosystemItem[] = [
 
   <section class="product-story product-story--knowledge" aria-labelledby="knowledge-title">
     <div class="product-story__copy">
-      <p class="section-label">Knowledge and artifacts</p>
+      <p class="section-label">Knowledge and memory</p>
       <h2 id="knowledge-title">Your work stays useful.</h2>
       <p>
-        Sources, memories, and finished artifacts live together. Fable can find the right context, show where it came from, and turn useful work into something durable.
+        Sources and memories stay visible and scoped. Fable can find the right context, show where it came from, and carry it into the conversation.
       </p>
       <ul class="story-points">
         <li>Search across files, notes, and connected services.</li>
         <li>Keep memories visible, scoped, and editable.</li>
-        <li>Return work as reusable artifacts, not lost chat.</li>
+        <li>Keep useful context attached to the conversation.</li>
       </ul>
     </div>
     <figure class="product-shot product-shot--story">
       <img
         src="/product-shots/fable-knowledge.png"
-        alt="Fable Knowledge showing sources, memories, artifacts, search, and import controls"
+        alt="Fable Knowledge showing sources, memories, search, and import controls"
         width="1440"
         height="1024"
         loading="lazy"
       />
-      <figcaption>Everything Fable knows and makes, in one calm library.</figcaption>
+      <figcaption>Everything Fable can use as context, in one calm library.</figcaption>
     </figure>
   </section>
 
@@ -194,7 +190,7 @@ const connectors: EcosystemItem[] = [
       <h2 id="closing-title">Ask naturally. Stay in control.</h2>
     </div>
     <p>
-      Projects, departments, routines, voice, browser use, computer use, and advanced controls are there when the work needs them—not before.
+      Provider choice, Connections, voice, browser use, computer control, and approvals are there when the work needs them—not before.
     </p>
   </section>
 

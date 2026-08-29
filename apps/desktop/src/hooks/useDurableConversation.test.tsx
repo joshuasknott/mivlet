@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   listThreads: vi.fn(),
   getThread: vi.fn(),
   listMessages: vi.fn(),
-  loadDraft: vi.fn()
+  loadDraft: vi.fn(),
 }));
 
 vi.mock("../runtime", () => ({
@@ -19,10 +19,16 @@ vi.mock("../runtime", () => ({
   reviseRuntimeConversationMessage: vi.fn(),
   loadRuntimeConversationDraft: mocks.loadDraft,
   saveRuntimeConversationDraft: vi.fn(async (draft) => draft),
-  deleteRuntimeConversationDraft: vi.fn(async () => {})
+  deleteRuntimeConversationDraft: vi.fn(async () => {}),
 }));
 
-const thread = (id: string) => ({ id, workspaceId: "workspace", title: id, lifecycle: "active", messageHead: { lastSequence: 0 } });
+const thread = (id: string) => ({
+  id,
+  workspaceId: "workspace",
+  title: id,
+  lifecycle: "active",
+  messageHead: { lastSequence: 0 },
+});
 
 describe("useDurableConversation", () => {
   beforeEach(() => {
@@ -33,19 +39,47 @@ describe("useDurableConversation", () => {
     mocks.loadDraft.mockResolvedValue(null);
   });
 
+  it("waits for the installation-local workspace boundary before hydrating", async () => {
+    const initialProps: { workspaceId?: string } = { workspaceId: undefined };
+    const { result, rerender } = renderHook(
+      ({ workspaceId }: { workspaceId?: string }) =>
+        useDurableConversation({ workspaceId }),
+      { initialProps },
+    );
+
+    await waitFor(() => expect(result.current.state.loading).toBe(false));
+    expect(result.current.state.error).toBeNull();
+    expect(mocks.listThreads).not.toHaveBeenCalled();
+    expect(mocks.loadDraft).not.toHaveBeenCalled();
+
+    rerender({ workspaceId: "default" });
+
+    await waitFor(() => expect(mocks.listThreads).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.state.loading).toBe(false));
+    expect(result.current.state.error).toBeNull();
+    expect(mocks.loadDraft).toHaveBeenCalledTimes(1);
+  });
+
   it("does not let a stale thread hydration overwrite the newly selected thread", async () => {
     let resolveOld!: (value: unknown) => void;
-    mocks.getThread.mockImplementation((id: string) => id === "old"
-      ? new Promise((resolve) => { resolveOld = resolve; })
-      : Promise.resolve(thread("new")));
+    mocks.getThread.mockImplementation((id: string) =>
+      id === "old"
+        ? new Promise((resolve) => {
+            resolveOld = resolve;
+          })
+        : Promise.resolve(thread("new")),
+    );
     mocks.listMessages.mockResolvedValue([]);
 
     const { result, rerender } = renderHook(
-      ({ threadId }) => useDurableConversation({ workspaceId: "workspace", threadId }),
-      { initialProps: { threadId: "old" } }
+      ({ threadId }) =>
+        useDurableConversation({ workspaceId: "workspace", threadId }),
+      { initialProps: { threadId: "old" } },
     );
     rerender({ threadId: "new" });
-    await waitFor(() => expect(result.current.state.conversation?.thread.id).toBe("new"));
+    await waitFor(() =>
+      expect(result.current.state.conversation?.thread.id).toBe("new"),
+    );
     resolveOld(thread("old"));
     await act(async () => {});
 
@@ -54,7 +88,7 @@ describe("useDurableConversation", () => {
 
   it("uses a stable draft key before a thread exists", async () => {
     const { result } = renderHook(() =>
-      useDurableConversation({ workspaceId: "workspace" })
+      useDurableConversation({ workspaceId: "workspace" }),
     );
     await act(async () => {});
     expect(result.current.draftKey).toBe("new-thread");

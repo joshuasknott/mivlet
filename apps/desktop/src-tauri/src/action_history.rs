@@ -2,7 +2,7 @@
 //! encrypted `audit_event` store.
 //!
 //! This module is the bridge between execution boundaries (tools, connectors,
-//! approvals, scheduler, model/web calls) and the durable, inspectable
+//! approvals, model calls, and web calls) and the durable, inspectable
 //! action-history store ([`crate::store::repos::action_history`]). It exists so
 //! every boundary records through one normalized path with consistent redaction
 //! and id synthesis.

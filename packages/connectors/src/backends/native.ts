@@ -1,8 +1,7 @@
 /**
  * Native model API adapter. Fable owns the full agent loop here — tool
  * dispatch, streaming, approval routing, memory, usage/cost, and cancellation —
- * unlike the runtime backends (Codex/Cursor/Copilot/Grok) that borrow sessions
- * and approvals from their providers.
+ * unlike Codex browser sign-in, which uses provider-owned app-server state.
  *
  * All native providers are API-key only, so the only two meaningful auth states
  * are `needs-auth` (empty capabilities — fail closed) and `connected` (the full
@@ -15,16 +14,20 @@
 
 import type { BackendProvider } from "@fable/protocol";
 import { resolveCapabilities } from "./capabilities";
-import { nativeFixtures, type NativeFixture, type NativeProviderId } from "./fixtures";
+import {
+  nativeProviderCatalog,
+  type NativeProviderCatalogEntry,
+  type NativeProviderId
+} from "./catalog";
 
 export const NATIVE_BACKEND_TYPE = "native-api" as const;
 
-function nativeFixture(providerId: NativeProviderId): NativeFixture {
-  const fixture = nativeFixtures.find((entry) => entry.providerId === providerId);
-  if (!fixture) {
+function nativeProvider(providerId: NativeProviderId): NativeProviderCatalogEntry {
+  const provider = nativeProviderCatalog.find((entry) => entry.providerId === providerId);
+  if (!provider) {
     throw new Error(`Unknown native provider: ${providerId}`);
   }
-  return fixture;
+  return provider;
 }
 
 /** Build a native API provider for a given auth state. */
@@ -32,17 +35,17 @@ export function resolveNativeProvider(
   providerId: NativeProviderId,
   authState: BackendProvider["authState"]
 ): BackendProvider {
-  const fixture = nativeFixture(providerId);
+  const provider = nativeProvider(providerId);
   const capabilities = resolveCapabilities(NATIVE_BACKEND_TYPE, authState, true);
 
   return {
     id: providerId,
     backendType: NATIVE_BACKEND_TYPE,
-    label: fixture.label,
-    description: fixture.description,
+    label: provider.label,
+    description: provider.description,
     authState,
     capabilities,
-    models: fixture.models.map((model) => ({
+    models: provider.models.map((model) => ({
       id: model.id,
       label: model.label,
       available: authState === "connected"

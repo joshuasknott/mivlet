@@ -117,30 +117,6 @@ pub(crate) fn normalize_memory_state(
     })
 }
 
-// Retained for legacy-file compatibility tests. Production reads through the
-// owner-qualified encrypted repository command boundary.
-#[cfg(test)]
-pub(crate) fn read_memory_state(path: &Path) -> Result<MemoryControlState, String> {
-    if let Some(state) = crate::store::read_document(path)? {
-        return normalize_memory_state(state);
-    }
-    if !path.exists() {
-        return Ok(default_memory_state());
-    }
-
-    let contents =
-        fs::read_to_string(path).map_err(|_| "Fable could not read memory state.".to_string())?;
-
-    if contents.trim().is_empty() {
-        return Ok(default_memory_state());
-    }
-
-    let parsed = serde_json::from_str::<MemoryControlState>(&contents)
-        .map_err(|_| "Fable could not parse memory state.".to_string())?;
-
-    normalize_memory_state(parsed)
-}
-
 pub(crate) fn write_memory_state(
     path: &Path,
     state: MemoryControlState,
@@ -155,11 +131,6 @@ pub(crate) fn write_memory_state(
     fs::write(path, encoded).map_err(|_| "Fable could not save memory state.".to_string())?;
 
     Ok(normalized)
-}
-
-#[cfg_attr(not(test), allow(dead_code))]
-pub(crate) fn encode_memory_export(state: MemoryControlState) -> Result<String, String> {
-    encode_memory_export_scoped(state, "default")
 }
 
 fn encode_memory_export_scoped(
@@ -528,7 +499,7 @@ pub fn save_memory_state(
                 .find(|candidate| candidate.id == record.id)
             {
                 if candidate.forgotten_at.is_none() {
-                    return Err("Forgotten memory cannot be restored by routine save.".to_string());
+                    return Err("Forgotten memory cannot be restored by a later save.".to_string());
                 }
                 *candidate = record;
             } else {

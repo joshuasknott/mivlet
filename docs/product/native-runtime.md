@@ -1,185 +1,83 @@
-# Native Agent Runtime
+# Native agent runtime
 
-Fable's native path supports OpenAI-compatible, Anthropic, and Gemini wire
-formats. Rust owns credential persistence, endpoint policy, HTTP/TLS egress,
-timeouts, retries, streaming, and cancellation. TypeScript owns the bounded
-multi-round agent loop and provider request/response shaping.
+Fable owns the conversation and tool loop. TypeScript assembles bounded model
+requests and interprets responses; Rust owns credentials, endpoint policy,
+network egress, streaming, timeout/retry behavior, cancellation, encrypted
+checkpoints, and final tool dispatch.
 
-## Setup and Credentials
+## Provider connections
 
-- ChatGPT subscription access uses Codex app-server's managed browser sign-in.
-  Fable asks the installed app-server to start `account/login/start` with the
-  `chatgpt` mode, validates the returned authorization host, opens it in the
-  system browser, and waits for the matching completion notification. The
-  authorization URL and tokens never enter React state, storage, logs, or the
-  model transcript. The official device-code mode is not presented as a manual
-  CLI workaround while the normal browser callback is available.
-  This follows the provider's documented [Codex app-server authentication
-  surface](https://developers.openai.com/codex/app-server#auth-endpoints).
-- Remote fixed profiles use a user-supplied API key. After submission, the key
-  is stored through the OS keyring boundary (with an in-memory test/headless
-  fallback), is never returned to the frontend, and is injected into request
-  headers only inside Rust.
-- Custom stores a versioned OpenAI-compatible base URL, explicit model ID, and
-  optional bearer key in the same secure credential record. HTTPS is required for remote hosts;
-  plain HTTP is accepted only for `localhost` or another loopback address.
-  User information, query strings, and fragments are rejected in the base URL.
-- Credential verification calls a bounded model-list endpoint where the
-  provider exposes one. Providers without a compatible list endpoint return an
-  explicit `unsupported` discovery state and continue with curated models; this
-  is not evidence that a key or account entitlement was validated.
+The native boundary implements OpenAI-compatible, Anthropic Messages, and
+Gemini wire formats. The provider catalogue maps supported services onto those
+formats and keeps model names, endpoints, headers, discovery, and connection
+methods in adapters.
 
-## Implemented Provider Catalog
+Connection methods are explicit:
 
-"Implemented" below means the endpoint profile, credential boundary, request
-shaping, streaming path, and tests exist in the repository. No live provider
-credentials, paid plans, regional availability, or billing behavior were
-externally validated in this checkout.
+- Codex app-server may start its official ChatGPT browser authorization and
+  keeps that session inside Codex. Fable does not collect browser cookies or
+  private session tokens and does not use a CLI login as the product flow.
+- Direct remote providers use a user-supplied API key held by the
+  operating-system credential store. The key is injected only by Rust.
+- A custom OpenAI-compatible connection needs an explicit base URL and model.
+  Remote URLs require HTTPS; plain HTTP is accepted only on loopback. User info,
+  query strings, and fragments are rejected.
 
-| Provider | Runtime profile | Connection | Model discovery |
-| --- | --- | --- | --- |
-| OpenAI | OpenAI-compatible | API key | Dynamic |
-| Anthropic | Anthropic Messages | API key | Dynamic |
-| Gemini | Google AI Gemini | API key | Dynamic |
-| OpenRouter | OpenAI-compatible | API key | Dynamic |
-| DeepSeek | OpenAI-compatible | API key | Dynamic |
-| Z.AI | OpenAI-compatible | API key | Curated fallback |
-| MiniMax | OpenAI-compatible | API key | Dynamic |
-| Alibaba Model Studio | OpenAI-compatible | API key | Curated fallback |
-| Fireworks AI | OpenAI-compatible | API key | Curated fallback |
-| Hugging Face | OpenAI-compatible router | API token | Dynamic |
-| Kimi Code membership | OpenAI-compatible coding endpoint | Membership API key | Fixed `kimi-for-coding` model |
-| Moonshot (Kimi API) | OpenAI-compatible | API key | Dynamic |
-| Mistral AI | OpenAI-compatible | API key | Dynamic |
-| Meta Llama API | OpenAI-compatible | API key; availability-limited | Dynamic when account access exists |
-| Perplexity | OpenAI-compatible | API key | Curated fallback |
-| Tencent TokenHub | OpenAI-compatible | API key | Curated fallback |
-| Xiaomi MiMo | OpenAI-compatible | API key | Curated fallback |
-| Groq | OpenAI-compatible | API key | Dynamic |
-| Together AI | OpenAI-compatible | API key | Dynamic |
-| Cerebras | OpenAI-compatible | API key | Dynamic |
-| Custom | OpenAI-compatible | Validated base URL, model ID, optional bearer key | Explicit configured model ID |
+A configured key is not proof of a working account. Verification and model
+discovery report missing, rejected, unsupported, offline, and transient failure
+states separately. Curated model names are fallbacks where a provider exposes
+no compatible model-list endpoint; they are not entitlement evidence.
 
-All three wire profiles implement text completion, streaming, approval-gated
-tool/function calls, bounded retries, and cancellation. The native payload path
-does not yet support image/file attachments. OpenAI-compatible providers can
-still differ in model naming and tool-call behavior, so repository conformance
-tests are not a substitute for live-provider validation.
+The reachable catalogue contains only Codex browser sign-in, OpenAI API,
+Anthropic API, Gemini API, xAI API, and a custom OpenAI-compatible endpoint.
+No consumer subscription is treated as a general API credential.
 
-## Settings provider UX states
+## Request boundary
 
-Settings and onboarding use one provider-first catalogue rather than separate
-subscription and API-key sections. The initial view shows a small featured set;
-Show all replaces it with an alphabetical, searchable catalogue. Selecting a
-  provider opens its implemented connection methods in one modal. Managed
-  browser OAuth appears first when the provider runtime exposes it; direct API
-  keys are the normal fallback where no supported application OAuth is
-  available. Installed ACP runtimes are labelled as advanced and do not show
-  copy-paste login commands. The model picker stays minimal: provider logo plus
-  model name.
+All three wire formats support text completion, streaming, bounded multi-round
+tool calls, retries before a stream begins, and cancellation. Image and file
+attachments are not yet supported by the native provider payload path.
 
-The view avoids treating key presence as live proof: direct API, local, and
-  custom methods read **Configured**, while managed browser or advanced
-  provider-owned runtime sessions can read **Connected** after their runtime
-  probe succeeds. Model discovery still tracks
-`loading`, `success`, `empty`, `offline`, `failed`, and `unsupported` internally;
-the merged picker uses live results or curated/explicit fallbacks. Settings can
-refresh models, but the provider tile does not yet expose that full lifecycle.
+Connect attempts time out after 20 seconds. A connected stream fails after 90
+seconds without a new chunk. Authentication and client-request failures do not
+retry; rate limits, connection failures, and server failures may retry up to two
+times with bounded `Retry-After` or exponential backoff. Once response bytes
+start, an interruption terminates the attempt rather than risking a repeated
+effect.
 
-For fixed remote API-key methods, connect outcomes distinguish a **missing** key
-("No API key stored... add a key", signalled by the boundary's missing-key
-message) from a **rejected** key ("key was rejected or has expired"). Transient
-outcomes never mention the key, and no secret or stack trace is surfaced.
+## Execution attempts and recovery
 
-## Runs and recovery
+One internal execution attempt records the provider, model, conversation,
+usage, pending approvals, and bounded exchange needed to recover safely. It is
+implementation state, not a user-managed product object.
 
-Each run checkpoints its provider, model, active thread, transcript, usage,
-pending approvals, and user/assistant/tool exchanges. On restart, in-flight
-runs become `interrupted`; the chat surface offers an explicit safe retry from
-the durable user prompt. Retry creates a new run with a `parentRunId`. It never
-replays a prior tool result or side effect.
+If the app exits mid-attempt, startup marks it interrupted. Retrying starts a
+new attempt from the durable user request. It never replays a previous tool
+result, approval permit, or external effect. Completed, cancelled, failed, and
+interrupted are mutually exclusive terminal outcomes.
 
-Canonical local Routines are natively stored and scheduled, including bounded
-missed-run recovery and renewable execution leases. New Routines bind to one
-named teammate. The headless runner resolves that teammate's current
-instructions and selected model and scopes approved file/browser tools to its
-private local computer. It fails closed if the teammate was deleted or no
-connected provider can run that model. Routines continue while Fable is open
-and the PC is awake, including while the window is minimized; they do not run
-after the desktop app is closed. Imported legacy schedules retain their earlier
-current-teammate behaviour until edited.
-
-Terminal states are exclusive: completed, cancelled, failed, or interrupted.
-Provider/parser errors cannot subsequently overwrite a run as completed.
-Provider token counts are retained as reported. Dollar cost is labelled
-estimated only where Fable has a maintained rate; otherwise the UI says cost is unknown.
+Ordinary conversation does not continue after Fable closes. A local Docker
+container or optional hosted computer being alive does not change that claim.
 
 ## Tool safety
 
-Tool calls are bounded by rounds, call count, argument size, output size, and
-strict JSON shape. Unknown tools, malformed identifiers, replayed call IDs, and
-oversized payloads fail before approval or execution.
+Tool calls are bounded by rounds, count, identifier, argument size, output size,
+and strict JSON shape. Unknown tools, duplicate call IDs, malformed arguments,
+and oversized payloads fail before execution.
 
-Approval IDs include the current run ID and provider. Rust then requires the
-exact persisted request fingerprint, tool policy, argument preview, workspace
-confinement, an unconsumed permit, and a fresh execution timestamp immediately
-before dispatch. Transport retries happen only before a successful response; an
-interrupted stream or completed tool side effect is not replayed automatically.
+Consequential calls bind an exact request fingerprint, service, action, risk,
+permission mode, bounded preview, workspace, teammate, computer generation, and
+fresh single-use permit. The final trusted boundary revalidates and consumes
+that authority immediately before the effect.
 
-## External requirements
+Local file and terminal tools target only the selected teammate's local
+computer scope. `run-shell` executes inside that Docker container. Hosted tools
+run only when the request explicitly selects hosted placement and the external
+hosted prerequisites are valid.
 
-Remote execution requires provider network access and the applicable
-user-supplied credential. Custom requires an endpoint that implements the expected OpenAI-compatible
-`/chat/completions` route; its explicit model ID removes any `/models` requirement. Tests use fixtures
-and mocks; they do not validate provider account entitlements or live billing.
+## Evidence boundary
 
-## Provider-specific boundaries
-
-- OpenAI-compatible fixed profiles use provider-specific fixed HTTPS endpoints
-  and bearer authentication. Anthropic uses `x-api-key` plus
-  `anthropic-version: 2023-06-01`. Gemini uses `x-goog-api-key` and a validated
-  model ID in the Google AI `streamGenerateContent` route.
-- Kimi Code membership API-key execution, Moonshot platform API-key execution,
-  and Kimi ACP execution are separate methods. Mistral API-key execution and Mistral Vibe ACP execution are
-  separate methods.
-- No consumer Anthropic or Gemini subscription session is imported. Native
-  access for those providers is API-key only.
-- Meta's hosted Llama API profile is present, but availability depends on Meta
-  granting the account access; Fable does not claim general availability.
-- Vertex AI, Amazon Bedrock, and Azure AI/Foundry IAM are not dedicated
-  integrations. Custom may work with an OpenAI-compatible endpoint that accepts
-  its optional bearer-auth contract, but Custom does not provide service-account
-  auth, SigV4/request signing, managed identity, or regional cloud routing.
-
-## Limitations & Constraints
-
-1. **No Multimodal payload / Attachments**: The native agent loop does not support uploading file or image attachments to LLM completions. The composer's file import feature works exclusively by parsing, chunking, and querying files locally via Fable's lexical retrieval engine.
-2. **Curated Model Fallbacks**: If model discovery fails due to an offline, unsupported, or server error state, Fable retains its curated fallback catalog rather than falling back to an empty selection. Compatible discovered generation models need not already exist in the curated catalogue.
-3. **Usage Costs**: Metrics use Fable's reviewed rate table only where one exists. Other providers show token counts with cost marked unknown instead of a fabricated zero.
-4. **Mission wire families**: Durable native mission completion supports every registered native-API provider while keeping its wire contract distinct. OpenAI-compatible routes, including a validated Custom endpoint, require the exact Chat Completions body and terminal sequence; Anthropic requires its exact Messages body and start/content/usage/stop sequence; Gemini requires its exact generate-content body, text-only candidate parts, finish reason, and final usage. Provider, model, route, journal head, output receipt, and provider-specific pricing evidence remain one binding. Local-model, ACP, and Codex app-server runtimes remain outside this path. Repository fixtures cover these contracts, but real-provider validation remains a manual gate.
-
-## Failure States & Error Handling
-
-### Connection & Read Timeouts
-- **Connect Timeout**: Fable terminates connection attempts to provider endpoints after **20 seconds** to prevent indefinite hanging.
-- **Read/Stream Timeout**: Once connected, Fable terminates the stream if it receives no new data chunks for **90 seconds**.
-- **Credential Verify Timeout**: Credential verify checks use a connect timeout of **15 seconds** and a total request timeout of **20 seconds**.
-
-### Retry Policy
-For streaming completions, Fable will attempt up to **3 attempts** (1 initial + 2 retries) under the following conditions:
-- **Retryable triggers**: Network/connection errors (`Err`), Rate-limiting HTTP status (429), or Server errors (5xx).
-- **Non-retryable triggers**: Client errors (e.g. 400 Bad Request, 401 Unauthorized, 403 Forbidden, 404 Not Found) fail immediately without retrying.
-- **Backoff Delay**: If a `Retry-After` header is present, Fable parses the duration in seconds and waits that long (capped at 30 seconds). Otherwise, it uses exponential backoff starting at `250 * 2^attempt` milliseconds (capped at 30 seconds).
-- **Stream Interruption**: To prevent side effects, retries only occur *before* a successful response stream starts. Once streaming chunks begin, any subsequent connection drop terminates the run as `failed` and does not auto-retry.
-
-### Cancellation
-Fable provides real cancellation of active requests. When the user cancels a run or composer generation, Rust looks up the `requestId` in the `CANCEL_MAP` and signals the Tokio watch channel, dropping the reqwest response future and immediately closing the connection.
-
-### Error Classification
-Error messages generated during execution or streaming are normalized in the agent runtime into the following categories:
-- **`authentication`**: Stored key is invalid, expired, or rejected (401/403). Not retryable.
-- **`rate-limited`**: The provider returned HTTP 429 or quota exceeded. Retryable.
-- **`cancelled`**: The run was explicitly terminated by the user. Not retryable.
-- **`provider-unavailable`**: Network timeouts, connection failures, or HTTP 5xx errors. Retryable.
-- **`invalid-request`**: Invalid model name, malformed payload, or size limit exceeded (e.g. body > 2MB, stream response > 16MB). Not retryable.
-- **`backend-failed`**: Fallback code for unclassified errors. Not retryable.
+Provider conformance tests use local fixtures. They prove request shaping,
+stream parsing, redaction, timeout, cancellation, and error classification—not
+live credentials, account entitlements, provider availability, pricing, or
+billing. Live-provider and hosted validation remain explicit external gates.

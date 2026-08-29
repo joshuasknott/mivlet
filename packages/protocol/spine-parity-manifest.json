@@ -1,5 +1,5 @@
 {
-  "contractVersion": "2.0.0",
+  "contractVersion": "3.0.0",
   "schemaVersion": 1,
   "limits": {
     "MESSAGE_CONTENT_MAX_CHARACTERS": 262144,
@@ -12,5 +12,5 @@
     { "name": "Connections", "source": "connections.ts" },
     { "name": "Conversations", "source": "conversations.ts" }
   ],
-  "expectedCanonicalSha256": "7efc4d77521cd846527d82b1602bb5e1cf684805def0e02bf3dd5529ac4c99db"
+  "expectedCanonicalSha256": "c01c0365b357f2309b3674dc3dcc1bcec441538c72d38469cd5c1d2a7ed243e3"
 }

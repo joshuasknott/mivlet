@@ -105,67 +105,16 @@ fn collect(
          WHERE workspace_id=?1 AND owner_subject=?2 AND disabled=0",
         params![workspace, owner_subject],
     )?;
-    let active_runs = count(
-        conn,
-        "SELECT COUNT(*) FROM mission_run_record
-         WHERE workspace_id=?1 AND owner_member_id=?2 AND terminal=0",
-        params![workspace, owner_member],
-    )?;
-    let failed_runs = count(
-        conn,
-        "SELECT COUNT(*) FROM mission_run_record
-         WHERE workspace_id=?1 AND owner_member_id=?2
-           AND status IN ('failed','blocked','cancelling')",
-        params![workspace, owner_member],
-    )?;
-    let active_routines = count(
-        conn,
-        "SELECT COUNT(*) FROM routine_record
-         WHERE workspace_id=?1 AND owner_subject=?2 AND status='active' AND deleted_at IS NULL",
-        params![workspace, owner_subject],
-    )?;
-    let routine_failures = count(
-        conn,
-        "SELECT COUNT(*) FROM routine_driver_occurrence
-         WHERE workspace_id=?1 AND owner_subject=?2
-           AND state IN ('failed','dead-letter')",
-        params![workspace, owner_subject],
-    )?;
-    let routine_quarantine = count(
-        conn,
-        "SELECT COUNT(*) FROM routine_migration_quarantine
-         WHERE workspace_id=?1 AND owner_subject=?2 AND resolution='unresolved'",
-        params![workspace, owner_subject],
-    )?;
-    let queued = count(
-        conn,
-        "SELECT COUNT(*) FROM scheduler_queue_entry
-         WHERE workspace_id=?1 AND state IN ('queued','leased','running')",
-        [workspace],
-    )?;
-    let queue_failures = count(
-        conn,
-        "SELECT COUNT(*) FROM scheduler_queue_entry
-         WHERE workspace_id=?1 AND state IN ('failed','dead-letter')",
-        [workspace],
-    )?;
     let migration_failures = count(
         conn,
         "SELECT COUNT(*) FROM migration_log WHERE status NOT IN ('completed','skipped')",
         [],
-    )? + count(
-        conn,
-        "SELECT COUNT(*) FROM routine_migration_batch
-         WHERE workspace_id=?1 AND owner_subject=?2
-           AND status NOT IN ('planned','applied','rolled-back')",
-        params![workspace, owner_subject],
     )?;
-    let migration_quarantine = routine_quarantine
-        + count(
-            conn,
-            "SELECT COUNT(*) FROM connection_legacy_unattributed WHERE workspace_id=?1",
-            [workspace],
-        )?;
+    let migration_quarantine = count(
+        conn,
+        "SELECT COUNT(*) FROM connection_legacy_unattributed WHERE workspace_id=?1",
+        [workspace],
+    )?;
     let sync_links = count(
         conn,
         "SELECT COUNT(*) FROM cloud_workspace_link WHERE local_workspace_id=?1",
@@ -264,55 +213,6 @@ fn collect(
                     "MCP configuration is present; live sessions are checked per use."
                 },
                 [("configured", mcp_servers), ("enabled", mcp_enabled)],
-            ),
-            category(
-                "runs",
-                "Missions and runs",
-                if failed_runs > 0 {
-                    "attention"
-                } else {
-                    "healthy"
-                },
-                if failed_runs > 0 {
-                    "One or more durable runs need review."
-                } else {
-                    "No durable run is currently recorded as failed or blocked."
-                },
-                [("active", active_runs), ("needsAttention", failed_runs)],
-            ),
-            category(
-                "routines",
-                "Routines",
-                if routine_failures > 0 || routine_quarantine > 0 {
-                    "attention"
-                } else {
-                    "healthy"
-                },
-                if routine_failures > 0 || routine_quarantine > 0 {
-                    "Routine failures or quarantined migration evidence need review."
-                } else {
-                    "No Routine failure or unresolved quarantine is recorded."
-                },
-                [
-                    ("active", active_routines),
-                    ("failed", routine_failures),
-                    ("quarantined", routine_quarantine),
-                ],
-            ),
-            category(
-                "queues",
-                "Queues",
-                if queue_failures > 0 {
-                    "attention"
-                } else {
-                    "healthy"
-                },
-                if queue_failures > 0 {
-                    "A local queue entry needs review."
-                } else {
-                    "No failed local queue entry is recorded."
-                },
-                [("active", queued), ("failed", queue_failures)],
             ),
             category(
                 "migrations",

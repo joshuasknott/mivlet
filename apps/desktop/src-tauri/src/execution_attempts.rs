@@ -819,7 +819,10 @@ mod tests {
                 selected_at: "2026-07-12T12:00:00Z".into(),
                 reason: "Selected OpenAI GPT-5 for model.generate; quality unobserved; cost unobserved; latency unobserved; healthy route.".into(),
                 fallback_from_provider_route_id: None,
-                boundary_policy_ref: Some("boundary:install-private:local-provider:openai:credential-egress".into()),
+                boundary_policy_ref: Some(
+                    "boundary:installation-private:user-owned-provider:openai:local-credential-egress"
+                        .into(),
+                ),
                 observation: None,
                 quality: None,
                 cost: None,

@@ -11,7 +11,6 @@
 )]
 
 mod account_workspace;
-mod acp_process;
 mod action_history;
 mod approvals;
 mod authorized_scope;
@@ -179,10 +178,6 @@ pub fn run() {
             local_computer::local_browser_key,
             local_computer::local_browser_history,
             local_computer::local_computer_launch_app,
-            acp_process::spawn_acp_process,
-            acp_process::write_acp_frame,
-            acp_process::close_acp_process,
-            acp_process::detect_acp_cli,
             mcp_process::spawn_mcp_process,
             mcp_process::write_mcp_frame,
             mcp_process::close_mcp_process,

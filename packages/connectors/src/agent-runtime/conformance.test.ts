@@ -6,8 +6,6 @@ import { createNativeApiBackend } from "./adapters/native-api";
 import { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 import { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
 import type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
-import { resolveAcpBackend } from "./adapters/acp";
-import { FakeAcpTransport, type ScriptedResponder } from "./adapters/acp/transport-fakes";
 
 /** Connected, streaming native-API provider. */
 function mockNativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
@@ -38,20 +36,6 @@ function mockCodexProvider(overrides: Partial<BackendProvider> = {}): BackendPro
   };
 }
 
-/** Connected, streaming ACP provider. */
-function mockAcpProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
-  return {
-    id: "cursor",
-    backendType: "acp",
-    label: "Cursor",
-    description: "Cursor ACP CLI",
-    authState: "connected",
-    capabilities: ["authentication", "threads", "streaming", "tool-requests", "approvals", "file-changes", "cancellation"],
-    models: [{ id: "cursor-default", label: "Cursor default", available: true }],
-    ...overrides
-  };
-}
-
 const baseRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "say hi" }],
@@ -76,25 +60,6 @@ function mockCodexDeps(handle: MockCodexAppServer | null): BackendDeps {
     createCodexAppServer: () => handle
   };
 }
-
-const okAcpResponder: ScriptedResponder = (req) => {
-  switch (req.method) {
-    case "initialize":
-      return {
-        result: {
-          protocolVersion: 1,
-          agentCapabilities: {},
-          authMethods: []
-        }
-      };
-    case "session/new":
-      return { result: { sessionId: "conformance-session" } };
-    case "session/prompt":
-      return { result: { stopReason: "end_turn" } };
-    default:
-      return { error: { code: -32601, message: "not found" } };
-  }
-};
 
 describe("AgentBackend Conformance Tests", () => {
   // ==========================================
@@ -163,30 +128,6 @@ describe("AgentBackend Conformance Tests", () => {
       });
     });
 
-    it("ensures ACP errors containing keys are redacted", async () => {
-      const transport = new FakeAcpTransport((req) =>
-        req.method === "session/prompt"
-          ? {
-              error: {
-                code: -32000,
-                message: "CLI token=sk-12345678901234567890abc123 expired"
-              }
-            }
-          : okAcpResponder(req)
-      );
-      const backend = resolveAcpBackend(mockAcpProvider(), {
-        createTransport: () => null,
-        createAcpTransport: () => transport
-      });
-      const stream = backend?.run(baseRequest, { execute: async () => "" });
-      const events = await collectEvents(stream);
-      expect(events).toContainEqual({
-        type: "error",
-        message: "CLI token=[REDACTED] expired",
-        code: "authentication",
-        retryable: false
-      });
-    });
   });
 
   // ==========================================
@@ -215,7 +156,7 @@ describe("AgentBackend Conformance Tests", () => {
   // Area 2b: Error Normalization
   // ==========================================
   describe("Error Normalization", () => {
-    it("normalizes blocked-auth errors across Native-API, Codex, and ACP", async () => {
+    it("normalizes blocked-auth errors across Native API and Codex", async () => {
       const nativeTransport = {
         async *stream(): AsyncIterable<string> {
           const error = new Error("Provider returned HTTP 401.");
@@ -233,20 +174,9 @@ describe("AgentBackend Conformance Tests", () => {
           events: [{ type: "error", message: "Codex sign-in required." }]
         }))
       );
-      const acpTransport = new FakeAcpTransport((req) =>
-        req.method === "initialize"
-          ? { error: { code: -32001, message: "Cursor login required." } }
-          : { result: {} }
-      );
-      const acp = resolveAcpBackend(mockAcpProvider(), {
-        createTransport: () => null,
-        createAcpTransport: () => acpTransport
-      });
-
       const eventSets = await Promise.all([
         collectEvents(native?.run(baseRequest, { execute: async () => "" })),
-        collectEvents(codex?.run(baseRequest, { execute: async () => "" })),
-        collectEvents(acp?.run(baseRequest, { execute: async () => "" }))
+        collectEvents(codex?.run(baseRequest, { execute: async () => "" }))
       ]);
 
       for (const events of eventSets) {
@@ -259,7 +189,7 @@ describe("AgentBackend Conformance Tests", () => {
       }
     });
 
-    it("normalizes retryable runtime errors across Native-API, Codex, and ACP", async () => {
+    it("normalizes retryable runtime errors across Native API and Codex", async () => {
       const nativeTransport = {
         async *stream(): AsyncIterable<string> {
           const error = new Error("Provider stream ended unexpectedly.");
@@ -277,20 +207,9 @@ describe("AgentBackend Conformance Tests", () => {
           events: [{ type: "error", message: "Codex connection unavailable." }]
         }))
       );
-      const acpTransport = new FakeAcpTransport((req) =>
-        req.method === "session/prompt"
-          ? { error: { code: -32000, message: "ACP provider overloaded." } }
-          : okAcpResponder(req)
-      );
-      const acp = resolveAcpBackend(mockAcpProvider(), {
-        createTransport: () => null,
-        createAcpTransport: () => acpTransport
-      });
-
       const eventSets = await Promise.all([
         collectEvents(native?.run(baseRequest, { execute: async () => "" })),
-        collectEvents(codex?.run(baseRequest, { execute: async () => "" })),
-        collectEvents(acp?.run(baseRequest, { execute: async () => "" }))
+        collectEvents(codex?.run(baseRequest, { execute: async () => "" }))
       ]);
 
       for (const events of eventSets) {

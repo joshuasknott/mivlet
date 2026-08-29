@@ -1,4 +1,4 @@
-//! Bounded encrypted policy-evaluation outcomes for account-owned provider routes.
+//! Bounded encrypted policy-evaluation outcomes for install-owned provider routes.
 //!
 //! Only a native evaluator may write these records. A cohort is scoped to one
 //! exact policy implementation revision; it is evidence, never general model
@@ -98,7 +98,8 @@ pub fn record(
     )?;
     if connected != 1 {
         return Err(StoreError::Invalid(
-            "Provider route policy evidence requires the account's connected provider.".into(),
+            "Provider route policy evidence requires this installation's connected provider."
+                .into(),
         ));
     }
     let payload = json!(ProviderRouteQualityPayload {

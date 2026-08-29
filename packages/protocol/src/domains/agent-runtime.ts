@@ -2,9 +2,13 @@ import type {
   ApprovalAuditEntry,
   ApprovalRequest,
   ApprovalRiskLevel,
-  PermissionMode
+  PermissionMode,
 } from "./approvals.js";
-import type { InternalUserId, MemberId, WorkspaceId } from "../spine/primitives.js";
+import type {
+  InternalUserId,
+  MemberId,
+  WorkspaceId,
+} from "../spine/primitives.js";
 import type { ProviderRouteSelection } from "./provider-routing.js";
 
 export type ExecutionAttemptStatus =
@@ -130,7 +134,8 @@ export interface ExecutionContextReceiptV2 {
   contributions: ExecutionContextContribution[];
 }
 
-export type ExecutionContextReceipt = ExecutionContextReceiptV1 | ExecutionContextReceiptV2;
+export type ExecutionContextReceipt =
+  ExecutionContextReceiptV1 | ExecutionContextReceiptV2;
 
 /** Transient prepared context handed to the execution boundary before egress. */
 export interface PreparedExecutionContext {
@@ -172,16 +177,10 @@ export interface ExecutionAttempt {
 }
 
 /**
- * The transport a backend speaks. Codex reaches its app-server, provider-owned
- * coding CLIs share a generic ACP (stdio/JSON-RPC) adapter, and native-API
- * providers speak their HTTP/SSE APIs directly with Fable owning the loop.
+ * The transport a backend speaks. Codex reaches its app-server, while native
+ * API providers speak their HTTP/SSE APIs directly with Fable owning the loop.
  */
-/** `copilot-sdk` is retained only for persisted-data compatibility; live Copilot uses ACP. */
-export type BackendType =
-  | "codex-app-server"
-  | "acp"
-  | "copilot-sdk"
-  | "native-api";
+export type BackendType = "codex-app-server" | "native-api";
 
 /**
  * Resolved auth state for a backend instance. Fail-closed states declare no
@@ -189,9 +188,8 @@ export type BackendType =
  *
  *   - `connected` — credential/runtime present and last-known good.
  *   - `needs-auth` — an API-key provider awaiting a key.
- *   - `sign-in-required` — a provider-owned login (Codex CLI, ACP, Copilot)
- *     is installed but not signed in; Fable never shows a token field here.
- *   - `install-required` — the provider's real runtime (CLI/SDK) is missing.
+ *   - `sign-in-required` — the official Codex browser sign-in is required.
+ *   - `install-required` — the official Codex runtime components are missing.
  *   - `connecting` — a verification round-trip is in flight (UI-only; never
  *     persisted by the boundary).
  *   - `expired` — a credential/login was valid before but is no longer.
@@ -201,8 +199,6 @@ export type BackendType =
  *     the credential may still be stored, so the user can retry.
  *   - `ready` — terminal success alias surfaced by onboarding before the
  *     boundary re-resolves to `connected`.
- *   - `entitlement-pending` — authenticated, awaiting an entitlement check
- *     (Grok). Declares only the `authentication` capability.
  *   - `unavailable` — unknown/initialization failure; fails closed.
  */
 export type BackendAuthState =
@@ -215,7 +211,6 @@ export type BackendAuthState =
   | "unsupported"
   | "failed"
   | "ready"
-  | "entitlement-pending"
   | "unavailable";
 
 /**
@@ -234,7 +229,6 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
   "unsupported",
   "failed",
   "ready",
-  "entitlement-pending",
   "unavailable",
 ] as const;
 
@@ -248,7 +242,7 @@ export const BACKEND_AUTH_FAIL_CLOSED_STATES = [
  * union makes a missing/duplicate state a *type* error; the runtime check makes
  * a parity drift between this list and `BACKEND_AUTH_FAIL_CLOSED_STATES` a load-
  * time failure instead of silent dedupe. Mirrors `BACKEND_AUTH_STATES` in the
- * Rust `models.rs` vocabulary (13 distinct values).
+ * Rust `models.rs` vocabulary (10 distinct values).
  */
 export const BACKEND_AUTH_STATE_VALUES = [
   "connected",
@@ -260,7 +254,6 @@ export const BACKEND_AUTH_STATE_VALUES = [
   "unsupported",
   "failed",
   "ready",
-  "entitlement-pending",
   "unavailable",
 ] as const;
 
@@ -275,23 +268,31 @@ const _BACKEND_AUTH_STATE_EXHAUSTIVE: Record<BackendAuthState, true> = {
   unsupported: true,
   failed: true,
   ready: true,
-  "entitlement-pending": true,
-  unavailable: true
+  unavailable: true,
 };
 
 // Runtime parity: fail-closed ∪ {connected} must equal the vocabulary exactly.
 const _BACKEND_AUTH_STATE_PARITY_CHECK = (() => {
   const expected = new Set<string>(BACKEND_AUTH_STATE_VALUES);
-  const actual = new Set<string>([...BACKEND_AUTH_FAIL_CLOSED_STATES, "connected"]);
+  const actual = new Set<string>([
+    ...BACKEND_AUTH_FAIL_CLOSED_STATES,
+    "connected",
+  ]);
   if (expected.size !== BACKEND_AUTH_STATE_VALUES.length) {
-    throw new Error("BACKEND_AUTH_STATE_VALUES contains a duplicate auth state.");
+    throw new Error(
+      "BACKEND_AUTH_STATE_VALUES contains a duplicate auth state.",
+    );
   }
   if (expected.size !== actual.size) {
-    throw new Error("Backend auth-state vocabulary has drifted from the fail-closed set.");
+    throw new Error(
+      "Backend auth-state vocabulary has drifted from the fail-closed set.",
+    );
   }
   for (const state of actual) {
     if (!expected.has(state)) {
-      throw new Error(`Backend auth-state "${state}" is not in the vocabulary.`);
+      throw new Error(
+        `Backend auth-state "${state}" is not in the vocabulary.`,
+      );
     }
   }
   return true as const;
@@ -385,15 +386,13 @@ export interface BackendCredentialRequest {
 /**
  * Outcome of verifying a stored backend credential against the provider. Rust
  * hit-tests the stored key inside the credential boundary (no key crosses to
- * JS) and returns one of these outcomes. `auth-failed` clears the bad key;
- * the transient outcomes keep the stored key so the user can retry.
+ * JS) and returns one of these outcomes. Custom OpenAI-compatible endpoints
+ * can be `configured` when their validated settings are saved but the endpoint
+ * has not yet been exercised. `auth-failed` clears the bad key; the transient
+ * outcomes keep the stored key so the user can retry.
  */
 export type BackendVerifyOutcome =
-  | "ready"
-  | "auth-failed"
-  | "offline"
-  | "unsupported"
-  | "failed";
+  "ready" | "configured" | "auth-failed" | "offline" | "unsupported" | "failed";
 
 export interface BackendVerifyResult {
   providerId: string;
@@ -522,7 +521,7 @@ export type BackendAgentEvent =
       message: string;
       /**
        * Machine-readable error code for routing (e.g. "authentication" routes a
-       * scheduled run to blocked-auth). Optional: backends that can't classify
+       * background attempt to blocked-auth). Optional: backends that can't classify
        * leave it undefined and callers treat it as a generic failure.
        */
       code?: string;
@@ -535,12 +534,10 @@ export type BackendAgentEvent =
 // Provider-neutral AgentBackend runtime contract.
 //
 // BackendAgentEvent (above) is the universal streaming surface every backend
-// family speaks. The AgentBackend abstraction lets native-API, Codex app-server,
-// ACP, Copilot SDK, and future local/subscription runtimes each implement one
-// contract: run a prompt turn (streaming events), request tools/approvals,
-// cancel, and expose models/capabilities. Native-API is the first concrete
-// adapter — not the foundation. Backends without a live adapter fail closed;
-// GitHub Copilot is live through the generic ACP family.
+// family speaks. The AgentBackend abstraction lets native API and Codex
+// app-server implement one contract: run a prompt turn (streaming events),
+// request tools/approvals, cancel, and expose models/capabilities. Backends
+// without a live adapter fail closed.
 //
 // HARD SECRET INVARIANT: none of these types carry a key, token, or credential.
 // Auth lives behind the Rust boundary or a provider-owned auth cache. An

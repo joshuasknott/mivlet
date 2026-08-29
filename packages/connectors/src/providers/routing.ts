@@ -261,4 +261,3 @@ function riskRank(value: ProviderRouteCandidate["risk"]): number {
 }
 
 function round(value: number): number { return Math.round(value * 1_000_000) / 1_000_000; }
-

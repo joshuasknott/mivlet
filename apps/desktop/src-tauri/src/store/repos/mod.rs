@@ -33,7 +33,6 @@ pub mod message;
 pub mod preferences;
 pub mod provider_route_observation;
 pub mod provider_route_quality_observation;
-pub mod run_state;
 pub mod scope;
 pub mod thread;
 pub mod workspace;

@@ -2,10 +2,7 @@ import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
 import { Moon } from "@phosphor-icons/react/dist/csr/Moon";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
-import type {
-  CustomApprovalSettings,
-  VoiceCapability,
-} from "@fable/protocol";
+import type { CustomApprovalSettings, VoiceCapability } from "@fable/protocol";
 import {
   CUSTOM_APPROVAL_SECTION,
   CUSTOM_APPROVAL_TOGGLE_ORDER,
@@ -118,7 +115,6 @@ export function ApprovalsSettingsView({
           {CUSTOM_APPROVAL_SECTION.reassurance}
         </p>
       </section>
-
     </div>
   );
 }

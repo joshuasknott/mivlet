@@ -15,7 +15,7 @@ pub struct BackendConnectionRow {
     pub updated_at: String,
 }
 
-/// Record an account-owned provider connection (idempotent upsert).
+/// Record a local-install-owned provider connection (idempotent upsert).
 pub fn upsert(tx: &Connection, internal_user_id: &str, provider_id: &str, now: &str) -> Result<()> {
     if !SUPPORTED_BACKEND_PROVIDER_IDS.contains(&provider_id) {
         return Err(StoreError::Invalid(format!(
@@ -96,17 +96,11 @@ mod tests {
     use crate::store::Store;
 
     #[test]
-    fn provider_connections_are_isolated_by_internal_user() {
+    fn provider_connections_are_isolated_by_local_install_principal() {
         let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
         let store = Store::open_in_memory(vault).unwrap();
         store
             .transaction(|tx| {
-                for user in ["user-a", "user-b"] {
-                    tx.execute(
-                        "INSERT INTO fable_internal_user_mirror(internal_user_id,status,revision,updated_at) VALUES (?1,'active',0,'t')",
-                        [user],
-                    )?;
-                }
                 upsert(tx, "user-a", "openai", "t")?;
                 upsert(tx, "user-b", "anthropic", "t")?;
                 Ok(())

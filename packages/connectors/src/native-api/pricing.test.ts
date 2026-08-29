@@ -16,18 +16,8 @@ describe("priceFor", () => {
     expect(hasKnownPrice("unknown")).toBe(false);
   });
 
-  it("does not invent one provider-wide price for model-dependent providers", () => {
-    for (const providerId of [
-      "deepseek", "zai", "minimax", "alibaba", "fireworks", "huggingface",
-      "moonshot", "kimi-code", "mistral", "meta", "perplexity", "tencent",
-      "xiaomi", "groq", "together", "cerebras", "custom"
-    ]) {
-      expect(priceFor(providerId, 1_000_000, 1_000_000), providerId).toBe(0);
-    }
-  });
-
   it("keeps every provider unknown without an exact model observation", () => {
-    for (const providerId of ["openai", "anthropic", "gemini", "xai", "openrouter"]) {
+    for (const providerId of ["openai", "anthropic", "gemini", "xai", "custom"]) {
       expect(priceFor(providerId, 1_000_000, 1_000_000)).toBe(0);
       expect(hasKnownPrice(providerId)).toBe(false);
     }

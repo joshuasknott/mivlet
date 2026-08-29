@@ -1025,12 +1025,11 @@ fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
         .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&scope.directory)
         .map_err(|_| "The teammate computer directory failed its security check.".to_string())?;
-    for directory in [scope.directory.join("workspace")] {
-        std::fs::create_dir_all(&directory)
-            .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
-        crate::paths::strict_canonicalize(&directory)
-            .map_err(|_| "A teammate computer directory failed its security check.".to_string())?;
-    }
+    let workspace = scope.directory.join("workspace");
+    std::fs::create_dir_all(&workspace)
+        .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
+    crate::paths::strict_canonicalize(&workspace)
+        .map_err(|_| "A teammate computer directory failed its security check.".to_string())?;
     Ok(())
 }
 

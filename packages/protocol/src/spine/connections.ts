@@ -98,10 +98,7 @@ export type ExecutionPlacementKind = (typeof EXECUTION_PLACEMENT_KINDS)[number];
 
 export const PROVIDER_ROUTE_KINDS = [
   "api-model",
-  "provider-app-server",
-  "acp-runtime",
-  "model-router",
-  "custom-agent-runtime"
+  "provider-app-server"
 ] as const;
 export type ProviderRouteKind = (typeof PROVIDER_ROUTE_KINDS)[number];
 
@@ -260,7 +257,7 @@ export interface NativeConnectorConnectionDetails {
 export interface ProviderRuntimeConnectionDetails {
   kind: "provider-runtime";
   providerFamily: string;
-  runtimeProtocol: "provider-api" | "app-server" | "acp" | "other";
+  runtimeProtocol: "provider-api" | "app-server";
 }
 
 export interface McpToolEnablement {

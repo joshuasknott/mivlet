@@ -2,15 +2,17 @@ import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { Browser } from "@phosphor-icons/react/dist/csr/Browser";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
-import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { Key } from "@phosphor-icons/react/dist/csr/Key";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
-import { TerminalWindow } from "@phosphor-icons/react/dist/csr/TerminalWindow";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BackendAuthState, BackendProvider, BackendVerifyResult } from "@fable/protocol";
+import type {
+  BackendAuthState,
+  BackendProvider,
+  BackendVerifyResult,
+} from "@fable/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
 import { enabledFableProviders } from "../../lib/provider-availability";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
@@ -18,28 +20,20 @@ import { ProviderIcon } from "../ProviderIcon";
 
 export const FEATURED_PROVIDER_FAMILY_IDS = [
   "openai",
-  "anthropic",
   "gemini",
-  "copilot",
-  "deepseek",
-  "openrouter",
-  "zai",
-  "minimax"
+  "xai",
+  "anthropic",
+  "custom",
 ] as const;
 
 export type ProviderConnectionMethodKind =
-  | "api-key"
-  | "oauth-browser"
-  | "oauth-device"
-  | "provider-login"
-  | "custom";
+  "api-key" | "oauth-browser" | "custom";
 
 export interface ProviderConnectionMethod {
   id: string;
   kind: ProviderConnectionMethodKind;
   label: string;
   description: string;
-  command?: string;
   provider: BackendProvider;
 }
 
@@ -62,76 +56,34 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
   openai: {
     label: "OpenAI / ChatGPT",
     iconProvider: "openai",
-    aliases: ["OpenAI", "ChatGPT", "Codex", "GPT"]
+    aliases: ["OpenAI", "ChatGPT", "Codex", "GPT"],
   },
   anthropic: {
     label: "Anthropic",
     iconProvider: "anthropic",
-    aliases: ["Anthropic", "Claude"]
+    aliases: ["Anthropic", "Claude"],
   },
   gemini: {
     label: "Google Gemini",
     iconProvider: "gemini",
-    aliases: ["Google", "Gemini", "Google AI"]
-  },
-  copilot: {
-    label: "GitHub Copilot",
-    iconProvider: "copilot",
-    aliases: ["GitHub", "Copilot", "GitHub Copilot"]
+    aliases: ["Google", "Gemini", "Google AI"],
   },
   xai: {
     label: "xAI",
     iconProvider: "xai",
-    aliases: ["xAI", "Grok", "Grok Build"]
-  },
-  openrouter: {
-    label: "OpenRouter",
-    iconProvider: "openrouter",
-    aliases: ["OpenRouter"]
-  },
-  zai: {
-    label: "Z.AI",
-    iconProvider: "zai",
-    aliases: ["Z.AI", "Z AI", "Zhipu", "GLM"]
+    aliases: ["xAI", "Grok", "Grok Build"],
   },
   custom: {
     label: "Custom provider",
     iconProvider: "custom",
-    aliases: ["Custom", "Other", "OpenAI compatible", "Base URL"]
+    aliases: ["Custom", "Other", "OpenAI compatible", "Base URL"],
   },
-  deepseek: {
-    label: "DeepSeek",
-    iconProvider: "deepseek",
-    aliases: ["DeepSeek", "Deep Seek"]
-  },
-  minimax: {
-    label: "MiniMax",
-    iconProvider: "minimax",
-    aliases: ["MiniMax", "MiniMax Coding Plan"]
-  },
-  alibaba: {
-    label: "Alibaba Cloud / Qwen",
-    iconProvider: "alibaba",
-    aliases: ["Alibaba", "Alibaba Cloud", "Qwen", "DashScope", "Coding Plan"]
-  },
-  kimi: {
-    label: "Kimi / Moonshot",
-    iconProvider: "kimi",
-    aliases: ["Kimi", "Moonshot", "Moonshot AI"]
-  },
-  mistral: {
-    label: "Mistral AI",
-    iconProvider: "mistral",
-    aliases: ["Mistral", "Mistral Vibe", "Vibe"]
-  }
 };
 
 const METHOD_KIND_PRIORITY: Record<ProviderConnectionMethodKind, number> = {
   "oauth-browser": 0,
-  "oauth-device": 1,
-  "api-key": 2,
-  "provider-login": 3,
-  custom: 4
+  "api-key": 1,
+  custom: 2,
 };
 
 function compactProviderId(value: string): string {
@@ -143,22 +95,6 @@ export function providerFamilyIdFor(providerId: string): string {
   if (["openai", "chatgpt", "codex"].includes(compact)) return "openai";
   if (["xai", "grok"].includes(compact)) return "xai";
   if (["gemini", "google", "googleai"].includes(compact)) return "gemini";
-  if (["copilot", "githubcopilot"].includes(compact)) return "copilot";
-  if (
-    compact.startsWith("zai") ||
-    compact.startsWith("zhipu") ||
-    compact.startsWith("glm")
-  ) return "zai";
-  if (compact.startsWith("deepseek")) return "deepseek";
-  if (compact.startsWith("minimax")) return "minimax";
-  if (
-    compact.startsWith("alibaba") ||
-    compact.startsWith("qwen") ||
-    compact.startsWith("dashscope")
-  ) return "alibaba";
-  if (compact.startsWith("kimi") || compact.startsWith("moonshot")) return "kimi";
-  if (compact.startsWith("mistral")) return "mistral";
-  if (compact === "openrouter") return "openrouter";
   if (compact === "anthropic") return "anthropic";
   if (
     compact.startsWith("custom") ||
@@ -170,7 +106,9 @@ export function providerFamilyIdFor(providerId: string): string {
   return providerId.toLowerCase();
 }
 
-function providerOwnedMethods(provider: BackendProvider): ProviderConnectionMethod[] {
+function providerOwnedMethods(
+  provider: BackendProvider,
+): ProviderConnectionMethod[] {
   const compact = compactProviderId(provider.id);
   if (compact === "codex") {
     return [
@@ -178,30 +116,18 @@ function providerOwnedMethods(provider: BackendProvider): ProviderConnectionMeth
         id: `${provider.id}:browser`,
         kind: "oauth-browser",
         label: "ChatGPT subscription",
-        description: "Sign in through the official ChatGPT browser flow managed by Codex.",
-        provider
-      }
+        description:
+          "Sign in through the official ChatGPT browser flow managed by Codex.",
+        provider,
+      },
     ];
   }
 
-  const label = compact === "copilot"
-    ? "GitHub account"
-    : compact === "cursor"
-      ? "Cursor subscription"
-      : `${provider.label} account`;
-  return [
-    {
-      id: `${provider.id}:account`,
-      kind: "provider-login",
-      label,
-      description: "Advanced: use an already installed and signed-in provider runtime. Fable reads only its connection state.",
-      provider
-    }
-  ];
+  return [];
 }
 
 export function connectionMethodsForProvider(
-  provider: BackendProvider
+  provider: BackendProvider,
 ): ProviderConnectionMethod[] {
   const familyId = providerFamilyIdFor(provider.id);
   if (familyId === "custom") {
@@ -211,8 +137,8 @@ export function connectionMethodsForProvider(
         kind: "custom",
         label: "OpenAI-compatible endpoint",
         description: "Use a custom base URL, model ID, and optional API key.",
-        provider
-      }
+        provider,
+      },
     ];
   }
 
@@ -226,12 +152,14 @@ export function connectionMethodsForProvider(
       kind: "api-key",
       label: `${provider.label} API key`,
       description: "Use a key stored by Fable's local credential boundary.",
-      provider
-    }
+      provider,
+    },
   ];
 }
 
-export function buildProviderFamilies(providers: BackendProvider[]): ProviderFamily[] {
+export function buildProviderFamilies(
+  providers: BackendProvider[],
+): ProviderFamily[] {
   const grouped = new Map<string, BackendProvider[]>();
   for (const provider of enabledFableProviders(providers)) {
     const familyId = providerFamilyIdFor(provider.id);
@@ -244,7 +172,8 @@ export function buildProviderFamilies(providers: BackendProvider[]): ProviderFam
     const methods = familyProviders
       .flatMap(connectionMethodsForProvider)
       .sort((a, b) => {
-        const kindDifference = METHOD_KIND_PRIORITY[a.kind] - METHOD_KIND_PRIORITY[b.kind];
+        const kindDifference =
+          METHOD_KIND_PRIORITY[a.kind] - METHOD_KIND_PRIORITY[b.kind];
         return kindDifference || a.label.localeCompare(b.label);
       });
     return {
@@ -253,7 +182,7 @@ export function buildProviderFamilies(providers: BackendProvider[]): ProviderFam
       iconProvider: metadata?.iconProvider ?? first.id,
       aliases: metadata?.aliases ?? [first.label, first.id],
       providers: familyProviders,
-      methods
+      methods,
     };
   }).sort((a, b) => a.label.localeCompare(b.label));
 }
@@ -261,7 +190,7 @@ export function buildProviderFamilies(providers: BackendProvider[]): ProviderFam
 export function encodeCustomProviderSecret(
   baseUrl: string,
   apiKey: string,
-  modelId: string
+  modelId: string,
 ): string {
   const parsed = new URL(baseUrl);
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
@@ -277,11 +206,14 @@ export function encodeCustomProviderSecret(
     kind: "openai-compatible",
     baseUrl: normalizedBaseUrl,
     modelId: normalizedModelId,
-    ...(apiKey ? { apiKey } : {})
+    ...(apiKey ? { apiKey } : {}),
   });
 }
 
-function isProviderConnected(provider: BackendProvider, connectedBackendIds: string[]): boolean {
+function isProviderConnected(
+  provider: BackendProvider,
+  connectedBackendIds: string[],
+): boolean {
   return (
     connectedBackendIds.includes(provider.id) ||
     provider.authState === "connected" ||
@@ -291,12 +223,14 @@ function isProviderConnected(provider: BackendProvider, connectedBackendIds: str
 
 function familyState(
   family: ProviderFamily,
-  connectedBackendIds: string[]
+  connectedBackendIds: string[],
 ): { label: string; tone: string } {
   const connectedProviders = family.providers.filter((provider) =>
-    isProviderConnected(provider, connectedBackendIds)
+    isProviderConnected(provider, connectedBackendIds),
   );
-  if (connectedProviders.some((provider) => provider.backendType !== "native-api")) {
+  if (
+    connectedProviders.some((provider) => provider.backendType !== "native-api")
+  ) {
     return { label: "Connected", tone: "ready" };
   }
   if (connectedProviders.length > 0) {
@@ -311,14 +245,14 @@ function familyState(
     "install-required",
     "expired",
     "failed",
-    "entitlement-pending",
     "needs-auth",
     "unsupported",
-    "unavailable"
+    "unavailable",
   ];
-  const state = statePriority.find((candidate) =>
-    family.providers.some((provider) => provider.authState === candidate)
-  ) ?? family.providers[0].authState;
+  const state =
+    statePriority.find((candidate) =>
+      family.providers.some((provider) => provider.authState === candidate),
+    ) ?? family.providers[0].authState;
   return stateViewFor(state);
 }
 
@@ -332,9 +266,9 @@ function familyMatches(family: ProviderFamily, query: string): boolean {
     ...family.providers.flatMap((provider) => [
       provider.label,
       provider.description,
-      ...provider.models.flatMap((model) => [model.id, model.label])
+      ...provider.models.flatMap((model) => [model.id, model.label]),
     ]),
-    ...family.methods.flatMap((method) => [method.label, method.description])
+    ...family.methods.flatMap((method) => [method.label, method.description]),
   ]
     .join(" ")
     .toLocaleLowerCase();
@@ -344,11 +278,14 @@ function familyMatches(family: ProviderFamily, query: string): boolean {
 export interface ProviderCatalogueProps {
   providers: BackendProvider[];
   connectedBackendIds: string[];
-  onConnect: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
+  onConnect: (
+    providerId: string,
+    secret: string,
+  ) => Promise<BackendVerifyResult>;
   onDisconnect?: (providerId: string) => void | Promise<void>;
   onRefreshModels?: (providerId: string) => void | Promise<void>;
   onCheckConnection?: (
-    providerId: string
+    providerId: string,
   ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
   onStatus?: (message: string) => void;
@@ -362,7 +299,7 @@ export function ProviderCatalogue({
   onRefreshModels,
   onCheckConnection,
   onStartBrowserLogin,
-  onStatus
+  onStatus,
 }: ProviderCatalogueProps) {
   const families = useMemo(() => buildProviderFamilies(providers), [providers]);
   const [showAll, setShowAll] = useState(false);
@@ -380,9 +317,11 @@ export function ProviderCatalogue({
 
   const alphabetical = useMemo(
     () => families.filter((family) => familyMatches(family, query)),
-    [families, query]
+    [families, query],
   );
-  const selectedFamily = families.find((family) => family.id === selectedFamilyId);
+  const selectedFamily = families.find(
+    (family) => family.id === selectedFamilyId,
+  );
 
   useEffect(() => {
     if (showAll) searchRef.current?.focus();
@@ -406,13 +345,16 @@ export function ProviderCatalogue({
             />
           </label>
           <span className="provider-catalogue__count">
-            {alphabetical.length} {alphabetical.length === 1 ? "provider" : "providers"}
+            {alphabetical.length}{" "}
+            {alphabetical.length === 1 ? "provider" : "providers"}
           </span>
         </div>
       ) : null}
 
       <div
-        className={showAll ? "provider-catalogue__list" : "provider-catalogue__grid"}
+        className={
+          showAll ? "provider-catalogue__list" : "provider-catalogue__grid"
+        }
         aria-label={showAll ? "All providers" : "Featured providers"}
       >
         {visibleFamilies.map((family) => {
@@ -421,13 +363,23 @@ export function ProviderCatalogue({
             <button
               key={family.id}
               type="button"
-              className={showAll ? "provider-catalogue-item provider-catalogue-item--list" : "provider-catalogue-item"}
+              className={
+                showAll
+                  ? "provider-catalogue-item provider-catalogue-item--list"
+                  : "provider-catalogue-item"
+              }
               data-provider-family-id={family.id}
               aria-label={`${family.label}, ${state.label}`}
               onClick={() => setSelectedFamilyId(family.id)}
             >
-              <span className="provider-catalogue-item__logo" aria-hidden="true">
-                <ProviderIcon provider={family.iconProvider} size={showAll ? 28 : 34} />
+              <span
+                className="provider-catalogue-item__logo"
+                aria-hidden="true"
+              >
+                <ProviderIcon
+                  provider={family.iconProvider}
+                  size={showAll ? 28 : 34}
+                />
               </span>
               <span className="provider-catalogue-item__text">
                 <strong>{family.label}</strong>
@@ -487,13 +439,10 @@ function ProviderMethodIcon({ kind }: { kind: ProviderConnectionMethodKind }) {
       return <Key size={20} />;
     case "oauth-browser":
       return <Browser size={20} />;
-    case "oauth-device":
-      return <DeviceMobile size={20} />;
     case "custom":
       return <Globe size={20} />;
-    case "provider-login":
     default:
-      return <TerminalWindow size={20} />;
+      return <Key size={20} />;
   }
 }
 
@@ -506,16 +455,19 @@ function ProviderConnectionModal({
   onRefreshModels,
   onCheckConnection,
   onStartBrowserLogin,
-  onStatus
+  onStatus,
 }: {
   family: ProviderFamily;
   connectedBackendIds: string[];
   onClose: () => void;
-  onConnect: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
+  onConnect: (
+    providerId: string,
+    secret: string,
+  ) => Promise<BackendVerifyResult>;
   onDisconnect?: (providerId: string) => void | Promise<void>;
   onRefreshModels?: (providerId: string) => void | Promise<void>;
   onCheckConnection?: (
-    providerId: string
+    providerId: string,
   ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
   onStatus?: (message: string) => void;
@@ -523,10 +475,16 @@ function ProviderConnectionModal({
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [locallyReady, setLocallyReady] = useState<string | null>(null);
+  const [locallyConfigured, setLocallyConfigured] = useState<string | null>(
+    null,
+  );
   const [locallyRemoved, setLocallyRemoved] = useState<string | null>(null);
   const [replacingCredential, setReplacingCredential] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
-  const [feedback, setFeedback] = useState<{ message: string; tone: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    tone: string;
+  } | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -534,13 +492,15 @@ function ProviderConnectionModal({
   const customBaseUrlRef = useRef<HTMLInputElement>(null);
   const customModelRef = useRef<HTMLInputElement>(null);
   const customKeyRef = useRef<HTMLInputElement>(null);
-  const selectedMethod = family.methods.find((method) => method.id === selectedMethodId);
+  const selectedMethod = family.methods.find(
+    (method) => method.id === selectedMethodId,
+  );
 
   useModalFocusTrap({
     active: true,
     containerRef: modalRef,
     initialFocusRef: closeRef,
-    onClose
+    onClose,
   });
 
   useEffect(() => {
@@ -557,22 +517,37 @@ function ProviderConnectionModal({
     }
   }, [selectedMethodId]);
 
-  const connect = async (providerId: string, secret: string, clearSecret?: () => void) => {
+  const connect = async (
+    providerId: string,
+    secret: string,
+    clearSecret?: () => void,
+  ) => {
     setPending(true);
     setFeedback(null);
     try {
       const result = await onConnect(providerId, secret);
-      const copy = connectResultCopy(result.outcome, { detail: result.message });
+      const copy = connectResultCopy(result.outcome, {
+        detail: result.message,
+      });
       setFeedback({ message: copy.message, tone: copy.tone });
       onStatus?.(copy.message);
       if (result.outcome === "ready") {
         setLocallyReady(providerId);
+        setLocallyConfigured(null);
+        setLocallyRemoved(null);
+        setReplacingCredential(false);
+      } else if (result.outcome === "configured") {
+        setLocallyConfigured(providerId);
+        setLocallyReady(null);
         setLocallyRemoved(null);
         setReplacingCredential(false);
       }
       return result;
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not connect this provider.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not connect this provider.";
       setFeedback({ message, tone: "danger" });
       onStatus?.(message);
       return null;
@@ -585,10 +560,14 @@ function ProviderConnectionModal({
   const methodVerifiedHere = selectedMethod
     ? locallyReady === selectedMethod.provider.id
     : false;
+  const methodConfiguredHere = selectedMethod
+    ? locallyConfigured === selectedMethod.provider.id
+    : false;
   const methodConnected = selectedMethod
     ? locallyRemoved === selectedMethod.provider.id
       ? false
       : methodVerifiedHere ||
+        methodConfiguredHere ||
         isProviderConnected(selectedMethod.provider, connectedBackendIds)
     : false;
   const methodConnectionLabel = methodVerifiedHere
@@ -596,7 +575,9 @@ function ProviderConnectionModal({
     : selectedMethod?.provider.backendType === "native-api"
       ? "Configured"
       : "Connected";
-  const methodState = selectedMethod ? stateViewFor(selectedMethod.provider.authState) : null;
+  const methodState = selectedMethod
+    ? stateViewFor(selectedMethod.provider.authState)
+    : null;
 
   const checkConnection = async (providerId: string) => {
     if (!onCheckConnection) return;
@@ -606,9 +587,15 @@ function ProviderConnectionModal({
       const result = await onCheckConnection(providerId);
       if (result?.outcome === "ready") {
         setLocallyReady(providerId);
+        setLocallyConfigured(null);
+        setLocallyRemoved(null);
+      } else if (result?.outcome === "configured") {
+        setLocallyConfigured(providerId);
+        setLocallyReady(null);
         setLocallyRemoved(null);
       } else if (result?.outcome === "auth-failed") {
         setLocallyReady(null);
+        setLocallyConfigured(null);
         setLocallyRemoved(providerId);
       }
       const copy = result
@@ -618,7 +605,10 @@ function ProviderConnectionModal({
       setFeedback({ message, tone: copy.tone });
       onStatus?.(message);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not refresh this connection.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not refresh this connection.";
       setFeedback({ message, tone: "danger" });
       onStatus?.(message);
     } finally {
@@ -634,13 +624,19 @@ function ProviderConnectionModal({
       const result = await onStartBrowserLogin(providerId);
       if (result.outcome === "ready") {
         setLocallyReady(providerId);
+        setLocallyConfigured(null);
         setLocallyRemoved(null);
       }
-      const copy = connectResultCopy(result.outcome, { detail: result.message });
+      const copy = connectResultCopy(result.outcome, {
+        detail: result.message,
+      });
       setFeedback({ message: copy.message, tone: copy.tone });
       onStatus?.(copy.message);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Browser sign-in could not be completed.";
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Browser sign-in could not be completed.";
       setFeedback({ message, tone: "danger" });
       onStatus?.(message);
     } finally {
@@ -678,7 +674,9 @@ function ProviderConnectionModal({
           </span>
           <h2 id={`provider-family-${family.id}`}>{family.label}</h2>
           <p id={`provider-family-${family.id}-description`}>
-            {selectedMethod ? selectedMethod.label : "Choose how you want to connect."}
+            {selectedMethod
+              ? selectedMethod.label
+              : "Choose how you want to connect."}
           </p>
         </header>
 
@@ -697,7 +695,9 @@ function ProviderConnectionModal({
             </button>
 
             <div className="provider-method-detail__heading">
-              <span aria-hidden="true"><ProviderMethodIcon kind={selectedMethod.kind} /></span>
+              <span aria-hidden="true">
+                <ProviderMethodIcon kind={selectedMethod.kind} />
+              </span>
               <div>
                 <strong>{selectedMethod.label}</strong>
                 <p>{selectedMethod.description}</p>
@@ -705,7 +705,8 @@ function ProviderConnectionModal({
               <small
                 data-tone={
                   methodConnected
-                    ? selectedMethod.provider.backendType === "native-api" && !methodVerifiedHere
+                    ? selectedMethod.provider.backendType === "native-api" &&
+                      !methodVerifiedHere
                       ? "info"
                       : "ready"
                     : methodState?.tone
@@ -715,14 +716,18 @@ function ProviderConnectionModal({
               </small>
             </div>
 
-            {selectedMethod.kind === "api-key" && (!methodConnected || replacingCredential) ? (
+            {selectedMethod.kind === "api-key" &&
+            (!methodConnected || replacingCredential) ? (
               <form
                 className="provider-method-form"
                 onSubmit={(event) => {
                   event.preventDefault();
                   const secret = keyInputRef.current?.value.trim() ?? "";
                   if (!secret) {
-                    setFeedback({ message: "Enter an API key to connect.", tone: "danger" });
+                    setFeedback({
+                      message: "Enter an API key to connect.",
+                      tone: "danger",
+                    });
                     return;
                   }
                   void connect(selectedMethod.provider.id, secret, () => {
@@ -742,8 +747,20 @@ function ProviderConnectionModal({
                     disabled={pending}
                   />
                 </label>
-                <button type="submit" className="provider-method-form__primary" disabled={pending}>
-                  {pending ? <><Spinner size={14} className="og-spinner" /> Verifying</> : replacingCredential ? "Replace key & reconnect" : "Add key & connect"}
+                <button
+                  type="submit"
+                  className="provider-method-form__primary"
+                  disabled={pending}
+                >
+                  {pending ? (
+                    <>
+                      <Spinner size={14} className="og-spinner" /> Verifying
+                    </>
+                  ) : replacingCredential ? (
+                    "Replace key & reconnect"
+                  ) : (
+                    "Add key & connect"
+                  )}
                 </button>
               </form>
             ) : null}
@@ -757,22 +774,35 @@ function ProviderConnectionModal({
                   const modelId = customModelRef.current?.value.trim() ?? "";
                   const apiKey = customKeyRef.current?.value.trim() ?? "";
                   if (!baseUrl) {
-                    setFeedback({ message: "Enter the provider's base URL.", tone: "danger" });
+                    setFeedback({
+                      message: "Enter the provider's base URL.",
+                      tone: "danger",
+                    });
                     return;
                   }
                   if (!modelId) {
-                    setFeedback({ message: "Enter the model ID used by this endpoint.", tone: "danger" });
+                    setFeedback({
+                      message: "Enter the model ID used by this endpoint.",
+                      tone: "danger",
+                    });
                     return;
                   }
                   try {
-                    const secret = encodeCustomProviderSecret(baseUrl, apiKey, modelId);
+                    const secret = encodeCustomProviderSecret(
+                      baseUrl,
+                      apiKey,
+                      modelId,
+                    );
                     void connect(selectedMethod.provider.id, secret, () => {
                       if (customKeyRef.current) customKeyRef.current.value = "";
                     });
                   } catch (error) {
                     setFeedback({
-                      message: error instanceof Error ? error.message : "Enter a valid base URL.",
-                      tone: "danger"
+                      message:
+                        error instanceof Error
+                          ? error.message
+                          : "Enter a valid base URL.",
+                      tone: "danger",
                     });
                   }
                 }}
@@ -801,7 +831,9 @@ function ProviderConnectionModal({
                   />
                 </label>
                 <label>
-                  <span>API key <small>Optional</small></span>
+                  <span>
+                    API key <small>Optional</small>
+                  </span>
                   <input
                     ref={customKeyRef}
                     type="password"
@@ -812,38 +844,36 @@ function ProviderConnectionModal({
                     disabled={pending}
                   />
                 </label>
-                <button type="submit" className="provider-method-form__primary" disabled={pending}>
-                  {pending ? <><Spinner size={14} className="og-spinner" /> Connecting</> : "Connect endpoint"}
+                <button
+                  type="submit"
+                  className="provider-method-form__primary"
+                  disabled={pending}
+                >
+                  {pending ? (
+                    <>
+                      <Spinner size={14} className="og-spinner" /> Connecting
+                    </>
+                  ) : (
+                    "Connect endpoint"
+                  )}
                 </button>
               </form>
             ) : null}
 
-            {selectedMethod.kind === "oauth-browser" ||
-            selectedMethod.kind === "oauth-device" ||
-            selectedMethod.kind === "provider-login" ? (
+            {selectedMethod.kind === "oauth-browser" ? (
               <div className="provider-method-detail__instructions">
-                {selectedMethod.kind === "oauth-browser"
-                  ? <Browser size={19} aria-hidden="true" />
-                  : <TerminalWindow size={19} aria-hidden="true" />}
+                <Browser size={19} aria-hidden="true" />
                 <div>
-                  <strong>{selectedMethod.kind === "oauth-browser" ? "Provider-supported browser sign-in" : "Provider-owned sign-in"}</strong>
+                  <strong>Provider-supported browser sign-in</strong>
                   <p>
-                    {selectedMethod.kind === "oauth-device"
-                      ? "Use the provider's official device authorization and return to Fable when it finishes."
-                      : selectedMethod.kind === "oauth-browser"
-                        ? "Fable opens the official provider page in your browser and waits for the provider-owned flow to finish. OAuth credentials never enter the Fable interface."
-                        : "Sign in through the provider's own installed app or runtime, then return to Fable."}
+                    Fable opens the official provider page in your browser and
+                    waits for the provider-owned flow to finish. OAuth
+                    credentials never enter the Fable interface.
                   </p>
                   <p>
                     {selectedMethod.provider.installHint ??
                       "Fable reads the provider runtime's connection state; it never collects subscription tokens."}
                   </p>
-                  {selectedMethod.command ? (
-                    <div className="provider-method-detail__command">
-                      <span>Run in your terminal</span>
-                      <code>{selectedMethod.command}</code>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -858,7 +888,13 @@ function ProviderConnectionModal({
                 disabled={pending}
                 onClick={() => void checkConnection(selectedMethod.provider.id)}
               >
-                {pending ? <><Spinner size={14} className="og-spinner" /> Checking</> : "Check for Codex"}
+                {pending ? (
+                  <>
+                    <Spinner size={14} className="og-spinner" /> Checking
+                  </>
+                ) : (
+                  "Check for Codex"
+                )}
               </button>
             ) : null}
 
@@ -870,21 +906,18 @@ function ProviderConnectionModal({
                 type="button"
                 className="provider-method-form__primary"
                 disabled={pending}
-                onClick={() => void startBrowserLogin(selectedMethod.provider.id)}
+                onClick={() =>
+                  void startBrowserLogin(selectedMethod.provider.id)
+                }
               >
-                {pending ? <><Spinner size={14} className="og-spinner" /> Waiting for browser</> : "Continue in browser"}
-              </button>
-            ) : null}
-
-            {(selectedMethod.kind === "oauth-device" ||
-              selectedMethod.kind === "provider-login") && onCheckConnection ? (
-              <button
-                type="button"
-                className="provider-method-detail__check"
-                disabled={pending}
-                onClick={() => void checkConnection(selectedMethod.provider.id)}
-              >
-                {pending ? <><Spinner size={14} className="og-spinner" /> Checking</> : "Check connection"}
+                {pending ? (
+                  <>
+                    <Spinner size={14} className="og-spinner" /> Waiting for
+                    browser
+                  </>
+                ) : (
+                  "Continue in browser"
+                )}
               </button>
             ) : null}
 
@@ -892,26 +925,37 @@ function ProviderConnectionModal({
               <div className="provider-method-detail__connected">
                 <CheckCircle size={18} weight="fill" aria-hidden="true" />
                 <span>
-                  {selectedMethod.provider.backendType === "native-api" && !methodVerifiedHere
+                  {selectedMethod.provider.backendType === "native-api" &&
+                  !methodVerifiedHere
                     ? "This connection is configured. A live model request is the final check."
                     : "This connection is ready."}
                 </span>
                 <div>
-                  {onCheckConnection && selectedMethod.provider.backendType === "native-api" ? (
+                  {onCheckConnection &&
+                  selectedMethod.provider.backendType === "native-api" ? (
                     <button
                       type="button"
                       disabled={pending}
-                      onClick={() => void checkConnection(selectedMethod.provider.id)}
+                      onClick={() =>
+                        void checkConnection(selectedMethod.provider.id)
+                      }
                     >
                       {pending ? "Checking…" : "Check health"}
                     </button>
                   ) : null}
-                  {onRefreshModels && selectedMethod.provider.backendType === "native-api" ? (
-                    <button type="button" onClick={() => void onRefreshModels(selectedMethod.provider.id)}>
+                  {onRefreshModels &&
+                  selectedMethod.provider.backendType === "native-api" ? (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        void onRefreshModels(selectedMethod.provider.id)
+                      }
+                    >
                       Refresh models
                     </button>
                   ) : null}
-                  {onDisconnect && selectedMethod.provider.backendType === "native-api" ? (
+                  {onDisconnect &&
+                  selectedMethod.provider.backendType === "native-api" ? (
                     <button
                       type="button"
                       onClick={() => setReplacingCredential(true)}
@@ -919,8 +963,12 @@ function ProviderConnectionModal({
                       Replace key
                     </button>
                   ) : null}
-                  {onDisconnect && selectedMethod.provider.backendType === "native-api" ? (
-                    <button type="button" onClick={() => setConfirmingRemoval(true)}>
+                  {onDisconnect &&
+                  selectedMethod.provider.backendType === "native-api" ? (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingRemoval(true)}
+                    >
                       Remove from Fable
                     </button>
                   ) : null}
@@ -928,32 +976,50 @@ function ProviderConnectionModal({
               </div>
             ) : null}
 
-            {confirmingRemoval && selectedMethod.provider.backendType === "native-api" ? (
-              <div className="provider-method-detail__removal" role="alertdialog" aria-label={`Remove ${selectedMethod.provider.label} from Fable`}>
+            {confirmingRemoval &&
+            selectedMethod.provider.backendType === "native-api" ? (
+              <div
+                className="provider-method-detail__removal"
+                role="alertdialog"
+                aria-label={`Remove ${selectedMethod.provider.label} from Fable`}
+              >
                 <strong>Remove this key from Fable?</strong>
                 <p>
-                  Fable will delete its local credential. This does not revoke the key at the
-                  provider; revoke it in the provider&rsquo;s account if it may be compromised.
+                  Fable will delete its local credential. This does not revoke
+                  the key at the provider; revoke it in the provider&rsquo;s
+                  account if it may be compromised.
                 </p>
                 <div>
-                  <button type="button" onClick={() => setConfirmingRemoval(false)}>Keep provider</button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmingRemoval(false)}
+                  >
+                    Keep provider
+                  </button>
                   <button
                     type="button"
                     disabled={pending}
                     onClick={() => {
                       setPending(true);
-                      void Promise.resolve(onDisconnect?.(selectedMethod.provider.id))
+                      void Promise.resolve(
+                        onDisconnect?.(selectedMethod.provider.id),
+                      )
                         .then(() => {
                           setLocallyReady(null);
+                          setLocallyConfigured(null);
                           setLocallyRemoved(selectedMethod.provider.id);
                           setReplacingCredential(false);
                           setConfirmingRemoval(false);
-                          const message = "Removed from Fable. Revoke the key at the provider too if needed.";
+                          const message =
+                            "Removed from Fable. Revoke the key at the provider too if needed.";
                           setFeedback({ message, tone: "neutral" });
                           onStatus?.(message);
                         })
                         .catch((error) => {
-                          const message = error instanceof Error ? error.message : "Could not remove this provider.";
+                          const message =
+                            error instanceof Error
+                              ? error.message
+                              : "Could not remove this provider.";
                           setFeedback({ message, tone: "danger" });
                         })
                         .finally(() => setPending(false));
@@ -966,15 +1032,25 @@ function ProviderConnectionModal({
             ) : null}
 
             {feedback ? (
-              <p className="provider-method-detail__feedback" data-tone={feedback.tone} role={feedback.tone === "danger" ? "alert" : "status"}>
+              <p
+                className="provider-method-detail__feedback"
+                data-tone={feedback.tone}
+                role={feedback.tone === "danger" ? "alert" : "status"}
+              >
                 {feedback.message}
               </p>
             ) : null}
           </div>
         ) : (
-          <div className="provider-connection-methods" aria-label={`Connection methods for ${family.label}`}>
+          <div
+            className="provider-connection-methods"
+            aria-label={`Connection methods for ${family.label}`}
+          >
             {family.methods.map((method) => {
-              const connected = isProviderConnected(method.provider, connectedBackendIds);
+              const connected = isProviderConnected(
+                method.provider,
+                connectedBackendIds,
+              );
               const state = connected
                 ? method.provider.backendType === "native-api"
                   ? { label: "Configured", tone: "info" }
@@ -990,14 +1066,20 @@ function ProviderConnectionModal({
                     setFeedback(null);
                   }}
                 >
-                  <span className="provider-connection-method__icon" aria-hidden="true">
+                  <span
+                    className="provider-connection-method__icon"
+                    aria-hidden="true"
+                  >
                     <ProviderMethodIcon kind={method.kind} />
                   </span>
                   <span>
                     <strong>{method.label}</strong>
                     <small>{method.description}</small>
                   </span>
-                  <span className="provider-connection-method__state" data-tone={state.tone}>
+                  <span
+                    className="provider-connection-method__state"
+                    data-tone={state.tone}
+                  >
                     {state.label}
                   </span>
                   <CaretRight size={16} aria-hidden="true" />

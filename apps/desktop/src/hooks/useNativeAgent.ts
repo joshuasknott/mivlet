@@ -2,8 +2,8 @@
  * Runs a provider-neutral `AgentBackend` and routes its events into the shell.
  *
  * The hook resolves the connected backend to an `AgentBackend` via
- * `resolveAgentBackend` (native API, Codex app-server, and provider-owned ACP
- * runtimes all have live adapters). It then runs the backend, consuming
+ * `resolveAgentBackend` (native API and Codex app-server have live adapters).
+ * It then runs the backend, consuming
  * the universal `BackendAgentEvent` stream, and:
  *   - accumulates text deltas into the agent transcript
  *   - pushes tool-call approvals into the shell's approval queue (via onToolCall)
@@ -36,7 +36,6 @@ import {
   type ToolExecutor
 } from "@fable/connectors";
 import { describeBackendError } from "../lib/backend-errors";
-import { createDesktopAcpTransport } from "../lib/acp-transport";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopTransport } from "../lib/native-transport";
 import {
@@ -196,7 +195,6 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     () => ({
       createTransport: createDesktopTransport,
       createCodexAppServer: createDesktopCodexAppServer,
-      createAcpTransport: createDesktopAcpTransport,
       discoverModels: async (providerId) => {
         const result = await listRuntimeBackendModels(providerId);
         return result;

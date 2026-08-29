@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BACKEND_AUTH_FAIL_CLOSED_STATES,
   BACKEND_AUTH_STATE_PARITY,
-  BACKEND_AUTH_STATE_VALUES
+  BACKEND_AUTH_STATE_VALUES,
 } from "@fable/protocol";
 import type { BackendProvider } from "@fable/protocol";
 import {
@@ -12,10 +12,12 @@ import {
   isFailClosedState,
   modelDiscoveryView,
   stateClassFor,
-  stateViewFor
+  stateViewFor,
 } from "./backend-state";
 
-const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider => ({
+const nativeProvider = (
+  over: Partial<BackendProvider> = {},
+): BackendProvider => ({
   id: "openai",
   backendType: "native-api",
   label: "OpenAI",
@@ -23,10 +25,12 @@ const nativeProvider = (over: Partial<BackendProvider> = {}): BackendProvider =>
   authState: "needs-auth",
   capabilities: [],
   models: [],
-  ...over
+  ...over,
 });
 
-const codexProvider = (over: Partial<BackendProvider> = {}): BackendProvider => ({
+const codexProvider = (
+  over: Partial<BackendProvider> = {},
+): BackendProvider => ({
   id: "codex",
   backendType: "codex-app-server",
   label: "Codex",
@@ -34,7 +38,7 @@ const codexProvider = (over: Partial<BackendProvider> = {}): BackendProvider => 
   authState: "install-required",
   capabilities: [],
   models: [],
-  ...over
+  ...over,
 });
 
 describe("authKindForProvider", () => {
@@ -44,12 +48,6 @@ describe("authKindForProvider", () => {
 
   it("classifies provider-owned runtimes as provider-login (never api-key)", () => {
     expect(authKindForProvider(codexProvider())).toBe("provider-login");
-    expect(
-      authKindForProvider(nativeProvider({ id: "cursor", backendType: "acp" }))
-    ).toBe("provider-login");
-    expect(
-      authKindForProvider(nativeProvider({ id: "copilot", backendType: "copilot-sdk" }))
-    ).toBe("provider-login");
   });
 });
 
@@ -93,8 +91,7 @@ describe("isFailClosedState", () => {
       "unsupported",
       "failed",
       "ready",
-      "entitlement-pending",
-      "unavailable"
+      "unavailable",
     ] as const) {
       expect(isFailClosedState(state)).toBe(true);
     }
@@ -103,20 +100,24 @@ describe("isFailClosedState", () => {
 
 describe("actionLabelForProvider", () => {
   it("offers 'Add API key' for an unconnected native provider", () => {
-    expect(actionLabelForProvider(nativeProvider({ authState: "needs-auth" }))).toBe(
-      "Add API key"
-    );
+    expect(
+      actionLabelForProvider(nativeProvider({ authState: "needs-auth" })),
+    ).toBe("Add API key");
   });
 
   it("never offers an api-key action for provider-owned runtimes", () => {
     // Provider-owned runtimes route to real setup; the label must not imply a
     // key field is available.
-    const label = actionLabelForProvider(codexProvider({ authState: "install-required" }));
+    const label = actionLabelForProvider(
+      codexProvider({ authState: "install-required" }),
+    );
     expect(label.toLowerCase()).not.toContain("api key");
   });
 
   it("shows Connected once a provider is connected", () => {
-    expect(actionLabelForProvider(nativeProvider({ authState: "connected" }))).toBe("Connected");
+    expect(
+      actionLabelForProvider(nativeProvider({ authState: "connected" })),
+    ).toBe("Connected");
   });
 });
 
@@ -178,11 +179,15 @@ describe("connectResultCopy", () => {
     // The Rust boundary returns auth-failed for both missing and rejected keys,
     // but a missing key must read as a configuration gap, not a wrong key.
     const missing = connectResultCopy("auth-failed", { missingKey: true });
-    expect(missing.message.toLowerCase()).toMatch(/no key|not.*stored|add.*key/);
+    expect(missing.message.toLowerCase()).toMatch(
+      /no key|not.*stored|add.*key/,
+    );
     expect(missing.message.toLowerCase()).not.toMatch(/reject|invalid|wrong/);
 
     const rejected = connectResultCopy("auth-failed");
-    expect(rejected.message.toLowerCase()).toMatch(/reject|invalid|couldn't verify/);
+    expect(rejected.message.toLowerCase()).toMatch(
+      /reject|invalid|couldn't verify/,
+    );
   });
 
   it("keeps transient outcomes (offline/failed) retryable and non-alarming", () => {
@@ -198,6 +203,12 @@ describe("connectResultCopy", () => {
 
   it("treats ready as success and unsupported as not-a-key-problem", () => {
     expect(connectResultCopy("ready").tone).toBe("ready");
+    const configured = connectResultCopy("configured", {
+      detail: "The endpoint has not been used yet.",
+    });
+    expect(configured.tone).toBe("ready");
+    expect(configured.message).toContain("when you send a message");
+    expect(configured.message).toContain("has not been used yet");
     const unsupported = connectResultCopy("unsupported");
     expect(unsupported.message.toLowerCase()).not.toContain("key");
   });
@@ -206,12 +217,17 @@ describe("connectResultCopy", () => {
 describe("backend auth-state vocabulary parity", () => {
   it("has no duplicate auth states in the canonical vocabulary list", () => {
     // Guards against the duplicate-`failed` regression drifting back in.
-    expect(new Set(BACKEND_AUTH_STATE_VALUES).size).toBe(BACKEND_AUTH_STATE_VALUES.length);
+    expect(new Set(BACKEND_AUTH_STATE_VALUES).size).toBe(
+      BACKEND_AUTH_STATE_VALUES.length,
+    );
   });
 
   it("covers every fail-closed state plus connected exactly", () => {
     const expected = new Set([...BACKEND_AUTH_STATE_VALUES]);
-    const actual = new Set<string>([...BACKEND_AUTH_FAIL_CLOSED_STATES, "connected"]);
+    const actual = new Set<string>([
+      ...BACKEND_AUTH_FAIL_CLOSED_STATES,
+      "connected",
+    ]);
     expect(actual).toEqual(expected);
   });
 
@@ -221,8 +237,8 @@ describe("backend auth-state vocabulary parity", () => {
     expect(BACKEND_AUTH_STATE_PARITY).toBe(true);
   });
 
-  it("matches the Rust boundary's 11 distinct auth states", () => {
+  it("matches the Rust boundary's 10 distinct auth states", () => {
     // Mirrors BACKEND_AUTH_STATES in apps/desktop/src-tauri/src/models.rs.
-    expect(BACKEND_AUTH_STATE_VALUES).toHaveLength(11);
+    expect(BACKEND_AUTH_STATE_VALUES).toHaveLength(10);
   });
 });

@@ -60,7 +60,7 @@ pub fn upsert_private(
     )?;
     if tombstoned {
         return Err(StoreError::Invalid(
-            "Deleted knowledge cannot be restored by routine import or synchronization.".into(),
+            "Deleted knowledge cannot be restored by a later import or synchronization.".into(),
         ));
     }
     let connector_id = value

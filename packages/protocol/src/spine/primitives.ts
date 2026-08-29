@@ -4,7 +4,7 @@ declare const fableIdBrand: unique symbol;
  * Version of the portable product-spine vocabulary. This advances only when a
  * canonical wire contract changes; storage migrations have their own versions.
  */
-export const PRODUCT_SPINE_CONTRACT_VERSION = "2.0.0" as const;
+export const PRODUCT_SPINE_CONTRACT_VERSION = "3.0.0" as const;
 
 /** Initial schema shape for records governed by the product spine. */
 export const PRODUCT_SPINE_SCHEMA_VERSION = 1 as const;
@@ -29,7 +29,6 @@ export type ConnectionId = FableId<"connection">;
 export type ProviderRouteId = FableId<"provider-route">;
 export type CapabilityId = FableId<"capability">;
 export type CapabilityGrantId = FableId<"capability-grant">;
-export type WorkerId = FableId<"worker">;
 export type RunId = FableId<"run">;
 
 export type IsoDateTime = string;

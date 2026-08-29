@@ -70,14 +70,6 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         "local-browser" | "local-browser-action" | "cloud-browser" | "cloud-browser-action" => {
             Some("browser-state-mutation")
         }
-        "cloud-process-schedule"
-        | "cloud-process-schedule-cancel"
-        | "cloud-process-schedule-pause"
-        | "cloud-process-schedule-resume"
-        | "cloud-agent-routine"
-        | "cloud-agent-routine-cancel"
-        | "cloud-agent-routine-pause"
-        | "cloud-agent-routine-resume" => Some("schedule-mutation"),
         "connection-read"
         | "github-read"
         | "vercel-read"
@@ -105,11 +97,7 @@ pub(crate) fn evaluate_permission_policy(
     let trusted_allowed = read_only_allowed
         || matches!(
             effect,
-            "local-write"
-                | "connector-write"
-                | "app-state-mutation"
-                | "schedule-mutation"
-                | "schedule-execution"
+            "local-write" | "connector-write" | "app-state-mutation"
         );
 
     if profile == "read-only" && !read_only_allowed {
@@ -139,8 +127,6 @@ pub(crate) fn evaluate_permission_policy(
             | "connector-write"
             | "cache-mutation"
             | "app-state-mutation"
-            | "schedule-mutation"
-            | "schedule-execution"
             | "browser-state-mutation"
             | "web-fetch"
     ) || matches!(risk_level, "high" | "critical");
@@ -177,17 +163,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn read_only_blocks_writes_shell_and_schedules() {
+    fn read_only_blocks_writes_and_shell_execution() {
         assert!(ensure_permission_allowed("read-only", None, "local-read", "low").is_ok());
         assert!(ensure_permission_allowed("read-only", None, "local-write", "medium").is_err());
         assert!(
             ensure_permission_allowed("read-only", None, "shell-execution", "critical").is_err()
-        );
-        assert!(
-            ensure_permission_allowed("read-only", None, "schedule-execution", "medium").is_err()
-        );
-        assert!(
-            ensure_permission_allowed("read-only", None, "schedule-mutation", "medium").is_err()
         );
         assert!(ensure_permission_allowed("read-only", None, "connector-write", "high").is_err());
     }
@@ -195,13 +175,7 @@ mod tests {
     #[test]
     fn trusted_requires_approval_for_consequential_and_blocks_shell() {
         // Consequential allowed but require approval
-        for effect in &[
-            "local-write",
-            "connector-write",
-            "app-state-mutation",
-            "schedule-mutation",
-            "schedule-execution",
-        ] {
+        for effect in &["local-write", "connector-write", "app-state-mutation"] {
             let decision =
                 evaluate_permission_policy("trusted-scope", None, effect, "low").unwrap();
             assert!(decision.allowed);
@@ -224,8 +198,6 @@ mod tests {
             "connector-write",
             "cache-mutation",
             "app-state-mutation",
-            "schedule-mutation",
-            "schedule-execution",
         ] {
             let decision = evaluate_permission_policy("full-access", None, effect, "low").unwrap();
             assert!(decision.allowed);

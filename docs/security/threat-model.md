@@ -1,101 +1,132 @@
-# Threat Model
+# Threat model
 
-## Assets
+Fable is a pre-release local-first desktop application. This model covers the
+reachable local product plus the repository's optional broker, account/sync,
+and hosted-computer foundations. It does not assert that any remote environment
+has been deployed or independently reviewed.
 
-- Local files and imported knowledge.
-- Credentials in OS secure storage.
-- Durable memory and user preferences.
-- Approval audit history.
-- Connector tokens and external service data.
-- Generated artifacts and published work.
+## Protected assets
 
-## Trust Boundaries
+- model-provider, connector, identity-session, and vault credentials;
+- conversation, knowledge, memory, Connection, approval, and audit data;
+- exact approval permits and request fingerprints;
+- teammate workspace files, persistent Linux home volumes, and browser profiles;
+- optional remote membership, device, capability, and hosted-computer state;
+- release artifacts and update metadata.
 
-- User interface to Rust runtime.
-- Runtime to local filesystem.
-- Runtime to external connectors.
-- Runtime to optional Convex shared workspace state.
-- Model-generated content to trusted user action.
-- Auth broker to native desktop token exchange.
-- Native execution permit store to side-effecting tool/connector commands.
+## Trust boundaries
 
-## Key Risks
+- React/WebView to typed Tauri commands;
+- Rust to encrypted SQLite and the operating-system credential store;
+- Rust to model providers, connector providers, installed runtimes, Docker, and
+  optional remote services;
+- the host to each Docker-backed Linux teammate computer;
+- Convex to the deployment-gated hosted runner;
+- the desktop to the narrow confidential connector OAuth broker; and
+- build inputs to packaged desktop and service artifacts.
 
-- Prompt injection through imported documents or web content.
-- Accidental publish/write/delete through a connector.
-- Memory poisoning from untrusted or stale sources.
-- Credential leakage through logs, screenshots, artifacts, or PRs.
-- Lost state after restart during a pending approval.
-- Forged, replayed, or argument-substituted approval requests.
-- OAuth callback interception, state confusion, or PKCE verifier leakage.
-- Refresh-token replay or accidental token persistence in ordinary app state.
-- Provider retry storms and duplicated writes after ambiguous failures.
+## Core invariants
 
-## Controls
+1. Secrets never enter ordinary React state, model context, logs, screenshots,
+   local exports, fixtures, or portable records.
+2. Every user-owned read or write starts with an explicit validated workspace;
+   no missing scope falls back to another workspace.
+3. External content, retrieved knowledge, web controls, and tool output are
+   untrusted input, not instructions or authority.
+4. Consequential effects require an exact, fresh, single-use approval checked
+   at the final trusted boundary.
+5. Local and hosted computer placement is explicit. One must never silently
+   substitute for the other or for the user's host shell.
+6. Fixture, build, dry-run, and local test evidence stays distinguishable from
+   live deployment evidence.
 
-- User-facing Read Only, Ask Me, Work Freely, and Custom choices mapped onto the
-  stable `read-only`, `trusted-scope`, and `full-access` protocol modes.
-- Consequence summaries before consequential actions.
-- Approve once, allow for this session, save as rule, modify, and deny outcomes.
-- Stronger confirmation (typing a phrase) for high-risk or critical actions (e.g., destructive, public, or financial tasks).
-- Memory provenance, freshness, permissions, and fact/inference separation.
-- Connector health and permission review before execution.
-- Explicit fixture states; missing provider configuration never appears connected.
-- Provider content is normalized as untrusted KnowledgeSource data and cannot enter durable memory without approval.
-- Retrieval excludes disabled, deleted, stale, failed, disconnected, and
-  out-of-scope sources before agent context is assembled. A pin changes
-  selection priority, not trust.
-- Local imports retain provenance and bounded previews. Recursive folder import
-  is capped, and unsupported or oversized files fail closed.
-- Durable memory is never inferred directly from imported content. Promotion is
-  explicit and audited; disabled or forgotten memory is excluded from future
-  agent context.
-- Connector client secrets and signing material stay in an auth broker; access and refresh tokens stay behind an OS secure-storage boundary.
-- Connector logs/errors redact authorization headers, cookies, tokens, raw payloads, email bodies, Slack messages, and imported Drive/Notion content.
-- OAuth uses high-entropy state and PKCE S256. Pending verifiers are stored in the OS credential store, callbacks require exact state, and plain HTTP redirects are restricted to literal loopback IP addresses.
-- The auth broker is required only for confidential-client or provider-installation flows. It has no model endpoint and no authority to execute connector actions.
-- General approval UI state is not execution authority. Native approval resolution writes a fingerprinted execution permit; the Rust side-effect boundary requires an exact, fresh, unconsumed permit. Argument substitution, risk or mode downgrade, stale permits, and replay fail closed. High-risk tool calls and all connector writes require a fresh per-action decision.
-- General Mission approval resolution also executes nothing. Its separate
-  owner-qualified encrypted consumption ledger is empty on migration. A native
-  effect adapter must revalidate the exact proposal, identified approver,
-  current Run head, and fifteen-minute freshness before atomically consuming it
-  once; the resulting stack-local proof is not serializable or renderer-visible.
-  Crash after consumption fails closed and requires a fresh approval.
-- Native tools recheck the registered permission/risk policy, active profile,
-  and exact argument preview. File operations remain workspace-confined.
-- Connector writes always require a fresh per-action record containing connector, account, proposed action, target, human-readable preview, risk, result, timestamps, actor, request/run correlation, and normalized failure code. Preparation and execution fail closed when the captured profile is read-only or otherwise does not allow connector writes.
-- Schedules capture the selected backend, model, and permission route at
-  creation time. Read-only routes cannot create or execute scheduled runs, and
-  pinned routes fail closed rather than silently switching backend.
-- Adapters cannot downgrade writes to non-consequential operations: the shared connector runtime rejects any external write capability that is not declared consequential.
-- Native provider retries are bounded and limited to connection failures, rate limits, and server failures. Connector writes are not blindly replayed after an ambiguous provider success.
-- Agent runs and connector state persist only non-secret metadata. Interrupted runs are marked recoverable after restart; an old approval permit cannot be replayed.
-- Action history provides an inspectable local record of Fable's past actions (such as model calls, connector actions, shell commands, web queries, approvals, schedules, and policy blocks). This log is saved locally in the encrypted SQLite `audit_event` table. For security and privacy, all secrets, keys, credentials, full file/email content, and environment variables are redacted at the storage boundary and never persisted. Action history only observes activity; it does not grant execution authority and does not bypass any security checks.
-- A workspace-wide encrypted execution control blocks new native-provider,
-  local-model, ACP, Codex app-server, approved MCP-tool, legacy scheduler, and
-  canonical Routine leases before their execution boundary. Pause and resume
-  require exact typed confirmation; resume is optimistic-revision fenced, and
-  both changes enter secret-safe action history. Missing state defaults active,
-  but corrupt state fails closed. This control does not claim to undo an effect
-  already accepted externally, and runtime-specific cancellation remains
-  separate.
-- Optional cloud/team sync uses Clerk identity and Convex only for explicitly
-  shared workspaces. Solo encrypted SQLite remains authoritative for local
-  workspaces. Cloud sync must use explicit record allowlists, workspace-scoped
-  authorization, device linking, idempotent outbox mutation handling, revisioned
-  tombstones, and denied-record tests so credentials, OAuth tokens, approval
-  permits, raw connector responses, local model prompts/responses, and
-  unselected private knowledge never leave the device. See
-  [Cloud Team Sync Threat Note](./cloud-team-sync-threat-note.md).
+## Principal risks and controls
 
-## Remaining Security Work
+### Renderer compromise or confused IPC
 
-- Deploy and independently review the auth broker before enabling confidential-client providers.
-- Add provider-specific redirect allowlists, webhook verification, and token audience/issuer validation as each live adapter is implemented.
-- Continue review of the encrypted SQLite schema and recovery UX as new Goal 8
-  domains are integrated; do not create a competing persistence layer.
-- Add platform CI for macOS Keychain and Linux Secret Service; Windows and mock-store coverage alone is insufficient for release confidence.
-- Add outbound network policy controls and SSRF protection before broadening `web-fetch` beyond the current explicit approval and HTTP(S) checks.
-- Before enabling shared workspaces for external users, implement and review the
-  Clerk + Convex authorization, device identity, idempotency, tombstone, export,
-  and denied-record controls in the cloud team sync threat note.
+The renderer receives capability metadata and bounded display projections, not
+credentials, host paths, Docker names, browser-debug URLs, cookies, or process
+handles. Tauri commands validate identifiers, sizes, scope, generation, and
+ownership again. The production content-security policy denies direct provider
+and secret-service egress from the WebView.
+
+### Local data disclosure or tampering
+
+Sensitive SQLite payloads use AES-256-GCM with fresh nonces and row-bound AAD.
+The vault key and integration credentials use separate credential-store
+services. Startup performs integrity and foreign-key checks and fails closed on
+a newer schema. Backups validate their manifest and vault marker before restore.
+Plaintext query columns must remain non-secret.
+
+### Provider and connector egress
+
+Rust owns credential injection, endpoint allowlists, HTTPS policy, timeouts, and
+bounded responses. Remote custom-provider HTTP is rejected; loopback is the
+only plaintext exception. Connector OAuth uses system-browser authorization,
+PKCE where applicable, exact callback state, and isolated credential custody.
+The broker handles only confidential connector authorization and stores no
+waitlist, conversation, or provider secrets.
+
+### Prompt injection and unsafe effects
+
+Retrieved files, connector results, websites, and model output cannot grant
+authority. Tools use strict schemas and bounds. The approval record binds the
+exact proposed effect and is rechecked immediately before dispatch. Replayed or
+stale permits, changed browser controls, unknown tools, and scope changes fail.
+
+### Local teammate computer escape
+
+Each workspace/teammate gets one labelled Docker container, persistent home
+volume, and narrow Fable-owned workspace bind. Commands run as UID 1000 with
+timeouts and bounded output. Chromium keeps its sandbox; the debug bridge is
+published only on host loopback. Container resources are capped and native code
+validates labels before lifecycle actions.
+
+Docker daemon access is privileged, containers share the Docker Linux kernel,
+default container networking remains available, and the scoped bind is writable
+when authorized. This is stronger separation than a browser profile or host
+directory alone, but it is not a dedicated VM or a hostile-code guarantee.
+
+### Human/agent control collision
+
+Takeover creates a five-minute lease and advances the computer generation.
+Pointer, key, browser, and return-control actions cite the current generation.
+Agent browser actions fail while the human holds control, and observed control
+references are single-use and invalidated by state changes.
+
+### Optional account, sync, and hosted boundaries
+
+Local use remains available without them. Any deployed remote entry point must
+derive identity server-side, verify current workspace membership and device
+state, scope data before access, and reject cached client authority. Sync must
+use explicit record allowlists and exclude credentials, permits, browser
+profiles, container state, raw connector caches, and host paths.
+
+Hosted capabilities are short-lived, scoped, generation-fenced, and single-use.
+The runner independently validates the capability and public-network policy.
+Undeployed or incomplete configuration must remain unavailable rather than
+falling back to a fixture.
+
+### Supply chain and release
+
+Lockfiles, dependency audits, Rust advisory policy, typed builds, CSP tests,
+desktop manifests, and installer smoke tests reduce risk but do not replace
+artifact signing, update-channel security, reproducible builds, or independent
+review. Generated output and credentials must stay out of commits.
+
+## Known gaps
+
+- No public signed release or updater channel is complete.
+- No per-container network allowlist, image-signing policy, or production
+  vulnerability-response process is complete.
+- Hosted sign-in/secret handoff, production account recovery, multi-device
+  authorization, metering, abuse controls, and disaster recovery are not live-
+  validated.
+- Remote sync is not claimed to be end-to-end encrypted.
+- A stolen unlocked device or compromised operating-system account can access
+  data available to that user; Fable is not a replacement for full-disk
+  encryption and OS account security.
+
+Security-sensitive changes require negative scope/replay tests, secret scans,
+the relevant TypeScript and Rust gates, and runtime evidence proportional to the
+boundary changed.

@@ -19,10 +19,16 @@ import type {
   ApprovalRiskLevel,
   CustomApprovalSettings,
   PermissionMode,
-  PermissionProfileId
+  PermissionProfileId,
 } from "./domains/approvals.js";
-import type { BackendProvider, ContextRecordAuthorityScope } from "./domains/agent-runtime.js";
-import type { ConnectorId, FirstWaveConnectorId } from "./domains/connectors.js";
+import type {
+  BackendProvider,
+  ContextRecordAuthorityScope,
+} from "./domains/agent-runtime.js";
+import type {
+  ConnectorId,
+  SupportedConnectorId,
+} from "./domains/connectors.js";
 
 export type MemoryKind = "fact" | "inference" | "preference" | "imported";
 
@@ -107,7 +113,6 @@ export interface MemoryPromotionResponse {
 }
 
 export type ConnectorStatus =
-  | "fixture"
   | "needs-auth"
   | "unconfigured"
   | "configured"
@@ -119,11 +124,7 @@ export type ConnectorStatus =
   | "unavailable";
 
 export type ConnectorAuthMode =
-  | "none"
-  | "fixture"
-  | "oauth-pkce"
-  | "oauth-broker"
-  | "provider-installation";
+  "none" | "oauth-pkce" | "oauth-broker" | "provider-installation";
 
 export type ConnectorPermissionAccess = "read" | "write";
 
@@ -145,12 +146,7 @@ export interface ConnectorHealth {
 }
 
 export type ConnectorSyncPhase =
-  | "idle"
-  | "syncing"
-  | "succeeded"
-  | "partial"
-  | "failed"
-  | "cancelled";
+  "idle" | "syncing" | "succeeded" | "partial" | "failed" | "cancelled";
 
 export type ConnectorSyncTrigger = "manual" | "background" | "retry";
 
@@ -186,7 +182,7 @@ export interface ConnectorSyncState {
 }
 
 export interface ConnectorSyncRequest {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   workspaceId: string;
   trigger?: ConnectorSyncTrigger;
 }
@@ -231,7 +227,7 @@ export interface ConnectorManifest {
   supportedActions?: ConnectorActionKind[];
   /**
    * Optional backend facet. When present, this connector entry surfaces an
-   * agent-runtime AI backend (Codex, Cursor, Copilot, Grok) whose auth state
+   * agent-runtime AI backend whose auth state
    * and capabilities are owned by the Rust credential boundary. The frontend
    * only ever sees `authState` and `capabilities` — never raw tokens.
    */
@@ -254,7 +250,7 @@ export type ConnectorItemKind =
   | "event";
 
 export interface ConnectorSearchRequest {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   query: string;
   limit?: number;
   cursor?: string;
@@ -262,7 +258,7 @@ export interface ConnectorSearchRequest {
 
 export interface ConnectorSearchItem {
   id: string;
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   /**
    * Exact Fable Connection that produced this result. Native search stamps this
    * value from authenticated selection evidence; imports reject a changed or
@@ -281,16 +277,16 @@ export interface ConnectorSearchItem {
 }
 
 export interface ConnectorSearchResult {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   query: string;
   items: ConnectorSearchItem[];
   nextCursor?: string;
-  source: "fixture" | "live";
+  source: "live";
   searchedAt: string;
 }
 
 export interface ConnectorImportRequest {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   item: ConnectorSearchItem;
   importedAt: string;
 }
@@ -349,7 +345,7 @@ export type ConnectorActionKind =
 
 export interface ConnectorActionRequest {
   id: string;
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   action: ConnectorActionKind;
   payload: Record<string, string>;
   permissionMode?: PermissionMode;
@@ -358,47 +354,15 @@ export interface ConnectorActionRequest {
 }
 
 export type ConnectorActionResultStatus =
-  | "unavailable"
-  | "denied"
-  | "approved"
-  | "failed"
-  | "completed";
+  "unavailable" | "denied" | "approved" | "failed" | "completed";
 
 export interface ConnectorActionResult {
   requestId: string;
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   action: ConnectorActionKind;
   status: ConnectorActionResultStatus;
   message: string;
   providerResourceId?: string;
-}
-
-export type BrowserSessionLifecycle =
-  | "unavailable"
-  | "starting"
-  | "active"
-  | "expired"
-  | "closed"
-  | "failed";
-
-export type BrowserSessionSource = "live" | "fixture-preview";
-
-/**
- * Browser/session metadata that is safe to keep in the shell process. It never
- * carries cookies, tokens, screenshots, DOM dumps, page text, clipboard data,
- * localStorage/sessionStorage, or any hidden browser state.
- */
-export interface BrowserSessionState {
-  id: string;
-  source: BrowserSessionSource;
-  lifecycle: BrowserSessionLifecycle;
-  connectorIds: ConnectorId[];
-  startedAt?: string;
-  expiresAt?: string;
-  closedAt?: string;
-  failedAt?: string;
-  reason: string;
-  fixtureOnly: boolean;
 }
 
 export type ConnectorErrorCode =
@@ -422,7 +386,7 @@ export interface ConnectorError {
 }
 
 export interface ConnectorAuthRequest {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   redirectUri?: string;
   /** Authorization callback URL, or the provider-returned code when completing OAuth. */
   callbackUrl?: string;
@@ -431,7 +395,7 @@ export interface ConnectorAuthRequest {
 }
 
 export interface ConnectorAuthResult {
-  connectorId: FirstWaveConnectorId;
+  connectorId: SupportedConnectorId;
   status: ConnectorStatus;
   authorizationUrl?: string;
   account?: ConnectorAccountSummary;
@@ -796,7 +760,7 @@ export interface KnowledgeSearchResponse {
 // The chunk, ingestion, memory, and context records below extend the existing
 // source/memory types so the local-first foundations keep working unchanged.
 // Every new field on an existing interface is optional, so a v1 runtime
-// snapshot still loads. See docs/product/knowledge-lifecycle.md.
+// snapshot still loads; unknown legacy states are normalized at the boundary.
 // ---------------------------------------------------------------------------
 
 /**
@@ -905,7 +869,7 @@ export interface WorkingContext {
 // Connector-source contract.
 //
 // A provider-agnostic ingestion contract: any connector branch (local-files or
-// a future first-wave connector) implements this interface so the knowledge
+// a future supported connector) implements this interface so the knowledge
 // pipeline can ingest its content uniformly. The knowledge package depends on
 // this interface only — never on a connector implementation.
 // ---------------------------------------------------------------------------
@@ -938,15 +902,14 @@ export interface ConnectorSourceCandidate {
 }
 
 /**
- * Implemented by a connector (local-files or any first-wave connector branch).
+ * Implemented by a connector (local-files or any supported connector branch).
  * The knowledge ingestion pipeline iterates `listSources()` and turns each
  * candidate into a `SourceRecord` via the shared ingestion path.
  */
 export interface ConnectorSourceProvider {
   readonly connectorId: ConnectorId;
   listSources():
-    | AsyncIterable<ConnectorSourceCandidate>
-    | ConnectorSourceCandidate[];
+    AsyncIterable<ConnectorSourceCandidate> | ConnectorSourceCandidate[];
 }
 
 // ---------------------------------------------------------------------------

@@ -71,7 +71,7 @@ const BROWSER_ACTION_POLICY: Record<string, BrowserActionPolicy> = {
   "browser.submit": {
     effect: "publish-external",
     riskLevel: "critical",
-    consequence: "Submit a browser form or commit a browser workflow."
+    consequence: "Submit a browser form or commit a browser interaction."
   },
   "browser.download": {
     effect: "local-write",

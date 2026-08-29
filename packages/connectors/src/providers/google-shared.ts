@@ -6,14 +6,14 @@ import type {
   ConnectorPermission,
   ConnectorStatus,
   ConnectorTokenSet,
-  FirstWaveConnectorId
+  SupportedConnectorId
 } from "@fable/protocol";
 
 export const GOOGLE_CONNECTOR_IDS = [
   "google-drive",
   "gmail",
   "google-calendar"
-] as const satisfies readonly FirstWaveConnectorId[];
+] as const satisfies readonly SupportedConnectorId[];
 
 export type GoogleConnectorId = (typeof GOOGLE_CONNECTOR_IDS)[number];
 

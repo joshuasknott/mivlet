@@ -22,12 +22,12 @@ import { checkBudget, loadBudget } from "./budget-check.mjs";
 test("logicalChunkId ignores hashed suffixes and handles real hyphenated Vite names", () => {
   // Basic
   assert.equal(logicalChunkId("index-D_VmwkJJ.js"), "index");
-  assert.equal(logicalChunkId("SchedulesPage-BV4Zsugu.js"), "SchedulesPage");
+  assert.equal(logicalChunkId("SettingsPage-BV4Zsugu.js"), "SettingsPage");
   assert.equal(logicalChunkId("index-tCTFrDkm.css"), "index");
   assert.equal(logicalChunkId("inter-latin-400-normal.woff2"), undefined);
   // Hyphenated vendor (from manualChunks) and tricky hash-with-dash cases seen in builds
   assert.equal(logicalChunkId("react-vendor-DTgtZFgi.js"), "react-vendor");
-  assert.equal(logicalChunkId("SchedulesPage-BD-qQMfd.js"), "SchedulesPage"); // hash portion contains '-'
+  assert.equal(logicalChunkId("SettingsPage-BD-qQMfd.js"), "SettingsPage"); // hash portion contains '-'
   assert.equal(logicalChunkId("ApprovalPanel-BTtwof1a.js"), "ApprovalPanel");
   assert.equal(logicalChunkId("vendor-BSD_XLgc.js"), "vendor");
   assert.equal(
@@ -41,7 +41,7 @@ test("summarizeBundle groups totals and route chunks", async () => {
   const distDir = join(root, "dist", "assets");
   await mkdir(distDir, { recursive: true });
   await writeFile(join(distDir, "index-abc123.js"), "a".repeat(100));
-  await writeFile(join(distDir, "SchedulesPage-def456.js"), "b".repeat(40));
+  await writeFile(join(distDir, "SettingsPage-def456.js"), "b".repeat(40));
   await writeFile(join(distDir, "index-abc123.css"), "c".repeat(20));
 
   const assets = await collectAssets(join(root, "dist"), root);
@@ -50,7 +50,7 @@ test("summarizeBundle groups totals and route chunks", async () => {
   assert.equal(summary.totalJsCss.rawBytes, 160);
   assert.equal(summary.css.rawBytes, 20);
   assert.equal(summary.initialEntryJs.rawBytes, 100);
-  assert.equal(summary.routeChunks.SchedulesPage.rawBytes, 40);
+  assert.equal(summary.routeChunks.SettingsPage.rawBytes, 40);
 });
 
 test("checkBudget passes within ceilings", async () => {
@@ -84,8 +84,8 @@ test("checkBudget fails on material regression", async () => {
       rawBytes: budget.ceilings.initialEntryJs.rawBytes + 1024,
     },
     routeChunks: {
-      SchedulesPage: {
-        rawBytes: budget.ceilings.routeChunks.SchedulesPage.rawBytes + 1024,
+      SettingsPage: {
+        rawBytes: budget.ceilings.routeChunks.SettingsPage.rawBytes + 1024,
       },
     },
   };
@@ -96,7 +96,7 @@ test("checkBudget fails on material regression", async () => {
   );
   assert.ok(
     violations.some(
-      (violation) => violation.label === "routeChunks.SchedulesPage.raw",
+      (violation) => violation.label === "routeChunks.SettingsPage.raw",
     ),
   );
 });
@@ -200,12 +200,12 @@ test("checkBudget fails when any metric exceeds its ceiling by exactly 1 byte", 
     initialEntryJs: { rawBytes: c.initialEntryJs.rawBytes },
     routeChunks: {
       ...baseRoute,
-      SchedulesPage: { rawBytes: c.routeChunks.SchedulesPage.rawBytes + 1 },
+      SettingsPage: { rawBytes: c.routeChunks.SettingsPage.rawBytes + 1 },
     },
   };
   const v2 = checkBudget(overRoute, budget);
   assert.ok(
-    v2.some((v) => v.label === "routeChunks.SchedulesPage.raw"),
+    v2.some((v) => v.label === "routeChunks.SettingsPage.raw"),
     "route +1 must violate",
   );
 });
@@ -274,8 +274,8 @@ test("summarizeBundle filters react-vendor/vendor/index and collects hyphenated 
       gzipBytes: 60,
     },
     {
-      fileName: "SchedulesPage-BD-qQMfd.js",
-      path: "apps/desktop/dist/assets/SchedulesPage-BD-qQMfd.js",
+      fileName: "SettingsPage-BD-qQMfd.js",
+      path: "apps/desktop/dist/assets/SettingsPage-BD-qQMfd.js",
       type: "js",
       bytes: 50,
       gzipBytes: 15,
@@ -310,6 +310,6 @@ test("summarizeBundle filters react-vendor/vendor/index and collects hyphenated 
   );
   assert.ok(!("vendor" in summary.routeChunks), "vendor must be filtered");
   assert.ok(!("index" in summary.routeChunks), "index must be filtered");
-  assert.equal(summary.routeChunks.SchedulesPage.rawBytes, 50);
+  assert.equal(summary.routeChunks.SettingsPage.rawBytes, 50);
   assert.equal(summary.routeChunks.RetiredPage.rawBytes, 10);
 });

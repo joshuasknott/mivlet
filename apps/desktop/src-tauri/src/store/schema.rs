@@ -9,7 +9,51 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 37;
+pub const CURRENT_SCHEMA_VERSION: u32 = 39;
+
+/// Retired orchestration storage is removed from every opened database. The
+/// historical migration steps remain readable only so pre-release databases
+/// can upgrade without guessing ownership or decrypting discarded payloads.
+pub const RETIRED_ORCHESTRATION_STORAGE_CLEANUP: &str = r#"
+DROP TABLE IF EXISTS mission_approval_consumption;
+DROP TABLE IF EXISTS mission_structured_intake_binding;
+DROP TABLE IF EXISTS mission_direct_artifact_source;
+DROP TABLE IF EXISTS mission_artifact_source;
+DROP TABLE IF EXISTS mission_worker_tool_receipt;
+DROP TABLE IF EXISTS mission_worker_output_receipt;
+DROP TABLE IF EXISTS mission_checkpoint_state;
+DROP TABLE IF EXISTS mission_run_event;
+DROP TABLE IF EXISTS mission_run_record;
+DROP TABLE IF EXISTS mission_plan_revision;
+DROP TABLE IF EXISTS mission_plan_record;
+DROP TABLE IF EXISTS mission_record;
+
+DROP TABLE IF EXISTS routine_trigger_cursor;
+DROP TABLE IF EXISTS routine_driver_occurrence;
+DROP TABLE IF EXISTS routine_occurrence;
+DROP TABLE IF EXISTS routine_trigger;
+DROP TABLE IF EXISTS routine_version;
+DROP TABLE IF EXISTS routine_migration_quarantine;
+DROP TABLE IF EXISTS routine_migration_snapshot;
+DROP TABLE IF EXISTS routine_migration_source;
+DROP TABLE IF EXISTS routine_migration_batch;
+DROP TABLE IF EXISTS routine_scheduler_authority;
+DROP TABLE IF EXISTS routine_record;
+
+DROP TABLE IF EXISTS scheduler_queue_entry;
+DROP TABLE IF EXISTS scheduled_job;
+DROP TABLE IF EXISTS workflow_run;
+DROP TABLE IF EXISTS workflow_definition;
+DROP TABLE IF EXISTS schedule;
+
+DROP TABLE IF EXISTS artifact_handoff;
+DROP TABLE IF EXISTS artifact_review;
+DROP TABLE IF EXISTS artifact_version;
+DROP TABLE IF EXISTS artifact_legacy_unowned;
+DROP TABLE IF EXISTS artifact;
+DROP TABLE IF EXISTS goal;
+DROP TABLE IF EXISTS run_state;
+"#;
 
 /// Forward schema step `v34 -> v35`: adds an encrypted, owner-qualified
 /// at-most-once consumption ledger for approved Mission effects.
@@ -851,26 +895,6 @@ CREATE INDEX IF NOT EXISTS idx_thread_workspace ON thread(workspace_id, project_
 CREATE INDEX IF NOT EXISTS idx_project_workspace ON project(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_project_owner ON project(workspace_id, owner_member_id, lifecycle, updated_at);
 
-CREATE TABLE IF NOT EXISTS goal (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  project_id TEXT REFERENCES project(id) ON DELETE SET NULL,
-  authority TEXT NOT NULL DEFAULT 'local',
-  visibility TEXT NOT NULL DEFAULT 'member-private',
-  owner_member_id TEXT NOT NULL,
-  created_by_internal_user_id TEXT NOT NULL,
-  schema_version INTEGER NOT NULL DEFAULT 1,
-  revision INTEGER NOT NULL DEFAULT 1,
-  lifecycle TEXT NOT NULL DEFAULT 'active',
-  title_fingerprint TEXT NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_goal_owner
-  ON goal(workspace_id, owner_member_id, project_id, lifecycle, updated_at);
-
 CREATE TABLE IF NOT EXISTS message (
   id TEXT PRIMARY KEY,
   workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
@@ -1010,120 +1034,6 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_event(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_category ON audit_event(category);
 CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_event(status);
 CREATE INDEX IF NOT EXISTS idx_audit_correlation ON audit_event(correlation_id);
-
-CREATE TABLE IF NOT EXISTS artifact (
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  owner_subject TEXT NOT NULL,
-  authority TEXT NOT NULL CHECK(authority='local'),
-  visibility TEXT NOT NULL CHECK(visibility='member-private'),
-  owner_member_id TEXT,
-  owner_internal_user_id TEXT,
-  id TEXT NOT NULL,
-  run_id TEXT REFERENCES run(id) ON DELETE CASCADE,
-  thread_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
-  source_message_id TEXT,
-  kind TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'draft',
-  revision INTEGER NOT NULL DEFAULT 1,
-  current_version_id TEXT NOT NULL,
-  title_fingerprint TEXT NOT NULL,
-  content_fingerprint TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY(workspace_id,owner_subject,id),
-  CHECK ((owner_member_id IS NOT NULL) != (owner_internal_user_id IS NOT NULL))
-);
-CREATE INDEX IF NOT EXISTS idx_artifact_run ON artifact(workspace_id,owner_subject,run_id);
-CREATE INDEX IF NOT EXISTS idx_artifact_thread ON artifact(workspace_id,owner_subject,thread_id,created_at);
-
-CREATE TABLE IF NOT EXISTS artifact_version (
-  workspace_id TEXT NOT NULL,
-  owner_subject TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  status TEXT NOT NULL DEFAULT 'available',
-  content_fingerprint TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY(workspace_id,owner_subject,id),
-  UNIQUE(workspace_id,owner_subject,artifact_id,id),
-  UNIQUE(workspace_id,owner_subject,artifact_id,version),
-  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
-    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE
-);
-CREATE INDEX IF NOT EXISTS idx_artifact_version_history
-  ON artifact_version(workspace_id,owner_subject,artifact_id,version);
-
-CREATE TABLE IF NOT EXISTS artifact_review (
-  workspace_id TEXT NOT NULL,
-  owner_subject TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  id TEXT NOT NULL,
-  version_id TEXT NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('requested','changes-requested','approved')),
-  requested_by_internal_user_id TEXT NOT NULL,
-  reviewer_member_id TEXT,
-  requested_at TEXT NOT NULL,
-  resolved_at TEXT,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY(workspace_id,owner_subject,id),
-  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
-    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
-  FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
-    REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_review_open
-  ON artifact_review(workspace_id,owner_subject,artifact_id) WHERE status='requested';
-CREATE INDEX IF NOT EXISTS idx_artifact_review_history
-  ON artifact_review(workspace_id,owner_subject,artifact_id,requested_at,id);
-
-CREATE TABLE IF NOT EXISTS artifact_handoff (
-  workspace_id TEXT NOT NULL,
-  owner_subject TEXT NOT NULL,
-  artifact_id TEXT NOT NULL,
-  id TEXT NOT NULL,
-  version_id TEXT NOT NULL,
-  source_thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE RESTRICT,
-  source_project_id TEXT REFERENCES project(id) ON DELETE RESTRICT,
-  target_project_id TEXT NOT NULL REFERENCES project(id) ON DELETE RESTRICT,
-  status TEXT NOT NULL CHECK(status IN ('proposed','accepted')),
-  revision INTEGER NOT NULL CHECK(revision >= 1),
-  proposed_by_internal_user_id TEXT NOT NULL,
-  resolved_by_internal_user_id TEXT,
-  proposed_at TEXT NOT NULL,
-  resolved_at TEXT,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY(workspace_id,owner_subject,id),
-  FOREIGN KEY(workspace_id,owner_subject,artifact_id)
-    REFERENCES artifact(workspace_id,owner_subject,id) ON DELETE CASCADE,
-  FOREIGN KEY(workspace_id,owner_subject,artifact_id,version_id)
-    REFERENCES artifact_version(workspace_id,owner_subject,artifact_id,id) ON DELETE RESTRICT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_artifact_handoff_exact
-  ON artifact_handoff(workspace_id,owner_subject,artifact_id,version_id,target_project_id);
-CREATE INDEX IF NOT EXISTS idx_artifact_handoff_target
-  ON artifact_handoff(workspace_id,owner_subject,target_project_id,status,resolved_at,id);
-
-CREATE TABLE IF NOT EXISTS artifact_legacy_unowned (
-  id TEXT PRIMARY KEY,
-  run_id TEXT,
-  kind TEXT NOT NULL,
-  content_fingerprint TEXT NOT NULL,
-  size_bytes INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  quarantined_at TEXT NOT NULL,
-  reason TEXT NOT NULL DEFAULT 'legacy artifact had no authenticated owner'
-);
 
 -- connectors (non-secret metadata only)
 CREATE TABLE IF NOT EXISTS connector_account (
@@ -1296,8 +1206,10 @@ CREATE TABLE IF NOT EXISTS connection_legacy_unattributed (
   PRIMARY KEY(workspace_id,connector_id)
 );
 
+-- Provider connections belong to the stable local-install principal. They must
+-- not depend on an optional hosted-account mirror being present.
 CREATE TABLE IF NOT EXISTS backend_connection (
-  internal_user_id TEXT NOT NULL REFERENCES fable_internal_user_mirror(internal_user_id) ON DELETE CASCADE,
+  internal_user_id TEXT NOT NULL,
   provider_id TEXT NOT NULL,
   connected_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
@@ -1306,7 +1218,7 @@ CREATE TABLE IF NOT EXISTS backend_connection (
 CREATE INDEX IF NOT EXISTS idx_backend_connection_user
   ON backend_connection(internal_user_id, updated_at);
 
--- Bounded, encrypted execution observations for account-owned native provider
+-- Bounded, encrypted execution observations for install-owned native provider
 -- routes. These rows are evidence only and never grant route or credential
 -- authority. Migration creates no observations.
 CREATE TABLE IF NOT EXISTS provider_route_observation (
@@ -1441,8 +1353,7 @@ CREATE INDEX IF NOT EXISTS idx_pinned_context_scope
   ON pinned_context(workspace_id, owner_subject, scope_level, project_id, thread_id);
 
 -- Minimal deletion/forget guards. They contain no user content and prevent a
--- routine re-import or sync from silently resurrecting an explicitly removed
--- record.
+-- later import or sync from silently resurrecting an explicitly removed record.
 CREATE TABLE IF NOT EXISTS knowledge_tombstone (
   workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
   owner_subject TEXT NOT NULL,
@@ -1472,57 +1383,6 @@ CREATE TABLE IF NOT EXISTS private_context_legacy_unowned (
   PRIMARY KEY (record_type, workspace_id, record_id)
 );
 
--- scheduler (stable surface for Goal 8)
-CREATE TABLE IF NOT EXISTS schedule (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
-  weekday TEXT NOT NULL,
-  time TEXT NOT NULL,
-  enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_schedule_enabled ON schedule(enabled);
-CREATE INDEX IF NOT EXISTS idx_schedule_workspace ON schedule(workspace_id, project_id, enabled);
-
--- Versioned workflow definitions and run journal. Rich user-authored content is
--- encrypted; only ownership, stable ids, versions, status, and timestamps are
--- queryable. These tables are the hand-off surface for the schedule-SQLite
--- branch.
-CREATE TABLE IF NOT EXISTS workflow_definition (
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
-  id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY (workspace_id, id, version)
-);
-CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace
-  ON workflow_definition(workspace_id, project_id, updated_at);
-
-CREATE TABLE IF NOT EXISTS workflow_run (
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  project_id TEXT REFERENCES project(id) ON DELETE CASCADE,
-  id TEXT NOT NULL,
-  definition_id TEXT NOT NULL,
-  definition_version INTEGER NOT NULL,
-  status TEXT NOT NULL,
-  started_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY (workspace_id, id)
-);
-CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace
-  ON workflow_run(workspace_id, project_id, updated_at);
-CREATE INDEX IF NOT EXISTS idx_workflow_run_definition
-  ON workflow_run(workspace_id, definition_id, definition_version);
-
 -- model/provider config (no secrets)
 CREATE TABLE IF NOT EXISTS model_config (
   provider_id TEXT NOT NULL,
@@ -1533,7 +1393,7 @@ CREATE TABLE IF NOT EXISTS model_config (
   PRIMARY KEY (provider_id, model_id)
 );
 
--- drafts + resumable run state
+-- drafts
 CREATE TABLE IF NOT EXISTS draft (
   workspace_id TEXT NOT NULL DEFAULT 'default' REFERENCES workspace(id) ON DELETE CASCADE,
   thread_id TEXT NOT NULL DEFAULT '',
@@ -1542,13 +1402,6 @@ CREATE TABLE IF NOT EXISTS draft (
   payload BLOB NOT NULL,
   payload_nonce BLOB NOT NULL,
   PRIMARY KEY (workspace_id, thread_id, id)
-);
-
-CREATE TABLE IF NOT EXISTS run_state (
-  id TEXT PRIMARY KEY,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  updated_at TEXT NOT NULL
 );
 
 -- connector cache (searchable, workspace-isolated, secret-free)
@@ -1580,6 +1433,16 @@ CREATE INDEX IF NOT EXISTS idx_connector_cache_search ON connector_cache(workspa
 -- the plaintext search column so a LIKE scan touches only plaintext rows.
 CREATE INDEX IF NOT EXISTS idx_connector_cache_search_text ON connector_cache(workspace_id, disabled, search_text);
 
+-- Records provider items removed from the local cache so a later sync cannot
+-- silently resurrect them.
+CREATE TABLE IF NOT EXISTS connector_cache_tombstone (
+  workspace_id TEXT NOT NULL,
+  connector_id TEXT NOT NULL,
+  provider_item_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, connector_id, provider_item_id)
+);
+
 -- connector cache settings (per-workspace + per-connector)
 CREATE TABLE IF NOT EXISTS connector_cache_settings (
   workspace_id TEXT NOT NULL,
@@ -1592,89 +1455,6 @@ CREATE TABLE IF NOT EXISTS connector_cache_settings (
   payload_nonce BLOB NOT NULL,
   PRIMARY KEY (workspace_id, connector_id)
 );
-
--- scheduler store: scheduled jobs (the durable automation engine record).
--- Encrypted, workspace-isolated; query columns are non-secret. See
--- `repos::scheduled_job`.
-CREATE TABLE IF NOT EXISTS scheduled_job (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  status TEXT NOT NULL DEFAULT 'active',
-  workflow_definition_id TEXT NOT NULL DEFAULT '',
-  trigger_kind TEXT NOT NULL DEFAULT '',
-  missed_run_policy TEXT NOT NULL DEFAULT 'skip',
-  schema_version INTEGER NOT NULL DEFAULT 1,
-  next_run_at TEXT NOT NULL DEFAULT '',
-  last_run_at TEXT NOT NULL DEFAULT '',
-  last_run_id TEXT NOT NULL DEFAULT '',
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_scheduled_job_workspace ON scheduled_job(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_scheduled_job_status ON scheduled_job(status);
-CREATE INDEX IF NOT EXISTS idx_scheduled_job_definition ON scheduled_job(workflow_definition_id);
-
--- scheduler store: the durable queue (runtime authority for entry state).
--- Encrypted, workspace-isolated; the encrypted payload holds the attempt
--- history + frozen execution route snapshot. See `repos::scheduler_queue`.
-CREATE TABLE IF NOT EXISTS scheduler_queue_entry (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  job_id TEXT NOT NULL REFERENCES scheduled_job(id) ON DELETE CASCADE,
-  state TEXT NOT NULL DEFAULT 'queued',
-  lease_holder TEXT NOT NULL DEFAULT '',
-  lease_expires_at TEXT NOT NULL DEFAULT '',
-  lease_token TEXT NOT NULL DEFAULT '',
-  deduplication_key TEXT NOT NULL,
-  available_at TEXT NOT NULL DEFAULT '',
-  last_error TEXT NOT NULL DEFAULT '',
-  scheduled_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  UNIQUE(workspace_id, deduplication_key)
-);
-CREATE INDEX IF NOT EXISTS idx_scheduler_queue_workspace ON scheduler_queue_entry(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_scheduler_queue_job ON scheduler_queue_entry(job_id);
-CREATE INDEX IF NOT EXISTS idx_scheduler_queue_state ON scheduler_queue_entry(workspace_id, state);
-CREATE INDEX IF NOT EXISTS idx_scheduler_queue_dedup ON scheduler_queue_entry(workspace_id, deduplication_key);
-
--- workflow definitions (versioned, workspace + version scoped). The full step
--- list lives in the encrypted payload. See `repos::workflow`.
-CREATE TABLE IF NOT EXISTS workflow_definition (
-  workspace_id TEXT NOT NULL,
-  id TEXT NOT NULL,
-  version INTEGER NOT NULL,
-  schema_version INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL,
-  PRIMARY KEY (workspace_id, id, version)
-);
-CREATE INDEX IF NOT EXISTS idx_workflow_definition_workspace ON workflow_definition(workspace_id, id);
-
--- workflow-run journal (workspace scoped). Step records, inputs, and the
--- idempotency key live in the encrypted payload. See `repos::workflow`.
-CREATE TABLE IF NOT EXISTS workflow_run (
-  id TEXT PRIMARY KEY,
-  workspace_id TEXT NOT NULL,
-  definition_id TEXT NOT NULL,
-  definition_version INTEGER NOT NULL DEFAULT 0,
-  status TEXT NOT NULL,
-  trigger TEXT NOT NULL,
-  scheduled_job_id TEXT NOT NULL DEFAULT '',
-  started_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  finished_at TEXT NOT NULL DEFAULT '',
-  payload BLOB NOT NULL,
-  payload_nonce BLOB NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_workflow_run_workspace ON workflow_run(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_run_definition ON workflow_run(workspace_id, definition_id);
-CREATE INDEX IF NOT EXISTS idx_workflow_run_status ON workflow_run(status);
 
 -- Local Fable control-plane mirror. Convex remains canonical; these records
 -- only support display, offline authorization facts, and replay-safe sync.
@@ -1780,6 +1560,21 @@ CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
 
+-- migration bookkeeping (idempotency + diagnostics)
+CREATE TABLE IF NOT EXISTS migration_log (
+  source TEXT PRIMARY KEY,
+  checksum TEXT NOT NULL,
+  status TEXT NOT NULL,
+  migrated_at TEXT NOT NULL,
+  diagnostics BLOB NOT NULL,
+  diagnostics_nonce BLOB NOT NULL
+);
+"#;
+
+/// Historical orchestration DDL retained only as a migration-cleanup fixture.
+/// Production schema initialization never executes this batch.
+#[cfg(test)]
+pub const LEGACY_ORCHESTRATION_SCHEMA_V37: &str = r#"
 -- Mission-generated plans are member-private, bounded snapshots. Mission and
 -- plan rows point to one selected immutable revision; free-text objectives,
 -- constraints, steps, and acceptance criteria remain encrypted.
