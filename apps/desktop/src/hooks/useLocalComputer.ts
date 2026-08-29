@@ -1,5 +1,6 @@
 import type {
   LocalBrowserSnapshot,
+  LocalComputerApplication,
   LocalComputerController,
   LocalComputerTarget,
 } from "@fable/protocol";
@@ -7,6 +8,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
+  launchRuntimeLocalComputerApplication,
   listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
@@ -75,8 +77,9 @@ export function useLocalComputer({
   });
   const navigate = useMutation({
     mutationFn: async (url: string) => {
-      if (!target) throw new Error("The local browser is unavailable.");
-      return navigateRuntimeLocalBrowser({ ...target, url });
+      const snapshot = browser.data;
+      if (!target || !snapshot) throw new Error("The local browser is unavailable.");
+      return navigateRuntimeLocalBrowser({ ...target, url, expectedGeneration: snapshot.generation });
     },
     onSuccess: setBrowserSnapshot,
   });
@@ -128,6 +131,18 @@ export function useLocalComputer({
     },
     onSuccess: setBrowserSnapshot,
   });
+  const application = useMutation({
+    mutationFn: async (next: LocalComputerApplication) => {
+      const snapshot = browser.data;
+      if (!target || !snapshot) throw new Error("The local computer is unavailable.");
+      return launchRuntimeLocalComputerApplication({
+        ...target,
+        application: next,
+        expectedGeneration: snapshot.generation,
+      });
+    },
+    onSuccess: setBrowserSnapshot,
+  });
   const recoveryError = computer.error instanceof Error
     ? computer.error.message
     : provision.error instanceof Error
@@ -149,7 +164,7 @@ export function useLocalComputer({
     filePreviewError: filePreviewMatchesScope && filePreview.error instanceof Error ? filePreview.error.message : null,
     loading: computer.isLoading,
     provisioning: provision.isPending,
-    browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending || history.isPending,
+    browserBusy: navigate.isPending || controller.isPending || pointer.isPending || key.isPending || history.isPending || application.isPending,
     recoveryNeeded: recoveryError !== null,
     error: recoveryError
       ?? (navigate.error instanceof Error
@@ -162,7 +177,9 @@ export function useLocalComputer({
               ? key.error.message
               : history.error instanceof Error
                 ? history.error.message
-                : null),
+                : application.error instanceof Error
+                  ? application.error.message
+                  : null),
     provision: () => provision.mutateAsync(),
     navigate: (url: string) => navigate.mutateAsync(url),
     refresh: () => browser.refetch().then((result) => result.data ?? null),
@@ -180,5 +197,6 @@ export function useLocalComputer({
     key: (value: string) => key.mutateAsync(value),
     goBack: () => history.mutateAsync("back"),
     goForward: () => history.mutateAsync("forward"),
+    launchApplication: (next: LocalComputerApplication) => application.mutateAsync(next),
   };
 }

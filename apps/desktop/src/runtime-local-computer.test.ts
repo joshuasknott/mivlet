@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
+  launchRuntimeLocalComputerApplication,
   listRuntimeLocalComputerFiles,
   loadRuntimeLocalComputer,
   navigateRuntimeLocalBrowser,
@@ -38,6 +39,7 @@ describe("local computer runtime boundary", () => {
     await expect(listRuntimeLocalComputerFiles(target)).resolves.toBeNull();
     await expect(previewRuntimeLocalComputerFile({ ...target, path: "notes/plan.md" })).resolves.toBeNull();
     await expect(snapshotRuntimeLocalBrowser(target)).resolves.toBeNull();
+    await expect(launchRuntimeLocalComputerApplication({ ...target, application: "terminal", expectedGeneration: 3 })).resolves.toBeNull();
     await expect(historyRuntimeLocalBrowser({ ...target, expectedGeneration: 3, direction: "back" })).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
@@ -55,7 +57,7 @@ describe("local computer runtime boundary", () => {
     await listRuntimeLocalComputerFiles(target);
     await previewRuntimeLocalComputerFile({ ...target, path: "notes/plan.md" });
     await snapshotRuntimeLocalBrowser(target);
-    await navigateRuntimeLocalBrowser({ ...target, url: "https://example.com/" });
+    await navigateRuntimeLocalBrowser({ ...target, url: "https://example.com/", expectedGeneration: 4 });
     await setRuntimeLocalComputerController({
       ...target,
       controller: "human",
@@ -70,6 +72,7 @@ describe("local computer runtime boundary", () => {
     });
     await keyRuntimeLocalBrowser({ ...target, expectedGeneration: 4, key: "Enter" });
     await historyRuntimeLocalBrowser({ ...target, expectedGeneration: 4, direction: "back" });
+    await launchRuntimeLocalComputerApplication({ ...target, application: "terminal", expectedGeneration: 4 });
 
     expect(mocks.invoke.mock.calls).toEqual([
       ["local_computer_status", target],
@@ -77,11 +80,12 @@ describe("local computer runtime boundary", () => {
       ["local_computer_files", { target }],
       ["local_computer_file_preview", { request: { ...target, path: "notes/plan.md" } }],
       ["local_browser_snapshot", { target }],
-      ["local_browser_navigate", { request: { ...target, url: "https://example.com/" } }],
+      ["local_browser_navigate", { request: { ...target, url: "https://example.com/", expectedGeneration: 4 } }],
       ["local_computer_set_controller", { request: { ...target, controller: "human", expectedGeneration: 3 } }],
       ["local_browser_pointer", { request: { ...target, action: "click", expectedGeneration: 4, x: 320, y: 240 } }],
       ["local_browser_key", { request: { ...target, expectedGeneration: 4, key: "Enter" } }],
       ["local_browser_history", { request: { ...target, expectedGeneration: 4, direction: "back" } }],
+      ["local_computer_launch_app", { request: { ...target, application: "terminal", expectedGeneration: 4 } }],
     ]);
     const serialized = JSON.stringify(mocks.invoke.mock.calls);
     expect(serialized).not.toContain("browser-profile");

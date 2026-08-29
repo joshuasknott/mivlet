@@ -8,6 +8,7 @@ import type {
   LocalComputerFilePreview,
   LocalComputerFileRequest,
   LocalComputerFilesSnapshot,
+  LocalComputerLaunchRequest,
   LocalComputerSnapshot,
   LocalComputerTarget,
 } from "@fable/protocol";
@@ -37,6 +38,9 @@ export interface LocalComputerRuntimePort {
   key(request: LocalBrowserKeyRequest): Promise<LocalBrowserSnapshot | null>;
   history(
     request: LocalBrowserHistoryRequest,
+  ): Promise<LocalBrowserSnapshot | null>;
+  launchApplication(
+    request: LocalComputerLaunchRequest,
   ): Promise<LocalBrowserSnapshot | null>;
 }
 
@@ -85,6 +89,10 @@ function createPort(adapter: RuntimeAdapter): LocalComputerRuntimePort {
       native
         ? invoke("local_browser_history", { request })
         : Promise.resolve(null),
+    launchApplication: (request) =>
+      native
+        ? invoke("local_computer_launch_app", { request })
+        : Promise.resolve(null),
   };
 }
 
@@ -123,3 +131,6 @@ export const keyRuntimeLocalBrowser = (request: LocalBrowserKeyRequest) =>
 export const historyRuntimeLocalBrowser = (
   request: LocalBrowserHistoryRequest,
 ) => port().history(request);
+export const launchRuntimeLocalComputerApplication = (
+  request: LocalComputerLaunchRequest,
+) => port().launchApplication(request);

@@ -12,8 +12,8 @@
 //!     `once`/`session`/`rule` decision is honored; a `deny` (or missing/reshaped
 //!     approval) fails closed with `approval-required` and performs nothing.
 //!   - File paths are confined to the teammate's local-computer workspace (no
-//!     `..` escapes or absolute escapes). Host shell execution fails closed;
-//!     process tools require an isolated computer backend.
+//!     `..` escapes or absolute escapes). Process tools execute only inside the
+//!     agent's Docker/WSL computer and never through the user's host shell.
 //!   - Tool names are a closed set; anything else fails closed.
 
 use std::net::{IpAddr, Ipv6Addr};
@@ -188,7 +188,9 @@ pub(crate) fn execute_tool_outcome(
     match tool.as_str() {
         "read-file" => ToolOutcome::Done(run_read_file(&arguments, workspace_root)),
         "write-file" => ToolOutcome::Done(run_write_file(&arguments, workspace_root)),
-        "run-shell" => ToolOutcome::Done(run_shell(&arguments, workspace_root)),
+        "run-shell" => ToolOutcome::Done(Err(
+            "Terminal commands require the asynchronous isolated-computer boundary.".into(),
+        )),
         "web-fetch" => match web_fetch_url_from_args(&arguments) {
             Ok(url) => ToolOutcome::NeedsWebFetch { url },
             Err(error) => ToolOutcome::Done(Err(error)),
@@ -754,92 +756,6 @@ pub(crate) fn run_write_file(
     })
 }
 
-/// Drain a child stream to EOF while retaining at most `cap` bytes. Draining
-/// beyond the retained prefix is required so a verbose child cannot block on a
-/// full pipe. The caller passes `max + 1` so truncation remains detectable.
-fn drain_stream(mut stream: impl std::io::Read, cap: usize) -> std::io::Result<Vec<u8>> {
-    let mut retained = Vec::with_capacity(cap);
-    let mut chunk = [0_u8; 16 * 1024];
-    loop {
-        let read = stream.read(&mut chunk)?;
-        if read == 0 {
-            break;
-        }
-        let remaining = cap.saturating_sub(retained.len());
-        if remaining > 0 {
-            retained.extend_from_slice(&chunk[..read.min(remaining)]);
-        }
-    }
-    Ok(retained)
-}
-
-pub(crate) fn run_shell(
-    arguments: &serde_json::Value,
-    workspace_root: &Path,
-) -> Result<ToolResult, String> {
-    let command = require_string_argument(arguments, "command")?;
-    if command.trim().is_empty() {
-        return Err("Tool argument \"command\" must be a non-empty string.".to_string());
-    }
-    // Run via the platform shell in the workspace root. Output is captured.
-    #[cfg(target_os = "windows")]
-    let (program, flag) = ("cmd", "/C");
-    #[cfg(not(target_os = "windows"))]
-    let (program, flag) = ("sh", "-c");
-
-    let mut child = std::process::Command::new(program)
-        .arg(flag)
-        .arg(&command)
-        .current_dir(workspace_root)
-        // Pipe stdout/stderr so we can read them incrementally and bound them,
-        // rather than buffering the entire output to completion in memory.
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
-        .map_err(|err| err.to_string())?;
-
-    // Drain stdout and stderr concurrently while the child runs. Waiting before
-    // draining can deadlock once either OS pipe buffer fills.
-    let cap = MAX_TOOL_OUTPUT_BYTES + 1;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "Shell stdout pipe was unavailable.".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "Shell stderr pipe was unavailable.".to_string())?;
-    let stdout_reader = std::thread::spawn(move || drain_stream(stdout, cap));
-    let stderr_reader = std::thread::spawn(move || drain_stream(stderr, cap));
-    let status = child.wait().map_err(|err| err.to_string())?;
-    let stdout_bytes = stdout_reader
-        .join()
-        .map_err(|_| "Shell stdout reader panicked.".to_string())?
-        .map_err(|err| err.to_string())?;
-    let stderr_bytes = stderr_reader
-        .join()
-        .map_err(|_| "Shell stderr reader panicked.".to_string())?
-        .map_err(|err| err.to_string())?;
-
-    let stdout = bounded_output(&stdout_bytes, MAX_TOOL_OUTPUT_BYTES);
-    let stderr = bounded_output(&stderr_bytes, MAX_TOOL_OUTPUT_BYTES);
-    if !status.success() {
-        return Err(format!(
-            "Shell command failed (exit code {}): {}",
-            status.code().unwrap_or(-1),
-            if stderr.trim().is_empty() {
-                stdout.trim()
-            } else {
-                &stderr
-            }
-        ));
-    }
-    Ok(ToolResult {
-        ok: true,
-        output: stdout,
-    })
-}
-
 /// The outcome shape the pure web-fetch layer returns to the async command.
 /// Keeping it pure (no reqwest) lets the command compose it after the GET, and
 /// lets tests pin the 2xx/non-2xx/transport contract without a live socket —
@@ -1030,22 +946,6 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
-    if tool == "run-shell" {
-        let error = "Local terminal execution is off until an isolated container or VM backend is available. Set up the optional cloud computer to run commands safely.".to_string();
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: "blocked",
-                error_code: "isolation-unavailable",
-                message: &error,
-            },
-            None,
-        );
-        return Err(error);
-    }
     if let Err(error) = verify_and_consume_execution_approval(
         &execution_approvals_path(&app)?,
         &request.approval.request,
@@ -1064,6 +964,52 @@ pub async fn execute_tool_call(
             None,
         );
         return Err(error);
+    }
+    if tool == "run-shell" {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "The isolated terminal requires an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "The isolated terminal requires an active teammate.".to_string())?;
+        let command = require_string_argument(&arguments, "command")?;
+        let result = local_computers
+            .inner()
+            .clone()
+            .run_shell_for_agent(workspace_id, agent_id, command)
+            .await
+            .inspect_err(|error| {
+                audit_tool_outcome(
+                    ToolOutcomeAudit {
+                        tool: &tool,
+                        request_id: &request_id,
+                        mode,
+                        risk,
+                        status: "failed",
+                        error_code: "isolated-terminal",
+                        message: error,
+                    },
+                    None,
+                );
+            })?;
+        let ok = result.exit_code == 0;
+        let output = serde_json::to_string(&result)
+            .map_err(|_| "Fable could not encode the isolated terminal result.".to_string())?;
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: if ok { "ok" } else { "failed" },
+                error_code: if ok { "" } else { "process-exit" },
+                message: "run-shell executed in the teammate container",
+            },
+            None,
+        );
+        return Ok(ToolResult { ok, output });
     }
     if tool == "local-browser" {
         let workspace_id = request

@@ -16,21 +16,30 @@ export type LocalComputerController = "agent" | "human";
 
 export type LocalComputerCapability =
   | "persistent-files"
+  | "persistent-home"
+  | "desktop-observe"
+  | "desktop-control"
   | "browser-observe"
-  | "browser-control";
+  | "browser-control"
+  | "terminal"
+  | "file-manager"
+  | "process-execution";
+
+export type LocalComputerApplication = "browser" | "files" | "terminal";
 
 export interface LocalComputerSnapshot {
   computerId: string;
   workspaceId: string;
   agentId: string;
   locality: "local";
-  backend: "native-browser";
-  isolation: "browser-sandbox";
+  backend: "docker";
+  isolation: "linux-container";
   lifecycle: LocalComputerLifecycle;
   browserAvailable: boolean;
   browserActive: boolean;
   controller: LocalComputerController;
   generation: number;
+  leaseExpiresAt?: string;
   capabilities: readonly LocalComputerCapability[];
   browserProduct?: string;
   message?: string;
@@ -92,6 +101,7 @@ export interface LocalBrowserSnapshot {
   canGoForward: boolean;
   controller: LocalComputerController;
   generation: number;
+  leaseExpiresAt?: string;
   updatedAt: string;
 }
 
@@ -102,6 +112,12 @@ export interface LocalComputerTarget {
 
 export interface LocalBrowserNavigateRequest extends LocalComputerTarget {
   url: string;
+  expectedGeneration: number;
+}
+
+export interface LocalComputerLaunchRequest extends LocalComputerTarget {
+  application: LocalComputerApplication;
+  expectedGeneration: number;
 }
 
 export interface LocalComputerControlRequest extends LocalComputerTarget {

@@ -1,0 +1,18 @@
+#!/bin/bash
+set -euo pipefail
+
+export DISPLAY=:99
+export HOME=/home/fable
+
+rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
+Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >/tmp/fable-xvfb.log 2>&1 &
+
+for _ in $(seq 1 60); do
+  if xdpyinfo -display :99 >/dev/null 2>&1; then
+    exec dbus-run-session -- /usr/local/bin/fable-session
+  fi
+  sleep 0.25
+done
+
+echo "Fable desktop display did not start." >&2
+exit 1

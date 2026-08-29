@@ -36,6 +36,7 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
+    "resources": ["resources/local-computer/**/*"],
     "icon": [
       "icons/icon.ico"
     ]

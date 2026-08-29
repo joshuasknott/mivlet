@@ -178,6 +178,7 @@ pub fn run() {
             local_computer::local_browser_pointer,
             local_computer::local_browser_key,
             local_computer::local_browser_history,
+            local_computer::local_computer_launch_app,
             acp_process::spawn_acp_process,
             acp_process::write_acp_frame,
             acp_process::close_acp_process,

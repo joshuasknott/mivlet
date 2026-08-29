@@ -626,6 +626,7 @@ export function ChatWorkspace() {
             browserUrl: localComputer.snapshot?.currentUrl,
             browserTitle: localComputer.snapshot?.title,
             generation: localComputer.snapshot?.generation ?? 0,
+            leaseExpiresAt: localComputer.snapshot?.leaseExpiresAt,
             viewport: localComputer.snapshot?.viewport,
             onProvision: localComputer.provision,
             onOpenBrowser: localComputer.navigate,
@@ -639,7 +640,8 @@ export function ChatWorkspace() {
             onReturnControl: localComputer.returnControl,
             onClick: localComputer.click,
             onScroll: localComputer.scroll,
-            onKey: localComputer.key
+            onKey: localComputer.key,
+            onLaunchApplication: localComputer.launchApplication
           }}
           hostedComputer={{
             available: hostedComputer.available,

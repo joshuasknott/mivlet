@@ -195,7 +195,7 @@ describe("hosted computer shell execution", () => {
       queueApproval
     });
 
-    await expect(executor(sourceApproval, JSON.stringify({ command: "pwd" }))).resolves.toBe("/workspace");
+    await expect(executor(sourceApproval, JSON.stringify({ command: "pwd", location: "hosted" }))).resolves.toBe("/workspace");
     expect(gate.waitForDecision).toHaveBeenNthCalledWith(1, sourceApproval);
     expect(gate.waitForDecision).toHaveBeenNthCalledWith(2, cloudApproval);
     expect(queueApproval).toHaveBeenCalledWith(
@@ -215,7 +215,7 @@ describe("hosted computer shell execution", () => {
 describe("local computer tool isolation", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("never falls back to the user's host shell", async () => {
+  it("routes approved shell work into the active teammate container", async () => {
     const shellApproval: ApprovalRequest = {
       id: "native-local-shell-blocked",
       service: "openai",
@@ -233,11 +233,18 @@ describe("local computer tool isolation", () => {
       workspaceId: "workspace-local",
       localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
     });
+    runtime.executeTool.mockResolvedValue({ ok: true, output: "isolated\n" });
 
     await expect(executor(shellApproval, JSON.stringify({ command: "pwd" })))
-      .rejects.toThrow(/container or VM/i);
-    expect(gate.waitForDecision).not.toHaveBeenCalled();
-    expect(runtime.executeTool).not.toHaveBeenCalled();
+      .resolves.toBe("isolated\n");
+    expect(gate.waitForDecision).toHaveBeenCalledWith(shellApproval);
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "run-shell",
+      workspaceId: "workspace-local",
+      agentId: "agent-research",
+      arguments: { command: "pwd" }
+    }));
+    expect(runtime.launchHosted).not.toHaveBeenCalled();
   });
 
   it("binds file tools to the active teammate scope", async () => {

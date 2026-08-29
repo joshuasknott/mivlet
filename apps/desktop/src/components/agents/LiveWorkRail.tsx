@@ -9,7 +9,7 @@ import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type WheelEvent } from "react";
-import type { LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
+import type { LocalComputerApplication, LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 export function LiveWorkRail({
@@ -46,6 +46,7 @@ export function LiveWorkRail({
     browserUrl?: string;
     browserTitle?: string;
     generation: number;
+    leaseExpiresAt?: string;
     viewport?: { width: number; height: number };
     onProvision: () => Promise<unknown>;
     onOpenBrowser: (url: string) => Promise<unknown>;
@@ -60,6 +61,7 @@ export function LiveWorkRail({
     onClick: (x: number, y: number) => Promise<unknown>;
     onScroll: (x: number, y: number, deltaY: number) => Promise<unknown>;
     onKey: (key: string) => Promise<unknown>;
+    onLaunchApplication: (application: LocalComputerApplication) => Promise<unknown>;
   };
   hostedComputer: {
     available: boolean;
@@ -101,6 +103,13 @@ export function LiveWorkRail({
     void (async () => {
       if (localComputer.controller !== "human") await localComputer.onTakeControl();
       await localComputer.onOpenBrowser(localBrowserUrl);
+      setScreenOpen(true);
+    })().catch(() => undefined);
+  };
+  const openLocalApplication = (application: LocalComputerApplication) => {
+    void (async () => {
+      if (localComputer.controller !== "human") await localComputer.onTakeControl();
+      await localComputer.onLaunchApplication(application);
       setScreenOpen(true);
     })().catch(() => undefined);
   };
@@ -174,16 +183,16 @@ export function LiveWorkRail({
         <span className="hosted-computer-card__copy">
           <strong>Computer on this PC</strong>
           <small>{localComputer.recoveryNeeded
-            ? localComputer.error ?? "The browser session needs to restart."
+            ? localComputer.error ?? "The private Linux computer needs to restart."
             : localComputer.status === "ready"
               ? localComputer.browserActive
-                ? `${localComputer.browserProduct ?? "Private browser"} · separate profile and files`
-                : "Private files are ready. Start this teammate's browser when needed."
+                ? `${localComputer.browserProduct ?? "Private Linux desktop"} · persistent home and workspace`
+                : "The private Linux desktop is ready. Start it when needed."
             : localComputer.provisioning || localComputer.status === "provisioning"
-              ? "Creating this teammate's private browser and files…"
+              ? "Building this teammate's private Linux desktop…"
               : localComputer.browserAvailable
-                ? "Free, local, and separate for this teammate"
-                : "Install Edge, Chrome, or Chromium to enable it"}</small>
+                ? "Docker/WSL isolation is ready for setup"
+                : "Start Docker Desktop with its WSL 2 engine"}</small>
         </span>
         {localComputer.available && (localComputer.recoveryNeeded || localComputer.status !== "ready" || !localComputer.browserActive) ? (
           <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading || !localComputer.browserAvailable}>
@@ -204,6 +213,13 @@ export function LiveWorkRail({
             />
             <button type="submit" disabled={localComputer.busy}>{localComputer.busy ? "Working…" : "Open"}</button>
           </form>
+        ) : null}
+        {localComputer.status === "ready" && localComputer.browserActive && !localComputer.recoveryNeeded ? (
+          <div className="local-computer-apps" aria-label="Linux desktop applications">
+            <button type="button" onClick={() => openLocalApplication("browser")} disabled={localComputer.busy}>Browser</button>
+            <button type="button" onClick={() => openLocalApplication("files")} disabled={localComputer.busy}>Files app</button>
+            <button type="button" onClick={() => openLocalApplication("terminal")} disabled={localComputer.busy}>Terminal</button>
+          </div>
         ) : null}
         {localComputer.filesAvailable ? (
           <div className="local-computer-files">
@@ -252,7 +268,7 @@ export function LiveWorkRail({
         ) : null}
         {localComputer.error && !localComputer.recoveryNeeded ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
         {localComputer.status === "ready" ? (
-          <small className="local-computer-card__boundary">Browser and files are separated per teammate. App and terminal isolation need a container or VM backend and remain off.</small>
+          <small className="local-computer-card__boundary">A separate Linux container holds this teammate&apos;s persistent desktop, browser profile, terminal, and files. Human control uses a renewable five-minute lease.</small>
         ) : null}
       </section>
 
@@ -319,7 +335,7 @@ export function LiveWorkRail({
         <div className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`}>
           <section className={`live-screen-modal__panel${localComputer.browserActive ? " live-screen-modal__panel--local" : ""}`}>
             <header>
-              <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s local browser` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>
+              <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s Linux computer` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>
               <span className="live-screen-modal__actions">
                 {localComputer.browserActive ? (
                   <>
@@ -330,7 +346,7 @@ export function LiveWorkRail({
                 <button type="button" onClick={() => void (localComputer.browserActive ? localComputer.onRefreshBrowser() : hostedComputer.onRefreshBrowser()).catch(() => undefined)} disabled={hostedComputer.browserOpening || localComputer.busy} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
                 {localComputer.recoveryNeeded ? (
                   <button type="button" onClick={() => void localComputer.onProvision().catch(() => undefined)} disabled={localComputer.provisioning || localComputer.loading}>
-                    {localComputer.provisioning ? "Restarting…" : "Restart browser"}
+                    {localComputer.provisioning ? "Restarting…" : "Restart computer"}
                   </button>
                 ) : localComputer.browserActive ? (
                   localComputer.controller === "human"
@@ -344,8 +360,8 @@ export function LiveWorkRail({
             {localComputer.recoveryNeeded ? (
               <div className="local-browser-recovery" role="alert">
                 <Browser size={28} aria-hidden="true" />
-                <strong>The private browser needs to restart</strong>
-                <small>{localComputer.error ?? "Fable lost contact with this browser session."}</small>
+                <strong>The private Linux computer needs to restart</strong>
+                <small>{localComputer.error ?? "Fable lost contact with this computer session."}</small>
               </div>
             ) : localComputer.browserActive ? (
               <div
@@ -353,13 +369,13 @@ export function LiveWorkRail({
                 ref={localScreenRef}
                 tabIndex={localComputer.controller === "human" ? 0 : -1}
                 role="group"
-                aria-label={`${agentName}'s interactive local browser`}
+                aria-label={`${agentName}'s interactive Linux computer`}
                 onClick={handleLocalScreenClick}
                 onWheel={handleLocalScreenWheel}
                 onKeyDown={handleLocalScreenKey}
               >
-                <img ref={localScreenImageRef} src={screenPreviewUrl} alt={`${agentName}'s local browser`} draggable={false} />
-                <small>{localComputer.controller === "human" ? "Click the screen, then type. Keys are sent directly and are not saved by Fable." : `${agentName} can use approved browser actions. Take control to interact safely.`}</small>
+                <img ref={localScreenImageRef} src={screenPreviewUrl} alt={`${agentName}'s Linux desktop`} draggable={false} />
+                <small>{localComputer.controller === "human" ? `${formatControlLease(localComputer.leaseExpiresAt)} Click the desktop, then type; keys are sent directly and are not saved by Fable.` : `${agentName} controls this isolated computer. Take control to use the desktop yourself.`}</small>
               </div>
             ) : <img src={screenPreviewUrl} alt={`${agentName}'s live computer session`} />}
           </section>
@@ -394,4 +410,12 @@ function formatBytes(value: number): string {
   if (value < 1_024) return `${value} B`;
   if (value < 1_024 * 1_024) return `${Math.round(value / 1_024)} KB`;
   return `${(value / (1_024 * 1_024)).toFixed(1)} MB`;
+}
+
+function formatControlLease(expiresAt?: string): string {
+  if (!expiresAt) return "You have a renewable five-minute control lease.";
+  const expiry = new Date(expiresAt);
+  if (Number.isNaN(expiry.getTime())) return "You have a renewable five-minute control lease.";
+  const time = expiry.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return `Control returns to the teammate automatically at ${time}.`;
 }

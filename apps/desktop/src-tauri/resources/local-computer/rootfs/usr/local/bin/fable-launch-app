@@ -1,0 +1,22 @@
+#!/bin/bash
+set -euo pipefail
+
+export DISPLAY=:99
+export HOME=/home/fable
+
+case "${1:-}" in
+  browser)
+    window="$(xdotool search --onlyvisible --class chromium 2>/dev/null | tail -n 1 || true)"
+    if [[ -n "$window" ]]; then
+      exec xdotool windowactivate --sync "$window"
+    fi
+    chromium --no-default-browser-check --no-first-run about:blank >/tmp/fable-chromium-extra.log 2>&1 &
+    ;;
+  terminal)
+    xfce4-terminal --working-directory=/home/fable/Workspace >/tmp/fable-terminal.log 2>&1 &
+    ;;
+  files)
+    thunar /home/fable/Workspace >/tmp/fable-thunar.log 2>&1 &
+    ;;
+  *) exit 2 ;;
+esac

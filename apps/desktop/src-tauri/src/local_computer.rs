@@ -1,45 +1,43 @@
 //! Local teammate computer boundary.
 //!
-//! The first local backend deliberately exposes only a Chromium sandbox and a
-//! persistent Fable-owned workspace. It does not run model-originated shell
-//! commands on the host and must not be described as a full OS/container
-//! boundary. Each workspace/agent pair gets a distinct browser profile and
-//! browser process. DevTools endpoints, profile paths, cookies, and process
-//! handles never cross into the renderer.
+//! Every workspace/agent pair gets a distinct Docker Linux desktop, persistent
+//! home volume, bounded host-workspace bridge, Chromium profile, and control
+//! lease. Docker/Chromium endpoints, container names, volume names, host paths,
+//! cookies, and process handles never cross into the renderer.
+
+mod container;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
-    ffi::OsStr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use chrono::Utc;
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use headless_chrome::{
-    browser::tab::{point::Point, Tab},
-    protocol::cdp::Page::{
-        CaptureScreenshotFormatOption, GetNavigationHistory, NavigateToHistoryEntry,
-    },
-    Browser, LaunchOptions,
+    browser::tab::Tab,
+    protocol::cdp::Page::{GetNavigationHistory, NavigateToHistoryEntry},
+    Browser,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Manager, State};
 use url::Url;
 
 const VIEWPORT_WIDTH: u32 = 1280;
 const VIEWPORT_HEIGHT: u32 = 800;
-const MAX_PREVIEW_BYTES: usize = 4 * 1024 * 1024;
 const MAX_URL_CHARACTERS: usize = 2_048;
 const MAX_FILE_ENTRIES: usize = 200;
 const MAX_FILE_DEPTH: usize = 8;
 const MAX_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
+const HUMAN_CONTROL_LEASE_MINUTES: i64 = 5;
 
 pub struct LocalComputerState {
     root: PathBuf,
+    image_context: PathBuf,
     sessions: Mutex<HashMap<String, Arc<Mutex<LocalBrowserSession>>>>,
     launch_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
 }
@@ -50,6 +48,7 @@ struct LocalBrowserSession {
     controller: LocalComputerController,
     generation: u64,
     browser_product: String,
+    human_lease_expires_at: Option<DateTime<Utc>>,
     observation_counter: u64,
     observation: Option<LocalBrowserObservationState>,
 }
@@ -96,6 +95,8 @@ pub struct LocalComputerSnapshot {
     browser_active: bool,
     controller: &'static str,
     generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_expires_at: Option<String>,
     capabilities: Vec<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     browser_product: Option<String>,
@@ -116,6 +117,8 @@ pub struct LocalBrowserSnapshot {
     can_go_forward: bool,
     controller: &'static str,
     generation: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    lease_expires_at: Option<String>,
     updated_at: String,
 }
 
@@ -176,6 +179,15 @@ pub(crate) struct LocalBrowserAgentResult {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub(crate) struct LocalComputerShellResult {
+    pub exit_code: i32,
+    pub stdout: String,
+    pub stderr: String,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct LocalBrowserAgentObservation {
     observation_id: String,
     computer_id: String,
@@ -211,6 +223,7 @@ pub struct LocalBrowserNavigateRequest {
     workspace_id: String,
     agent_id: String,
     url: String,
+    expected_generation: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -253,14 +266,36 @@ pub struct LocalBrowserHistoryRequest {
     direction: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerLaunchRequest {
+    workspace_id: String,
+    agent_id: String,
+    application: String,
+    expected_generation: u64,
+}
+
 impl LocalComputerState {
     pub fn initialize(app: &AppHandle) -> Result<Self, String> {
         let app_data = crate::paths::app_data_dir(app)?;
         let root = app_data.join("local-computers");
         std::fs::create_dir_all(&root)
             .map_err(|_| "Fable could not initialize local computer storage.".to_string())?;
+        let source_context = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("local-computer");
+        let resource_root = app.path().resource_dir().unwrap_or_else(|_| PathBuf::new());
+        let image_context = [
+            source_context,
+            resource_root.join("resources").join("local-computer"),
+            resource_root.join("local-computer"),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.join("Dockerfile").is_file())
+        .unwrap_or_else(|| resource_root.join("local-computer"));
         Ok(Self {
             root,
+            image_context,
             sessions: Mutex::new(HashMap::new()),
             launch_gates: Mutex::new(HashMap::new()),
         })
@@ -268,8 +303,12 @@ impl LocalComputerState {
 
     #[cfg(test)]
     fn for_test(root: PathBuf) -> Self {
+        let image_context = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("resources")
+            .join("local-computer");
         Self {
             root,
+            image_context,
             sessions: Mutex::new(HashMap::new()),
             launch_gates: Mutex::new(HashMap::new()),
         }
@@ -338,16 +377,18 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
             }
             session.observation = None;
+            container::focus_browser(&scope)?;
             session
                 .tab
                 .navigate_to(&url)
                 .map_err(|_| "The local browser could not open that page.".to_string())?;
             let _ = session.tab.wait_until_navigated();
-            let snapshot = snapshot_from_session(&scope, &session)?;
+            let snapshot = snapshot_from_session(&scope, &mut session)?;
             Ok(LocalBrowserAgentResult {
                 computer_id: snapshot.computer_id,
                 current_url: sanitize_agent_result_url(&snapshot.current_url),
@@ -382,6 +423,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
             }
@@ -416,6 +458,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
             }
@@ -442,6 +485,7 @@ impl LocalComputerState {
                 value.as_deref(),
                 key.as_deref(),
             )?;
+            container::focus_browser(&scope)?;
             perform_agent_control_action(
                 &session,
                 &control_ref,
@@ -454,7 +498,7 @@ impl LocalComputerState {
             if matches!(action.as_str(), "click" | "press" | "select") {
                 let _ = session.tab.wait_until_navigated();
             }
-            let snapshot = snapshot_from_session(&scope, &session)?;
+            let snapshot = snapshot_from_session(&scope, &mut session)?;
             Ok(LocalBrowserAgentResult {
                 computer_id: snapshot.computer_id,
                 current_url: sanitize_agent_result_url(&snapshot.current_url),
@@ -465,6 +509,41 @@ impl LocalComputerState {
         })
         .await
         .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
+    }
+
+    pub(crate) async fn run_shell_for_agent(
+        self: Arc<Self>,
+        workspace_id: String,
+        agent_id: String,
+        command: String,
+    ) -> Result<LocalComputerShellResult, String> {
+        let scope = self.scope(&workspace_id, &agent_id)?;
+        if !scope.directory.join("workspace").is_dir() {
+            return Err("Set up this teammate's local computer before using its terminal.".into());
+        }
+        ensure_browser_session(self.clone(), scope.clone()).await?;
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| "The local computer state is unavailable.".to_string())?
+            .get(&scope.key)
+            .cloned()
+            .ok_or_else(|| "The teammate computer is not running.".to_string())?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut session = session
+                .lock()
+                .map_err(|_| "The teammate computer state is unavailable.".to_string())?;
+            expire_human_lease(&mut session)?;
+            if session.controller != LocalComputerController::Agent {
+                return Err(
+                    "The user currently controls this computer. Ask them to return control before running a command."
+                        .into(),
+                );
+            }
+            container::run_shell(&scope, &command)
+        })
+        .await
+        .map_err(|_| "The isolated terminal task stopped unexpectedly.".to_string())?
     }
 }
 
@@ -814,6 +893,7 @@ fn perform_agent_control_action(
     Ok(())
 }
 
+#[derive(Clone)]
 struct ComputerScope {
     key: String,
     computer_id: String,
@@ -921,7 +1001,7 @@ async fn ensure_browser_session(
             .unwrap_or((false, 0));
         if !healthy {
             let generation = next_browser_generation(previous_generation)?;
-            let session = launch_browser(&scope, generation)?;
+            let session = launch_browser(&scope, &launch_state.image_context, generation)?;
             launch_state
                 .sessions
                 .lock()
@@ -940,105 +1020,12 @@ fn next_browser_generation(previous: u64) -> Result<u64, String> {
         .ok_or_else(|| "The teammate browser control generation is exhausted.".to_string())
 }
 
-fn find_browser() -> Option<(PathBuf, String)> {
-    if let Some(path) = std::env::var_os("FABLE_BROWSER_EXECUTABLE") {
-        let path = PathBuf::from(path);
-        if valid_browser_path(&path) {
-            return Some((path, "Configured Chromium".into()));
-        }
-    }
-
-    let mut candidates: Vec<(PathBuf, &str)> = Vec::new();
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(root) = std::env::var_os("ProgramFiles(x86)") {
-            let root = PathBuf::from(root);
-            candidates.push((
-                root.join("Microsoft/Edge/Application/msedge.exe"),
-                "Microsoft Edge",
-            ));
-            candidates.push((
-                root.join("Google/Chrome/Application/chrome.exe"),
-                "Google Chrome",
-            ));
-        }
-        if let Some(root) = std::env::var_os("ProgramFiles") {
-            let root = PathBuf::from(root);
-            candidates.push((
-                root.join("Microsoft/Edge/Application/msedge.exe"),
-                "Microsoft Edge",
-            ));
-            candidates.push((
-                root.join("Google/Chrome/Application/chrome.exe"),
-                "Google Chrome",
-            ));
-        }
-        if let Some(root) = std::env::var_os("LOCALAPPDATA") {
-            let root = PathBuf::from(root);
-            candidates.push((
-                root.join("Microsoft/Edge/Application/msedge.exe"),
-                "Microsoft Edge",
-            ));
-            candidates.push((
-                root.join("Google/Chrome/Application/chrome.exe"),
-                "Google Chrome",
-            ));
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        candidates.push((
-            PathBuf::from("/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"),
-            "Microsoft Edge",
-        ));
-        candidates.push((
-            PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-            "Google Chrome",
-        ));
-    }
-    #[cfg(target_os = "linux")]
-    {
-        candidates.push((PathBuf::from("/usr/bin/microsoft-edge"), "Microsoft Edge"));
-        candidates.push((PathBuf::from("/usr/bin/google-chrome"), "Google Chrome"));
-        candidates.push((PathBuf::from("/usr/bin/chromium"), "Chromium"));
-        candidates.push((PathBuf::from("/usr/bin/chromium-browser"), "Chromium"));
-    }
-    candidates
-        .into_iter()
-        .find(|(path, _)| valid_browser_path(path))
-        .map(|(path, product)| (path, product.to_string()))
-}
-
-fn valid_browser_path(path: &Path) -> bool {
-    if !path.is_absolute() || !path.is_file() {
-        return false;
-    }
-    let file_name = path
-        .file_name()
-        .and_then(OsStr::to_str)
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    matches!(
-        file_name.as_str(),
-        "msedge.exe"
-            | "chrome.exe"
-            | "microsoft-edge"
-            | "google-chrome"
-            | "chromium"
-            | "chromium-browser"
-    )
-}
-
 fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     std::fs::create_dir_all(&scope.directory)
         .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&scope.directory)
         .map_err(|_| "The teammate computer directory failed its security check.".to_string())?;
-    for directory in [
-        scope.directory.join("workspace"),
-        scope.directory.join("browser-profile"),
-        scope.directory.join("downloads"),
-    ] {
+    for directory in [scope.directory.join("workspace")] {
         std::fs::create_dir_all(&directory)
             .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
         crate::paths::strict_canonicalize(&directory)
@@ -1047,37 +1034,37 @@ fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     Ok(())
 }
 
-fn launch_browser(scope: &ComputerScope, generation: u64) -> Result<LocalBrowserSession, String> {
+fn launch_browser(
+    scope: &ComputerScope,
+    image_context: &Path,
+    generation: u64,
+) -> Result<LocalBrowserSession, String> {
     ensure_scope_directories(scope)?;
-    let (browser_path, browser_product) = find_browser().ok_or_else(|| {
-        "Install Microsoft Edge, Google Chrome, or Chromium to use this teammate's local browser."
-            .to_string()
-    })?;
-    let options = LaunchOptions::default_builder()
-        .headless(true)
-        .sandbox(true)
-        .enable_logging(false)
-        .enable_gpu(false)
-        .ignore_certificate_errors(false)
-        .window_size(Some((VIEWPORT_WIDTH, VIEWPORT_HEIGHT)))
-        .idle_browser_timeout(Duration::from_secs(24 * 60 * 60))
-        .path(Some(browser_path))
-        .user_data_dir(Some(scope.directory.join("browser-profile")))
-        .build()
-        .map_err(|_| "Fable could not configure the local browser.".to_string())?;
-    let browser = Browser::new(options)
-        .map_err(|_| "Fable could not start the local browser.".to_string())?;
+    container::ensure_running(scope, image_context)?;
+    let debugger_url = container::debugger_websocket_url(scope)?;
+    let browser = Browser::connect_with_timeout(debugger_url, Duration::from_secs(24 * 60 * 60))
+        .map_err(|_| {
+            "Fable could not connect to Chromium inside the teammate computer.".to_string()
+        })?;
     browser.set_default_timeout(Duration::from_secs(15));
-    let tab = browser
-        .new_tab()
-        .map_err(|_| "Fable could not open the local browser screen.".to_string())?;
+    let tabs = browser.get_tabs();
+    let tab = tabs
+        .lock()
+        .ok()
+        .and_then(|tabs| tabs.first().cloned())
+        .map(Ok)
+        .unwrap_or_else(|| browser.new_tab())
+        .map_err(|_| {
+            "Fable could not open the browser inside the teammate computer.".to_string()
+        })?;
     tab.set_default_timeout(Duration::from_secs(15));
     Ok(LocalBrowserSession {
         _browser: browser,
         tab,
         controller: LocalComputerController::Agent,
         generation,
-        browser_product,
+        browser_product: "Chromium in Docker/WSL".into(),
+        human_lease_expires_at: None,
         observation_counter: 0,
         observation: None,
     })
@@ -1085,17 +1072,15 @@ fn launch_browser(scope: &ComputerScope, generation: u64) -> Result<LocalBrowser
 
 fn snapshot_from_session(
     scope: &ComputerScope,
-    session: &LocalBrowserSession,
+    session: &mut LocalBrowserSession,
 ) -> Result<LocalBrowserSnapshot, String> {
-    let viewport = viewport_from_session(session)?;
+    expire_human_lease(session)?;
+    let viewport = LocalBrowserViewportSnapshot {
+        width: VIEWPORT_WIDTH,
+        height: VIEWPORT_HEIGHT,
+    };
     let (can_go_back, can_go_forward) = browser_history_availability(session)?;
-    let bytes = session
-        .tab
-        .capture_screenshot(CaptureScreenshotFormatOption::Jpeg, Some(72), None, true)
-        .map_err(|_| "Fable could not capture the teammate browser.".to_string())?;
-    if bytes.is_empty() || bytes.len() > MAX_PREVIEW_BYTES {
-        return Err("The teammate browser returned an invalid preview.".into());
-    }
+    let bytes = container::capture_desktop(scope)?;
     let current_url = session.tab.get_url();
     let title = sanitize_browser_title(
         session
@@ -1113,6 +1098,9 @@ fn snapshot_from_session(
         can_go_forward,
         controller: session.controller.as_str(),
         generation: session.generation,
+        lease_expires_at: session
+            .human_lease_expires_at
+            .map(|value| value.to_rfc3339()),
         updated_at: Utc::now().to_rfc3339(),
     })
 }
@@ -1138,30 +1126,18 @@ fn browser_history_availability(session: &LocalBrowserSession) -> Result<(bool, 
     ))
 }
 
-fn viewport_from_session(
-    session: &LocalBrowserSession,
-) -> Result<LocalBrowserViewportSnapshot, String> {
-    let value = session
-        .tab
-        .evaluate(
-            "JSON.stringify([window.innerWidth, window.innerHeight])",
-            false,
-        )
-        .map_err(|_| "Fable could not measure the teammate browser viewport.".to_string())?
-        .value
-        .ok_or_else(|| "The teammate browser returned no viewport size.".to_string())?;
-    let dimensions: [u32; 2] =
-        serde_json::from_str(value.as_str().ok_or_else(|| {
-            "The teammate browser returned an invalid viewport size.".to_string()
-        })?)
-        .map_err(|_| "The teammate browser returned an invalid viewport size.".to_string())?;
-    let width = Some(dimensions[0])
-        .filter(|value| *value > 0 && *value <= 4_096)
-        .ok_or_else(|| "The teammate browser returned an invalid viewport width.".to_string())?;
-    let height = Some(dimensions[1])
-        .filter(|value| *value > 0 && *value <= 4_096)
-        .ok_or_else(|| "The teammate browser returned an invalid viewport height.".to_string())?;
-    Ok(LocalBrowserViewportSnapshot { width, height })
+fn expire_human_lease(session: &mut LocalBrowserSession) -> Result<(), String> {
+    if session.controller == LocalComputerController::Human
+        && session
+            .human_lease_expires_at
+            .is_none_or(|expires_at| expires_at <= Utc::now())
+    {
+        session.controller = LocalComputerController::Agent;
+        session.generation = next_browser_generation(session.generation)?;
+        session.human_lease_expires_at = None;
+        session.observation = None;
+    }
+    Ok(())
 }
 
 fn computer_snapshot(
@@ -1170,9 +1146,7 @@ fn computer_snapshot(
     agent_id: String,
 ) -> Result<LocalComputerSnapshot, String> {
     let scope = state.scope(&workspace_id, &agent_id)?;
-    let browser = find_browser();
-    let browser_available = browser.is_some();
-    let detected_browser_product = browser.as_ref().map(|(_, product)| product.clone());
+    let container_status = container::status(&scope);
     let session = state
         .sessions
         .lock()
@@ -1182,20 +1156,26 @@ fn computer_snapshot(
     let session_projection = session
         .as_ref()
         .map(|value| {
-            let value = value
+            let mut value = value
                 .lock()
                 .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            expire_human_lease(&mut value)?;
             Ok::<_, String>((
                 value.controller,
                 value.generation,
                 value.browser_product.clone(),
+                value
+                    .human_lease_expires_at
+                    .map(|expires_at| expires_at.to_rfc3339()),
             ))
         })
         .transpose()?;
-    let provisioned = scope.directory.join("workspace").is_dir();
-    let lifecycle = if !provisioned {
+    let lifecycle = if !container_status.container_exists {
         "unprovisioned"
-    } else if !browser_available {
+    } else if !container_status.engine_available
+        || !container_status.running
+        || !container_status.healthy
+    {
         "degraded"
     } else {
         "ready"
@@ -1205,25 +1185,48 @@ fn computer_snapshot(
         workspace_id,
         agent_id,
         locality: "local",
-        backend: "native-browser",
-        isolation: "browser-sandbox",
+        backend: "docker",
+        isolation: "linux-container",
         lifecycle,
-        browser_available,
-        browser_active: session_projection.is_some(),
+        browser_available: container_status.engine_available,
+        browser_active: container_status.running && session_projection.is_some(),
         controller: session_projection
             .as_ref()
-            .map(|(controller, _, _)| controller.as_str())
+            .map(|(controller, _, _, _)| controller.as_str())
             .unwrap_or("agent"),
         generation: session_projection
             .as_ref()
-            .map(|(_, generation, _)| *generation)
+            .map(|(_, generation, _, _)| *generation)
             .unwrap_or(0),
-        capabilities: vec!["persistent-files", "browser-observe", "browser-control"],
+        lease_expires_at: session_projection
+            .as_ref()
+            .and_then(|(_, _, _, lease)| lease.clone()),
+        capabilities: vec![
+            "persistent-files",
+            "persistent-home",
+            "desktop-observe",
+            "desktop-control",
+            "browser-observe",
+            "browser-control",
+            "terminal",
+            "file-manager",
+            "process-execution",
+        ],
         browser_product: session_projection
-            .map(|(_, _, product)| product)
-            .or(detected_browser_product),
-        message: if !browser_available {
-            Some("Install a supported Chromium browser to use this computer.".into())
+            .map(|(_, _, product, _)| product)
+            .or_else(|| {
+                container_status
+                    .container_exists
+                    .then(|| "Chromium in Docker/WSL".into())
+            }),
+        message: if !container_status.engine_available {
+            Some("Start Docker Desktop with its WSL 2 Linux engine to use this computer.".into())
+        } else if !container_status.image_available && !container_status.container_exists {
+            Some("Set up this computer to build its private Linux desktop.".into())
+        } else if container_status.container_exists && !container_status.running {
+            Some("Start this teammate's private Linux desktop.".into())
+        } else if container_status.running && !container_status.healthy {
+            Some("This teammate's Linux desktop is still starting.".into())
         } else {
             None
         },
@@ -1476,16 +1479,16 @@ pub async fn local_browser_navigate(
         let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
-        if session.controller != LocalComputerController::Human {
-            return Err("Take control before opening a page yourself.".into());
-        }
+        require_human_control(&mut session, request.expected_generation)?;
         session.observation = None;
+        container::focus_browser(&scope)?;
         session
             .tab
             .navigate_to(&url)
             .map_err(|_| "The local browser could not open that page.".to_string())?;
         let _ = session.tab.wait_until_navigated();
-        snapshot_from_session(&scope, &session)
+        renew_human_lease(&mut session);
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1506,10 +1509,10 @@ pub async fn local_browser_snapshot(
         .cloned()
         .ok_or_else(|| "The teammate browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let session = session
+        let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
-        snapshot_from_session(&scope, &session)
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1533,15 +1536,24 @@ pub async fn local_computer_set_controller(
         let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+        expire_human_lease(&mut session)?;
         if session.generation != request.expected_generation {
-            return Err("The teammate browser changed. Refresh it before changing control.".into());
+            return Err(
+                "The teammate computer changed. Refresh it before changing control.".into(),
+            );
         }
         if session.controller != request.controller {
             session.controller = request.controller;
-            session.generation = session.generation.saturating_add(1);
+            session.generation = next_browser_generation(session.generation)?;
         }
+        session.human_lease_expires_at = match request.controller {
+            LocalComputerController::Human => {
+                Some(Utc::now() + ChronoDuration::minutes(HUMAN_CONTROL_LEASE_MINUTES))
+            }
+            LocalComputerController::Agent => None,
+        };
         session.observation = None;
-        snapshot_from_session(&scope, &session)
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1565,37 +1577,33 @@ pub async fn local_browser_pointer(
         .cloned()
         .ok_or_else(|| "The teammate browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let session = session
+        let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
-        require_human_control(&session, request.expected_generation)?;
-        let viewport = viewport_from_session(&session)?;
-        if request.x > f64::from(viewport.width) || request.y > f64::from(viewport.height) {
-            return Err("The browser pointer position is outside the live screen.".into());
+        require_human_control(&mut session, request.expected_generation)?;
+        if request.x > f64::from(VIEWPORT_WIDTH) || request.y > f64::from(VIEWPORT_HEIGHT) {
+            return Err("The pointer position is outside the live desktop.".into());
         }
-        match request.action.as_str() {
-            "click" => {
-                session
-                    .tab
-                    .click_point(Point {
-                        x: request.x,
-                        y: request.y,
-                    })
-                    .map_err(|_| "The local browser could not click that point.".to_string())?;
-            }
+        let delta = match request.action.as_str() {
+            "click" => None,
             "scroll" => {
                 let delta = request.delta_y.unwrap_or(0.0).clamp(-800.0, 800.0);
                 if delta.abs() < 1.0 {
-                    return Err("The browser scroll amount is invalid.".into());
+                    return Err("The desktop scroll amount is invalid.".into());
                 }
-                session
-                    .tab
-                    .evaluate(&format!("window.scrollBy(0, {delta}); undefined"), false)
-                    .map_err(|_| "The local browser could not scroll.".to_string())?;
+                Some(delta)
             }
-            _ => return Err("The browser pointer action is not supported.".into()),
-        }
-        snapshot_from_session(&scope, &session)
+            _ => return Err("The desktop pointer action is not supported.".into()),
+        };
+        container::pointer(
+            &scope,
+            request.x.round() as u32,
+            request.y.round() as u32,
+            &request.action,
+            delta,
+        )?;
+        renew_human_lease(&mut session);
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1622,42 +1630,69 @@ pub async fn local_browser_key(
         .cloned()
         .ok_or_else(|| "The teammate browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
-        let session = session
+        let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
-        require_human_control(&session, request.expected_generation)?;
-        if request.key.chars().count() == 1 {
-            session
-                .tab
-                .send_character(&request.key)
-                .map_err(|_| "The local browser could not type that character.".to_string())?;
-        } else if matches!(
-            request.key.as_str(),
-            "Enter"
-                | "Tab"
-                | "Escape"
-                | "Backspace"
-                | "Delete"
-                | "ArrowUp"
-                | "ArrowDown"
-                | "ArrowLeft"
-                | "ArrowRight"
-                | "Home"
-                | "End"
-                | "PageUp"
-                | "PageDown"
-        ) {
-            session
-                .tab
-                .press_key(&request.key)
-                .map_err(|_| "The local browser could not send that key.".to_string())?;
-        } else {
-            return Err("That browser key is not supported.".into());
+        require_human_control(&mut session, request.expected_generation)?;
+        if request.key.chars().count() != 1
+            && !matches!(
+                request.key.as_str(),
+                "Enter"
+                    | "Tab"
+                    | "Escape"
+                    | "Backspace"
+                    | "Delete"
+                    | "ArrowUp"
+                    | "ArrowDown"
+                    | "ArrowLeft"
+                    | "ArrowRight"
+                    | "Home"
+                    | "End"
+                    | "PageUp"
+                    | "PageDown"
+            )
+        {
+            return Err("That desktop key is not supported.".into());
         }
-        snapshot_from_session(&scope, &session)
+        container::key(&scope, &request.key)?;
+        renew_human_lease(&mut session);
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+pub async fn local_computer_launch_app(
+    request: LocalComputerLaunchRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<LocalBrowserSnapshot, String> {
+    if !matches!(
+        request.application.as_str(),
+        "browser" | "files" | "terminal"
+    ) {
+        return Err("That teammate computer application is not supported.".into());
+    }
+    let owned_state = state.inner().clone();
+    let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
+    let session = owned_state
+        .sessions
+        .lock()
+        .map_err(|_| "The local computer state is unavailable.".to_string())?
+        .get(&scope.key)
+        .cloned()
+        .ok_or_else(|| "The teammate computer is not running.".to_string())?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut session = session
+            .lock()
+            .map_err(|_| "The teammate computer state is unavailable.".to_string())?;
+        require_human_control(&mut session, request.expected_generation)?;
+        container::launch_application(&scope, &request.application)?;
+        renew_human_lease(&mut session);
+        snapshot_from_session(&scope, &mut session)
+    })
+    .await
+    .map_err(|_| "The teammate application task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1681,7 +1716,8 @@ pub async fn local_browser_history(
         let mut session = session
             .lock()
             .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
-        require_human_control(&session, request.expected_generation)?;
+        require_human_control(&mut session, request.expected_generation)?;
+        container::focus_browser(&scope)?;
         let history = session
             .tab
             .call_method(GetNavigationHistory(None))
@@ -1703,23 +1739,32 @@ pub async fn local_browser_history(
             })
             .map_err(|_| "The local browser could not move through its history.".to_string())?;
         let _ = session.tab.wait_until_navigated();
-        snapshot_from_session(&scope, &session)
+        renew_human_lease(&mut session);
+        snapshot_from_session(&scope, &mut session)
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
 }
 
 fn require_human_control(
-    session: &LocalBrowserSession,
+    session: &mut LocalBrowserSession,
     expected_generation: u64,
 ) -> Result<(), String> {
+    expire_human_lease(session)?;
     if session.controller != LocalComputerController::Human {
-        return Err("Take control before interacting with this browser.".into());
+        return Err("Take control before interacting with this computer.".into());
     }
     if session.generation != expected_generation {
-        return Err("The teammate browser changed. Refresh it before interacting.".into());
+        return Err("The teammate computer changed. Refresh it before interacting.".into());
     }
     Ok(())
+}
+
+fn renew_human_lease(session: &mut LocalBrowserSession) {
+    if session.controller == LocalComputerController::Human {
+        session.human_lease_expires_at =
+            Some(Utc::now() + ChronoDuration::minutes(HUMAN_CONTROL_LEASE_MINUTES));
+    }
 }
 
 #[cfg(test)]
@@ -1805,8 +1850,8 @@ mod tests {
         let scope = state.scope("workspace-one", "agent-one").unwrap();
         ensure_scope_directories(&scope).unwrap();
         assert!(scope.directory.join("workspace").is_dir());
-        assert!(scope.directory.join("browser-profile").is_dir());
-        assert!(scope.directory.join("downloads").is_dir());
+        assert!(!scope.directory.join("browser-profile").exists());
+        assert!(!scope.directory.join("downloads").exists());
         assert_eq!(
             state
                 .tool_workspace_root("workspace-one", "agent-one")
@@ -1981,10 +2026,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires an installed Chromium browser"]
+    #[ignore = "requires Docker Desktop and the local computer image"]
     fn real_local_browser_navigates_types_and_captures_a_frame() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             for stream in listener.incoming().take(1) {
                 let mut stream = stream.unwrap();
@@ -2002,13 +2047,14 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
         let scope = state.scope("workspace-live", "agent-live").unwrap();
-        let mut session = launch_browser(&scope, 1).unwrap();
+        let mut session = launch_browser(&scope, &state.image_context, 1).unwrap();
         session.controller = LocalComputerController::Human;
         session.generation = 2;
-        require_human_control(&session, 2).unwrap();
+        renew_human_lease(&mut session);
+        require_human_control(&mut session, 2).unwrap();
         session
             .tab
-            .navigate_to(&format!("http://{address}/"))
+            .navigate_to(&format!("http://host.docker.internal:{port}/"))
             .unwrap()
             .wait_until_navigated()
             .unwrap();
@@ -2021,9 +2067,11 @@ mod tests {
             .value
             .unwrap();
         assert_eq!(typed, serde_json::json!("Fable"));
-        let snapshot = snapshot_from_session(&scope, &session).unwrap();
+        let snapshot = snapshot_from_session(&scope, &mut session).unwrap();
         assert_eq!(snapshot.title, "Fable local computer");
-        assert!(snapshot.current_url.starts_with("http://127.0.0.1:"));
+        assert!(snapshot
+            .current_url
+            .starts_with("http://host.docker.internal:"));
         assert!(snapshot
             .preview_data_url
             .starts_with("data:image/jpeg;base64,"));
@@ -2046,10 +2094,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires an installed Chromium browser"]
+    #[ignore = "requires Docker Desktop and the local computer image"]
     fn real_agent_navigation_uses_the_isolated_browser_and_returns_no_frame() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             for stream in listener.incoming().take(1) {
                 let mut stream = stream.unwrap();
@@ -2071,21 +2119,23 @@ mod tests {
         let result = tauri::async_runtime::block_on(state.navigate_for_agent(
             "workspace-agent".into(),
             "agent-browser".into(),
-            format!("http://{address}/"),
+            format!("http://host.docker.internal:{port}/"),
         ))
         .unwrap();
         assert_eq!(result.title, "Agent browser result");
-        assert!(result.current_url.starts_with("http://127.0.0.1:"));
+        assert!(result
+            .current_url
+            .starts_with("http://host.docker.internal:"));
         assert!(result.computer_id.starts_with("local-"));
         assert_eq!(result.trust, "external-untrusted");
         let _ = server.join();
     }
 
     #[test]
-    #[ignore = "requires an installed Chromium browser"]
+    #[ignore = "requires Docker Desktop and the local computer image"]
     fn real_agent_observation_omits_secrets_and_uses_exact_controls() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let address = listener.local_addr().unwrap();
+        let listener = TcpListener::bind("0.0.0.0:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
         let server = std::thread::spawn(move || {
             for stream in listener.incoming().take(1) {
                 let mut stream = stream.unwrap();
@@ -2103,10 +2153,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
         let scope = state.scope("workspace-controls", "agent-controls").unwrap();
-        let mut session = launch_browser(&scope, 1).unwrap();
+        let mut session = launch_browser(&scope, &state.image_context, 1).unwrap();
         session
             .tab
-            .navigate_to(&format!("http://{address}/"))
+            .navigate_to(&format!("http://host.docker.internal:{port}/"))
             .unwrap()
             .wait_until_navigated()
             .unwrap();

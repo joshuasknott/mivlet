@@ -95,8 +95,9 @@ export function createDesktopToolExecutor(
     ) {
       throw new Error("Set up this teammate's cloud computer before asking it to use hosted work.");
     }
-    if (toolName === "run-shell" && !options.hostedComputer?.ready) {
-      throw new Error("Local terminal execution is off until Fable has a genuine isolated container or VM backend. Set up the optional cloud computer to run commands safely.");
+    const hostedShellRequested = parsed.location === "hosted";
+    if (toolName === "run-shell" && !options.localComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
+      throw new Error("Set up this teammate's isolated local computer before asking it to run terminal commands.");
     }
     if ((toolName === "read-file" || toolName === "write-file") && !options.localComputer?.ready) {
       throw new Error("Set up this teammate's local computer before asking it to use files.");
@@ -131,7 +132,7 @@ export function createDesktopToolExecutor(
     if (mcpRoute) {
       return runMcpSemanticRead(approval, parsed, options, mcpRoute);
     }
-    if (toolName === "run-shell" && options.hostedComputer?.ready) {
+    if (toolName === "run-shell" && hostedShellRequested && options.hostedComputer?.ready) {
       return runOnHostedComputer(gate, approval, parsed, options);
     }
     if (toolName === "cloud-browser") {

@@ -53,6 +53,7 @@ export {
 export {
   historyRuntimeLocalBrowser,
   keyRuntimeLocalBrowser,
+  launchRuntimeLocalComputerApplication,
   listRuntimeLocalComputerFiles,
   previewRuntimeLocalComputerFile,
   loadRuntimeLocalComputer,
