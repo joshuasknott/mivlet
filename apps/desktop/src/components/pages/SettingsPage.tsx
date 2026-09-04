@@ -15,6 +15,7 @@ import {
 } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { LocalMcpSettings } from "../settings/LocalMcpSettings";
+import { PrivacySummary } from "../settings/PrivacyNotice";
 import {
   AppearanceSettingsView,
   ApprovalsSettingsView,
@@ -329,6 +330,10 @@ function PrivacyAndDataSettings({
 }) {
   return (
     <>
+      <details className="settings-disclosure">
+        <summary>How Fable uses your data</summary>
+        <PrivacySummary />
+      </details>
       <DictationPrivacySettings
         runtime={runtime}
         capability={dictationCapability}

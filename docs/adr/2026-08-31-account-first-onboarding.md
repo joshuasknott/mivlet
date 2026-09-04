@@ -41,3 +41,9 @@ and cannot be inferred from a successful account sign-in.
 Missing identity configuration fails closed with a plain-language message.
 Browser preview state remains explicitly synthetic and is not evidence of a
 deployed sign-in or connector integration.
+
+The first-run privacy disclosure describes the current local storage, account,
+provider, and connector boundaries inside Fable. It does not link to an
+unverified public domain or claim agreement to an unpublished legal policy.
+The shared screen walkthrough is available in development at
+`/design-preview.html?view=onboarding`; its connections are simulated.

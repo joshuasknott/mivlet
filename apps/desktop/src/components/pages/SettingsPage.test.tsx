@@ -165,7 +165,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Local data recovery")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Ask first/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Delete local data" })).toBeDisabled();
-    expect(view.container.textContent).not.toMatch(/mission|routine|schedule|workflow|run history/i);
+    expect(view.container.textContent).not.toMatch(/\b(?:mission|routine|schedule|workflow|run history)\b/i);
     fireEvent.click(screen.getByRole("button", { name: "Check local health" }));
     await screen.findByText(/local health checks are available in the installed desktop app/i);
   });

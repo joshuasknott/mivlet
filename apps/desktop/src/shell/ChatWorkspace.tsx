@@ -339,9 +339,6 @@ export function ChatWorkspace() {
           identityStatus={runtime.identityStatus}
           identityPending={runtime.identityPending}
           onSignIn={() => runtime.signInIdentity()}
-          onConnect={(providerId, secret) =>
-            void runtime.connectBackend(providerId, secret)
-          }
           onConnectWithVerify={runtime.connectBackendWithVerify}
           onCheckConnection={runtime.checkBackendConnection}
           onStartBrowserLogin={runtime.startBackendBrowserLogin}

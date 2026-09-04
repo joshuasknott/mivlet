@@ -8,9 +8,11 @@ import type {
   ConnectorManifest,
   IdentityStatus,
 } from "@fable/protocol";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ConnectorIcon } from "../ConnectorIcon";
+import { PrivacyNotice } from "../settings/PrivacyNotice";
 import { OnboardingProviderStep } from "./OnboardingProviderStep";
+import fableMark from "../../assets/fable-mark.png";
 import "../../styles/routes/onboarding.css";
 
 type OnboardingStage = "account" | "provider" | "connectors";
@@ -27,7 +29,8 @@ const ONBOARDING_CONNECTOR_IDS = [
 function identityReady(identityStatus: IdentityStatus): boolean {
   return (
     identityStatus.state === "signed-in" ||
-    (identityStatus.state === "offline" && Boolean(identityStatus.authentication))
+    (identityStatus.state === "offline" &&
+      Boolean(identityStatus.authentication))
   );
 }
 
@@ -38,7 +41,6 @@ export function OnboardingPage({
   identityStatus,
   identityPending,
   onSignIn,
-  onConnect,
   onConnectWithVerify,
   onCheckConnection,
   onStartBrowserLogin,
@@ -53,10 +55,11 @@ export function OnboardingPage({
   identityStatus: IdentityStatus;
   identityPending: boolean;
   onSignIn: (entryPoint: AccountEntryPoint) => void | Promise<void>;
-  /** Legacy fire-and-forget connect used only when verification is unavailable. */
-  onConnect?: (providerId: string, secret?: string) => void;
   /** Credentials cross directly into the verified Rust boundary. */
-  onConnectWithVerify?: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
+  onConnectWithVerify: (
+    providerId: string,
+    secret: string,
+  ) => Promise<BackendVerifyResult>;
   /** Re-probe a provider-owned CLI after the user completes its login flow. */
   onCheckConnection?: (
     providerId: string,
@@ -71,7 +74,13 @@ export function OnboardingPage({
   const [stage, setStage] = useState<OnboardingStage>("account");
   const [accountActionPending, setAccountActionPending] = useState(false);
   const [accountAttempted, setAccountAttempted] = useState(false);
-  const [activeConnectorId, setActiveConnectorId] = useState<string | null>(null);
+  const [accountError, setAccountError] = useState("");
+  const [activeConnectorId, setActiveConnectorId] = useState<string | null>(
+    null,
+  );
+  const [connectorError, setConnectorError] = useState("");
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const visibleConnectors = useMemo(
     () =>
       ONBOARDING_CONNECTOR_IDS.flatMap((id) => {
@@ -80,18 +89,27 @@ export function OnboardingPage({
       }),
     [connectors],
   );
-  const currentStepIndex = stage === "account" ? 0 : stage === "provider" ? 1 : 2;
+  const currentStepIndex =
+    stage === "account" ? 0 : stage === "provider" ? 1 : 2;
   const signedIn = identityReady(identityStatus);
 
   const handleAccountEntry = async (entryPoint: AccountEntryPoint) => {
+    if (identityPending || accountActionPending) return;
     if (signedIn) {
       setStage("provider");
       return;
     }
     setAccountActionPending(true);
     setAccountAttempted(true);
+    setAccountError("");
     try {
       await onSignIn(entryPoint);
+    } catch (error) {
+      setAccountError(
+        error instanceof Error
+          ? error.message
+          : "Sign-in could not open. Try again.",
+      );
     } finally {
       setAccountActionPending(false);
     }
@@ -101,13 +119,25 @@ export function OnboardingPage({
     if (accountAttempted && signedIn) setStage("provider");
   }, [accountAttempted, signedIn]);
 
-  const handleConnect = async (
-    providerId: string,
-    secret: string,
-  ): Promise<BackendVerifyResult> => {
-    if (onConnectWithVerify) return onConnectWithVerify(providerId, secret);
-    onConnect?.(providerId, secret);
-    return { providerId, outcome: "ready" };
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [stage]);
+
+  const handleConnectorConnect = async (connector: ConnectorManifest) => {
+    if (activeConnectorId || connector.status === "connected") return;
+    setActiveConnectorId(connector.id);
+    setConnectorError("");
+    try {
+      await onConnectConnector(connector);
+    } catch (error) {
+      setConnectorError(
+        error instanceof Error
+          ? error.message
+          : `${connector.name} could not connect. Try again.`,
+      );
+    } finally {
+      setActiveConnectorId(null);
+    }
   };
 
   return (
@@ -116,26 +146,31 @@ export function OnboardingPage({
         <button
           type="button"
           className="og-back-button"
-          onClick={() => setStage(stage === "connectors" ? "provider" : "account")}
+          onClick={() =>
+            setStage(stage === "connectors" ? "provider" : "account")
+          }
         >
           <ArrowLeft size={17} aria-hidden="true" /> Back
         </button>
       ) : null}
       <div className="og-center">
-        <div className="og-progress" aria-label={`Onboarding step ${currentStepIndex + 1} of 3`}>
-          {[0, 1, 2].map((index) => (
-            <span
-              key={index}
-              className={index === currentStepIndex ? "is-current" : undefined}
-              aria-hidden="true"
-            />
-          ))}
-        </div>
+        <img
+          className="fable-mark og-brand"
+          src={fableMark}
+          alt="Fable"
+          width={60}
+          height={60}
+        />
 
         {stage === "account" ? (
-          <section className="og-screen og-screen--account" aria-labelledby="onboarding-title">
+          <section
+            className="og-screen og-screen--account"
+            aria-labelledby="onboarding-title"
+          >
             <div className="og-heading">
-              <h1 id="onboarding-title">Welcome to Fable</h1>
+              <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
+                Welcome to Fable
+              </h1>
               <p>Sign in or create an account to get started.</p>
             </div>
 
@@ -147,9 +182,14 @@ export function OnboardingPage({
                 onClick={() => void handleAccountEntry("google")}
               >
                 {identityPending || accountActionPending ? (
-                  <><Spinner size={17} className="og-spinner" /> Opening sign in</>
+                  <>
+                    <Spinner size={17} className="og-spinner" /> Opening sign in
+                  </>
                 ) : (
-                  <><GoogleLogo size={20} weight="bold" aria-hidden="true" /> Continue with Google</>
+                  <>
+                    <GoogleLogo size={20} weight="bold" aria-hidden="true" />{" "}
+                    Continue with Google
+                  </>
                 )}
               </button>
               <button
@@ -162,68 +202,98 @@ export function OnboardingPage({
               </button>
             </div>
 
-            {accountAttempted && !signedIn ? (
+            {accountError ? (
+              <p className="og-feedback og-feedback--danger" role="alert">
+                {accountError}
+              </p>
+            ) : accountAttempted && !signedIn ? (
               <p
                 className={`og-feedback${identityStatus.state === "error" || identityStatus.state === "disabled" ? " og-feedback--danger" : ""}`}
-                role={identityStatus.state === "error" || identityStatus.state === "disabled" ? "alert" : "status"}
+                role={
+                  identityStatus.state === "error" ||
+                  identityStatus.state === "disabled"
+                    ? "alert"
+                    : "status"
+                }
               >
                 {identityStatus.message}
               </p>
             ) : null}
 
-            <p className="og-legal">
-              By continuing, you agree to Fable&rsquo;s{" "}
-              <a href="https://fable.app/privacy-policy" target="_blank" rel="noreferrer">
-                Privacy Policy
-              </a>.
-            </p>
+            <button
+              type="button"
+              className="og-privacy-link"
+              onClick={() => setPrivacyOpen(true)}
+            >
+              Privacy &amp; data
+            </button>
           </section>
         ) : stage === "provider" ? (
           <section className="og-screen" aria-labelledby="onboarding-title">
             <div className="og-heading">
-              <h1 id="onboarding-title">Choose your provider</h1>
-              <p>Use a subscription you already have, or connect an API key.</p>
+              <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
+                Choose your provider
+              </h1>
+              <p>Connect an account or use an API key.</p>
             </div>
             <OnboardingProviderStep
               providers={providers}
               connectedBackendIds={connectedBackendIds}
-              onConnect={handleConnect}
+              onConnect={onConnectWithVerify}
               onCheckConnection={onCheckConnection}
               onStartBrowserLogin={onStartBrowserLogin}
               onReady={() => setStage("connectors")}
             />
-            {status ? <p className="og-feedback" role="status">{status}</p> : null}
+            {status ? (
+              <p className="og-feedback" role="status">
+                {status}
+              </p>
+            ) : null}
           </section>
         ) : (
           <section className="og-screen" aria-labelledby="onboarding-title">
             <div className="og-heading">
-              <h1 id="onboarding-title">Connect the apps you use</h1>
-              <p>Optional — you can do this later.</p>
+              <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
+                Connect the apps you use
+              </h1>
+              <p>You can do this later.</p>
             </div>
 
             <div className="og-icon-choices" aria-label="Apps to connect">
               {visibleConnectors.map((connector) => {
                 const connected = connector.status === "connected";
                 const pending = activeConnectorId === connector.id;
+                const unavailable =
+                  connector.status === "unavailable" ||
+                  connector.status === "unconfigured";
                 return (
                   <button
                     key={connector.id}
                     type="button"
                     className={`og-icon-choice${connected ? " is-selected is-connected" : ""}`}
                     aria-label={`${connected ? "Connected: " : "Connect "}${connector.name}`}
-                    title={connector.name}
-                    disabled={activeConnectorId !== null}
-                    onClick={() => {
-                      if (connected) return;
-                      setActiveConnectorId(connector.id);
-                      void Promise.resolve(onConnectConnector(connector)).finally(() => {
-                        setActiveConnectorId(null);
-                      });
-                    }}
+                    title={
+                      unavailable
+                        ? `${connector.name}: This connection is not available in this build.`
+                        : connector.name
+                    }
+                    disabled={
+                      activeConnectorId !== null || unavailable || connected
+                    }
+                    onClick={() => void handleConnectorConnect(connector)}
                   >
-                    {pending ? <Spinner size={24} className="og-spinner" /> : <ConnectorIcon id={connector.id} />}
+                    {pending ? (
+                      <Spinner size={24} className="og-spinner" />
+                    ) : (
+                      <ConnectorIcon id={connector.id} />
+                    )}
                     {connected ? (
-                      <span className="og-icon-choice__check" aria-hidden="true"><Check size={11} weight="bold" /></span>
+                      <span
+                        className="og-icon-choice__check"
+                        aria-hidden="true"
+                      >
+                        <Check size={11} weight="bold" />
+                      </span>
                     ) : null}
                   </button>
                 );
@@ -231,17 +301,48 @@ export function OnboardingPage({
             </div>
 
             <div className="og-connector-actions">
-              <button type="button" className="og-primary-button" onClick={onComplete}>
+              <button
+                type="button"
+                className="og-primary-button"
+                onClick={onComplete}
+              >
                 Enter Fable
               </button>
-              <button type="button" className="og-text-button" onClick={onComplete}>
+              <button
+                type="button"
+                className="og-text-button"
+                onClick={onComplete}
+              >
                 Skip for now
               </button>
             </div>
-            {connectorStatus ? <p className="og-feedback" role="status">{connectorStatus}</p> : null}
+            {connectorError ? (
+              <p className="og-feedback og-feedback--danger" role="alert">
+                {connectorError}
+              </p>
+            ) : connectorStatus ? (
+              <p className="og-feedback" role="status">
+                {connectorStatus}
+              </p>
+            ) : null}
           </section>
         )}
       </div>
+      <div
+        className="og-progress"
+        aria-label={`Onboarding step ${currentStepIndex + 1} of 3`}
+      >
+        {[0, 1, 2].map((index) => (
+          <span
+            key={index}
+            className={index === currentStepIndex ? "is-current" : undefined}
+            aria-hidden="true"
+          />
+        ))}
+      </div>
+      {privacyOpen ? (
+        <PrivacyNotice onClose={() => setPrivacyOpen(false)} />
+      ) : null}
     </main>
   );
 }

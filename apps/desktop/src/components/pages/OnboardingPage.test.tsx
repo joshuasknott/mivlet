@@ -1,6 +1,7 @@
 import { listSupportedConnectors } from "@fable/connectors";
+import { listBackendProviders } from "@fable/connectors/backends/registry";
 import type { BackendProvider, IdentityStatus } from "@fable/protocol";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -106,7 +107,7 @@ function renderOnboarding(
         providerId,
         outcome: "ready" as const,
       }))}
-      connectors={listSupportedConnectors()}
+      connectors={listSupportedConnectors().map((connector) => ({ ...connector, status: "needs-auth" }))}
       connectorStatus={null}
       onConnectConnector={vi.fn().mockResolvedValue(undefined)}
       onComplete={vi.fn()}
@@ -177,7 +178,7 @@ describe("OnboardingPage", () => {
     expect(screen.getByRole("button", { name: "Google Antigravity" })).toHaveTextContent("");
     expect(screen.getByRole("button", { name: "Grok" })).toHaveTextContent("");
     expect(screen.queryByRole("button", { name: "Custom provider" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Or add a different API key" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "More providers" })).toBeInTheDocument();
     expect(document.querySelector('[data-provider-brand="anthropic"]')).toBeTruthy();
     expect(document.querySelector('[data-provider-brand="antigravity"]')).toBeTruthy();
     expect(screen.getByRole("button", { name: "Continue with ChatGPT" })).toHaveClass("og-primary-button");
@@ -194,7 +195,8 @@ describe("OnboardingPage", () => {
     renderOnboarding({ identityStatus: signedIn });
 
     await user.click(screen.getByRole("button", { name: "Continue with Google" }));
-    await user.click(await screen.findByRole("button", { name: "Or add a different API key" }));
+    await user.click(await screen.findByRole("button", { name: "More providers" }));
+    await user.click(screen.getByRole("button", { name: "Custom provider" }));
 
     expect(screen.getByLabelText("Base URL")).toBeInTheDocument();
     expect(screen.getByLabelText("Model ID")).toBeInTheDocument();
@@ -248,5 +250,92 @@ describe("OnboardingPage", () => {
     await waitFor(() => expect(onConnectConnector).toHaveBeenCalledWith(expect.objectContaining({ id: "google-drive" })));
     await user.click(screen.getByRole("button", { name: "Skip for now" }));
     expect(onComplete).toHaveBeenCalledOnce();
+  });
+
+  it("exposes every additional provider without crowding the initial choices", async () => {
+    const user = userEvent.setup();
+    renderOnboarding({ identityStatus: signedIn, providers: listBackendProviders() });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    expect(screen.queryByRole("button", { name: "Cursor" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "More providers" }));
+    for (const name of ["Cursor", "OpenCode", "Custom provider"]) {
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole("button", { name: "Cursor" }));
+    expect(screen.getByRole("button", { name: "Cursor" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("keeps failed account sign-in recoverable", async () => {
+    const user = userEvent.setup();
+    const onSignIn = vi.fn().mockRejectedValueOnce(new Error("Browser sign-in could not open.")).mockResolvedValue(undefined);
+    renderOnboarding({ onSignIn });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Browser sign-in could not open.");
+    await user.click(screen.getByRole("button", { name: "Continue with email" }));
+    expect(onSignIn).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("rejects a successful result for a different provider", async () => {
+    const user = userEvent.setup();
+    renderOnboarding({ identityStatus: signedIn, onStartBrowserLogin: vi.fn(async () => ({ providerId: "anthropic", outcome: "ready" as const })) });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    await user.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("could not verify this connection");
+    expect(screen.getByRole("heading", { name: "Choose your provider" })).toBeInTheDocument();
+  });
+
+  it("ignores a provider result after leaving that setup screen", async () => {
+    const user = userEvent.setup();
+    let finish!: (result: { providerId: string; outcome: "ready" }) => void;
+    const result = new Promise<{ providerId: string; outcome: "ready" }>((resolve) => { finish = resolve; });
+    renderOnboarding({ identityStatus: signedIn, onStartBrowserLogin: vi.fn(() => result) });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    await user.click(screen.getByRole("button", { name: "Continue with ChatGPT" }));
+    expect(screen.getByRole("button", { name: "Claude" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await act(async () => finish({ providerId: "codex", outcome: "ready" }));
+    expect(screen.getByRole("heading", { name: "Welcome to Fable" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Connect the apps you use" })).not.toBeInTheDocument();
+  });
+
+  it("reports a connector failure and keeps optional setup skippable", async () => {
+    const user = userEvent.setup();
+    const onComplete = vi.fn();
+    renderOnboarding({ identityStatus: signedIn, connectedBackendIds: ["codex"], onComplete, onConnectConnector: vi.fn().mockRejectedValue(new Error("Google connection could not finish.")) });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    await user.click(screen.getByRole("button", { name: "Continue with OpenAI / ChatGPT" }));
+    await user.click(screen.getByRole("button", { name: "Connect Google Drive" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Google connection could not finish.");
+    expect(screen.getByRole("button", { name: "Connect Google Drive" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(onComplete).toHaveBeenCalledOnce();
+  });
+
+  it("does not start authorization for an unconfigured connector", async () => {
+    const user = userEvent.setup();
+    const onConnectConnector = vi.fn();
+    renderOnboarding({ identityStatus: signedIn, connectedBackendIds: ["codex"], connectors: listSupportedConnectors().map((connector) => ({ ...connector, status: "unconfigured" })), onConnectConnector });
+    await user.click(screen.getByRole("button", { name: "Continue with Google" }));
+    await user.click(screen.getByRole("button", { name: "Continue with OpenAI / ChatGPT" }));
+    const drive = screen.getByRole("button", { name: "Connect Google Drive" });
+    expect(drive).toBeDisabled();
+    await user.click(drive);
+    expect(onConnectConnector).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
+  });
+
+  it("shows local privacy information with keyboard dismissal and focus return", async () => {
+    const user = userEvent.setup();
+    renderOnboarding();
+    const privacy = screen.getByRole("button", { name: "Privacy & data" });
+    await user.click(privacy);
+    const dialog = screen.getByRole("dialog", { name: "Privacy & data" });
+    expect(within(dialog).getByText("Model providers")).toBeInTheDocument();
+    expect(within(dialog).getByText(/Clerk handles account sign-in/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Privacy Policy" })).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(privacy).toHaveFocus();
   });
 });

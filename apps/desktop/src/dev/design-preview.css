@@ -1,0 +1,25 @@
+.design-preview-notice {
+  position: fixed;
+  z-index: 200;
+  bottom: 4px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 20px);
+  transform: translateX(-50%);
+  color: var(--ink-muted);
+  background: var(--surface);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.design-preview-notice button,
+.design-preview-notice a {
+  padding: 4px;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

@@ -1,12 +1,14 @@
-/* First-run onboarding: quiet, centered, and intentionally separate from the
- * denser provider and connector management surfaces in Settings. */
+/* First-run onboarding shares the workspace's quiet palette and compact scale. */
 
 .og-frame {
   position: relative;
   display: grid;
-  min-height: 100dvh;
+  grid-template-rows: minmax(min-content, 1fr) auto;
+  height: 100dvh;
+  min-height: 0;
   overflow-y: auto;
-  padding: clamp(32px, 7vh, 72px) 24px 32px;
+  overscroll-behavior: contain;
+  padding: 64px 24px 32px;
   color: var(--ink);
   background: var(--surface);
 }
@@ -37,40 +39,42 @@
 .og-center {
   display: flex;
   width: min(100%, 560px);
-  min-height: min(780px, calc(100dvh - 104px));
   margin: auto;
+  padding-block: 16px;
   flex-direction: column;
   align-items: center;
+}
+
+.og-brand.fable-mark {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 22px;
 }
 
 .og-progress {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 14px;
   min-height: 12px;
-  margin-bottom: clamp(68px, 12vh, 116px);
+  margin-top: 40px;
 }
 
 .og-progress span {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   background: color-mix(in srgb, var(--ink) 14%, transparent);
   border-radius: 999px;
-  transition:
-    width 160ms ease,
-    background 160ms ease;
+  transition: background 160ms ease;
 }
 
 .og-progress span.is-current {
-  width: 20px;
   background: var(--ink);
 }
 
 .og-screen {
   display: flex;
   width: 100%;
-  flex: 1;
   flex-direction: column;
   align-items: center;
   text-align: center;
@@ -78,24 +82,28 @@
 
 .og-heading {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   justify-items: center;
 }
 
 .og-heading h1 {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(30px, 4vw, 40px);
-  font-weight: 560;
+  font-size: clamp(26px, 3vw, 32px);
+  font-weight: 500;
   letter-spacing: -0.035em;
-  line-height: 1.08;
+  line-height: 1.2;
+}
+
+.og-heading h1:focus {
+  outline: none;
 }
 
 .og-heading p {
   max-width: 480px;
   margin: 0;
   color: var(--ink-muted);
-  font-size: var(--text-15);
+  font-size: var(--text-14);
   line-height: 1.55;
 }
 
@@ -103,38 +111,39 @@
 .og-provider-action,
 .og-connector-actions {
   display: flex;
-  width: min(100%, 440px);
+  width: min(100%, 360px);
   flex-direction: column;
   align-items: stretch;
-  gap: 14px;
+  gap: 10px;
 }
 
 .og-account-actions {
-  margin-top: 64px;
+  margin-top: 40px;
 }
 
 .og-provider-action {
-  margin-top: 30px;
+  margin-top: 26px;
 }
 
 .og-connector-actions {
-  margin-top: 68px;
+  margin-top: 40px;
 }
 
 .og-primary-button {
   display: inline-flex;
   width: 100%;
-  min-height: 54px;
+  min-height: 46px;
   align-items: center;
   justify-content: center;
   gap: 10px;
   padding: 0 22px;
-  color: #fff;
-  background: #111;
-  border: 1px solid #111;
+  color: var(--surface);
+  background: var(--ink);
+  border: 1px solid var(--ink);
   border-radius: 12px;
-  font-size: var(--text-15);
-  font-weight: 600;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 5%);
+  font-size: var(--text-14);
+  font-weight: 500;
   letter-spacing: -0.01em;
   transition:
     background 120ms ease,
@@ -143,7 +152,7 @@
 }
 
 .og-primary-button:hover:not(:disabled) {
-  background: #292929;
+  background: color-mix(in srgb, var(--ink) 90%, var(--surface));
 }
 
 .og-primary-button:active:not(:disabled) {
@@ -152,19 +161,21 @@
 
 .og-primary-button:disabled,
 .og-text-button:disabled,
-.og-icon-choice:disabled {
+.og-icon-choice:disabled,
+.og-provider-alternative:disabled,
+.og-extra-provider:disabled {
   cursor: default;
   opacity: 0.5;
 }
 
 .og-text-button,
-.og-provider-alternative {
+.og-provider-alternative,
+.og-privacy-link {
   color: var(--ink);
   background: transparent;
   border: 0;
   border-radius: 4px;
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-decoration: none;
   text-underline-offset: 4px;
 }
 
@@ -176,8 +187,9 @@
 }
 
 .og-text-button:hover:not(:disabled),
-.og-provider-alternative:hover:not(:disabled) {
-  text-decoration-color: currentColor;
+.og-provider-alternative:hover:not(:disabled),
+.og-privacy-link:hover {
+  text-decoration: underline;
 }
 
 .og-primary-button:focus-visible,
@@ -186,34 +198,62 @@
 .og-provider-alternative:focus-visible,
 .og-icon-choice:focus-visible,
 .og-provider-form input:focus-visible,
-.og-legal a:focus-visible {
+.og-privacy-link:focus-visible,
+.og-extra-provider:focus-visible {
   outline: 0;
   box-shadow: var(--focus-ring);
 }
 
-.og-legal {
-  margin: auto 0 0;
-  padding-top: 72px;
-  color: var(--ink-soft);
-  font-size: var(--text-11);
-  line-height: 1.5;
+.og-privacy-link {
+  min-height: 40px;
+  margin-top: 22px;
+  padding: 8px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
 }
 
 .og-provider-alternative {
   min-height: 40px;
-  margin-top: 14px;
   padding: 6px 8px;
+  color: var(--ink-muted);
   font-size: var(--text-13);
 }
 
-.og-provider-alternative[aria-pressed="true"] {
-  color: var(--ink);
-  text-decoration-color: currentColor;
+.og-more-providers {
+  width: min(100%, 360px);
+  margin-top: 22px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
 }
 
-.og-legal a {
-  color: inherit;
-  text-underline-offset: 3px;
+.og-extra-providers {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  padding-top: 6px;
+}
+
+.og-extra-provider {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  font-size: var(--text-12);
+  text-align: left;
+}
+
+.og-extra-provider:hover:not(:disabled),
+.og-extra-provider[aria-pressed="true"] {
+  background: var(--surface-hover);
+}
+
+.og-extra-provider svg {
+  flex-shrink: 0;
 }
 
 .og-icon-choices {
@@ -221,20 +261,22 @@
   width: 100%;
   justify-content: center;
   gap: 14px;
-  margin-top: 52px;
+  margin-top: 32px;
+  flex-wrap: wrap;
 }
 
 .og-icon-choice {
   position: relative;
   display: grid;
-  width: 72px;
-  height: 72px;
+  width: 58px;
+  height: 58px;
   place-items: center;
   flex: 0 0 auto;
   color: var(--ink);
   background: var(--surface-raised);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: 14px;
+  box-shadow: 0 3px 10px rgb(0 0 0 / 3%);
   transition:
     border-color 120ms ease,
     background 120ms ease,
@@ -243,7 +285,7 @@
 
 .og-icon-choice:hover:not(:disabled) {
   background: var(--surface-hover);
-  border-color: color-mix(in srgb, var(--ink) 35%, var(--line-strong));
+  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
 }
 
 .og-icon-choice:active:not(:disabled) {
@@ -251,13 +293,17 @@
 }
 
 .og-icon-choice.is-selected {
-  border-color: var(--ink);
-  box-shadow: inset 0 0 0 1px var(--ink);
+  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
+  background: var(--surface-hover);
+}
+
+.og-icon-choice.is-connected:disabled {
+  opacity: 1;
 }
 
 .og-icon-choice .connector-icon-svg {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
 }
 
 .og-icon-choice__check {
@@ -265,8 +311,8 @@
   top: -7px;
   right: -7px;
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   place-items: center;
   color: var(--surface);
   background: var(--ink);
@@ -292,11 +338,11 @@
 
 .og-provider-form input {
   width: 100%;
-  min-height: 48px;
+  min-height: 46px;
   padding: 0 14px;
   color: var(--ink);
   background: var(--surface-raised);
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--line);
   border-radius: 10px;
   font: inherit;
 }
@@ -313,19 +359,9 @@
   color: var(--destructive);
 }
 
-.og-spinner {
-  animation: og-spin 0.8s linear infinite;
-}
-
-@keyframes og-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 @media (max-width: 620px) {
   .og-frame {
-    padding: 28px 20px 24px;
+    padding: 64px 20px 24px;
   }
 
   .og-back-button {
@@ -334,30 +370,18 @@
     left: 12px;
   }
 
-  .og-center {
-    min-height: calc(100dvh - 52px);
-  }
-
-  .og-progress {
-    margin-bottom: clamp(54px, 10vh, 76px);
-  }
-
   .og-heading h1 {
-    font-size: 31px;
-  }
-
-  .og-account-actions {
-    margin-top: 48px;
+    font-size: 27px;
   }
 
   .og-icon-choices {
     gap: 9px;
-    margin-top: 42px;
+    margin-top: 28px;
   }
 
   .og-icon-choice {
-    width: clamp(52px, 15vw, 62px);
-    height: clamp(52px, 15vw, 62px);
+    width: clamp(50px, 14vw, 58px);
+    height: clamp(50px, 14vw, 58px);
     border-radius: 12px;
   }
 
@@ -367,11 +391,7 @@
   }
 
   .og-connector-actions {
-    margin-top: 46px;
-  }
-
-  .og-provider-action {
-    margin-top: 28px;
+    margin-top: 32px;
   }
 }
 

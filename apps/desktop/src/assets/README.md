@@ -9,3 +9,5 @@ Every new teammate receives a versioned random `avatarSeed`, saved with the prof
 Keep the `blob-v1` renderer stable. Future design versions must preserve rendering of existing seeds. The regression fixture checks v1 stability; generation tests cover 1,000 distinct portraits. This is a generative system with a large variation space, not a promise of mathematically unlimited distinct pixels.
 
 The reference-generation prompt is recorded in [avatar-direction.json](avatar-direction.json). The 12 examples in the generated reference are a style study, not production presets.
+
+The account, provider, and optional connector onboarding screens use the same approved mark and workspace palette. Their Image Gen briefs are recorded in [onboarding-direction.json](onboarding-direction.json); the implemented screens use shared React controls and the native connection boundaries.

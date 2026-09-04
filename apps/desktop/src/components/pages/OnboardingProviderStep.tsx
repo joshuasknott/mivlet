@@ -1,6 +1,6 @@
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import type { BackendProvider, BackendVerifyResult } from "@fable/protocol";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { connectResultCopy } from "../../lib/backend-state";
 import { ProviderIcon } from "../ProviderIcon";
 import {
@@ -80,7 +80,9 @@ export function OnboardingProviderStep({
     () => visibleFamilies[0]?.id ?? "",
   );
   const [showCredential, setShowCredential] = useState(false);
+  const [showMore, setShowMore] = useState(false);
   const [pending, setPending] = useState(false);
+  const attemptRef = useRef<symbol | null>(null);
   const [feedback, setFeedback] = useState<{
     message: string;
     danger: boolean;
@@ -89,7 +91,9 @@ export function OnboardingProviderStep({
   const selectedFamily =
     families.find((family) => family.id === selectedFamilyId) ??
     visibleFamilies[0];
-  const customFamily = families.find((family) => family.id === "custom");
+  const additionalFamilies = families.filter(
+    (family) => !visibleFamilies.some((visible) => visible.id === family.id),
+  );
   const subscriptionMethod = selectedFamily?.methods.find(
     (method) =>
       method.kind === "oauth-browser" || method.kind === "provider-cli",
@@ -117,6 +121,13 @@ export function OnboardingProviderStep({
     setFeedback(null);
   }, [selectedFamilyId, subscriptionAvailable]);
 
+  useEffect(
+    () => () => {
+      attemptRef.current = null;
+    },
+    [],
+  );
+
   if (!selectedFamily) {
     return (
       <p className="og-feedback og-feedback--danger" role="alert">
@@ -125,45 +136,29 @@ export function OnboardingProviderStep({
     );
   }
 
-  const completeResult = (result: BackendVerifyResult | void) => {
-    if (!result) return;
-    const copy = connectResultCopy(result.outcome, { detail: result.message });
-    setFeedback({ message: copy.message, danger: copy.tone === "danger" });
-    if (result.outcome === "ready" || result.outcome === "configured")
-      onReady();
-  };
-
-  const runSubscription = async (method: ProviderConnectionMethod) => {
-    setPending(true);
-    setFeedback(null);
-    try {
-      const result =
-        method.kind === "provider-cli" && onCheckConnection
-          ? await onCheckConnection(method.provider.id)
-          : await onStartBrowserLogin?.(method.provider.id);
-      completeResult(result);
-    } catch (error) {
-      setFeedback({
-        message:
-          error instanceof Error
-            ? error.message
-            : "This connection could not be completed.",
-        danger: true,
-      });
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const runCredential = async (
+  const runConnection = async (
     method: ProviderConnectionMethod,
-    secret: string,
+    connect: () => Promise<BackendVerifyResult | void>,
   ) => {
+    if (attemptRef.current) return;
+    const attempt = Symbol(method.provider.id);
+    attemptRef.current = attempt;
     setPending(true);
     setFeedback(null);
     try {
-      completeResult(await onConnect(method.provider.id, secret));
+      const result = await connect();
+      if (attemptRef.current !== attempt) return;
+      if (!result || result.providerId !== method.provider.id) {
+        throw new Error("Fable could not verify this connection. Try again.");
+      }
+      const copy = connectResultCopy(result.outcome, {
+        detail: result.message,
+      });
+      setFeedback({ message: copy.message, danger: copy.tone === "danger" });
+      if (result.outcome === "ready" || result.outcome === "configured")
+        onReady();
     } catch (error) {
+      if (attemptRef.current !== attempt) return;
       setFeedback({
         message:
           error instanceof Error
@@ -172,9 +167,22 @@ export function OnboardingProviderStep({
         danger: true,
       });
     } finally {
-      setPending(false);
+      if (attemptRef.current === attempt) {
+        attemptRef.current = null;
+        setPending(false);
+      }
     }
   };
+
+  const runSubscription = (method: ProviderConnectionMethod) =>
+    runConnection(method, async () =>
+      method.kind === "provider-cli" && onCheckConnection
+        ? onCheckConnection(method.provider.id)
+        : onStartBrowserLogin?.(method.provider.id),
+    );
+
+  const runCredential = (method: ProviderConnectionMethod, secret: string) =>
+    runConnection(method, () => onConnect(method.provider.id, secret));
 
   const alreadyConnected = connectedFamily(selectedFamily, connectedBackendIds);
   const primaryLabel =
@@ -200,9 +208,10 @@ export function OnboardingProviderStep({
               aria-label={providerButtonLabel(family)}
               aria-pressed={selected}
               title={providerButtonLabel(family)}
+              disabled={pending}
               onClick={() => setSelectedFamilyId(family.id)}
             >
-              <ProviderIcon provider={family.iconProvider} size={34} />
+              <ProviderIcon provider={family.iconProvider} size={28} />
               {connected ? (
                 <span className="og-icon-choice__check" aria-hidden="true">
                   ✓
@@ -212,17 +221,6 @@ export function OnboardingProviderStep({
           );
         })}
       </div>
-
-      {customFamily ? (
-        <button
-          type="button"
-          className="og-provider-alternative"
-          aria-pressed={selectedFamily.id === customFamily.id}
-          onClick={() => setSelectedFamilyId(customFamily.id)}
-        >
-          Or add a different API key
-        </button>
-      ) : null}
 
       <div className="og-provider-action">
         {alreadyConnected ? (
@@ -287,6 +285,37 @@ export function OnboardingProviderStep({
           </p>
         ) : null}
       </div>
+      {additionalFamilies.length ? (
+        <div className="og-more-providers">
+          <button
+            type="button"
+            className="og-provider-alternative"
+            aria-expanded={showMore}
+            aria-controls="onboarding-more-providers"
+            disabled={pending}
+            onClick={() => setShowMore(!showMore)}
+          >
+            {showMore ? "Fewer providers" : "More providers"}
+          </button>
+          {showMore ? (
+            <div className="og-extra-providers" id="onboarding-more-providers">
+              {additionalFamilies.map((family) => (
+                <button
+                  key={family.id}
+                  type="button"
+                  className="og-extra-provider"
+                  aria-pressed={selectedFamily.id === family.id}
+                  disabled={pending}
+                  onClick={() => setSelectedFamilyId(family.id)}
+                >
+                  <ProviderIcon provider={family.iconProvider} size={22} />
+                  <span>{family.label}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </>
   );
 }
@@ -317,6 +346,7 @@ function CredentialForm({
       className="og-provider-form"
       onSubmit={(event) => {
         event.preventDefault();
+        if (pending) return;
         try {
           const secret = custom
             ? encodeCustomProviderSecret(
