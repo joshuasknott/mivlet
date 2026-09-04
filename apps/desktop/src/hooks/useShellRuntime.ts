@@ -120,7 +120,15 @@ import {
   syncRuntimeConnector,
   refreshRuntimeIdentity,
   signOutRuntimeIdentity,
+  checkRuntimeAntigravityConnection,
+  checkRuntimeManagedConnection,
+  installRuntimeAntigravity,
+  logoutRuntimeAntigravity,
+  logoutRuntimeManaged,
+  startRuntimeAntigravityBrowserLogin,
   startRuntimeCodexBrowserLogin,
+  startRuntimeManagedLogin,
+  type ManagedRuntimeProviderId,
   verifyRuntimeBackend,
 } from "../runtime";
 import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
@@ -438,8 +446,13 @@ export function useShellRuntime(
         (provider) =>
           provider.authState === "connected" &&
           provider.capabilities.includes("streaming") &&
-          hasRunnableAdapter(provider.backendType) &&
-          (provider.backendType !== "codex-app-server" || hasTauriRuntime()),
+          hasRunnableAdapter(
+            provider.driverKind ??
+              (provider.backendType === "codex-app-server"
+                ? "codex"
+                : provider.backendType),
+          ) &&
+          (provider.backendType === "native-api" || hasTauriRuntime()),
       ),
     [backendProviders],
   );
@@ -799,8 +812,20 @@ export function useShellRuntime(
           error instanceof Error
             ? error.message
             : "Fable could not load account workspaces.";
+        let localFallback = accountWorkspaceFallback;
+        if (hasTauriRuntime()) {
+          try {
+            // Hosted reconciliation is optional. If it fails, re-read the
+            // native local status so the exact installation owner survives;
+            // the static boot fallback is not an authority-bearing identity.
+            localFallback =
+              (await loadRuntimeAccountWorkspaceStatus()) ?? localFallback;
+          } catch {
+            // Preserve the original reconciliation failure below.
+          }
+        }
         const failed: AccountWorkspaceStatus = {
-          ...accountWorkspaceFallback,
+          ...localFallback,
           message: `Local workspace ready. Optional account refresh failed: ${message}`,
         };
         if (requestGeneration === accountRequestGenerationRef.current) {
@@ -1149,13 +1174,13 @@ export function useShellRuntime(
     [],
   );
 
-  // Auto-run discovery for every connected native API provider. Provider-owned
-  // runtimes expose their own fixed/default choices and are not sent through
-  // the Rust HTTP model-list command.
+  // Auto-run discovery for connected HTTP providers and Antigravity's cached
+  // ACP account model list. Codex exposes its own catalogue directly.
   useEffect(() => {
     for (const provider of connectedAgentBackends) {
       if (
-        provider.backendType === "native-api" &&
+        (provider.backendType === "native-api" ||
+          provider.backendType === "antigravity-acp") &&
         (modelDiscoveryByProvider[provider.id] ?? "idle") === "idle"
       ) {
         void runModelDiscovery(provider.id);
@@ -2377,6 +2402,77 @@ export function useShellRuntime(
       };
     }
 
+    if (provider.id === "antigravity") {
+      try {
+        if (provider.authState === "install-required") {
+          setBackendStatus("Installing Google's Antigravity ACP runtime…");
+          await installRuntimeAntigravity();
+          setBackendStatus("Opening Google sign-in…");
+          const login = await startRuntimeAntigravityBrowserLogin();
+          await refreshBackendProviders();
+          const result: BackendVerifyResult = login
+            ? { providerId, outcome: "ready", message: login.message }
+            : {
+                providerId,
+                outcome: "unsupported",
+                message: "Antigravity setup is available in the desktop app.",
+              };
+          setBackendStatus(result.message ?? "Antigravity connected.");
+          return result;
+        }
+        const result = await checkRuntimeAntigravityConnection();
+        await refreshBackendProviders();
+        return (
+          result ?? {
+            providerId,
+            outcome: "unsupported",
+            message: "Antigravity checks run in the desktop app.",
+          }
+        );
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Antigravity could not be installed or connected.";
+        await refreshBackendProviders();
+        setBackendStatus(message);
+        return { providerId, outcome: "failed", message };
+      }
+    }
+
+    if (["claude", "cursor", "grok", "opencode"].includes(provider.id)) {
+      const providerId = provider.id as ManagedRuntimeProviderId;
+      try {
+        if (
+          provider.authState !== "install-required" &&
+          provider.authState !== "connected" &&
+          providerId !== "opencode"
+        ) {
+          setBackendStatus(`Opening the official ${provider.label} sign-in…`);
+          await startRuntimeManagedLogin(providerId);
+        }
+        const result = await checkRuntimeManagedConnection(providerId);
+        await refreshBackendProviders();
+        const resolved = result ?? {
+          providerId,
+          outcome: "unsupported" as const,
+          message: `${provider.label} setup is available in the desktop app.`,
+        };
+        setBackendStatus(
+          resolved.message ?? `${provider.label} connection checked.`,
+        );
+        return resolved;
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : `${provider.label} could not be connected.`;
+        await refreshBackendProviders();
+        setBackendStatus(message);
+        return { providerId, outcome: "failed", message };
+      }
+    }
+
     if (provider.backendType !== "native-api") {
       const refreshed = await refreshBackendProviders();
       const current =
@@ -2431,7 +2527,7 @@ export function useShellRuntime(
   const startBackendBrowserLogin = async (
     providerId: string,
   ): Promise<BackendVerifyResult> => {
-    if (providerId !== "codex") {
+    if (providerId !== "codex" && providerId !== "antigravity") {
       return {
         providerId,
         outcome: "unsupported",
@@ -2440,19 +2536,48 @@ export function useShellRuntime(
       };
     }
     markProviderState(providerId, "connecting");
-    setBackendStatus("Opening the official ChatGPT sign-in…");
+    setBackendStatus(
+      providerId === "codex"
+        ? "Opening the official ChatGPT sign-in…"
+        : "Opening the official Google sign-in…",
+    );
     try {
-      const started = await startRuntimeCodexBrowserLogin();
+      const started =
+        providerId === "codex"
+          ? await startRuntimeCodexBrowserLogin()
+          : await (async () => {
+              const status = backendProviders.find(
+                (provider) => provider.id === providerId,
+              );
+              if (status?.authState === "install-required") {
+                setBackendStatus("Preparing Google Antigravity…");
+                await installRuntimeAntigravity();
+              }
+              setBackendStatus("Opening the official Google sign-in…");
+              return startRuntimeAntigravityBrowserLogin();
+            })();
       if (!started) {
         markProviderState(providerId, "needs-auth");
         return {
           providerId,
           outcome: "unsupported",
-          message:
-            "ChatGPT browser sign-in is available in the Fable desktop app.",
+          message: "Browser sign-in is available in the Fable desktop app.",
         };
       }
-      const verified = await checkBackendConnection(providerId);
+      // Antigravity's native sign-in already authenticates and creates a real
+      // ACP session. Starting a second process immediately only repeats the
+      // same check and can contend with the provider-owned profile teardown.
+      let verified: BackendVerifyResult;
+      if (providerId === "antigravity") {
+        await refreshBackendProviders();
+        verified = {
+          providerId,
+          outcome: "ready",
+          message: started.message,
+        };
+      } else {
+        verified = await checkBackendConnection(providerId);
+      }
       const result =
         verified.outcome === "ready"
           ? { providerId, outcome: "ready" as const, message: started.message }
@@ -2465,7 +2590,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "ChatGPT sign-in could not be completed.";
+          : "Provider sign-in could not be completed.";
       setBackendStatus(message);
       setLastAction(message);
       return { providerId, outcome: "failed", message };
@@ -2475,6 +2600,26 @@ export function useShellRuntime(
   const disconnectBackend = async (providerId: string) => {
     setBackendStatus(`Disconnecting ${providerId}…`);
     try {
+      if (providerId === "antigravity") {
+        const cleared = await logoutRuntimeAntigravity();
+        if (cleared !== null) {
+          await refreshBackendProviders();
+          setBackendStatus("Antigravity disconnected.");
+          setLastAction("Antigravity disconnected");
+          return;
+        }
+      }
+      if (["claude", "cursor", "grok", "opencode"].includes(providerId)) {
+        const cleared = await logoutRuntimeManaged(
+          providerId as ManagedRuntimeProviderId,
+        );
+        if (cleared !== null) {
+          await refreshBackendProviders();
+          setBackendStatus(`${providerId} disconnected.`);
+          setLastAction(`${providerId} disconnected`);
+          return;
+        }
+      }
       const cleared = await clearRuntimeBackend(providerId);
       if (cleared === null) {
         setConnectedBackendIds((current) =>
@@ -2513,6 +2658,16 @@ export function useShellRuntime(
   };
 
   const dismissOnboarding = () => {
+    const accountReady =
+      identityStatus.state === "signed-in" ||
+      (identityStatus.state === "offline" &&
+        Boolean(identityStatus.authentication));
+    if (!accountReady) {
+      const message = "Sign in to Fable before finishing setup.";
+      setIdentityStatus((current) => ({ ...current, message }));
+      setLastAction(message);
+      return;
+    }
     if (!activeWorkspaceScope || connectedBackendIds.length === 0) {
       const message =
         "Connect and verify a model provider before entering Fable.";
@@ -2554,6 +2709,11 @@ export function useShellRuntime(
   // first-run journey are all required. Persisted preview/local dismissal can
   // never bypass a missing provider.
   const onboardingRequired =
+    !(
+      identityStatus.state === "signed-in" ||
+      (identityStatus.state === "offline" &&
+        Boolean(identityStatus.authentication))
+    ) ||
     !activeWorkspaceScope ||
     connectedBackendIds.length === 0 ||
     !onboardingDismissed ||

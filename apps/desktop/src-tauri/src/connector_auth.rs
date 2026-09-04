@@ -325,6 +325,12 @@ fn provider_config(
                 false,
             )
         })?;
+        // Some Google Desktop OAuth clients reject the token exchange without
+        // their generated client secret even though PKCE remains mandatory and
+        // the general native-app documentation describes the field as optional.
+        // Keep it in the native process environment only; it never enters React
+        // state, connection metadata, logs, or a model transcript.
+        google_oauth_client_secret(connector_id)?;
         let mut provider_scopes = vec![
             "openid".to_string(),
             "profile".to_string(),
@@ -374,6 +380,21 @@ fn provider_config(
         scopes,
         brokered: true,
     })
+}
+
+fn google_oauth_client_secret(connector_id: &str) -> Result<Option<String>, ConnectorCommandError> {
+    if !matches!(connector_id, "google-drive" | "gmail" | "google-calendar") {
+        return Ok(None);
+    }
+    match std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET") {
+        Ok(secret) if !secret.trim().is_empty() => Ok(Some(secret)),
+        _ => Err(command_error(
+            "configuration-required",
+            connector_id,
+            "Google Desktop OAuth client secret configuration is required.",
+            false,
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -437,7 +458,9 @@ fn start_with_store_bound(
         authorization
             .query_pairs_mut()
             .append_pair("access_type", "offline")
-            .append_pair("prompt", "consent");
+            // Never let the system browser's default Google session silently
+            // decide which account a connector receives access to.
+            .append_pair("prompt", "consent select_account");
     }
     let pending = PendingOAuth {
         connector_id: connector_id.to_string(),
@@ -486,6 +509,29 @@ struct TokenResponse {
     expires_in: Option<u64>,
     scope: Option<String>,
     account: Option<ConnectorAccountSummary>,
+}
+
+#[derive(Deserialize)]
+struct OAuthErrorResponse {
+    error: Option<String>,
+}
+
+fn token_exchange_rejection_message(provider_error: Option<&str>) -> &'static str {
+    match provider_error {
+        Some("invalid_grant") => {
+            "OAuth token exchange was rejected: the authorization code or PKCE verifier was invalid (invalid_grant)."
+        }
+        Some("invalid_client") => {
+            "OAuth token exchange was rejected: the desktop OAuth client was invalid (invalid_client)."
+        }
+        Some("redirect_uri_mismatch") => {
+            "OAuth token exchange was rejected: the loopback redirect did not match (redirect_uri_mismatch)."
+        }
+        Some("invalid_request") => {
+            "OAuth token exchange was rejected because the provider considered the request invalid (invalid_request)."
+        }
+        _ => "OAuth token exchange was rejected.",
+    }
 }
 
 /// Broker handoff redemption response. The broker returns the token set nested
@@ -903,15 +949,20 @@ async fn prepare_with_store(
                 false,
             )
         })?;
+        let client_secret = google_oauth_client_secret(connector_id)?;
+        let mut form = vec![
+            ("grant_type", "authorization_code"),
+            ("code", code_value.as_ref()),
+            ("client_id", pending.client_id.as_str()),
+            ("redirect_uri", pending.redirect_uri.as_str()),
+            ("code_verifier", pending.verifier.as_str()),
+        ];
+        if let Some(secret) = client_secret.as_deref() {
+            form.push(("client_secret", secret));
+        }
         let response = reqwest::Client::new()
             .post(&token_endpoint)
-            .form(&[
-                ("grant_type", "authorization_code"),
-                ("code", &code_value),
-                ("client_id", pending.client_id.as_str()),
-                ("redirect_uri", pending.redirect_uri.as_str()),
-                ("code_verifier", pending.verifier.as_str()),
-            ])
+            .form(&form)
             .send()
             .await
             .map_err(|_| {
@@ -923,10 +974,18 @@ async fn prepare_with_store(
                 )
             })?;
         if !response.status().is_success() {
+            // Provider error payloads may contain sensitive or attacker-controlled
+            // detail. Parse only the standard error code and map an allowlisted
+            // set to actionable local messages; never retain or surface the body.
+            let provider_error = response
+                .json::<OAuthErrorResponse>()
+                .await
+                .ok()
+                .and_then(|payload| payload.error);
             return Err(command_error(
                 "needs-auth",
                 connector_id,
-                "OAuth token exchange was rejected.",
+                token_exchange_rejection_message(provider_error.as_deref()),
                 false,
             ));
         }
@@ -2484,13 +2543,18 @@ async fn refresh_connection_for_connection(
                 false,
             )
         })?;
+        let client_secret = google_oauth_client_secret(connector_id)?;
+        let mut form = vec![
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token.as_str()),
+            ("client_id", tokens.client_id.as_str()),
+        ];
+        if let Some(secret) = client_secret.as_deref() {
+            form.push(("client_secret", secret));
+        }
         let response = reqwest::Client::new()
             .post(&token_endpoint)
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("refresh_token", refresh_token.as_str()),
-                ("client_id", tokens.client_id.as_str()),
-            ])
+            .form(&form)
             .send()
             .await
             .map_err(|_| {
@@ -2712,6 +2776,18 @@ mod tests {
         }
     }
 
+    #[test]
+    fn token_exchange_errors_are_actionable_without_echoing_provider_details() {
+        assert!(token_exchange_rejection_message(Some("invalid_grant"))
+            .contains("authorization code or PKCE verifier"));
+        assert!(token_exchange_rejection_message(Some("invalid_client"))
+            .contains("desktop OAuth client"));
+        assert_eq!(
+            token_exchange_rejection_message(Some("secret-bearing-provider-detail")),
+            "OAuth token exchange was rejected."
+        );
+    }
+
     fn authorized_test_scope(durable: &Store) -> AuthorizedCommandScope {
         durable
             .transaction(|tx| resolve(tx, None, None, ScopeAccess::Write))
@@ -2793,6 +2869,10 @@ mod tests {
         assert_eq!(
             query.get("access_type").map(|value| value.as_ref()),
             Some("offline")
+        );
+        assert_eq!(
+            query.get("prompt").map(|value| value.as_ref()),
+            Some("consent select_account")
         );
         assert!(!query.contains_key("include_granted_scopes"));
         let pending = store.get(&pending_key("fixture", state)).unwrap().unwrap();
@@ -3830,6 +3910,34 @@ mod tests {
         let err = result.expect_err("should fail when client id is missing");
         assert_eq!(err.code, "configuration-required");
         assert_eq!(err.connector_id, "google-drive");
+        assert!(!err.retryable);
+    }
+
+    #[test]
+    fn test_provider_config_pkce_missing_client_secret_fails_closed() {
+        let _lock = ENV_LOCK.lock().unwrap();
+
+        let old_id = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+        let old_secret = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET").ok();
+        std::env::set_var(
+            "FABLE_GOOGLE_OAUTH_CLIENT_ID",
+            "google-desktop-client.apps.googleusercontent.com",
+        );
+        std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET");
+
+        let result = provider_config("google-drive", "oauth-pkce", vec![]);
+
+        match old_id {
+            Some(value) => std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value),
+            None => std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID"),
+        }
+        if let Some(value) = old_secret {
+            std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET", value);
+        }
+
+        let err = result.expect_err("should fail when client secret is missing");
+        assert_eq!(err.code, "configuration-required");
+        assert!(err.message.contains("client secret"));
         assert!(!err.retryable);
     }
 

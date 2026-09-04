@@ -7,16 +7,37 @@ checkpoints, and final tool dispatch.
 
 ## Provider connections
 
-The native boundary implements OpenAI-compatible, Anthropic Messages, and
-Gemini wire formats. The provider catalogue maps supported services onto those
-formats and keeps model names, endpoints, headers, discovery, and connection
-methods in adapters.
+The native HTTP boundary implements OpenAI-compatible and Anthropic Messages
+wire formats. Provider-owned agent processes use separate adapters: Codex
+app-server for ChatGPT; Google's Antigravity, Cursor, and Grok agents over ACP;
+Claude's bidirectional Agent SDK protocol; and an authenticated OpenCode server
+owned by Fable for the duration of the turn. The catalogue keeps connection and
+execution routes explicit.
 
 Connection methods are explicit:
 
 - Codex app-server may start its official ChatGPT browser authorization and
   keeps that session inside Codex. Fable does not collect browser cookies or
   private session tokens and does not use a CLI login as the product flow.
+- Antigravity ACP uses its personal Google OAuth method. The single **Continue
+  with Google** action installs a version-and-hash-pinned Google release when
+  required, then opens Google sign-in. Fable keeps its profile account-scoped,
+  discovers models from the ACP session, and routes its permission requests
+  through Fable's approval queue before the agent may continue.
+- Cursor and Grok use their installed official command-line runtimes. Fable
+  starts provider-owned sign-in, speaks ACP over supervised standard I/O,
+  discovers provider models, and mediates each permission request before the
+  runtime may continue.
+- Claude uses its installed official CLI with the bidirectional streaming JSON
+  protocol and a Fable-account-scoped profile. Ambient settings and MCP servers
+  are excluded. Built-in tool requests cross Claude's documented stdio
+  permission protocol and must receive a matching, single-use Fable approval
+  before Claude may continue.
+- OpenCode runs as a Fable-owned, password-protected loopback server in pure
+  mode, inside its Fable-owned workspace, with sharing disabled. Fable creates
+  a session with explicit ask rules, subscribes to its event stream, and sends
+  only one-time allow or reject permission replies. It uses provider
+  configuration already established through OpenCode.
 - Direct remote providers use a user-supplied API key held by the
   operating-system credential store. The key is injected only by Rust.
 - A custom OpenAI-compatible connection needs an explicit base URL and model.
@@ -28,13 +49,15 @@ discovery report missing, rejected, unsupported, offline, and transient failure
 states separately. Curated model names are fallbacks where a provider exposes
 no compatible model-list endpoint; they are not entitlement evidence.
 
-The reachable catalogue contains only Codex browser sign-in, OpenAI API,
-Anthropic API, Gemini API, xAI API, and a custom OpenAI-compatible endpoint.
-No consumer subscription is treated as a general API credential.
+The reachable catalogue contains Codex browser sign-in, Antigravity ACP,
+Cursor ACP, Grok ACP, Claude Agent, OpenCode server, OpenAI API, Anthropic API,
+xAI API, and a custom OpenAI-compatible endpoint. A route is not runnable until
+the native boundary verifies its executable and account state. No consumer
+subscription is treated as a general API credential.
 
 ## Request boundary
 
-All three wire formats support text completion, streaming, bounded multi-round
+The native HTTP formats support text completion, streaming, bounded multi-round
 tool calls, retries before a stream begins, and cancellation. Image and file
 attachments are not yet supported by the native provider payload path.
 
@@ -43,7 +66,11 @@ seconds without a new chunk. Authentication and client-request failures do not
 retry; rate limits, connection failures, and server failures may retry up to two
 times with bounded `Retry-After` or exponential backoff. Once response bytes
 start, an interruption terminates the attempt rather than risking a repeated
-effect.
+effect. Antigravity, Cursor, and Grok use ACP's initialize, authenticate,
+session, prompt, update, permission, and cancellation messages rather than the
+native HTTP retry loop. Claude uses its control-protocol interrupt. OpenCode
+uses its authenticated session-abort endpoint. Shutdown still terminates the
+exact supervised provider process.
 
 ## Execution attempts and recovery
 

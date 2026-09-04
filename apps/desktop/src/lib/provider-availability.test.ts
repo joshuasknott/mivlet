@@ -6,7 +6,8 @@ describe("Fable provider availability", () => {
     expect(isFableProviderEnabled("xai")).toBe(true);
   });
 
-  it("does not offer the retired CLI-only Grok path", () => {
-    expect(isFableProviderEnabled("grok")).toBe(false);
+  it("registers the Grok ACP instance without reviving the retired CLI alias", () => {
+    expect(isFableProviderEnabled("grok")).toBe(true);
+    expect(isFableProviderEnabled("grok-cli")).toBe(false);
   });
 });

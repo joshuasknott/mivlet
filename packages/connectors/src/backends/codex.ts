@@ -37,6 +37,8 @@ export function resolveCodexProvider(
 
   return {
     id: CODEX_PROVIDER_ID,
+    instanceId: CODEX_PROVIDER_ID,
+    driverKind: "codex",
     backendType: CODEX_BACKEND_TYPE,
     label: provider.label,
     description: provider.description,
@@ -47,6 +49,12 @@ export function resolveCodexProvider(
       label: model.label,
       available: authState === "connected"
     })),
+    setup: {
+      kind: "browser",
+      label: "ChatGPT account",
+      description: "Sign in through the official browser flow managed by Codex.",
+      recommended: true
+    },
     installHint: provider.installHint
   };
 }

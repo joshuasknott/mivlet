@@ -13,7 +13,6 @@ import {
   prepareRuntimeLocalRestore,
   type RuntimeLocalDiagnosticsSnapshot
 } from "../../runtime";
-import { PluginPanel } from "../PluginPanel";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { LocalMcpSettings } from "../settings/LocalMcpSettings";
 import {
@@ -132,9 +131,9 @@ function GeneralSettings({
               </div>
               <p>{workspaceName}</p>
               <p>
-                Conversations, drafts, memory, and preferences remain available
-                without a Fable account. Provider and app connections are added
-                separately and keep their credentials behind the native secure boundary.
+                Conversations, drafts, memory, and preferences stay on this device
+                and do not sync by default. Account, provider, and app credentials
+                remain separate behind the native secure boundary.
               </p>
             </section>
           </div>
@@ -185,20 +184,20 @@ function ConfiguredAccountSettings({
     <div className="settings-page__body">
       <article className="profile-clean-card settings-open-section">
         <div className="profile-clean-card__content">
-          <section className="profile-section" aria-labelledby="optional-account-title">
+          <section className="profile-section" aria-labelledby="fable-account-title">
             <div className="profile-section__heading">
               <span className="settings-panel__icon" aria-hidden="true">
                 <UserCircle size={19} />
               </span>
               <span>
-                <strong id="optional-account-title">Optional Fable account</strong>
-                <small>{runtime.accountWorkspaceStatus.message || runtime.identityStatus.message}</small>
+                <strong id="fable-account-title">Fable account</strong>
+                <small>{runtime.identityStatus.message}</small>
               </span>
             </div>
             <p>
               {authentication
                 ? display?.displayName ?? display?.email ?? authentication.subject
-                : "Sign in only when you want configured hosted features or future sync."}
+                : "Sign in to use Fable on this device."}
             </p>
             <div className="profile-action-row">
               {!authentication && !needsRecovery ? (
@@ -237,7 +236,7 @@ function ConfiguredAccountSettings({
                   type="button"
                   className="button button--secondary"
                   disabled={busy}
-                  onClick={() => void act(runtime.signOutIdentity, "Signed out of the optional account.")}
+                  onClick={() => void act(runtime.signOutIdentity, "Signed out of Fable.")}
                 >
                   Sign out
                 </button>
@@ -308,27 +307,14 @@ function ConnectionSettings({
   runtime: ShellRuntime;
   onStatus: (message: string) => void;
 }) {
-  const visibleConnectors = runtime.connectorManifests.filter(
-    (connector) => connector.id !== "local-files"
-  );
-
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
-        <p>Give teammates access only to the apps and local tools you choose.</p>
+        <p>
+          App connectors are managed from Connectors in the sidebar. Advanced
+          tool servers stay here.
+        </p>
       </div>
-      <PluginPanel
-        manifests={visibleConnectors}
-        onUseConnector={runtime.useConnector}
-        onConnect={(connector) => void runtime.connectConnector(connector)}
-        onDisconnect={(connectorId) => void runtime.disconnectConnector(connectorId)}
-        onRefresh={(connectorId) => void runtime.refreshConnector(connectorId)}
-        accounts={runtime.connectorAccounts}
-        onSwitchAccount={(connectorId, accountId) =>
-          void runtime.switchConnectorAccount(connectorId, accountId)
-        }
-        onSelect={(connector) => void runtime.loadConnectorAccounts(connector.id)}
-      />
       <LocalMcpSettings
         workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}
         onStatus={onStatus}

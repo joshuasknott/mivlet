@@ -13,13 +13,30 @@ describe("ProviderIcon", () => {
     expect(mark).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("keeps the Gemini mark multicolour", () => {
-    const { container } = render(<ProviderIcon provider="gemini" />);
-    const mark = container.querySelector('[data-provider-brand="gemini"]');
-    expect(mark?.querySelectorAll("stop")).toHaveLength(4);
+  it("uses Google's official full-colour Antigravity icon", () => {
+    const { container } = render(<ProviderIcon provider="antigravity" />);
+    const mark = container.querySelector('[data-provider-brand="antigravity"]');
+    expect(mark).toHaveAttribute("src", "/brand/google-antigravity.png");
+    expect(mark).toHaveAttribute("width", "20");
+    expect(mark).toHaveAttribute("height", "20");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
   });
 
-  it.each(["codex", "openai", "anthropic", "gemini", "xai", "custom"])(
+  it("renders the Anthropic mark in its official terracotta treatment", () => {
+    const { container } = render(<ProviderIcon provider="anthropic" />);
+    expect(container.querySelector('[data-provider-brand="anthropic"]')).toHaveStyle({
+      color: "#D97757",
+    });
+  });
+
+  it("uses the Grok product mark for xAI", () => {
+    const { container } = render(<ProviderIcon provider="xai" />);
+    const icon = container.querySelector('[data-provider-brand="grok"]');
+    expect(icon).toHaveAttribute("viewBox", "0 0 512 512");
+    expect(icon?.querySelector('rect[fill="#050505"]')).toBeTruthy();
+  });
+
+  it.each(["codex", "openai", "anthropic", "antigravity", "gemini", "custom"])(
     "renders the current %s provider",
     (provider) => {
       const { container } = render(<ProviderIcon provider={provider} />);

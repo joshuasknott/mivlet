@@ -86,8 +86,11 @@ export * from "./sync";
 export {
   BACKEND_PROVIDER_IDS,
   listBackendProviders,
+  BUILT_IN_PROVIDER_DRIVERS,
+  providerDriverForInstance,
   resolveCapabilities,
   resolveCodexProvider,
+  resolveManagedProvider,
   resolveNativeProvider,
   NATIVE_BACKEND_TYPE
 } from "./backends/registry";
@@ -97,7 +100,8 @@ export type {
 } from "./backends/capabilities";
 export type {
   BackendProviderId,
-  NativeProviderId
+  NativeProviderId,
+  ProviderDriverDefinition
 } from "./backends/registry";
 
 // native-API agent loop (pure shaping + orchestration; the transport seam
@@ -149,12 +153,20 @@ export {
   resolveAgentBackend,
   hasRunnableAdapter,
   createCodexBackend,
+  createAntigravityBackend,
+  createManagedRuntimeBackend,
   createNativeApiBackend,
   type AgentBackend,
   type AgentBackendFactory,
   type AgentTurnRequest,
   type AgentTurnOptions,
   type BackendDeps,
+  type AntigravityAcpEvent,
+  type AntigravityAcpHandle,
+  type AntigravityAcpHandlers,
+  type ManagedRuntimeEvent,
+  type ManagedRuntimeHandle,
+  type ManagedRuntimeHandlers,
   type CodexAppServerEvent,
   type CodexAppServerHandle,
   type CodexAppServerHandlers,

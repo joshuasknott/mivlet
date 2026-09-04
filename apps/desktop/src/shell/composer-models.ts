@@ -30,7 +30,7 @@ export function composerModelsFor(
     const hasGpt4 = available.some((model) => model.modelId.toLowerCase().startsWith("gpt-4"));
     if (hasGpt4) return available.filter((model) => !model.modelId.toLowerCase().startsWith("gpt-3.5"));
   }
-  if (providerId === "gemini") {
+  if (providerId === "antigravity") {
     const versioned = available
       .map((model) => ({ model, version: parsedModelVersion(model.modelId, "gemini") }))
       .filter((entry): entry is { model: ProviderModelOption; version: number } => entry.version !== null);

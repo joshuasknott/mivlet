@@ -40,6 +40,8 @@ export function resolveNativeProvider(
 
   return {
     id: providerId,
+    instanceId: providerId,
+    driverKind: "native-api",
     backendType: NATIVE_BACKEND_TYPE,
     label: provider.label,
     description: provider.description,
@@ -50,6 +52,14 @@ export function resolveNativeProvider(
       label: model.label,
       available: authState === "connected"
     })),
+    setup: {
+      kind: providerId === "custom" ? "custom" : "api-key",
+      label: provider.authLabel,
+      description: providerId === "custom"
+        ? "Use one explicit OpenAI-compatible endpoint."
+        : "Use a metered API key stored by Fable's local credential boundary.",
+      recommended: false
+    },
     installHint: undefined
   };
 }

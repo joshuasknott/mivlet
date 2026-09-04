@@ -2,7 +2,7 @@
 
 Date: 2026-08-29
 
-Status: Accepted
+Status: Superseded by `2026-08-31-account-first-onboarding.md`
 
 ## Decision
 

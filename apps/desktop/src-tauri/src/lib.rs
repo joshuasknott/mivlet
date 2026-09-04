@@ -12,6 +12,7 @@
 
 mod account_workspace;
 mod action_history;
+mod antigravity_acp;
 mod approvals;
 mod authorized_scope;
 mod backends;
@@ -35,6 +36,7 @@ mod google;
 mod hosted_computer;
 mod knowledge;
 mod local_computer;
+mod managed_runtime;
 mod mcp_process;
 mod memory;
 mod models;
@@ -52,6 +54,12 @@ pub mod tools;
 /// the audited ring provider before constructing any native HTTP client.
 pub(crate) fn ensure_rustls_provider() {
     let _ = rustls::crypto::ring::default_provider().install_default();
+}
+
+/// Opens an Antigravity authorization request only after validating the exact
+/// Google origin and loopback callback expected by the pinned ACP runtime.
+pub fn open_antigravity_browser_helper(raw_url: &str) -> bool {
+    antigravity_acp::open_validated_browser_helper(raw_url)
 }
 
 use tauri::Manager;
@@ -113,6 +121,25 @@ pub fn run() {
             codex_app_server::respond_codex_app_server_approval,
             codex_app_server::interrupt_codex_app_server_turn,
             codex_app_server::shutdown_codex_app_server_turn,
+            antigravity_acp::antigravity_status,
+            antigravity_acp::install_antigravity_runtime,
+            antigravity_acp::start_antigravity_browser_login,
+            antigravity_acp::check_antigravity_connection,
+            antigravity_acp::list_antigravity_models,
+            antigravity_acp::start_antigravity_acp_turn,
+            antigravity_acp::respond_antigravity_acp_approval,
+            antigravity_acp::interrupt_antigravity_acp_turn,
+            antigravity_acp::shutdown_antigravity_acp_turn,
+            antigravity_acp::logout_antigravity,
+            managed_runtime::managed_runtime_status,
+            managed_runtime::check_managed_runtime_connection,
+            managed_runtime::start_managed_runtime_login,
+            managed_runtime::list_managed_runtime_models,
+            managed_runtime::start_managed_runtime_turn,
+            managed_runtime::respond_managed_runtime_approval,
+            managed_runtime::interrupt_managed_runtime_turn,
+            managed_runtime::shutdown_managed_runtime_turn,
+            managed_runtime::logout_managed_runtime,
             connectors::list_connector_statuses,
             connector_approvals::list_connector_approval_records,
             connectors::start_connector_auth,

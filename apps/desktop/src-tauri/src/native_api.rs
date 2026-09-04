@@ -885,7 +885,7 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "gemini", "xai", "custom"];
+const NATIVE_PROVIDER_IDS: [&str; 4] = ["openai", "anthropic", "xai", "custom"];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]

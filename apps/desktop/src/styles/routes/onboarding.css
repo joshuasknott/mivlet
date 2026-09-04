@@ -1,251 +1,384 @@
-/* ---------------------------------------------------------------------------
- * Local-first onboarding shell. The `.og-` namespace (onboarding-gate) is
- * deliberately separate from the `.onboarding-` classes shared with the
- * Settings page panel.
- * ------------------------------------------------------------------------- */
+/* First-run onboarding: quiet, centered, and intentionally separate from the
+ * denser provider and connector management surfaces in Settings. */
 
 .og-frame {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
+  display: grid;
   min-height: 100dvh;
-  padding: 42px 28px;
   overflow-y: auto;
+  padding: clamp(32px, 7vh, 72px) 24px 32px;
+  color: var(--ink);
   background: var(--surface);
 }
 
-.og-frame::before {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
+.og-back-button {
+  position: fixed;
+  top: 28px;
+  left: 28px;
+  z-index: 2;
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  color: var(--ink-muted);
   background: transparent;
-  content: "";
+  border: 0;
+  border-radius: 8px;
+  font-size: var(--text-13);
+  font-weight: 500;
+}
+
+.og-back-button:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
 }
 
 .og-center {
-  position: relative;
-  z-index: 1;
-  width: min(100%, 1180px);
-  margin: auto;
   display: flex;
+  width: min(100%, 560px);
+  min-height: min(780px, calc(100dvh - 104px));
+  margin: auto;
+  flex-direction: column;
+  align-items: center;
+}
+
+.og-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 12px;
+  margin-bottom: clamp(68px, 12vh, 116px);
+}
+
+.og-progress span {
+  width: 8px;
+  height: 8px;
+  background: color-mix(in srgb, var(--ink) 14%, transparent);
+  border-radius: 999px;
+  transition:
+    width 160ms ease,
+    background 160ms ease;
+}
+
+.og-progress span.is-current {
+  width: 20px;
+  background: var(--ink);
+}
+
+.og-screen {
+  display: flex;
+  width: 100%;
+  flex: 1;
   flex-direction: column;
   align-items: center;
   text-align: center;
 }
 
-/* Hero — same greeting + headline rhythm as the workspace. */
-.og-hero {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  width: 100%;
-  margin-bottom: 20px;
+.og-heading {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
 }
 
-.og-hero h1 {
-  max-width: 860px;
-  margin: 12px 0 0;
+.og-heading h1 {
+  margin: 0;
   color: var(--ink);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  font-size: clamp(28px, 3vw, 38px);
-  font-weight: 500;
-  letter-spacing: 0;
+  font-size: clamp(30px, 4vw, 40px);
+  font-weight: 560;
+  letter-spacing: -0.035em;
   line-height: 1.08;
 }
 
-.og-lede {
-  max-width: 68ch;
-  margin: 16px 0 0;
+.og-heading p {
+  max-width: 480px;
+  margin: 0;
   color: var(--ink-muted);
-  font-size: var(--text-16);
+  font-size: var(--text-15);
   line-height: 1.55;
 }
 
-.og-eyebrow {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-/* Scale up onboarding presence on desktop screens */
-@media (min-width: 769px) {
-  .og-form {
-    max-width: 680px;
-    padding: 38px 42px;
-    gap: 22px;
-    border-radius: var(--radius-3);
-  }
-  .og-progress-container {
-    max-width: 680px;
-    margin-bottom: 34px;
-  }
-  .og-progress-steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-  .og-progress-step {
-    padding: 14px 18px;
-    font-size: var(--text-15);
-    gap: 10px;
-  }
-  .og-progress-step > span {
-    width: 28px;
-    height: 28px;
-    font-size: var(--text-13);
-  }
-  .og-field {
-    gap: 8px;
-  }
-  .og-field span {
-    font-size: var(--text-15);
-  }
-  .og-field input {
-    min-height: 48px;
-    padding: 14px 18px;
-    font-size: var(--text-15);
-  }
-  .og-submit {
-    margin-top: 10px;
-    padding: 14px;
-    font-size: var(--text-15);
-  }
-  .og-hero {
-    margin-bottom: 34px;
-  }
-  .og-hero h1 {
-    font-size: 36px;
-    line-height: 1.15;
-  }
-  .og-lede {
-    font-size: var(--text-16);
-    margin-top: 16px;
-    max-width: 64ch;
-  }
-}
-
-@media (min-width: 960px) {
-  .og-unified .provider-catalogue__grid {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-}
-
-/* Two equal frosted-glass path cards. */
-.og-paths {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  width: 100%;
-  margin-top: 4px;
-}
-
-.og-path {
+.og-account-actions,
+.og-provider-action,
+.og-connector-actions {
   display: flex;
+  width: min(100%, 440px);
   flex-direction: column;
-  padding: 20px 22px;
-  text-align: left;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised);
-  box-shadow: none;
-  backdrop-filter: var(--glass-filter);
+  align-items: stretch;
+  gap: 14px;
 }
 
-.og-path__heading {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
+.og-account-actions {
+  margin-top: 64px;
 }
 
-.og-path__heading strong {
-  display: block;
-  color: var(--ink);
-  font-size: var(--text-14);
-  font-weight: 500;
+.og-provider-action {
+  margin-top: 30px;
 }
 
-.og-path__heading small {
-  display: block;
-  margin-top: 2px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
+.og-connector-actions {
+  margin-top: 68px;
 }
 
-.og-path__icon {
+.og-primary-button {
   display: inline-flex;
+  width: 100%;
+  min-height: 54px;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  color: var(--ink);
-  background: var(--accent-blue);
-  border-radius: var(--radius-2);
+  gap: 10px;
+  padding: 0 22px;
+  color: #fff;
+  background: #111;
+  border: 1px solid #111;
+  border-radius: 12px;
+  font-size: var(--text-15);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition:
+    background 120ms ease,
+    transform 120ms ease,
+    opacity 120ms ease;
 }
 
-.og-path__note {
-  margin: 12px 0 0 46px;
+.og-primary-button:hover:not(:disabled) {
+  background: #292929;
+}
+
+.og-primary-button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.og-primary-button:disabled,
+.og-text-button:disabled,
+.og-icon-choice:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.og-text-button,
+.og-provider-alternative {
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 50%, transparent);
+  text-underline-offset: 4px;
+}
+
+.og-text-button {
+  align-self: center;
+  min-height: 40px;
+  padding: 6px 8px;
+  font-size: var(--text-14);
+}
+
+.og-text-button:hover:not(:disabled),
+.og-provider-alternative:hover:not(:disabled) {
+  text-decoration-color: currentColor;
+}
+
+.og-primary-button:focus-visible,
+.og-back-button:focus-visible,
+.og-text-button:focus-visible,
+.og-provider-alternative:focus-visible,
+.og-icon-choice:focus-visible,
+.og-provider-form input:focus-visible,
+.og-legal a:focus-visible {
+  outline: 0;
+  box-shadow: var(--focus-ring);
+}
+
+.og-legal {
+  margin: auto 0 0;
+  padding-top: 72px;
   color: var(--ink-soft);
+  font-size: var(--text-11);
+  line-height: 1.5;
+}
+
+.og-provider-alternative {
+  min-height: 40px;
+  margin-top: 14px;
+  padding: 6px 8px;
+  font-size: var(--text-13);
+}
+
+.og-provider-alternative[aria-pressed="true"] {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+.og-legal a {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.og-icon-choices {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+  gap: 14px;
+  margin-top: 52px;
+}
+
+.og-icon-choice {
+  position: relative;
+  display: grid;
+  width: 72px;
+  height: 72px;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    transform 120ms ease;
+}
+
+.og-icon-choice:hover:not(:disabled) {
+  background: var(--surface-hover);
+  border-color: color-mix(in srgb, var(--ink) 35%, var(--line-strong));
+}
+
+.og-icon-choice:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.og-icon-choice.is-selected {
+  border-color: var(--ink);
+  box-shadow: inset 0 0 0 1px var(--ink);
+}
+
+.og-icon-choice .connector-icon-svg {
+  width: 32px;
+  height: 32px;
+}
+
+.og-icon-choice__check {
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  color: var(--surface);
+  background: var(--ink);
+  border: 3px solid var(--surface);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.og-provider-form {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+
+.og-provider-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  text-align: left;
+}
+
+.og-provider-form input {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  color: var(--ink);
+  background: var(--surface-raised);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  font: inherit;
+}
+
+.og-feedback {
+  max-width: 480px;
+  margin: 18px 0 0;
+  color: var(--ink-muted);
   font-size: var(--text-12);
   line-height: 1.5;
 }
 
-/* Obsolete og-provider card styles removed */
-
-/* Trust note — quiet centered frosted pill. */
-.og-trust {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 28px 0 0;
-  padding: 8px 14px;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  backdrop-filter: var(--glass-filter);
-}
-
-.og-status {
-  margin: 14px 0 0;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.og-status--error {
-  margin: 4px 0;
+.og-feedback--danger {
   color: var(--destructive);
 }
 
-.og-skip {
-  margin-top: 14px;
-  background: none;
-  border: none;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  cursor: pointer;
-  padding: 0;
+.og-spinner {
+  animation: og-spin 0.8s linear infinite;
 }
 
-.og-skip--profile {
-  margin-top: 6px;
+@keyframes og-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.og-skip:hover {
-  color: var(--ink-muted);
+@media (max-width: 620px) {
+  .og-frame {
+    padding: 28px 20px 24px;
+  }
+
+  .og-back-button {
+    position: absolute;
+    top: 16px;
+    left: 12px;
+  }
+
+  .og-center {
+    min-height: calc(100dvh - 52px);
+  }
+
+  .og-progress {
+    margin-bottom: clamp(54px, 10vh, 76px);
+  }
+
+  .og-heading h1 {
+    font-size: 31px;
+  }
+
+  .og-account-actions {
+    margin-top: 48px;
+  }
+
+  .og-icon-choices {
+    gap: 9px;
+    margin-top: 42px;
+  }
+
+  .og-icon-choice {
+    width: clamp(52px, 15vw, 62px);
+    height: clamp(52px, 15vw, 62px);
+    border-radius: 12px;
+  }
+
+  .og-icon-choice .connector-icon-svg {
+    width: 28px;
+    height: 28px;
+  }
+
+  .og-connector-actions {
+    margin-top: 46px;
+  }
+
+  .og-provider-action {
+    margin-top: 28px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .og-progress span,
+  .og-primary-button,
+  .og-icon-choice {
+    transition: none;
+  }
 }

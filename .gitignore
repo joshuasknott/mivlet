@@ -16,6 +16,7 @@ output/
 coverage/
 .npm-cache/
 .vite/
+.playwright-cli/
 **/.wrangler/
 .superpowers/
 .worktrees/

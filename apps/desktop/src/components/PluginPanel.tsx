@@ -3,14 +3,36 @@ import type {
   ConnectorAccountOption,
   ConnectorManifest,
 } from "@fable/protocol";
+import { Check } from "@phosphor-icons/react/dist/csr/Check";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
+import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
+import {
+  findMarketplaceConnector,
+  marketplaceConnectorSections,
+  recommendedMarketplaceConnectors,
+  type MarketplaceConnectorEntry,
+} from "./marketplace/marketplace-catalog";
+
+const INSTALLED_CONNECTOR_PRIORITY = [
+  "gmail",
+  "google-drive",
+  "slack",
+  "github",
+  "google-calendar",
+  "notion",
+  "linear",
+  "vercel",
+];
 
 /**
- * Icon-first connector cards with one expanded detail panel. Keep the cards
- * quiet; advanced permissions and actions only appear after selection.
+ * Marketplace directory backed by the native connector manifests. Catalogue
+ * rows without a matching manifest are visible as Planned but can never enter
+ * a connected or installed state.
  */
 export function PluginPanel({
   manifests,
@@ -32,175 +54,260 @@ export function PluginPanel({
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(
-    null,
-  );
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
+  const manifestById = useMemo(
+    () => new Map(manifests.map((connector) => [connector.id, connector])),
+    [manifests],
+  );
+  const selectedEntry = useMemo(
+    () =>
+      (selectedEntryId ? findMarketplaceConnector(selectedEntryId) : null) ??
+      null,
+    [selectedEntryId],
+  );
   const selectedConnector = useMemo(
     () =>
-      manifests.find((connector) => connector.id === selectedConnectorId) ??
-      null,
-    [manifests, selectedConnectorId],
+      (selectedEntryId ? manifestById.get(selectedEntryId) : undefined) ?? null,
+    [manifestById, selectedEntryId],
   );
 
   useModalFocusTrap({
-    active: selectedConnector !== null,
+    active: selectedEntry !== null,
     containerRef: detailModalRef,
     initialFocusRef: detailCloseRef,
-    onClose: () => setSelectedConnectorId(null),
+    onClose: () => setSelectedEntryId(null),
   });
 
-  const visibleManifests = useMemo(() => {
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visibleSections = useMemo(() => {
+    if (!normalizedQuery) return marketplaceConnectorSections;
+    return marketplaceConnectorSections
+      .map((section) => ({
+        ...section,
+        connectors: section.connectors.filter((entry) => {
+          const manifest = manifestById.get(entry.id);
+          return [
+            entry.name,
+            entry.description,
+            section.title,
+            manifest?.setupMessage,
+            manifest?.healthSummary,
+            ...(manifest?.permissions ?? []),
+          ]
+            .filter(Boolean)
+            .join(" ")
+            .toLocaleLowerCase()
+            .includes(normalizedQuery);
+        }),
+      }))
+      .filter((section) => section.connectors.length > 0);
+  }, [manifestById, normalizedQuery]);
+  const installedManifests = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
-    if (!normalized) return manifests;
-    return manifests.filter((connector) =>
-      [
-        connector.name,
-        connector.setupMessage,
-        connector.healthSummary,
-        ...connector.permissions,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLocaleLowerCase()
-        .includes(normalized),
-    );
+    return manifests
+      .filter(
+        (connector) =>
+          connector.status === "connected" &&
+          connector.id !== "local-files" &&
+          (!normalized ||
+            [
+              connector.name,
+              connector.setupMessage,
+              connector.healthSummary,
+              ...connector.permissions,
+            ]
+              .filter(Boolean)
+              .join(" ")
+              .toLocaleLowerCase()
+              .includes(normalized)),
+      )
+      .sort((left, right) => {
+        const leftIndex = INSTALLED_CONNECTOR_PRIORITY.indexOf(left.id);
+        const rightIndex = INSTALLED_CONNECTOR_PRIORITY.indexOf(right.id);
+        return (
+          (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
+          (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex)
+        );
+      });
   }, [manifests, query]);
-  const installedManifests = visibleManifests.filter(
-    (connector) => connector.status === "connected",
+  const visibleRecommended = recommendedMarketplaceConnectors.filter((entry) =>
+    visibleSections.some((section) =>
+      section.connectors.some((candidate) => candidate.id === entry.id),
+    ),
   );
-  const availableManifests = visibleManifests.filter(
-    (connector) => connector.status !== "connected",
-  );
+  const hasDirectoryMatches = visibleSections.length > 0;
 
-  const renderConnector = (connector: ConnectorManifest) => {
-    const connected = connector.status === "connected";
-    const selected = selectedConnector?.id === connector.id;
-    const cardDetail = resolveDetailedStatus(connector);
+  const openEntry = (entry: MarketplaceConnectorEntry) => {
+    setSelectedEntryId(entry.id);
+    const connector = manifestById.get(entry.id);
+    if (connector) onSelect(connector);
+  };
+
+  const renderConnectorRow = (
+    entry: MarketplaceConnectorEntry,
+    placement: string,
+  ) => {
+    const connector = manifestById.get(entry.id);
+    const connected = connector?.status === "connected";
+    const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const needsReconnect =
-      cardDetail.className === "expired" ||
-      cardDetail.className === "revoked" ||
-      cardDetail.className === "failed";
+      cardDetail?.className === "expired" ||
+      cardDetail?.className === "revoked" ||
+      cardDetail?.className === "failed";
+    const ariaLabel = connected
+      ? `Manage ${entry.name}`
+      : connector
+        ? `${needsReconnect ? "Reconnect" : "Connect"} ${entry.name}`
+        : `${entry.name} is planned`;
 
     return (
-      <article
-        className="connector-card"
-        key={connector.id}
-        data-connector-id={connector.id}
-        data-selected={selected}
-        role="button"
-        aria-label={
-          connected
-            ? `Manage ${connector.name}`
-            : connector.authMode !== "none"
-              ? `${needsReconnect ? "Reconnect" : "Connect"} ${connector.name}`
-              : `Open ${connector.name}`
-        }
-        tabIndex={0}
-        onClick={() => {
-          setSelectedConnectorId(connector.id);
-          onSelect(connector);
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
-            event.preventDefault();
-            setSelectedConnectorId(connector.id);
-            onSelect(connector);
-          }
-        }}
+      <button
+        type="button"
+        className="marketplace-connector-row"
+        key={`${placement}-${entry.id}`}
+        data-connector-id={entry.id}
+        data-availability={connector ? "available" : "planned"}
+        onClick={() => openEntry(entry)}
+        aria-label={ariaLabel}
       >
-        <span className="sr-only">{connector.status}</span>
         <span
-          className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}
+          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          aria-hidden="true"
         >
-          <ConnectorIcon id={connector.id} />
+          <MarketplaceIcon id={entry.id} icon={entry.icon} />
         </span>
-        <strong>{connector.name}</strong>
-
-        {connected ? (
-          <span className="connector-card__connected">
-            <span aria-hidden="true" />
-            Installed
-          </span>
-        ) : connector.authMode !== "none" ? (
-          <span className="connector-card__connect">
-            {needsReconnect ? "Reconnect" : "Connect"}
-          </span>
-        ) : (
-          <span className="connector-card__connected">Available</span>
-        )}
-      </article>
+        <span className="marketplace-connector-row__copy">
+          <strong>{entry.name}</strong>
+          <span>{entry.description}</span>
+        </span>
+        <span
+          className={`marketplace-connector-row__action${connected ? " marketplace-connector-row__action--connected" : ""}`}
+          aria-hidden="true"
+        >
+          {connected ? (
+            <Check size={19} weight="bold" />
+          ) : connector ? (
+            <Plus size={19} />
+          ) : (
+            <Clock size={17} />
+          )}
+        </span>
+      </button>
     );
   };
 
   return (
-    <section
-      className="context-panel connectors-panel"
-      aria-label="Connections"
-    >
-      <label className="connections-search">
-        <MagnifyingGlass size={17} aria-hidden="true" />
-        <span className="sr-only">Search connections</span>
-        <input
-          type="search"
-          placeholder="Search connections"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
+    <section className="connectors-marketplace" aria-label="Connectors">
+      <header className="marketplace-page-header">
+        <div>
+          <h1>Connectors</h1>
+          <p>Give your teammates access to the tools you use.</p>
+        </div>
+        <label className="connections-search">
+          <MagnifyingGlass size={17} aria-hidden="true" />
+          <span className="sr-only">Search connectors</span>
+          <input
+            type="search"
+            placeholder="Search connectors"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
+      </header>
 
       <section
-        className="connections-group"
+        className="marketplace-section marketplace-section--installed"
         aria-labelledby="installed-connections-title"
       >
-        <div className="connections-group__heading">
-          <h2 id="installed-connections-title">Installed</h2>
-          <span>{installedManifests.length}</span>
-        </div>
+        <h2 id="installed-connections-title">Installed</h2>
         {installedManifests.length ? (
-          <div className="connector-grid connector-grid--installed">
-            {installedManifests.map(renderConnector)}
+          <div className="marketplace-installed-list">
+            {installedManifests.map((connector) => {
+              const entry = findMarketplaceConnector(connector.id);
+              if (!entry) return null;
+              return (
+                <button
+                  type="button"
+                  className="marketplace-installed-connector"
+                  key={connector.id}
+                  onClick={() => openEntry(entry)}
+                  aria-label={`Manage ${connector.name} from Installed`}
+                >
+                  <span
+                    className={`marketplace-installed-connector__icon marketplace-connector-icon--${entry.icon}`}
+                    aria-hidden="true"
+                  >
+                    <MarketplaceIcon
+                      id={entry.id}
+                      icon={entry.icon}
+                      size={30}
+                    />
+                  </span>
+                  <span>
+                    {connector.name}
+                    <i aria-hidden="true" />
+                  </span>
+                </button>
+              );
+            })}
           </div>
         ) : (
-          <p className="connections-group__empty">
+          <p className="marketplace-section__empty">
             {query.trim()
-              ? "No installed connections match this search."
-              : "No connections installed yet."}
+              ? "No installed connectors match this search."
+              : "Connect an app and it will appear here."}
           </p>
         )}
       </section>
 
-      <section
-        className="connections-group"
-        aria-labelledby="all-connections-title"
-      >
-        <div className="connections-group__heading">
-          <h2 id="all-connections-title">All connections</h2>
-          <span>{availableManifests.length}</span>
-        </div>
-        {availableManifests.length ? (
-          <div className="connector-grid">
-            {availableManifests.map(renderConnector)}
+      {visibleRecommended.length ? (
+        <section
+          className="marketplace-section"
+          aria-labelledby="recommended-connections-title"
+        >
+          <h2 id="recommended-connections-title">Recommended</h2>
+          <div className="marketplace-connector-grid">
+            {visibleRecommended.map((entry) =>
+              renderConnectorRow(entry, "recommended"),
+            )}
           </div>
-        ) : (
-          <p className="connections-group__empty">
-            No connections match “{query}”.
-          </p>
-        )}
-      </section>
+        </section>
+      ) : null}
 
-      {selectedConnector ? (
+      {visibleSections.map((section) => (
+        <section
+          className="marketplace-section"
+          aria-labelledby={`marketplace-section-${section.id}`}
+          key={section.id}
+        >
+          <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
+          <div className="marketplace-connector-grid">
+            {section.connectors.map((entry) =>
+              renderConnectorRow(entry, section.id),
+            )}
+          </div>
+        </section>
+      ))}
+
+      {!hasDirectoryMatches ? (
+        <p className="marketplace-search-empty" role="status">
+          No connectors match “{query.trim()}”.
+        </p>
+      ) : null}
+
+      {selectedEntry ? (
         <div
           ref={detailModalRef}
           className="connector-detail-modal"
           role="dialog"
           aria-modal="true"
-          aria-labelledby={`connector-detail-${selectedConnector.id}`}
+          aria-labelledby={`connector-detail-${selectedEntry.id}`}
           tabIndex={-1}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
-              setSelectedConnectorId(null);
+              setSelectedEntryId(null);
             }
           }}
         >
@@ -213,24 +320,74 @@ export function PluginPanel({
               type="button"
               className="connector-detail-modal__close"
               aria-label="Close connector setup"
-              onClick={() => setSelectedConnectorId(null)}
+              onClick={() => setSelectedEntryId(null)}
             >
               <X size={17} />
             </button>
-            <ConnectorDetails
-              connector={selectedConnector}
-              onUseConnector={onUseConnector}
-              onDisconnect={onDisconnect}
-              onRefresh={onRefresh}
-              accounts={accounts[selectedConnector.id] ?? []}
-              onSwitchAccount={onSwitchAccount}
-              onConnect={onConnect}
-              titleId={`connector-detail-${selectedConnector.id}`}
-            />
+            {selectedConnector ? (
+              <ConnectorDetails
+                connector={selectedConnector}
+                onUseConnector={onUseConnector}
+                onDisconnect={onDisconnect}
+                onRefresh={onRefresh}
+                accounts={accounts[selectedConnector.id] ?? []}
+                onSwitchAccount={onSwitchAccount}
+                onConnect={onConnect}
+                titleId={`connector-detail-${selectedConnector.id}`}
+              />
+            ) : (
+              <PlannedConnectorDetails
+                entry={selectedEntry}
+                titleId={`connector-detail-${selectedEntry.id}`}
+              />
+            )}
           </div>
         </div>
       ) : null}
     </section>
+  );
+}
+
+function PlannedConnectorDetails({
+  entry,
+  titleId,
+}: {
+  entry: MarketplaceConnectorEntry;
+  titleId: string;
+}) {
+  return (
+    <article className="connector-detail connector-detail--planned">
+      <div className="connector-detail__header">
+        <span
+          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          aria-hidden="true"
+        >
+          <MarketplaceIcon id={entry.id} icon={entry.icon} />
+        </span>
+        <div>
+          <h2 id={titleId}>{entry.name}</h2>
+          <p>{entry.description}</p>
+        </div>
+        <span className="connector-detail__status connector-detail__status--planned">
+          Planned
+        </span>
+      </div>
+      <div className="connector-detail__body connector-detail__body--single">
+        <div>
+          <span>Availability</span>
+          <p>
+            Fable does not have a native adapter or authorization path for this
+            connector yet. It cannot be installed, connected, or used by a
+            teammate.
+          </p>
+        </div>
+      </div>
+      <div className="connector-detail__actions">
+        <button type="button" disabled>
+          Not available yet
+        </button>
+      </div>
+    </article>
   );
 }
 

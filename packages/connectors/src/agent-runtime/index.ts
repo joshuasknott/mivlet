@@ -10,6 +10,12 @@
 
 export type {
   AgentBackend,
+  AntigravityAcpEvent,
+  AntigravityAcpHandle,
+  AntigravityAcpHandlers,
+  ManagedRuntimeEvent,
+  ManagedRuntimeHandle,
+  ManagedRuntimeHandlers,
   BackendDeps,
   CodexAppServerEvent,
   CodexAppServerHandle,
@@ -18,7 +24,7 @@ export type {
   CodexTurnRequest,
   TransportHandlers,
   TransportHandle,
-  AgentBackendFactory
+  AgentBackendFactory,
 } from "./contract";
 export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
 export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
@@ -26,12 +32,20 @@ export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // reaches them only through resolveAgentBackend.
 export { createNativeApiBackend } from "./adapters/native-api";
 export { createCodexBackend } from "./adapters/codex";
-export { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
-export { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
+export { createAntigravityBackend } from "./adapters/antigravity";
+export { createManagedRuntimeBackend } from "./adapters/managed";
+export {
+  MockCodexAppServer,
+  MockHttpTransport,
+} from "./testing/fake-backend-utils";
+export {
+  redactSecretsFromString,
+  redactSecretsFromObject,
+} from "./utils/redact";
 export {
   BackendRuntimeError,
   backendErrorEvent,
   classifyBackendError,
   normalizeBackendErrorEvent,
-  type BackendErrorMetadata
+  type BackendErrorMetadata,
 } from "./utils/errors";

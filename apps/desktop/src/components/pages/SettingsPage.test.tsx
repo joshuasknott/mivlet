@@ -86,17 +86,17 @@ function renderTab(activeTab: React.ComponentProps<typeof SettingsPage>["activeT
 }
 
 describe("SettingsPage", () => {
-  it("keeps the unconfigured product local and does not expose account administration", () => {
+  it("keeps local workspace storage separate from account administration", () => {
     const view = renderTab("general");
 
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Joshua's workspace")).toBeInTheDocument();
-    expect(screen.getByText(/remain available without a Fable account/i)).toBeInTheDocument();
-    expect(screen.queryByText("Optional Fable account")).not.toBeInTheDocument();
+    expect(screen.getByText(/stay on this device and do not sync by default/i)).toBeInTheDocument();
+    expect(screen.queryByText("Fable account")).not.toBeInTheDocument();
     expect(view.container.textContent).not.toMatch(/member|invitation|run history/i);
   });
 
-  it("shows optional account controls only when the account boundary is configured", async () => {
+  it("shows account controls only when the account boundary is configured", async () => {
     const signIn = vi.fn().mockResolvedValue(undefined);
     renderTab(
       "general",
@@ -110,7 +110,7 @@ describe("SettingsPage", () => {
         accountWorkspaceStatus: {
           configured: true,
           state: "signed-out",
-          message: "Optional account is signed out.",
+          message: "Account is signed out.",
           accountBound: false,
           workspaces: [],
           activeWorkspace: {
@@ -124,7 +124,7 @@ describe("SettingsPage", () => {
       })
     );
 
-    expect(screen.getByText("Optional Fable account")).toBeInTheDocument();
+    expect(screen.getByText("Fable account")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Sign-in opened in your browser.")).toBeInTheDocument();
@@ -148,13 +148,13 @@ describe("SettingsPage", () => {
     expect(screen.getByText(/credentials stay outside the interface/i)).toBeInTheDocument();
   });
 
-  it("gives plugins their own connection directory", () => {
+  it("keeps advanced tool servers separate from the connector marketplace", () => {
     renderTab("connections");
 
     expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Installed" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "All connections" })).toBeInTheDocument();
-    expect(screen.getByText("No connections installed yet.")).toBeInTheDocument();
+    expect(screen.getByText(/managed from Connectors in the sidebar/i)).toBeInTheDocument();
+    expect(screen.getByText("Tool servers")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Installed" })).not.toBeInTheDocument();
   });
 
   it("keeps approvals, memory, and explicit local data controls together", async () => {

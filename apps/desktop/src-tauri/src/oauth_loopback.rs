@@ -2,7 +2,7 @@
 //!
 //! Desktop OAuth needs a real redirect URI the provider or auth broker can call
 //! back. We bind an ephemeral
-//! `http://127.0.0.1:{port}/callback` listener, hand that exact URI to
+//! `http://127.0.0.1:{port}` listener, hand that exact URI to
 //! `start_auth`, and then accept a bounded number of local connections until
 //! the real callback arrives. The received callback URL is forwarded to
 //! `complete_auth`, which already validates state, redirect match, and consumes
@@ -105,7 +105,10 @@ fn bound_redirect(listener: &TcpListener) -> Result<String, ConnectorCommandErro
             )
         })?
         .port();
-    Ok(format!("http://127.0.0.1:{port}/callback"))
+    // Google's Desktop-app loopback flow documents the redirect as the bare
+    // loopback origin. Keep the random port, but do not append an application
+    // path: the exact value is reused during the authorization-code exchange.
+    Ok(format!("http://127.0.0.1:{port}"))
 }
 
 fn is_hex_digit(b: u8) -> bool {
@@ -191,10 +194,15 @@ fn looks_like_oauth_callback_request(request: &[u8]) -> bool {
         return false;
     };
     let target = target.to_ascii_lowercase();
-    let callback_path = target.starts_with("/callback?")
+    let callback_path = target.starts_with("/?")
+        || target.starts_with("/callback?")
+        || target.contains("://127.0.0.1") && target.contains("/?")
         || target.contains("://127.0.0.1") && target.contains("/callback?")
+        || target.starts_with("127.0.0.1:") && target.contains("/?")
         || target.starts_with("127.0.0.1:") && target.contains("/callback?")
+        || target.contains("://[::1]") && target.contains("/?")
         || target.contains("://[::1]") && target.contains("/callback?")
+        || target.starts_with("[::1]:") && target.contains("/?")
         || target.starts_with("[::1]:") && target.contains("/callback?");
     callback_path
         && target.contains("state=")
@@ -224,7 +232,10 @@ fn classify_callback_target(
             false,
         )
     })?;
-    if callback.path() != "/callback" {
+    // The bare root is the provider-compliant Desktop-app redirect. Continue
+    // accepting the historical path so an already-open flow fails safely and
+    // existing broker callbacks are not broken during a development restart.
+    if !matches!(callback.path(), "/" | "/callback") {
         return Ok(CallbackTargetDisposition::Ignore);
     }
 
@@ -429,56 +440,55 @@ fn parse_callback_target(request: &[u8]) -> Result<String, ConnectorCommandError
             false,
         ));
     }
-    let (target, absolute_authority) =
-        if raw_target.starts_with('/') && !raw_target.contains("://") && raw_target != "*" {
-            (raw_target.to_string(), None)
-        } else {
-            let proxy_compatible =
-                raw_target.starts_with("127.0.0.1:") || raw_target.starts_with("[::1]:");
-            let absolute = url::Url::parse(raw_target)
-                .or_else(|_| {
-                    proxy_compatible
-                        .then(|| url::Url::parse(&format!("http://{raw_target}")))
-                        .transpose()
-                        .and_then(|value| value.ok_or(url::ParseError::RelativeUrlWithoutBase))
-                })
-                .map_err(|_| {
-                    command_error(
-                        "invalid-request",
-                        "oauth",
-                        "OAuth callback request-target was invalid.",
-                        false,
-                    )
-                })?;
-            let host = absolute.host_str().unwrap_or_default();
-            if absolute.scheme() != "http"
-                || !absolute.username().is_empty()
-                || absolute.password().is_some()
-                || !matches!(host, "127.0.0.1" | "::1")
-            {
-                return Err(command_error(
+    let (target, absolute_authority) = if raw_target.starts_with('/') && raw_target != "*" {
+        (raw_target.to_string(), None)
+    } else {
+        let proxy_compatible =
+            raw_target.starts_with("127.0.0.1:") || raw_target.starts_with("[::1]:");
+        let absolute = url::Url::parse(raw_target)
+            .or_else(|_| {
+                proxy_compatible
+                    .then(|| url::Url::parse(&format!("http://{raw_target}")))
+                    .transpose()
+                    .and_then(|value| value.ok_or(url::ParseError::RelativeUrlWithoutBase))
+            })
+            .map_err(|_| {
+                command_error(
                     "invalid-request",
                     "oauth",
-                    "OAuth callback absolute request-target must use local HTTP.",
+                    "OAuth callback request-target was invalid.",
                     false,
-                ));
-            }
-            let authority = match absolute.port() {
-                Some(port) if host == "::1" => format!("[::1]:{port}"),
-                Some(port) => format!("{host}:{port}"),
-                None if host == "::1" => "[::1]".to_string(),
-                None => host.to_string(),
-            };
-            let mut normalized = absolute.path().to_string();
-            if normalized.is_empty() {
-                normalized.push('/');
-            }
-            if let Some(query) = absolute.query() {
-                normalized.push('?');
-                normalized.push_str(query);
-            }
-            (normalized, Some(authority))
+                )
+            })?;
+        let host = absolute.host_str().unwrap_or_default();
+        if absolute.scheme() != "http"
+            || !absolute.username().is_empty()
+            || absolute.password().is_some()
+            || !matches!(host, "127.0.0.1" | "::1")
+        {
+            return Err(command_error(
+                "invalid-request",
+                "oauth",
+                "OAuth callback absolute request-target must use local HTTP.",
+                false,
+            ));
+        }
+        let authority = match absolute.port() {
+            Some(port) if host == "::1" => format!("[::1]:{port}"),
+            Some(port) => format!("{host}:{port}"),
+            None if host == "::1" => "[::1]".to_string(),
+            None => host.to_string(),
         };
+        let mut normalized = absolute.path().to_string();
+        if normalized.is_empty() {
+            normalized.push('/');
+        }
+        if let Some(query) = absolute.query() {
+            normalized.push('?');
+            normalized.push_str(query);
+        }
+        (normalized, Some(authority))
+    };
     if target.contains('#') || raw_target.contains('#') {
         return Err(command_error(
             "invalid-request",
@@ -1045,6 +1055,14 @@ mod tests {
             classify_callback_target("/callback".to_string()).unwrap(),
             CallbackTargetDisposition::Ignore
         );
+        assert_eq!(
+            classify_callback_target("/".to_string()).unwrap(),
+            CallbackTargetDisposition::Ignore
+        );
+        assert!(matches!(
+            classify_callback_target("/?state=s&code=c".to_string()).unwrap(),
+            CallbackTargetDisposition::OAuth(_)
+        ));
         assert!(matches!(
             classify_callback_target("/callback?state=s&code=c".to_string()).unwrap(),
             CallbackTargetDisposition::OAuth(_)
@@ -1085,6 +1103,17 @@ mod tests {
         assert_eq!(CALLBACK_TIMEOUT, Duration::from_secs(15 * 60));
     }
 
+    #[tokio::test]
+    async fn bound_redirect_uses_google_desktop_loopback_form() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        assert_eq!(
+            bound_redirect(&listener).unwrap(),
+            format!("http://127.0.0.1:{port}")
+        );
+    }
+
     #[test]
     fn parse_callback_target_is_table_driven_for_attacks_and_valid() {
         // Table-driven cases covering: request smuggling (via post-first \r\n\r\n),
@@ -1099,6 +1128,12 @@ mod tests {
             (
                 b"GET /callback?code=4/P7q7W91a-oMsCeLvIaQm6bTrgtp7&state=xyz1234567890 HTTP/1.1\r\nHost: 127.0.0.1:54321\r\nUser-Agent: Mozilla/5.0 (Windows)\r\nAccept: text/html,application/xhtml+xml\r\nAccept-Language: en-US\r\n\r\n".to_vec(),
                 Ok("/callback?code=4/P7q7W91a-oMsCeLvIaQm6bTrgtp7&state=xyz1234567890"),
+            ),
+            // Google includes granted scopes as URL-valued query parameters.
+            // `://` in the query does not make an origin-form target absolute.
+            (
+                b"GET /callback?state=xyz1234567890&code=4/valid&scope=https://www.googleapis.com/auth/drive.file HTTP/1.1\r\nHost: 127.0.0.1:54321\r\n\r\n".to_vec(),
+                Ok("/callback?state=xyz1234567890&code=4/valid&scope=https://www.googleapis.com/auth/drive.file"),
             ),
             // IPv6 literal Host form (preserves dev behavior for ::1)
             (
@@ -1422,17 +1457,15 @@ mod tests {
             .unwrap();
         valid
             .write_all(
-                format!(
-                    "GET /callback?code=ok&state=ok HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"
-                )
-                .as_bytes(),
+                format!("GET /?code=ok&state=ok HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n")
+                    .as_bytes(),
             )
             .await
             .unwrap();
         valid.shutdown().await.unwrap();
 
         let (_, target) = receiver.await.unwrap().unwrap();
-        assert_eq!(target, "/callback?code=ok&state=ok");
+        assert_eq!(target, "/?code=ok&state=ok");
     }
 
     #[tokio::test]

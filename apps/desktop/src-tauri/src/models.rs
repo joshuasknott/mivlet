@@ -32,7 +32,15 @@ pub const APPROVAL_MODES: [&str; 3] = ["read-only", "trusted-scope", "full-acces
 pub const APPROVAL_RISK_LEVELS: [&str; 4] = ["low", "medium", "high", "critical"];
 
 // Agent-runtime backend vocabularies (controlled, used for validation).
-pub const BACKEND_TYPES: [&str; 2] = ["codex-app-server", "native-api"];
+pub const BACKEND_TYPES: [&str; 7] = [
+    "codex-app-server",
+    "claude-agent",
+    "cursor-acp",
+    "grok-acp",
+    "opencode-server",
+    "antigravity-acp",
+    "native-api",
+];
 pub const BACKEND_AUTH_STATES: [&str; 10] = [
     "connected",
     "needs-auth",
@@ -78,8 +86,18 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 6] =
-    ["codex", "openai", "anthropic", "gemini", "xai", "custom"];
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 10] = [
+    "codex",
+    "openai",
+    "claude",
+    "anthropic",
+    "antigravity",
+    "grok",
+    "xai",
+    "cursor",
+    "opencode",
+    "custom",
+];
 /// Marker that backend credential storage is pre-release. Now that the OS
 /// keychain is wired (`backends::KeyringStore`, with an in-memory fallback),
 /// this is `false` — secrets persist across restarts in the platform-secure
@@ -685,14 +703,26 @@ pub struct BackendModel {
 #[serde(rename_all = "camelCase")]
 pub struct BackendProvider {
     pub id: String,
+    pub instance_id: String,
+    pub driver_kind: String,
     pub backend_type: String,
     pub label: String,
     pub description: String,
     pub auth_state: String,
     pub capabilities: Vec<String>,
     pub models: Vec<BackendModel>,
+    pub setup: ProviderSetup,
     pub install_hint: Option<String>,
     pub entitlements: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSetup {
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+    pub recommended: bool,
 }
 
 /// Request to store a backend credential. The secret is written to the

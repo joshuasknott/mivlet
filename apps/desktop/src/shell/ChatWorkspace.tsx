@@ -37,6 +37,7 @@ import {
   tabs as settingsTabs,
   type SettingsTab,
 } from "../components/pages/settings-tabs";
+import type { MarketplaceTab } from "../components/pages/MarketplacePage";
 import { composerModelsFor } from "./composer-models";
 import { useShellAgentController } from "./useShellAgentController";
 
@@ -53,6 +54,11 @@ const OnboardingPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("../components/pages/SettingsPage").then((module) => ({
     default: module.SettingsPage,
+  })),
+);
+const MarketplacePage = lazy(() =>
+  import("../components/pages/MarketplacePage").then((module) => ({
+    default: module.MarketplacePage,
   })),
 );
 
@@ -80,11 +86,14 @@ export function ChatWorkspace() {
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [marketplaceTab, setMarketplaceTab] = useState<MarketplaceTab | null>(
+    null,
+  );
   const [workPanelOpen, setWorkPanelOpen] = useState(false);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [learningDialog, setLearningDialog] = useState<{
-    mode: "manage" | "teach";
+    mode: "create" | "manage" | "teach";
     source: AgentLearningSource | null;
   } | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -325,22 +334,18 @@ export function ChatWorkspace() {
           providers={runtime.backendProviders}
           connectedBackendIds={runtime.connectedBackendIds}
           status={runtime.backendStatus}
-          accountWorkspaceStatus={runtime.accountWorkspaceStatus}
-          accountWorkspacePending={runtime.accountWorkspacePending}
+          identityStatus={runtime.identityStatus}
+          identityPending={runtime.identityPending}
+          onSignIn={() => runtime.signInIdentity()}
           onConnect={(providerId, secret) =>
             void runtime.connectBackend(providerId, secret)
           }
           onConnectWithVerify={runtime.connectBackendWithVerify}
           onCheckConnection={runtime.checkBackendConnection}
           onStartBrowserLogin={runtime.startBackendBrowserLogin}
-          initialTeammateName={activeAgent.name}
-          initialTeammatePurpose={activeAgent.instructions}
-          onConfigureTeammate={({ name, purpose }) => {
-            runtime.updateAgent(activeAgent.id, {
-              name,
-              instructions: purpose,
-            });
-          }}
+          connectors={runtime.connectorManifests}
+          connectorStatus={runtime.connectorStatus}
+          onConnectConnector={runtime.connectConnector}
           onComplete={runtime.dismissOnboarding}
         />
       </Suspense>
@@ -375,11 +380,13 @@ export function ChatWorkspace() {
       return;
     }
     runtime.selectAgent(profile.id);
+    setMarketplaceTab(null);
     setSelectedThreadId(profile.threadId);
     runtime.setComposerValue("");
     setSubmissionError("");
   };
   const createTeammate = () => {
+    setMarketplaceTab(null);
     setEditingAgentId(null);
     setAgentEditorOpen(true);
   };
@@ -458,7 +465,7 @@ export function ChatWorkspace() {
 
   return (
     <main
-      className={`desktop-frame desktop-frame--agents${workPanelOpen ? "" : " desktop-frame--live-closed"}`}
+      className={`desktop-frame desktop-frame--agents${workPanelOpen && !marketplaceTab ? "" : " desktop-frame--live-closed"}`}
       data-theme={theme}
     >
       <AgentSidebar
@@ -466,12 +473,81 @@ export function ChatWorkspace() {
         activeAgentId={activeAgent.id}
         previews={previews}
         profileName={profileName}
+        connectors={runtime.connectorManifests}
+        marketplaceActive={marketplaceTab !== null}
         onSelectAgent={selectAgent}
         onCreateAgent={createTeammate}
         onEditAgent={editTeammate}
+        onOpenMarketplace={() => {
+          setMarketplaceTab("plugins");
+          setWorkPanelOpen(false);
+        }}
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
+      {marketplaceTab ? (
+        <Suspense fallback={null}>
+          <MarketplacePage
+            activeTab={marketplaceTab}
+            onTabChange={setMarketplaceTab}
+            manifests={runtime.connectorManifests.filter(
+              (connector) => connector.id !== "local-files",
+            )}
+            accounts={runtime.connectorAccounts}
+            connectorStatus={runtime.connectorStatus}
+            onUseConnector={(connector) => {
+              runtime.useConnector(connector);
+              setMarketplaceTab(null);
+            }}
+            onConnect={(connector) => void runtime.connectConnector(connector)}
+            onDisconnect={(connectorId) =>
+              void runtime.disconnectConnector(connectorId)
+            }
+            onRefresh={(connectorId) =>
+              void runtime.refreshConnector(connectorId)
+            }
+            onSelectConnector={(connector) =>
+              void runtime.loadConnectorAccounts(connector.id)
+            }
+            onSwitchAccount={(connectorId, connectionId) =>
+              void runtime.switchConnectorAccount(connectorId, connectionId)
+            }
+            agents={runtime.agents}
+            activeAgentId={activeAgent.id}
+            onCreateSkill={(agentId) => {
+              const profile = runtime.agents.find(
+                (candidate) => candidate.id === agentId,
+              );
+              if (!profile) return;
+              runtime.selectAgent(profile.id);
+              setSelectedThreadId(profile.threadId);
+              setLearningDialog({ mode: "create", source: null });
+            }}
+            onManageSkills={(agentId) => {
+              const profile = runtime.agents.find(
+                (candidate) => candidate.id === agentId,
+              );
+              if (!profile) return;
+              runtime.selectAgent(profile.id);
+              setSelectedThreadId(profile.threadId);
+              setLearningDialog({ mode: "manage", source: null });
+            }}
+            onRunSkill={(agentId, task) => {
+              const profile = runtime.agents.find(
+                (candidate) => candidate.id === agentId,
+              );
+              if (!profile) return;
+              runtime.selectAgent(profile.id);
+              setSelectedThreadId(profile.threadId);
+              setMarketplaceTab(null);
+              runtime.setComposerValue(task.instruction);
+              window.requestAnimationFrame(() =>
+                runtime.composerRef.current?.focus(),
+              );
+            }}
+          />
+        </Suspense>
+      ) : (
       <section className="workspace agent-workspace">
         <AgentWorkspaceHeader
           agent={activeAgent}
@@ -672,10 +748,13 @@ export function ChatWorkspace() {
                 setAddMenuOpen(false);
               }}
               onOpenTool={(tool) => {
-                setSettingsTab(
-                  tool === "Connectors" ? "connections" : "general",
-                );
-                setSettingsOpen(true);
+                if (tool === "Connectors") {
+                  setMarketplaceTab("plugins");
+                  setWorkPanelOpen(false);
+                } else {
+                  setSettingsTab("general");
+                  setSettingsOpen(true);
+                }
                 setAddMenuOpen(false);
               }}
               onRunCommand={(command) => runtime.setComposerValue(command)}
@@ -708,8 +787,9 @@ export function ChatWorkspace() {
           </div>
         </div>
       </section>
+      )}
 
-      {workPanelOpen ? (
+      {workPanelOpen && !marketplaceTab ? (
         <LiveWorkRail
           agentName={activeAgent.name}
           approvalPanel={approvalPanel}
@@ -827,6 +907,7 @@ export function ChatWorkspace() {
         open={learningDialog !== null}
         agent={activeAgent}
         source={learningDialog?.mode === "teach" ? learningDialog.source : null}
+        startCreating={learningDialog?.mode === "create"}
         onClose={() => setLearningDialog(null)}
         onChange={(learnedTasks) =>
           runtime.updateAgent(activeAgent.id, { learnedTasks })

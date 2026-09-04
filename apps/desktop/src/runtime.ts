@@ -1,7 +1,7 @@
 import { getActiveRuntimeDataScope } from "./runtime-scope";
 import {
   getRuntimeAdapter,
-  hasNativeRuntimeAdapter
+  hasNativeRuntimeAdapter,
 } from "./runtime/adapters/select";
 import type { RuntimeEvent, RuntimeUnlisten } from "./runtime/ports";
 import { toRuntimeError } from "./runtime/errors";
@@ -19,7 +19,7 @@ export {
   type RuntimeLocalDataDeletionReceipt,
   type RuntimeLocalDiagnosticCategory,
   type RuntimeLocalDiagnosticsSnapshot,
-  type RuntimeLocalRestorePreparation
+  type RuntimeLocalRestorePreparation,
 } from "./runtime/domains/local-data";
 export {
   beginRuntimeIdentityRecovery,
@@ -30,7 +30,7 @@ export {
   reconcileRuntimeAccountWorkspace,
   refreshRuntimeIdentity,
   signOutRuntimeIdentity,
-  type AccountRuntimePort
+  type AccountRuntimePort,
 } from "./runtime/domains/account";
 export {
   inspectRuntimeHostedProcess,
@@ -44,7 +44,7 @@ export {
   prepareRuntimeHostedProcess,
   provisionRuntimeHostedComputer,
   snapshotRuntimeHostedBrowser,
-  type HostedComputerRuntimePort
+  type HostedComputerRuntimePort,
 } from "./runtime/domains/hosted-computer";
 export {
   historyRuntimeLocalBrowser,
@@ -96,7 +96,7 @@ import type {
   ProviderRoutePricingEvidence,
   ProviderRouteQualitySnapshot,
   RecordActionHistoryRequest,
-  RuntimeSnapshot
+  RuntimeSnapshot,
 } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
 
@@ -116,7 +116,7 @@ function invoke<T>(command: string, args?: Record<string, unknown>) {
 
 function listen<T>(
   event: string,
-  handler: (event: RuntimeEvent<T>) => void
+  handler: (event: RuntimeEvent<T>) => void,
 ): Promise<RuntimeUnlisten> {
   return getRuntimeAdapter().listen<T>(event, handler);
 }
@@ -158,7 +158,9 @@ export async function loadRuntimeApprovalRules() {
   }
 }
 
-export async function resolveRuntimeApprovalRequest(request: ApprovalResolutionRequest) {
+export async function resolveRuntimeApprovalRequest(
+  request: ApprovalResolutionRequest,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -166,10 +168,13 @@ export async function resolveRuntimeApprovalRequest(request: ApprovalResolutionR
   if (!scope) return null;
 
   try {
-    return await invoke<ApprovalResolutionResponse>("resolve_approval_request", {
-      request,
-      ...scope
-    });
+    return await invoke<ApprovalResolutionResponse>(
+      "resolve_approval_request",
+      {
+        request,
+        ...scope,
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -179,21 +184,24 @@ export async function loadRuntimeImportedKnowledgeSources() {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
-    return await invoke<LocalFileImport[]>("list_imported_knowledge_sources", scope);
+    return await invoke<LocalFileImport[]>(
+      "list_imported_knowledge_sources",
+      scope,
+    );
   } catch {
     return null;
   }
 }
 
 export async function saveRuntimeImportedKnowledgeSources(
-  sources: LocalFileImport[]
+  sources: LocalFileImport[],
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
     return await invoke<LocalFileImport[]>("save_imported_knowledge_sources", {
       sources,
-      ...scope
+      ...scope,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -201,14 +209,14 @@ export async function saveRuntimeImportedKnowledgeSources(
 }
 
 export async function importRuntimeLocalKnowledgeSource(
-  candidate: LocalTextFileCandidate
+  candidate: LocalTextFileCandidate,
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
     return await invoke<LocalFileImport>("import_local_knowledge_source", {
       candidate,
-      ...scope
+      ...scope,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -216,15 +224,18 @@ export async function importRuntimeLocalKnowledgeSource(
 }
 
 export async function refreshRuntimeLocalKnowledgeSource(
-  request: RefreshLocalKnowledgeSourceRequest
+  request: RefreshLocalKnowledgeSourceRequest,
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
-    return await invoke<LocalKnowledgeRefreshResponse>("refresh_local_knowledge_source", {
-      request,
-      ...scope
-    });
+    return await invoke<LocalKnowledgeRefreshResponse>(
+      "refresh_local_knowledge_source",
+      {
+        request,
+        ...scope,
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -233,7 +244,7 @@ export async function refreshRuntimeLocalKnowledgeSource(
 export async function searchRuntimeKnowledgeSources(
   query: string,
   sources: KnowledgeSource[],
-  limit?: number
+  limit?: number,
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
@@ -242,7 +253,7 @@ export async function searchRuntimeKnowledgeSources(
       query,
       sources,
       limit,
-      ...scope
+      ...scope,
     });
   } catch {
     return null;
@@ -283,7 +294,7 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
   try {
     return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
       snapshot,
-      ...scope
+      ...scope,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -295,7 +306,10 @@ export async function saveRuntimeExecutionAttempt(attempt: ExecutionAttempt) {
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<ExecutionAttempt>("save_execution_attempt", { attempt, ...scope });
+    return await invoke<ExecutionAttempt>("save_execution_attempt", {
+      attempt,
+      ...scope,
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -317,7 +331,10 @@ export async function recoverRuntimeExecutionAttempts(recoveredAt: string) {
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<ExecutionAttempt[]>("recover_interrupted_execution_attempts", { recoveredAt, ...scope });
+    return await invoke<ExecutionAttempt[]>(
+      "recover_interrupted_execution_attempts",
+      { recoveredAt, ...scope },
+    );
   } catch {
     return null;
   }
@@ -333,10 +350,14 @@ export async function recoverRuntimeExecutionAttempts(recoveredAt: string) {
 type ConversationThread = Spine.Conversations.Thread;
 type ConversationMessage = Spine.Conversations.Message;
 type ConversationRevision = Spine.Conversations.MessageRevision;
-export type RuntimeConversationThreadCreate = Spine.Conversations.ThreadCreateInput;
-export type RuntimeConversationThreadUpdate = Spine.Conversations.ThreadUpdateInput;
-export type RuntimeConversationMessageAppend = Spine.Conversations.MessageAppendInput;
-export type RuntimeConversationMessageRevision = Spine.Conversations.MessageRevisionCreateInput;
+export type RuntimeConversationThreadCreate =
+  Spine.Conversations.ThreadCreateInput;
+export type RuntimeConversationThreadUpdate =
+  Spine.Conversations.ThreadUpdateInput;
+export type RuntimeConversationMessageAppend =
+  Spine.Conversations.MessageAppendInput;
+export type RuntimeConversationMessageRevision =
+  Spine.Conversations.MessageRevisionCreateInput;
 
 export interface RuntimeConversationMessageView {
   message: ConversationMessage;
@@ -384,11 +405,14 @@ const previewConversationStores = new Map<string, PreviewConversationStore>();
 
 function conversationScopeOrThrow() {
   const scope = activeDataScope();
-  if (!scope) throw new Error("A selected workspace is required for conversations.");
+  if (!scope)
+    throw new Error("A selected workspace is required for conversations.");
   return scope;
 }
 
-function previewConversationStore(workspaceId: string): PreviewConversationStore {
+function previewConversationStore(
+  workspaceId: string,
+): PreviewConversationStore {
   let store = previewConversationStores.get(workspaceId);
   if (!store) {
     store = { threads: [], messages: [], drafts: new Map() };
@@ -401,7 +425,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function assertNativeThread(value: unknown): asserts value is NativeConversationThreadRow {
+function assertNativeThread(
+  value: unknown,
+): asserts value is NativeConversationThreadRow {
   if (!isRecord(value) || typeof value.id !== "string") {
     throw new Error("Malformed conversation thread response.");
   }
@@ -416,8 +442,14 @@ function assertNativeThread(value: unknown): asserts value is NativeConversation
   }
 }
 
-function assertNativeMessage(value: unknown): asserts value is NativeConversationMessageRow {
-  if (!isRecord(value) || typeof value.id !== "string" || typeof value.threadId !== "string") {
+function assertNativeMessage(
+  value: unknown,
+): asserts value is NativeConversationMessageRow {
+  if (
+    !isRecord(value) ||
+    typeof value.id !== "string" ||
+    typeof value.threadId !== "string"
+  ) {
     throw new Error("Malformed conversation message response.");
   }
   if (
@@ -430,28 +462,39 @@ function assertNativeMessage(value: unknown): asserts value is NativeConversatio
   }
 }
 
-function assertDraft(value: unknown, workspaceId: string): asserts value is RuntimeConversationDraft {
+function assertDraft(
+  value: unknown,
+  workspaceId: string,
+): asserts value is RuntimeConversationDraft {
   if (
     !isRecord(value) ||
-    value.workspaceId !== undefined && value.workspaceId !== workspaceId ||
+    (value.workspaceId !== undefined && value.workspaceId !== workspaceId) ||
     typeof value.draftKey !== "string" ||
     typeof value.content !== "string" ||
     typeof value.updatedAt !== "string" ||
     (value.threadId !== undefined && typeof value.threadId !== "string")
   ) {
-    throw new Error("Malformed or cross-workspace conversation draft response.");
+    throw new Error(
+      "Malformed or cross-workspace conversation draft response.",
+    );
   }
 }
 
-function previewThread(input: RuntimeConversationThreadCreate, workspaceId: string): ConversationThread {
+function previewThread(
+  input: RuntimeConversationThreadCreate,
+  workspaceId: string,
+): ConversationThread {
   const now = new Date().toISOString();
-  const id = `thread-preview-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}` as never;
+  const id =
+    `thread-preview-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}` as never;
   return {
     id,
     workspaceId: workspaceId as never,
     authority: input.authorityScope.authority,
     visibility: input.authorityScope.visibility,
-    ...(input.authorityScope.authority === "local" ? { ownerMemberId: input.authorityScope.ownerMemberId } : {}),
+    ...(input.authorityScope.authority === "local"
+      ? { ownerMemberId: input.authorityScope.ownerMemberId }
+      : {}),
     schemaVersion: 1,
     revision: 0,
     createdByInternalUserId: "preview-user" as never,
@@ -460,11 +503,15 @@ function previewThread(input: RuntimeConversationThreadCreate, workspaceId: stri
     updatedAt: now,
     title: input.title,
     lifecycle: "active",
-    messageHead: { lastSequence: 0 }
+    messageHead: { lastSequence: 0 },
   } as ConversationThread;
 }
 
-function nativeMetadata(workspaceId: string, createdAt: string, updatedAt = createdAt) {
+function nativeMetadata(
+  workspaceId: string,
+  createdAt: string,
+  updatedAt = createdAt,
+) {
   return {
     workspaceId: workspaceId as never,
     authority: "local" as const,
@@ -474,11 +521,14 @@ function nativeMetadata(workspaceId: string, createdAt: string, updatedAt = crea
     revision: 0 as never,
     createdByInternalUserId: workspaceId as never,
     createdAt: createdAt as never,
-    updatedAt: updatedAt as never
+    updatedAt: updatedAt as never,
   };
 }
 
-function fromNativeThread(row: NativeConversationThreadRow, workspaceId: string): ConversationThread {
+function fromNativeThread(
+  row: NativeConversationThreadRow,
+  workspaceId: string,
+): ConversationThread {
   return {
     ...nativeMetadata(workspaceId, row.createdAt, row.updatedAt),
     id: row.id as never,
@@ -486,12 +536,15 @@ function fromNativeThread(row: NativeConversationThreadRow, workspaceId: string)
     lifecycle: row.lifecycle,
     messageHead: {
       lastSequence: row.lastSequence,
-      lastMessageId: row.lastMessageId as never ?? undefined
-    }
+      lastMessageId: (row.lastMessageId as never) ?? undefined,
+    },
   } as ConversationThread;
 }
 
-function fromNativeMessage(row: NativeConversationMessageRow, workspaceId: string): RuntimeConversationMessageView {
+function fromNativeMessage(
+  row: NativeConversationMessageRow,
+  workspaceId: string,
+): RuntimeConversationMessageView {
   const metadata = nativeMetadata(workspaceId, row.createdAt);
   const detail = row.detail === null ? {} : { detail: row.detail };
   const message = {
@@ -505,11 +558,18 @@ function fromNativeMessage(row: NativeConversationMessageRow, workspaceId: strin
     idempotencyKey: `native:message:${row.id}`,
     currentRevisionId: row.currentRevisionId,
     currentRevisionNumber: row.currentRevisionNumber,
-    currentRevisionState: row.currentRevisionState
+    currentRevisionState: row.currentRevisionState,
   } as unknown as ConversationMessage;
-  const body = row.currentRevisionState === "redacted"
-    ? { state: "redacted" as const, redaction: row.content }
-    : { state: row.currentRevisionState, content: typeof row.content === "string" ? row.content : JSON.stringify(row.content) };
+  const body =
+    row.currentRevisionState === "redacted"
+      ? { state: "redacted" as const, redaction: row.content }
+      : {
+          state: row.currentRevisionState,
+          content:
+            typeof row.content === "string"
+              ? row.content
+              : JSON.stringify(row.content),
+        };
   const currentRevision = {
     ...metadata,
     ...body,
@@ -520,16 +580,20 @@ function fromNativeMessage(row: NativeConversationMessageRow, workspaceId: strin
     baseMessageRevisionNumber: Math.max(0, row.currentRevisionNumber - 1),
     reason: row.currentRevisionNumber === 1 ? "initial" : "recovery",
     idempotencyKey: `native:revision:${row.currentRevisionId}`,
-    checkpointedAt: row.createdAt
+    checkpointedAt: row.createdAt,
   } as unknown as ConversationRevision;
   return { message, currentRevision };
 }
 
 function draftThreadId(draftKey: string) {
-  return draftKey.startsWith("thread:") ? draftKey.slice("thread:".length) : undefined;
+  return draftKey.startsWith("thread:")
+    ? draftKey.slice("thread:".length)
+    : undefined;
 }
 
-export async function createRuntimeConversationThread(input: RuntimeConversationThreadCreate) {
+export async function createRuntimeConversationThread(
+  input: RuntimeConversationThreadCreate,
+) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
     const thread = previewThread(input, scope.workspaceId);
@@ -537,14 +601,18 @@ export async function createRuntimeConversationThread(input: RuntimeConversation
     return thread;
   }
   if (input.authorityScope.authority !== "local") {
-    throw new Error("Shared conversations are not available in the local desktop store.");
+    throw new Error(
+      "Shared conversations are not available in the local desktop store.",
+    );
   }
   const nativeInput = {
     id: `thread-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)}`,
     title: input.title,
-    payload: input
+    payload: input,
   };
-  const result = await invoke<unknown>("conversation_create_thread", { input: nativeInput });
+  const result = await invoke<unknown>("conversation_create_thread", {
+    input: nativeInput,
+  });
   assertNativeThread(result);
   return fromNativeThread(result, scope.workspaceId);
 }
@@ -555,7 +623,8 @@ export async function listRuntimeConversationThreads() {
     return [...previewConversationStore(scope.workspaceId).threads];
   }
   const result = await invoke<unknown>("conversation_list_threads");
-  if (!Array.isArray(result)) throw new Error("Malformed conversation thread list response.");
+  if (!Array.isArray(result))
+    throw new Error("Malformed conversation thread list response.");
   result.forEach(assertNativeThread);
   return result.map((thread) => fromNativeThread(thread, scope.workspaceId));
 }
@@ -563,7 +632,11 @@ export async function listRuntimeConversationThreads() {
 export async function getRuntimeConversationThread(threadId: string) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
-    return previewConversationStore(scope.workspaceId).threads.find((thread) => thread.id === threadId) ?? null;
+    return (
+      previewConversationStore(scope.workspaceId).threads.find(
+        (thread) => thread.id === threadId,
+      ) ?? null
+    );
   }
   const result = await invoke<unknown>("conversation_get_thread", { threadId });
   if (result === null) return null;
@@ -571,14 +644,24 @@ export async function getRuntimeConversationThread(threadId: string) {
   return fromNativeThread(result, scope.workspaceId);
 }
 
-export async function updateRuntimeConversationThread(input: RuntimeConversationThreadUpdate) {
+export async function updateRuntimeConversationThread(
+  input: RuntimeConversationThreadUpdate,
+) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
-    const index = store.threads.findIndex((thread) => thread.id === input.threadId);
-    if (index < 0) throw new Error("Conversation thread was not found in this workspace.");
+    const index = store.threads.findIndex(
+      (thread) => thread.id === input.threadId,
+    );
+    if (index < 0)
+      throw new Error("Conversation thread was not found in this workspace.");
     const previous = store.threads[index];
-    const next = { ...previous, ...input, updatedAt: new Date().toISOString(), revision: previous.revision + 1 } as ConversationThread;
+    const next = {
+      ...previous,
+      ...input,
+      updatedAt: new Date().toISOString(),
+      revision: previous.revision + 1,
+    } as ConversationThread;
     store.threads[index] = next;
     return next;
   }
@@ -590,22 +673,61 @@ export async function updateRuntimeConversationThread(input: RuntimeConversation
 export async function listRuntimeConversationMessages(threadId: string) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
-    return previewConversationStore(scope.workspaceId).messages.filter((view) => view.message.threadId === threadId);
+    return previewConversationStore(scope.workspaceId).messages.filter(
+      (view) => view.message.threadId === threadId,
+    );
   }
-  const result = await invoke<unknown>("conversation_list_messages", { threadId });
-  if (!Array.isArray(result)) throw new Error("Malformed conversation message list response.");
+  const result = await invoke<unknown>("conversation_list_messages", {
+    threadId,
+  });
+  if (!Array.isArray(result))
+    throw new Error("Malformed conversation message list response.");
   result.forEach(assertNativeMessage);
   return result.map((message) => fromNativeMessage(message, scope.workspaceId));
 }
 
-export async function appendRuntimeConversationMessage(input: RuntimeConversationMessageAppend) {
+export async function appendRuntimeConversationMessage(
+  input: RuntimeConversationMessageAppend,
+) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
-    const thread = store.threads.find((candidate) => candidate.id === input.threadId);
-    if (!thread) throw new Error("Conversation thread was not found in this workspace.");
-    const revision = { ...input.initialRevision, id: input.initialRevision.revisionId, messageId: input.messageId, threadId: input.threadId, messageRevisionNumber: 1, baseMessageRevisionNumber: 0, workspaceId: scope.workspaceId as never, authority: thread.authority, visibility: thread.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.initialRevision.checkpointedAt, updatedAt: input.initialRevision.checkpointedAt } as unknown as ConversationRevision;
-    const message = { ...input, id: input.messageId, workspaceId: scope.workspaceId as never, authority: thread.authority, visibility: thread.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.initialRevision.checkpointedAt, updatedAt: input.initialRevision.checkpointedAt, currentRevisionId: revision.id, currentRevisionNumber: 1, currentRevisionState: revision.state } as unknown as ConversationMessage;
+    const thread = store.threads.find(
+      (candidate) => candidate.id === input.threadId,
+    );
+    if (!thread)
+      throw new Error("Conversation thread was not found in this workspace.");
+    const revision = {
+      ...input.initialRevision,
+      id: input.initialRevision.revisionId,
+      messageId: input.messageId,
+      threadId: input.threadId,
+      messageRevisionNumber: 1,
+      baseMessageRevisionNumber: 0,
+      workspaceId: scope.workspaceId as never,
+      authority: thread.authority,
+      visibility: thread.visibility,
+      schemaVersion: 1,
+      revision: 0,
+      createdByInternalUserId: "preview-user" as never,
+      createdAt: input.initialRevision.checkpointedAt,
+      updatedAt: input.initialRevision.checkpointedAt,
+    } as unknown as ConversationRevision;
+    const message = {
+      ...input,
+      id: input.messageId,
+      workspaceId: scope.workspaceId as never,
+      authority: thread.authority,
+      visibility: thread.visibility,
+      schemaVersion: 1,
+      revision: 0,
+      createdByInternalUserId: "preview-user" as never,
+      createdAt: input.initialRevision.checkpointedAt,
+      updatedAt: input.initialRevision.checkpointedAt,
+      currentRevisionId: revision.id,
+      currentRevisionNumber: 1,
+      currentRevisionState: revision.state,
+    } as unknown as ConversationMessage;
     const view = { message, currentRevision: revision };
     store.messages.push(view);
     return view;
@@ -617,53 +739,95 @@ export async function appendRuntimeConversationMessage(input: RuntimeConversatio
     revisionId: initialRevision.revisionId,
     state: initialRevision.state,
     reason: initialRevision.reason,
-    content: initialRevision.state === "redacted" ? initialRevision.redaction : initialRevision.content,
-    checkpointedAt: initialRevision.checkpointedAt
+    content:
+      initialRevision.state === "redacted"
+        ? initialRevision.redaction
+        : initialRevision.content,
+    checkpointedAt: initialRevision.checkpointedAt,
   };
-  const result = await invoke<unknown>("conversation_append_message", { input: nativeInput });
+  const result = await invoke<unknown>("conversation_append_message", {
+    input: nativeInput,
+  });
   assertNativeMessage(result);
   return fromNativeMessage(result, scope.workspaceId);
 }
 
-export async function reviseRuntimeConversationMessage(input: RuntimeConversationMessageRevision) {
+export async function reviseRuntimeConversationMessage(
+  input: RuntimeConversationMessageRevision,
+) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
-    const index = store.messages.findIndex((view) => view.message.id === input.messageId && view.message.threadId === input.threadId);
-    if (index < 0) throw new Error("Conversation message was not found in this workspace.");
+    const index = store.messages.findIndex(
+      (view) =>
+        view.message.id === input.messageId &&
+        view.message.threadId === input.threadId,
+    );
+    if (index < 0)
+      throw new Error("Conversation message was not found in this workspace.");
     const previous = store.messages[index];
-    const revision = { ...input, id: input.revisionId, workspaceId: scope.workspaceId as never, authority: previous.message.authority, visibility: previous.message.visibility, schemaVersion: 1, revision: 0, createdByInternalUserId: "preview-user" as never, createdAt: input.checkpointedAt, updatedAt: input.checkpointedAt, messageRevisionNumber: previous.message.currentRevisionNumber + 1 } as unknown as ConversationRevision;
-    const message = { ...previous.message, currentRevisionId: revision.id, currentRevisionNumber: revision.messageRevisionNumber, currentRevisionState: revision.state, updatedAt: input.checkpointedAt } as ConversationMessage;
+    const revision = {
+      ...input,
+      id: input.revisionId,
+      workspaceId: scope.workspaceId as never,
+      authority: previous.message.authority,
+      visibility: previous.message.visibility,
+      schemaVersion: 1,
+      revision: 0,
+      createdByInternalUserId: "preview-user" as never,
+      createdAt: input.checkpointedAt,
+      updatedAt: input.checkpointedAt,
+      messageRevisionNumber: previous.message.currentRevisionNumber + 1,
+    } as unknown as ConversationRevision;
+    const message = {
+      ...previous.message,
+      currentRevisionId: revision.id,
+      currentRevisionNumber: revision.messageRevisionNumber,
+      currentRevisionState: revision.state,
+      updatedAt: input.checkpointedAt,
+    } as ConversationMessage;
     const view = { message, currentRevision: revision };
     store.messages[index] = view;
     return view;
   }
   const nativeInput = {
     ...input,
-    content: input.state === "redacted" ? input.redaction : input.content
+    content: input.state === "redacted" ? input.redaction : input.content,
   };
-  const result = await invoke<unknown>("conversation_revise_message", { input: nativeInput });
+  const result = await invoke<unknown>("conversation_revise_message", {
+    input: nativeInput,
+  });
   assertNativeMessage(result);
   return fromNativeMessage(result, scope.workspaceId);
 }
 
 export async function loadRuntimeConversationDraft(draftKey: string) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) return previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null;
-  const result = await invoke<unknown>("conversation_load_draft", { id: draftKey, threadId: draftThreadId(draftKey) });
+  if (!hasTauriRuntime())
+    return (
+      previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null
+    );
+  const result = await invoke<unknown>("conversation_load_draft", {
+    id: draftKey,
+    threadId: draftThreadId(draftKey),
+  });
   if (result === null) return null;
   assertDraft(result, scope.workspaceId);
   return result;
 }
 
-export async function saveRuntimeConversationDraft(draft: RuntimeConversationDraft) {
+export async function saveRuntimeConversationDraft(
+  draft: RuntimeConversationDraft,
+) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
-    previewConversationStore(scope.workspaceId).drafts.set(draft.draftKey, { ...draft });
+    previewConversationStore(scope.workspaceId).drafts.set(draft.draftKey, {
+      ...draft,
+    });
     return draft;
   }
   await invoke<void>("conversation_save_draft", {
-    input: { id: draft.draftKey, threadId: draft.threadId, payload: draft }
+    input: { id: draft.draftKey, threadId: draft.threadId, payload: draft },
   });
   return draft;
 }
@@ -674,27 +838,26 @@ export async function deleteRuntimeConversationDraft(draftKey: string) {
     previewConversationStore(scope.workspaceId).drafts.delete(draftKey);
     return;
   }
-  await invoke<void>("conversation_delete_draft", { id: draftKey, threadId: draftThreadId(draftKey) });
+  await invoke<void>("conversation_delete_draft", {
+    id: draftKey,
+    threadId: draftThreadId(draftKey),
+  });
 }
 
-export async function saveRuntimeMemoryState(
-  state: MemoryControlState
-) {
+export async function saveRuntimeMemoryState(state: MemoryControlState) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
     return await invoke<MemoryControlState>("save_memory_state", {
       state,
-      ...scope
+      ...scope,
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function exportRuntimeMemoryState(
-  _state: MemoryControlState
-) {
+export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
@@ -705,15 +868,18 @@ export async function exportRuntimeMemoryState(
 }
 
 export async function promoteRuntimeKnowledgeSourceToMemory(
-  request: MemoryPromotionRequest
+  request: MemoryPromotionRequest,
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
   try {
-    return await invoke<MemoryPromotionResponse>("promote_knowledge_source_to_memory", {
-      request,
-      ...scope
-    });
+    return await invoke<MemoryPromotionResponse>(
+      "promote_knowledge_source_to_memory",
+      {
+        request,
+        ...scope,
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -727,10 +893,13 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
   if (!scope) return null;
 
   try {
-    const response = await invoke<ApprovalAuditRecordResponse>("record_approval_decision", {
-      entry,
-      ...scope
-    });
+    const response = await invoke<ApprovalAuditRecordResponse>(
+      "record_approval_decision",
+      {
+        entry,
+        ...scope,
+      },
+    );
     return response.persisted ? response.entry : null;
   } catch {
     return null;
@@ -754,7 +923,7 @@ export async function recordRuntimeApprovalDecision(entry: ApprovalAuditEntry) {
  */
 export async function loadRuntimeActionHistory(
   category?: ActionHistoryCategory | string,
-  limit?: number
+  limit?: number,
 ) {
   if (!hasTauriRuntime()) {
     return null;
@@ -766,7 +935,7 @@ export async function loadRuntimeActionHistory(
     return await invoke<ActionHistoryEvent[]>("list_action_history", {
       category: category ?? null,
       limit: limit ?? null,
-      ...scope
+      ...scope,
     });
   } catch {
     return null;
@@ -778,7 +947,7 @@ export async function loadRuntimeActionHistory(
  * whether the event was persisted; outside Tauri this is always false.
  */
 export async function recordRuntimeActionHistory(
-  request: RecordActionHistoryRequest
+  request: RecordActionHistoryRequest,
 ) {
   if (!hasTauriRuntime()) {
     return false;
@@ -787,7 +956,10 @@ export async function recordRuntimeActionHistory(
   if (!scope) return false;
 
   try {
-    return await invoke<boolean>("record_action_history", { request, ...scope });
+    return await invoke<boolean>("record_action_history", {
+      request,
+      ...scope,
+    });
   } catch {
     return false;
   }
@@ -829,14 +1001,16 @@ export async function startRuntimeConnectorAuth(request: ConnectorAuthRequest) {
   try {
     return await invoke<ConnectorAuthResult>("start_connector_auth", {
       request,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest) {
+export async function completeRuntimeConnectorAuth(
+  request: ConnectorAuthRequest,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -845,7 +1019,7 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
   try {
     return await invoke<ConnectorAuthResult>("complete_connector_auth", {
       request,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -859,7 +1033,9 @@ export async function completeRuntimeConnectorAuth(request: ConnectorAuthRequest
  * exchange through the configured auth broker; public Google clients call
  * Google directly. Returns null outside Tauri.
  */
-export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) {
+export async function beginRuntimeConnectorOAuth(
+  request: ConnectorAuthRequest,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -868,7 +1044,7 @@ export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) 
   try {
     return await invoke<ConnectorAuthResult>("begin_connector_oauth", {
       request,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -881,7 +1057,11 @@ export async function beginRuntimeConnectorOAuth(request: ConnectorAuthRequest) 
  * an unlisten function (or null outside Tauri).
  */
 export async function listenRuntimeConnectorAuth(
-  onComplete: (event: { connectorId: string; status: string; message: string }) => void
+  onComplete: (event: {
+    connectorId: string;
+    status: string;
+    message: string;
+  }) => void,
 ) {
   if (!hasTauriRuntime()) {
     return null;
@@ -909,7 +1089,7 @@ export async function clearRuntimeConnectorAuth(connectorId: string) {
   try {
     return await invoke<ConnectorManifest>("clear_connector_auth", {
       connectorId,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -925,14 +1105,17 @@ export async function listRuntimeConnectorAccounts(connectorId: string) {
   try {
     return await invoke<ConnectorAccountOption[]>("list_connector_accounts", {
       connectorId,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function switchRuntimeConnectorAccount(connectorId: string, connectionId: string) {
+export async function switchRuntimeConnectorAccount(
+  connectorId: string,
+  connectionId: string,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -942,7 +1125,7 @@ export async function switchRuntimeConnectorAccount(connectorId: string, connect
     return await invoke<ConnectorManifest>("switch_connector_account", {
       connectorId,
       connectionId,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -958,20 +1141,24 @@ export async function refreshRuntimeConnectorHealth(connectorId: string) {
   try {
     return await invoke<ConnectorManifest>("refresh_connector_health", {
       connectorId,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function listRuntimeConnectorSyncStates(workspaceId = activeDataScope()?.workspaceId) {
+export async function listRuntimeConnectorSyncStates(
+  workspaceId = activeDataScope()?.workspaceId,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
   if (!workspaceId) return null;
   try {
-    return await invoke<ConnectorSyncState[]>("list_connector_sync_states", { workspaceId });
+    return await invoke<ConnectorSyncState[]>("list_connector_sync_states", {
+      workspaceId,
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -992,7 +1179,7 @@ export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
 
 export async function searchRuntimeConnector(
   request: ConnectorSearchRequest,
-  connectionId?: string
+  connectionId?: string,
 ) {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
@@ -1001,7 +1188,7 @@ export async function searchRuntimeConnector(
     return await invoke<ConnectorSearchResult>("search_connector", {
       request,
       ...scope,
-      connectionId
+      connectionId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1010,7 +1197,7 @@ export async function searchRuntimeConnector(
 
 export async function importRuntimeConnectorItem(
   request: ConnectorImportRequest,
-  connectionId?: string
+  connectionId?: string,
 ) {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
@@ -1019,7 +1206,7 @@ export async function importRuntimeConnectorItem(
     return await invoke<ConnectorImportResult>("import_connector_item", {
       request,
       ...scope,
-      connectionId
+      connectionId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1028,7 +1215,7 @@ export async function importRuntimeConnectorItem(
 
 async function invokeConnectorKnowledge<T>(
   command: string,
-  args: Record<string, unknown> = {}
+  args: Record<string, unknown> = {},
 ): Promise<T | null> {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
@@ -1036,7 +1223,7 @@ async function invokeConnectorKnowledge<T>(
   try {
     return await invoke<T>(command, {
       ...args,
-      ...scope
+      ...scope,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1044,29 +1231,31 @@ async function invokeConnectorKnowledge<T>(
 }
 
 export function listRuntimeConnectorKnowledgeSources() {
-  return invokeConnectorKnowledge<KnowledgeSource[]>("list_connector_knowledge_sources");
+  return invokeConnectorKnowledge<KnowledgeSource[]>(
+    "list_connector_knowledge_sources",
+  );
 }
 
 export async function setRuntimeConnectorKnowledgeSourceDisabled(
   sourceId: string,
-  disabled: boolean
+  disabled: boolean,
 ) {
   return invokeConnectorKnowledge<KnowledgeSource>(
     "set_connector_knowledge_source_disabled",
-    { sourceId, disabled }
+    { sourceId, disabled },
   );
 }
 
-export function deleteRuntimeConnectorKnowledgeSource(
-  sourceId: string
-) {
+export function deleteRuntimeConnectorKnowledgeSource(sourceId: string) {
   return invokeConnectorKnowledge<KnowledgeSource>(
     "delete_connector_knowledge_source",
-    { sourceId }
+    { sourceId },
   );
 }
 
-export async function prepareRuntimeConnectorAction(request: ConnectorActionRequest) {
+export async function prepareRuntimeConnectorAction(
+  request: ConnectorActionRequest,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -1075,7 +1264,7 @@ export async function prepareRuntimeConnectorAction(request: ConnectorActionRequ
   try {
     return await invoke<ConnectorActionRequest>("prepare_connector_action", {
       request,
-      workspaceId: scope.workspaceId
+      workspaceId: scope.workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1092,10 +1281,13 @@ export async function executeRuntimeConnectorAction(request: {
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<ConnectorActionResult>("execute_approved_connector_action", {
-      request,
-      workspaceId: scope.workspaceId
-    });
+    return await invoke<ConnectorActionResult>(
+      "execute_approved_connector_action",
+      {
+        request,
+        workspaceId: scope.workspaceId,
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1145,21 +1337,23 @@ export async function connectRuntimeBackend(request: BackendCredentialRequest) {
  *   - `offline` / `unsupported` / `failed` → keep the stored key, show a warning.
  */
 export async function verifyRuntimeBackend(
-  providerId: string
+  providerId: string,
 ): Promise<BackendVerifyResult | null> {
   if (!hasTauriRuntime()) {
     return null;
   }
 
   try {
-    return await invoke<BackendVerifyResult>("verify_backend_credential", { providerId });
+    return await invoke<BackendVerifyResult>("verify_backend_credential", {
+      providerId,
+    });
   } catch (error) {
     // A command failure is treated as a transient failure, not auth failure:
     // the stored key may still be good.
     return {
       providerId,
       outcome: "failed",
-      message: toRuntimeError(error).message
+      message: toRuntimeError(error).message,
     };
   }
 }
@@ -1183,7 +1377,7 @@ export async function clearRuntimeBackend(providerId: string) {
  */
 export async function recordRuntimeBackendEvent(
   event: BackendConsequentialEvent,
-  decidedAt: string
+  decidedAt: string,
 ) {
   if (!hasTauriRuntime()) {
     return null;
@@ -1192,7 +1386,7 @@ export async function recordRuntimeBackendEvent(
   try {
     return await invoke<ApprovalAuditEntry>("record_backend_event", {
       event,
-      decidedAt
+      decidedAt,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1232,8 +1426,13 @@ export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
 
 export async function listRuntimeNativeProviderRoutes() {
   if (!hasTauriRuntime()) return null;
-  try { return await invoke<RuntimeNativeProviderRoute[]>("list_native_provider_routes"); }
-  catch (error) { throw toRuntimeError(error); }
+  try {
+    return await invoke<RuntimeNativeProviderRoute[]>(
+      "list_native_provider_routes",
+    );
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
 }
 
 /** Begin a streaming completion. Rust adds the key + performs the HTTP call. */
@@ -1284,27 +1483,53 @@ export async function listRuntimeBackendModels(providerId: string) {
     return null;
   }
   try {
-    return await invoke<RuntimeModelDiscoveryResult>("list_backend_models", { providerId });
+    if (providerId === "antigravity") {
+      const models = await invoke<BackendProvider["models"]>(
+        "list_antigravity_models",
+      );
+      return {
+        outcome: models.length ? ("success" as const) : ("empty" as const),
+        models,
+      };
+    }
+    if (["claude", "cursor", "grok", "opencode"].includes(providerId)) {
+      const models = await invoke<BackendProvider["models"]>(
+        "list_managed_runtime_models",
+        {
+          providerId,
+        },
+      );
+      return {
+        outcome: models.length ? ("success" as const) : ("empty" as const),
+        models,
+      };
+    }
+    return await invoke<RuntimeModelDiscoveryResult>("list_backend_models", {
+      providerId,
+    });
   } catch (error) {
     return {
       outcome: "failed" as const,
       models: [],
-      message: toRuntimeError(error).message
+      message: toRuntimeError(error).message,
     };
   }
 }
 
 export async function listenRuntimeBackendEvents(
   requestId: string,
-  onLine: (line: string) => void
+  onLine: (line: string) => void,
 ) {
   if (!hasTauriRuntime()) {
     return null;
   }
   try {
-    const unlisten = await listen<string>(`arden://backend/${requestId}`, (event) => {
-      onLine(event.payload as string);
-    });
+    const unlisten = await listen<string>(
+      `arden://backend/${requestId}`,
+      (event) => {
+        onLine(event.payload as string);
+      },
+    );
     return unlisten;
   } catch {
     return null;
@@ -1351,7 +1576,12 @@ export type RuntimeCodexEvent =
       approval: import("@fable/protocol").ApprovalRequest;
     }
   | { type: "text-delta"; text: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd?: number }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      costUsd?: number;
+    }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }
   | { type: "cancelled" };
@@ -1364,7 +1594,7 @@ export async function getRuntimeCodexStatus() {
     return {
       installed: false,
       authenticated: false,
-      message: "Fable could not inspect the Codex CLI."
+      message: "Fable could not inspect the Codex CLI.",
     };
   }
 }
@@ -1372,13 +1602,17 @@ export async function getRuntimeCodexStatus() {
 export async function startRuntimeCodexBrowserLogin() {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<RuntimeCodexBrowserLoginResult>("start_codex_browser_login");
+    return await invoke<RuntimeCodexBrowserLoginResult>(
+      "start_codex_browser_login",
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function startRuntimeCodexTurn(request: RuntimeCodexTurnStartRequest) {
+export async function startRuntimeCodexTurn(
+  request: RuntimeCodexTurnStartRequest,
+) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<null>("start_codex_app_server_turn", { request });
@@ -1424,14 +1658,290 @@ export async function shutdownRuntimeCodexTurn(requestId: string) {
 
 export async function listenRuntimeCodexEvents(
   requestId: string,
-  onEvent: (event: RuntimeCodexEvent) => void
+  onEvent: (event: RuntimeCodexEvent) => void,
 ) {
   if (!hasTauriRuntime()) return null;
   try {
-    const unlisten = await listen<RuntimeCodexEvent>(`fable://codex/${requestId}`, (event) => {
-      onEvent(event.payload);
-    });
+    const unlisten = await listen<RuntimeCodexEvent>(
+      `fable://codex/${requestId}`,
+      (event) => {
+        onEvent(event.payload);
+      },
+    );
     return unlisten;
+  } catch {
+    return null;
+  }
+}
+
+export interface RuntimeAntigravityStatus {
+  installed: boolean;
+  authenticated: boolean;
+  version?: string;
+  message?: string;
+}
+
+export type RuntimeAntigravityEvent = Extract<
+  RuntimeCodexEvent,
+  {
+    type:
+      | "approval-request"
+      | "text-delta"
+      | "done"
+      | "error"
+      | "cancelled"
+      | "process-exited";
+  }
+>;
+
+export async function getRuntimeAntigravityStatus() {
+  if (!hasTauriRuntime()) return null;
+  return invoke<RuntimeAntigravityStatus>("antigravity_status").catch(() => ({
+    installed: false,
+    authenticated: false,
+    message: "Fable could not inspect the Antigravity runtime.",
+  }));
+}
+
+export async function installRuntimeAntigravity() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      providerId: "antigravity";
+      version: string;
+      installed: boolean;
+    }>("install_antigravity_runtime");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function startRuntimeAntigravityBrowserLogin() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      providerId: "antigravity";
+      outcome: "ready";
+      message: string;
+    }>("start_antigravity_browser_login");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function checkRuntimeAntigravityConnection() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<BackendVerifyResult>("check_antigravity_connection");
+  } catch (error) {
+    return {
+      providerId: "antigravity",
+      outcome: "failed" as const,
+      message: toRuntimeError(error).message,
+    };
+  }
+}
+
+export async function startRuntimeAntigravityTurn(request: {
+  requestId: string;
+  providerId: string;
+  request: AgentTurnRequest;
+  options: { contextPrefix?: string; permissionMode?: string; runId?: string };
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("start_antigravity_acp_turn", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function respondRuntimeAntigravityApproval(request: {
+  requestId: string;
+  approvalRequestId: string;
+  approved: boolean;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("respond_antigravity_acp_approval", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function interruptRuntimeAntigravityTurn(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("interrupt_antigravity_acp_turn", { requestId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function shutdownRuntimeAntigravityTurn(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("shutdown_antigravity_acp_turn", { requestId });
+  } catch {
+    return null;
+  }
+}
+
+export async function logoutRuntimeAntigravity() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("logout_antigravity");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listenRuntimeAntigravityEvents(
+  requestId: string,
+  onEvent: (event: RuntimeAntigravityEvent) => void,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await listen<RuntimeAntigravityEvent>(
+      `fable://antigravity/${requestId}`,
+      (event) => onEvent(event.payload),
+    );
+  } catch {
+    return null;
+  }
+}
+
+export type ManagedRuntimeProviderId =
+  "claude" | "cursor" | "grok" | "opencode";
+
+export interface RuntimeManagedStatus {
+  providerId: ManagedRuntimeProviderId;
+  installed: boolean;
+  authenticated: boolean;
+  version?: string;
+  message?: string;
+}
+
+export type RuntimeManagedEvent = RuntimeCodexEvent;
+
+export async function getRuntimeManagedStatus(
+  providerId: ManagedRuntimeProviderId,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeManagedStatus>("managed_runtime_status", {
+      providerId,
+    });
+  } catch {
+    return {
+      providerId,
+      installed: false,
+      authenticated: false,
+      message: `Fable could not inspect the ${providerId} runtime.`,
+    };
+  }
+}
+
+export async function checkRuntimeManagedConnection(
+  providerId: ManagedRuntimeProviderId,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<BackendVerifyResult>(
+      "check_managed_runtime_connection",
+      { providerId },
+    );
+  } catch (error) {
+    return {
+      providerId,
+      outcome: "failed" as const,
+      message: toRuntimeError(error).message,
+    };
+  }
+}
+
+export async function startRuntimeManagedLogin(
+  providerId: Exclude<ManagedRuntimeProviderId, "opencode">,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{
+      providerId: string;
+      outcome: "ready";
+      message: string;
+    }>("start_managed_runtime_login", { providerId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function startRuntimeManagedTurn(request: {
+  requestId: string;
+  providerId: ManagedRuntimeProviderId;
+  request: AgentTurnRequest;
+  options: { contextPrefix?: string; permissionMode?: string; runId?: string };
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("start_managed_runtime_turn", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function respondRuntimeManagedApproval(request: {
+  requestId: string;
+  approvalRequestId: string;
+  approved: boolean;
+}) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("respond_managed_runtime_approval", { request });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function interruptRuntimeManagedTurn(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("interrupt_managed_runtime_turn", { requestId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function shutdownRuntimeManagedTurn(requestId: string) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("shutdown_managed_runtime_turn", { requestId });
+  } catch {
+    return null;
+  }
+}
+
+export async function logoutRuntimeManaged(
+  providerId: ManagedRuntimeProviderId,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<null>("logout_managed_runtime", { providerId });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function listenRuntimeManagedEvents(
+  providerId: ManagedRuntimeProviderId,
+  requestId: string,
+  onEvent: (event: RuntimeManagedEvent) => void,
+) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await listen<RuntimeManagedEvent>(
+      `fable://managed-runtime/${providerId}/${requestId}`,
+      (event) => onEvent(event.payload),
+    );
   } catch {
     return null;
   }
@@ -1479,12 +1989,17 @@ export interface RuntimeResolvedMcpCapabilityRoute {
 
 export async function resolveRuntimeMcpCapabilityRoute(
   workspaceId: string,
-  capabilityId: string
+  capabilityId: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeResolvedMcpCapabilityRoute | null>("resolve_mcp_capability_route", {
-    request: { workspaceId, capabilityId }
-  }).catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimeResolvedMcpCapabilityRoute | null>(
+    "resolve_mcp_capability_route",
+    {
+      request: { workspaceId, capabilityId },
+    },
+  ).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export interface RuntimeMcpToolProposal {
@@ -1573,52 +2088,72 @@ export type RuntimePreparedCapabilityGrant =
       approval: import("@fable/protocol").ApprovalRequest;
     };
 
-export async function prepareRuntimeCapabilityGrant(proposal: RuntimeCapabilityGrantProposal) {
+export async function prepareRuntimeCapabilityGrant(
+  proposal: RuntimeCapabilityGrantProposal,
+) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimePreparedCapabilityGrant>("prepare_capability_grant", { proposal })
-    .catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimePreparedCapabilityGrant>("prepare_capability_grant", {
+    proposal,
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function commitRuntimeCapabilityGrant(
   proposal: RuntimeCapabilityGrantProposal,
-  resolution: ApprovalResolutionRequest
+  resolution: ApprovalResolutionRequest,
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<RuntimeCapabilityGrant>("commit_capability_grant", {
-    request: { proposal, resolution }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { proposal, resolution },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function prepareRuntimeMcpServerConfiguration(
-  configuration: RuntimeMcpServerConfiguration
+  configuration: RuntimeMcpServerConfiguration,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimePreparedMcpServerConfiguration>("prepare_mcp_server_configuration", {
-    configuration
-  }).catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimePreparedMcpServerConfiguration>(
+    "prepare_mcp_server_configuration",
+    {
+      configuration,
+    },
+  ).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function commitRuntimeMcpServerConfiguration(
   configuration: RuntimeMcpServerConfiguration,
-  resolution: ApprovalResolutionRequest
+  resolution: ApprovalResolutionRequest,
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<RuntimeMcpServerSummary>("commit_mcp_server_configuration", {
-    request: { configuration, resolution }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { configuration, resolution },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function listRuntimeMcpServerConfigurations(workspaceId: string) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeMcpServerSummary[]>("list_mcp_server_configurations", { workspaceId })
-    .catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimeMcpServerSummary[]>("list_mcp_server_configurations", {
+    workspaceId,
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
-export async function spawnRuntimeMcpProcess(workspaceId: string, launchReference: string) {
+export async function spawnRuntimeMcpProcess(
+  workspaceId: string,
+  launchReference: string,
+) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<RuntimeSpawnedMcpProcess>("spawn_mcp_process", {
-      request: { workspaceId, launchReference }
+      request: { workspaceId, launchReference },
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1657,54 +2192,70 @@ export interface RuntimeRemoteMcpAuthorizationResult {
 
 export async function inspectRuntimeRemoteMcpAuthorization(
   workspaceId: string,
-  configurationReference: string
+  configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeRemoteMcpAuthorizationSummary>("inspect_remote_mcp_authorization", {
-    request: { workspaceId, configurationReference }
-  }).catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimeRemoteMcpAuthorizationSummary>(
+    "inspect_remote_mcp_authorization",
+    {
+      request: { workspaceId, configurationReference },
+    },
+  ).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function beginRuntimeRemoteMcpAuthorization(
   workspaceId: string,
-  configurationReference: string
+  configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeRemoteMcpAuthorizationResult>("begin_remote_mcp_authorization", {
-    request: { workspaceId, configurationReference }
-  }).catch((error) => { throw toRuntimeError(error); });
+  return invoke<RuntimeRemoteMcpAuthorizationResult>(
+    "begin_remote_mcp_authorization",
+    {
+      request: { workspaceId, configurationReference },
+    },
+  ).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function disconnectRuntimeRemoteMcpAuthorization(
   workspaceId: string,
-  configurationReference: string
+  configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<{ status: "disconnected"; message: string }>(
     "disconnect_remote_mcp_authorization",
-    { request: { workspaceId, configurationReference } }
-  ).catch((error) => { throw toRuntimeError(error); });
+    { request: { workspaceId, configurationReference } },
+  ).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function openRuntimeRemoteMcpSession(
   workspaceId: string,
-  configurationReference: string
+  configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<RuntimeOpenedRemoteMcpSession>("open_remote_mcp_session", {
-    request: { workspaceId, configurationReference }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { workspaceId, configurationReference },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function sendRuntimeRemoteMcpFrame(
   workspaceId: string,
   sessionId: string,
-  frame: string
+  frame: string,
 ) {
   if (!hasTauriRuntime()) return null;
   return invoke<string[]>("send_remote_mcp_frame", {
-    request: { workspaceId, sessionId, frame }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { workspaceId, sessionId, frame },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export interface RuntimeRemoteMcpPollResult {
@@ -1713,40 +2264,53 @@ export interface RuntimeRemoteMcpPollResult {
   retryAfterMs: number;
 }
 
-export async function pollRuntimeRemoteMcpMessages(workspaceId: string, sessionId: string) {
+export async function pollRuntimeRemoteMcpMessages(
+  workspaceId: string,
+  sessionId: string,
+) {
   if (!hasTauriRuntime()) return null;
   return invoke<RuntimeRemoteMcpPollResult>("poll_remote_mcp_messages", {
-    request: { workspaceId, sessionId }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { workspaceId, sessionId },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
-export async function closeRuntimeRemoteMcpSession(workspaceId: string, sessionId: string) {
+export async function closeRuntimeRemoteMcpSession(
+  workspaceId: string,
+  sessionId: string,
+) {
   if (!hasTauriRuntime()) return null;
   return invoke<null>("close_remote_mcp_session", {
-    request: { workspaceId, sessionId }
-  }).catch((error) => { throw toRuntimeError(error); });
+    request: { workspaceId, sessionId },
+  }).catch((error) => {
+    throw toRuntimeError(error);
+  });
 }
 
 export async function writeRuntimeMcpFrame(
   workspaceId: string,
   sessionId: string,
-  frame: string
+  frame: string,
 ) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<null>("write_mcp_frame", {
-      request: { workspaceId, sessionId, frame }
+      request: { workspaceId, sessionId, frame },
     });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function closeRuntimeMcpProcess(workspaceId: string, sessionId: string) {
+export async function closeRuntimeMcpProcess(
+  workspaceId: string,
+  sessionId: string,
+) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<null>("close_mcp_process", {
-      request: { workspaceId, sessionId }
+      request: { workspaceId, sessionId },
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1757,13 +2321,16 @@ export async function recordRuntimeMcpDiscovery(
   workspaceId: string,
   sessionId: string,
   tools: string[],
-  resources: string[]
+  resources: string[],
 ) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<RuntimeMcpConnectionDetails>("record_mcp_server_discovery", {
-      request: { workspaceId, sessionId, tools, resources }
-    });
+    return await invoke<RuntimeMcpConnectionDetails>(
+      "record_mcp_server_discovery",
+      {
+        request: { workspaceId, sessionId, tools, resources },
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1775,29 +2342,39 @@ export async function setRuntimeMcpEnablement(
   expectedRevision: number,
   enabledTools: string[],
   enabledResources: string[],
-  capabilityBindings: Array<{ capabilityId: "knowledge.content.search"; toolName: string }>
+  capabilityBindings: Array<{
+    capabilityId: "knowledge.content.search";
+    toolName: string;
+  }>,
 ) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<RuntimeMcpConnectionDetails>("set_mcp_server_enablement", {
-      request: {
-        workspaceId,
-        connectionId,
-        expectedRevision,
-        enabledTools,
-        enabledResources,
-        capabilityBindings
-      }
-    });
+    return await invoke<RuntimeMcpConnectionDetails>(
+      "set_mcp_server_enablement",
+      {
+        request: {
+          workspaceId,
+          connectionId,
+          expectedRevision,
+          enabledTools,
+          enabledResources,
+          capabilityBindings,
+        },
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function prepareRuntimeMcpToolCall(proposal: RuntimeMcpToolProposal) {
+export async function prepareRuntimeMcpToolCall(
+  proposal: RuntimeMcpToolProposal,
+) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<RuntimePreparedMcpToolCall>("prepare_mcp_tool_call", { proposal });
+    return await invoke<RuntimePreparedMcpToolCall>("prepare_mcp_tool_call", {
+      proposal,
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1805,13 +2382,16 @@ export async function prepareRuntimeMcpToolCall(proposal: RuntimeMcpToolProposal
 
 export async function authorizeRuntimeMcpToolCall(
   proposal: RuntimeMcpToolProposal,
-  resolution: ApprovalResolutionRequest
+  resolution: ApprovalResolutionRequest,
 ) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<RuntimeAuthorizedMcpToolCall>("authorize_mcp_tool_call", {
-      request: { proposal, resolution }
-    });
+    return await invoke<RuntimeAuthorizedMcpToolCall>(
+      "authorize_mcp_tool_call",
+      {
+        request: { proposal, resolution },
+      },
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }
@@ -1820,12 +2400,12 @@ export async function authorizeRuntimeMcpToolCall(
 export async function executeRuntimeApprovedMcpToolCall(
   proposal: RuntimeMcpToolProposal,
   permitId: string,
-  requestId: string
+  requestId: string,
 ) {
   if (!hasTauriRuntime()) return null;
   try {
     return await invoke<string[]>("execute_approved_mcp_tool_call", {
-      request: { proposal, permitId, requestId }
+      request: { proposal, permitId, requestId },
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -1834,7 +2414,7 @@ export async function executeRuntimeApprovedMcpToolCall(
 
 export async function listenRuntimeMcpFrames(
   channel: string,
-  onFrame: (line: string) => void
+  onFrame: (line: string) => void,
 ) {
   if (!hasTauriRuntime()) return null;
   if (!/^fable:\/\/mcp\/mcp-[0-9a-f]{32}$/.test(channel)) {

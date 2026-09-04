@@ -31,7 +31,7 @@ import type {
   ApprovalRequest,
   BackendAgentEvent,
   BackendCapability,
-  BackendProvider
+  BackendProvider,
 } from "@fable/protocol";
 import type { HttpTransport } from "../native-api/transport";
 import type { ModelDiscoveryResult } from "../native-api/discovery";
@@ -60,7 +60,7 @@ export interface AgentBackend {
    */
   run(
     request: AgentTurnRequest,
-    options: AgentTurnOptions
+    options: AgentTurnOptions,
   ): AsyncIterable<BackendAgentEvent> | null;
 
   /**
@@ -94,7 +94,7 @@ export interface BackendDeps {
    */
   createTransport: (
     provider: BackendProvider,
-    handlers: TransportHandlers
+    handlers: TransportHandlers,
   ) => TransportHandle | null;
   /**
    * Build the Codex app-server process client. This is Codex-specific by
@@ -103,8 +103,18 @@ export interface BackendDeps {
    */
   createCodexAppServer?: (
     provider: BackendProvider,
-    handlers: CodexAppServerHandlers
+    handlers: CodexAppServerHandlers,
   ) => CodexAppServerHandle | null;
+  /** Build Google's official Antigravity ACP process client. */
+  createAntigravityAcp?: (
+    provider: BackendProvider,
+    handlers: AntigravityAcpHandlers,
+  ) => AntigravityAcpHandle | null;
+  /** Build an installed provider-owned runtime for Claude, Cursor, Grok, or OpenCode. */
+  createManagedRuntime?: (
+    provider: BackendProvider,
+    handlers: ManagedRuntimeHandlers,
+  ) => ManagedRuntimeHandle | null;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }
@@ -157,7 +167,12 @@ export type CodexAppServerEvent =
       approval: ApprovalRequest;
     }
   | { type: "approval-result"; callId: string; ok: boolean; output: string }
-  | { type: "usage"; inputTokens: number; outputTokens: number; costUsd?: number }
+  | {
+      type: "usage";
+      inputTokens: number;
+      outputTokens: number;
+      costUsd?: number;
+    }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }
   | { type: "cancelled" };
@@ -165,19 +180,71 @@ export type CodexAppServerEvent =
 export interface CodexTurnRequest {
   threadId: string;
   request: AgentTurnRequest;
-  options: Pick<AgentTurnOptions, "contextPrefix" | "permissionMode" | "attemptId">;
+  options: Pick<
+    AgentTurnOptions,
+    "contextPrefix" | "permissionMode" | "attemptId"
+  >;
 }
 
 export interface CodexAppServerHandle {
   initialize(): Promise<void>;
   startThread(request: AgentTurnRequest): Promise<CodexThreadRef>;
-  resumeThread(threadId: string, request: AgentTurnRequest): Promise<CodexThreadRef>;
+  resumeThread(
+    threadId: string,
+    request: AgentTurnRequest,
+  ): Promise<CodexThreadRef>;
   submitTurn(request: CodexTurnRequest): AsyncIterable<CodexAppServerEvent>;
   respondApproval(
     requestId: string,
-    result: { callId: string; ok: boolean; output: string }
+    result: { callId: string; ok: boolean; output: string },
   ): Promise<void>;
   cancel(threadId: string, turnId?: string): Promise<void>;
+  shutdown(): Promise<void>;
+  listModels?(): Promise<ModelDiscoveryResult>;
+}
+
+export interface AntigravityAcpHandlers {
+  onRequestStarted: (requestId: string) => void;
+}
+
+export type AntigravityAcpEvent = CodexAppServerEvent;
+
+export interface AntigravityAcpHandle {
+  initialize(): Promise<void>;
+  submitTurn(
+    request: AgentTurnRequest,
+    options: Pick<
+      AgentTurnOptions,
+      "contextPrefix" | "permissionMode" | "attemptId"
+    >,
+  ): AsyncIterable<AntigravityAcpEvent>;
+  respondApproval(requestId: string, approved: boolean): Promise<void>;
+  cancel(): Promise<void>;
+  shutdown(): Promise<void>;
+  listModels?(): Promise<ModelDiscoveryResult>;
+}
+
+export interface ManagedRuntimeHandlers {
+  onRequestStarted: (requestId: string) => void;
+}
+
+export type ManagedRuntimeEvent = CodexAppServerEvent;
+
+/**
+ * Supervised provider-owned execution process. ACP, Claude stdio, and OpenCode
+ * server drivers all use the same one-time approval response boundary.
+ */
+export interface ManagedRuntimeHandle {
+  initialize(): Promise<void>;
+  submitTurn(
+    request: AgentTurnRequest,
+    options: Pick<
+      AgentTurnOptions,
+      "contextPrefix" | "permissionMode" | "attemptId"
+    >,
+  ): AsyncIterable<ManagedRuntimeEvent>;
+  respondApproval(requestId: string, approved: boolean): Promise<void>;
+  cancel(): Promise<void>;
   shutdown(): Promise<void>;
   listModels?(): Promise<ModelDiscoveryResult>;
 }
@@ -192,7 +259,7 @@ export interface CodexAppServerHandle {
  */
 export type AgentBackendFactory = (
   provider: BackendProvider,
-  deps: BackendDeps
+  deps: BackendDeps,
 ) => AgentBackend | null;
 
 export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";

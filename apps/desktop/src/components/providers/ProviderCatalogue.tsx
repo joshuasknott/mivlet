@@ -6,6 +6,7 @@ import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { Key } from "@phosphor-icons/react/dist/csr/Key";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
+import { TerminalWindow } from "@phosphor-icons/react/dist/csr/TerminalWindow";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -20,14 +21,13 @@ import { ProviderIcon } from "../ProviderIcon";
 
 export const FEATURED_PROVIDER_FAMILY_IDS = [
   "openai",
-  "gemini",
-  "xai",
   "anthropic",
-  "custom",
+  "antigravity",
+  "xai",
 ] as const;
 
 export type ProviderConnectionMethodKind =
-  "api-key" | "oauth-browser" | "custom";
+  "api-key" | "oauth-browser" | "provider-cli" | "custom";
 
 export interface ProviderConnectionMethod {
   id: string;
@@ -59,17 +59,17 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     aliases: ["OpenAI", "ChatGPT", "Codex", "GPT"],
   },
   anthropic: {
-    label: "Anthropic",
+    label: "Claude",
     iconProvider: "anthropic",
     aliases: ["Anthropic", "Claude"],
   },
-  gemini: {
-    label: "Google Gemini",
-    iconProvider: "gemini",
-    aliases: ["Google", "Gemini", "Google AI"],
+  antigravity: {
+    label: "Google Antigravity",
+    iconProvider: "antigravity",
+    aliases: ["Google", "Gemini", "Antigravity"],
   },
   xai: {
-    label: "xAI",
+    label: "Grok",
     iconProvider: "xai",
     aliases: ["xAI", "Grok", "Grok Build"],
   },
@@ -78,12 +78,23 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     iconProvider: "custom",
     aliases: ["Custom", "Other", "OpenAI compatible", "Base URL"],
   },
+  cursor: {
+    label: "Cursor",
+    iconProvider: "cursor",
+    aliases: ["Cursor", "Anysphere", "ACP"],
+  },
+  opencode: {
+    label: "OpenCode",
+    iconProvider: "opencode",
+    aliases: ["OpenCode", "local agent", "server"],
+  },
 };
 
 const METHOD_KIND_PRIORITY: Record<ProviderConnectionMethodKind, number> = {
   "oauth-browser": 0,
-  "api-key": 1,
-  custom: 2,
+  "provider-cli": 1,
+  "api-key": 2,
+  custom: 3,
 };
 
 function compactProviderId(value: string): string {
@@ -94,8 +105,11 @@ export function providerFamilyIdFor(providerId: string): string {
   const compact = compactProviderId(providerId);
   if (["openai", "chatgpt", "codex"].includes(compact)) return "openai";
   if (["xai", "grok"].includes(compact)) return "xai";
-  if (["gemini", "google", "googleai"].includes(compact)) return "gemini";
-  if (compact === "anthropic") return "anthropic";
+  if (["antigravity", "gemini", "google", "googleai"].includes(compact))
+    return "antigravity";
+  if (["anthropic", "claude"].includes(compact)) return "anthropic";
+  if (compact === "cursor") return "cursor";
+  if (compact === "opencode") return "opencode";
   if (
     compact.startsWith("custom") ||
     compact.startsWith("openaicompatible") ||
@@ -109,21 +123,36 @@ export function providerFamilyIdFor(providerId: string): string {
 function providerOwnedMethods(
   provider: BackendProvider,
 ): ProviderConnectionMethod[] {
-  const compact = compactProviderId(provider.id);
-  if (compact === "codex") {
-    return [
-      {
-        id: `${provider.id}:browser`,
-        kind: "oauth-browser",
-        label: "ChatGPT subscription",
-        description:
-          "Sign in through the official ChatGPT browser flow managed by Codex.",
-        provider,
-      },
-    ];
-  }
-
-  return [];
+  const setup =
+    provider.setup ??
+    (provider.backendType === "codex-app-server"
+      ? {
+          kind: "browser" as const,
+          label: "ChatGPT account",
+          description:
+            "Sign in through the official browser flow managed by Codex.",
+          recommended: true,
+        }
+      : provider.backendType === "antigravity-acp"
+        ? {
+            kind: "browser" as const,
+            label: "Google account",
+            description:
+              "Sign in through Google's official Antigravity browser flow.",
+            recommended: true,
+          }
+        : null);
+  if (!setup || (setup.kind !== "browser" && setup.kind !== "provider-cli"))
+    return [];
+  return [
+    {
+      id: `${provider.id}:${setup.kind}`,
+      kind: setup.kind === "browser" ? "oauth-browser" : "provider-cli",
+      label: setup.label,
+      description: setup.description,
+      provider,
+    },
+  ];
 }
 
 export function connectionMethodsForProvider(
@@ -439,6 +468,8 @@ function ProviderMethodIcon({ kind }: { kind: ProviderConnectionMethodKind }) {
       return <Key size={20} />;
     case "oauth-browser":
       return <Browser size={20} />;
+    case "provider-cli":
+      return <TerminalWindow size={20} />;
     case "custom":
       return <Globe size={20} />;
     default:
@@ -860,15 +891,25 @@ function ProviderConnectionModal({
               </form>
             ) : null}
 
-            {selectedMethod.kind === "oauth-browser" ? (
+            {selectedMethod.kind === "oauth-browser" ||
+            selectedMethod.kind === "provider-cli" ? (
               <div className="provider-method-detail__instructions">
-                <Browser size={19} aria-hidden="true" />
+                {selectedMethod.kind === "oauth-browser" ? (
+                  <Browser size={19} aria-hidden="true" />
+                ) : (
+                  <TerminalWindow size={19} aria-hidden="true" />
+                )}
                 <div>
-                  <strong>Provider-supported browser sign-in</strong>
+                  <strong>
+                    {selectedMethod.kind === "oauth-browser"
+                      ? "Provider-supported browser sign-in"
+                      : "Provider-owned local sign-in"}
+                  </strong>
                   <p>
-                    Fable opens the official provider page in your browser and
-                    waits for the provider-owned flow to finish. OAuth
-                    credentials never enter the Fable interface.
+                    {selectedMethod.kind === "oauth-browser"
+                      ? "Fable opens the official provider page and waits for the provider-owned flow to finish."
+                      : "Fable uses the provider's official local runtime and reads only its connection state."}{" "}
+                    Credentials never enter the Fable interface.
                   </p>
                   <p>
                     {selectedMethod.provider.installHint ??
@@ -878,7 +919,9 @@ function ProviderConnectionModal({
               </div>
             ) : null}
 
-            {selectedMethod.kind === "oauth-browser" &&
+            {(selectedMethod.kind === "provider-cli" ||
+              (selectedMethod.kind === "oauth-browser" &&
+                selectedMethod.provider.id !== "antigravity")) &&
             selectedMethod.provider.authState === "install-required" &&
             onCheckConnection &&
             !methodConnected ? (
@@ -893,13 +936,35 @@ function ProviderConnectionModal({
                     <Spinner size={14} className="og-spinner" /> Checking
                   </>
                 ) : (
-                  "Check for Codex"
+                  `Check for ${selectedMethod.provider.label}`
+                )}
+              </button>
+            ) : null}
+
+            {selectedMethod.kind === "provider-cli" &&
+            selectedMethod.provider.authState !== "install-required" &&
+            selectedMethod.provider.authState !== "unavailable" &&
+            onCheckConnection &&
+            !methodConnected ? (
+              <button
+                type="button"
+                className="provider-method-form__primary"
+                disabled={pending}
+                onClick={() => void checkConnection(selectedMethod.provider.id)}
+              >
+                {pending ? (
+                  <>
+                    <Spinner size={14} className="og-spinner" /> Checking
+                  </>
+                ) : (
+                  "Check connection"
                 )}
               </button>
             ) : null}
 
             {selectedMethod.kind === "oauth-browser" &&
-            selectedMethod.provider.authState !== "install-required" &&
+            (selectedMethod.provider.authState !== "install-required" ||
+              selectedMethod.provider.id === "antigravity") &&
             onStartBrowserLogin &&
             !methodConnected ? (
               <button
@@ -915,6 +980,8 @@ function ProviderConnectionModal({
                     <Spinner size={14} className="og-spinner" /> Waiting for
                     browser
                   </>
+                ) : selectedMethod.provider.id === "antigravity" ? (
+                  "Continue with Google"
                 ) : (
                   "Continue in browser"
                 )}
@@ -931,8 +998,7 @@ function ProviderConnectionModal({
                     : "This connection is ready."}
                 </span>
                 <div>
-                  {onCheckConnection &&
-                  selectedMethod.provider.backendType === "native-api" ? (
+                  {onCheckConnection ? (
                     <button
                       type="button"
                       disabled={pending}
@@ -944,7 +1010,9 @@ function ProviderConnectionModal({
                     </button>
                   ) : null}
                   {onRefreshModels &&
-                  selectedMethod.provider.backendType === "native-api" ? (
+                  selectedMethod.provider.capabilities.includes(
+                    "model-availability",
+                  ) ? (
                     <button
                       type="button"
                       onClick={() =>
@@ -963,8 +1031,7 @@ function ProviderConnectionModal({
                       Replace key
                     </button>
                   ) : null}
-                  {onDisconnect &&
-                  selectedMethod.provider.backendType === "native-api" ? (
+                  {onDisconnect && selectedMethod.provider.id !== "codex" ? (
                     <button
                       type="button"
                       onClick={() => setConfirmingRemoval(true)}
@@ -976,18 +1043,21 @@ function ProviderConnectionModal({
               </div>
             ) : null}
 
-            {confirmingRemoval &&
-            selectedMethod.provider.backendType === "native-api" ? (
+            {confirmingRemoval && selectedMethod.provider.id !== "codex" ? (
               <div
                 className="provider-method-detail__removal"
                 role="alertdialog"
                 aria-label={`Remove ${selectedMethod.provider.label} from Fable`}
               >
-                <strong>Remove this key from Fable?</strong>
+                <strong>
+                  {selectedMethod.provider.backendType === "native-api"
+                    ? "Remove this key from Fable?"
+                    : "Disconnect this provider?"}
+                </strong>
                 <p>
-                  Fable will delete its local credential. This does not revoke
-                  the key at the provider; revoke it in the provider&rsquo;s
-                  account if it may be compromised.
+                  {selectedMethod.provider.backendType === "native-api"
+                    ? "Fable will delete its local credential. This does not revoke the key at the provider; revoke it there too if it may be compromised."
+                    : "Fable will remove the local Antigravity profile and its Google session from this account."}
                 </p>
                 <div>
                   <button
@@ -1025,7 +1095,9 @@ function ProviderConnectionModal({
                         .finally(() => setPending(false));
                     }}
                   >
-                    Remove key
+                    {selectedMethod.provider.backendType === "native-api"
+                      ? "Remove key"
+                      : "Disconnect"}
                   </button>
                 </div>
               </div>

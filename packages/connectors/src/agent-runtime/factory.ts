@@ -2,10 +2,10 @@
  * The `AgentBackend` factory: resolves a `BackendProvider` to a live agent
  * backend (or null) by dispatching on `backendType`.
  *
- * Today `native-api` and Codex app-server return live backends. The factory
- * returns null for any backend that is not connected or lacks the `streaming`
- * capability — so the shell's "is there a backend to drive a run?" predicate is
- * preserved by construction.
+ * Native HTTP, Codex, ACP, and supervised provider-owned command drivers can
+ * return live backends. The factory returns null for any backend that is not
+ * connected or lacks the `streaming` capability — so the shell's "is there a
+ * backend to drive a run?" predicate is preserved by construction.
  *
  * The factory is pure: it holds no state and performs no I/O. All egress + auth
  * flows through the injected {@link BackendDeps}.
@@ -13,8 +13,7 @@
 
 import type { BackendCapability, BackendProvider } from "@fable/protocol";
 import type { AgentBackend, BackendDeps } from "./contract";
-import { createNativeApiBackend } from "./adapters/native-api";
-import { resolveCodexBackend } from "./adapters/codex";
+import { createRegisteredBackend, hasRegisteredAdapter } from "./adapter-registry";
 
 /** A backend must be connected AND report streaming to be runnable. */
 function isRunnable(provider: BackendProvider): boolean {
@@ -27,17 +26,15 @@ function isRunnable(provider: BackendProvider): boolean {
  * True when a backend family has a *live* adapter the factory can resolve today.
  *
  * This is the provider-neutral "can Fable actually drive a run on this backend
- * right now?" predicate. Native API and Codex return true. The shell uses this to
- * decide whether the composer drives the agent loop vs. the knowledge-search
- * fallback — preserving the legacy native-API-only behavior while keeping the
- * contract ready for future adapters (flip a backend type here once it ships).
+ * right now?" predicate. The shell uses this to decide whether the composer
+ * drives the agent loop or the knowledge-search fallback.
  *
  * Note: this checks the backend family's adapter readiness, not the per-instance
  * connection state. Pair with a connected + streaming check (as {@link
  * resolveAgentBackend} does) for the full "runnable now" answer.
  */
-export function hasRunnableAdapter(backendType: string): boolean {
-  return backendType === "native-api" || backendType === "codex-app-server";
+export function hasRunnableAdapter(driverKind: string): boolean {
+  return hasRegisteredAdapter(driverKind);
 }
 
 /**
@@ -51,15 +48,5 @@ export function resolveAgentBackend(
   deps: BackendDeps
 ): AgentBackend | null {
   if (!provider || !isRunnable(provider)) return null;
-  switch (provider.backendType) {
-    case "native-api":
-      // Fable owns the full loop here; transport + discovery injected via deps.
-      return createNativeApiBackend(provider, deps);
-    case "codex-app-server":
-      // Codex owns auth + process protocol; Fable maps it into AgentBackend.
-      return resolveCodexBackend(provider, deps);
-    default:
-      // Unknown backend type: fail-closed (no execution path).
-      return null;
-  }
+  return createRegisteredBackend(provider, deps);
 }

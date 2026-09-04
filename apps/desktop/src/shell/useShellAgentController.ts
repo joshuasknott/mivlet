@@ -252,6 +252,11 @@ export function useShellAgentController({
     threadId,
     createDurableRunWriter: createDesktopDurableRunWriter,
     execute: executor,
+    authorize: async (approval) => {
+      if ((await approvalGate.waitForDecision(approval)) !== "granted") {
+        throw new Error("Antigravity permission was denied.");
+      }
+    },
     shouldCancel: () => cancelRequestedRef.current,
     onCancel: () => {
       cancelRequestedRef.current = true;

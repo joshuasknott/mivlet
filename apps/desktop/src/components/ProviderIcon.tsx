@@ -1,4 +1,6 @@
 import { Cube } from "@phosphor-icons/react/dist/csr/Cube";
+import { CursorClick } from "@phosphor-icons/react/dist/csr/CursorClick";
+import { TerminalWindow } from "@phosphor-icons/react/dist/csr/TerminalWindow";
 import { useId } from "react";
 
 interface ProviderIconProps {
@@ -30,6 +32,19 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
     );
   }
 
+  if (providerId === "antigravity") {
+    return (
+      <img
+        src="/brand/google-antigravity.png"
+        width={size}
+        height={size}
+        alt=""
+        data-provider-brand="antigravity"
+        aria-hidden="true"
+      />
+    );
+  }
+
   if (providerId === "gemini" || providerId === "google") {
     return (
       <svg viewBox="0 0 24 24" width={size} height={size} data-provider-brand="gemini" aria-hidden="true">
@@ -48,10 +63,20 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
 
   if (providerId === "xai") {
     return (
-      <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" style={{ color: "var(--provider-monochrome)" }} data-provider-brand="xai" aria-hidden="true">
-        <path d="M6.469 8.776 16.512 23h-4.464L2.005 8.776H6.47Zm-.004 7.9 2.233 3.164L6.467 23H2l4.465-6.324ZM22 2.582V23h-3.659V7.764L22 2.582ZM22 1l-9.952 14.095-2.233-3.163L17.533 1H22Z" />
+      <svg viewBox="0 0 512 512" width={size} height={size} data-provider-brand="grok" aria-hidden="true">
+        <rect width="512" height="512" rx="96" fill="#050505" />
+        <path d="M210.484 312.759 343.465 210.383c6.519-5.019 15.837-3.061 18.943 4.734 16.35 41.114 9.046 90.523-23.483 124.446-32.528 33.924-77.788 41.364-119.157 24.42l-45.191 21.82c64.817 46.205 143.527 34.778 192.712-16.552 39.014-40.687 51.097-96.147 39.799-146.16l.102.107c-16.383-73.472 4.028-102.839 45.84-162.891.99-1.424 1.98-2.848 2.97-4.307l-55.022 57.382v-.178L210.45 312.794" fill="#FCFCFC" />
+        <path d="M183.042 337.641c-46.523-46.347-38.502-118.074 1.194-159.438 29.354-30.613 77.447-43.107 119.43-24.739l45.089-21.714c-8.123-6.123-18.534-12.708-30.48-17.336-53.998-23.173-118.645-11.64-162.54 34.102-42.222 44.033-55.499 111.738-32.699 169.511 17.033 43.179-10.888 73.721-39.013 104.548C74.056 433.503 64.055 444.431 56 456l127.007-118.323" fill="#FCFCFC" />
       </svg>
     );
+  }
+
+  if (providerId === "cursor") {
+    return <CursorClick size={size} weight="duotone" data-provider-brand="cursor" aria-hidden="true" />;
+  }
+
+  if (providerId === "opencode") {
+    return <TerminalWindow size={size} weight="duotone" data-provider-brand="opencode" aria-hidden="true" />;
   }
 
   return <Cube size={size} data-provider-brand={providerId === "custom" ? "custom" : undefined} aria-hidden="true" />;

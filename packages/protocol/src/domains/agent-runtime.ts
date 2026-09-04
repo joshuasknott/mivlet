@@ -180,7 +180,41 @@ export interface ExecutionAttempt {
  * The transport a backend speaks. Codex reaches its app-server, while native
  * API providers speak their HTTP/SSE APIs directly with Fable owning the loop.
  */
-export type BackendType = "codex-app-server" | "native-api";
+export type BackendType =
+  | "codex-app-server"
+  | "claude-agent"
+  | "cursor-acp"
+  | "grok-acp"
+  | "opencode-server"
+  | "antigravity-acp"
+  | "native-api";
+
+/**
+ * The implementation that owns a provider instance. Driver identity is kept
+ * separate from the instance id so a later multi-account instance can be
+ * added without changing thread routing or inventing another backend type.
+ */
+export type ProviderDriverKind =
+  | "codex"
+  | "claude-agent"
+  | "cursor-acp"
+  | "grok-acp"
+  | "opencode"
+  | "antigravity-acp"
+  | "native-api";
+
+export type ProviderSetupKind =
+  | "browser"
+  | "provider-cli"
+  | "api-key"
+  | "custom";
+
+export interface ProviderSetup {
+  kind: ProviderSetupKind;
+  label: string;
+  description: string;
+  recommended: boolean;
+}
 
 /**
  * Resolved auth state for a backend instance. Fail-closed states declare no
@@ -359,12 +393,18 @@ export interface BackendModel {
  */
 export interface BackendProvider {
   id: string;
+  /** Stable configured instance id. Omitted only by older persisted/fixture payloads. */
+  instanceId?: string;
+  /** Runtime implementation selected independently of the instance id. */
+  driverKind?: ProviderDriverKind;
   backendType: BackendType;
   label: string;
   description: string;
   authState: BackendAuthState;
   capabilities: BackendCapability[];
   models: BackendModel[];
+  /** Setup presentation. Optional only for cross-version payload compatibility. */
+  setup?: ProviderSetup;
   /** Shown when `authState === "install-required"` (e.g. a missing CLI). */
   installHint?: string;
   /**
@@ -566,6 +606,8 @@ export interface AgentTurnRequest {
 export interface AgentTurnOptions {
   /** Executes an approved tool. Backends call this for each tool-call event. */
   execute: (approval: ApprovalRequest, args: string) => Promise<string>;
+  /** Grants or denies a provider-owned action without executing it twice in Fable. */
+  authorize?: (approval: ApprovalRequest) => Promise<void>;
   /** Cooperative cancellation hook, checked between events. */
   shouldCancel?: () => boolean;
   /** Optional system-context prefix (pinned memory/knowledge by trust level). */

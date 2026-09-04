@@ -13,7 +13,7 @@
 import type {
   BackendAuthState,
   BackendCapability,
-  BackendType
+  BackendType,
 } from "@fable/protocol";
 
 /** A capability set that supports `includes` without array copying. */
@@ -27,7 +27,7 @@ const CODEX_SUBSCRIPTION_CAPS: CapabilitySet = [
   "approvals",
   "file-changes",
   "model-availability",
-  "cancellation"
+  "cancellation",
 ];
 
 const CODEX_API_KEY_CAPS: CapabilitySet = [
@@ -40,7 +40,7 @@ const CODEX_API_KEY_CAPS: CapabilitySet = [
   "model-availability",
   "cancellation",
   // usage-cost is only honor-able against metered API keys, not subscriptions.
-  "usage-cost"
+  "usage-cost",
 ];
 
 /**
@@ -57,7 +57,18 @@ const NATIVE_API_CAPS: CapabilitySet = [
   "file-changes",
   "usage-cost",
   "model-availability",
-  "cancellation"
+  "cancellation",
+];
+
+const MANAGED_AGENT_CAPS: CapabilitySet = [
+  "authentication",
+  "threads",
+  "streaming",
+  "tool-requests",
+  "approvals",
+  "file-changes",
+  "model-availability",
+  "cancellation",
 ];
 
 /** Empty set returned for any fail-closed auth state. */
@@ -74,7 +85,7 @@ const NO_CAPS: CapabilitySet = [];
 export function resolveCapabilities(
   backendType: BackendType,
   authState: BackendAuthState,
-  withUsageCost = false
+  withUsageCost = false,
 ): BackendCapability[] {
   // Fail closed for every state that cannot actually serve requests.
   if (authState !== "connected") {
@@ -83,7 +94,16 @@ export function resolveCapabilities(
 
   switch (backendType) {
     case "codex-app-server":
-      return withUsageCost ? [...CODEX_API_KEY_CAPS] : [...CODEX_SUBSCRIPTION_CAPS];
+      return withUsageCost
+        ? [...CODEX_API_KEY_CAPS]
+        : [...CODEX_SUBSCRIPTION_CAPS];
+    case "antigravity-acp":
+    case "cursor-acp":
+    case "grok-acp":
+      return [...CODEX_SUBSCRIPTION_CAPS];
+    case "claude-agent":
+    case "opencode-server":
+      return [...MANAGED_AGENT_CAPS];
     case "native-api":
       return [...NATIVE_API_CAPS];
     default:
@@ -94,7 +114,7 @@ export function resolveCapabilities(
 /** True when the resolved capability set contains the requested capability. */
 export function hasCapability(
   capabilities: CapabilitySet,
-  capability: BackendCapability
+  capability: BackendCapability,
 ): boolean {
   return capabilities.includes(capability);
 }

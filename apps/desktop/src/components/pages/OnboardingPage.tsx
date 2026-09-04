@@ -1,71 +1,110 @@
-import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { Check } from "@phosphor-icons/react/dist/csr/Check";
+import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { GoogleLogo } from "@phosphor-icons/react/dist/csr/GoogleLogo";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
-import type { AccountWorkspaceStatus, BackendProvider, BackendVerifyResult } from "@fable/protocol";
-import { useState } from "react";
-import { ProviderCatalogue } from "../providers/ProviderCatalogue";
+import type {
+  BackendProvider,
+  BackendVerifyResult,
+  ConnectorManifest,
+  IdentityStatus,
+} from "@fable/protocol";
+import { useEffect, useMemo, useState } from "react";
+import { ConnectorIcon } from "../ConnectorIcon";
+import { OnboardingProviderStep } from "./OnboardingProviderStep";
 import "../../styles/routes/onboarding.css";
 
-type OnboardingStage = "welcome" | "provider" | "teammate";
+type OnboardingStage = "account" | "provider" | "connectors";
+type AccountEntryPoint = "google" | "email";
 
-/**
- * The required minimum journey starts locally: connect a verified provider,
- * then name the first teammate. A Fable account remains optional in Settings.
- */
+const ONBOARDING_CONNECTOR_IDS = [
+  "google-drive",
+  "github",
+  "slack",
+  "notion",
+  "linear",
+] as const;
+
+function identityReady(identityStatus: IdentityStatus): boolean {
+  return (
+    identityStatus.state === "signed-in" ||
+    (identityStatus.state === "offline" && Boolean(identityStatus.authentication))
+  );
+}
+
 export function OnboardingPage({
   providers,
   connectedBackendIds,
   status,
-  accountWorkspaceStatus,
-  accountWorkspacePending,
+  identityStatus,
+  identityPending,
+  onSignIn,
   onConnect,
   onConnectWithVerify,
   onCheckConnection,
   onStartBrowserLogin,
-  initialTeammateName,
-  initialTeammatePurpose,
-  onConfigureTeammate,
-  onComplete
+  connectors,
+  connectorStatus,
+  onConnectConnector,
+  onComplete,
 }: {
   providers: BackendProvider[];
   connectedBackendIds: string[];
   status: string | null;
-  accountWorkspaceStatus: AccountWorkspaceStatus;
-  accountWorkspacePending: boolean;
+  identityStatus: IdentityStatus;
+  identityPending: boolean;
+  onSignIn: (entryPoint: AccountEntryPoint) => void | Promise<void>;
   /** Legacy fire-and-forget connect used only when verification is unavailable. */
   onConnect?: (providerId: string, secret?: string) => void;
   /** Credentials cross directly into the verified Rust boundary. */
   onConnectWithVerify?: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
   /** Re-probe a provider-owned CLI after the user completes its login flow. */
   onCheckConnection?: (
-    providerId: string
+    providerId: string,
   ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   /** Start an official provider-owned browser sign-in flow. */
   onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
-  initialTeammateName: string;
-  initialTeammatePurpose: string;
-  onConfigureTeammate: (input: { name: string; purpose: string }) => void | Promise<void>;
+  connectors: ConnectorManifest[];
+  connectorStatus: string | null;
+  onConnectConnector: (connector: ConnectorManifest) => void | Promise<void>;
   onComplete: () => void;
 }) {
-  const [started, setStarted] = useState(false);
-  const [teammateName, setTeammateName] = useState(initialTeammateName);
-  const [teammatePurpose, setTeammatePurpose] = useState(initialTeammatePurpose);
-  const [finishing, setFinishing] = useState(false);
-  const [teammateError, setTeammateError] = useState<string | null>(null);
-  const pending = accountWorkspacePending;
-  const hasAnyConnected = connectedBackendIds.length > 0;
-  const steps: Array<{ id: OnboardingStage; label: string }> = [
-    { id: "welcome", label: "Welcome" },
-    { id: "provider", label: "Model provider" },
-    { id: "teammate", label: "First teammate" }
-  ];
-  const stage: OnboardingStage = !started
-    ? "welcome"
-    : !hasAnyConnected
-      ? "provider"
-      : "teammate";
-  const currentStepIndex = Math.max(0, steps.findIndex((entry) => entry.id === stage));
+  const [stage, setStage] = useState<OnboardingStage>("account");
+  const [accountActionPending, setAccountActionPending] = useState(false);
+  const [accountAttempted, setAccountAttempted] = useState(false);
+  const [activeConnectorId, setActiveConnectorId] = useState<string | null>(null);
+  const visibleConnectors = useMemo(
+    () =>
+      ONBOARDING_CONNECTOR_IDS.flatMap((id) => {
+        const connector = connectors.find((candidate) => candidate.id === id);
+        return connector ? [connector] : [];
+      }),
+    [connectors],
+  );
+  const currentStepIndex = stage === "account" ? 0 : stage === "provider" ? 1 : 2;
+  const signedIn = identityReady(identityStatus);
 
-  const handleConnect = async (providerId: string, secret: string): Promise<BackendVerifyResult> => {
+  const handleAccountEntry = async (entryPoint: AccountEntryPoint) => {
+    if (signedIn) {
+      setStage("provider");
+      return;
+    }
+    setAccountActionPending(true);
+    setAccountAttempted(true);
+    try {
+      await onSignIn(entryPoint);
+    } finally {
+      setAccountActionPending(false);
+    }
+  };
+
+  useEffect(() => {
+    if (accountAttempted && signedIn) setStage("provider");
+  }, [accountAttempted, signedIn]);
+
+  const handleConnect = async (
+    providerId: string,
+    secret: string,
+  ): Promise<BackendVerifyResult> => {
     if (onConnectWithVerify) return onConnectWithVerify(providerId, secret);
     onConnect?.(providerId, secret);
     return { providerId, outcome: "ready" };
@@ -73,127 +112,133 @@ export function OnboardingPage({
 
   return (
     <main className="og-frame" aria-label="Fable onboarding">
+      {stage !== "account" ? (
+        <button
+          type="button"
+          className="og-back-button"
+          onClick={() => setStage(stage === "connectors" ? "provider" : "account")}
+        >
+          <ArrowLeft size={17} aria-hidden="true" /> Back
+        </button>
+      ) : null}
       <div className="og-center">
-        <nav className="og-progress-container" aria-label="Onboarding progress">
-          <ol className="og-progress-steps">
-            {steps.map((entry, index) => {
-              const complete = index < currentStepIndex;
-              const current = index === currentStepIndex;
-              return (
-                <li
-                  key={entry.id}
-                  className={`og-progress-step${current ? " is-current" : ""}${complete ? " is-complete" : ""}`}
-                  aria-current={current ? "step" : undefined}
-                >
-                  <span aria-hidden="true">
-                    {complete ? <CheckCircle size={14} weight="fill" /> : index + 1}
-                  </span>
-                  {entry.label}
-                </li>
-              );
-            })}
-          </ol>
-          <p className="og-progress-status" role="status">
-            Step {currentStepIndex + 1} of {steps.length}
-          </p>
-        </nav>
+        <div className="og-progress" aria-label={`Onboarding step ${currentStepIndex + 1} of 3`}>
+          {[0, 1, 2].map((index) => (
+            <span
+              key={index}
+              className={index === currentStepIndex ? "is-current" : undefined}
+              aria-hidden="true"
+            />
+          ))}
+        </div>
 
-        {stage === "welcome" ? (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <p className="og-eyebrow">Private by default</p>
-            <h1 id="onboarding-title">Meet your teammates on this PC</h1>
-            <p className="og-lede">
-              Fable gives each teammate private files and a separate browser. Connect a model
-              provider you already use, choose what your first teammate should help with, and
-              then start working in conversation.
-            </p>
-            <p className="og-connection-status-msg" role="status">
-              {accountWorkspaceStatus.message}
-            </p>
-            <div className="og-primary-cta">
+        {stage === "account" ? (
+          <section className="og-screen og-screen--account" aria-labelledby="onboarding-title">
+            <div className="og-heading">
+              <h1 id="onboarding-title">Welcome to Fable</h1>
+              <p>Sign in or create an account to get started.</p>
+            </div>
+
+            <div className="og-account-actions">
               <button
                 type="button"
-                className="og-primary-cta__start"
-                disabled={pending}
-                onClick={() => setStarted(true)}
+                className="og-primary-button og-primary-button--google"
+                disabled={identityPending || accountActionPending}
+                onClick={() => void handleAccountEntry("google")}
               >
-                {pending ? <><Spinner size={16} className="og-spinner" /> Preparing Fable</> : "Set up Fable"}
+                {identityPending || accountActionPending ? (
+                  <><Spinner size={17} className="og-spinner" /> Opening sign in</>
+                ) : (
+                  <><GoogleLogo size={20} weight="bold" aria-hidden="true" /> Continue with Google</>
+                )}
+              </button>
+              <button
+                type="button"
+                className="og-text-button"
+                disabled={identityPending || accountActionPending}
+                onClick={() => void handleAccountEntry("email")}
+              >
+                Continue with email
               </button>
             </div>
+
+            {accountAttempted && !signedIn ? (
+              <p
+                className={`og-feedback${identityStatus.state === "error" || identityStatus.state === "disabled" ? " og-feedback--danger" : ""}`}
+                role={identityStatus.state === "error" || identityStatus.state === "disabled" ? "alert" : "status"}
+              >
+                {identityStatus.message}
+              </p>
+            ) : null}
+
+            <p className="og-legal">
+              By continuing, you agree to Fable&rsquo;s{" "}
+              <a href="https://fable.app/privacy-policy" target="_blank" rel="noreferrer">
+                Privacy Policy
+              </a>.
+            </p>
           </section>
         ) : stage === "provider" ? (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <h1 id="onboarding-title">Add a model provider</h1>
-            <p className="og-lede">
-              Your private workspace on this PC is ready. Connect and verify a
-              provider you already use.
-            </p>
-            <div className="og-unified">
-              <ProviderCatalogue
-                providers={providers}
-                connectedBackendIds={connectedBackendIds}
-                onConnect={handleConnect}
-                onCheckConnection={onCheckConnection}
-                onStartBrowserLogin={onStartBrowserLogin}
-              />
+          <section className="og-screen" aria-labelledby="onboarding-title">
+            <div className="og-heading">
+              <h1 id="onboarding-title">Choose your provider</h1>
+              <p>Use a subscription you already have, or connect an API key.</p>
             </div>
-            {status ? <p className="og-connection-status-msg" role="status">{status}</p> : null}
+            <OnboardingProviderStep
+              providers={providers}
+              connectedBackendIds={connectedBackendIds}
+              onConnect={handleConnect}
+              onCheckConnection={onCheckConnection}
+              onStartBrowserLogin={onStartBrowserLogin}
+              onReady={() => setStage("connectors")}
+            />
+            {status ? <p className="og-feedback" role="status">{status}</p> : null}
           </section>
         ) : (
-          <section className="og-hero" aria-labelledby="onboarding-title">
-            <h1 id="onboarding-title">Create your first teammate</h1>
-            <p className="og-lede">
-              Give this teammate a clear name and purpose. You can change both later.
-            </p>
-            <form
-              className="og-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                const name = teammateName.trim();
-                const purpose = teammatePurpose.trim();
-                if (!name || !purpose) {
-                  setTeammateError("Add both a name and a purpose for your first teammate.");
-                  return;
-                }
-                setFinishing(true);
-                setTeammateError(null);
-                void Promise.resolve(onConfigureTeammate({ name, purpose }))
-                  .then(onComplete)
-                  .catch((error) => {
-                    setTeammateError(
-                      error instanceof Error ? error.message : "Fable could not save this teammate."
-                    );
-                  })
-                  .finally(() => setFinishing(false));
-              }}
-            >
-              <label className="og-field">
-                <span>Teammate name</span>
-                <input
-                  type="text"
-                  value={teammateName}
-                  maxLength={80}
-                  autoComplete="off"
-                  disabled={finishing}
-                  onChange={(event) => setTeammateName(event.target.value)}
-                />
-              </label>
-              <label className="og-field">
-                <span>What should they help with?</span>
-                <textarea
-                  value={teammatePurpose}
-                  maxLength={2_000}
-                  rows={4}
-                  disabled={finishing}
-                  onChange={(event) => setTeammatePurpose(event.target.value)}
-                />
-              </label>
-              {teammateError ? <p className="og-status og-status--error" role="alert">{teammateError}</p> : null}
-              {status ? <p className="og-connection-status-msg" role="status">{status}</p> : null}
-              <button type="submit" className="og-submit" disabled={finishing}>
-                {finishing ? <><Spinner size={16} className="og-spinner" /> Finishing setup</> : "Enter Fable"}
+          <section className="og-screen" aria-labelledby="onboarding-title">
+            <div className="og-heading">
+              <h1 id="onboarding-title">Connect the apps you use</h1>
+              <p>Optional — you can do this later.</p>
+            </div>
+
+            <div className="og-icon-choices" aria-label="Apps to connect">
+              {visibleConnectors.map((connector) => {
+                const connected = connector.status === "connected";
+                const pending = activeConnectorId === connector.id;
+                return (
+                  <button
+                    key={connector.id}
+                    type="button"
+                    className={`og-icon-choice${connected ? " is-selected is-connected" : ""}`}
+                    aria-label={`${connected ? "Connected: " : "Connect "}${connector.name}`}
+                    title={connector.name}
+                    disabled={activeConnectorId !== null}
+                    onClick={() => {
+                      if (connected) return;
+                      setActiveConnectorId(connector.id);
+                      void Promise.resolve(onConnectConnector(connector)).finally(() => {
+                        setActiveConnectorId(null);
+                      });
+                    }}
+                  >
+                    {pending ? <Spinner size={24} className="og-spinner" /> : <ConnectorIcon id={connector.id} />}
+                    {connected ? (
+                      <span className="og-icon-choice__check" aria-hidden="true"><Check size={11} weight="bold" /></span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="og-connector-actions">
+              <button type="button" className="og-primary-button" onClick={onComplete}>
+                Enter Fable
               </button>
-            </form>
+              <button type="button" className="og-text-button" onClick={onComplete}>
+                Skip for now
+              </button>
+            </div>
+            {connectorStatus ? <p className="og-feedback" role="status">{connectorStatus}</p> : null}
           </section>
         )}
       </div>

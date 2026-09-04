@@ -5,9 +5,10 @@ experience is a quiet desktop conversation with named teammates. Connections,
 knowledge, approvals, and a teammate's computer appear only when the work needs
 them.
 
-Fable is local-first: the usable product does not require a Fable cloud account.
-A person connects a supported model provider, creates a teammate, and can then
-work with local encrypted data and an isolated local computer.
+Fable is local-first: conversations, workspace data, provider credentials, and
+the teammate computer remain on the device. First-run setup uses a lightweight
+Fable account, then validates a supported model provider and optionally connects
+the apps a person already uses.
 
 ## Maturity
 
@@ -20,11 +21,19 @@ a deployed or production-validated service.
 - A Tauri 2 desktop app with a compact React conversation shell, named teammate
   profiles, image avatars, model selection, and one adaptive voice/send
   composer.
-- First-run setup that prepares local storage, validates at least one supported
-  provider connection, and creates the first teammate before entering chat.
-- Provider adapters for OpenAI-compatible, Anthropic, and Gemini wire formats.
-  Codex uses its official ChatGPT browser sign-in; OpenAI, Anthropic, Gemini,
-  xAI, and custom OpenAI-compatible connections use explicit API credentials.
+- First-run setup with Google-first account sign-in, a verified model-provider
+  connection, and optional app connectors. The default Chief of Staff appears
+  only after setup is complete.
+- One provider-driver registry with stable instance ids for ChatGPT/Codex,
+  Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
+  connections. Codex and Antigravity have provider-owned agent adapters;
+  Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
+  protocol; and OpenCode runs behind a Fable-owned authenticated loopback
+  server. All six provider-owned routes mediate consequential actions through
+  Fable's one-time approval boundary. Direct OpenAI-compatible and Anthropic
+  wire adapters are also runnable. Every route remains unavailable until its
+  executable and account or credential are validated; catalogue presence is
+  never presented as a live connection.
 - Encrypted SQLite persistence for conversations, knowledge, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
@@ -46,12 +55,16 @@ a deployed or production-validated service.
   with short-lived generation-fenced capabilities. Local tests and packaging
   checks do not prove that Containers, Browser Rendering, Durable Objects,
   Convex, Clerk, or production secrets have been deployed.
-- Account and sync code is optional foundation for future shared or multi-device
-  work. It does not gate local setup and is not a current production
-  collaboration claim.
-- Confidential connector OAuth needs the separate broker and provider
+- Account sign-in gates first-run setup. Convex sync and remote workspace code
+  remain optional foundation for future shared or multi-device work and are not
+  current production collaboration claims.
+- Account sign-in needs configured Clerk OIDC. Confidential connector OAuth
+  needs the separate broker and provider
   configuration. Direct provider APIs and Codex browser sign-in still require
   valid credentials, entitlement, installed components, and network access.
+  Antigravity's managed installer is currently Windows x64 only. Claude,
+  Cursor, Grok, and OpenCode require their official command-line runtime to be
+  installed separately before Fable can connect it.
 
 ### Not complete
 

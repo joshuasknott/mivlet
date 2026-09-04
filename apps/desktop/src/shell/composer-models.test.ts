@@ -30,12 +30,12 @@ describe("composerModelsFor", () => {
     ).toEqual(["o3", "gpt-5"]);
   });
 
-  it("keeps only the newest Gemini version and ignores unavailable models", () => {
+  it("keeps only the newest Antigravity Gemini version and ignores unavailable models", () => {
     expect(
-      composerModelsFor("gemini", [
-        model("gemini-2.5", "gemini"),
-        model("gemini-3.0", "gemini"),
-        model("gemini-4.0", "gemini", false),
+      composerModelsFor("antigravity", [
+        model("gemini-2.5", "antigravity"),
+        model("gemini-3.0", "antigravity"),
+        model("gemini-4.0", "antigravity", false),
       ]).map((item) => item.modelId),
     ).toEqual(["gemini-3.0"]);
   });

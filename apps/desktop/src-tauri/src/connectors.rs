@@ -226,7 +226,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare approval-gated file changes",
         ],
         scopes: DRIVE_SCOPES,
-        setup_message: "Enable the Drive API, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.",
+        setup_message: "Enable the Drive API, create a desktop OAuth client, and set its client id and secret in Fable's local environment.",
         actions: &[
             "google-drive.create-file",
             "google-drive.update-file",
@@ -266,7 +266,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         ],
         scopes: GMAIL_SCOPES,
         setup_message:
-            "Enable the Gmail API, create a desktop OAuth client, set FABLE_GOOGLE_OAUTH_CLIENT_ID, and complete required Google verification.",
+            "Enable the Gmail API, create a desktop OAuth client, set its client id and secret in Fable's local environment, and complete required Google verification.",
         actions: &["gmail.create-draft", "gmail.send"],
     },
     ConnectorCatalogEntry {
@@ -298,7 +298,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare event create or update requests",
         ],
         scopes: CALENDAR_SCOPES,
-        setup_message: "Enable the Calendar API, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.",
+        setup_message: "Enable the Calendar API, create a desktop OAuth client, and set its client id and secret in Fable's local environment.",
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",

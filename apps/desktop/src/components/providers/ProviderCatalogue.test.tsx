@@ -8,6 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { BackendProvider } from "@fable/protocol";
+import { listBackendProviders } from "@fable/connectors";
 import {
   buildProviderFamilies,
   encodeCustomProviderSecret,
@@ -35,7 +36,12 @@ const catalogueProviders: BackendProvider[] = [
   provider("codex", "Codex", "codex-app-server", "sign-in-required"),
   provider("openai", "OpenAI"),
   provider("anthropic", "Anthropic"),
-  provider("gemini", "Gemini"),
+  provider(
+    "antigravity",
+    "Google Antigravity",
+    "antigravity-acp",
+    "install-required",
+  ),
   provider("xai", "xAI"),
   provider("custom", "Custom provider"),
 ];
@@ -64,6 +70,34 @@ function renderCatalogue(providers = catalogueProviders) {
 }
 
 describe("provider families", () => {
+  it("groups every built-in account driver with its advanced connection route", () => {
+    const families = buildProviderFamilies(listBackendProviders());
+    expect(families.map((family) => family.id).sort()).toEqual([
+      "anthropic",
+      "antigravity",
+      "cursor",
+      "custom",
+      "openai",
+      "opencode",
+      "xai",
+    ]);
+    expect(
+      families
+        .find((family) => family.id === "anthropic")
+        ?.providers.map((entry) => entry.id),
+    ).toEqual(["claude", "anthropic"]);
+    expect(
+      families
+        .find((family) => family.id === "anthropic")
+        ?.methods.map((method) => method.kind),
+    ).toEqual(["provider-cli", "api-key"]);
+    expect(
+      families
+        .find((family) => family.id === "xai")
+        ?.providers.map((entry) => entry.id),
+    ).toEqual(["grok", "xai"]);
+  });
+
   it("groups Codex with OpenAI while keeping xAI API-only", () => {
     const families = buildProviderFamilies(catalogueProviders);
     const openai = families.find((family) => family.id === "openai");
@@ -81,8 +115,8 @@ describe("provider families", () => {
     expect(xai?.methods.map((method) => method.kind)).toEqual(["api-key"]);
     expect(families.map((family) => family.id).sort()).toEqual([
       "anthropic",
+      "antigravity",
       "custom",
-      "gemini",
       "openai",
       "xai",
     ]);
@@ -108,7 +142,7 @@ describe("provider families", () => {
 });
 
 describe("ProviderCatalogue", () => {
-  it("shows the small current provider set", () => {
+  it("shows only the four quiet account-first families initially", () => {
     const { container } = renderCatalogue();
     const visible = Array.from(
       container.querySelectorAll(
@@ -116,7 +150,7 @@ describe("ProviderCatalogue", () => {
       ),
     ).map((entry) => entry.getAttribute("data-provider-family-id"));
 
-    expect(visible).toEqual(["openai", "gemini", "xai", "anthropic", "custom"]);
+    expect(visible).toEqual(["openai", "anthropic", "antigravity", "xai"]);
     expect(
       container.querySelector('[data-provider-family-id="copilot"]'),
     ).toBeNull();
@@ -139,8 +173,8 @@ describe("ProviderCatalogue", () => {
     expect(labels).toEqual(
       [...labels].sort((a, b) => (a ?? "").localeCompare(b ?? "")),
     );
-    expect(labels).toContain("Anthropic");
-    expect(labels).toContain("xAI");
+    expect(labels).toContain("Claude");
+    expect(labels).toContain("Grok");
 
     const search = screen.getByRole("searchbox", { name: "Search providers" });
     await user.type(search, "grok");
@@ -162,9 +196,7 @@ describe("ProviderCatalogue", () => {
     );
 
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
-    expect(
-      within(dialog).getByText("ChatGPT subscription"),
-    ).toBeInTheDocument();
+    expect(within(dialog).getByText("ChatGPT account")).toBeInTheDocument();
     expect(within(dialog).queryByText(/device code/i)).toBeNull();
     expect(within(dialog).getByText("OpenAI API key")).toBeInTheDocument();
 
@@ -189,7 +221,7 @@ describe("ProviderCatalogue", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
     await user.click(
-      within(dialog).getByRole("button", { name: /ChatGPT subscription/ }),
+      within(dialog).getByRole("button", { name: /ChatGPT account/ }),
     );
 
     expect(dialog).toHaveTextContent("Provider-supported browser sign-in");
@@ -221,7 +253,7 @@ describe("ProviderCatalogue", () => {
     );
     const dialog = screen.getByRole("dialog", { name: "OpenAI / ChatGPT" });
     await user.click(
-      within(dialog).getByRole("button", { name: /ChatGPT subscription/ }),
+      within(dialog).getByRole("button", { name: /ChatGPT account/ }),
     );
 
     expect(
@@ -232,6 +264,24 @@ describe("ProviderCatalogue", () => {
     );
     expect(onCheckConnection).toHaveBeenCalledWith("codex");
     expect(onStartBrowserLogin).not.toHaveBeenCalled();
+  });
+
+  it("continues with Google while Antigravity installation stays internal", async () => {
+    const user = userEvent.setup();
+    const { onCheckConnection, onStartBrowserLogin } = renderCatalogue();
+    await user.click(
+      screen.getByRole("button", { name: /Google Antigravity, / }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "Google Antigravity" });
+    await user.click(
+      within(dialog).getByRole("button", { name: /Google account/ }),
+    );
+    expect(within(dialog).queryByLabelText(/API key/i)).not.toBeInTheDocument();
+    await user.click(
+      within(dialog).getByRole("button", { name: "Continue with Google" }),
+    );
+    expect(onStartBrowserLogin).toHaveBeenCalledWith("antigravity");
+    expect(onCheckConnection).not.toHaveBeenCalled();
   });
 
   it("adds an API-key provider through verification and clears the uncontrolled field", async () => {
@@ -259,17 +309,40 @@ describe("ProviderCatalogue", () => {
     expect(dialog).not.toHaveTextContent("sk-test-secret");
   });
 
-  it("offers xAI only through its API key", async () => {
+  it("offers the Grok family through its available xAI API route", async () => {
     const user = userEvent.setup();
     renderCatalogue();
     await user.click(
       screen.getByRole("button", { name: "Show all providers" }),
     );
 
-    await user.click(screen.getByRole("button", { name: /xAI, / }));
-    const dialog = screen.getByRole("dialog", { name: "xAI" });
+    await user.click(screen.getByRole("button", { name: /Grok, / }));
+    const dialog = screen.getByRole("dialog", { name: "Grok" });
     expect(within(dialog).getByText("xAI API key")).toBeInTheDocument();
     expect(within(dialog).queryByText("Grok account")).not.toBeInTheDocument();
+  });
+
+  it("offers setup for an installed provider-owned execution adapter", async () => {
+    const user = userEvent.setup();
+    const { onCheckConnection } = renderCatalogue(listBackendProviders());
+    await user.click(
+      screen.getByRole("button", { name: "Show all providers" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Cursor, Install required" }),
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "Cursor" });
+    await user.click(
+      within(dialog).getByRole("button", { name: /Cursor account/ }),
+    );
+
+    expect(dialog).toHaveTextContent("Provider-owned local sign-in");
+    expect(dialog).toHaveTextContent("Install the official Cursor Agent CLI");
+    await user.click(
+      within(dialog).getByRole("button", { name: "Check for Cursor" }),
+    );
+    expect(onCheckConnection).toHaveBeenCalledWith("cursor");
   });
 
   it("keeps a chat-only custom endpoint runnable with an explicit model ID", async () => {
@@ -364,9 +437,9 @@ describe("ProviderCatalogue", () => {
       provider("anthropic", "Anthropic", "native-api", "connected"),
     ]);
 
-    const tile = screen.getByRole("button", { name: "Anthropic, Configured" });
+    const tile = screen.getByRole("button", { name: "Claude, Configured" });
     await user.click(tile);
-    const dialog = screen.getByRole("dialog", { name: "Anthropic" });
+    const dialog = screen.getByRole("dialog", { name: "Claude" });
     await user.click(
       within(dialog).getByRole("button", { name: /Anthropic API key/ }),
     );
@@ -522,11 +595,9 @@ describe("ProviderCatalogue", () => {
   it("closes on Escape and returns focus to the provider tile", async () => {
     const user = userEvent.setup();
     renderCatalogue();
-    const tile = screen.getByRole("button", { name: /Anthropic, / });
+    const tile = screen.getByRole("button", { name: /Claude, / });
     await user.click(tile);
-    expect(
-      screen.getByRole("dialog", { name: "Anthropic" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Claude" })).toBeInTheDocument();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(tile).toHaveFocus();

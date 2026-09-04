@@ -1,4 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,11 +22,19 @@ const gmail: ConnectorManifest = {
   lastCheckedAt: "2026-07-11T12:00:00.000Z",
   authMode: "oauth-pkce",
   scopes: [],
-  health: { state: "healthy", summary: "Connected", checkedAt: "2026-07-11T12:00:00.000Z" },
-  account: { id: "provider-account-active", displayName: "Work", email: "work@example.com" },
+  health: {
+    state: "healthy",
+    summary: "Connected",
+    checkedAt: "2026-07-11T12:00:00.000Z",
+  },
+  account: {
+    id: "provider-account-active",
+    displayName: "Work",
+    email: "work@example.com",
+  },
   supportsSearch: true,
   supportsImport: true,
-  supportedActions: []
+  supportedActions: [],
 };
 
 const github: ConnectorManifest = {
@@ -29,7 +43,11 @@ const github: ConnectorManifest = {
   name: "GitHub",
   status: "needs-auth",
   account: undefined,
-  health: { state: "unknown", summary: "Not connected", checkedAt: "2026-07-11T12:00:00.000Z" }
+  health: {
+    state: "unknown",
+    summary: "Not connected",
+    checkedAt: "2026-07-11T12:00:00.000Z",
+  },
 };
 
 describe("Connector Connection selection", () => {
@@ -54,27 +72,35 @@ describe("Connector Connection selection", () => {
               authorizationState: "authorized",
               healthState: "healthy",
               credentialCustody: "os-secure-store",
-              credentialState: "available"
+              credentialState: "available",
             },
             {
               connectionId: "connection_other",
-              account: { id: "provider-account-other", displayName: "Personal", email: "personal@example.com" },
+              account: {
+                id: "provider-account-other",
+                displayName: "Personal",
+                email: "personal@example.com",
+              },
               active: false,
               lifecycle: "authorized",
               authorizationState: "authorized",
               healthState: "unknown",
               credentialCustody: "os-secure-store",
-              credentialState: "available"
-            }
-          ]
+              credentialState: "available",
+            },
+          ],
         }}
         onSwitchAccount={onSwitch}
-      />
+      />,
     );
 
-    const opener = screen.getByRole("button", { name: "Manage Gmail" });
+    const opener = screen.getAllByRole("button", { name: "Manage Gmail" })[0];
     await user.click(opener);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Close connector setup" })).toHaveFocus());
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Close connector setup" }),
+      ).toHaveFocus(),
+    );
     const select = screen.getByLabelText("Active connection");
     expect(select).toHaveValue("connection_active");
     fireEvent.change(select, { target: { value: "connection_other" } });
@@ -99,15 +125,59 @@ describe("Connector Connection selection", () => {
         onSelect={() => {}}
         accounts={{}}
         onSwitchAccount={() => {}}
-      />
+      />,
     );
 
     expect(screen.getByRole("heading", { name: "Installed" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Manage Gmail" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    expect(
+      screen.getAllByRole("button", { name: "Manage Gmail" })[0],
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("button", { name: "Connect GitHub" })[0],
+    ).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Recommended" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Product & design" }),
+    ).toBeVisible();
+    expect(
+      screen.getAllByRole("button", { name: "Figma is planned" })[0],
+    ).toBeVisible();
 
-    await user.type(screen.getByRole("searchbox", { name: "Search connections" }), "github");
-    expect(screen.queryByRole("button", { name: "Manage Gmail" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect GitHub" })).toBeVisible();
+    await user.type(
+      screen.getByRole("searchbox", { name: "Search connectors" }),
+      "github",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Manage Gmail" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "Connect GitHub" })[0],
+    ).toBeVisible();
+  });
+
+  it("keeps planned catalogue entries visibly unavailable", async () => {
+    const user = userEvent.setup();
+    render(
+      <PluginPanel
+        manifests={[github]}
+        onUseConnector={vi.fn()}
+        onConnect={vi.fn()}
+        onDisconnect={vi.fn()}
+        onRefresh={vi.fn()}
+        onSelect={vi.fn()}
+        accounts={{}}
+        onSwitchAccount={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getAllByRole("button", { name: "Figma is planned" })[0],
+    );
+
+    expect(screen.getByRole("dialog", { name: "Figma" })).toBeVisible();
+    expect(screen.getByText("Planned")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Not available yet" }),
+    ).toBeDisabled();
   });
 });

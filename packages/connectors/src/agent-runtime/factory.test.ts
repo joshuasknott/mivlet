@@ -91,7 +91,12 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 describe("hasRunnableAdapter", () => {
   it("returns true for every executable backend family", () => {
     expect(hasRunnableAdapter("native-api")).toBe(true);
-    expect(hasRunnableAdapter("codex-app-server")).toBe(true);
+    expect(hasRunnableAdapter("codex")).toBe(true);
+    expect(hasRunnableAdapter("antigravity-acp")).toBe(true);
+    expect(hasRunnableAdapter("claude-agent")).toBe(true);
+    expect(hasRunnableAdapter("cursor-acp")).toBe(true);
+    expect(hasRunnableAdapter("grok-acp")).toBe(true);
+    expect(hasRunnableAdapter("opencode")).toBe(true);
   });
 
   it("returns false for an unknown backend type", () => {

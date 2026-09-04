@@ -31,7 +31,7 @@ use sha2::{Digest, Sha256};
 
 use crate::models::{
     ApprovalAuditEntry, BackendConsequentialEvent, BackendCredentialRequest, BackendModel,
-    BackendProvider, APPROVAL_DECISIONS, APPROVAL_MODES, APPROVAL_RISK_LEVELS,
+    BackendProvider, ProviderSetup, APPROVAL_DECISIONS, APPROVAL_MODES, APPROVAL_RISK_LEVELS,
     BACKENDS_PRE_RELEASE, BACKEND_AUTH_STATES, BACKEND_CAPABILITIES, BACKEND_TYPES,
     MAX_BACKEND_CAPABILITIES, MAX_BACKEND_MODELS, MAX_BACKEND_SECRET_CHARACTERS,
     SUPPORTED_BACKEND_PROVIDER_IDS,
@@ -44,15 +44,42 @@ use crate::paths::{connected_backends_path, normalize_spaces, truncate_character
 /// render provider metadata.
 struct BackendCatalogEntry {
     id: &'static str,
+    driver_kind: &'static str,
     backend_type: &'static str,
     label: &'static str,
     description: &'static str,
     install_hint: &'static str,
     models: &'static [(&'static str, &'static str)],
     capabilities: &'static [&'static str],
+    setup_kind: &'static str,
+    setup_label: &'static str,
+    setup_description: &'static str,
+    recommended: bool,
 }
 
 const CODEX_CAPS: &[&str] = &[
+    "authentication",
+    "threads",
+    "streaming",
+    "tool-requests",
+    "approvals",
+    "file-changes",
+    "model-availability",
+    "cancellation",
+];
+
+const ANTIGRAVITY_CAPS: &[&str] = &[
+    "authentication",
+    "threads",
+    "streaming",
+    "tool-requests",
+    "approvals",
+    "file-changes",
+    "model-availability",
+    "cancellation",
+];
+
+const MANAGED_AGENT_CAPS: &[&str] = &[
     "authentication",
     "threads",
     "streaming",
@@ -82,6 +109,7 @@ const NATIVE_API_CAPS: &[&str] = &[
 const CATALOG: &[BackendCatalogEntry] = &[
     BackendCatalogEntry {
         id: "codex",
+        driver_kind: "codex",
         backend_type: "codex-app-server",
         label: "Codex",
         description: "Continue with ChatGPT through the official Codex browser sign-in flow.",
@@ -92,6 +120,10 @@ const CATALOG: &[BackendCatalogEntry] = &[
             ("gpt-4.1", "GPT-4.1"),
         ],
         capabilities: CODEX_CAPS,
+        setup_kind: "browser",
+        setup_label: "ChatGPT account",
+        setup_description: "Sign in through the official browser flow managed by Codex.",
+        recommended: true,
     },
     // Native-API providers: Fable owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
@@ -99,6 +131,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
     // copy names only the implemented connection path.
     BackendCatalogEntry {
         id: "openai",
+        driver_kind: "native-api",
         backend_type: "native-api",
         label: "OpenAI",
         description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
@@ -109,9 +142,28 @@ const CATALOG: &[BackendCatalogEntry] = &[
             ("gpt-4.1", "GPT-4.1"),
         ],
         capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "OpenAI API key",
+        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        recommended: false,
+    },
+    BackendCatalogEntry {
+        id: "claude",
+        driver_kind: "claude-agent",
+        backend_type: "claude-agent",
+        label: "Claude",
+        description: "Use Claude through Anthropic's official Claude Agent runtime.",
+        install_hint: "Install the official Claude runtime to continue with a Claude account.",
+        models: &[("sonnet", "Claude Sonnet"), ("opus", "Claude Opus"), ("haiku", "Claude Haiku")],
+        capabilities: MANAGED_AGENT_CAPS,
+        setup_kind: "provider-cli",
+        setup_label: "Claude account",
+        setup_description: "Sign in with the official Claude runtime; Fable never handles the session token.",
+        recommended: true,
     },
     BackendCatalogEntry {
         id: "anthropic",
+        driver_kind: "native-api",
         backend_type: "native-api",
         label: "Anthropic",
         description: "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
@@ -121,36 +173,94 @@ const CATALOG: &[BackendCatalogEntry] = &[
             ("claude-opus-4-8", "Claude Opus 4.8"),
         ],
         capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "Anthropic API key",
+        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        recommended: false,
     },
     BackendCatalogEntry {
-        id: "gemini",
-        backend_type: "native-api",
-        label: "Gemini",
-        description: "Reach Gemini via a Google AI API key. Fable owns the agent loop.",
-        install_hint: "",
-        models: &[
-            ("gemini-3.5-flash", "Gemini 3.5 Flash"),
-            ("gemini-2.5-pro", "Gemini 2.5 Pro"),
-        ],
-        capabilities: NATIVE_API_CAPS,
+        id: "antigravity",
+        driver_kind: "antigravity-acp",
+        backend_type: "antigravity-acp",
+        label: "Google Antigravity",
+        description: "Use Gemini models through Google's official Antigravity ACP agent and personal Google sign-in.",
+        install_hint: "Fable installs Google's pinned Antigravity ACP runtime locally.",
+        models: &[],
+        capabilities: ANTIGRAVITY_CAPS,
+        setup_kind: "browser",
+        setup_label: "Google account",
+        setup_description: "Sign in through Google's official Antigravity browser flow.",
+        recommended: true,
+    },
+    BackendCatalogEntry {
+        id: "grok",
+        driver_kind: "grok-acp",
+        backend_type: "grok-acp",
+        label: "Grok",
+        description: "Use your xAI account through the official Grok ACP runtime.",
+        install_hint: "Install the official Grok runtime to continue with a Grok account. An xAI API key remains available as an advanced route.",
+        models: &[("grok-build", "Grok default")],
+        capabilities: CODEX_CAPS,
+        setup_kind: "provider-cli",
+        setup_label: "Grok account",
+        setup_description: "Sign in through xAI's official Grok runtime.",
+        recommended: true,
     },
     BackendCatalogEntry {
         id: "xai",
+        driver_kind: "native-api",
         backend_type: "native-api",
         label: "xAI",
         description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[("grok-4", "Grok 4")],
         capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "xAI API key",
+        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        recommended: false,
+    },
+    BackendCatalogEntry {
+        id: "cursor",
+        driver_kind: "cursor-acp",
+        backend_type: "cursor-acp",
+        label: "Cursor",
+        description: "Use your Cursor account through Cursor's official ACP runtime.",
+        install_hint: "Install the official Cursor Agent CLI to continue with a Cursor account.",
+        models: &[("default", "Cursor default")],
+        capabilities: CODEX_CAPS,
+        setup_kind: "provider-cli",
+        setup_label: "Cursor account",
+        setup_description: "Sign in through Cursor's official agent runtime.",
+        recommended: true,
+    },
+    BackendCatalogEntry {
+        id: "opencode",
+        driver_kind: "opencode",
+        backend_type: "opencode-server",
+        label: "OpenCode",
+        description: "Use providers already configured in your local OpenCode runtime.",
+        install_hint: "Install OpenCode and configure a provider with `opencode auth login`.",
+        models: &[],
+        capabilities: MANAGED_AGENT_CAPS,
+        setup_kind: "provider-cli",
+        setup_label: "OpenCode",
+        setup_description: "Connect through your local OpenCode configuration.",
+        recommended: true,
     },
     BackendCatalogEntry {
         id: "custom",
+        driver_kind: "native-api",
         backend_type: "native-api",
         label: "Custom provider",
         description: "Connect an OpenAI-compatible base URL and model ID with an optional API key.",
         install_hint: "HTTPS is required except for loopback development endpoints.",
         models: &[],
         capabilities: NATIVE_API_CAPS,
+        setup_kind: "custom",
+        setup_label: "OpenAI-compatible endpoint",
+        setup_description: "Use one explicit OpenAI-compatible endpoint.",
+        recommended: false,
     },
 ];
 
@@ -267,7 +377,7 @@ pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, Strin
     CredentialStores { internal_user_id }.get(provider_id)
 }
 
-fn connected_providers_for(internal_user_id: &str) -> Result<Vec<String>, String> {
+pub(crate) fn connected_providers_for(internal_user_id: &str) -> Result<Vec<String>, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
@@ -275,7 +385,10 @@ fn connected_providers_for(internal_user_id: &str) -> Result<Vec<String>, String
         .map_err(|error| error.to_string())
 }
 
-fn record_connected_provider(internal_user_id: &str, provider_id: &str) -> Result<(), String> {
+pub(crate) fn record_connected_provider(
+    internal_user_id: &str,
+    provider_id: &str,
+) -> Result<(), String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
@@ -286,7 +399,10 @@ fn record_connected_provider(internal_user_id: &str, provider_id: &str) -> Resul
         .map_err(|error| error.to_string())
 }
 
-fn remove_connected_provider(internal_user_id: &str, provider_id: &str) -> Result<(), String> {
+pub(crate) fn remove_connected_provider(
+    internal_user_id: &str,
+    provider_id: &str,
+) -> Result<(), String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     store
@@ -310,7 +426,7 @@ fn scoped_credential_key(internal_user_id: &str, provider_id: &str) -> String {
     format!("account-{:x}:{provider_id}", digest)
 }
 
-fn require_current_internal_user() -> Result<String, String> {
+pub(crate) fn require_current_internal_user() -> Result<String, String> {
     Ok(crate::account_workspace::local_install_principals().0)
 }
 
@@ -408,7 +524,14 @@ fn resolve_auth_state<S: BackendCredentialStore>(provider_id: &str, store: &S) -
         return "connected".to_string();
     }
 
-    "needs-auth".to_string()
+    if matches!(
+        entry.map(|candidate| candidate.backend_type),
+        Some("claude-agent" | "cursor-acp" | "grok-acp" | "opencode-server")
+    ) {
+        "unavailable".to_string()
+    } else {
+        "needs-auth".to_string()
+    }
 }
 
 /// Build the provider shape served to JavaScript (auth state + caps, no secret).
@@ -448,12 +571,20 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
 
     BackendProvider {
         id: entry.id.to_string(),
+        instance_id: entry.id.to_string(),
+        driver_kind: entry.driver_kind.to_string(),
         backend_type: entry.backend_type.to_string(),
         label: entry.label.to_string(),
         description: entry.description.to_string(),
         auth_state: safe_auth_state,
         capabilities,
         models,
+        setup: ProviderSetup {
+            kind: entry.setup_kind.to_string(),
+            label: entry.setup_label.to_string(),
+            description: entry.setup_description.to_string(),
+            recommended: entry.recommended,
+        },
         install_hint: Some(entry.install_hint.to_string()),
         // Grok entitlements are detected post-login only — never pre-populated.
         entitlements: if entry.id == "grok" {
@@ -1426,7 +1557,9 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
     // Auth state is resolved against the keychain (primary) with the in-memory
     // store as fallback — never against a raw secret. A persisted connected id
     // re-resolves to "connected" when the keychain still holds the entry.
-    let stores = CredentialStores { internal_user_id };
+    let stores = CredentialStores {
+        internal_user_id: internal_user_id.clone(),
+    };
     let mut providers = list_providers_from(&stores, &path)?;
     for provider in &mut providers {
         let native_api = catalog_entry(&provider.id)
@@ -1464,6 +1597,65 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
                     codex.install_hint = Some(message);
                 }
             }
+        }
+    }
+    if let Some(antigravity) = providers
+        .iter_mut()
+        .find(|provider| provider.id == "antigravity")
+    {
+        let is_connected = connected.iter().any(|id| id == "antigravity");
+        let status = crate::antigravity_acp::status_for(&app, is_connected);
+        if !status.installed {
+            antigravity.auth_state = "install-required".to_string();
+            antigravity.capabilities.clear();
+            antigravity.models.clear();
+            antigravity.install_hint = status.message;
+        } else if status.authenticated {
+            antigravity.auth_state = "connected".to_string();
+            antigravity.models = crate::antigravity_acp::cached_models(&app, &internal_user_id);
+            antigravity.install_hint = status
+                .version
+                .map(|version| format!("Antigravity ACP {version} is installed."));
+        } else {
+            antigravity.auth_state = "needs-auth".to_string();
+            antigravity.capabilities.clear();
+            antigravity.models.clear();
+        }
+    }
+    for provider_id in ["claude", "cursor", "grok", "opencode"] {
+        let Some(provider) = providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+        else {
+            continue;
+        };
+        let is_connected = connected.iter().any(|id| id == provider_id);
+        let status = crate::managed_runtime::status_for(provider_id, is_connected);
+        if !status.installed {
+            provider.auth_state = "install-required".to_string();
+            provider.capabilities.clear();
+            provider.models.clear();
+            provider.install_hint = status.message;
+        } else if status.authenticated {
+            provider.auth_state = "connected".to_string();
+            provider.capabilities = catalog_entry(provider_id)
+                .map(|entry| {
+                    entry
+                        .capabilities
+                        .iter()
+                        .filter(|capability| BACKEND_CAPABILITIES.contains(capability))
+                        .map(|capability| (*capability).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
+            provider.models =
+                crate::managed_runtime::cached_models(&app, &internal_user_id, provider_id);
+            provider.install_hint = status.message;
+        } else {
+            provider.auth_state = "sign-in-required".to_string();
+            provider.capabilities.clear();
+            provider.models.clear();
+            provider.install_hint = status.message;
         }
     }
     Ok(providers)
@@ -1513,6 +1705,28 @@ pub fn record_backend_event(
 #[cfg(test)]
 mod provider_route_tests {
     use super::*;
+
+    #[test]
+    fn provider_catalogue_exposes_stable_instances_and_driver_kinds() {
+        validate_catalog_vocabulary();
+        assert_eq!(
+            CATALOG.iter().map(|entry| entry.id).collect::<Vec<_>>(),
+            SUPPORTED_BACKEND_PROVIDER_IDS
+        );
+        for entry in CATALOG {
+            let provider = build_provider(entry, resolve_auth_state(entry.id, &HashMap::new()));
+            assert_eq!(provider.instance_id, provider.id);
+            assert!(!provider.driver_kind.is_empty());
+            assert!(!provider.setup.label.is_empty());
+            if matches!(
+                entry.backend_type,
+                "claude-agent" | "cursor-acp" | "grok-acp" | "opencode-server"
+            ) {
+                assert_eq!(provider.auth_state, "unavailable");
+                assert!(provider.capabilities.is_empty());
+            }
+        }
+    }
 
     #[test]
     fn account_routes_are_model_specific_and_connection_stable() {
