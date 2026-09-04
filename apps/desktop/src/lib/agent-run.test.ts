@@ -251,6 +251,16 @@ describe("sourceAllowedByConnections", () => {
 });
 
 describe("buildAgentRequest", () => {
+  it("keeps teammate instructions out of the user's message", () => {
+    const request = buildAgentRequest({ model: "test", prompt: "Plan my week", instructions: "  Keep priorities clear.  " });
+    expect(request.messages).toEqual([
+      { role: "system", content: "Keep priorities clear." },
+      { role: "user", content: "Plan my week" },
+    ]);
+    expect(buildAgentRequest({ model: "test", prompt: "Hello", instructions: "  " }).messages).toEqual([
+      { role: "user", content: "Hello" },
+    ]);
+  });
   it("shapes the model/messages into a provider-neutral AgentTurnRequest", () => {
     const request = buildAgentRequest({
       model: "gpt-5",

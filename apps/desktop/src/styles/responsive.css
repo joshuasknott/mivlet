@@ -471,22 +471,28 @@
   }
 
   .settings-modal {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     height: min(720px, calc(100dvh - 24px));
   }
 
   .settings-modal__nav {
+    min-width: 0;
     max-height: 116px;
+    padding: 16px 12px;
     border-right: 0;
     border-bottom: 1px solid var(--line);
   }
 
   .settings-modal__tab-list {
+    flex: 0 0 auto;
+    min-width: 0;
+    min-height: 44px;
     grid-auto-flow: column;
     grid-auto-columns: max-content;
     overflow-x: auto;
     overflow-y: hidden;
+    scrollbar-width: thin;
   }
 
   .settings-open-section .profile-clean-card__identity {

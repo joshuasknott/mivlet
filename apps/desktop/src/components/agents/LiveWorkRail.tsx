@@ -8,6 +8,8 @@ import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import restingWallpaper from "../../assets/computer-wallpaper.png";
 import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type WheelEvent } from "react";
 import type { LocalComputerApplication, LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
@@ -18,6 +20,11 @@ export function LiveWorkRail({
   localComputer,
   hostedComputer,
   screenPreviewUrl,
+  conversations = [],
+  activeConversationId,
+  conversationBusy = false,
+  onNewConversation,
+  onSelectConversation,
   onClose
 }: {
   agentName: string;
@@ -83,9 +90,17 @@ export function LiveWorkRail({
     onRefreshBrowser: () => Promise<unknown>;
   };
   screenPreviewUrl?: string;
+  conversations?: { id: string; title: string; time: string }[];
+  activeConversationId?: string;
+  conversationBusy?: boolean;
+  onNewConversation?: () => void;
+  onSelectConversation?: (id: string) => void;
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
+  const [computerDetailsOpen, setComputerDetailsOpen] = useState(false);
+  const screenDialogRef = useRef<HTMLDivElement>(null);
+  useModalFocusTrap({ active: screenOpen && Boolean(screenPreviewUrl), containerRef: screenDialogRef, onClose: () => setScreenOpen(false) });
   const [browserUrl, setBrowserUrl] = useState("");
   const [localBrowserUrl, setLocalBrowserUrl] = useState("");
   const [filesOpen, setFilesOpen] = useState(false);
@@ -175,9 +190,24 @@ export function LiveWorkRail({
   };
   return (
     <aside className="live-rail" aria-label="Work">
-      <header className="live-rail__header"><div><strong>Work</strong><span>{agentName}</span></div><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
+      <header className="live-rail__header"><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
+      <section className="computer-overview" aria-label={`${agentName}'s computer`}>
+        <button className="computer-overview__preview" type="button" onClick={() => {
+          if (screenPreviewUrl) setScreenOpen(true);
+          else setComputerDetailsOpen(true);
+        }} aria-label={screenPreviewUrl ? `Open ${agentName}'s screen` : "Open computer setup"}>
+          <img src={screenPreviewUrl ?? restingWallpaper} alt={screenPreviewUrl ? `${agentName}'s latest computer screen` : "Resting computer wallpaper preview"} />
+          {!screenPreviewUrl ? <span>Computer preview</span> : null}
+        </button>
+        <p>{localComputer.recoveryNeeded ? "Computer needs attention" : localComputer.provisioning ? "Preparing computer…" : localComputer.browserActive || hostedComputer.runtimeActive ? (localComputer.controller === "human" ? "You have control" : "Computer is running") : "Computer is resting"}</p>
+        <button className="computer-overview__action" type="button" onClick={() => {
+          if (screenPreviewUrl) setScreenOpen(true);
+          else setComputerDetailsOpen(true);
+        }}>{screenPreviewUrl ? "Open computer" : "Set up computer"}</button>
+      </section>
       {approvalPanel}
-
+      <details className="computer-details" open={computerDetailsOpen} onToggle={(event) => setComputerDetailsOpen(event.currentTarget.open)}>
+      <summary>Computer options</summary>
       <section className={`hosted-computer-card local-computer-card${localComputer.recoveryNeeded || localComputer.status === "degraded" ? " is-attention" : localComputer.status === "ready" ? " is-ready" : ""}`} aria-label="Computer on this PC">
         <span className="hosted-computer-card__icon"><Browser size={18} weight={localComputer.status === "ready" ? "fill" : "regular"} /></span>
         <span className="hosted-computer-card__copy">
@@ -324,15 +354,14 @@ export function LiveWorkRail({
         {hostedComputer.browserError ? <small className="hosted-browser-launcher__error" role="alert">{hostedComputer.browserError}</small> : null}
       </section> : null}
 
-      {screenPreviewUrl ? (
-        <button className="live-screen" type="button" onClick={() => screenPreviewUrl && setScreenOpen(true)} disabled={!screenPreviewUrl}>
-          {screenPreviewUrl ? <img src={screenPreviewUrl} alt={`${agentName}'s live screen`} /> : <span className="live-screen__empty"><Browser size={24} /><span>Computer use is active</span><small>The live screen will appear when the runtime publishes a frame.</small></span>}
-          <span className="live-screen__label"><span>{agentName}&apos;s screen</span>{screenPreviewUrl ? <ArrowSquareOut size={14} /> : null}</span>
-        </button>
-      ) : null}
+      </details>
+      <section className="rail-conversations" aria-labelledby="rail-conversations-title">
+        <header><h2 id="rail-conversations-title">Conversations</h2><button type="button" onClick={onNewConversation} disabled={conversationBusy || !onNewConversation} aria-label="New conversation"><Plus size={18} /></button></header>
+        {conversations.length ? <ul>{conversations.map((conversation) => <li key={conversation.id}><button type="button" disabled={conversationBusy} aria-current={activeConversationId === conversation.id ? "page" : undefined} onClick={() => onSelectConversation?.(conversation.id)}><span>{conversation.title}</span><time>{conversation.time}</time></button></li>)}</ul> : <p>Your conversations with {agentName} will appear here.</p>}
+      </section>
 
       {screenOpen && screenPreviewUrl ? (
-        <div className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`}>
+        <div ref={screenDialogRef} className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`} tabIndex={-1}>
           <section className={`live-screen-modal__panel${localComputer.browserActive ? " live-screen-modal__panel--local" : ""}`}>
             <header>
               <span><strong>{localComputer.browserActive ? localComputer.browserTitle || `${agentName}'s Linux computer` : hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{localComputer.browserActive ? localComputer.browserUrl : hostedComputer.browserUrl}</small></span>

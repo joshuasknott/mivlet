@@ -544,6 +544,7 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
             label: (*label).to_string(),
             available,
             capabilities: None,
+            reasoning: None,
         });
     }
 
@@ -1587,6 +1588,7 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
                             label: model.label,
                             available: true,
                             capabilities: None,
+                            reasoning: model.reasoning,
                         })
                         .collect();
                 }

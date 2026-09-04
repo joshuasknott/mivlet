@@ -70,10 +70,12 @@ account, request, workspace, and action. A denied, expired, replayed, changed,
 or mismatched approval fails before egress.
 
 The desktop marketplace is opened from the compact Connectors row at the bottom
-of the teammate sidebar. Its Plugins and Skills switcher keeps app Connections
-separate from repeatable work learned by a teammate. Connected apps appear in
-Installed, selected catalogue entries repeat in Recommended and capability
-sections, and search covers names, descriptions, permissions, and section names.
+of the teammate sidebar. Connected apps appear as compact icons in Installed;
+Popular and category sections use two-column rows with expandable lists. Search
+covers names, descriptions, permissions, and section names. Each implemented
+connector has a detail page with usage examples, permissions, and connection
+controls. Skills are specific to a teammate and live in that teammate's editor,
+outside Connectors.
 Broader product, engineering, data, sales, marketing, commerce, finance, legal,
 people, operations, and research entries are discovery-only until a native
 manifest exists. They are labelled Planned and cannot begin authorization,

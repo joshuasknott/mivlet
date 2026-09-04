@@ -1,0 +1,7 @@
+{
+  "tool": "built-in image_gen",
+  "createdAt": "2026-09-04",
+  "original": "exec-55224526-5546-4884-ac3d-28daa2eb55de.png",
+  "prompt": "Use case: ui-mockup. Create a compact visual style guide for Fable's original, automatically generated agent avatars. One board with 12 small example avatars in a clean 4 by 3 grid, on warm off-white. These are examples of an unlimited generative design system, not preset characters.\nEach icon is a friendly asymmetric blob: an irregular softly rounded organic silhouette, softly shaded matte mineral color, with two SMALL ROUND charcoal dot eyes and a tiny relaxed curved smile. Full silhouette visible with comfortable breathing room. Use restrained pale sage, periwinkle, peach, blue-grey, warm sand and dusty rose. Vary every silhouette, proportion, tilt, face position and small smile subtly while keeping the same family. Faces should remain legible at 28–32 px.\nImportant: create an identity distinct from Grok Bot. NO close-cropped enormous white circular heads, NO black square backgrounds, NO long vertical pill-shaped eyes. No body, limbs, props, lettering, labels, borders, frames, antenna, blush, sparkles or visual clutter. Minimal, abstract, cute. Gentle relief shading only, not a glossy toy render. Each blob is an original friendly fluid shape, neither a robot helmet nor an existing logo. The UI should feel quiet and grown-up.",
+  "purpose": "Style reference for the local generative renderer; not a preset library."
+}

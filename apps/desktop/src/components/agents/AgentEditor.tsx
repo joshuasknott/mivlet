@@ -1,11 +1,14 @@
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import type { ApprovalPresetLabel, ConnectorManifest, FableAgentProfile, KnowledgeSource } from "@fable/protocol";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import type { ApprovalPresetLabel, ConnectorManifest, FableAgentProfile, FableLearnedTask, KnowledgeSource } from "@fable/protocol";
+import { useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
-import { AgentAvatar, DEFAULT_AGENT_COLOR, agentColorPalette } from "./agent-icons";
+import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
+import { createAvatarSeed } from "../../lib/blob-avatar";
+import { AgentLearningDialog } from "./AgentLearningDialog";
+import { ModelPicker } from "../ModelPicker";
 
 const permissionOptions: ApprovalPresetLabel[] = ["Ask Me", "Read Only", "Work Freely", "Custom"];
 
@@ -75,45 +78,58 @@ export function AgentEditor({
   models,
   connectors,
   knowledgeSources,
-  suggestedColor,
   canDelete,
   onClose,
   onSave,
-  onDelete
+  onDelete,
+  onSkillsChange,
+  onUseSkill,
 }: {
   open: boolean;
   agent: FableAgentProfile | null;
   models: ProviderModelOption[];
   connectors: ConnectorManifest[];
   knowledgeSources: KnowledgeSource[];
-  suggestedColor: string;
   canDelete: boolean;
   onClose: () => void;
   onSave: (draft: AgentDraft) => void;
   onDelete: () => void;
+  onSkillsChange?: (tasks: FableLearnedTask[]) => void;
+  onUseSkill?: (task: FableLearnedTask) => void;
 }) {
   const [draft, setDraft] = useState<AgentDraft>(emptyDraft);
   const modalRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const imageRequestRef = useRef(0);
   const [imageError, setImageError] = useState("");
+  const [imagePending, setImagePending] = useState(false);
+  const [skillsOpen, setSkillsOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   useModalFocusTrap({ active: open, containerRef: modalRef, initialFocusRef: nameRef, onClose });
 
   useEffect(() => {
+    imageRequestRef.current++;
+    setImagePending(false);
     if (!open) return;
+    setSkillsOpen(false);
+    setModelOpen(false);
     setImageError("");
     setDraft(agent ? {
       name: agent.name,
       instructions: agent.instructions,
       modelId: agent.modelId,
+      reasoningEffort: agent.reasoningEffort,
       icon: "agent",
-      iconColor: agent.iconColor || suggestedColor,
+      iconColor: agent.iconColor || DEFAULT_AGENT_COLOR,
+      avatarSeed: agent.avatarSeed ?? `blob-v1:${agent.id}`,
       iconImageDataUrl: agent.iconImageDataUrl,
       connectorIds: agent.connectorIds,
       knowledgeSourceIds: agent.knowledgeSourceIds,
       permissionLabel: agent.permissionLabel
-    } : { ...emptyDraft, iconColor: suggestedColor });
-  }, [agent, open, suggestedColor]);
+    } : { ...emptyDraft, avatarSeed: createAvatarSeed() });
+    return () => { imageRequestRef.current++; };
+  }, [agent?.id, open]);
 
   if (!open) return null;
   const toggle = (key: "connectorIds" | "knowledgeSourceIds", id: string) => {
@@ -127,31 +143,18 @@ export function AgentEditor({
     <div className="agent-editor-backdrop" role="presentation">
       <div ref={modalRef} className="agent-editor" role="dialog" aria-modal="true" aria-labelledby="agent-editor-title">
         <header className="agent-editor__header">
-          <div><span>Agent</span><h2 id="agent-editor-title">{agent ? "Edit agent" : "Create agent"}</h2></div>
+          <div><h2 id="agent-editor-title">{agent ? `Edit ${agent.name}` : "Create teammate"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </header>
-        <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim()) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
+        <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar color={draft.iconColor} imageDataUrl={draft.iconImageDataUrl} iconSize={46} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} iconSize={40} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
           <fieldset className="agent-icon-picker">
             <legend>Agent icon</legend>
             <div className="agent-icon-picker__options">
-              <div className="agent-color-picker" aria-label="Agent icon colour">
-                {agentColorPalette.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    className={draft.iconColor.toUpperCase() === option.value.toUpperCase() ? "is-selected" : ""}
-                    style={{ "--agent-swatch": option.value } as CSSProperties}
-                    onClick={() => setDraft({ ...draft, iconColor: option.value })}
-                    aria-label={`${option.label} icon`}
-                    aria-pressed={draft.iconColor.toUpperCase() === option.value.toUpperCase()}
-                  />
-                ))}
-              </div>
               <div className="agent-image-upload">
                 <input
                   ref={imageInputRef}
@@ -162,39 +165,58 @@ export function AgentEditor({
                     const file = event.target.files?.[0];
                     event.target.value = "";
                     if (!file) return;
+                    const request = ++imageRequestRef.current;
                     setImageError("");
+                    setImagePending(true);
                     try {
                       const iconImageDataUrl = await normalizeAgentImage(file);
-                      setDraft((current) => ({ ...current, iconImageDataUrl }));
+                      if (request === imageRequestRef.current) setDraft((current) => ({ ...current, iconImageDataUrl }));
                     } catch (error) {
-                      setImageError(error instanceof Error ? error.message : "That image could not be used.");
+                      if (request === imageRequestRef.current) setImageError(error instanceof Error ? error.message : "That image could not be used.");
+                    } finally {
+                      if (request === imageRequestRef.current) setImagePending(false);
                     }
                   }}
                 />
-                <button type="button" onClick={() => imageInputRef.current?.click()}><UploadSimple size={15} />{draft.iconImageDataUrl ? "Replace image" : "Upload image"}</button>
-                {draft.iconImageDataUrl ? <button type="button" onClick={() => setDraft({ ...draft, iconImageDataUrl: undefined })}>Remove image</button> : null}
+                <button type="button" disabled={imagePending} onClick={() => imageInputRef.current?.click()}><UploadSimple size={15} />{imagePending ? "Preparing image…" : draft.iconImageDataUrl ? "Replace image" : "Upload image"}</button>
+                {draft.iconImageDataUrl ? <button type="button" onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined }); }}>Remove image</button> : null}
               </div>
             </div>
-            <small>Choose a colour for Fable's agent mark, or upload your own square image.</small>
+            <small>A unique portrait is made for every teammate. Upload an image to make it your own.</small>
             {imageError ? <p className="agent-image-error" role="alert">{imageError}</p> : null}
           </fieldset>
 
-          <label className="agent-editor__field"><span>Instructions</span><textarea rows={5} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="Describe how this agent should think, communicate, and work." /></label>
+          <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this teammate work with you?" /></label>
 
           <div className="agent-editor__grid">
-            <label className="agent-editor__field"><span>Model</span><select aria-label="Model" value={draft.modelId} onChange={(event) => setDraft({ ...draft, modelId: event.target.value })}><option value="">Automatic</option>{models.map((model) => <option key={model.id} value={model.id}>{model.label}</option>)}</select><small>Automatic uses the best available connected model.</small></label>
-            <label className="agent-editor__field"><span>Permissions</span><select aria-label="Permissions" value={draft.permissionLabel} onChange={(event) => setDraft({ ...draft, permissionLabel: event.target.value as ApprovalPresetLabel })}>{permissionOptions.map((option) => <option key={option}>{option}</option>)}</select><small>Fable still asks before consequential actions.</small></label>
+            <div className="agent-editor__field agent-editor__model"><span>Model</span>
+              <ModelPicker models={models} selectedId={draft.modelId} label={models.find((model) => model.id === draft.modelId)?.label ?? (draft.modelId ? "Unavailable model" : "Automatic")}
+                effort={draft.reasoningEffort} onSelect={(modelId) => setDraft({ ...draft, modelId, reasoningEffort: undefined })}
+                onSelectEffort={(reasoningEffort) => setDraft({ ...draft, reasoningEffort })} open={modelOpen} onOpenChange={setModelOpen} allowAutomatic />
+              <small>Automatic uses an available connected model.</small>
+            </div>
+            <label className="agent-editor__field"><span>Permissions</span><select aria-label="Permissions" value={draft.permissionLabel} onChange={(event) => setDraft({ ...draft, permissionLabel: event.target.value as ApprovalPresetLabel })}>{permissionOptions.map((option) => <option key={option} value={option}>{{ "Ask Me": "Ask first", "Read Only": "Read only", "Work Freely": "Full access", Custom: "Custom" }[option]}</option>)}</select><small>Fable still asks before consequential actions.</small></label>
           </div>
 
-          <fieldset className="agent-editor__choices"><legend>Connections</legend>{connectors.filter((connector) => connector.id !== "local-files").length ? connectors.filter((connector) => connector.id !== "local-files").map((connector) => <label key={connector.id}><input type="checkbox" checked={draft.connectorIds.includes(connector.id)} onChange={() => toggle("connectorIds", connector.id)} /><span>{connector.name}</span><small>{connector.status === "connected" ? "Connected" : "Not connected"}</small></label>) : <p>No connections are available yet.</p>}</fieldset>
+          <details className="agent-editor__disclosure"><summary>Connectors<span>{draft.connectorIds.length ? `${draft.connectorIds.length} selected` : "None selected"}</span></summary>
+            <fieldset className="agent-editor__choices"><legend className="sr-only">Connectors for this teammate</legend>{connectors.filter((connector) => connector.id !== "local-files").length ? connectors.filter((connector) => connector.id !== "local-files").map((connector) => <label key={connector.id}><input type="checkbox" checked={draft.connectorIds.includes(connector.id)} onChange={() => toggle("connectorIds", connector.id)} /><span>{connector.name}</span><small>{connector.status === "connected" ? "Connected" : "Not connected"}</small></label>) : <p>No connectors are available yet.</p>}</fieldset>
+          </details>
 
-          <fieldset className="agent-editor__choices"><legend>Knowledge pool</legend>{knowledgeSources.length ? knowledgeSources.map((source) => <label key={source.id}><input type="checkbox" checked={draft.knowledgeSourceIds.includes(source.id)} onChange={() => toggle("knowledgeSourceIds", source.id)} /><span>{source.title}</span></label>) : <p>Add knowledge to make it available to this agent.</p>}</fieldset>
+          <details className="agent-editor__disclosure"><summary>Knowledge<span>{draft.knowledgeSourceIds.length ? `${draft.knowledgeSourceIds.length} selected` : "None selected"}</span></summary>
+            <fieldset className="agent-editor__choices"><legend className="sr-only">Knowledge for this teammate</legend>{knowledgeSources.length ? knowledgeSources.map((source) => <label key={source.id}><input type="checkbox" checked={draft.knowledgeSourceIds.includes(source.id)} onChange={() => toggle("knowledgeSourceIds", source.id)} /><span>{source.title}</span></label>) : <p>Add knowledge to make it available to this teammate.</p>}</fieldset>
+          </details>
+
+          {agent && onSkillsChange ? <button type="button" className="agent-editor__skills" onClick={() => setSkillsOpen(true)}>Skills for {agent.name}<span>{agent.learnedTasks?.length ?? 0}</span></button> : null}
 
           <footer className="agent-editor__footer">
             {agent && canDelete ? <button className="agent-editor__delete" type="button" onClick={onDelete}><Trash size={15} />Delete</button> : <span />}
-            <div><button type="button" onClick={onClose}>Cancel</button><button className="agent-editor__save" type="submit" disabled={!draft.name.trim()}>{agent ? "Save changes" : "Create agent"}</button></div>
+            <div><button type="button" onClick={onClose}>Cancel</button><button className="agent-editor__save" type="submit" disabled={!draft.name.trim() || imagePending}>{agent ? "Save changes" : "Create agent"}</button></div>
           </footer>
         </form>
+        {agent && onSkillsChange ? <AgentLearningDialog open={skillsOpen} agent={agent} source={null}
+          onClose={() => setSkillsOpen(false)} onChange={onSkillsChange} onRun={(task) => {
+            setSkillsOpen(false); onClose(); onUseSkill?.(task);
+          }} /> : null}
       </div>
     </div>
   );

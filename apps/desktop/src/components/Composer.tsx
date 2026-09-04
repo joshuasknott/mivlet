@@ -1,5 +1,5 @@
 import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useState } from "react";
-import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { Books } from "@phosphor-icons/react/dist/csr/Books";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -8,7 +8,7 @@ import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
 import { HandPalm } from "@phosphor-icons/react/dist/csr/HandPalm";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
-import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { Paperclip } from "@phosphor-icons/react/dist/csr/Paperclip";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
@@ -19,27 +19,23 @@ import type { ProviderModelOption } from "../lib/provider-models";
 import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
-import { ProviderIcon } from "./ProviderIcon";
+import { ModelPicker } from "./ModelPicker";
 
 const PERMISSION_PRESENTATION = {
   "Read Only": {
-    label: "Ask for approval",
-    description: "Always ask before Fable changes files or takes external actions.",
+    label: "Read only",
     icon: HandPalm
   },
   "Ask Me": {
-    label: "Approve for me",
-    description: "Fable handles everyday work and asks before sensitive actions.",
+    label: "Ask first",
     icon: ShieldCheck
   },
   "Work Freely": {
     label: "Full access",
-    description: "Use Fable's broadest in-house permission profile.",
     icon: ShieldWarning
   },
   Custom: {
     label: "Custom",
-    description: "Use the permissions you set in Fable.",
     icon: GearSix
   }
 } as const;
@@ -69,6 +65,9 @@ export function Composer({
   models,
   selectedModelId,
   selectedModelLabel,
+  selectedReasoningEffort,
+  onSelectReasoningEffort,
+  placeholder = "Ask anything…",
   onSelectModel,
   permissionLabel,
   permissionProfiles,
@@ -110,6 +109,9 @@ export function Composer({
   selectedModelId: string;
   /** Label to show on the model chip when a model is selected. */
   selectedModelLabel: string;
+  selectedReasoningEffort?: string;
+  onSelectReasoningEffort?: (effort: string | undefined) => void;
+  placeholder?: string;
   onSelectModel: (modelId: string) => void;
   /** Label of the active approval preset (drives the chip text). */
   permissionLabel: string;
@@ -130,8 +132,6 @@ export function Composer({
   const activePermissionPresentation =
     PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
   const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
-  const ActivePermissionIcon = activePermissionPresentation?.icon ?? ShieldCheck;
-  const selectedModel = models.find((model) => model.id === selectedModelId);
 
   const closeExternalMenus = () => {
     if (addMenuOpen) onToggleAddMenu();
@@ -177,8 +177,6 @@ export function Composer({
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
   const hasComposerText = composerValue.trim().length > 0;
-  const showVoiceAction =
-    !isWorking && (!hasComposerText || voiceListening || voiceTransitioning);
   useEffect(() => {
     const input = composerRef.current;
     if (!input) return;
@@ -302,7 +300,7 @@ export function Composer({
                 onSubmit(event as unknown as FormEvent);
               }
             }}
-            placeholder="Ask anything..."
+            placeholder={placeholder}
             aria-label="Universal composer"
             rows={1}
           />
@@ -337,7 +335,7 @@ export function Composer({
                 aria-expanded={addMenuOpen}
                 aria-label="Add files and context"
               >
-                <Plus size={21} weight="bold" />
+                <Paperclip size={20} />
               </button>
               {addMenuOpen ? (
                 <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt">
@@ -361,7 +359,6 @@ export function Composer({
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={connectedConnectors.length === 0}
                       onClick={() => {
                         if (connectedConnectors.length > 0) {
                           openSubmenu("connectors");
@@ -420,7 +417,6 @@ export function Composer({
                     <button
                       type="button"
                       role="menuitem"
-                      disabled={knowledgeSources.length === 0}
                       onClick={() => onOpenTool("Knowledge")}
                       className="composer-menu-item"
                       onPointerEnter={() => openSubmenu("knowledge")}
@@ -478,9 +474,8 @@ export function Composer({
                 aria-expanded={permissionsOpen}
                 aria-label="Approval preset"
               >
-                <ActivePermissionIcon size={19} aria-hidden="true" />
                 <span>{visiblePermissionLabel}</span>
-                <CaretDown size={15} weight="bold" />
+                <CaretDown size={13} />
               </button>
               {permissionsOpen ? (
                 <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
@@ -510,7 +505,7 @@ export function Composer({
                         />
                         <span>
                           <strong>{presentation?.label ?? profile.label}</strong>
-                          <small>{presentation?.description ?? profile.description}</small>
+                          <small>{profile.description}</small>
                         </span>
                       </button>
                     );
@@ -521,58 +516,11 @@ export function Composer({
           </div>
 
           <div className="composer-control-group composer-control-group--end">
-            {!compactAgentSurface ? <div className="composer-control-anchor composer-control-anchor--model">
-              <button
-                type="button"
-                className={`composer-model${modelOpen ? " composer-trigger--open" : ""}`}
-                aria-label="Select model"
-                aria-expanded={modelOpen}
-                onClick={() => {
-                  closeExternalMenus();
-                  setModelOpen((open) => !open);
-                }}
-              >
-                {selectedModel ? (
-                  <span className="composer-model__provider" aria-hidden="true">
-                    <ProviderIcon provider={selectedModel.providerId} size={16} />
-                  </span>
-                ) : null}
-                <span>{selectedModelLabel}</span>
-                <CaretDown size={16} weight="bold" />
-              </button>
-              {modelOpen ? (
-                <div className="composer-menu composer-model-menu" role="menu" aria-label="Models">
-                  {models.length === 0 ? (
-                    <span className="composer-menu__heading">No models available</span>
-                  ) : (
-                    models.map((option) => {
-                      const disabled = !option.available;
-                      return (
-                        <button
-                          key={option.id}
-                          type="button"
-                          role="menuitemradio"
-                          aria-checked={selectedModelId === option.id}
-                          aria-label={`${option.providerLabel} ${option.label}${disabled ? ", unavailable" : ""}`}
-                          disabled={disabled}
-                          onClick={() => {
-                            if (disabled) return;
-                            onSelectModel(option.id);
-                            setModelOpen(false);
-                          }}
-                        >
-                          <span className="composer-model-menu__provider" aria-hidden="true">
-                            <ProviderIcon provider={option.providerId} size={18} />
-                          </span>
-                          <strong>{option.label}</strong>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              ) : null}
-            </div> : null}
-            {showVoiceAction ? (
+            {!compactAgentSurface ? <ModelPicker models={models} selectedId={selectedModelId}
+              label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
+              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} /> : null}
+            {!isWorking ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
                   <button
@@ -591,7 +539,7 @@ export function Composer({
                     {voiceListening ? (
                       <Stop size={15} weight="fill" />
                     ) : (
-                      <Microphone size={17} weight="fill" />
+                      <Microphone size={19} />
                     )}
                   </button>
                   <span className="voice-tooltip" role="tooltip" aria-hidden="true">
@@ -609,20 +557,20 @@ export function Composer({
                   <X size={16} weight="bold" />
                 </button>
               </div>
-            ) : (
+            ) : null}
               <button
                 className={`send-button${isWorking ? " send-button--stop" : ""}`}
                 type={isWorking ? "button" : "submit"}
                 aria-label={isWorking ? "Stop response" : "Send prompt"}
                 onClick={isWorking ? onStop : undefined}
+                disabled={!isWorking && (!hasComposerText || voiceListening || voiceTransitioning)}
               >
                 {isWorking ? (
                   <Stop size={14} weight="fill" />
                 ) : (
-                  <ArrowUp size={19} weight="bold" />
+                  <PaperPlaneTilt size={20} />
                 )}
               </button>
-            )}
           </div>
         </div>
 

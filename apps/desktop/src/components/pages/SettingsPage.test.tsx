@@ -91,7 +91,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Joshua's workspace")).toBeInTheDocument();
-    expect(screen.getByText(/stay on this device and do not sync by default/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved on this computer/i)).toBeInTheDocument();
     expect(screen.queryByText("Fable account")).not.toBeInTheDocument();
     expect(view.container.textContent).not.toMatch(/member|invitation|run history/i);
   });
@@ -145,15 +145,14 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
     expect(screen.getByText(/connect at least one model provider/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /OpenAI \/ ChatGPT/ })).toBeInTheDocument();
-    expect(screen.getByText(/credentials stay outside the interface/i)).toBeInTheDocument();
+    expect(screen.getByText(/credentials in your device.s secure storage/i)).toBeInTheDocument();
   });
 
   it("keeps advanced tool servers separate from the connector marketplace", () => {
     renderTab("connections");
 
-    expect(screen.getByRole("heading", { name: "Connections" })).toBeInTheDocument();
-    expect(screen.getByText(/managed from Connectors in the sidebar/i)).toBeInTheDocument();
-    expect(screen.getByText("Tool servers")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Tool servers" })).toBeInTheDocument();
+    expect(screen.getByText(/Manage app connections from Connectors/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Installed" })).not.toBeInTheDocument();
   });
 
@@ -162,8 +161,9 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Privacy & data" })).toBeInTheDocument();
     expect(screen.getByText("Personal memory")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Manage local data"));
     expect(screen.getByText("Local data recovery")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Ask Me/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("radio", { name: /Ask first/ })).toHaveAttribute("aria-checked", "true");
     expect(screen.getByRole("button", { name: "Delete local data" })).toBeDisabled();
     expect(view.container.textContent).not.toMatch(/mission|routine|schedule|workflow|run history/i);
     fireEvent.click(screen.getByRole("button", { name: "Check local health" }));

@@ -19,8 +19,9 @@ a deployed or production-validated service.
 ### Implemented locally
 
 - A Tauri 2 desktop app with a compact React conversation shell, named teammate
-  profiles, image avatars, model selection, and one adaptive voice/send
-  composer.
+  profiles, persistent generated blob portraits or uploaded images, and model
+  selection with supported reasoning levels. Dictation and send have separate
+  controls below the message text.
 - First-run setup with Google-first account sign-in, a verified model-provider
   connection, and optional app connectors. The default Chief of Staff appears
   only after setup is complete.
@@ -40,6 +41,9 @@ a deployed or production-validated service.
 - Provider and plugin-style Connections, including connector and MCP
   boundaries. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
+- Teammate instructions travel as model context rather than appearing in user
+  messages. Skills belong to their teammate profile. ChatGPT turns use ephemeral
+  Codex sessions while Fable keeps the durable conversation locally.
 - Exact approval checks for consequential tools and connector actions.
 - A genuine separate Linux desktop per workspace/teammate, backed by Docker
   Desktop's WSL 2 engine. It has a persistent home volume, Chromium, a file

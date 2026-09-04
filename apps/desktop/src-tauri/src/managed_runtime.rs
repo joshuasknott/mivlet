@@ -315,6 +315,7 @@ fn fallback_models(provider_id: &str) -> Vec<BackendModel> {
             label: (*label).to_string(),
             available: true,
             capabilities: None,
+            reasoning: None,
         })
         .collect()
 }
@@ -490,6 +491,7 @@ fn parse_grok_models(output: &str) -> (Option<bool>, Vec<BackendModel>) {
                     .join(" "),
                 available: true,
                 capabilities: None,
+                reasoning: None,
             })
         })
         .take(32)
@@ -518,6 +520,7 @@ fn parse_opencode_models(output: &str) -> Vec<BackendModel> {
                 label: id.to_string(),
                 available: true,
                 capabilities: None,
+                reasoning: None,
             })
         })
         .take(32)
@@ -889,6 +892,7 @@ fn extract_acp_models(value: &Value) -> Vec<BackendModel> {
                 label: label.to_string(),
                 available: true,
                 capabilities: None,
+                reasoning: None,
             })
         })
         .take(32)

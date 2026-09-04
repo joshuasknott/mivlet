@@ -6,6 +6,7 @@ const FOCUSABLE_SELECTOR = [
   "input:not([disabled])",
   "select:not([disabled])",
   "textarea:not([disabled])",
+  "summary",
   "[tabindex]:not([tabindex='-1'])"
 ].join(",");
 
@@ -13,10 +14,17 @@ const inertClaims = new Map<HTMLElement, { count: number; originallyInert: boole
 
 function focusableElements(container: HTMLElement) {
   return Array.from(container.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (element) =>
-      !element.hidden &&
-      element.getAttribute("aria-hidden") !== "true" &&
-      !element.closest("[hidden]")
+    (element) => {
+      if (element.hidden || element.getAttribute("aria-hidden") === "true" || element.closest("[hidden]")) return false;
+      // Closed disclosures keep their summary in the tab order, but not their fields.
+      let disclosure = element.closest("details:not([open])");
+      while (disclosure) {
+        const summary = Array.from(disclosure.children).find((child) => child.tagName === "SUMMARY");
+        if (!summary?.contains(element)) return false;
+        disclosure = disclosure.parentElement?.closest("details:not([open])") ?? null;
+      }
+      return true;
+    }
   );
 }
 

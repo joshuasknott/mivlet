@@ -567,18 +567,14 @@ fn normalize_runtime_agents(
     ];
     const PERMISSIONS: [&str; 4] = ["Read Only", "Ask Me", "Work Freely", "Custom"];
     let mut normalized = Vec::new();
-    for (index, agent) in agents.into_iter().take(100).enumerate() {
+    let mut seen_ids = HashSet::new();
+    for (index, agent) in agents.into_iter().enumerate() {
         let id = truncate_characters(
             &normalize_spaces(&agent.id),
             MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
         );
         let name = truncate_characters(&normalize_spaces(&agent.name), 80);
-        if id.is_empty()
-            || name.is_empty()
-            || normalized
-                .iter()
-                .any(|item: &FableAgentProfile| item.id == id)
-        {
+        if id.is_empty() || name.is_empty() || !seen_ids.insert(id.clone()) {
             continue;
         }
         let icon_color = if agent.icon_color.len() == 7
@@ -602,9 +598,44 @@ fn normalize_runtime_agents(
         } else {
             "Ask Me".to_string()
         };
+        let avatar_seed = agent
+            .avatar_seed
+            .filter(|seed| seed.starts_with("blob-v1:") && seed.len() <= 160)
+            .unwrap_or_else(|| format!("blob-v1:{id}"));
         normalized.push(FableAgentProfile {
             id,
             name,
+            reasoning_effort: agent.reasoning_effort.filter(|value| {
+                !value.is_empty()
+                    && value.len() <= 32
+                    && value
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+            }),
+            thread_ids: normalize_snapshot_id_list(
+                agent
+                    .thread_ids
+                    .into_iter()
+                    .chain(agent.thread_id.clone())
+                    .collect(),
+            ),
+            learned_tasks: agent
+                .learned_tasks
+                .into_iter()
+                .take(24)
+                .filter_map(|mut task| {
+                    task.id = truncate_characters(task.id.trim(), 120);
+                    task.title = truncate_characters(task.title.trim(), 120);
+                    task.instruction = truncate_characters(task.instruction.trim(), 4_000);
+                    task.created_at = truncate_characters(task.created_at.trim(), 40);
+                    task.updated_at = truncate_characters(task.updated_at.trim(), 40);
+                    if task.id.is_empty() || task.title.is_empty() || task.instruction.is_empty() {
+                        None
+                    } else {
+                        Some(task)
+                    }
+                })
+                .collect(),
             instructions: truncate_characters(&agent.instructions, 8_000),
             model_id: truncate_characters(
                 &normalize_spaces(&agent.model_id),
@@ -612,6 +643,7 @@ fn normalize_runtime_agents(
             ),
             icon: "agent".to_string(),
             icon_color,
+            avatar_seed: Some(avatar_seed),
             icon_image_data_url,
             connector_ids: normalize_snapshot_id_list(agent.connector_ids),
             knowledge_source_ids: normalize_snapshot_id_list(agent.knowledge_source_ids),
@@ -746,6 +778,53 @@ pub fn save_runtime_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn teammate_preferences_and_skills_survive_native_roundtrip() {
+        let agent: FableAgentProfile = serde_json::from_value(serde_json::json!({
+            "id": "ava", "name": "Ava", "instructions": "Keep things simple.",
+            "modelId": "codex::model", "reasoningEffort": "high", "icon": "agent",
+            "avatarSeed": "blob-v1:stable-ava",
+            "permissionLabel": "Ask Me", "threadId": "new-chat", "threadIds": ["old-chat", "old-chat"],
+            "learnedTasks": [{ "id": "weekly", "title": "Weekly plan", "instruction": "Ask about priorities.", "createdAt": "2026-09-04", "updatedAt": "2026-09-04" }]
+        })).unwrap();
+        let normalized = normalize_runtime_agents(vec![agent]).unwrap().remove(0);
+        let encoded = serde_json::to_value(&normalized).unwrap();
+        let restored: FableAgentProfile = serde_json::from_value(encoded).unwrap();
+        assert_eq!(restored.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(restored.avatar_seed.as_deref(), Some("blob-v1:stable-ava"));
+        assert_eq!(restored.thread_ids, vec!["old-chat", "new-chat"]);
+        assert_eq!(restored.learned_tasks.len(), 1);
+        assert_eq!(
+            restored.learned_tasks[0].instruction,
+            "Ask about priorities."
+        );
+        assert_eq!(restored, normalized);
+    }
+
+    #[test]
+    fn generated_portraits_and_teammates_do_not_stop_at_one_hundred() {
+        let agents = (0..150)
+            .map(|index| {
+                serde_json::from_value(serde_json::json!({
+                    "id": format!("agent-{index}"), "name": format!("Teammate {index}"),
+                    "instructions": "", "modelId": "", "icon": "agent", "permissionLabel": "Ask Me"
+                }))
+                .unwrap()
+            })
+            .collect();
+        let normalized = normalize_runtime_agents(agents).unwrap();
+        assert_eq!(normalized.len(), 150);
+        let seeds: HashSet<_> = normalized
+            .iter()
+            .map(|agent| agent.avatar_seed.as_deref())
+            .collect();
+        assert_eq!(seeds.len(), 150);
+        assert_eq!(
+            normalized[149].avatar_seed.as_deref(),
+            Some("blob-v1:agent-149")
+        );
+    }
 
     fn refresh_source(name: &str, content: &str) -> LocalFileImport {
         import_local_text_file(LocalTextFileCandidate {

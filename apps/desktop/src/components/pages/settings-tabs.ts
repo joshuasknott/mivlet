@@ -9,6 +9,6 @@ export type SettingsTab = "general" | "providers" | "connections" | "privacy";
 export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "providers", label: "Providers" },
-  { id: "connections", label: "Connections" },
+  { id: "connections", label: "Tool servers" },
   { id: "privacy", label: "Privacy & data" }
 ];

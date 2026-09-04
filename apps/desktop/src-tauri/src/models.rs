@@ -694,6 +694,8 @@ pub struct BackendModel {
     /// and can state it truthfully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capabilities: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<serde_json::Value>,
 }
 
 /// Describes a connected (or connectable) agent-runtime backend. The Rust
@@ -1048,9 +1050,13 @@ pub struct FableAgentProfile {
     pub name: String,
     pub instructions: String,
     pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub icon: String,
     #[serde(default)]
     pub icon_color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avatar_seed: Option<String>,
     #[serde(default)]
     pub icon_image_data_url: Option<String>,
     #[serde(default)]
@@ -1060,6 +1066,20 @@ pub struct FableAgentProfile {
     pub permission_label: String,
     #[serde(default)]
     pub thread_id: Option<String>,
+    #[serde(default)]
+    pub thread_ids: Vec<String>,
+    #[serde(default)]
+    pub learned_tasks: Vec<FableLearnedTask>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FableLearnedTask {
+    pub id: String,
+    pub title: String,
+    pub instruction: String,
+    pub created_at: String,
+    pub updated_at: String,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

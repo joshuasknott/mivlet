@@ -70,4 +70,18 @@ describe("conversation shell runtime", () => {
     );
     expect(result.current.permissionMode).toBe("full-access");
   });
+
+  it("assigns a persistent portrait to every created teammate without an icon catalogue limit", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    const template = result.current.agents[0];
+    const created = Array.from({ length: 12 }, (_, index) => {
+      let createdId = "";
+      act(() => { createdId = result.current.createAgent({ ...template, name: `Agent ${index}`, avatarSeed: undefined }).id; });
+      return result.current.agents.find((agent) => agent.id === createdId)!;
+    });
+    expect(new Set(created.map((agent) => agent.avatarSeed)).size).toBe(12);
+    act(() => result.current.updateAgent(created[0].id, { name: "New name" }));
+    expect(result.current.agents.find((agent) => agent.id === created[0].id)?.avatarSeed).toBe(created[0].avatarSeed);
+  });
 });

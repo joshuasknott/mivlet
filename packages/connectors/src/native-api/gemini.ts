@@ -78,7 +78,10 @@ export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
           ]
         }
       : {}),
-    generationConfig: { maxOutputTokens: request.maxTokens }
+    generationConfig: {
+      maxOutputTokens: request.maxTokens,
+      ...(request.reasoningEffort ? { thinkingConfig: { thinkingLevel: request.reasoningEffort } } : {})
+    }
   };
 }
 

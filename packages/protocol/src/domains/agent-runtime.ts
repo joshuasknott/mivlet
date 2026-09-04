@@ -384,6 +384,11 @@ export interface BackendModel {
    * unknown" (fail conservatively), never as "all capabilities present".
    */
   capabilities?: ModelCapabilities;
+  /** Only levels advertised by this runtime or verified for this exact model. */
+  reasoning?: {
+    supportedEfforts: string[];
+    defaultEffort?: string;
+  };
 }
 
 /**
@@ -516,6 +521,7 @@ export interface BackendTool {
 export interface NativeCompletionRequest {
   providerId: string;
   model: string;
+  reasoningEffort?: string;
   messages: NativeMessage[];
   tools: NativeToolSpec[];
   /** Max output tokens; provider shapers clamp to the provider's limit. */
@@ -591,6 +597,7 @@ export type BackendAgentEvent =
  */
 export interface AgentTurnRequest {
   model: string;
+  reasoningEffort?: string;
   messages: NativeMessage[];
   tools: NativeToolSpec[];
   /** Max output tokens; adapters clamp to the model's known ceiling. */

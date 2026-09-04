@@ -26,6 +26,7 @@ import type {
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { resolveModelCapabilities } from "../../native-api/model-catalogue";
+import { validateReasoningEffort } from "../../native-api/reasoning";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 
@@ -74,6 +75,7 @@ export function createNativeApiBackend(
       })();
     }
     const executionId = options.attemptId ?? `native-anonymous-attempt-${++anonymousRunSequence}`;
+    validateReasoningEffort(provider.id, provider.models.find((model) => model.id === request.model) ?? { id: request.model, label: request.model, available: true }, request.reasoningEffort);
     const activeRun: ActiveRun = {
       requestId: null,
       cancel: async () => undefined,
@@ -107,6 +109,7 @@ export function createNativeApiBackend(
       messages: request.messages,
       tools: request.tools,
       maxTokens: request.maxTokens,
+      ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
       ...(request.providerRoute ? { providerRoute: request.providerRoute } : {})
     };
     const eventStream = runAgentLoop(handle.transport, nativeRequest, {

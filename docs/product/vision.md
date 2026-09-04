@@ -10,7 +10,7 @@ the concise source of truth for repository maturity.
 
 ## Default experience
 
-1. Connect a supported model provider.
+1. Sign in to Fable and connect a supported model provider.
 2. Create or choose a named teammate.
 3. Describe the work in conversation.
 4. Watch the current work, take over the teammate computer when needed, and
@@ -31,8 +31,8 @@ person administer execution machinery.
   remote placement and the deployment is available.
 - Narrow browser, filesystem, process, connector, MCP, and knowledge tools that
   are observable and approval-bound.
-- Optional accounts and future synchronization without making cloud identity a
-  prerequisite for local work.
+- Account sign-in for first-run setup, with workspace data and provider
+  credentials remaining local. Future synchronization is separately gated.
 
 ## Trust model
 
@@ -55,7 +55,8 @@ states. Infrastructure is successful when it makes conversation simpler.
 
 The repository implements a local Windows desktop foundation, encrypted local
 data, provider and Connection boundaries, approvals, and a Docker/WSL-backed
-Linux teammate computer. Hosted computer/browser, account, and synchronization
-code remains optional and deployment-gated. Production hosted operation, secure
+Linux teammate computer. First-run account sign-in requires configured identity;
+hosted computer/browser and synchronization remain optional and deployment-gated.
+Production hosted operation, secure
 hosted sign-in, ordinary conversation continuation after close, multi-device
 sync, mobile control, and multi-platform releases remain incomplete.

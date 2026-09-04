@@ -57,25 +57,26 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
-  it("shows one adaptive primary action for empty and typed drafts", () => {
+  it("keeps dictation and Send separate and only enables Send for text", () => {
     const { rerender } = render(
       <Composer {...propsFor("idle", { composerValue: "" })} />
     );
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
 
     rerender(<Composer {...propsFor("idle", { composerValue: "Draft reply" })} />);
 
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Start dictation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeEnabled();
   });
 
   it("treats whitespace-only drafts as empty", () => {
     render(<Composer {...propsFor("idle", { composerValue: "   " })} />);
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
   });
 
   it("shows truthful listening controls while keeping typing available", () => {
@@ -90,6 +91,7 @@ describe("Composer dictation controls", () => {
       screen.getByRole("button", { name: "Cancel dictation" })
     ).toBeVisible();
     expect(screen.getByLabelText("Universal composer")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
     expect(screen.getByText("State: listening")).toBeInTheDocument();
     expect(document.querySelectorAll("[aria-live='polite']")).toHaveLength(1);
   });

@@ -1,10 +1,11 @@
-import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
+import { AccountMenu } from "./AccountMenu";
+import fableMark from "../../assets/fable-mark.png";
 
 export interface AgentSidebarPreview {
   message: string;
@@ -24,6 +25,8 @@ export function AgentSidebar({
   onEditAgent,
   onOpenMarketplace,
   onOpenSettings,
+  onOpenUsage,
+  onSignOut,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -36,6 +39,8 @@ export function AgentSidebar({
   onEditAgent: (agent: FableAgentProfile) => void;
   onOpenMarketplace: () => void;
   onOpenSettings: () => void;
+  onOpenUsage: () => void;
+  onSignOut: () => void;
 }) {
   const installedConnectors = connectors.filter(
     (connector) =>
@@ -45,6 +50,7 @@ export function AgentSidebar({
   return (
     <aside className="agent-sidebar" aria-label="Agents">
       <div className="agent-sidebar__topline">
+        <img className="fable-mark" src={fableMark} alt="Fable" width={32} height={32} />
         <button
           className="agent-sidebar__new"
           type="button"
@@ -132,27 +138,10 @@ export function AgentSidebar({
               </span>
             ))}
           </span>
-        ) : (
-          <span
-            className="agent-sidebar__connector-count"
-            aria-label="No installed connectors"
-          >
-            0
-          </span>
-        )}
+        ) : null}
       </button>
 
-      <button
-        className="agent-sidebar__profile"
-        type="button"
-        onClick={onOpenSettings}
-      >
-        <span className="agent-sidebar__profile-avatar">
-          {profileName.trim().slice(0, 1).toUpperCase() || "F"}
-        </span>
-        <span>{profileName}</span>
-        <Gear size={15} aria-hidden="true" />
-      </button>
+      <AccountMenu name={profileName} onUsage={onOpenUsage} onSettings={onOpenSettings} onSignOut={onSignOut} />
     </aside>
   );
 }

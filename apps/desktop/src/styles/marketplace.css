@@ -1,44 +1,11 @@
 .desktop-frame--agents > .marketplace-workspace {
   display: grid;
-  grid-template-rows: 58px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
   background: var(--surface);
   border-right: 0;
-}
-
-.marketplace-switcher {
-  align-self: start;
-  justify-self: center;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(88px, 1fr));
-  margin-top: 10px;
-  padding: 3px;
-  background: var(--surface-hover);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-}
-
-.marketplace-switcher button {
-  min-height: 34px;
-  padding: 0 16px;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-pill);
-  font-size: var(--text-13);
-  font-weight: 600;
-}
-
-.marketplace-switcher button:hover {
-  color: var(--ink);
-}
-
-.marketplace-switcher button.is-active {
-  color: var(--ink);
-  background: var(--surface-raised);
-  box-shadow: var(--shadow-1);
 }
 
 .marketplace-scroll {
@@ -48,30 +15,29 @@
 }
 
 .marketplace-content {
-  width: min(100% - 64px, 1120px);
+  width: min(100% - 64px, 860px);
   min-height: 100%;
   margin: 0 auto;
-  padding: 28px 0 72px;
+  padding: 42px 0 56px;
 }
 
-.connectors-marketplace,
-.skills-marketplace {
+.connectors-marketplace {
   display: grid;
-  gap: 38px;
+  gap: 28px;
 }
 
 .marketplace-page-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(240px, 304px);
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: 32px;
+  gap: 20px;
 }
 
 .marketplace-page-header h1 {
   margin: 0 0 5px;
   color: var(--ink);
-  font-size: clamp(27px, 2.3vw, 34px);
-  font-weight: 650;
+  font-size: 26px;
+  font-weight: 500;
   letter-spacing: -0.035em;
   line-height: 1.1;
 }
@@ -85,10 +51,10 @@
 
 .marketplace-page-header .connections-search {
   width: 100%;
-  min-height: 42px;
+  min-height: 36px;
   background: transparent;
   border-color: var(--line-strong);
-  border-radius: 12px;
+  border-radius: 999px;
 }
 
 .marketplace-section {
@@ -100,8 +66,10 @@
   margin: 0;
   color: var(--ink);
   font-size: var(--text-16);
-  font-weight: 650;
+  font-weight: 500;
   letter-spacing: -0.015em;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
 .marketplace-section__empty,
@@ -115,14 +83,14 @@
 .marketplace-installed-list {
   display: flex;
   flex-wrap: wrap;
-  gap: 22px;
+  gap: 10px;
 }
 
 .marketplace-installed-connector {
   display: grid;
   justify-items: center;
-  width: 84px;
-  gap: 7px;
+  width: 40px;
+  gap: 0;
   padding: 3px;
   color: var(--ink);
   background: transparent;
@@ -150,22 +118,18 @@
 }
 
 .marketplace-installed-connector__icon {
-  width: 54px;
-  height: 54px;
-  border-radius: 14px;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
 }
 
 .marketplace-installed-connector__icon .connector-icon-svg {
-  width: 31px;
-  height: 31px;
+  width: 24px;
+  height: 24px;
 }
 
 .marketplace-installed-connector > span:last-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 84px;
-  white-space: nowrap;
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
 }
 
 .marketplace-installed-connector i {
@@ -178,25 +142,28 @@
 .marketplace-connector-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 38px;
+  gap: 4px 32px;
 }
 
-.marketplace-connector-row {
-  display: grid;
-  grid-template-columns: 52px minmax(0, 1fr) 38px;
-  align-items: center;
-  width: 100%;
-  min-height: 88px;
-  gap: 12px;
-  padding: 11px 5px;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
-  text-align: left;
-}
-
+.marketplace-connector-row { position: relative; display: grid; grid-template-columns: 36px minmax(0, 1fr) 28px; align-items: center; width: 100%; min-height: 68px; gap: 12px; padding: 8px; color: var(--ink); background: transparent; border: 0; border-radius: 12px; text-align: left; }
+.marketplace-connector-row .marketplace-connector-icon { width: 36px; height: 36px; border-radius: 10px; }
+.marketplace-connector-row .marketplace-connector-row__action { display: grid; place-items: center; width: 28px; height: 28px; background: transparent; border: 0; }
+.marketplace-connector-row .marketplace-connector-row__action svg { width: 18px; height: 18px; }
+.marketplace-connector-row .marketplace-connector-row__copy { display: grid; gap: 4px; }
+.marketplace-connector-row .marketplace-connector-row__copy strong { font-size: 13px; font-weight: 500; }
+.marketplace-connector-row .marketplace-connector-row__copy > span { color: var(--ink-muted); font-size: 11.5px; line-height: 1.4; }
+.marketplace-connector-row__copy small { color: var(--ink-muted); font-size: 10px; }
+.marketplace-see-more { display: flex; align-items: center; gap: 10px; width: fit-content; min-height: 36px; padding: 4px 8px; color: var(--ink-muted); background: transparent; border: 0; border-radius: 8px; font-size: 11px; text-align: left; }
+.marketplace-see-more:hover { color: var(--ink); background: var(--surface-hover); }
+.marketplace-see-more__icons { display: flex; align-items: center; }
+.marketplace-see-more__icons > svg { width: 18px; height: 18px; padding: 1px; background: var(--surface); }
+.connector-guide { padding: 16px 0 24px; }
+.connector-guide h3 { margin: 18px 0 12px; font-size: 14px; }
+.connector-guide__examples { display: grid; gap: 8px; }
+.connector-guide__examples p { margin: 0; padding: 14px 16px; background: var(--surface-hover); border-radius: 12px; font-size: 13px; }
+.connector-guide ol { padding-left: 20px; color: var(--ink-muted); line-height: 1.7; }
+.connector-guide li { margin-bottom: 8px; padding-left: 4px; }
+.connector-guide > p { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
 .marketplace-connector-row:hover,
 .marketplace-connector-row:focus-visible {
   background: var(--surface-hover);
@@ -342,136 +309,6 @@
   font-size: var(--text-12);
 }
 
-.skills-marketplace__actions {
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) 42px;
-  gap: 10px;
-}
-
-.skills-marketplace__add {
-  display: grid;
-  width: 42px;
-  height: 42px;
-  place-items: center;
-  padding: 0;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  border-radius: 50%;
-}
-
-.skills-marketplace__add:hover {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
-
-.skills-marketplace__empty {
-  display: grid;
-  place-items: center;
-  align-content: start;
-  min-height: 420px;
-  padding-top: 110px;
-  text-align: center;
-}
-
-.skills-marketplace__empty strong {
-  color: var(--ink);
-  font-size: var(--text-14);
-  font-weight: 650;
-}
-
-.skills-marketplace__empty p {
-  max-width: 440px;
-  margin: 8px 0 0;
-  color: var(--ink-muted);
-  font-size: var(--text-13);
-  line-height: 1.5;
-}
-
-.skills-marketplace__empty button {
-  min-height: 34px;
-  margin-top: 18px;
-  padding: 0 13px;
-  color: var(--ink);
-  background: var(--surface-raised);
-  border: 1px solid var(--line-strong);
-  border-radius: 9px;
-  font-size: var(--text-12);
-  font-weight: 600;
-}
-
-.skills-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.skill-card {
-  display: grid;
-  gap: 14px;
-  min-height: 190px;
-  padding: 17px;
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-}
-
-.skill-card__owner {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.skill-card__copy {
-  min-width: 0;
-}
-
-.skill-card__copy h3 {
-  margin: 0 0 6px;
-  color: var(--ink);
-  font-size: var(--text-15);
-  font-weight: 650;
-}
-
-.skill-card__copy p {
-  display: -webkit-box;
-  margin: 0;
-  overflow: hidden;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.5;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
-}
-
-.skill-card__actions {
-  display: flex;
-  align-items: end;
-  gap: 7px;
-  margin-top: auto;
-}
-
-.skill-card__actions button {
-  display: inline-flex;
-  align-items: center;
-  min-height: 32px;
-  gap: 6px;
-  padding: 0 10px;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  font-size: var(--text-12);
-  font-weight: 600;
-}
-
-.skill-card__actions button:first-child {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
-
 .agent-sidebar__connections {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
@@ -523,18 +360,6 @@
   height: 13px;
 }
 
-.agent-sidebar__connector-count {
-  display: grid;
-  min-width: 20px;
-  height: 20px;
-  place-items: center;
-  color: var(--ink-soft);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  font-size: 10px;
-}
-
 .agent-learning-dialog__list-header {
   display: flex;
   align-items: center;
@@ -557,35 +382,19 @@
   font-weight: 600;
 }
 
-@media (max-width: 1180px) {
-  .marketplace-connector-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 
 @media (max-width: 900px) {
   .marketplace-content {
     width: min(100% - 40px, 760px);
   }
 
-  .marketplace-connector-grid,
-  .skills-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+  .marketplace-connector-grid { gap: 4px 16px; }
 }
 
 @media (max-width: 650px) {
   .desktop-frame--agents > .marketplace-workspace {
     height: 100%;
-    grid-template-rows: 52px minmax(0, 1fr);
-  }
-
-  .marketplace-switcher {
-    margin-top: 6px;
-  }
-
-  .marketplace-switcher button {
-    min-height: 36px;
+    grid-template-rows: minmax(0, 1fr);
   }
 
   .marketplace-content {
@@ -602,19 +411,8 @@
     min-height: 44px;
   }
 
-  .skills-marketplace__actions {
-    grid-template-columns: minmax(0, 1fr) 44px;
-  }
-
-  .skills-marketplace__add {
-    width: 44px;
-    height: 44px;
-  }
-
-  .marketplace-connector-row {
-    grid-template-columns: 48px minmax(0, 1fr) 40px;
-    min-height: 82px;
-  }
+  .marketplace-connector-grid { grid-template-columns: minmax(0, 1fr); }
+  .marketplace-connector-row { grid-template-columns: 36px minmax(0, 1fr) 32px; min-height: 68px; }
 
   .marketplace-connector-row__copy > span {
     white-space: normal;
@@ -627,8 +425,7 @@
     margin: 0;
   }
 
-  .agent-sidebar__connector-stack,
-  .agent-sidebar__connector-count {
+  .agent-sidebar__connector-stack {
     display: none;
   }
 }

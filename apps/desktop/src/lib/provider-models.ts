@@ -1,4 +1,5 @@
 import type { BackendModel, BackendProvider } from "@fable/protocol";
+import { modelReasoning } from "@fable/connectors/native-api/reasoning";
 
 /**
  * A model option carries its owning backend alongside the provider model id.
@@ -24,6 +25,7 @@ export function providerModelOptions(entries: ProviderModels[]): ProviderModelOp
   return entries.flatMap(({ provider, models }) =>
     models.map((model) => ({
       ...model,
+      reasoning: modelReasoning(provider.id, model),
       id: `${provider.id}${MODEL_KEY_SEPARATOR}${model.id}`,
       modelId: model.id,
       providerId: provider.id,

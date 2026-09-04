@@ -1,0 +1,129 @@
+/** Development-only component preview. No account, credentials, or model transport. */
+import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { createRoot } from "react-dom/client";
+import type { FableAgentProfile, ConnectorManifest } from "@fable/protocol";
+import { AgentSidebar } from "../components/agents/AgentSidebar";
+import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
+import { ProfileAgentAvatar } from "../components/agents/agent-icons";
+import { AgentEditor } from "../components/agents/AgentEditor";
+import { AccountDialog } from "../components/agents/AccountDialog";
+import { LiveWorkRail } from "../components/agents/LiveWorkRail";
+import { Composer } from "../components/Composer";
+import { MarketplacePage } from "../components/pages/MarketplacePage";
+import { PERMISSION_PROFILES } from "../lib/agent-run";
+import type { ProviderModelOption } from "../lib/provider-models";
+import { SettingsModal } from "../components/settings/SettingsModal";
+import { SettingsPage } from "../components/pages/SettingsPage";
+import type { SettingsTab } from "../components/pages/settings-tabs";
+import type { SettingsRuntime } from "../components/settings/settings-runtime";
+import { DEFAULT_ACCOUNT_WORKSPACE_STATUS, DEFAULT_IDENTITY_STATUS, defaultShellState } from "../hooks/shell-runtime/defaults";
+import { resolveCodexProvider } from "@fable/connectors/backends/codex";
+import { resolveNativeProvider } from "@fable/connectors/backends/native";
+import "../styles.css";
+
+if (!import.meta.env.DEV) throw new Error("The component preview is available only in development.");
+const noop = () => {};
+const asyncNoop = async () => {};
+const samples: FableAgentProfile[] = [
+  { id: "ava", name: "Ava", iconColor: "#FC6D69", instructions: "Help me plan and organize my work.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
+  { id: "leo", name: "Leo", iconColor: "#2CC663", instructions: "Research questions and prepare clear briefs.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
+  { id: "maya", name: "Maya", iconColor: "#865DFA", instructions: "Help with design and writing.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
+];
+const connectors: ConnectorManifest[] = [
+  ["gmail", "Gmail"], ["google-drive", "Google Drive"], ["google-calendar", "Google Calendar"], ["github", "GitHub"], ["slack", "Slack"], ["notion", "Notion"], ["linear", "Linear"], ["vercel", "Vercel"],
+].map(([id, name]) => ({ id, name, status: "needs-auth", authMode: "oauth-broker", permissions: [], healthSummary: "Not connected", lastCheckedAt: "Not checked", supportsSearch: true, supportsImport: true, supportedActions: [] }));
+const models: ProviderModelOption[] = [{ id: "codex::preview-model", modelId: "preview-model", label: "Example model", providerId: "codex", providerLabel: "ChatGPT", available: true, reasoning: { supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" } }];
+const localComputer: ComponentProps<typeof LiveWorkRail>["localComputer"] = {
+  available: false, browserAvailable: false, browserActive: false, canGoBack: false, canGoForward: false,
+  filesAvailable: false, files: null, filesLoading: false, filesError: null, filePreview: null,
+  filePreviewLoading: false, filePreviewError: null, controller: "agent", loading: false,
+  provisioning: false, busy: false, recoveryNeeded: false, error: null, generation: 0,
+  onProvision: asyncNoop, onOpenBrowser: asyncNoop, onRefreshBrowser: asyncNoop, onGoBack: asyncNoop, onGoForward: asyncNoop,
+  onRefreshFiles: asyncNoop, onPreviewFile: asyncNoop, onCloseFilePreview: noop, onTakeControl: asyncNoop, onReturnControl: asyncNoop,
+  onClick: asyncNoop, onScroll: asyncNoop, onKey: asyncNoop, onLaunchApplication: asyncNoop,
+};
+const hostedComputer: ComponentProps<typeof LiveWorkRail>["hostedComputer"] = {
+  available: false, runtimeActive: false, keepAlive: false, loading: false, provisioning: false,
+  error: null, onProvision: asyncNoop, browserOpening: false, browserPhase: "idle", browserError: null,
+  onOpenBrowser: asyncNoop, onRefreshBrowser: asyncNoop,
+};
+
+function DesignPreview() {
+  const [profiles, setProfiles] = useState(samples);
+  const [agentId, setAgentId] = useState("ava");
+  const [page, setPage] = useState("chat");
+  const [rail, setRail] = useState(true);
+  const [editor, setEditor] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [account, setAccount] = useState<"usage" | "sign-out" | null>(null);
+  const [message, setMessage] = useState("");
+  const [permission, setPermission] = useState("Ask Me");
+  const [addOpen, setAddOpen] = useState(false);
+  const [permissionsOpen, setPermissionsOpen] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  const [reasoning, setReasoning] = useState<string>();
+  const [memoryDisabled, setMemoryDisabled] = useState(false);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const unavailable = async (providerId: string) => ({ providerId, outcome: "unsupported" as const, message: "Design preview: connection requires the desktop app." });
+  const settingsRuntime: SettingsRuntime = {
+    accountWorkspacePending: false, accountWorkspaceStatus: DEFAULT_ACCOUNT_WORKSPACE_STATUS,
+    backendProviders: [resolveCodexProvider("needs-auth"), resolveNativeProvider("openai", "needs-auth"), resolveNativeProvider("anthropic", "needs-auth"), resolveNativeProvider("xai", "needs-auth")].filter((provider) => provider !== null),
+    checkBackendConnection: unavailable, connectBackendWithVerify: unavailable, connectedBackendIds: [],
+    disconnectBackend: asyncNoop, exportMemory: asyncNoop, identityPending: false,
+    identityStatus: DEFAULT_IDENTITY_STATUS, memoryDisabled, recoverIdentity: asyncNoop, refreshIdentity: asyncNoop,
+    refreshModels: asyncNoop, signInIdentity: asyncNoop, signOutIdentity: asyncNoop,
+    startBackendBrowserLogin: unavailable, toggleMemoryDisabled: () => setMemoryDisabled((value) => !value),
+    customApprovalSettings: defaultShellState.customApprovalSettings, permissionLabel: permission,
+    selectPermissionLabel: setPermission, setVoiceEnabled, updateCustomApprovalSetting: noop, voiceEnabled,
+  };
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const agent = profiles.find((profile) => profile.id === agentId)!;
+  const editingAgent = profiles.find((profile) => profile.id === editingAgentId) ?? null;
+  return <>
+    <main className={`desktop-frame desktop-frame--agents${rail && page === "chat" ? "" : " desktop-frame--live-closed"}`} data-theme={theme}>
+      <AgentSidebar agents={profiles} activeAgentId={agentId} previews={{ ava: { message: "Chief of Staff", time: "", status: "idle" }, leo: { message: "Research", time: "", status: "idle" }, maya: { message: "Design", time: "", status: "idle" } }} profileName="Joshua" connectors={[]} marketplaceActive={page === "connectors"}
+        onSelectAgent={(profile) => { setAgentId(profile.id); setPage("chat"); }} onCreateAgent={() => { setEditingAgentId(null); setEditor(true); }} onEditAgent={(profile) => { setEditingAgentId(profile.id); setEditor(true); }}
+        onOpenMarketplace={() => setPage("connectors")} onOpenSettings={() => setSettingsOpen(true)}
+        onOpenUsage={() => setAccount("usage")} onSignOut={() => setAccount("sign-out")} />
+      {page === "connectors" ? <MarketplacePage manifests={connectors} accounts={{}} connectorStatus={notice || null}
+        onUseConnector={noop} onConnect={() => setNotice("Design preview: no account connection was started.")} onDisconnect={noop} onRefresh={noop} onSelectConnector={noop} onSwitchAccount={noop} /> :
+        <section className="workspace agent-workspace">
+          <AgentWorkspaceHeader agent={agent} attentionCount={0} panelOpen={rail} onTogglePanel={() => setRail(!rail)} />
+          <div className="workspace-center workspace-center--composer workspace-center--conversation">
+            <div className="conversation-scroll"><div className="conversation-feed">
+              <article className="conversation-message conversation-message--user"><div className="conversation-message__author"><strong>You</strong></div><p>Help me plan this week</p></article>
+              <article className="conversation-message conversation-message--assistant"><div className="conversation-message__author"><ProfileAgentAvatar agent={agent} iconSize={28} /><strong>{agent.name}</strong></div><p>Let's start with your priorities. What needs to happen this week, and which days are already busy?</p></article>
+            </div></div>
+            <div className="conversation-composer-dock"><Composer composerRef={composerRef} fileInputRef={fileRef} composerValue={message} onComposerChange={setMessage}
+              onSubmit={(event) => { event.preventDefault(); if (message.trim()) { setNotice("Design preview: no model request was sent."); setMessage(""); } }}
+              voiceStatus="unsupported" voiceMessage="Dictation is unavailable in this preview." voiceCanStart={false} voiceDisclosure="No microphone access is requested in the preview."
+              onStartVoice={noop} onStopVoice={noop} onCancelVoice={noop} onDismissVoice={noop} onAttach={noop} addMenuOpen={addOpen} permissionsOpen={permissionsOpen}
+              onToggleAddMenu={() => setAddOpen(!addOpen)} onTogglePermissions={() => setPermissionsOpen(!permissionsOpen)} onOpenTool={() => setPage("connectors")} onRunCommand={noop}
+              onFileChange={noop} models={models} selectedModelId={models[0].id} selectedModelLabel={models[0].label} onSelectModel={noop}
+              selectedReasoningEffort={reasoning} onSelectReasoningEffort={setReasoning} placeholder={`Message ${agent.name}…`}
+              permissionLabel={permission} permissionProfiles={PERMISSION_PROFILES} onSelectPermissionLabel={setPermission} inThread /></div>
+          </div>
+        </section>}
+      {rail && page === "chat" ? <LiveWorkRail agentName={agent.name} localComputer={localComputer} hostedComputer={hostedComputer} onClose={() => setRail(false)}
+        conversations={[{ id: "sample-1", title: "Weekly planning", time: "Today" }, { id: "sample-2", title: "A first draft", time: "Sep 2" }]}
+        onNewConversation={() => { setMessage(""); composerRef.current?.focus(); }} onSelectConversation={noop} /> : null}
+      <AgentEditor open={editor} agent={editingAgent} models={models} connectors={connectors} knowledgeSources={[]} canDelete={false}
+        onClose={() => setEditor(false)} onDelete={noop} onSave={(draft) => {
+          if (editingAgent) setProfiles(profiles.map((profile) => profile.id === editingAgent.id ? { ...profile, ...draft } : profile));
+          else { const created = { ...draft, id: crypto.randomUUID() }; setProfiles([...profiles, created]); setAgentId(created.id); setPage("chat"); }
+          setEditor(false);
+        }}
+        onSkillsChange={(learnedTasks) => setProfiles(profiles.map((profile) => profile.id === editingAgent?.id ? { ...profile, learnedTasks } : profile))} onUseSkill={(task) => setMessage(task.instruction)} />
+      {account ? <AccountDialog kind={account} name="Joshua" records={[]} onClose={() => setAccount(null)} onSignOut={asyncNoop} /> : null}
+    </main>
+    {settingsOpen ? <SettingsModal activeTab={settingsTab} onSelectTab={setSettingsTab} onClose={() => setSettingsOpen(false)}><SettingsPage runtime={settingsRuntime} theme={theme} onThemeChange={setTheme} activeTab={settingsTab} workspaceName="Preview workspace" titleId="settings-modal-title" /></SettingsModal> : null}
+    <div style={{ position: "fixed", bottom: 3, left: "50%", transform: "translateX(-50%)", color: "#777", fontSize: 9, pointerEvents: "none", zIndex: 200 }}>Design preview · Sample conversation · {notice}</div>
+  </>;
+}
+
+createRoot(document.getElementById("root")!).render(<DesignPreview />);

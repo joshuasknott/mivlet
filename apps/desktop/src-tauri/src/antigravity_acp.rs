@@ -642,6 +642,7 @@ fn extract_models(value: &Value) -> Vec<BackendModel> {
                 label: label.to_string(),
                 available: true,
                 capabilities: None,
+                reasoning: None,
             })
         })
         .take(32)

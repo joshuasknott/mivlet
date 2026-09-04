@@ -243,9 +243,16 @@ function normalizeAgentProfiles(agents: FableAgentProfile[] | undefined): FableA
       : [];
     return {
       ...agent,
+      reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
       icon: "agent",
       iconColor,
+      avatarSeed: typeof agent.avatarSeed === "string" && agent.avatarSeed.startsWith("blob-v1:") && agent.avatarSeed.length <= 160
+        ? agent.avatarSeed : `blob-v1:${agent.id}`,
       iconImageDataUrl,
+      threadIds: [...new Set([
+        ...(Array.isArray(agent.threadIds) ? agent.threadIds.filter((id): id is string => typeof id === "string" && id.length > 0) : []),
+        ...(typeof agent.threadId === "string" && agent.threadId ? [agent.threadId] : []),
+      ])],
       learnedTasks
     };
   });

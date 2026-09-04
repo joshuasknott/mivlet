@@ -35,6 +35,7 @@ import {
   type BackendDeps,
   type ToolExecutor,
 } from "@fable/connectors";
+import { validateReasoningEffort } from "@fable/connectors/native-api/reasoning";
 import { describeBackendError } from "../lib/backend-errors";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopAntigravityAcp } from "../lib/antigravity-acp";
@@ -46,7 +47,11 @@ import {
   recoverRuntimeExecutionAttempts,
   saveRuntimeExecutionAttempt,
 } from "../runtime";
-import type { DurableRunWriter } from "../lib/conversation-runtime";
+import type {
+  DurableRunWriter,
+  HydratedConversation,
+} from "../lib/conversation-runtime";
+import { buildContinuationMessages } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
 
 /** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
@@ -93,6 +98,8 @@ export interface UseNativeAgentOptions {
   models?: BackendModel[];
   /** Active chat/thread identifier used to durably associate completed exchanges. */
   threadId?: string;
+  /** Fresh canonical history; never re-persisted as a new user turn. */
+  loadConversation?: (threadId: string) => Promise<HydratedConversation | null>;
   /** Receives tool-call events so the shell can route them into its approval queue. */
   onToolCall?: (
     event: Extract<BackendAgentEvent, { type: "tool-call" }>,
@@ -169,6 +176,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   onCancelRef.current = options.onCancel;
   const threadIdRef = useRef(options.threadId);
   threadIdRef.current = options.threadId;
+  const loadConversationRef = useRef(options.loadConversation);
+  loadConversationRef.current = options.loadConversation;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
@@ -292,6 +301,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         return;
       }
       const providerId = backend.providerId;
+      try {
+        validateReasoningEffort(providerId, modelsRef.current.find((model) => model.id === request.model) ?? backend.backend.models.find((model) => model.id === request.model), request.reasoningEffort);
+      } catch (error) {
+        setState((current) => ({ ...current, lastError: error instanceof Error ? error.message : "Choose a reasoning level again.", status: "failed" }));
+        return;
+      }
       const generatedAttemptId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const createdAt = new Date().toISOString();
       const prepared =
@@ -315,6 +330,55 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // Reserve the attempt before asynchronous route selection so two rapid sends
       // cannot both acquire provider authority before either durable write.
       activeAttemptIdRef.current = attemptId;
+      const requestThreadId = threadIdRef.current;
+      let providerRequest = request;
+      if (requestThreadId && loadConversationRef.current) {
+        try {
+          const conversation =
+            await loadConversationRef.current(requestThreadId);
+          if (
+            !conversation ||
+            conversation.thread.id !== requestThreadId ||
+            threadIdRef.current !== requestThreadId
+          ) {
+            throw new Error(
+              "The conversation changed before the message could be sent. Try again.",
+            );
+          }
+          // Completed conversation only. Orphaned tool results and tool calls
+          // must not be replayed as requests or duplicated in the transcript.
+          const history = buildContinuationMessages(
+            conversation.messages.filter((view) => !parentAttemptId || view.message.runId !== parentAttemptId),
+          ).filter(
+            (message) =>
+              message.role === "user" || message.role === "assistant",
+          );
+          providerRequest = {
+            ...request,
+            messages: [
+              ...request.messages.filter(
+                (message) => message.role === "system",
+              ),
+              ...history,
+              ...request.messages.filter(
+                (message) => message.role !== "system",
+              ),
+            ],
+          };
+        } catch (error) {
+          activeAttemptIdRef.current = null;
+          setState((current) => ({
+            ...current,
+            lastError:
+              error instanceof Error
+                ? error.message
+                : "Could not read this conversation.",
+            status: "failed",
+            currentAttemptId: null,
+          }));
+          return;
+        }
+      }
       let providerRoute:
         Awaited<ReturnType<typeof selectNativeProviderRoute>> | undefined;
       const provider = options.providers.find(
@@ -325,7 +389,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           const requiredInputTokens = Math.max(
             1,
             Math.ceil(
-              (request.messages.reduce(
+              (providerRequest.messages.reduce(
                 (total, message) => total + message.content.length,
                 0,
               ) +
@@ -354,6 +418,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           activeAttemptIdRef.current = null;
           return;
         }
+      }
+      if (
+        activeAttemptIdRef.current !== attemptId ||
+        threadIdRef.current !== requestThreadId ||
+        shouldCancelRef.current?.()
+      ) {
+        if (activeAttemptIdRef.current === attemptId)
+          activeAttemptIdRef.current = null;
+        return;
       }
       setState((current) => ({
         ...current,
@@ -399,7 +472,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         model: request.model,
         status: "streaming",
         transcript: "",
-        threadId: threadIdRef.current,
+        threadId: requestThreadId,
         exchanges: initialExchanges,
         parentAttemptId,
         contextReceipt: prepared.receipt,
@@ -412,11 +485,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         updatedAt: createdAt,
       };
       activePersistedRef.current = persisted;
-      const durableWriter = threadIdRef.current
-        ? (createDurableRunWriterRef.current?.(
-            threadIdRef.current,
-            attemptId,
-          ) ?? null)
+      const durableWriter = requestThreadId
+        ? (createDurableRunWriterRef.current?.(requestThreadId, attemptId) ??
+          null)
         : null;
       activeWriterRef.current = durableWriter;
       try {
@@ -485,7 +556,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // when no transport is available (browser preview). The event handling below
       // is provider-neutral — it consumes the universal BackendAgentEvent stream.
       const eventStream = backend.run(
-        { ...request, ...(providerRoute ? { providerRoute } : {}) },
+        { ...providerRequest, ...(providerRoute ? { providerRoute } : {}) },
         {
           // The real executor is wired by App.tsx from the shell's shared
           // approval gate + the Rust tool boundary; until then (or in tests)
@@ -860,6 +931,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           lastError:
             "This interrupted run does not contain a safe user prompt to retry.",
         }));
+        return;
+      }
+      if (attemptToRetry.threadId !== threadIdRef.current) {
+        setState((current) => ({ ...current, lastError: "Open this run's conversation before retrying it." }));
         return;
       }
       const model = modelsRef.current.find(

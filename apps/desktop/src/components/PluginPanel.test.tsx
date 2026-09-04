@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectorManifest } from "@fable/protocol";
-import { PluginPanel } from "./PluginPanel";
+import { PluginPanel, resolveDetailedStatus } from "./PluginPanel";
 
 afterEach(cleanup);
 
@@ -51,6 +51,18 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it("reports syncing only for an active sync and keeps unhealthy connections actionable", async () => {
+    const unchecked = { ...gmail, health: { ...gmail.health!, state: "unknown" as const } };
+    expect(resolveDetailedStatus(unchecked).label).toBe("Not checked");
+    expect(resolveDetailedStatus({ ...unchecked, sync: { connectorId: "gmail", workspaceId: "workspace-test", phase: "syncing", attempt: 1, itemsProcessed: 0, staleTokenRecovered: false } }).label).toBe("Syncing");
+    const unhealthy = { ...gmail, health: { ...gmail.health!, state: "error" as const, summary: "Could not reach Gmail." } };
+    expect(resolveDetailedStatus(unhealthy).className).toBe("failed");
+    const user = userEvent.setup();
+    render(<PluginPanel manifests={[unhealthy]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Manage Gmail from Installed" }));
+    expect(screen.getByRole("button", { name: "Use in composer" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+  });
   it("labels and selects the opaque Fable Connection instead of provider account authority", async () => {
     const user = userEvent.setup();
     const onSwitch = vi.fn();
@@ -135,7 +147,7 @@ describe("Connector Connection selection", () => {
     expect(
       screen.getAllByRole("button", { name: "Connect GitHub" })[0],
     ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Recommended" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Popular" })).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Product & design" }),
     ).toBeVisible();
@@ -175,7 +187,7 @@ describe("Connector Connection selection", () => {
     );
 
     expect(screen.getByRole("dialog", { name: "Figma" })).toBeVisible();
-    expect(screen.getByText("Planned")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Figma" })).toHaveTextContent("Planned");
     expect(
       screen.getByRole("button", { name: "Not available yet" }),
     ).toBeDisabled();

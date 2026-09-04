@@ -297,7 +297,7 @@
 
 .composer-chip {
   width: 34px;
-  border-radius: 50% !important;
+  border-radius: 13px;
 }
 
 /* Long model/permission labels must truncate instead of growing the chip and
@@ -447,30 +447,10 @@
   min-width: 0;
 }
 
-.composer-add-menu button strong,
-.composer-model-menu button strong {
+.composer-add-menu button strong {
   color: var(--ink);
   font-size: var(--text-13);
   font-weight: 500;
-}
-
-.composer-model-menu {
-  min-width: 220px;
-  max-height: min(420px, 60vh);
-  overflow-y: auto;
-}
-
-.composer-model-menu button {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-}
-
-.composer-model-menu__provider {
-  display: inline-flex;
-  flex: 0 0 18px;
-  align-items: center;
-  justify-content: center;
 }
 
 .composer-control-anchor--model .composer-menu {

@@ -9,6 +9,7 @@ import type {
 import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
+import type { DurableRunWriter } from "../lib/conversation-runtime";
 import { useNativeAgent } from "./useNativeAgent";
 
 /**
@@ -211,6 +212,60 @@ describe("useNativeAgent", () => {
     vi.clearAllMocks();
     resetLineState();
     removeDesktopRuntime();
+  });
+
+  it("continues from local conversation history without duplicating it in storage", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Elm"), finishStop];
+    const record = vi.fn(async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {});
+    const loadConversation = vi.fn(async () => ({
+      thread: { id: "thread-1" },
+      messages: [
+        { message: { kind: "user", sequence: 1 }, currentRevision: { state: "terminal", content: "The project is Elm." } },
+        { message: { kind: "assistant", sequence: 2 }, currentRevision: { state: "terminal", content: "I'll remember Elm." } },
+        { message: { kind: "tool", sequence: 3, detail: { phase: "call", toolCallId: "old-write", toolName: "write-file" } }, currentRevision: { state: "terminal", content: "Old action" } },
+      ],
+    }) as never);
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()],
+      threadId: "thread-1",
+      loadConversation,
+      createDurableRunWriter: () => ({ record, checkpointAssistant: vi.fn(async () => {}) }),
+    }));
+    await act(async () => {
+      await result.current.run({ ...baseRequest, messages: [
+        { role: "system", content: "Be concise." },
+        { role: "user", content: "What is the project called?" },
+      ] });
+    });
+    const messages = (mocks.streamRequests[0].body as { messages: Array<{ role: string; content: string }> }).messages;
+    expect(messages.filter((message) => message.role !== "system")).toEqual([
+      { role: "user", content: "The project is Elm." },
+      { role: "assistant", content: "I'll remember Elm." },
+      { role: "user", content: "What is the project called?" },
+    ]);
+    expect(messages.some((message) => message.role === "system" && message.content.includes("Be concise."))).toBe(true);
+    expect(record.mock.calls.filter(([entry]) => entry.kind === "user")).toEqual([
+      [{ kind: "user", content: "What is the project called?" }],
+    ]);
+    const saved = mocks.savedRuns.at(-1) as ExecutionAttempt;
+    expect(saved.exchanges?.filter((entry) => entry.role === "user")).toEqual([
+      { role: "user", content: "What is the project called?", toolCallId: undefined, toolName: undefined },
+    ]);
+    expect(JSON.stringify(saved)).not.toContain("Be concise.");
+  });
+
+  it("refuses history from a different thread before persistence or egress", async () => {
+    installDesktopRuntime();
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()],
+      threadId: "thread-1",
+      loadConversation: async () => ({ thread: { id: "thread-2" }, messages: [] }) as never,
+    }));
+    await act(async () => { await result.current.run(baseRequest); });
+    expect(result.current.state.lastError).toContain("conversation changed");
+    expect(mocks.savedRuns).toHaveLength(0);
+    expect(mocks.streamCalls).toBe(0);
   });
 
   it("surfaces noTransport and an error when no desktop runtime is present", async () => {

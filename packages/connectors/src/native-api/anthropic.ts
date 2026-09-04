@@ -71,6 +71,7 @@ export function shapeAnthropicRequest(request: NativeCompletionRequest): unknown
   return {
     model: request.model,
     max_tokens: request.maxTokens,
+    ...(request.reasoningEffort ? { output_config: { effort: request.reasoningEffort } } : {}),
     stream: true,
     ...(system ? { system } : {}),
     messages,

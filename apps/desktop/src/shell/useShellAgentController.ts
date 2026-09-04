@@ -10,6 +10,7 @@ import { useLocalComputer } from "../hooks/useLocalComputer";
 import { useNativeAgent } from "../hooks/useNativeAgent";
 import {
   createDesktopDurableRunWriter,
+  loadDesktopConversation,
   useDurableConversation,
 } from "../hooks/useDurableConversation";
 import { useShellRuntime } from "../hooks/useShellRuntime";
@@ -251,6 +252,7 @@ export function useShellAgentController({
     models: runtime.selectableModels,
     threadId,
     createDurableRunWriter: createDesktopDurableRunWriter,
+    loadConversation: loadDesktopConversation,
     execute: executor,
     authorize: async (approval) => {
       if ((await approvalGate.waitForDecision(approval)) !== "granted") {

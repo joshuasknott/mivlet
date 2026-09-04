@@ -8,6 +8,7 @@
     "apps/desktop": {
       "entry": [
         "src/main.tsx",
+        "src/dev/DesignPreview.tsx",
         "src/**/*.test.{ts,tsx}",
         "src-tauri/tests/fixtures/*.mjs",
         "vite.config.ts",

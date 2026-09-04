@@ -10,13 +10,13 @@ import {
   customApprovalToggleLabel,
 } from "../../lib/approval-copy";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
-import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import type { SettingsRuntime } from "./settings-runtime";
 
 export function ApprovalsSettingsView({
   runtime,
   onStatus,
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   const handleToggle = (key: keyof CustomApprovalSettings, value: boolean) => {
@@ -27,7 +27,7 @@ export function ApprovalsSettingsView({
   return (
     <div className="settings-page__body approvals-settings">
       <div className="settings-section-heading">
-        <p>Choose how often Fable should stop and ask before it acts.</p>
+        <p>Choose when your teammate should ask you.</p>
       </div>
 
       <section
@@ -40,7 +40,7 @@ export function ApprovalsSettingsView({
           </span>
           <span>
             <strong id="approval-choice-title">How Fable should work</strong>
-            <small>Ask Me is the recommended starting point.</small>
+            <small>Ask first is the recommended starting point.</small>
           </span>
         </div>
         <div
@@ -63,58 +63,73 @@ export function ApprovalsSettingsView({
                 onStatus(`${profile.label} selected.`);
               }}
             >
-              <strong>{profile.label}</strong>
+              <strong>
+                {
+                  {
+                    "Read Only": "Read only",
+                    "Ask Me": "Ask first",
+                    "Work Freely": "Full access",
+                    Custom: "Custom",
+                  }[profile.label]
+                }
+              </strong>
               <span>{profile.description}</span>
             </button>
           ))}
         </div>
       </section>
 
-      <section
-        className="approvals-settings__section"
-        aria-labelledby="custom-approvals-title"
+      <details
+        className="settings-disclosure"
+        open={runtime.permissionLabel === "Custom" ? true : undefined}
       >
-        <div className="profile-section__heading">
-          <span className="settings-panel__icon" aria-hidden="true">
-            <GearSix size={19} />
-          </span>
-          <span>
-            <strong id="custom-approvals-title">
-              {CUSTOM_APPROVAL_SECTION.heading}
-            </strong>
-            <small>{CUSTOM_APPROVAL_SECTION.intro}</small>
-          </span>
-        </div>
-        <div
-          className="custom-approvals-list"
-          role="group"
+        <summary>Custom approval preferences</summary>
+        <section
+          className="approvals-settings__section"
           aria-labelledby="custom-approvals-title"
         >
-          {CUSTOM_APPROVAL_TOGGLE_ORDER.map((key) => {
-            const checked = runtime.customApprovalSettings[key];
-            return (
-              <button
-                key={key}
-                type="button"
-                className="toggle-row custom-approval-toggle"
-                aria-pressed={checked}
-                onClick={() => handleToggle(key, !checked)}
-              >
-                <span>
-                  <strong>{customApprovalToggleLabel(key)}</strong>
-                  <small>{customApprovalToggleHelper(key)}</small>
-                </span>
-                <span className="toggle-switch" aria-hidden="true">
-                  <span />
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <p className="approvals-settings__note">
-          {CUSTOM_APPROVAL_SECTION.reassurance}
-        </p>
-      </section>
+          <div className="profile-section__heading">
+            <span className="settings-panel__icon" aria-hidden="true">
+              <GearSix size={19} />
+            </span>
+            <span>
+              <strong id="custom-approvals-title">
+                {CUSTOM_APPROVAL_SECTION.heading}
+              </strong>
+              <small>{CUSTOM_APPROVAL_SECTION.intro}</small>
+            </span>
+          </div>
+          <div
+            className="custom-approvals-list"
+            role="group"
+            aria-labelledby="custom-approvals-title"
+          >
+            {CUSTOM_APPROVAL_TOGGLE_ORDER.map((key) => {
+              const checked = runtime.customApprovalSettings[key];
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className="toggle-row custom-approval-toggle"
+                  aria-pressed={checked}
+                  onClick={() => handleToggle(key, !checked)}
+                >
+                  <span>
+                    <strong>{customApprovalToggleLabel(key)}</strong>
+                    <small>{customApprovalToggleHelper(key)}</small>
+                  </span>
+                  <span className="toggle-switch" aria-hidden="true">
+                    <span />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="approvals-settings__note">
+            {CUSTOM_APPROVAL_SECTION.reassurance}
+          </p>
+        </section>
+      </details>
     </div>
   );
 }
@@ -124,7 +139,7 @@ export function DictationPrivacySettings({
   capability,
   onStatus,
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   capability: VoiceCapability;
   onStatus: (message: string) => void;
 }) {
@@ -132,9 +147,7 @@ export function DictationPrivacySettings({
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
-        <p>
-          Control optional input features that can access sensitive device data.
-        </p>
+        <p>Choose what Fable remembers and how you give input.</p>
       </div>
       <div className="provider-access-list" style={{ padding: "14px 20px" }}>
         <button
@@ -151,10 +164,9 @@ export function DictationPrivacySettings({
           <span>
             <strong>Enable dictation</strong>
             <small>
-              Starts only when you choose the microphone. Fable does not retain
-              raw audio or persist a separate dictation transcript. Recognized
-              text is added to your normal composer draft. Speech processing may
-              use an operating-system or browser service.
+              Starts when you choose the microphone. Your browser or operating
+              system may process speech remotely. Fable keeps the text you send,
+              not raw audio.
             </small>
             {!available ? (
               <small>{capability.reason} Text input remains available.</small>
@@ -181,13 +193,15 @@ export function AppearanceSettingsView({
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
-        <p>Customize the look and feel of the Fable interface.</p>
+        <p>Appearance</p>
       </div>
 
       <div className="provider-access-list" style={{ padding: "20px" }}>
         <div
           style={{
             display: "flex",
+            flexWrap: "wrap",
+            gap: "16px",
             alignItems: "center",
             justifyContent: "space-between",
           }}
@@ -201,7 +215,7 @@ export function AppearanceSettingsView({
                 fontWeight: 500,
               }}
             >
-              Interface Theme
+              Theme
             </strong>
             <span
               style={{
@@ -211,7 +225,7 @@ export function AppearanceSettingsView({
                 marginTop: "4px",
               }}
             >
-              Choose between Light and Dark color schemes.
+              Choose how Fable looks.
             </span>
           </div>
           <div

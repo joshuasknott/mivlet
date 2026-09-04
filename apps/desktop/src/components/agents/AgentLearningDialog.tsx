@@ -131,17 +131,17 @@ export function AgentLearningDialog({
             <ProfileAgentAvatar agent={agent} iconSize={26} />
             <div>
               <span>
-                <GraduationCap size={14} aria-hidden="true" /> Learned work
+                <GraduationCap size={14} aria-hidden="true" /> Skills
               </span>
               <h2 id="agent-learning-title">
                 {source
                   ? `Teach ${agent.name} this task`
-                  : `${agent.name}'s responsibilities`}
+                  : `Skills for ${agent.name}`}
               </h2>
               <p>
                 {source
                   ? "Turn this exchange into guidance the teammate will use in future conversations."
-                  : "Review the repeatable work you have explicitly taught this teammate."}
+                  : `Saved guidance used only by ${agent.name}.`}
               </p>
             </div>
           </div>

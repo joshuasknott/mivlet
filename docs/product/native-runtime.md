@@ -57,6 +57,23 @@ subscription is treated as a general API credential.
 
 ## Request boundary
 
+Teammate instructions remain system context. Fable sends the exact new user
+message and loads completed user/assistant history from its canonical local
+conversation. It does not save that history again as another user turn or
+replay old tool calls and approvals. Retrying a failed run requires its original
+conversation and excludes the failed attempt from replay.
+
+ChatGPT uses a new ephemeral Codex app-server thread for each turn, with
+instructions in `developerInstructions` and prior conversation in untrusted
+`additionalContext`. Fable refuses to send a model turn unless the runtime
+confirms the thread is ephemeral. A local app-server probe verified that such a
+thread is absent from the stored-thread listing; the actual ChatGPT Recents UI
+and billed model turns still need live account verification.
+
+The model menu shows reasoning levels advertised by the provider or explicitly
+supported by the adapter's model catalogue. Unsupported selections fail before
+transport. Fable preserves each teammate's model and effort preferences.
+
 The native HTTP formats support text completion, streaming, bounded multi-round
 tool calls, retries before a stream begins, and cancellation. Image and file
 attachments are not yet supported by the native provider payload path.

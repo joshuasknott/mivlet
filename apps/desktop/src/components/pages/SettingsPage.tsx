@@ -5,7 +5,7 @@ import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { useState } from "react";
 import type { VoiceCapability } from "@fable/protocol";
-import type { ShellRuntime } from "../../hooks/useShellRuntime";
+import type { SettingsRuntime } from "../settings/settings-runtime";
 import {
   createRuntimeLocalBackup,
   deleteRuntimeLocalData,
@@ -46,7 +46,7 @@ export function SettingsPage({
   dictationCapability = DEFAULT_DICTATION_CAPABILITY,
   titleId = "settings-title"
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   theme: "light" | "dark";
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
@@ -102,7 +102,7 @@ function GeneralSettings({
   onThemeChange,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   workspaceName: string;
   theme: "light" | "dark";
   onThemeChange: (theme: "light" | "dark") => void;
@@ -115,7 +115,7 @@ function GeneralSettings({
     <>
       <div className="settings-page__body">
         <div className="settings-section-heading">
-          <p>Fable keeps its core workspace on this device.</p>
+          <p>Your account and workspace preferences.</p>
         </div>
         <article className="profile-clean-card settings-open-section">
           <div className="profile-clean-card__content">
@@ -131,9 +131,7 @@ function GeneralSettings({
               </div>
               <p>{workspaceName}</p>
               <p>
-                Conversations, drafts, memory, and preferences stay on this device
-                and do not sync by default. Account, provider, and app credentials
-                remain separate behind the native secure boundary.
+                Your conversations and preferences are saved on this computer.
               </p>
             </section>
           </div>
@@ -157,7 +155,7 @@ function ConfiguredAccountSettings({
   runtime,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   const authentication = runtime.identityStatus.authentication;
@@ -196,7 +194,7 @@ function ConfiguredAccountSettings({
             </div>
             <p>
               {authentication
-                ? display?.displayName ?? display?.email ?? authentication.subject
+                ? display?.email ?? display?.displayName ?? "Signed in"
                 : "Sign in to use Fable on this device."}
             </p>
             <div className="profile-action-row">
@@ -253,7 +251,7 @@ function ProviderSettings({
   runtime,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   return (
@@ -288,11 +286,9 @@ function ProviderSettings({
           <LockKey size={18} />
         </span>
         <div>
-          <strong>Credentials stay outside the interface</strong>
+          <strong>Connected securely</strong>
           <p>
-            API keys and provider authorization are stored by Fable&apos;s native
-            credential boundary. They are never written into conversations,
-            exports, interface state, or Fable cloud storage.
+            Your provider handles model access and billing. Fable keeps connection credentials in your device&apos;s secure storage.
           </p>
         </div>
       </div>
@@ -304,15 +300,14 @@ function ConnectionSettings({
   runtime,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   return (
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          App connectors are managed from Connectors in the sidebar. Advanced
-          tool servers stay here.
+          Add custom tools with an MCP server. Manage app connections from Connectors.
         </p>
       </div>
       <LocalMcpSettings
@@ -328,7 +323,7 @@ function PrivacyAndDataSettings({
   dictationCapability,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   dictationCapability: VoiceCapability;
   onStatus: (message: string) => void;
 }) {
@@ -341,7 +336,10 @@ function PrivacyAndDataSettings({
       />
       <MemorySettings runtime={runtime} onStatus={onStatus} />
       <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
-      <LocalDataSettings runtime={runtime} onStatus={onStatus} />
+      <details className="settings-disclosure">
+        <summary>Manage local data</summary>
+        <LocalDataSettings runtime={runtime} onStatus={onStatus} />
+      </details>
     </>
   );
 }
@@ -350,7 +348,7 @@ function MemorySettings({
   runtime,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   const [exporting, setExporting] = useState(false);
@@ -372,15 +370,6 @@ function MemorySettings({
       <article className="profile-clean-card settings-open-section">
         <div className="profile-clean-card__content">
           <section className="profile-section" aria-labelledby="memory-settings-title">
-            <div className="profile-section__heading">
-              <span className="settings-panel__icon" aria-hidden="true">
-                <LockKey size={19} />
-              </span>
-              <span>
-                <strong id="memory-settings-title">Personal memory</strong>
-                <small>Explicit local facts stored in the encrypted workspace</small>
-              </span>
-            </div>
             <button
               type="button"
               className="toggle-row"
@@ -391,8 +380,8 @@ function MemorySettings({
               }}
             >
               <span>
-                <strong>Use personal memory</strong>
-                <small>Allow teammates to save and recall approved facts on this device.</small>
+                <strong id="memory-settings-title">Personal memory</strong>
+                <small>Let teammates recall facts you have approved.</small>
               </span>
               <span className="toggle-switch" aria-hidden="true">
                 <span />
@@ -420,7 +409,7 @@ function LocalDataSettings({
   runtime,
   onStatus
 }: {
-  runtime: ShellRuntime;
+  runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   const [backupPath, setBackupPath] = useState("");
@@ -506,7 +495,7 @@ function LocalDataSettings({
               </span>
               <span>
                 <strong id="local-data-title">Local data recovery</strong>
-                <small>Explicit backup, restore, health, and deletion controls</small>
+                <small>Keep a backup or check your workspace.</small>
               </span>
             </div>
 
@@ -604,7 +593,7 @@ function LocalDataSettings({
               </span>
               <span>
                 <strong id="delete-local-data-title">Delete local workspace data</strong>
-                <small>This does not revoke provider credentials or delete optional hosted data.</small>
+                <small>Provider accounts and credentials are kept separately.</small>
               </span>
             </div>
             <input

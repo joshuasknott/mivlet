@@ -10,6 +10,8 @@ import {
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentEditor } from "../components/agents/AgentEditor";
+import { AccountDialog } from "../components/agents/AccountDialog";
+import { SettingsModal } from "../components/settings/SettingsModal";
 import {
   AgentLearningDialog,
   type AgentLearningSource,
@@ -22,7 +24,6 @@ import { AgentWelcome } from "../components/agents/AgentWelcome";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
 import {
   ProfileAgentAvatar,
-  nextAgentColor,
 } from "../components/agents/agent-icons";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
@@ -34,10 +35,8 @@ import {
 import { agentExecutionInstructions } from "../lib/agent-learning";
 import { insertDictation } from "../lib/insert-dictation";
 import {
-  tabs as settingsTabs,
   type SettingsTab,
 } from "../components/pages/settings-tabs";
-import type { MarketplaceTab } from "../components/pages/MarketplacePage";
 import { composerModelsFor } from "./composer-models";
 import { useShellAgentController } from "./useShellAgentController";
 
@@ -85,11 +84,12 @@ export function ChatWorkspace() {
     return saved === "dark" ? "dark" : "light";
   });
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [accountDialog, setAccountDialog] = useState<"usage" | "sign-out" | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
-  const [marketplaceTab, setMarketplaceTab] = useState<MarketplaceTab | null>(
+  const [marketplaceTab, setMarketplaceTab] = useState<"plugins" | null>(
     null,
   );
-  const [workPanelOpen, setWorkPanelOpen] = useState(false);
+  const [workPanelOpen, setWorkPanelOpen] = useState(true);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [learningDialog, setLearningDialog] = useState<{
@@ -102,7 +102,6 @@ export function ChatWorkspace() {
   const [optimisticUserMessage, setOptimisticUserMessage] = useState("");
   const [submissionError, setSubmissionError] = useState("");
   const conversationScrollRef = useRef<HTMLDivElement>(null);
-  const settingsRef = useRef<HTMLElement>(null);
   const wasRunningRef = useRef(false);
 
   const controller = useShellAgentController({
@@ -181,7 +180,7 @@ export function ChatWorkspace() {
   useEffect(() => {
     conversationScrollRef.current?.scrollTo({
       top: conversationScrollRef.current.scrollHeight,
-      behavior: "smooth",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
     });
   }, [
     agent.state.transcript,
@@ -216,6 +215,9 @@ export function ChatWorkspace() {
   const selectedModelLabel =
     composerModels.find((candidate) => candidate.id === selectedModelOptionId)
       ?.label ?? "Choose model";
+  const selectedReasoning = composerModels.find((model) => model.id === selectedModelOptionId)?.reasoning;
+  const selectedReasoningEffort = activeAgent?.reasoningEffort && selectedReasoning?.supportedEfforts.includes(activeAgent.reasoningEffort)
+    ? activeAgent.reasoningEffort : undefined;
   const connectedConnectors = useMemo(
     () =>
       runtime.connectorManifests
@@ -263,9 +265,6 @@ export function ChatWorkspace() {
       resetCancellation();
       try {
         const instructions = agentExecutionInstructions(activeAgent);
-        const executionPrompt = instructions
-          ? `Teammate instructions:\n${instructions}\n\nUser request:\n${prompt}`
-          : prompt;
         const preparedContext = await runtime.assembleKnowledgeContext(prompt, {
           allowedConnectorIds: activeAgent.connectorIds,
           allowedKnowledgeSourceIds: activeAgent.knowledgeSourceIds,
@@ -273,7 +272,9 @@ export function ChatWorkspace() {
         await agent.run(
           buildAgentRequest({
             model: selectedModelId,
-            prompt: executionPrompt,
+            reasoningEffort: selectedReasoningEffort,
+            prompt,
+            instructions,
             maxTokens: validation.maxTokens,
           }),
           preparedContext,
@@ -305,6 +306,7 @@ export function ChatWorkspace() {
       runtime.selectableModels,
       runtime.setComposerValue,
       selectedModelId,
+      selectedReasoningEffort,
       selectedThreadId,
     ],
   );
@@ -483,13 +485,13 @@ export function ChatWorkspace() {
           setWorkPanelOpen(false);
         }}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenUsage={() => setAccountDialog("usage")}
+        onSignOut={() => setAccountDialog("sign-out")}
       />
 
       {marketplaceTab ? (
         <Suspense fallback={null}>
           <MarketplacePage
-            activeTab={marketplaceTab}
-            onTabChange={setMarketplaceTab}
             manifests={runtime.connectorManifests.filter(
               (connector) => connector.id !== "local-files",
             )}
@@ -512,52 +514,12 @@ export function ChatWorkspace() {
             onSwitchAccount={(connectorId, connectionId) =>
               void runtime.switchConnectorAccount(connectorId, connectionId)
             }
-            agents={runtime.agents}
-            activeAgentId={activeAgent.id}
-            onCreateSkill={(agentId) => {
-              const profile = runtime.agents.find(
-                (candidate) => candidate.id === agentId,
-              );
-              if (!profile) return;
-              runtime.selectAgent(profile.id);
-              setSelectedThreadId(profile.threadId);
-              setLearningDialog({ mode: "create", source: null });
-            }}
-            onManageSkills={(agentId) => {
-              const profile = runtime.agents.find(
-                (candidate) => candidate.id === agentId,
-              );
-              if (!profile) return;
-              runtime.selectAgent(profile.id);
-              setSelectedThreadId(profile.threadId);
-              setLearningDialog({ mode: "manage", source: null });
-            }}
-            onRunSkill={(agentId, task) => {
-              const profile = runtime.agents.find(
-                (candidate) => candidate.id === agentId,
-              );
-              if (!profile) return;
-              runtime.selectAgent(profile.id);
-              setSelectedThreadId(profile.threadId);
-              setMarketplaceTab(null);
-              runtime.setComposerValue(task.instruction);
-              window.requestAnimationFrame(() =>
-                runtime.composerRef.current?.focus(),
-              );
-            }}
           />
         </Suspense>
       ) : (
       <section className="workspace agent-workspace">
         <AgentWorkspaceHeader
           agent={activeAgent}
-          learnedCount={activeAgent.learnedTasks?.length ?? 0}
-          learnedOpen={learningDialog !== null}
-          onOpenLearned={() =>
-            setLearningDialog({ mode: "manage", source: null })
-          }
-          newConversationDisabled={agent.state.running}
-          onNewConversation={startNewConversation}
           attentionCount={runtime.openApprovals.length}
           panelOpen={workPanelOpen}
           onTogglePanel={() => setWorkPanelOpen((open) => !open)}
@@ -611,7 +573,7 @@ export function ChatWorkspace() {
                 >
                   <div className="conversation-message__author">
                     {role === "assistant" ? (
-                      <ProfileAgentAvatar agent={activeAgent} iconSize={36} />
+                      <ProfileAgentAvatar agent={activeAgent} iconSize={28} />
                     ) : (
                       <span className="conversation-message__user-avatar">
                         {profileName.trim().slice(0, 1).toUpperCase() || "F"}
@@ -670,7 +632,7 @@ export function ChatWorkspace() {
             {agent.state.running ? (
               <article className="conversation-message conversation-message--assistant conversation-message--working">
                 <div className="conversation-message__author">
-                  <ProfileAgentAvatar agent={activeAgent} iconSize={36} />
+                  <ProfileAgentAvatar agent={activeAgent} iconSize={28} />
                   <strong>{activeAgent.name}</strong>
                 </div>
                 <p>{agent.state.transcript || "Thinking…"}</p>
@@ -763,9 +725,12 @@ export function ChatWorkspace() {
               models={composerModels}
               selectedModelId={selectedModelOptionId}
               selectedModelLabel={selectedModelLabel}
+              selectedReasoningEffort={selectedReasoningEffort}
+              onSelectReasoningEffort={(reasoningEffort) => runtime.updateAgent(activeAgent.id, { reasoningEffort })}
+              placeholder={`Message ${activeAgent.name}…`}
               onSelectModel={(modelId) => {
                 runtime.selectModel(modelId);
-                runtime.updateAgent(activeAgent.id, { modelId });
+                runtime.updateAgent(activeAgent.id, { modelId, reasoningEffort: undefined });
               }}
               permissionLabel={runtime.permissionLabel}
               permissionProfiles={PERMISSION_PROFILES}
@@ -791,6 +756,17 @@ export function ChatWorkspace() {
 
       {workPanelOpen && !marketplaceTab ? (
         <LiveWorkRail
+          conversations={durableConversation.state.threads.filter((thread) =>
+            thread.lifecycle === "active" && (activeAgent.threadIds ?? [activeAgent.threadId]).includes(thread.id)
+          ).map((thread) => ({ id: thread.id, title: thread.title, time: compactTime(thread.updatedAt) }))}
+          activeConversationId={selectedThreadId}
+          conversationBusy={agent.state.running || Boolean(queuedPrompt)}
+          onNewConversation={startNewConversation}
+          onSelectConversation={(id) => {
+            if (agent.state.running || queuedPrompt) return;
+            runtime.updateAgent(activeAgent.id, { threadId: id });
+            setSelectedThreadId(id); runtime.setComposerValue(""); setOptimisticUserMessage(""); setSubmissionError("");
+          }}
           agentName={activeAgent.name}
           approvalPanel={approvalPanel}
           localComputer={{
@@ -866,6 +842,13 @@ export function ChatWorkspace() {
       ) : null}
 
       <AgentEditor
+        onSkillsChange={(learnedTasks) => { if (editingAgentId) runtime.updateAgent(editingAgentId, { learnedTasks }); }}
+        onUseSkill={(task) => {
+          const profile = runtime.agents.find((candidate) => candidate.id === editingAgentId);
+          if (profile) selectAgent(profile);
+          runtime.setComposerValue(task.instruction);
+          focusComposer();
+        }}
         open={agentEditorOpen}
         agent={
           editingAgentId
@@ -877,9 +860,6 @@ export function ChatWorkspace() {
         models={runtime.modelOptions}
         connectors={runtime.connectorManifests}
         knowledgeSources={runtime.workspaceKnowledgeSources}
-        suggestedColor={nextAgentColor(
-          runtime.agents.map((profile) => profile.iconColor),
-        )}
         canDelete={runtime.agents.length > 1}
         onClose={() => {
           setAgentEditorOpen(false);
@@ -921,47 +901,12 @@ export function ChatWorkspace() {
         }}
       />
 
+      {accountDialog ? <AccountDialog key={accountDialog} kind={accountDialog} name={profileName}
+        records={Object.values(agent.state.usageReceipts)} onClose={() => setAccountDialog(null)}
+        onSignOut={async () => { await stopCurrentWork(); await runtime.signOutIdentity(); }} /> : null}
+
       {settingsOpen ? (
-        <div className="settings-modal-backdrop" role="presentation">
-          <section
-            ref={settingsRef}
-            className="settings-modal"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-modal-title"
-            tabIndex={-1}
-          >
-            <aside
-              className="settings-modal__nav"
-              aria-label="Settings sections"
-            >
-              <nav className="settings-modal__tab-list" aria-label="Settings">
-                {settingsTabs.map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    className={
-                      settingsTab === tab.id
-                        ? "settings-modal__tab settings-modal__tab--active"
-                        : "settings-modal__tab"
-                    }
-                    aria-current={settingsTab === tab.id ? "page" : undefined}
-                    onClick={() => setSettingsTab(tab.id)}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </nav>
-            </aside>
-            <div className="settings-modal__content">
-              <button
-                type="button"
-                className="settings-modal__close"
-                aria-label="Close settings"
-                onClick={() => setSettingsOpen(false)}
-              >
-                <X size={17} />
-              </button>
+        <SettingsModal activeTab={settingsTab} onSelectTab={setSettingsTab} onClose={() => setSettingsOpen(false)}>
               <Suspense fallback={null}>
                 <SettingsPage
                   runtime={runtime}
@@ -976,9 +921,7 @@ export function ChatWorkspace() {
                   titleId="settings-modal-title"
                 />
               </Suspense>
-            </div>
-          </section>
-        </div>
+        </SettingsModal>
       ) : null}
     </main>
   );

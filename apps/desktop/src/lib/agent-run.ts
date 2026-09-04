@@ -253,7 +253,9 @@ export function buildContextPrefixForRun(input: BuildContextPrefixForRunInput): 
 
 export interface BuildAgentRequestInput {
   model: string;
+  reasoningEffort?: string;
   prompt: string;
+  instructions?: string;
   maxTokens?: number;
 }
 
@@ -266,7 +268,13 @@ export interface BuildAgentRequestInput {
 export function buildAgentRequest(input: BuildAgentRequestInput): AgentTurnRequest {
   return {
     model: input.model,
-    messages: [{ role: "user", content: input.prompt }],
+    ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+    messages: [
+      ...(input.instructions?.trim()
+        ? [{ role: "system" as const, content: input.instructions.trim() }]
+        : []),
+      { role: "user", content: input.prompt },
+    ],
     tools: [],
     maxTokens: input.maxTokens ?? MAX_TOKENS_DEFAULT
   };

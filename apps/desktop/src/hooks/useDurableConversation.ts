@@ -52,6 +52,9 @@ const runtime = createConversationRuntime({
   deleteDraft: deleteRuntimeConversationDraft,
 });
 
+/** Read a fresh, thread-validated history before a provider request. */
+export const loadDesktopConversation = (threadId: string) => runtime.hydrate(threadId);
+
 /** Shared callback for the agent loop; UI callers use the hook below. */
 export function createDesktopDurableRunWriter(threadId: string, runId: string) {
   return createDurableRunWriter(

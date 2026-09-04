@@ -19,6 +19,7 @@
 
 import type { BackendModel } from "@fable/protocol";
 import { catalogueCapabilities } from "./model-catalogue";
+import { modelReasoning } from "./reasoning";
 
 /** A model id the provider's list-models endpoint returned. */
 export interface DiscoveredModel {
@@ -26,6 +27,7 @@ export interface DiscoveredModel {
   available: boolean;
   /** Optional provider-reported capabilities, used only when the runtime can substantiate them. */
   capabilities?: BackendModel["capabilities"];
+  reasoning?: BackendModel["reasoning"];
 }
 
 export type DiscoveryOutcome = "success" | "unsupported" | "offline" | "failed" | "empty";
@@ -71,7 +73,11 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
       id: model.id,
       label: catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
       available: model.available,
-      capabilities
+      capabilities,
+      reasoning: modelReasoning(providerId, {
+        ...catalogueModels.find((entry) => entry.id === model.id),
+        ...model, label: model.id
+      })
     });
   }
 
@@ -86,7 +92,8 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
       id: entry.id,
       label: entry.label,
       available: discoveryRan ? discoveredIds.has(entry.id) : connected,
-      capabilities: catalogueCapabilities(providerId, entry.id)
+      capabilities: entry.capabilities ?? catalogueCapabilities(providerId, entry.id),
+      reasoning: modelReasoning(providerId, entry)
     });
   }
 

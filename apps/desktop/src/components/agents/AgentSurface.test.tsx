@@ -42,6 +42,8 @@ describe("quiet teammate surface", () => {
         onEditAgent={vi.fn()}
         onOpenMarketplace={onOpenMarketplace}
         onOpenSettings={onOpenSettings}
+        onOpenUsage={vi.fn()}
+        onSignOut={vi.fn()}
       />,
     );
 
@@ -52,6 +54,11 @@ describe("quiet teammate surface", () => {
     fireEvent.click(screen.getByRole("button", { name: /Connectors/i }));
     fireEvent.click(screen.getByRole("button", { name: "Create teammate" }));
     fireEvent.click(screen.getByRole("button", { name: /Local workspace/i }));
+    expect(onOpenSettings).not.toHaveBeenCalled();
+    expect(screen.getByRole("menu", { name: "Account" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Usage" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeVisible();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Settings" }));
     expect(onCreateAgent).toHaveBeenCalledOnce();
     expect(onOpenMarketplace).toHaveBeenCalledOnce();
     expect(onOpenSettings).toHaveBeenCalledOnce();
@@ -106,24 +113,18 @@ describe("quiet teammate surface", () => {
     expect(screen.getByLabelText("What to repeat")).toBeVisible();
   });
 
-  it("shows learned work and the teammate computer without team orchestration", () => {
+  it("keeps only the computer sidebar toggle in the conversation header", () => {
     render(
       <AgentWorkspaceHeader
         agent={agent}
-        learnedCount={2}
-        learnedOpen={false}
-        onOpenLearned={vi.fn()}
-        newConversationDisabled={false}
-        onNewConversation={vi.fn()}
         attentionCount={1}
         panelOpen={false}
         onTogglePanel={vi.fn()}
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: /Learned work, 2/i }),
-    ).toBeInTheDocument();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /Learned work/i })).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: /Open work panel, 1 needs attention/i,

@@ -1,0 +1,10 @@
+export const connectorGuides: Record<string, { description: string; examples: string[] }> = {
+  gmail: { description: "Read mail, find the context you need, and prepare a reply.", examples: ["Find unread messages from this week.", "Summarize the conversation about our next meeting.", "Help me draft a reply to this email."] },
+  "google-drive": { description: "Bring files shared with Fable into your conversation.", examples: ["Find the project brief in my connected files.", "Summarize this document.", "Compare the requirements in these two files."] },
+  "google-calendar": { description: "Look at your schedule and plan around existing events.", examples: ["What is on my calendar today?", "Help me prepare for tomorrow's meetings.", "Review my week and suggest time for focused work."] },
+  github: { description: "Explore repositories, issues, and pull requests together.", examples: ["Summarize the open issues in this repository.", "Explain the changes in this pull request.", "Find the context behind this issue."] },
+  slack: { description: "Bring connected channel conversations into the work at hand.", examples: ["Summarize the recent conversation in this channel.", "Find the discussion about the release.", "Pull out the decisions and next steps from these messages."] },
+  notion: { description: "Work with the pages and databases you share with Fable.", examples: ["Find the project plan in my shared pages.", "Summarize this Notion page.", "Turn these notes into a concise briefing."] },
+  linear: { description: "Keep track of issues and understand what needs attention.", examples: ["Find the issues assigned to me.", "Summarize the blockers in this project.", "Help me prepare a status update from these issues."] },
+  vercel: { description: "Review your projects and deployment activity.", examples: ["Show the latest deployments for this project.", "Help me understand this deployment's status.", "Summarize the recent changes across my projects."] },
+};

@@ -938,11 +938,12 @@ export function useShellRuntime(
     setIdentityPending(true);
     try {
       const status = await signOutRuntimeIdentity();
+      if (!status && hasTauriRuntime()) throw new Error("Fable could not confirm sign out. Try again.");
       await clearRuntimeAccountWorkspaceSession();
       applyAccountWorkspaceStatus({
         ...DEFAULT_ACCOUNT_WORKSPACE_STATUS,
         message:
-          "Local workspace ready. The optional Fable account is signed out.",
+          "Signed out of Fable. Your workspace is saved on this device.",
       });
       const next =
         status ??
@@ -953,13 +954,14 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable cloud identity could not sign out.";
+          : "Fable could not sign out.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
         message,
       }));
       setLastAction(message);
+      throw new Error(message);
     } finally {
       setIdentityPending(false);
     }
@@ -2969,6 +2971,7 @@ export function useShellRuntime(
       ...input,
       id,
       icon: "agent",
+      avatarSeed: input.avatarSeed ?? `blob-v1:${id}`,
       iconColor: /^#[0-9a-f]{6}$/i.test(input.iconColor)
         ? input.iconColor
         : "#865DFA",
@@ -2987,7 +2990,15 @@ export function useShellRuntime(
   ) => {
     setAgents((current) =>
       current.map((agent) =>
-        agent.id === agentId ? { ...agent, ...patch } : agent,
+        agent.id === agentId ? {
+          ...agent,
+          ...patch,
+          threadIds: [...new Set([
+            ...(agent.threadIds ?? []),
+            ...(agent.threadId ? [agent.threadId] : []),
+            ...(patch.threadId ? [patch.threadId] : []),
+          ])],
+        } : agent,
       ),
     );
     if (agentId === activeAgentId) {

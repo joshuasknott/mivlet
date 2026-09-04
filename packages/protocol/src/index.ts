@@ -1064,9 +1064,12 @@ export interface FableAgentProfile {
   name: string;
   instructions: string;
   modelId: string;
+  reasoningEffort?: string;
   icon: FableAgentIcon;
-  /** Hex colour used by the shared agent mark when no custom image is set. */
+  /** Legacy appearance metadata retained for saved-profile compatibility. */
   iconColor: string;
+  /** Versioned, non-secret seed for a stable generated blob portrait. */
+  avatarSeed?: string;
   /** Locally uploaded, normalized image. Remote URLs are deliberately unsupported. */
   iconImageDataUrl?: string;
   connectorIds: string[];
@@ -1075,4 +1078,6 @@ export interface FableAgentProfile {
   learnedTasks?: FableLearnedTask[];
   permissionLabel: ApprovalPresetLabel;
   threadId?: string;
+  /** Local conversation references for this teammate, including earlier chats. */
+  threadIds?: string[];
 }

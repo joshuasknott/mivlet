@@ -9,12 +9,12 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { connectorGuides } from "./marketplace/connector-guides";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
 import {
   findMarketplaceConnector,
   marketplaceConnectorSections,
-  recommendedMarketplaceConnectors,
   type MarketplaceConnectorEntry,
 } from "./marketplace/marketplace-catalog";
 
@@ -54,6 +54,7 @@ export function PluginPanel({
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
@@ -132,11 +133,6 @@ export function PluginPanel({
         );
       });
   }, [manifests, query]);
-  const visibleRecommended = recommendedMarketplaceConnectors.filter((entry) =>
-    visibleSections.some((section) =>
-      section.connectors.some((candidate) => candidate.id === entry.id),
-    ),
-  );
   const hasDirectoryMatches = visibleSections.length > 0;
 
   const openEntry = (entry: MarketplaceConnectorEntry) => {
@@ -181,6 +177,7 @@ export function PluginPanel({
         <span className="marketplace-connector-row__copy">
           <strong>{entry.name}</strong>
           <span>{entry.description}</span>
+          {!connector ? <small>Planned</small> : null}
         </span>
         <span
           className={`marketplace-connector-row__action${connected ? " marketplace-connector-row__action--connected" : ""}`}
@@ -233,6 +230,7 @@ export function PluginPanel({
                   className="marketplace-installed-connector"
                   key={connector.id}
                   onClick={() => openEntry(entry)}
+                  title={connector.name}
                   aria-label={`Manage ${connector.name} from Installed`}
                 >
                   <span
@@ -262,34 +260,23 @@ export function PluginPanel({
         )}
       </section>
 
-      {visibleRecommended.length ? (
-        <section
-          className="marketplace-section"
-          aria-labelledby="recommended-connections-title"
-        >
-          <h2 id="recommended-connections-title">Recommended</h2>
-          <div className="marketplace-connector-grid">
-            {visibleRecommended.map((entry) =>
-              renderConnectorRow(entry, "recommended"),
-            )}
-          </div>
-        </section>
-      ) : null}
-
-      {visibleSections.map((section) => (
-        <section
-          className="marketplace-section"
-          aria-labelledby={`marketplace-section-${section.id}`}
-          key={section.id}
-        >
+      {[
+        ...(!normalizedQuery ? [{ id: "popular", title: "Popular", connectors: ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
+        ...visibleSections,
+      ].map((section) => {
+        const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
+        const limit = section.id === "popular" ? 6 : 4;
+        const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
+        const remaining = section.connectors.slice(limit);
+        return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
           <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
-          <div className="marketplace-connector-grid">
-            {section.connectors.map((entry) =>
-              renderConnectorRow(entry, section.id),
-            )}
-          </div>
-        </section>
-      ))}
+          <div className="marketplace-connector-grid">{shown.map((entry) => renderConnectorRow(entry, section.id))}</div>
+          {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
+            {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
+            {expanded ? "Show less" : `See ${remaining.slice(0, 2).map((entry) => entry.name).join(", ")}${remaining.length > 2 ? ", and more" : ""}`}
+          </button> : null}
+        </section>;
+      })}
 
       {!hasDirectoryMatches ? (
         <p className="marketplace-search-empty" role="status">
@@ -413,6 +400,7 @@ function ConnectorDetails({
   const permissions =
     connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
   const detail = resolveDetailedStatus(connector);
+  const guide = connectorGuides[connector.id];
 
   return (
     <article
@@ -427,7 +415,7 @@ function ConnectorDetails({
         </span>
         <div>
           <h2 id={titleId}>{connector.name}</h2>
-          <p>{connector.setupMessage ?? detail.summary}</p>
+          <p>{guide?.description ?? detail.summary}</p>
         </div>
         <span
           className={`connector-detail__status connector-detail__status--${detail.className}`}
@@ -436,23 +424,32 @@ function ConnectorDetails({
         </span>
       </div>
 
+      {guide ? <section className="connector-guide" aria-label="How to use this connector">
+        <h3>Try asking</h3>
+        <div className="connector-guide__examples">{guide.examples.map((example) => <p key={example}>{example}</p>)}</div>
+        <h3>How it works</h3>
+        <ol><li>Connect your account and choose the access you want to grant.</li><li>Enable {connector.name} in your teammate's connections.</li><li>Mention <code>@{connector.id}</code> in a message, or choose it from the attachment menu.</li></ol>
+        <p>Fable uses the access you grant. Changes follow your workspace's approval settings.</p>
+      </section> : null}
       <div className="connector-detail__body">
         <div>
           <span>Access</span>
-          <ul>
-            {permissions.slice(0, 3).map((permission) => (
+          {permissions.length ? <ul>
+            {permissions.map((permission) => (
               <li key={permission}>{permission}</li>
             ))}
-          </ul>
+          </ul> : <p>Access is shown when you connect.</p>}
         </div>
+        {connector.status === "connected" ? <>
         <div>
-          <span>Health</span>
+          <span>Connection</span>
           <p>{detail.summary}</p>
         </div>
         <div>
           <span>Sync</span>
           <p>{syncLabel(connector)}</p>
         </div>
+        </> : null}
       </div>
 
       {connector.status === "connected" && accounts.length > 1 ? (
@@ -480,7 +477,7 @@ function ConnectorDetails({
 
       <div className="connector-detail__actions">
         {connector.status === "connected" ? (
-          <button type="button" onClick={() => onUseConnector(connector)}>
+          <button type="button" disabled={detail.className === "failed" || detail.className === "permission-limited"} onClick={() => onUseConnector(connector)}>
             Use in composer
           </button>
         ) : null}
@@ -488,9 +485,10 @@ function ConnectorDetails({
           <button
             type="button"
             className="button button--primary"
+            disabled={detail.className === "configuration-required" || detail.className === "unavailable"}
             onClick={() => onConnect(connector)}
           >
-            {detail.className === "expired" ||
+            {detail.className === "configuration-required" ? "Setup needed" : detail.className === "unavailable" ? "Unavailable" : detail.className === "expired" ||
             detail.className === "revoked" ||
             detail.className === "failed"
               ? "Reconnect"
@@ -547,19 +545,26 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     healthSummary.toLowerCase().includes("stale");
   if (status === "connected" && (hasMissingRequiredScopes || isStale)) {
     return {
-      label: "Permission Limited",
+      label: "Needs permission",
       className: "permission-limited",
       summary: `${connector.name} is missing required scopes or permissions.`,
     };
   }
 
-  // 2. Syncing
-  if (status === "connected" && healthState === "unknown") {
+  if (status === "connected" && (healthState === "error" || healthState === "degraded")) {
+    return { label: "Connection issue", className: "failed", summary: healthSummary || "Check this connection and try again." };
+  }
+
+  // Only an active sync operation establishes that syncing is happening.
+  if (status === "connected" && connector.sync?.phase === "syncing") {
     return {
       label: "Syncing",
       className: "syncing",
-      summary: `Verifying connection with ${connector.name}...`,
+      summary: `Syncing ${connector.name}…`,
     };
+  }
+  if (status === "connected" && healthState === "unknown") {
+    return { label: "Not checked", className: "unverified", summary: healthSummary || "Connection health has not been checked yet." };
   }
 
   // 3. Connected
@@ -617,7 +622,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
           `${connector.name} requires a desktop OAuth client configuration.`)
         : `${connector.name} is not configured on the Fable auth broker.`;
     return {
-      label: "Configuration Required",
+      label: "Setup needed",
       className: "configuration-required",
       summary,
     };
@@ -656,7 +661,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
 
   // Default: unconfigured / Needs Authorization
   return {
-    label: "Needs Authorization",
+    label: "Not connected",
     className: "needs-auth",
     summary:
       setupMessage ??
