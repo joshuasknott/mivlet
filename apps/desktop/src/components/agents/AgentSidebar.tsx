@@ -55,8 +55,8 @@ export function AgentSidebar({
           className="agent-sidebar__new"
           type="button"
           onClick={onCreateAgent}
-          aria-label="Create teammate"
-          title="Create teammate"
+          aria-label="Create agent"
+          title="Create agent"
         >
           <Plus size={17} aria-hidden="true" />
         </button>
@@ -82,13 +82,13 @@ export function AgentSidebar({
                 onClick={() => onSelectAgent(agent)}
                 aria-current={active ? "page" : undefined}
               >
-                <ProfileAgentAvatar agent={agent} iconSize={32} />
+                <ProfileAgentAvatar agent={agent} iconSize={32} thinking={preview.status === "running"} />
                 <span className="agent-row__copy">
                   <span className="agent-row__line">
                     <strong>{agent.name}</strong>
-                    <span>{preview.time}</span>
+
                   </span>
-                  <span className="agent-row__preview">{preview.message}</span>
+                  <span className="agent-row__meta"><span className="agent-row__preview">{preview.message}</span><time>{preview.time}</time></span>
                 </span>
                 {preview.status !== "idle" ? (
                   <span

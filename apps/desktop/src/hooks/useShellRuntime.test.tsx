@@ -19,6 +19,38 @@ describe("conversation shell runtime", () => {
     });
   });
 
+  it("shares approval preferences when creating, editing, switching and deleting agents", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    const first = result.current.agents[0];
+    act(() => result.current.selectPermissionLabel("Work Freely"));
+    let created = "";
+    act(() => { created = result.current.createAgent({ ...first, name: "New", permissionLabel: "Read Only" }).id; });
+    expect(result.current.permissionLabel).toBe("Work Freely");
+    act(() => result.current.updateAgent(created, { permissionLabel: "Ask Me" }));
+    act(() => result.current.selectAgent(first.id));
+    expect(result.current.permissionLabel).toBe("Work Freely");
+    act(() => result.current.selectAgent(created));
+    act(() => result.current.removeAgent(created));
+    expect(result.current.permissionLabel).toBe("Work Freely");
+  });
+
+  it("hides models across conversations without silently rerouting a selected model", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await act(async () => { await result.current.connectBackend("xai", "test-key"); });
+    const model = result.current.modelOptions.find((option) => option.available)!;
+    act(() => result.current.selectModel(model.id));
+    act(() => result.current.setModelVisible(model.id, false));
+    expect(result.current.modelOptions.some((option) => option.id === model.id)).toBe(false);
+    expect(result.current.allModelOptions.some((option) => option.id === model.id)).toBe(true);
+    expect(result.current.resolvedSelectedModelId).toBe("");
+    act(() => result.current.selectModel(model.id));
+    expect(result.current.selectedModelId).toBe(model.id);
+    expect(result.current.resolvedSelectedModelId).toBe("");
+    act(() => result.current.setModelVisible(model.id, true));
+    expect(result.current.resolvedSelectedModelId).toBe(model.modelId);
+  });
+
   it("keeps entry gated until a provider is connected and setup is completed", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
 
@@ -71,7 +103,7 @@ describe("conversation shell runtime", () => {
     expect(result.current.permissionMode).toBe("full-access");
   });
 
-  it("assigns a persistent portrait to every created teammate without an icon catalogue limit", async () => {
+  it("assigns a persistent portrait to every created agent without an icon catalogue limit", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
     const template = result.current.agents[0];

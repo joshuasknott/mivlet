@@ -6,7 +6,6 @@ import type {
 } from "@fable/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
 import {
-  getRuntimeCodexStatus,
   interruptRuntimeCodexTurn,
   listenRuntimeCodexEvents,
   respondRuntimeCodexApproval,
@@ -48,10 +47,9 @@ export function createDesktopCodexAppServer(
 
   return {
     async initialize() {
-      const status = await getRuntimeCodexStatus();
-      if (!status?.installed) {
-        throw new Error(status?.message ?? "Codex CLI is not installed.");
-      }
+      // The provider was verified when connected. Native turn startup checks
+      // the executable and the server reports current auth failures; spawning
+      // --version and login status for every message adds two avoidable starts.
       handlers.onRequestStarted(currentRequestId);
     },
 
@@ -138,7 +136,7 @@ export function createDesktopCodexAppServer(
     async cancel(threadId: string, turnId?: string) {
       await interruptRuntimeCodexTurn({
         requestId: currentRequestId,
-        threadId,
+        threadId: activeThreadId ?? threadId,
         turnId: turnId ?? activeTurnId ?? undefined
       });
     },

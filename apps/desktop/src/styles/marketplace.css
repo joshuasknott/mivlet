@@ -429,3 +429,10 @@
     display: none;
   }
 }
+.remote-connector-access { min-width: 0; }
+.remote-connector-region { display: grid; gap: 8px; margin-top: 16px; }
+.remote-connector-access > label { display: flex; align-items: flex-start; gap: 10px; margin: 12px 0; }
+.remote-connector-access small { display: block; opacity: .7; overflow-wrap: anywhere; }
+.remote-connector-access select, .remote-connector-access textarea { width: 100%; max-width: 100%; }
+.connector-detail pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.connector-detail input:not([type="checkbox"]), .connector-detail textarea, .connector-detail select { box-sizing: border-box; max-width: 100%; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }

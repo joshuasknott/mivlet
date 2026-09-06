@@ -36,6 +36,7 @@ export interface ComposerAttachment {
   type: string;
   sizeBytes: number;
   previewUrl?: string;
+  sourceId?: string;
   status?: string;
 }
 
@@ -61,6 +62,7 @@ export interface PersistedShellState {
   onboardingVersion?: number;
   /** Model id last chosen in the composer's model picker (re-validated before use). */
   selectedModelId: string;
+  hiddenModelIds?: string[];
   /** Composer permission level driving agent-run tool gating. */
   permissionMode: PermissionMode;
   /** User-facing approval preset label shown in the composer. */

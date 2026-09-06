@@ -257,6 +257,7 @@ export interface BuildAgentRequestInput {
   prompt: string;
   instructions?: string;
   maxTokens?: number;
+  tools?: AgentTurnRequest["tools"];
 }
 
 /**
@@ -275,7 +276,7 @@ export function buildAgentRequest(input: BuildAgentRequestInput): AgentTurnReque
         : []),
       { role: "user", content: input.prompt },
     ],
-    tools: [],
+    tools: input.tools ?? [],
     maxTokens: input.maxTokens ?? MAX_TOKENS_DEFAULT
   };
 }

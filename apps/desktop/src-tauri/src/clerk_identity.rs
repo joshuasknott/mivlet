@@ -640,7 +640,40 @@ fn load_config_from(
 }
 
 fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
-    load_config_from(!cfg!(debug_assertions), |key| std::env::var(key).ok())
+    load_config_with_packaged(
+        !cfg!(debug_assertions),
+        |key| std::env::var(key).ok(),
+        |key| {
+            // Public OAuth client settings only. Never embed credentials or tokens.
+            match key {
+                "FABLE_CLERK_ISSUER" => option_env!("FABLE_CLERK_ISSUER"),
+                "FABLE_CLERK_OAUTH_CLIENT_ID" => option_env!("FABLE_CLERK_OAUTH_CLIENT_ID"),
+                "FABLE_CLERK_AUDIENCE" => option_env!("FABLE_CLERK_AUDIENCE"),
+                "FABLE_CLERK_AUTHORIZED_PARTY" => option_env!("FABLE_CLERK_AUTHORIZED_PARTY"),
+                "FABLE_CLERK_SCOPES" => option_env!("FABLE_CLERK_SCOPES"),
+                _ => None,
+            }
+            .map(str::to_owned)
+        },
+    )
+}
+
+fn load_config_with_packaged(
+    production: bool,
+    runtime: impl Fn(&str) -> Option<String>,
+    packaged: impl Fn(&str) -> Option<String>,
+) -> Result<Option<ClerkIdentityConfig>, IdentityError> {
+    // A runtime override must be complete: do not mix separate identity services.
+    let has_override = CLERK_CONFIG_KEYS
+        .iter()
+        .any(|key| runtime(key).is_some_and(|value| !value.trim().is_empty()));
+    load_config_from(production, |key| {
+        if has_override {
+            runtime(key)
+        } else {
+            packaged(key)
+        }
+    })
 }
 
 fn load_convex_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
@@ -2484,6 +2517,29 @@ mod tests {
         assert!(keyring_manifest(&unsafe_generation).is_none());
         let too_many = encoded.replace("\"chunks\":3", "\"chunks\":65");
         assert!(keyring_manifest(&too_many).is_none());
+    }
+
+    #[test]
+    fn packaged_identity_works_without_launch_environment_and_rejects_partial_overrides() {
+        let packaged = config_values(&[
+            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
+            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+        ]);
+        let config = load_config_with_packaged(true, |_| None, |key| packaged.get(key).cloned())
+            .unwrap()
+            .unwrap();
+        assert_eq!(config.audience, "fable-desktop");
+        let error = load_config_with_packaged(
+            true,
+            |key| (key == "FABLE_CLERK_ISSUER").then(|| "https://override.example".to_string()),
+            |key| packaged.get(key).cloned(),
+        )
+        .unwrap_err();
+        assert_eq!(error.code, "configuration-required");
+        assert!(load_config_with_packaged(true, |_| None, |_| None)
+            .unwrap()
+            .is_none());
     }
 
     #[test]

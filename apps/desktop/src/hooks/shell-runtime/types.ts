@@ -1,18 +1,47 @@
 import type * as React from "react";
-import type { ChangeEvent, FormEvent } from "react";
 import type {
-  AccountWorkspaceStatus, ActionHistoryEvent, ApprovalAuditEntry, ApprovalDecision, ApprovalGrant, ApprovalModification,
-  ApprovalRequest, BackendProvider, BackendVerifyResult,
-  ConnectorAccountOption, ConnectorManifest, CustomApprovalSettings,
+  ChangeEvent,
+} from "react";
+import type {
+  AccountWorkspaceStatus,
+  ActionHistoryEvent,
+  ApprovalAuditEntry,
+  ApprovalDecision,
+  ApprovalGrant,
+  ApprovalModification,
+  ApprovalRequest,
+  BackendProvider,
+  BackendVerifyResult,
+  ConnectorAccountOption,
+  ConnectorManifest,
+  CustomApprovalSettings,
   FableAgentProfile,
-  IdentityStatus, KnowledgeCitation, KnowledgeSource, MemoryControlState,
-  MemoryRecord, PermissionMode, PreparedExecutionContext, ThreadSummary, WorkspaceDirective
+  IdentityStatus,
+  KnowledgeSource,
+  MemoryControlState,
+  MemoryRecord,
+  PermissionMode,
+  PreparedExecutionContext,
+  ThreadSummary,
 } from "@fable/protocol";
-import type { ToolApprovalGate } from "@fable/connectors";
-import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
-import type { ProviderModelOption } from "../../lib/provider-models";
-import type { KnowledgeRunContext } from "../../lib/agent-run";
-import type { ApprovalModificationDraft, ComposerAttachment, PendingApprovalConfirmation, WorkspacePage } from "../../lib/types";
+import type {
+  ToolApprovalGate,
+} from "@fable/connectors";
+import type {
+  ModelDiscoveryOutcome,
+} from "../../lib/backend-state";
+import type {
+  ProviderModelOption,
+} from "../../lib/provider-models";
+import type {
+  KnowledgeRunContext,
+} from "../../lib/agent-run";
+import type {
+  ApprovalModificationDraft,
+  ComposerAttachment,
+  PendingApprovalConfirmation,
+  WorkspacePage,
+} from "../../lib/types";
 
 export interface ShellRuntime {
   // navigation
@@ -41,24 +70,16 @@ export interface ShellRuntime {
   commandOpen: boolean;
   importStatus: string | null;
   composerAttachments: ComposerAttachment[];
-  knowledgeCitations: KnowledgeCitation[];
-  knowledgeSearchMode: string;
-  composerRef: React.MutableRefObject<HTMLTextAreaElement | null>;
+  composerRef: React.MutableRefObject<import("../../components/ComposerInput").ComposerInputHandle | null>;
   fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
-  folderInputRef: React.MutableRefObject<HTMLInputElement | null>;
-  submitComposer: (event: FormEvent) => void;
-  submitPrompt: (prompt: string) => void;
   removeComposerAttachment: (attachmentId: string) => void;
-  handleLocalKnowledgeFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   handleComposerAttachmentChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  handleLocalKnowledgeFolderChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  triggerFolderImport: () => void;
   focusComposer: (value: string) => void;
-  useDirective: (directive: WorkspaceDirective) => void;
   useConnector: (connector: ConnectorManifest) => void;
   runCommand: (command: string) => void;
   // connected apps
   connectorManifests: ConnectorManifest[];
+  refreshConnectorStatuses: () => Promise<ConnectorManifest[] | null>;
   connectorAccounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
   connectorImportedSources: KnowledgeSource[];
@@ -89,21 +110,12 @@ export interface ShellRuntime {
   clearApprovalInteraction: () => void;
   // knowledge + memory
   workspaceKnowledgeSources: KnowledgeSource[];
-  saveTextToKnowledge: (title: string, content: string) => Promise<boolean>;
-  contextualDirectives: WorkspaceDirective[];
   pinnedSourceIds: string[];
   managedMemoryRecords: MemoryRecord[];
   memoryDisabled: boolean;
   memoryState: MemoryControlState;
-  editingMemoryId: string | null;
-  editingMemoryDraft: Pick<MemoryRecord, "title" | "value">;
   memoryExportText: string;
   memoryStatus: string;
-  setEditingMemoryDraft: (draft: Pick<MemoryRecord, "title" | "value">) => void;
-  toggleSourcePin: (sourceId: string) => void;
-  promoteSourceToMemory: (source: KnowledgeSource) => void;
-  startMemoryEdit: (record: MemoryRecord) => void;
-  saveMemoryEdit: (recordId: string) => void;
   toggleMemoryPin: (recordId: string) => void;
   forgetMemory: (recordId: string) => void;
   /** Soft-disable a single memory: excluded from retrieval/context/export, but stays in management views. */
@@ -111,24 +123,10 @@ export interface ShellRuntime {
   toggleMemoryDisabled: () => void;
   exportMemory: () => Promise<void>;
   /**
-   * Export all current-workspace knowledge (live sources + live memories) as
-   * plain text. Excludes disabled sources, forgotten/disabled memories,
-   * secrets, connector tokens, and raw audit payloads. Resolves to the export
-   * text and surfaces it through `knowledgeExportText`.
-   */
-  exportKnowledge: () => Promise<void>;
-  knowledgeExportText: string;
-  cancelMemoryEdit: () => void;
-  searchKnowledge: (query: string) => Promise<void>;
-  refreshKnowledgeSource: (sourceId: string, file?: File) => Promise<void>;
-  toggleKnowledgeSourceDisabled: (sourceId: string) => void;
-  /** Permanently remove a source from search, citations, pins, and context. */
-  deleteKnowledgeSource: (sourceId: string) => void;
-  /**
    * Assemble context for the authenticated active member. Fails closed when
    * the active workspace has no matching member instead of widening scope.
    */
-  assembleKnowledgeContext: (query: string, context?: KnowledgeRunContext) => Promise<PreparedExecutionContext>;
+  assembleConversationContext: (query: string, context?: KnowledgeRunContext) => Promise<PreparedExecutionContext>;
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
@@ -176,6 +174,9 @@ export interface ShellRuntime {
   selectableModels: BackendProvider["models"];
   /** Provider-aware choices shown by the composer across every connected backend. */
   modelOptions: ProviderModelOption[];
+  allModelOptions: ProviderModelOption[];
+  hiddenModelIds: string[];
+  setModelVisible: (modelId: string, visible: boolean) => void;
   /** The provider model id that should drive the next agent run (re-validated). */
   resolvedSelectedModelId: string;
   /** The collision-safe picker id corresponding to `resolvedSelectedModelId`. */
@@ -205,6 +206,7 @@ export interface ShellRuntime {
     arguments: string;
     approval: ApprovalRequest;
   }) => void;
+  approvalPreviews: Record<string, { summary: string; details: string }>;
   /** Remove cancelled backend tool calls from the transient approval queue. */
   clearBackendToolApprovals: () => void;
   /** Optional hosted identity, separate from local data and provider credentials. */

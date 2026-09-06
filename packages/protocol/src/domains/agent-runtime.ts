@@ -544,6 +544,7 @@ export interface ProviderRouteExecutionBinding {
  */
 export type BackendAgentEvent =
   | { type: "text-delta"; text: string }
+  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
   | {
       type: "tool-call";
       callId: string;

@@ -311,13 +311,48 @@ pub(crate) struct BrokerEndpoints {
     pub revocation_endpoint: String,
 }
 
+pub(crate) fn provision_connector_configuration() -> Result<(), String> {
+    if let (Some(client_id), Ok(secret)) = (
+        google_oauth_client_id(),
+        std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET"),
+    ) {
+        if !secret.trim().is_empty() {
+            NativeConnectorSecretStore
+                .set(&format!("oauth-client-secret:google:{client_id}"), &secret)?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn google_oauth_client_id() -> Option<String> {
+    public_configuration(
+        "FABLE_GOOGLE_OAUTH_CLIENT_ID",
+        option_env!("FABLE_GOOGLE_OAUTH_CLIENT_ID"),
+    )
+}
+
+pub(crate) fn auth_broker_url() -> Option<String> {
+    public_configuration(
+        "FABLE_AUTH_BROKER_URL",
+        option_env!("FABLE_AUTH_BROKER_URL"),
+    )
+}
+
+fn public_configuration(key: &str, compiled: Option<&str>) -> Option<String> {
+    let compiled = if cfg!(test) { None } else { compiled };
+    std::env::var(key)
+        .ok()
+        .or_else(|| compiled.map(str::to_owned))
+        .filter(|value| !value.trim().is_empty())
+}
+
 fn provider_config(
     connector_id: &str,
     auth_mode: &str,
     scopes: Vec<String>,
 ) -> Result<OAuthProviderConfig, ConnectorCommandError> {
     if auth_mode == "oauth-pkce" {
-        let client_id = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").map_err(|_| {
+        let client_id = google_oauth_client_id().ok_or_else(|| {
             command_error(
                 "configuration-required",
                 connector_id,
@@ -330,7 +365,7 @@ fn provider_config(
         // the general native-app documentation describes the field as optional.
         // Keep it in the native process environment only; it never enters React
         // state, connection metadata, logs, or a model transcript.
-        google_oauth_client_secret(connector_id)?;
+        google_oauth_client_secret(connector_id, &client_id)?;
         let mut provider_scopes = vec![
             "openid".to_string(),
             "profile".to_string(),
@@ -365,7 +400,7 @@ fn provider_config(
         });
     }
 
-    let broker_url = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+    let broker_url = auth_broker_url();
     let endpoints = resolve_broker_endpoints(connector_id, broker_url.as_deref())?;
     Ok(OAuthProviderConfig {
         authorization_endpoint: endpoints.authorization_endpoint,
@@ -382,19 +417,72 @@ fn provider_config(
     })
 }
 
-fn google_oauth_client_secret(connector_id: &str) -> Result<Option<String>, ConnectorCommandError> {
+fn google_oauth_client_secret(
+    connector_id: &str,
+    client_id: &str,
+) -> Result<Option<String>, ConnectorCommandError> {
     if !matches!(connector_id, "google-drive" | "gmail" | "google-calendar") {
         return Ok(None);
     }
-    match std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET") {
-        Ok(secret) if !secret.trim().is_empty() => Ok(Some(secret)),
-        _ => Err(command_error(
-            "configuration-required",
-            connector_id,
-            "Google Desktop OAuth client secret configuration is required.",
-            false,
-        )),
+    let environment_secret = if google_oauth_client_id().as_deref() == Some(client_id) {
+        std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET")
+            .ok()
+            .filter(|secret| !secret.trim().is_empty())
+    } else {
+        None
+    };
+    // Development provisioning survives a normal app launch, without embedding secrets.
+    // Unit tests must never read or write the real user's credential store.
+    if cfg!(test) {
+        return environment_secret.map(Some).ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "Google Desktop OAuth client secret configuration is required.",
+                false,
+            )
+        });
     }
+    google_secret_with_store(
+        connector_id,
+        client_id,
+        environment_secret,
+        &NativeConnectorSecretStore,
+    )
+}
+
+fn google_secret_with_store(
+    connector_id: &str,
+    client_id: &str,
+    environment_secret: Option<String>,
+    store: &dyn ConnectorSecretStore,
+) -> Result<Option<String>, ConnectorCommandError> {
+    let key = format!("oauth-client-secret:google:{client_id}");
+    let storage_error = |_| {
+        command_error(
+            "credential-store-unavailable",
+            connector_id,
+            "Fable could not access Google sign-in configuration in secure storage.",
+            true,
+        )
+    };
+    if let Some(secret) = environment_secret {
+        store.set(&key, &secret).map_err(storage_error)?;
+        return Ok(Some(secret));
+    }
+    store
+        .get(&key)
+        .map_err(storage_error)?
+        .filter(|secret| !secret.trim().is_empty())
+        .map(Some)
+        .ok_or_else(|| {
+            command_error(
+                "configuration-required",
+                connector_id,
+                "Google sign-in needs client configuration in this installation's secure storage.",
+                false,
+            )
+        })
 }
 
 #[cfg(test)]
@@ -949,7 +1037,7 @@ async fn prepare_with_store(
                 false,
             )
         })?;
-        let client_secret = google_oauth_client_secret(connector_id)?;
+        let client_secret = google_oauth_client_secret(connector_id, &pending.client_id)?;
         let mut form = vec![
             ("grant_type", "authorization_code"),
             ("code", code_value.as_ref()),
@@ -2543,7 +2631,7 @@ async fn refresh_connection_for_connection(
                 false,
             )
         })?;
-        let client_secret = google_oauth_client_secret(connector_id)?;
+        let client_secret = google_oauth_client_secret(connector_id, &tokens.client_id)?;
         let mut form = vec![
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token.as_str()),
@@ -2774,6 +2862,25 @@ mod tests {
             self.0.lock().unwrap().remove(key);
             Ok(())
         }
+    }
+
+    #[test]
+    fn google_client_configuration_survives_restart_and_is_client_scoped() {
+        let store = MemoryStore::default();
+        let provisioned =
+            google_secret_with_store("gmail", "client-a", Some("test-secret".into()), &store)
+                .unwrap();
+        assert_eq!(provisioned.as_deref(), Some("test-secret"));
+        assert_eq!(
+            google_secret_with_store("google-drive", "client-a", None, &store).unwrap(),
+            provisioned
+        );
+        assert_eq!(
+            google_secret_with_store("gmail", "client-b", None, &store)
+                .unwrap_err()
+                .code,
+            "configuration-required"
+        );
     }
 
     #[test]

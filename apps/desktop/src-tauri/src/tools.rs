@@ -1,14 +1,16 @@
 //! Fable-owned tool execution boundary (Rust side).
 //!
 //! The TypeScript executor (see `@fable/connectors` `tool-executor.ts`) runs only
-//! after the shell grants an approval. This module is the defense-in-depth Rust
+//! after the shell's permission gate allows it. This module is the defense-in-depth Rust
 //! layer each tool call must still cross: it re-validates the approval, confines
 //! file paths to the teammate's Fable-owned workspace, and performs the actual
 //! side effects (read/write file, web-fetch). The shell NEVER spawns a process or writes files
 //! from JavaScript — every consequential tool routes through these commands.
 //!
 //! Hard invariants:
-//!   - Every command re-checks its own approval before the side effect. A granted
+//!   - Allowlisted native connector reads use scoped account consent, with exact
+//!     argument/policy binding, without a redundant persisted user decision.
+//!   - Consequential commands re-check their approval before the side effect. A granted
 //!     `once`/`session`/`rule` decision is honored; a `deny` (or missing/reshaped
 //!     approval) fails closed with `approval-required` and performs nothing.
 //!   - File paths are confined to the teammate's local-computer workspace (no
@@ -236,7 +238,7 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
     }
 }
 
-fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
+pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
@@ -255,6 +257,37 @@ fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "search-notion" | "search-slack" => Some(("read-only", "low")),
         _ => None,
     }
+}
+
+/// Existing connector account consent covers only these closed read adapters.
+/// Semantic grants, arbitrary MCP calls and every mutation retain exact permits.
+fn routine_connector_read(tool: &str) -> bool {
+    matches!(
+        tool,
+        "google-drive-read"
+            | "gmail-read"
+            | "google-calendar-read"
+            | "github-read"
+            | "vercel-read"
+            | "linear-read"
+            | "search-notion"
+            | "search-slack"
+    )
+}
+
+fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<(), String> {
+    validate_tool_approval_binding(&request.tool, &request.arguments, &request.approval.request)?;
+    if routine_connector_read(&request.tool) {
+        if request.approval.decision != "once" {
+            return Err("Connector read was denied or has an invalid decision.".into());
+        }
+        return Ok(());
+    }
+    verify_and_consume_execution_approval(
+        path,
+        &request.approval.request,
+        &request.approval.decided_at,
+    )
 }
 
 /// Bind an approval to the exact registered tool policy and argument preview.
@@ -915,8 +948,7 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
-    if let Err(error) = validate_tool_approval_binding(&tool, &arguments, &request.approval.request)
-    {
+    if let Err(error) = verify_tool_authority(&execution_approvals_path(&app)?, &request) {
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -931,24 +963,14 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
-    if let Err(error) = verify_and_consume_execution_approval(
-        &execution_approvals_path(&app)?,
-        &request.approval.request,
-        &decided_at,
-    ) {
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: "blocked",
-                error_code: "permit",
-                message: &error,
-            },
+    if routine_connector_read(&tool) {
+        // Match the requested workspace against native account authority before
+        // the provider resolves its selected connection, credentials and scopes.
+        crate::authorized_scope::command_scope(
+            request.workspace_id.clone(),
             None,
-        );
-        return Err(error);
+            crate::authorized_scope::ScopeAccess::Read,
+        )?;
     }
     if tool == "run-shell" {
         let workspace_id = request
@@ -958,7 +980,7 @@ pub async fn execute_tool_call(
         let agent_id = request
             .agent_id
             .clone()
-            .ok_or_else(|| "The isolated terminal requires an active teammate.".to_string())?;
+            .ok_or_else(|| "The isolated terminal requires an active agent.".to_string())?;
         let command = require_string_argument(&arguments, "command")?;
         let result = local_computers
             .inner()
@@ -990,7 +1012,7 @@ pub async fn execute_tool_call(
                 risk,
                 status: if ok { "ok" } else { "failed" },
                 error_code: if ok { "" } else { "process-exit" },
-                message: "run-shell executed in the teammate container",
+                message: "run-shell executed in the agent container",
             },
             None,
         );
@@ -1004,7 +1026,7 @@ pub async fn execute_tool_call(
         let agent_id = request
             .agent_id
             .clone()
-            .ok_or_else(|| "The local browser requires an active teammate.".to_string())?;
+            .ok_or_else(|| "The local browser requires an active agent.".to_string())?;
         let url = require_string_argument(&arguments, "url")?;
         let result = local_computers
             .inner()
@@ -1049,7 +1071,7 @@ pub async fn execute_tool_call(
         let agent_id = request
             .agent_id
             .clone()
-            .ok_or_else(|| "Local browser observation requires an active teammate.".to_string())?;
+            .ok_or_else(|| "Local browser observation requires an active agent.".to_string())?;
         let result = local_computers
             .inner()
             .clone()
@@ -1093,7 +1115,7 @@ pub async fn execute_tool_call(
         let agent_id = request
             .agent_id
             .clone()
-            .ok_or_else(|| "Local browser actions require an active teammate.".to_string())?;
+            .ok_or_else(|| "Local browser actions require an active agent.".to_string())?;
         let action = require_string_argument(&arguments, "action")?;
         if !matches!(action.as_str(), "click" | "fill" | "press" | "select") {
             return Err("The local browser action must be click, fill, press, or select.".into());
@@ -1229,7 +1251,7 @@ pub async fn execute_tool_call(
         let agent_id = request
             .agent_id
             .as_deref()
-            .ok_or_else(|| "File tools require an active teammate.".to_string())?;
+            .ok_or_else(|| "File tools require an active agent.".to_string())?;
         local_computers.tool_workspace_root(workspace_id, agent_id)?
     } else {
         // Non-file tools do not use this path, but the pure dispatcher retains
@@ -1589,4 +1611,72 @@ pub(crate) fn is_denied(decision: &str) -> bool {
 #[allow(dead_code)]
 pub(crate) fn approving_decisions() -> &'static [&'static str] {
     &APPROVAL_DECISIONS[..APPROVAL_DECISIONS.len().saturating_sub(1)]
+}
+
+#[cfg(test)]
+mod connector_authority_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn request(tool: &str) -> ToolExecutionRequest {
+        let (mode, risk) = tool_policy(tool).unwrap_or(("full-access", "critical"));
+        serde_json::from_value(json!({
+            "tool": tool, "arguments": {"query": "test"}, "approval": {
+                "decision": "once", "decidedAt": "2026-09-05T20:00:00Z", "request": {
+                    "id": "connector-test", "service": "Fable", "action": tool,
+                    "mode": mode, "riskLevel": risk, "dataUsed": ["query: test"],
+                    "consequence": "Read data", "requestedAt": "2026-09-05T20:00:00Z", "decisions": ["once", "deny"]
+                }
+            }
+        })).unwrap()
+    }
+
+    #[test]
+    fn native_connector_reads_do_not_require_a_persisted_user_prompt() {
+        let path = std::env::temp_dir()
+            .join(format!("fable-no-read-permits-{}", std::process::id()))
+            .join("missing.json");
+        for tool in [
+            "gmail-read",
+            "google-drive-read",
+            "google-calendar-read",
+            "github-read",
+            "vercel-read",
+            "linear-read",
+            "search-notion",
+            "search-slack",
+        ] {
+            verify_tool_authority(&path, &request(tool)).expect(tool);
+        }
+        assert!(
+            !path.exists(),
+            "Read consent must not fabricate a user decision record"
+        );
+        for tool in [
+            "write-file",
+            "run-shell",
+            "connection-read",
+            "web-fetch",
+            "connector-call",
+        ] {
+            assert!(
+                verify_tool_authority(&path, &request(tool)).is_err(),
+                "{tool} must retain its permit boundary"
+            );
+        }
+    }
+
+    #[test]
+    fn read_consent_rejects_changed_arguments_policy_and_denial() {
+        let path = Path::new("unused-read-permit.json");
+        let mut changed = request("gmail-read");
+        changed.arguments = json!({"query": "different"});
+        assert!(verify_tool_authority(path, &changed).is_err());
+        let mut denied = request("gmail-read");
+        denied.approval.decision = "deny".into();
+        assert!(verify_tool_authority(path, &denied).is_err());
+        let mut downgraded = request("gmail-read");
+        downgraded.approval.request.risk_level = "low".into();
+        assert!(verify_tool_authority(path, &downgraded).is_err());
+    }
 }

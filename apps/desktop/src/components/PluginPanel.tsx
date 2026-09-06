@@ -1,4 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listRuntimeMcpServerConfigurations } from "../runtime";
+import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
+import { remoteConnectorFor, remoteConnectorServerId, remoteConnectors } from "./marketplace/remote-connectors";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
@@ -30,11 +33,11 @@ const INSTALLED_CONNECTOR_PRIORITY = [
 ];
 
 /**
- * Marketplace directory backed by the native connector manifests. Catalogue
- * rows without a matching manifest are visible as Planned but can never enter
- * a connected or installed state.
+ * Marketplace directory backed by native manifests and official remote setup
+ * routes. A saved endpoint never establishes a connected or installed state.
  */
 export function PluginPanel({
+  workspaceId,
   manifests,
   onUseConnector,
   onConnect,
@@ -44,6 +47,7 @@ export function PluginPanel({
   accounts,
   onSwitchAccount,
 }: {
+  workspaceId?: string;
   manifests: ConnectorManifest[];
   onUseConnector: (connector: ConnectorManifest) => void;
   onConnect: (connector: ConnectorManifest) => void;
@@ -56,6 +60,20 @@ export function PluginPanel({
   const [query, setQuery] = useState("");
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
+  const [useRemote, setUseRemote] = useState(false);
+  const [savedRemoteIds, setSavedRemoteIds] = useState<string[]>([]);
+  const refreshSaved = useCallback(async () => {
+    if (!workspaceId) return;
+    const servers = await listRuntimeMcpServerConfigurations(workspaceId).catch(() => null);
+    return servers?.filter((server) => !server.disabled).map((server) => server.id) ?? [];
+  }, [workspaceId]);
+  useEffect(() => {
+    let active = true;
+    setSavedRemoteIds([]);
+    if (!workspaceId) return;
+    void refreshSaved().then((ids) => { if (active) setSavedRemoteIds(ids ?? []); });
+    return () => { active = false; };
+  }, [refreshSaved, workspaceId]);
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
   const manifestById = useMemo(
@@ -138,6 +156,7 @@ export function PluginPanel({
   const openEntry = (entry: MarketplaceConnectorEntry) => {
     setSelectedEntryId(entry.id);
     const connector = manifestById.get(entry.id);
+    setUseRemote(Boolean(remoteConnectorFor(entry.id)) && (!connector || connector.status !== "connected" || savedRemoteIds.includes(remoteConnectorServerId(entry.id))));
     if (connector) onSelect(connector);
   };
 
@@ -146,6 +165,8 @@ export function PluginPanel({
     placement: string,
   ) => {
     const connector = manifestById.get(entry.id);
+    const remote = remoteConnectorFor(entry.id);
+    const connectable = Boolean(connector || remote);
     const connected = connector?.status === "connected";
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const needsReconnect =
@@ -154,7 +175,7 @@ export function PluginPanel({
       cardDetail?.className === "failed";
     const ariaLabel = connected
       ? `Manage ${entry.name}`
-      : connector
+      : connectable
         ? `${needsReconnect ? "Reconnect" : "Connect"} ${entry.name}`
         : `${entry.name} is planned`;
 
@@ -164,7 +185,7 @@ export function PluginPanel({
         className="marketplace-connector-row"
         key={`${placement}-${entry.id}`}
         data-connector-id={entry.id}
-        data-availability={connector ? "available" : "planned"}
+        data-availability={connectable ? "available" : "planned"}
         onClick={() => openEntry(entry)}
         aria-label={ariaLabel}
       >
@@ -177,7 +198,7 @@ export function PluginPanel({
         <span className="marketplace-connector-row__copy">
           <strong>{entry.name}</strong>
           <span>{entry.description}</span>
-          {!connector ? <small>Planned</small> : null}
+          {!connectable ? <small>Planned</small> : null}
         </span>
         <span
           className={`marketplace-connector-row__action${connected ? " marketplace-connector-row__action--connected" : ""}`}
@@ -185,7 +206,7 @@ export function PluginPanel({
         >
           {connected ? (
             <Check size={19} weight="bold" />
-          ) : connector ? (
+          ) : connectable ? (
             <Plus size={19} />
           ) : (
             <Clock size={17} />
@@ -200,7 +221,7 @@ export function PluginPanel({
       <header className="marketplace-page-header">
         <div>
           <h1>Connectors</h1>
-          <p>Give your teammates access to the tools you use.</p>
+          <p>Give your agents access to the tools you use.</p>
         </div>
         <label className="connections-search">
           <MagnifyingGlass size={17} aria-hidden="true" />
@@ -260,6 +281,11 @@ export function PluginPanel({
         )}
       </section>
 
+      {savedRemoteIds.length ? <section className="marketplace-section" aria-label="Saved app connections">
+        <h2>Saved connections</h2><p>Open a connection to verify its account and enabled tools.</p>
+        <div className="marketplace-connector-grid">{remoteConnectors.filter((preset) => savedRemoteIds.includes(remoteConnectorServerId(preset.id))).map((preset) => findMarketplaceConnector(preset.id)).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter((entry) => !normalizedQuery || `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery)).map((entry) => renderConnectorRow(entry, "saved"))}</div>
+      </section> : null}
+
       {[
         ...(!normalizedQuery ? [{ id: "popular", title: "Popular", connectors: ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
         ...visibleSections,
@@ -311,7 +337,11 @@ export function PluginPanel({
             >
               <X size={17} />
             </button>
-            {selectedConnector ? (
+            {(useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
+              <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
+                titleId={`connector-detail-${selectedEntry.id}`} onSaved={() => setSavedRemoteIds((ids) => [...new Set([...ids, remoteConnectorServerId(selectedEntry.id)])])} />
+            ) : selectedConnector ? (
+              <>
               <ConnectorDetails
                 connector={selectedConnector}
                 onUseConnector={onUseConnector}
@@ -322,6 +352,8 @@ export function PluginPanel({
                 onConnect={onConnect}
                 titleId={`connector-detail-${selectedConnector.id}`}
               />
+              {remoteConnectorFor(selectedEntry.id) && selectedConnector.status !== "connected" ? <button type="button" className="button button--secondary" onClick={() => setUseRemote(true)}>Connect through {selectedEntry.name}'s official service</button> : null}
+              </>
             ) : (
               <PlannedConnectorDetails
                 entry={selectedEntry}
@@ -365,7 +397,7 @@ function PlannedConnectorDetails({
           <p>
             Fable does not have a native adapter or authorization path for this
             connector yet. It cannot be installed, connected, or used by a
-            teammate.
+            agent.
           </p>
         </div>
       </div>
@@ -428,10 +460,11 @@ function ConnectorDetails({
         <h3>Try asking</h3>
         <div className="connector-guide__examples">{guide.examples.map((example) => <p key={example}>{example}</p>)}</div>
         <h3>How it works</h3>
-        <ol><li>Connect your account and choose the access you want to grant.</li><li>Enable {connector.name} in your teammate's connections.</li><li>Mention <code>@{connector.id}</code> in a message, or choose it from the attachment menu.</li></ol>
+        <ol><li>Connect your account and choose the access you want to grant.</li><li>The connection is available to every agent in your workspace.</li><li>Mention <code>@{connector.id}</code> in a message, or choose it from the attachment menu.</li></ol>
         <p>Fable uses the access you grant. Changes follow your workspace's approval settings.</p>
       </section> : null}
       <div className="connector-detail__body">
+        {connector.status !== "connected" ? <div><span>Connection setup</span><p>{detail.summary}</p></div> : null}
         <div>
           <span>Access</span>
           {permissions.length ? <ul>

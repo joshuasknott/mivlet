@@ -1,24 +1,24 @@
-import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { blobAvatarDataUrl, createAvatarSeed } from "./blob-avatar";
 
-describe("generated teammate portraits", () => {
-  it("creates independent seeds and deterministic portraits without cycling a preset list", () => {
-    const seeds = Array.from({ length: 1000 }, () => createAvatarSeed());
-    expect(new Set(seeds).size).toBe(seeds.length);
-    const portraits = seeds.map(blobAvatarDataUrl);
-    expect(new Set(portraits).size).toBe(seeds.length);
-    expect(seeds.map(blobAvatarDataUrl)).toEqual(portraits);
+describe("Organic agent portraits", () => {
+  it("gives consecutive agents distinct family members and unique seeds", () => {
+    const seeds = Array.from({ length: 4 }, () => createAvatarSeed());
+    expect(new Set(seeds).size).toBe(4);
+    expect(new Set(seeds.map(blobAvatarDataUrl)).size).toBe(4);
   });
-
-  it("keeps the v1 design stable for a saved seed", () => {
-    const portrait = blobAvatarDataUrl("blob-v1:fable-stable-portrait");
-    expect(createHash("sha256").update(portrait).digest("hex")).toMatchInlineSnapshot(`"84b4658e213783aebcd1098ec5be5c723912a5b7a80995ba5a7bec21a9fada6a"`);
+  it("restores the saved family member independently of creation order", () => {
+    const before = blobAvatarDataUrl("organic-v1:2:saved-agent");
+    createAvatarSeed();
+    expect(blobAvatarDataUrl("organic-v1:2:saved-agent")).toBe(before);
+    expect(before).toContain("organic-taper.png");
   });
-
-  it("keeps seed contents out of generated markup", () => {
-    const svg = decodeURIComponent(blobAvatarDataUrl('<script>external("https://example.com")</script>').split(",")[1]);
-    expect(svg).not.toMatch(/<script|example\.com|onload|NaN|Infinity/);
-    expect(svg).toContain('viewBox="0 0 64 64"');
+  it("maps old or malformed seeds deterministically to bundled assets", () => {
+    for (const seed of ["blob-v1:saved", "", '<script>https://example.com</script>', "organic-v1:99:invalid"]) {
+      const source = blobAvatarDataUrl(seed);
+      expect(source).toBe(blobAvatarDataUrl(seed));
+      expect(source).toMatch(/organic-(wedge|branch|taper|bean)\.png/);
+      expect(source).not.toMatch(/<script|example\.com|NaN|Infinity/);
+    }
   });
 });

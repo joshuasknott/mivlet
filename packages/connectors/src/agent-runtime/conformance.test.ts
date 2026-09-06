@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { registeredToolSpecs } from "../native-api/tools";
 import type { BackendProvider, BackendAgentEvent, BackendCapability } from "@fable/protocol";
 import { resolveAgentBackend, type BackendDeps } from "./index";
 import { createCodexBackend } from "./adapters/codex";
@@ -66,6 +67,15 @@ describe("AgentBackend Conformance Tests", () => {
   // Area 1: Secret Redaction
   // ==========================================
   describe("Secret Redaction", () => {
+    it("streams public reasoning summaries separately from answer text with secrets redacted", async () => {
+      const handle = new MockCodexAppServer({ events: [
+        { type: "reasoning-summary", text: "Checking token=sk-12345678901234567890abc123", itemId: "r1", summaryIndex: 0 },
+        { type: "text-delta", text: "Answer" }
+      ] });
+      const events = await collectEvents(createCodexBackend(mockCodexProvider(), mockCodexDeps(handle))?.run(baseRequest, { execute: async () => "" }));
+      expect(events).toContainEqual({ type: "reasoning-summary", text: "Checking token=[REDACTED]", itemId: "r1", summaryIndex: 0 });
+      expect(events.filter((event) => event.type === "text-delta")).toEqual([{ type: "text-delta", text: "Answer" }]);
+    });
     it("redacts credentials from raw strings", () => {
       expect(redactSecretsFromString("my key is sk-12345678901234567890abc123")).toBe("my key is [REDACTED]");
       expect(redactSecretsFromString("bearer sk-ant-12345678901234567890abc123")).toBe("bearer [REDACTED]");
@@ -396,8 +406,8 @@ describe("AgentBackend Conformance Tests", () => {
             type: "approval-request",
             requestId: "codex-req-id",
             callId: "call-1",
-            tool: "run-shell",
-            arguments: "{\"command\":\"echo 1\"}",
+            tool: "gmail-read",
+            arguments: "{\"operation\":\"search\"}",
             approval: {
               id: "app-id",
               service: "codex",
@@ -416,7 +426,7 @@ describe("AgentBackend Conformance Tests", () => {
       const backend = createCodexBackend(mockCodexProvider(), mockCodexDeps(handle));
 
       const executeSpy = vi.fn().mockResolvedValue("tool response text");
-      const stream = backend?.run(baseRequest, { execute: executeSpy });
+      const stream = backend?.run({ ...baseRequest, tools: registeredToolSpecs().filter((tool) => tool.name === "gmail-read") }, { execute: executeSpy });
       const events = await collectEvents(stream);
 
       expect(executeSpy).toHaveBeenCalled();

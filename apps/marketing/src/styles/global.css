@@ -143,7 +143,7 @@ footer {
   width: 44px;
   height: 44px;
   object-fit: contain;
-  filter: grayscale(1) contrast(1.4);
+  filter: invert(1) hue-rotate(180deg);
 }
 
 .nav-links,
@@ -232,7 +232,7 @@ main {
   height: clamp(136px, 11vw, 176px);
   margin-bottom: 1.75rem;
   object-fit: contain;
-  filter: grayscale(1) contrast(1.35);
+  filter: invert(1) hue-rotate(180deg);
 }
 
 .home-hero h1 {
@@ -506,7 +506,7 @@ button:hover {
   height: 108px;
   margin-bottom: 2.4rem;
   object-fit: contain;
-  filter: grayscale(1) contrast(1.35);
+  filter: invert(1) hue-rotate(180deg);
 }
 
 .updates-copy h2 {
@@ -688,7 +688,7 @@ noscript .fallback {
   width: 48px;
   height: 48px;
   object-fit: contain;
-  filter: grayscale(1) contrast(1.4);
+  filter: invert(1) hue-rotate(180deg);
 }
 
 .site-footer p {
@@ -1146,7 +1146,7 @@ th {
 .home-page .logo-image {
   width: 32px;
   height: 32px;
-  filter: grayscale(1) contrast(1.6);
+  filter: none;
 }
 
 .home-page .logo-wordmark {
@@ -1715,3 +1715,5 @@ th {
     transition: none !important;
   }
 }
+
+.home-page .footer-mark img { filter: none; }

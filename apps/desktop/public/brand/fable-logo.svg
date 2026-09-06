@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60" width="200" height="60" aria-labelledby="fable-logo-title">
-  <title id="fable-logo-title">Fable</title>
-  <!-- Placeholder lockup; real assets per brand.md -->
-  <rect x="5" y="5" width="50" height="50" rx="6" fill="#A16B3F"/>
-  <text x="65" y="40" font-family="system-ui, sans-serif" font-size="32" font-weight="600" fill="#17191A">Fable</text>
-</svg>

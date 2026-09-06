@@ -298,6 +298,7 @@ pub struct RemoteMcpAuthorizationSummary {
 
 struct RemoteMcpAuthorizationDiscovery {
     summary: RemoteMcpAuthorizationSummary,
+    resource: Option<String>,
     authorization_endpoint: Url,
     token_endpoint: Url,
     registration_endpoint: Option<Url>,
@@ -314,6 +315,8 @@ struct RemoteMcpOAuthTokens {
     token_endpoint: String,
     client_id: String,
     resource: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    transport_endpoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     revocation_endpoint: Option<String>,
 }
@@ -433,6 +436,7 @@ pub(crate) struct McpSemanticContinuation {
 #[serde(rename_all = "camelCase")]
 pub struct PreparedMcpToolCall {
     proposal_fingerprint: String,
+    requires_approval: bool,
     approval: crate::models::ApprovalRequest,
 }
 

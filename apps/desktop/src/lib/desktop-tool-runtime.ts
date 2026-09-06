@@ -36,6 +36,8 @@ import {
   actRuntimeHostedBrowser,
   commitRuntimeCapabilityGrant,
   executeRuntimeToolCall,
+  executeRuntimeConnectorAction,
+  prepareRuntimeConnectorToolAction,
   inspectRuntimeHostedProcess,
   launchRuntimeHostedProcess,
   navigateRuntimeHostedBrowser,
@@ -47,6 +49,9 @@ import {
   type RuntimeCapabilityGrantProposal
 } from "../runtime";
 import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime";
+import { openConnectorTools } from "./connector-mcp";
+import { CONNECTOR_READ_TOOLS } from "./connector-chat";
+import { remoteConnectorFor, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
 import {
   createDesktopMcpTransport,
   createDesktopRemoteMcpTransport,
@@ -54,6 +59,8 @@ import {
 } from "./mcp-transport";
 
 export interface DesktopToolExecutorOptions {
+  connectorIds?: readonly string[];
+  connectorAccessCurrent?: (connectorId: string) => boolean;
   workspaceId?: string;
   localComputer?: {
     workspaceId: string;
@@ -87,22 +94,54 @@ export function createDesktopToolExecutor(
   return async (approval, args) => {
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
+    const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
+    const checkConnectorAccess = () => {
+      if (nativeConnector && options.connectorAccessCurrent && !options.connectorAccessCurrent(nativeConnector)) {
+        throw new Error("Mention this connected app in your message or select it in the agent's connections.");
+      }
+    };
+    checkConnectorAccess();
+    if (toolName === "connector-action") {
+      const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
+      const action = typeof parsed.action === "string" ? parsed.action : "";
+      const payload = parsed.payload;
+      const accessCurrent = () => options.connectorAccessCurrent
+        ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId);
+      if (!options.workspaceId || !accessCurrent()) throw new Error("Select or mention this connected app first.");
+      if (!action || !payload || typeof payload !== "object" || Array.isArray(payload)
+        || Object.values(payload).some((value) => typeof value !== "string")) throw new Error("Supply an action and a payload of string values.");
+      const prepared = await prepareRuntimeConnectorToolAction(options.workspaceId, connectorId, action, payload as Record<string, string>);
+      if (!prepared || !options.queueApproval) throw new Error("Connector actions require the desktop runtime.");
+      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      options.queueApproval(prepared.action.approval, "connector-action", JSON.stringify({ preview: prepared.preview, payload }));
+      if (await gate.waitForDecision(prepared.action.approval) !== "granted") throw new Error("Connector action was denied.");
+      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      const result = await executeRuntimeConnectorAction({ action: prepared.action, approval: resolutionFor(prepared.action.approval) });
+      if (!result) throw new Error("Connector execution is unavailable.");
+      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      return JSON.stringify({ trust: "untrusted", instructionAuthority: "none", result });
+    }
+    // Remote calls first prepare the exact native action. Only that preview is
+    // approved; the generic dispatch wrapper is not a second user decision.
+    if (toolName === "connector-tools" || toolName === "connector-call") {
+      return runOfficialConnector(gate, toolName, parsed, options);
+    }
     if (
       (toolName === "cloud-browser"
         || toolName === "cloud-browser-action")
       && !options.hostedComputer?.ready
     ) {
-      throw new Error("Set up this teammate's cloud computer before asking it to use hosted work.");
+      throw new Error("Set up this agent's cloud computer before asking it to use hosted work.");
     }
     const hostedShellRequested = parsed.location === "hosted";
     if (toolName === "run-shell" && !options.localComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
-      throw new Error("Set up this teammate's isolated local computer before asking it to run terminal commands.");
+      throw new Error("Set up this agent's isolated local computer before asking it to run terminal commands.");
     }
     if ((toolName === "read-file" || toolName === "write-file") && !options.localComputer?.ready) {
-      throw new Error("Set up this teammate's local computer before asking it to use files.");
+      throw new Error("Set up this agent's local computer before asking it to use files.");
     }
     if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !options.localComputer?.ready) {
-      throw new Error("Set up this teammate's local computer before asking it to use its browser.");
+      throw new Error("Set up this agent's local computer before asking it to use its browser.");
     }
     let mcpRoute: RuntimeResolvedMcpCapabilityRoute | null = null;
     if (toolName === "connection-read") {
@@ -121,6 +160,7 @@ export function createDesktopToolExecutor(
     if (decision !== "granted") {
       throw new Error(`Tool call denied: ${approval.action}.`);
     }
+    checkConnectorAccess();
     if (mcpRoute) {
       return runMcpSemanticRead(approval, parsed, options, mcpRoute);
     }
@@ -133,8 +173,48 @@ export function createDesktopToolExecutor(
     if (toolName === "cloud-browser-action") {
       return runHostedBrowserAction(gate, approval, parsed, options);
     }
-    return runOnDesktop(approval, parsed, options);
+    const result = await runOnDesktop(approval, parsed, options);
+    checkConnectorAccess();
+    return result;
   };
+}
+
+async function runOfficialConnector(
+  gate: ApprovalGate, operation: string, parsed: Record<string, unknown>, options: DesktopToolExecutorOptions,
+): Promise<string> {
+  const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
+  const accessCurrent = () => options.connectorAccessCurrent
+    ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId);
+  if (!options.workspaceId || !remoteConnectorFor(connectorId) || !accessCurrent()) {
+    throw new Error("Connect this app in the workspace's Connectors page first.");
+  }
+  const connection = await openConnectorTools(options.workspaceId, remoteConnectorServerId(connectorId));
+  try {
+    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    const enabledTools = connection.tools.filter((tool) => connection.discovery.enabledTools.includes(tool.name));
+    if (operation === "connector-tools") {
+      return JSON.stringify({ trust: "untrusted", instructionAuthority: "none", connectorId, tools: enabledTools });
+    }
+    const toolName = typeof parsed.toolName === "string" ? parsed.toolName : "";
+    const input = parsed.input;
+    if (!enabledTools.some((tool) => tool.name === toolName) || !input || typeof input !== "object" || Array.isArray(input)) {
+      throw new Error("Choose an enabled connector tool and supply its input object.");
+    }
+    const { proposal, prepared } = await connection.transport.prepareToolCall(toolName, input as Record<string, unknown>);
+    // Only native policy can classify an exact official tool as a routine read.
+    // Missing flags (including older runtimes) retain the approval requirement.
+    if (prepared.requiresApproval !== false) {
+      if (!options.queueApproval) throw new Error("Connector actions require the workspace approval panel.");
+      options.queueApproval(prepared.approval, "connector-call", JSON.stringify({ connectorId, toolName, input }));
+      if (await gate.waitForDecision(prepared.approval) !== "granted") throw new Error("Connector action was denied.");
+    }
+    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    const permit = await connection.transport.authorizeToolCall(proposal, resolutionFor(prepared.approval));
+    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
+    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    return JSON.stringify(result);
+  } finally { await connection.client.close().catch(() => undefined); }
 }
 
 function resolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {

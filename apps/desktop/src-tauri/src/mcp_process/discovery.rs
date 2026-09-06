@@ -6,6 +6,73 @@ struct ToolProposalContext {
     proposal_fingerprint: String,
 }
 
+// Curated provider operations, never name prefixes or server-supplied annotations.
+// Keep unknown tools and arbitrary MCP endpoints behind exact approval.
+fn is_official_read(endpoint: &Url, configuration: &str, tool: &str) -> bool {
+    configuration == "marketplace-vercel"
+        && endpoint.as_str() == "https://mcp.vercel.com/"
+        && matches!(
+            tool,
+            "search_vercel_documentation"
+                | "list_teams"
+                | "list_projects"
+                | "get_project"
+                | "list_deployments"
+                | "get_deployment"
+                | "get_deployment_build_logs"
+                | "get_runtime_logs"
+                | "get_runtime_errors"
+                | "get_git_deployment_context"
+        )
+}
+
+fn routine_official_read(proposal: &McpToolProposal) -> Result<bool, String> {
+    let sessions = remote_sessions()
+        .lock()
+        .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+    Ok(sessions.get(&proposal.session_id).is_some_and(|session| {
+        session.oauth_credential_key.is_some()
+            && is_official_read(
+                &session.endpoint,
+                &session.configuration_reference,
+                &proposal.tool_name,
+            )
+    }))
+}
+
+#[test]
+fn official_read_policy_requires_exact_provider_endpoint_and_tool() {
+    let endpoint = Url::parse("https://mcp.vercel.com").unwrap();
+    for tool in [
+        "list_projects",
+        "get_deployment",
+        "search_vercel_documentation",
+    ] {
+        assert!(is_official_read(&endpoint, "marketplace-vercel", tool));
+    }
+    for tool in [
+        "deploy_to_vercel",
+        "create_git_project",
+        "delete_project",
+        "get_unknown",
+    ] {
+        assert!(!is_official_read(&endpoint, "marketplace-vercel", tool));
+    }
+    assert!(!is_official_read(&endpoint, "custom-vercel", "list_projects"));
+    for url in [
+        "https://mcp.vercel.com/other",
+        "https://mcp.vercel.com/?target=other",
+        "https://mcp.vercel.com.evil.test/",
+        "http://mcp.vercel.com/",
+    ] {
+        assert!(!is_official_read(
+            &Url::parse(url).unwrap(),
+            "marketplace-vercel",
+            "list_projects",
+        ));
+    }
+}
+
 pub(crate) fn prepare_semantic_capability_call(
     workspace_id: String,
     session_id: String,

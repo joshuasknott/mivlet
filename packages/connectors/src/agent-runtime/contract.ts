@@ -158,6 +158,7 @@ export interface CodexThreadRef {
 
 export type CodexAppServerEvent =
   | { type: "text-delta"; text: string }
+  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
   | {
       type: "approval-request";
       requestId: string;

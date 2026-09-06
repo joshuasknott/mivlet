@@ -1,6 +1,6 @@
-import { ChangeEvent, FormEvent, KeyboardEvent, RefObject, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, RefObject, useMemo, useState } from "react";
+import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
 import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
-import { Books } from "@phosphor-icons/react/dist/csr/Books";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { FileArrowUp } from "@phosphor-icons/react/dist/csr/FileArrowUp";
@@ -8,7 +8,7 @@ import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
 import { HandPalm } from "@phosphor-icons/react/dist/csr/HandPalm";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
-import { Paperclip } from "@phosphor-icons/react/dist/csr/Paperclip";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
@@ -76,12 +76,11 @@ export function Composer({
   isWorking = false,
   onStop,
   connectedConnectors = [],
-  knowledgeSources = [],
   attachments = [],
   onRemoveAttachment,
   compactAgentSurface = false
 }: {
-  composerRef: RefObject<HTMLTextAreaElement | null>;
+  composerRef: RefObject<ComposerInputHandle | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   composerValue: string;
   onComposerChange: (value: string) => void;
@@ -99,7 +98,7 @@ export function Composer({
   permissionsOpen: boolean;
   onToggleAddMenu: () => void;
   onTogglePermissions: () => void;
-  onOpenTool: (tool: "Connectors" | "Knowledge") => void;
+  onOpenTool: (tool: "Connectors") => void;
   onRunCommand: (command: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   importStatus?: string | null;
@@ -122,13 +121,12 @@ export function Composer({
   isWorking?: boolean;
   onStop?: () => void;
   connectedConnectors?: { id: string; name: string; status: string }[];
-  knowledgeSources?: { id: string; title: string; provenance: string; connectorId?: string }[];
   attachments?: ComposerAttachment[];
   onRemoveAttachment?: (attachmentId: string) => void;
   compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | "knowledge" | null>(null);
+  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | null>(null);
   const activePermissionPresentation =
     PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
   const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
@@ -138,9 +136,8 @@ export function Composer({
     if (permissionsOpen) onTogglePermissions();
     setActiveSubmenu(null);
   };
-  const openSubmenu = (submenu: "connectors" | "knowledge") => {
+  const openSubmenu = (submenu: "connectors") => {
     if (submenu === "connectors" && connectedConnectors.length === 0) return;
-    if (submenu === "knowledge" && knowledgeSources.length === 0) return;
     setActiveSubmenu(submenu);
   };
 
@@ -177,12 +174,6 @@ export function Composer({
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
   const hasComposerText = composerValue.trim().length > 0;
-  useEffect(() => {
-    const input = composerRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = `${Math.min(input.scrollHeight, 248)}px`;
-  }, [composerRef, composerValue, inThread]);
   const currentToken = useMemo(() => {
     const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
     if (!match) return null;
@@ -279,12 +270,12 @@ export function Composer({
         />
         <div className="composer">
         <div className="composer-field">
-          <textarea
-            ref={composerRef}
-            className="composer-input"
+          <ComposerInput
+            inputRef={composerRef}
             value={composerValue}
-            onChange={(event) => onComposerChange(event.target.value)}
-            onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+            onChange={onComposerChange}
+            connectors={connectedConnectors}
+            onKeyDown={(event) => {
               if (
                 composerSuggestions.length > 0 &&
                 (event.key === "Tab" ||
@@ -301,8 +292,6 @@ export function Composer({
               }
             }}
             placeholder={placeholder}
-            aria-label="Universal composer"
-            rows={1}
           />
           {composerSuggestions.length > 0 ? (
             <div className="composer-suggestions" role="listbox" aria-label="Composer suggestions">
@@ -313,8 +302,7 @@ export function Composer({
                   role="option"
                   onClick={() => applyComposerSuggestion(suggestion.value)}
                 >
-                  <strong>{suggestion.label}</strong>
-                  <small>{suggestion.description}</small>
+                  <span className="connector-mention"><span aria-hidden="true"><ConnectorIcon id={suggestion.id} /></span>{suggestion.description}</span>
                 </button>
               ))}
             </div>
@@ -335,7 +323,7 @@ export function Composer({
                 aria-expanded={addMenuOpen}
                 aria-label="Add files and context"
               >
-                <Paperclip size={20} />
+                <Plus size={20} />
               </button>
               {addMenuOpen ? (
                 <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt">
@@ -390,7 +378,7 @@ export function Composer({
                             type="button"
                             role="menuitem"
                             onClick={() => {
-                              const prompt = `Use @${connector.id} to `;
+                              const prompt = `${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${connector.id} `;
                               onComposerChange(prompt);
                               composerRef.current?.focus();
                               onToggleAddMenu();
@@ -407,57 +395,6 @@ export function Composer({
                     )}
                   </div>
 
-                  <div
-                    className={`composer-menu-item-wrapper${activeSubmenu === "knowledge" ? " is-active" : ""}`}
-                    onPointerEnter={() => openSubmenu("knowledge")}
-                    onMouseEnter={() => openSubmenu("knowledge")}
-                    onPointerLeave={() => setActiveSubmenu(null)}
-                    onMouseLeave={() => setActiveSubmenu(null)}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => onOpenTool("Knowledge")}
-                      className="composer-menu-item"
-                      onPointerEnter={() => openSubmenu("knowledge")}
-                      onMouseEnter={() => openSubmenu("knowledge")}
-                    >
-                      <Books size={18} />
-                      <span>
-                        <strong>Knowledge</strong>
-                        <small>
-                          {knowledgeSources.length > 0
-                            ? "Use saved workspace sources"
-                            : "No knowledge sources. Add one"}
-                        </small>
-                      </span>
-                      {knowledgeSources.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
-                    </button>
-                    {activeSubmenu === "knowledge" && knowledgeSources.length > 0 && (
-                      <div className="composer-submenu-sidebar" role="menu" aria-label="Knowledge sources list">
-                        <span className="composer-menu__heading">Workspace Knowledge</span>
-                        {knowledgeSources.map((source) => (
-                          <button
-                            key={source.id}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              const prompt = `Use source "${source.title}" to `;
-                              onComposerChange(prompt);
-                              composerRef.current?.focus();
-                              onToggleAddMenu();
-                              setActiveSubmenu(null);
-                            }}
-                          >
-                            <div className="composer-submenu-item-content">
-                              <Books size={16} />
-                              <span className="composer-submenu-item-title" title={source.title}>{source.title}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
 
                 </div>
               ) : null}

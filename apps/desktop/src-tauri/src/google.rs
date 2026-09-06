@@ -70,6 +70,11 @@ fn has_any_scope(tokens: &StoredTokenSet, required: &[&str]) -> bool {
             .scopes
             .iter()
             .any(|granted| granted == required || granted.ends_with(&format!("/{required}")))
+            || (tokens
+                .scopes
+                .iter()
+                .any(|granted| granted == "https://www.googleapis.com/auth/drive")
+                && required.starts_with("https://www.googleapis.com/auth/drive"))
     })
 }
 
@@ -1793,6 +1798,11 @@ async fn run_read_operation(
     object: &serde_json::Map<String, Value>,
 ) -> Result<Value, ConnectorCommandError> {
     let (_connection, tokens) = authorized_tokens(app, connector_id).await?;
+    let limit = object
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(20)
+        .clamp(1, 50) as usize;
     let value = match (connector_id, operation) {
         ("google-drive", "search") => {
             let query = object.get("query").and_then(Value::as_str).unwrap_or("");
@@ -1800,7 +1810,7 @@ async fn run_read_operation(
                 call_id,
                 &tokens,
                 query,
-                20,
+                limit,
                 object.get("cursor").and_then(Value::as_str),
             )
             .await?;
@@ -1826,6 +1836,28 @@ async fn run_read_operation(
             let mut url = api_url(DRIVE_API, &format!("files/{}", encode_segment(file_id)))?;
             url.query_pairs_mut().append_pair("fields", "id,name,mimeType,modifiedTime,webViewLink,parents,size,owners(displayName,emailAddress)");
             send_json(call_id, connector_id, &tokens, Method::GET, url, None).await?
+        }
+        ("google-drive", "content") => {
+            let file_id = object
+                .get("fileId")
+                .and_then(Value::as_str)
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| {
+                    error(
+                        connector_id,
+                        "invalid-request",
+                        "fileId is required.",
+                        false,
+                    )
+                })?;
+            let mut url = api_url(DRIVE_API, &format!("files/{}", encode_segment(file_id)))?;
+            url.query_pairs_mut()
+                .append_pair("fields", "id,name,mimeType,modifiedTime,webViewLink");
+            let metadata =
+                send_json(call_id, connector_id, &tokens, Method::GET, url, None).await?;
+            let item = drive_item(&metadata)?;
+            let content = drive_content(call_id, &tokens, &item).await?;
+            json!({ "item": item, "content": truncate_characters(&content, MAX_PREVIEW_CHARACTERS), "truncated": content.chars().count() > MAX_PREVIEW_CHARACTERS, "trust": "untrusted" })
         }
         ("google-drive", "children") => {
             require_scope(
@@ -1891,7 +1923,7 @@ async fn run_read_operation(
                 call_id,
                 &tokens,
                 query,
-                20,
+                limit,
                 object.get("cursor").and_then(Value::as_str),
             )
             .await?;

@@ -152,7 +152,7 @@ describe("Connector Connection selection", () => {
       screen.getByRole("heading", { name: "Product & design" }),
     ).toBeVisible();
     expect(
-      screen.getAllByRole("button", { name: "Figma is planned" })[0],
+      screen.getAllByRole("button", { name: "Connect Figma" })[0],
     ).toBeVisible();
 
     await user.type(
@@ -183,11 +183,11 @@ describe("Connector Connection selection", () => {
     );
 
     await user.click(
-      screen.getAllByRole("button", { name: "Figma is planned" })[0],
+      screen.getAllByRole("button", { name: "Dropbox is planned" })[0],
     );
 
-    expect(screen.getByRole("dialog", { name: "Figma" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Figma" })).toHaveTextContent("Planned");
+    expect(screen.getByRole("dialog", { name: "Dropbox" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Dropbox" })).toHaveTextContent("Planned");
     expect(
       screen.getByRole("button", { name: "Not available yet" }),
     ).toBeDisabled();

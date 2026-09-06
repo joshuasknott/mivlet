@@ -64,9 +64,8 @@ const entry = (
 });
 
 /**
- * Product catalogue only. A row is connectable exclusively when the native
- * connector boundary returns a matching manifest; every other row is labelled
- * Planned and cannot create synthetic authorization or data.
+ * Product catalogue only. Native manifests and official remote setup routes
+ * determine availability; catalogue entries never establish authorization.
  */
 export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
   {
@@ -150,7 +149,7 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
       entry(
         "granola",
         "Granola",
-        "Bring meeting notes into teammate context",
+        "Bring meeting notes into agent context",
         "communication",
       ),
     ],

@@ -1271,6 +1271,13 @@ export async function prepareRuntimeConnectorAction(
   }
 }
 
+export async function prepareRuntimeConnectorToolAction(workspaceId: string, connectorId: string, action: string, payload: Record<string, string>) {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<{ action: ConnectorActionRequest; preview: string }>("prepare_connector_tool_action", { workspaceId, connectorId, action, payload });
+  } catch (error) { throw toRuntimeError(error); }
+}
+
 export async function executeRuntimeConnectorAction(request: {
   action: ConnectorActionRequest;
   approval: ApprovalResolutionRequest;
@@ -1576,6 +1583,7 @@ export type RuntimeCodexEvent =
       approval: import("@fable/protocol").ApprovalRequest;
     }
   | { type: "text-delta"; text: string }
+  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
   | {
       type: "usage";
       inputTokens: number;
@@ -2011,6 +2019,7 @@ export interface RuntimeMcpToolProposal {
 
 export interface RuntimePreparedMcpToolCall {
   proposalFingerprint: string;
+  requiresApproval?: boolean;
   approval: import("@fable/protocol").ApprovalRequest;
 }
 

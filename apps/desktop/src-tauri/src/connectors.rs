@@ -98,12 +98,26 @@ const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("deployment:read", "Deployments", "read", true),
     ("deployment:write", "Promote or rollback", "write", false),
 ];
-const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[(
-    "https://www.googleapis.com/auth/drive.file",
-    "Selected Drive files",
-    "read",
-    true,
-)];
+const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
+    (
+        "https://www.googleapis.com/auth/drive",
+        "Read and manage all Drive files",
+        "write",
+        false,
+    ),
+    (
+        "https://www.googleapis.com/auth/drive.file",
+        "Selected Drive files",
+        "read",
+        true,
+    ),
+    (
+        "https://www.googleapis.com/auth/drive.readonly",
+        "Search and read all Drive files",
+        "read",
+        false,
+    ),
+];
 const NOTION_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read_content", "Read selected content", "read", true),
     ("insert_content", "Create content", "write", false),
@@ -868,8 +882,7 @@ fn selected_auth_scopes(
 fn connector_configuration_state(entry: &'static ConnectorCatalogEntry) -> &'static str {
     match entry.auth_mode {
         "oauth-pkce" => {
-            if std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID")
-                .ok()
+            if crate::connector_auth::google_oauth_client_id()
                 .is_some_and(|value| !value.trim().is_empty())
             {
                 "configured"
@@ -878,7 +891,7 @@ fn connector_configuration_state(entry: &'static ConnectorCatalogEntry) -> &'sta
             }
         }
         "oauth-broker" | "provider-installation" => {
-            let broker_url = std::env::var("FABLE_AUTH_BROKER_URL").ok();
+            let broker_url = crate::connector_auth::auth_broker_url();
             if crate::connector_auth::resolve_broker_endpoints(entry.id, broker_url.as_deref())
                 .is_ok()
             {
@@ -2145,6 +2158,79 @@ pub async fn import_connector_item(
 }
 
 #[tauri::command]
+pub fn prepare_connector_tool_action(
+    app: tauri::AppHandle,
+    connector_id: String,
+    action: String,
+    payload: BTreeMap<String, String>,
+    workspace_id: String,
+) -> Result<serde_json::Value, ConnectorCommandError> {
+    require_connector_workspace(Some(workspace_id.clone()))?;
+    let request = connector_tool_action_request(connector_id, action, payload)?;
+    let action = prepare_connector_action(app.clone(), request, Some(workspace_id))?;
+    let record = verify_prepared_connector_action(
+        &connector_approval_records_path(&app)
+            .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?,
+        &action,
+    )
+    .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
+    Ok(serde_json::json!({"action": action, "preview": record.preview}))
+}
+
+fn connector_tool_action_request(
+    connector_id: String,
+    action: String,
+    payload: BTreeMap<String, String>,
+) -> Result<ConnectorActionRequest, ConnectorCommandError> {
+    let entry = require_connector(&connector_id)?;
+    let policy = action_policy(&action).ok_or_else(|| {
+        command_error(
+            "invalid-request",
+            &connector_id,
+            "Unsupported connector action.",
+            false,
+        )
+    })?;
+    let mut nonce = [0_u8; 16];
+    getrandom::fill(&mut nonce).map_err(|_| {
+        command_error(
+            "unknown",
+            &connector_id,
+            "Could not prepare this connector action.",
+            true,
+        )
+    })?;
+    let id = nonce
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let request = ConnectorActionRequest {
+        id: id.clone(),
+        connector_id,
+        action,
+        permission_mode: None,
+        permission_profile: None,
+        approval: crate::models::ApprovalRequest {
+            id,
+            service: entry.name.into(),
+            action: policy.label.into(),
+            mode: policy.mode.into(),
+            risk_level: policy.risk_level.into(),
+            consequence: policy.consequence.into(),
+            requested_at: chrono::Utc::now().to_rfc3339(),
+            decisions: APPROVAL_DECISIONS
+                .iter()
+                .map(|value| (*value).into())
+                .collect(),
+            confirmation_phrase: policy.confirmation_phrase.map(String::from),
+            data_used: payload.keys().cloned().collect(),
+        },
+        payload,
+    };
+    validate_connector_action(request)
+}
+
+#[tauri::command]
 pub fn prepare_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionRequest,
@@ -2391,6 +2477,47 @@ fn _empty_provider_metadata() -> BTreeMap<String, String> {
 #[cfg(test)]
 mod workspace_scope_tests {
     use super::*;
+
+    #[test]
+    fn model_writes_use_native_policy_and_unique_exact_approvals() {
+        for entry in CATALOG {
+            for action in entry.actions {
+                let payload = BTreeMap::from([("targetId".into(), "selected-resource".into())]);
+                let first = connector_tool_action_request(
+                    entry.id.into(),
+                    (*action).into(),
+                    payload.clone(),
+                )
+                .unwrap();
+                let second =
+                    connector_tool_action_request(entry.id.into(), (*action).into(), payload)
+                        .unwrap();
+                assert_ne!(first.id, second.id);
+                let mut changed = first.clone();
+                changed.approval.risk_level = "low".into();
+                assert!(validate_connector_action(changed).is_err());
+                assert!(
+                    validate_connector_execution_request(ConnectorActionExecutionRequest {
+                        action: first.clone(),
+                        approval: crate::models::ApprovalResolutionRequest {
+                            request: first.approval.clone(),
+                            decision: "session".into(),
+                            decided_at: first.approval.requested_at.clone(),
+                            confirmation_text: None,
+                            modification: None,
+                        }
+                    })
+                    .is_err()
+                );
+            }
+        }
+        assert!(connector_tool_action_request(
+            "gmail".into(),
+            "google-drive.delete-file".into(),
+            BTreeMap::new()
+        )
+        .is_err());
+    }
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;
     use crate::store::repos::workspace_directory::clear_current_internal_user;

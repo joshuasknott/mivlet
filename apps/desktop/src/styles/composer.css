@@ -158,7 +158,15 @@
   font-size: var(--text-14);
   line-height: 1.45;
   transition: color 150ms ease;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
 }
+
+.composer-input:empty::before { content: attr(data-placeholder); color: var(--ink-soft); pointer-events: none; }
+.connector-mention { display: inline; white-space: nowrap; font-weight: 550; line-height: inherit; color: var(--ink); }
+.connector-mention > span { display: inline; }
+.connector-mention svg, .connector-mention img { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2px; object-fit: contain; }
 
 .composer-input::placeholder {
   color: var(--ink-soft);

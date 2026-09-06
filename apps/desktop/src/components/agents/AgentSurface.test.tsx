@@ -18,8 +18,8 @@ const agent: FableAgentProfile = {
   permissionLabel: "Ask Me",
 };
 
-describe("quiet teammate surface", () => {
-  it("keeps teammate switching and settings in the sidebar without product navigation", () => {
+describe("quiet agent surface", () => {
+  it("keeps agent switching and settings in the sidebar without product navigation", () => {
     const onCreateAgent = vi.fn();
     const onOpenSettings = vi.fn();
     const onOpenMarketplace = vi.fn();
@@ -52,7 +52,7 @@ describe("quiet teammate surface", () => {
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Connectors/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Create teammate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     fireEvent.click(screen.getByRole("button", { name: /Local workspace/i }));
     expect(onOpenSettings).not.toHaveBeenCalled();
     expect(screen.getByRole("menu", { name: "Account" })).toBeVisible();
@@ -70,10 +70,7 @@ describe("quiet teammate surface", () => {
       <AgentLearningDialog
         open
         agent={agent}
-        source={{
-          prompt: "Write a launch note",
-          response: "Here is the note.",
-        }}
+        startCreating
         onClose={vi.fn()}
         onChange={onChange}
         onRun={vi.fn()}
@@ -101,7 +98,6 @@ describe("quiet teammate surface", () => {
       <AgentLearningDialog
         open
         agent={agent}
-        source={null}
         startCreating
         onClose={vi.fn()}
         onChange={vi.fn()}
@@ -131,7 +127,7 @@ describe("quiet teammate surface", () => {
       }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", { name: /teammates/i }),
+      screen.queryByRole("button", { name: /agents/i }),
     ).not.toBeInTheDocument();
   });
 });

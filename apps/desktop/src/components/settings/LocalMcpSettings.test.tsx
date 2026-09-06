@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable/connectors";
 
@@ -123,14 +123,50 @@ beforeEach(() => {
 });
 
 describe("LocalMcpSettings", () => {
+  it("retries a failed server-list read without claiming the list is empty", async () => {
+    runtime.list.mockRejectedValueOnce(new Error("Unavailable")).mockResolvedValueOnce([summary]);
+    render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("couldn’t be loaded");
+    expect(screen.queryByText("No tool servers yet.")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByText("Local files")).toBeInTheDocument();
+    expect(runtime.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a server-list response after switching workspaces", async () => {
+    let finish!: (servers: typeof summary[]) => void;
+    const oldList = new Promise<typeof summary[]>((resolve) => { finish = resolve; });
+    runtime.list.mockReturnValueOnce(oldList).mockResolvedValueOnce([]);
+    const onStatus = vi.fn();
+    const view = render(<LocalMcpSettings workspaceId="workspace-a" onStatus={onStatus} />);
+    view.rerender(<LocalMcpSettings workspaceId="workspace-b" onStatus={onStatus} />);
+    expect(await screen.findByText("No tool servers yet.")).toBeInTheDocument();
+    await act(async () => finish([summary]));
+    expect(screen.queryByText("Local files")).not.toBeInTheDocument();
+    expect(runtime.list).toHaveBeenLastCalledWith("workspace-b");
+  });
+
+  it("clears unsaved server details when the workspace changes", async () => {
+    const onStatus = vi.fn();
+    const view = render(<LocalMcpSettings workspaceId="workspace-a" onStatus={onStatus} />);
+    await screen.findByText("No tool servers yet.");
+    fireEvent.click(screen.getByText("Add server"));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Workspace A tools" } });
+    view.rerender(<LocalMcpSettings workspaceId="workspace-b" onStatus={onStatus} />);
+    await screen.findByText("No tool servers yet.");
+    fireEvent.click(screen.getByText("Add server"));
+    expect(screen.getByLabelText("Name")).toHaveValue("");
+    expect(runtime.prepare).not.toHaveBeenCalled();
+  });
+
   it("requires exact confirmation before saving an approved local server", async () => {
     runtime.list.mockResolvedValueOnce([]).mockResolvedValueOnce([summary]);
     const status = vi.fn();
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
-    await screen.findByText("No tool servers saved.");
 
-    fireEvent.click(screen.getByText("Add a server"));
+    await screen.findByText("No tool servers yet.");
+
+    fireEvent.click(screen.getByText("Add server"));
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Local files" } });
     fireEvent.change(screen.getByLabelText("Program path"), { target: { value: "C:\\tools\\mcp.exe" } });
     fireEvent.change(screen.getByLabelText(/Arguments/), { target: { value: "--stdio\nC:\\work" } });
@@ -158,7 +194,7 @@ describe("LocalMcpSettings", () => {
     runtime.list.mockResolvedValue([summary]);
     const status = vi.fn();
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
+
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     await waitFor(() => expect(status).toHaveBeenCalledWith(
       "Local files responded with 1 tool and 1 resource. Nothing was enabled."
@@ -174,7 +210,7 @@ describe("LocalMcpSettings", () => {
   it("explicitly binds one enabled tool to connected-source search", async () => {
     runtime.list.mockResolvedValue([summary]);
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
+
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     const access = await screen.findByLabelText("Local files access");
     fireEvent.change(within(access).getByRole("combobox", { name: /Connected-source search tool/ }), {
@@ -194,16 +230,16 @@ describe("LocalMcpSettings", () => {
   it("states that browser preview cannot configure local programs", async () => {
     runtime.list.mockResolvedValue(null);
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
+
     expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeInTheDocument();
   });
 
   it("saves a remote HTTPS server without local command fields", async () => {
     runtime.list.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={vi.fn()} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
-    await screen.findByText("No tool servers saved.");
-    fireEvent.click(screen.getByText("Add a server"));
+
+    await screen.findByText("No tool servers yet.");
+    fireEvent.click(screen.getByText("Add server"));
     fireEvent.change(screen.getByLabelText("Location"), {
       target: { value: "streamable-http" }
     });
@@ -234,7 +270,7 @@ describe("LocalMcpSettings", () => {
     });
     const status = vi.fn();
     render(<LocalMcpSettings workspaceId="workspace-a" onStatus={status} />);
-    fireEvent.click(screen.getByText("Manage tool servers"));
+
     fireEvent.click(await screen.findByRole("button", { name: "Check server" }));
     await waitFor(() => expect(runtime.inspectAuth).toHaveBeenCalledWith("workspace-a", "remote-tools"));
     expect(status.mock.calls.at(-1)?.[0]).toContain("Connecting an account");

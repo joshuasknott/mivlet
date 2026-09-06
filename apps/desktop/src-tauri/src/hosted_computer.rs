@@ -666,7 +666,7 @@ fn approval_for_process(
 ) -> ApprovalRequest {
     let mut data_used = vec![
         format!(
-            "computer scope: workspace {} / teammate {}",
+            "computer scope: workspace {} / agent {}",
             proposal.workspace_id, proposal.agent_id
         ),
         format!(
@@ -686,11 +686,11 @@ fn approval_for_process(
     ApprovalRequest {
         id,
         service: HOSTED_COMPUTER_SERVICE.into(),
-        action: format!("Run {} on this teammate's cloud computer", proposal.argv[0]),
+        action: format!("Run {} on this agent's cloud computer", proposal.argv[0]),
         mode: "full-access".into(),
         risk_level: "critical".into(),
         data_used,
-        consequence: "Starts the exact displayed program inside this teammate's isolated, always-on cloud computer. The program can change its workspace and access the network until it exits or is stopped.".into(),
+        consequence: "Starts the exact displayed program inside this agent's isolated, always-on cloud computer. The program can change its workspace and access the network until it exits or is stopped.".into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
         confirmation_phrase: Some(HOSTED_PROCESS_CONFIRMATION.into()),
@@ -706,18 +706,18 @@ fn approval_for_browser(
     ApprovalRequest {
         id,
         service: HOSTED_COMPUTER_SERVICE.into(),
-        action: "Open this page in the teammate's cloud browser".into(),
+        action: "Open this page in the agent's cloud browser".into(),
         mode: "full-access".into(),
         risk_level: "critical".into(),
         data_used: vec![
             format!(
-                "computer scope: workspace {} / teammate {}",
+                "computer scope: workspace {} / agent {}",
                 proposal.workspace_id, proposal.agent_id
             ),
             format!("page: {}", proposal.url),
             format!("exact request fingerprint: {fingerprint}"),
         ],
-        consequence: "Loads the displayed public page from this teammate's isolated cloud browser and creates a short-lived interactive takeover link. A page can observe the browser's network address and may change browser state while the session remains active.".into(),
+        consequence: "Loads the displayed public page from this agent's isolated cloud browser and creates a short-lived interactive takeover link. A page can observe the browser's network address and may change browser state while the session remains active.".into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
         confirmation_phrase: Some(HOSTED_BROWSER_CONFIRMATION.into()),
@@ -758,7 +758,7 @@ fn approval_for_browser_action(
     };
     let mut data_used = vec![
         format!(
-            "computer scope: workspace {} / teammate {}",
+            "computer scope: workspace {} / agent {}",
             proposal.workspace_id, proposal.agent_id
         ),
         format!("observation: {}", proposal.observation_id),

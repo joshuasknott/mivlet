@@ -7,15 +7,10 @@ import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
-  suggestedLearnedTask,
   upsertLearnedTask,
 } from "../../lib/agent-learning";
 import { ProfileAgentAvatar } from "./agent-icons";
 
-export interface AgentLearningSource {
-  prompt: string;
-  response: string;
-}
 
 interface LearningDraft {
   title: string;
@@ -32,7 +27,6 @@ function newTaskId() {
 export function AgentLearningDialog({
   open,
   agent,
-  source,
   startCreating = false,
   onClose,
   onChange,
@@ -40,7 +34,6 @@ export function AgentLearningDialog({
 }: {
   open: boolean;
   agent: FableAgentProfile;
-  source: AgentLearningSource | null;
   startCreating?: boolean;
   onClose: () => void;
   onChange: (tasks: FableLearnedTask[]) => void;
@@ -57,28 +50,22 @@ export function AgentLearningDialog({
   });
 
   const tasks = agent.learnedTasks ?? [];
-  const teaching = source !== null || editingId !== null || creating;
+  const teaching = editingId !== null || creating;
 
   useEffect(() => {
     if (!open) return;
-    if (source) {
-      setEditingId(null);
-      setCreating(false);
-      setDraft(suggestedLearnedTask(source.prompt));
-    } else {
       setEditingId(null);
       setCreating(startCreating);
       setDraft({ title: "", instruction: "" });
       if (startCreating) {
         window.setTimeout(() => titleRef.current?.focus(), 0);
       }
-    }
-  }, [open, source, startCreating]);
+  }, [open, startCreating]);
 
   useModalFocusTrap({
     active: open,
     containerRef: modalRef,
-    initialFocusRef: source || startCreating ? titleRef : closeRef,
+    initialFocusRef: startCreating ? titleRef : closeRef,
     onClose,
   });
 
@@ -108,10 +95,6 @@ export function AgentLearningDialog({
       updatedAt: now,
     };
     onChange(upsertLearnedTask(tasks, task));
-    if (source) {
-      onClose();
-      return;
-    }
     setEditingId(null);
     setCreating(false);
     setDraft({ title: "", instruction: "" });
@@ -134,14 +117,10 @@ export function AgentLearningDialog({
                 <GraduationCap size={14} aria-hidden="true" /> Skills
               </span>
               <h2 id="agent-learning-title">
-                {source
-                  ? `Teach ${agent.name} this task`
-                  : `Skills for ${agent.name}`}
+                {`Skills for ${agent.name}`}
               </h2>
               <p>
-                {source
-                  ? "Turn this exchange into guidance the teammate will use in future conversations."
-                  : `Saved guidance used only by ${agent.name}.`}
+                {`Saved guidance used only by ${agent.name}.`}
               </p>
             </div>
           </div>
@@ -189,23 +168,13 @@ export function AgentLearningDialog({
                 placeholder="Describe the outcome, sources, and quality bar."
               />
             </label>
-            {source ? (
-              <details className="agent-learning-dialog__example">
-                <summary>Example outcome from this conversation</summary>
-                <p>{source.response}</p>
-              </details>
-            ) : null}
             <footer>
               <button
                 type="button"
                 onClick={() => {
-                  if (source) {
-                    onClose();
-                  } else {
-                    setEditingId(null);
+setEditingId(null);
                     setCreating(false);
                     setDraft({ title: "", instruction: "" });
-                  }
                 }}
               >
                 Cancel
@@ -279,8 +248,7 @@ export function AgentLearningDialog({
                 <GraduationCap size={28} aria-hidden="true" />
                 <strong>No learned work yet</strong>
                 <p>
-                  After a useful response, choose “Teach this” to make the
-                  approach repeatable.
+                  Add a skill to save an approach your agent can use again.
                 </p>
                 <button
                   type="button"

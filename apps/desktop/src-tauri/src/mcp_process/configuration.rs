@@ -303,6 +303,7 @@ pub async fn begin_remote_mcp_authorization(
                 .cloned()
         });
     let discovery = discover_remote_authorization(&endpoint, challenge.as_ref()).await?;
+    let resource = discovery.resource.as_deref().unwrap_or(endpoint.as_str());
     if discovery.summary.client_registration_status != "selected" {
         return Err(discovery.summary.client_registration_reason.clone());
     }
@@ -320,7 +321,7 @@ pub async fn begin_remote_mcp_authorization(
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
         .append_pair("code_challenge_method", "S256")
-        .append_pair("resource", endpoint.as_str());
+        .append_pair("resource", resource);
     if !discovery.summary.scopes.is_empty() {
         authorization_url
             .query_pairs_mut()
@@ -330,15 +331,16 @@ pub async fn begin_remote_mcp_authorization(
     let callback_url =
         crate::oauth_loopback::accept_loopback_callback(listener, &redirect_uri).await?;
     let code = authorization_code_from_callback(&callback_url, &redirect_uri, &state)?;
-    let tokens = exchange_mcp_authorization_code(
+    let mut tokens = exchange_mcp_authorization_code(
         &discovery,
-        &endpoint,
+        resource,
         &client_id,
         &redirect_uri,
         &code,
         &verifier,
     )
     .await?;
+    tokens.transport_endpoint = Some(endpoint.to_string());
     let credential_key = mcp_oauth_credential_key(
         scope.data.workspace_id(),
         scope.private.owner_subject(),
@@ -802,6 +804,7 @@ pub fn prepare_mcp_tool_call(proposal: McpToolProposal) -> Result<PreparedMcpToo
     );
     Ok(PreparedMcpToolCall {
         proposal_fingerprint: context.proposal_fingerprint,
+        requires_approval: !routine_official_read(&proposal)?,
         approval,
     })
 }
@@ -825,11 +828,13 @@ pub fn authorize_mcp_tool_call(
         return Err("The MCP tool proposal changed after approval preview.".into());
     }
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
-    crate::execution_approvals::verify_and_consume_execution_approval(
-        &crate::paths::execution_approvals_path(&app)?,
-        &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
-    )?;
+    if !routine_official_read(&request.proposal)? {
+        crate::execution_approvals::verify_and_consume_execution_approval(
+            &crate::paths::execution_approvals_path(&app)?,
+            &resolution.effective_request,
+            &resolution.audit_entry.decided_at,
+        )?;
+    }
     // Re-resolve every authority after permit I/O so an account, session,
     // Connection revision, or enablement change cannot race approval.
     let current = validate_tool_proposal(&request.proposal)?;

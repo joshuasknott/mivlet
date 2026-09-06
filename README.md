@@ -1,12 +1,12 @@
 # Fable
 
-Fable is an independent, provider-neutral AI teammate workspace. Its default
-experience is a quiet desktop conversation with named teammates. Connections,
-knowledge, approvals, and a teammate's computer appear only when the work needs
+Fable is an independent, provider-neutral AI agent workspace. Its default
+experience is a quiet desktop conversation with named agents. Connections,
+files, approvals, and a agent's computer appear only when the work needs
 them.
 
 Fable is local-first: conversations, workspace data, provider credentials, and
-the teammate computer remain on the device. First-run setup uses a lightweight
+the agent computer remain on the device. First-run setup uses a lightweight
 Fable account, then validates a supported model provider and optionally connects
 the apps a person already uses.
 
@@ -18,8 +18,8 @@ a deployed or production-validated service.
 
 ### Implemented locally
 
-- A Tauri 2 desktop app with a compact React conversation shell, named teammate
-  profiles, persistent generated blob portraits or uploaded images, and model
+- A Tauri 2 desktop app with a compact React conversation shell, named agent
+  profiles, persistent Organic avatar identities or uploaded images, and model
   selection with supported reasoning levels. Dictation and send have separate
   controls below the message text.
 - First-run setup with Google-first account sign-in, a verified model-provider
@@ -35,17 +35,22 @@ a deployed or production-validated service.
   wire adapters are also runnable. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.
-- Encrypted SQLite persistence for conversations, knowledge, memory,
+- Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
 - Provider and plugin-style Connections, including connector and MCP
   boundaries. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
-- Teammate instructions travel as model context rather than appearing in user
-  messages. Skills belong to their teammate profile. ChatGPT turns use ephemeral
+- Agent instructions travel as model context rather than appearing in user
+  messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Fable keeps the durable conversation locally.
-- Exact approval checks for consequential tools and connector actions.
-- A genuine separate Linux desktop per workspace/teammate, backed by Docker
+- Workspace-wide app access and approval preferences shared by all agents,
+  with exact approval checks for consequential tools and connector actions.
+- Provider model visibility controls in Settings. Hidden models stay out of
+  conversation pickers; hiding the selected model requires a new selection.
+- File attachments and memory provide conversation context; Knowledge is no
+  longer a separate product feature. Existing imported records remain stored.
+- A genuine separate Linux desktop per workspace/agent, backed by Docker
   Desktop's WSL 2 engine. It has a persistent home volume, Chromium, a file
   manager, a terminal, a small scoped workspace bridge, resource limits, and a
   five-minute watch/take-control lease. Local terminal commands execute only
@@ -74,14 +79,14 @@ a deployed or production-validated service.
 
 - Automatic continuation of ordinary conversations after the desktop app
   closes.
-- Secure sign-in or secret handoff inside a hosted teammate computer.
+- Secure sign-in or secret handoff inside a hosted agent computer.
 - Deployed hosted operation, live third-party validation, production tenancy,
   metering, quotas, monitoring, disaster recovery, or multi-device sync.
 - Signed public installers, updater channels, supported macOS/Linux releases,
   and mobile control.
 
-The [local computer](docs/architecture/local-teammate-computer.md) and
-[hosted computer](docs/architecture/hosted-teammate-computer.md) documents define
+The [local computer](docs/architecture/local-agent-computer.md) and
+[hosted computer](docs/architecture/hosted-agent-computer.md) documents define
 their separate trust boundaries.
 
 ## Repository layout
@@ -120,7 +125,7 @@ pnpm dev
 
 `pnpm dev` starts the browser-only Vite preview, whose synthetic state is
 labelled. Use the native app for provider credentials, encrypted persistence,
-and the isolated teammate computer:
+and the isolated agent computer:
 
 ```bash
 pnpm tauri:dev
@@ -165,7 +170,7 @@ Cloudflare environment.
 
 ## Working principles
 
-- Keep the default UI sparse, conversational, accessible, and teammate-first.
+- Keep the default UI sparse, conversational, accessible, and agent-first.
 - Preserve provider choice behind Fable-owned contracts and adapters.
 - Keep credentials behind native or deployment-secret boundaries.
 - Bind consequential actions to exact approvals and fail closed when authority

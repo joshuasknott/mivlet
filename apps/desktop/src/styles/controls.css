@@ -112,8 +112,6 @@ textarea:focus-visible {
 .og-field input,
 .og-provider__key-panel input,
 .settings-field input,
-.knowledge-search input,
-.knowledge-pin-filter input,
 .connector-search-bar__input-wrapper {
   border-color: transparent;
 }
@@ -124,8 +122,6 @@ textarea:focus-visible {
 .og-field input:focus,
 .og-provider__key-panel input:focus,
 .settings-field input:focus,
-.knowledge-search input:focus,
-.knowledge-pin-filter input:focus,
 .connector-search-bar__input-wrapper:focus-within {
   border-color: transparent;
   box-shadow: none;
@@ -136,3 +132,20 @@ textarea:focus-visible {
     transition: none;
   }
 }
+
+.label-row,
+.section-heading span {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.window-controls { position: fixed; z-index: 1000; inset: 0 0 auto; height: 26px; display: flex; align-items: stretch; color: var(--ink-muted); pointer-events: none; }
+.window-controls__drag { flex: 1; pointer-events: auto; user-select: none; }
+.window-controls button { pointer-events: auto; width: 36px; padding: 5px 10px; border: 0; border-radius: 0; background: transparent; color: inherit; font: 16px/1 Arial, sans-serif; }
+.window-controls button:hover { background: var(--surface-hover); color: var(--ink); }
+.window-controls button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+.window-controls button.window-controls__close:hover { background: #c42b1c; color: white; }
+.window-controls [role=alert] { position: absolute; top: 30px; right: 8px; padding: 8px; background: var(--surface); color: var(--ink); font-size: 12px; }

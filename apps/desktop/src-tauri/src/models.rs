@@ -1111,6 +1111,8 @@ pub struct RuntimeSnapshot {
     pub onboarding_version: u8,
     #[serde(default)]
     pub selected_model_id: String,
+    #[serde(default)]
+    pub hidden_model_ids: Vec<String>,
     #[serde(default = "default_permission_mode")]
     pub permission_mode: String,
     #[serde(default)]

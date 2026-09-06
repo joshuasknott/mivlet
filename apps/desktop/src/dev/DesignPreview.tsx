@@ -1,6 +1,9 @@
+import { WindowControls } from "../components/WindowControls";
+import { AgentProgress } from "../components/agents/AgentProgress";
 /** Development-only component preview. No account, credentials, or model transport. */
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
+import { ApprovalPanel } from "../components/ApprovalPanel";
 import type { FableAgentProfile, ConnectorManifest } from "@fable/protocol";
 import { AgentSidebar } from "../components/agents/AgentSidebar";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
@@ -26,7 +29,7 @@ if (!import.meta.env.DEV) throw new Error("The component preview is available on
 const noop = () => {};
 const asyncNoop = async () => {};
 const samples: FableAgentProfile[] = [
-  { id: "ava", name: "Ava", iconColor: "#FC6D69", instructions: "Help me plan and organize my work.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
+  { id: "ava", name: "Chief of Staff", iconColor: "#FC6D69", instructions: "Help me plan and organize my work.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
   { id: "leo", name: "Leo", iconColor: "#2CC663", instructions: "Research questions and prepare clear briefs.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
   { id: "maya", name: "Maya", iconColor: "#865DFA", instructions: "Help with design and writing.", modelId: "codex::preview-model", icon: "agent", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" },
 ];
@@ -50,6 +53,7 @@ const hostedComputer: ComponentProps<typeof LiveWorkRail>["hostedComputer"] = {
 };
 
 function DesignPreview() {
+  const [showApproval, setShowApproval] = useState(new URLSearchParams(window.location.search).get("view") === "approval");
   const [profiles, setProfiles] = useState(samples);
   const [agentId, setAgentId] = useState("ava");
   const [page, setPage] = useState("chat");
@@ -68,9 +72,11 @@ function DesignPreview() {
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   const [reasoning, setReasoning] = useState<string>();
   const [memoryDisabled, setMemoryDisabled] = useState(false);
+  const [hiddenModelIds, setHiddenModelIds] = useState<string[]>([]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const unavailable = async (providerId: string) => ({ providerId, outcome: "unsupported" as const, message: "Design preview: connection requires the desktop app." });
   const settingsRuntime: SettingsRuntime = {
+    allModelOptions: models, hiddenModelIds, setModelVisible: (id, visible) => setHiddenModelIds((current) => visible ? current.filter((value) => value !== id) : [...new Set([...current, id])]),
     accountWorkspacePending: false, accountWorkspaceStatus: DEFAULT_ACCOUNT_WORKSPACE_STATUS,
     backendProviders: [resolveCodexProvider("needs-auth"), resolveNativeProvider("openai", "needs-auth"), resolveNativeProvider("anthropic", "needs-auth"), resolveNativeProvider("xai", "needs-auth")].filter((provider) => provider !== null),
     checkBackendConnection: unavailable, connectBackendWithVerify: unavailable, connectedBackendIds: [],
@@ -81,13 +87,13 @@ function DesignPreview() {
     customApprovalSettings: defaultShellState.customApprovalSettings, permissionLabel: permission,
     selectPermissionLabel: setPermission, setVoiceEnabled, updateCustomApprovalSetting: noop, voiceEnabled,
   };
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<import("../components/ComposerInput").ComposerInputHandle>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const agent = profiles.find((profile) => profile.id === agentId)!;
   const editingAgent = profiles.find((profile) => profile.id === editingAgentId) ?? null;
   return <>
     <main className={`desktop-frame desktop-frame--agents${rail && page === "chat" ? "" : " desktop-frame--live-closed"}`} data-theme={theme}>
-      <AgentSidebar agents={profiles} activeAgentId={agentId} previews={{ ava: { message: "Chief of Staff", time: "", status: "idle" }, leo: { message: "Research", time: "", status: "idle" }, maya: { message: "Design", time: "", status: "idle" } }} profileName="Joshua" connectors={[]} marketplaceActive={page === "connectors"}
+      <WindowControls preview /><AgentSidebar agents={profiles} activeAgentId={agentId} previews={{ ava: { message: "Checking your priorities", time: "01:34", status: "running" }, leo: { message: "Research", time: "", status: "idle" }, maya: { message: "Design", time: "", status: "idle" } }} profileName="Joshua" connectors={[]} marketplaceActive={page === "connectors"}
         onSelectAgent={(profile) => { setAgentId(profile.id); setPage("chat"); }} onCreateAgent={() => { setEditingAgentId(null); setEditor(true); }} onEditAgent={(profile) => { setEditingAgentId(profile.id); setEditor(true); }}
         onOpenMarketplace={() => setPage("connectors")} onOpenSettings={() => setSettingsOpen(true)}
         onOpenUsage={() => setAccount("usage")} onSignOut={() => setAccount("sign-out")} />
@@ -99,13 +105,19 @@ function DesignPreview() {
             <div className="conversation-scroll"><div className="conversation-feed">
               <article className="conversation-message conversation-message--user"><div className="conversation-message__author"><strong>You</strong></div><p>Help me plan this week</p></article>
               <article className="conversation-message conversation-message--assistant"><div className="conversation-message__author"><ProfileAgentAvatar agent={agent} iconSize={28} /><strong>{agent.name}</strong></div><p>Let's start with your priorities. What needs to happen this week, and which days are already busy?</p></article>
+              {new URLSearchParams(window.location.search).get("view") === "thinking" ? <AgentProgress agent={agent} running transcript="" summaries={{ example: "Checking the relevant files before making changes." }} activity="Using: read-file" /> : null}
+              {showApproval ? <article className="conversation-message conversation-message--assistant conversation-message--approval"><div className="conversation-message__author"><ProfileAgentAvatar agent={agent} iconSize={28} /><strong>{agent.name}</strong></div><div className="conversation-message__approval"><ApprovalPanel compact approvals={[{ id: "preview", service: "Gmail", action: "Send the project update to Alex?", mode: "full-access", riskLevel: "high", dataUsed: ["Draft message", "alex@example.com"], consequence: "Sends one email from your connected account.", requestedAt: "2026-09-05T12:00:00Z", decisions: ["once", "deny"] }]}
+                audit={[]} sessionGrants={[]} approvalRules={[]} editingApprovalId={null} modificationDraft={{ mode: "read-only", dataUsed: "", consequence: "" }} pendingConfirmation={null} confirmationText=""
+                onDecision={() => { setShowApproval(false); setNotice("Preview only: no action was taken."); }} onStartModify={noop} onUpdateModification={noop} onSaveModify={noop} onCancelModify={noop} onUpdateConfirmation={noop} onConfirmDecision={noop} onCancelConfirmation={noop} /></div></article> : null}
             </div></div>
-            <div className="conversation-composer-dock"><Composer composerRef={composerRef} fileInputRef={fileRef} composerValue={message} onComposerChange={setMessage}
+            <div className="conversation-composer-dock">
+              <Composer composerRef={composerRef} fileInputRef={fileRef} composerValue={message} onComposerChange={setMessage}
               onSubmit={(event) => { event.preventDefault(); if (message.trim()) { setNotice("Design preview: no model request was sent."); setMessage(""); } }}
               voiceStatus="unsupported" voiceMessage="Dictation is unavailable in this preview." voiceCanStart={false} voiceDisclosure="No microphone access is requested in the preview."
               onStartVoice={noop} onStopVoice={noop} onCancelVoice={noop} onDismissVoice={noop} onAttach={noop} addMenuOpen={addOpen} permissionsOpen={permissionsOpen}
               onToggleAddMenu={() => setAddOpen(!addOpen)} onTogglePermissions={() => setPermissionsOpen(!permissionsOpen)} onOpenTool={() => setPage("connectors")} onRunCommand={noop}
               onFileChange={noop} models={models} selectedModelId={models[0].id} selectedModelLabel={models[0].label} onSelectModel={noop}
+              connectedConnectors={[{ id: "google-drive", name: "Google Drive", status: "connected" }, { id: "gmail", name: "Gmail", status: "connected" }, { id: "github", name: "GitHub", status: "connected" }]}
               selectedReasoningEffort={reasoning} onSelectReasoningEffort={setReasoning} placeholder={`Message ${agent.name}…`}
               permissionLabel={permission} permissionProfiles={PERMISSION_PROFILES} onSelectPermissionLabel={setPermission} inThread /></div>
           </div>
@@ -113,7 +125,7 @@ function DesignPreview() {
       {rail && page === "chat" ? <LiveWorkRail agentName={agent.name} localComputer={localComputer} hostedComputer={hostedComputer} onClose={() => setRail(false)}
         conversations={[{ id: "sample-1", title: "Weekly planning", time: "Today" }, { id: "sample-2", title: "A first draft", time: "Sep 2" }]}
         onNewConversation={() => { setMessage(""); composerRef.current?.focus(); }} onSelectConversation={noop} /> : null}
-      <AgentEditor open={editor} agent={editingAgent} models={models} connectors={connectors} knowledgeSources={[]} canDelete={false}
+      <AgentEditor open={editor} agent={editingAgent} models={models} canDelete={false}
         onClose={() => setEditor(false)} onDelete={noop} onSave={(draft) => {
           if (editingAgent) setProfiles(profiles.map((profile) => profile.id === editingAgent.id ? { ...profile, ...draft } : profile));
           else { const created = { ...draft, id: crypto.randomUUID() }; setProfiles([...profiles, created]); setAgentId(created.id); setPage("chat"); }

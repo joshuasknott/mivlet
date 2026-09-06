@@ -11,7 +11,7 @@ function propsFor(
   const unavailable =
     voiceStatus === "disabled" || voiceStatus === "unsupported";
   return {
-    composerRef: createRef<HTMLTextAreaElement>(),
+    composerRef: createRef<import("./ComposerInput").ComposerInputHandle>(),
     fileInputRef: createRef<HTMLInputElement>(),
     composerValue: "Typed text stays",
     onComposerChange: vi.fn(),

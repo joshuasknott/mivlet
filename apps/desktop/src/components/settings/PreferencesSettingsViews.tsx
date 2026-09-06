@@ -27,7 +27,10 @@ export function ApprovalsSettingsView({
   return (
     <div className="settings-page__body approvals-settings">
       <div className="settings-section-heading">
-        <p>Choose when your teammate should ask you.</p>
+        <p>
+          Choose when Fable should ask you. These preferences apply to every
+          agent.
+        </p>
       </div>
 
       <section

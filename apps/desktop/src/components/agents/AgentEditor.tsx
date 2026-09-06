@@ -1,7 +1,7 @@
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import type { ApprovalPresetLabel, ConnectorManifest, FableAgentProfile, FableLearnedTask, KnowledgeSource } from "@fable/protocol";
+import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
 import { useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
@@ -10,7 +10,6 @@ import { createAvatarSeed } from "../../lib/blob-avatar";
 import { AgentLearningDialog } from "./AgentLearningDialog";
 import { ModelPicker } from "../ModelPicker";
 
-const permissionOptions: ApprovalPresetLabel[] = ["Ask Me", "Read Only", "Work Freely", "Custom"];
 
 type AgentDraft = Omit<FableAgentProfile, "id" | "threadId">;
 
@@ -76,8 +75,6 @@ export function AgentEditor({
   open,
   agent,
   models,
-  connectors,
-  knowledgeSources,
   canDelete,
   onClose,
   onSave,
@@ -88,8 +85,6 @@ export function AgentEditor({
   open: boolean;
   agent: FableAgentProfile | null;
   models: ProviderModelOption[];
-  connectors: ConnectorManifest[];
-  knowledgeSources: KnowledgeSource[];
   canDelete: boolean;
   onClose: () => void;
   onSave: (draft: AgentDraft) => void;
@@ -132,23 +127,17 @@ export function AgentEditor({
   }, [agent?.id, open]);
 
   if (!open) return null;
-  const toggle = (key: "connectorIds" | "knowledgeSourceIds", id: string) => {
-    setDraft((current) => ({
-      ...current,
-      [key]: current[key].includes(id) ? current[key].filter((value) => value !== id) : [...current[key], id]
-    }));
-  };
 
   return (
     <div className="agent-editor-backdrop" role="presentation">
       <div ref={modalRef} className="agent-editor" role="dialog" aria-modal="true" aria-labelledby="agent-editor-title">
         <header className="agent-editor__header">
-          <div><h2 id="agent-editor-title">{agent ? `Edit ${agent.name}` : "Create teammate"}</h2></div>
+          <div><h2 id="agent-editor-title">{agent ? `Edit ${agent.name}` : "Create agent"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} iconSize={40} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={40} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
@@ -182,29 +171,23 @@ export function AgentEditor({
                 {draft.iconImageDataUrl ? <button type="button" onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined }); }}>Remove image</button> : null}
               </div>
             </div>
-            <small>A unique portrait is made for every teammate. Upload an image to make it your own.</small>
+            <small>A unique portrait is made for every agent. Upload an image to make it your own.</small>
             {imageError ? <p className="agent-image-error" role="alert">{imageError}</p> : null}
           </fieldset>
 
-          <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this teammate work with you?" /></label>
+          <label className="agent-editor__colour"><span>Agent colour</span><input aria-label="Agent colour" type="color" value={draft.iconColor} onInput={(event) => setDraft({ ...draft, iconColor: event.currentTarget.value })} /><small>{draft.iconImageDataUrl ? "Applies to the generated icon when you remove the uploaded image." : "Choose your agent’s colour."}</small></label>
 
-          <div className="agent-editor__grid">
+          <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this agent work with you?" /></label>
+
+          <div className="agent-editor__model-settings">
             <div className="agent-editor__field agent-editor__model"><span>Model</span>
               <ModelPicker models={models} selectedId={draft.modelId} label={models.find((model) => model.id === draft.modelId)?.label ?? (draft.modelId ? "Unavailable model" : "Automatic")}
                 effort={draft.reasoningEffort} onSelect={(modelId) => setDraft({ ...draft, modelId, reasoningEffort: undefined })}
                 onSelectEffort={(reasoningEffort) => setDraft({ ...draft, reasoningEffort })} open={modelOpen} onOpenChange={setModelOpen} allowAutomatic />
               <small>Automatic uses an available connected model.</small>
             </div>
-            <label className="agent-editor__field"><span>Permissions</span><select aria-label="Permissions" value={draft.permissionLabel} onChange={(event) => setDraft({ ...draft, permissionLabel: event.target.value as ApprovalPresetLabel })}>{permissionOptions.map((option) => <option key={option} value={option}>{{ "Ask Me": "Ask first", "Read Only": "Read only", "Work Freely": "Full access", Custom: "Custom" }[option]}</option>)}</select><small>Fable still asks before consequential actions.</small></label>
           </div>
 
-          <details className="agent-editor__disclosure"><summary>Connectors<span>{draft.connectorIds.length ? `${draft.connectorIds.length} selected` : "None selected"}</span></summary>
-            <fieldset className="agent-editor__choices"><legend className="sr-only">Connectors for this teammate</legend>{connectors.filter((connector) => connector.id !== "local-files").length ? connectors.filter((connector) => connector.id !== "local-files").map((connector) => <label key={connector.id}><input type="checkbox" checked={draft.connectorIds.includes(connector.id)} onChange={() => toggle("connectorIds", connector.id)} /><span>{connector.name}</span><small>{connector.status === "connected" ? "Connected" : "Not connected"}</small></label>) : <p>No connectors are available yet.</p>}</fieldset>
-          </details>
-
-          <details className="agent-editor__disclosure"><summary>Knowledge<span>{draft.knowledgeSourceIds.length ? `${draft.knowledgeSourceIds.length} selected` : "None selected"}</span></summary>
-            <fieldset className="agent-editor__choices"><legend className="sr-only">Knowledge for this teammate</legend>{knowledgeSources.length ? knowledgeSources.map((source) => <label key={source.id}><input type="checkbox" checked={draft.knowledgeSourceIds.includes(source.id)} onChange={() => toggle("knowledgeSourceIds", source.id)} /><span>{source.title}</span></label>) : <p>Add knowledge to make it available to this teammate.</p>}</fieldset>
-          </details>
 
           {agent && onSkillsChange ? <button type="button" className="agent-editor__skills" onClick={() => setSkillsOpen(true)}>Skills for {agent.name}<span>{agent.learnedTasks?.length ?? 0}</span></button> : null}
 
@@ -213,7 +196,7 @@ export function AgentEditor({
             <div><button type="button" onClick={onClose}>Cancel</button><button className="agent-editor__save" type="submit" disabled={!draft.name.trim() || imagePending}>{agent ? "Save changes" : "Create agent"}</button></div>
           </footer>
         </form>
-        {agent && onSkillsChange ? <AgentLearningDialog open={skillsOpen} agent={agent} source={null}
+        {agent && onSkillsChange ? <AgentLearningDialog open={skillsOpen} agent={agent}
           onClose={() => setSkillsOpen(false)} onChange={onSkillsChange} onRun={(task) => {
             setSkillsOpen(false); onClose(); onUseSkill?.(task);
           }} /> : null}

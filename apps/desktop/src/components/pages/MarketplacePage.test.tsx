@@ -8,7 +8,7 @@ import { MarketplacePage } from "./MarketplacePage";
 const github: ConnectorManifest = { id: "github", name: "GitHub", status: "needs-auth", permissions: ["Repositories"], healthSummary: "Not connected", lastCheckedAt: "Not checked", authMode: "oauth-broker", supportsSearch: false, supportsImport: false, supportedActions: [] };
 
 describe("MarketplacePage", () => {
-  it("keeps teammate skills out of Connectors and connects through the detail page", async () => {
+  it("keeps agent skills out of Connectors and connects through the detail page", async () => {
     const user = userEvent.setup();
     const onConnect = vi.fn();
     render(<MarketplacePage manifests={[github]} accounts={{}} connectorStatus={null}

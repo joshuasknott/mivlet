@@ -55,6 +55,7 @@ function noop(): void {
 }
 
 interface PanelProps {
+  compact?: boolean;
   approvals?: ApprovalRequest[];
   audit?: ApprovalAuditEntry[];
   sessionGrants?: ApprovalGrant[];
@@ -97,6 +98,7 @@ function renderPanel(props: PanelProps = {}) {
   };
   const view = render(
     <ApprovalPanel
+      compact={props.compact}
       approvals={props.approvals ?? [baseApproval]}
       audit={props.audit ?? []}
       sessionGrants={props.sessionGrants ?? []}
@@ -119,6 +121,14 @@ function renderPanel(props: PanelProps = {}) {
 }
 
 describe("ApprovalPanel — required card fields", () => {
+  it("keeps compact decisions visible and details collapsed without the sidebar heading", () => {
+    const { handlers } = renderPanel({ compact: true });
+    expect(screen.queryByRole("heading", { name: "Approvals" })).not.toBeInTheDocument();
+    expect(screen.getByText("View action details").closest("details")).not.toHaveAttribute("open");
+    const deny = screen.getByRole("button", { name: "Deny" });
+    expect(deny).toBeVisible(); fireEvent.click(deny);
+    expect(handlers.onDecision).toHaveBeenCalledWith(baseApproval, "deny");
+  });
   it("shows the short action summary, service, profile, risk, data, consequence, and why-needed", () => {
     renderPanel();
 

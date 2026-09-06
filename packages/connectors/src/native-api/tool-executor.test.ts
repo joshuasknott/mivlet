@@ -3,6 +3,7 @@ import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/prot
 import type { HttpTransport } from "./transport";
 import { runAgentLoop } from "./agent-loop";
 import { registeredToolSpecs } from "./tools";
+import { buildToolApproval } from "./approvals";
 import {
   createApprovalGate,
   createToolExecutor,
@@ -10,6 +11,25 @@ import {
   type DecisionResult,
   type ToolRuntime
 } from "./tool-executor";
+
+describe("routine connector consent", () => {
+  it("runs Gmail and Drive reads without adding a pending approval", async () => {
+    const gate = createApprovalGate();
+    for (const tool of ["gmail-read", "google-drive-read", "google-calendar-read", "github-read", "connector-tools"]) {
+      const approval = buildToolApproval("Codex", tool, '{"operation":"search"}');
+      expect(gate.register(approval)).toBe(false);
+      await expect(gate.waitForDecision(approval)).resolves.toBe("granted");
+    }
+    expect(gate.pendingCount()).toBe(0);
+  });
+  it("keeps writes and unknown or misclassified requests behind explicit approval", () => {
+    const gate = createApprovalGate();
+    for (const approval of [buildToolApproval("Codex", "connector-call", "{}"), buildToolApproval("Codex", "invented-read", "{}"), { ...buildToolApproval("Codex", "gmail-read", "{}"), riskLevel: "critical" as const }]) {
+      expect(gate.register(approval)).toBe(true);
+    }
+    expect(gate.pendingCount()).toBe(3);
+  });
+});
 
 /**
  * TDD coverage for the pure tool executor + its grant gate. The executor never
@@ -293,7 +313,7 @@ describe("createToolExecutor — dispatch + grant gating", () => {
     expect(runtime.browserActions).toEqual(["select:combobox:Region"]);
   });
 
-  it("dispatches an exact native-dropdown selection to the local teammate browser", async () => {
+  it("dispatches an exact native-dropdown selection to the local agent browser", async () => {
     const runtime = fakeRuntime();
     const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
     await expect(

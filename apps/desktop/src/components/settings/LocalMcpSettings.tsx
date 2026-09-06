@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { McpClient } from "@fable/connectors/mcp/client";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
@@ -32,9 +33,21 @@ export function LocalMcpSettings({
   workspaceId: string;
   onStatus: (message: string) => void;
 }) {
+  return <WorkspaceMcpSettings key={workspaceId} workspaceId={workspaceId} onNotice={onStatus} />;
+}
+
+function WorkspaceMcpSettings({ workspaceId, onNotice }: {
+  workspaceId: string;
+  onNotice: (message: string) => void;
+}) {
   const [servers, setServers] = useState<RuntimeMcpServerSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [desktopAvailable, setDesktopAvailable] = useState(true);
+  const [desktopAvailable, setDesktopAvailable] = useState(false);
+  const [loadError, setLoadError] = useState("");
+  const [adding, setAdding] = useState(false);
+  const loadGeneration = useRef(0);
+  const mounted = useRef(false);
+  const onStatus = (message: string) => { if (mounted.current) onNotice(message); };
   const [name, setName] = useState("");
   const [transport, setTransport] = useState<"stdio" | "streamable-http">("stdio");
   const [command, setCommand] = useState("");
@@ -44,6 +57,7 @@ export function LocalMcpSettings({
   const [confirmation, setConfirmation] = useState("");
   const confirmationModalRef = useRef<HTMLElement>(null);
   const confirmationInputRef = useRef<HTMLInputElement>(null);
+  const addServerRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [authorizingId, setAuthorizingId] = useState<string | null>(null);
@@ -58,22 +72,38 @@ export function LocalMcpSettings({
     active: pending !== null,
     containerRef: confirmationModalRef,
     initialFocusRef: confirmationInputRef,
+    returnFocusRef: addServerRef,
     onClose: () => {
       if (!busy) void decide("deny");
     }
   });
 
-  const refresh = async () => {
-    const loaded = await listRuntimeMcpServerConfigurations(workspaceId);
-    if (loaded === null) {
+  const refresh = useCallback(async () => {
+    const generation = ++loadGeneration.current;
+    setLoadError("");
+    setLoaded(false);
+    try {
+      const result = await listRuntimeMcpServerConfigurations(workspaceId);
+      if (generation !== loadGeneration.current) return;
+      setDesktopAvailable(result !== null);
+      setServers(result ?? []);
+    } catch {
+      if (generation !== loadGeneration.current) return;
+      setLoadError("Tool servers couldn’t be loaded. Try again.");
       setDesktopAvailable(false);
-      setLoaded(true);
-      return;
+    } finally {
+      if (generation === loadGeneration.current) setLoaded(true);
     }
-    setDesktopAvailable(true);
-    setServers(loaded);
-    setLoaded(true);
-  };
+  }, [workspaceId]);
+
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    return () => {
+      mounted.current = false;
+      loadGeneration.current += 1;
+    };
+  }, [refresh]);
 
   const prepare = async () => {
     setBusy(true);
@@ -117,6 +147,7 @@ export function LocalMcpSettings({
         setCommand("");
         setArgsText("");
         setEndpoint("");
+        setAdding(false);
         onStatus(`${pending.configuration.transport === "stdio" ? "Local" : "Remote"} tool server saved. Check it before enabling any tools.`);
       } else {
         onStatus("Tool server wasn’t added.");
@@ -270,28 +301,13 @@ export function LocalMcpSettings({
   return (
     <article className="profile-clean-card settings-open-section mcp-settings">
       <div className="profile-clean-card__content">
-        <section className="profile-section" aria-labelledby="local-tool-servers-title">
-          <div className="profile-section__heading">
-            <span>
-              <strong id="local-tool-servers-title">Tool servers</strong>
-              <small>Advanced. Connect trusted tools on this computer or over HTTPS.</small>
-            </span>
-          </div>
-
-          <details
-            className="mcp-settings__advanced"
-            onToggle={(event) => {
-              if (event.currentTarget.open && !loaded) {
-                void refresh().catch(() => onStatus("Tool servers couldn’t be loaded."));
-              }
-            }}
-          >
-            <summary>Manage tool servers</summary>
-            {!loaded ? <p>Reading saved local servers…</p> : !desktopAvailable ? (
-              <p>Tool servers are available only in the desktop app.</p>
+        <section className="profile-section" aria-label="Saved tool servers">
+            {!loaded ? <p role="status">Loading tool servers…</p> : loadError ? (
+              <div className="mcp-settings__empty"><p role="alert">{loadError}</p><button type="button" className="button button--secondary" onClick={() => void refresh()}>Retry</button></div>
             ) : (
               <>
-              {servers.length > 0 ? (
+              {!desktopAvailable ? <p className="mcp-settings__empty">Tool servers are available only in the desktop app.</p> :
+              servers.length > 0 ? (
                 <div className="provider-access-list">
                   {servers.map((server) => {
                     const discovery = discoveries[server.id];
@@ -376,10 +392,10 @@ export function LocalMcpSettings({
                     </div>
                   })}
                 </div>
-              ) : <p>No tool servers saved.</p>}
+              ) : <p className="mcp-settings__empty">No tool servers yet.</p>}
 
-              <details>
-                <summary>Add a server</summary>
+              <details className="mcp-settings__add" open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}>
+                <summary ref={addServerRef}><Plus size={15} aria-hidden="true" /> Add server</summary>
                 <p>Only add software you trust. Credentials in commands, arguments, or web addresses are blocked.</p>
                 <div className="mcp-settings__form">
                   <label className="settings-field">
@@ -406,14 +422,13 @@ export function LocalMcpSettings({
                     <span>HTTPS address</span>
                     <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://example.com/mcp" />
                   </label>}
-                  <button type="button" className="button button--secondary" disabled={busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
+                  <button type="button" className="button button--secondary" disabled={!desktopAvailable || busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
                     Review and save
                   </button>
                 </div>
               </details>
               </>
             )}
-          </details>
         </section>
       </div>
 

@@ -6,6 +6,8 @@ import type {
 } from "@fable/protocol";
 import { FixtureTransport, SequencedFixtureTransport } from "../native-api/transport";
 import { readFixture } from "../native-api/fixtures-loader";
+import { buildToolApproval } from "../native-api/approvals";
+import { registeredToolSpecs } from "../native-api/tools";
 import {
   resolveAgentBackend,
   hasRunnableAdapter,
@@ -141,6 +143,31 @@ describe("resolveAgentBackend dispatch", () => {
 });
 
 describe("createCodexBackend", () => {
+  it("runs advertised connector reads with native-compatible approvals and returns their output", async () => {
+    const args = '{"operation":"search","query":""}';
+    const handle = new MockCodexAppServer({ events: [{ type: "approval-request", requestId: "rpc-1", callId: "drive-1",
+      tool: "google-drive-read", arguments: args, approval: { ...buildToolApproval("Codex", "google-drive-read", args), action: "Approve google-drive-read" } }, { type: "done", finishReason: "stop" }] });
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    let action = "";
+    const events = await collect(backend!.run({ ...baseRunRequest, tools: registeredToolSpecs().filter((tool) => tool.name === "google-drive-read") }, {
+      permissionMode: "read-only", execute: async (approval) => { action = approval.action; return '{"files":["Project plan"]}'; },
+    })!);
+    expect(action).toMatch(/^google-drive-read /);
+    expect(events).toContainEqual({ type: "tool-result", callId: "drive-1", ok: true, output: '{"files":["Project plan"]}' });
+    expect(handle.approvalResponses[0].ok).toBe(true);
+  });
+
+  it("blocks generic remote connector calls in read-only mode before execution", async () => {
+    const handle = new MockCodexAppServer({ events: [{ type: "approval-request", requestId: "rpc-2", callId: "call-2",
+      tool: "connector-call", arguments: "{}", approval: buildToolApproval("Codex", "connector-call", "{}") }, { type: "done", finishReason: "stop" }] });
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    let executed = false;
+    await collect(backend!.run({ ...baseRunRequest, tools: registeredToolSpecs().filter((tool) => tool.name === "connector-call") }, {
+      permissionMode: "read-only", execute: async () => { executed = true; return "unexpected"; },
+    })!);
+    expect(executed).toBe(false);
+    expect(handle.approvalResponses[0].ok).toBe(false);
+  });
   it("returns null at run time when no app-server process seam is wired", () => {
     const backend = createCodexBackend(codexProvider(), codexDeps(null));
     expect(backend).not.toBeNull();
@@ -187,7 +214,7 @@ describe("createCodexBackend", () => {
     expect(handle.resumedThreadId).toBe("codex-thread-existing");
   });
 
-  it("routes Codex approval requests through the provider-neutral execute seam", async () => {
+  it("declines inherited host tools without adding a user approval", async () => {
     const handle = new MockCodexAppServer({
       events: [
         {
@@ -214,15 +241,9 @@ describe("createCodexBackend", () => {
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));
     const iter = backend?.run(baseRunRequest, { execute: async () => "approved output" });
     const events = await collect(iter as AsyncIterable<BackendAgentEvent>);
-    expect(events.some((event) => event.type === "tool-call")).toBe(true);
-    expect(events).toContainEqual({
-      type: "tool-result",
-      callId: "call-1",
-      ok: true,
-      output: "approved output"
-    });
+    expect(events.some((event) => event.type === "tool-call")).toBe(false);
     expect(handle.approvalResponses).toEqual([
-      { requestId: "codex-request-1", ok: true, output: "approved output" }
+      { requestId: "codex-request-1", ok: false, output: expect.stringContaining("Host commands") }
     ]);
   });
 

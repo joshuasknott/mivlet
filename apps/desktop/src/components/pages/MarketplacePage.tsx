@@ -2,6 +2,7 @@ import type { ConnectorAccountOption, ConnectorManifest } from "@fable/protocol"
 import { PluginPanel } from "../PluginPanel";
 
 export function MarketplacePage({
+  workspaceId,
   manifests,
   accounts,
   connectorStatus,
@@ -12,6 +13,7 @@ export function MarketplacePage({
   onSelectConnector,
   onSwitchAccount,
 }: {
+  workspaceId?: string;
   manifests: ConnectorManifest[];
   accounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
@@ -25,6 +27,8 @@ export function MarketplacePage({
   return <section className="workspace marketplace-workspace" aria-label="Connectors">
     <div className="marketplace-scroll"><div className="marketplace-content">
             <PluginPanel
+              key={workspaceId ?? "preview"}
+              workspaceId={workspaceId}
               manifests={manifests}
               onUseConnector={onUseConnector}
               onConnect={onConnect}

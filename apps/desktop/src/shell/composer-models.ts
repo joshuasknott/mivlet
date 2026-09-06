@@ -40,5 +40,5 @@ export function composerModelsFor(
       if (preferred.length > 0) return preferred;
     }
   }
-  return available.slice(0, 24);
+  return available;
 }

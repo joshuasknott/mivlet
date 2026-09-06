@@ -67,7 +67,7 @@ export function useLocalComputer({
   };
   const provision = useMutation({
     mutationFn: async () => {
-      if (!target) throw new Error("Choose a teammate before setting up a local computer.");
+      if (!target) throw new Error("Choose a agent before setting up a local computer.");
       return provisionRuntimeLocalComputer(target);
     },
     onSuccess: async (snapshot) => {

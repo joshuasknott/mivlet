@@ -89,7 +89,7 @@ describe("hosted computer runtime boundary", () => {
     const approval = {
       id: "approval-a",
       service: "Fable cloud computer",
-      action: "Run node on this teammate's cloud computer",
+      action: "Run node on this agent's cloud computer",
       mode: "full-access" as const,
       riskLevel: "critical" as const,
       dataUsed: ["program: node"],
@@ -133,7 +133,7 @@ describe("hosted computer runtime boundary", () => {
     const approval = {
       id: "approval-browser-a",
       service: "Fable cloud computer",
-      action: "Open this page in the teammate's cloud browser",
+      action: "Open this page in the agent's cloud browser",
       mode: "full-access" as const,
       riskLevel: "critical" as const,
       dataUsed: ["page: https://example.com/"],

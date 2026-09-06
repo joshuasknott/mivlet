@@ -1,3 +1,4 @@
+import { WindowControls } from "./components/WindowControls";
 import { FableQueryProvider } from "./lib/query-client";
 import { DesktopShell } from "./shell/DesktopShell";
 
@@ -5,6 +6,7 @@ import { DesktopShell } from "./shell/DesktopShell";
 export function App() {
   return (
     <FableQueryProvider>
+      <WindowControls />
       <DesktopShell />
     </FableQueryProvider>
   );

@@ -251,7 +251,7 @@ describe("sourceAllowedByConnections", () => {
 });
 
 describe("buildAgentRequest", () => {
-  it("keeps teammate instructions out of the user's message", () => {
+  it("keeps agent instructions out of the user's message", () => {
     const request = buildAgentRequest({ model: "test", prompt: "Plan my week", instructions: "  Keep priorities clear.  " });
     expect(request.messages).toEqual([
       { role: "system", content: "Keep priorities clear." },

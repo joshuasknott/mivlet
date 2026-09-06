@@ -23,6 +23,8 @@ import type {
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
+import { buildToolApproval } from "../../native-api/approvals";
+import { effectForTool, evaluatePermissionPolicy } from "../../permission-policy";
 
 function requestedThreadId(request: AgentTurnRequest): string | null {
   const candidate = (request as AgentTurnRequest & { threadId?: unknown; codexThreadId?: unknown })
@@ -41,7 +43,8 @@ async function* mapCodexEvents(
   threadId: string,
   events: AsyncIterable<CodexAppServerEvent>,
   options: AgentTurnOptions,
-  capabilities: readonly BackendCapability[]
+  capabilities: readonly BackendCapability[],
+  advertisedTools: AgentTurnRequest["tools"]
 ): AsyncIterable<BackendAgentEvent> {
   for await (const event of events) {
     if (options.shouldCancel?.()) {
@@ -52,6 +55,8 @@ async function* mapCodexEvents(
 
     if (event.type === "text-delta") {
       yield { type: "text-delta", text: event.text };
+    } else if (event.type === "reasoning-summary") {
+      yield { ...event, text: redactSecretsFromString(event.text) };
     } else if (event.type === "usage") {
       yield {
         type: "usage",
@@ -62,20 +67,25 @@ async function* mapCodexEvents(
         costUnknown: event.costUsd === undefined
       };
     } else if (event.type === "approval-request") {
+      const dynamicTool = advertisedTools.some((tool) => tool.name === event.tool);
+      const approval = dynamicTool ? buildToolApproval("Codex", event.tool, event.arguments) : event.approval;
       if (!capabilities.includes("tool-requests") || !capabilities.includes("approvals")) {
         yield { type: "error", message: "Tool calls/approvals are not supported by this backend's capabilities." };
         yield { type: "done", finishReason: "error" };
         return;
       }
-      yield {
-        type: "tool-call",
-        callId: event.callId,
-        tool: event.tool,
-        arguments: event.arguments,
-        approval: event.approval
-      };
       try {
-        const output = await options.execute(event.approval, event.arguments);
+        if (!dynamicTool) {
+          throw new Error("Use only the Fable tools supplied for this turn. Host commands, files, and inherited provider tools are unavailable.");
+        }
+        if (dynamicTool) {
+          const effect = effectForTool(event.tool);
+          if (!effect || !evaluatePermissionPolicy({ mode: options.permissionMode ?? "read-only", effect, riskLevel: approval.riskLevel }).allowed) {
+            throw new Error(`Blocked by Fable's ${options.permissionMode ?? "read-only"} permission mode.`);
+          }
+        }
+        yield { type: "tool-call", callId: event.callId, tool: event.tool, arguments: event.arguments, approval };
+        const output = await options.execute(approval, event.arguments);
         await handle.respondApproval(event.requestId, {
           callId: event.callId,
           ok: true,
@@ -150,7 +160,7 @@ export function createCodexBackend(
             attemptId: options.attemptId
           }
         });
-        yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities);
+        yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities, request.tools);
       } catch (error) {
         yield backendErrorEvent(error, "Codex app-server run failed.");
         yield { type: "done", finishReason: "error" };

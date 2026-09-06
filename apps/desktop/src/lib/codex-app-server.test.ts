@@ -62,6 +62,12 @@ describe("desktop Codex app-server client", () => {
     });
   });
 
+  it("does not launch version and login probes before each message", async () => {
+    const client = createDesktopCodexAppServer(provider, { onRequestStarted: vi.fn(), onRetry: vi.fn() })!;
+    await client.initialize();
+    expect(runtimeMocks.getRuntimeCodexStatus).not.toHaveBeenCalled();
+  });
+
   it("keeps streaming after the native start command acknowledges process startup", async () => {
     const handle = createDesktopCodexAppServer(provider, {
       onRequestStarted: vi.fn(),

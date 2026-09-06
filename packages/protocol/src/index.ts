@@ -1024,6 +1024,8 @@ export interface RuntimeSnapshot {
    * available models before use (empty string = let Fable pick).
    */
   selectedModelId: string;
+  /** Provider-qualified model keys hidden from conversation pickers. */
+  hiddenModelIds?: string[];
   /**
    * The composer's permission level, driving how the agent loop gates tool
    * approvals (read-only suppresses write/shell tool calls, etc.).

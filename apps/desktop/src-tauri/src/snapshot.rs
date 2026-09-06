@@ -552,6 +552,7 @@ pub(crate) fn normalize_runtime_snapshot(
             MAX_RUNTIME_SNAPSHOT_ID_CHARACTERS,
         ),
         permission_mode,
+        hidden_model_ids: normalize_snapshot_id_list(snapshot.hidden_model_ids),
         permission_label,
         custom_approval_settings: snapshot.custom_approval_settings,
         saved_at,
@@ -807,7 +808,7 @@ mod tests {
         let agents = (0..150)
             .map(|index| {
                 serde_json::from_value(serde_json::json!({
-                    "id": format!("agent-{index}"), "name": format!("Teammate {index}"),
+                    "id": format!("agent-{index}"), "name": format!("Agent {index}"),
                     "instructions": "", "modelId": "", "icon": "agent", "permissionLabel": "Ask Me"
                 }))
                 .unwrap()

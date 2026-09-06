@@ -10,4 +10,5 @@ export type SettingsRuntime = Pick<ShellRuntime,
   | "startBackendBrowserLogin" | "toggleMemoryDisabled" | "customApprovalSettings"
   | "permissionLabel" | "selectPermissionLabel" | "setVoiceEnabled"
   | "updateCustomApprovalSetting" | "voiceEnabled"
+  | "allModelOptions" | "hiddenModelIds" | "setModelVisible"
 >;

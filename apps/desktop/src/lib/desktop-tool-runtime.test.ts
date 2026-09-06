@@ -2,11 +2,37 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@fable/protocol";
 import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
+import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+
+describe("native connector chat tools", () => {
+  it("passes an approved Drive read to the scoped native boundary", async () => {
+    runtime.executeTool.mockResolvedValue({ ok: true, output: "live result" });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: (id) => id === "google-drive" });
+    const args = '{"operation":"search","query":""}';
+    expect(await execute(buildToolApproval("Codex", "google-drive-read", args), args)).toBe("live result");
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ tool: "google-drive-read", workspaceId: "workspace-1", arguments: { operation: "search", query: "" } }));
+  });
+  it("rechecks connector access after approval and before egress", async () => {
+    runtime.executeTool.mockClear();
+    let allowed = true;
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => { allowed = false; return "granted"; } }, { workspaceId: "workspace-1", connectorAccessCurrent: () => allowed });
+    await expect(execute(buildToolApproval("Codex", "gmail-read", "{}"), "{}")).rejects.toThrow("Mention this connected app");
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+  it("routes Slack search through the async connector boundary", async () => {
+    runtime.executeTool.mockResolvedValue({ ok: true, output: '{"items":[{"title":"Updates","trust":"untrusted"}]}' });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: () => true });
+    const result = await execute(buildToolApproval("Codex", "search-slack", '{"query":"launch"}'), '{"query":"launch"}');
+    expect(result).toContain('"trust":"untrusted"');
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ tool: "search-slack", workspaceId: "workspace-1", arguments: { query: "launch" } }));
+  });
+});
 
 const runtime = vi.hoisted(() => ({
   prepareGrant: vi.fn(),
   commitGrant: vi.fn(),
   executeTool: vi.fn(),
+  searchConnector: vi.fn(),
   prepareHosted: vi.fn(),
   launchHosted: vi.fn(),
   inspectHosted: vi.fn(),
@@ -19,6 +45,7 @@ const runtime = vi.hoisted(() => ({
 const mcpFactory = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime", () => ({
+  searchRuntimeConnector: runtime.searchConnector,
   prepareRuntimeCapabilityGrant: runtime.prepareGrant,
   commitRuntimeCapabilityGrant: runtime.commitGrant,
   executeRuntimeToolCall: runtime.executeTool,
@@ -115,11 +142,11 @@ describe("hosted computer shell execution", () => {
     const cloudApproval: ApprovalRequest = {
       id: "approval-hosted-process-a",
       service: "Fable cloud computer",
-      action: "Run sh on this teammate's cloud computer",
+      action: "Run sh on this agent's cloud computer",
       mode: "full-access",
       riskLevel: "critical",
       dataUsed: ["program: sh", "argument 1: -lc", "argument 2: pwd"],
-      consequence: "Runs the exact displayed program on the teammate cloud computer.",
+      consequence: "Runs the exact displayed program on the agent cloud computer.",
       requestedAt: "2026-08-24T12:00:01.000Z",
       decisions: ["once", "deny"],
       confirmationPhrase: "run on cloud computer"
@@ -180,7 +207,7 @@ describe("hosted computer shell execution", () => {
 describe("local computer tool isolation", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("routes approved shell work into the active teammate container", async () => {
+  it("routes approved shell work into the active agent container", async () => {
     const shellApproval: ApprovalRequest = {
       id: "native-local-shell-blocked",
       service: "openai",
@@ -212,7 +239,7 @@ describe("local computer tool isolation", () => {
     expect(runtime.launchHosted).not.toHaveBeenCalled();
   });
 
-  it("binds file tools to the active teammate scope", async () => {
+  it("binds file tools to the active agent scope", async () => {
     const fileApproval: ApprovalRequest = {
       id: "native-local-file-read",
       service: "openai",
@@ -242,7 +269,7 @@ describe("local computer tool isolation", () => {
     }));
   });
 
-  it("routes approved local browser navigation to the active teammate without exposing a frame", async () => {
+  it("routes approved local browser navigation to the active agent without exposing a frame", async () => {
     const browserApproval: ApprovalRequest = {
       id: "native-local-browser",
       service: "openai",
@@ -250,7 +277,7 @@ describe("local computer tool isolation", () => {
       mode: "full-access",
       riskLevel: "critical",
       dataUsed: ["url: https://example.com/"],
-      consequence: "Open one page in the teammate browser.",
+      consequence: "Open one page in the agent browser.",
       requestedAt: "2026-08-27T12:00:00.000Z",
       decisions: ["once", "deny"],
       confirmationPhrase: "approve local-browser"
@@ -280,7 +307,7 @@ describe("local computer tool isolation", () => {
     expect(output).not.toContain("data:image");
   });
 
-  it("rejects local browser navigation before approval when the teammate computer is not set up", async () => {
+  it("rejects local browser navigation before approval when the agent computer is not set up", async () => {
     const browserApproval: ApprovalRequest = {
       id: "native-local-browser-missing",
       service: "openai",
@@ -288,7 +315,7 @@ describe("local computer tool isolation", () => {
       mode: "full-access",
       riskLevel: "critical",
       dataUsed: ["url: https://example.com/"],
-      consequence: "Open one page in the teammate browser.",
+      consequence: "Open one page in the agent browser.",
       requestedAt: "2026-08-27T12:00:00.000Z",
       decisions: ["once", "deny"],
       confirmationPhrase: "approve local-browser"
@@ -322,7 +349,7 @@ describe("hosted cloud browser execution", () => {
     const browserApproval: ApprovalRequest = {
       id: "approval-hosted-browser-a",
       service: "Fable cloud computer",
-      action: "Open https://example.com/ in this teammate's cloud browser",
+      action: "Open https://example.com/ in this agent's cloud browser",
       mode: "full-access",
       riskLevel: "critical",
       dataUsed: ["page: https://example.com/"],

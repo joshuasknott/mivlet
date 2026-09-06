@@ -934,6 +934,7 @@ pub(crate) async fn run_loopback_oauth(
     let (listener, redirect_uri) = bind_loopback_callback()
         .await
         .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let redirect_uri = connector_redirect(&redirect_uri, auth_mode);
 
     // Start the OAuth transaction with the real, bound loopback redirect URI.
     // `start_auth` stores the PKCE verifier + pending state in secure storage.
@@ -1021,6 +1022,14 @@ pub(crate) async fn run_loopback_oauth(
     }
 }
 
+fn connector_redirect(origin: &str, auth_mode: &str) -> String {
+    if matches!(auth_mode, "oauth-broker" | "provider-installation") {
+        format!("{}/callback", origin.trim_end_matches('/'))
+    } else {
+        origin.to_string()
+    }
+}
+
 fn emit_auth_event(app: &tauri::AppHandle, connector_id: &str, status: &str, message: &str) {
     let _ = app.emit(
         "fable://connector/auth",
@@ -1035,6 +1044,20 @@ fn emit_auth_event(app: &tauri::AppHandle, connector_id: &str, status: &str, mes
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn connector_callback_matches_public_and_broker_contracts() {
+        assert_eq!(
+            connector_redirect("http://127.0.0.1:43123", "oauth-pkce"),
+            "http://127.0.0.1:43123"
+        );
+        for auth_mode in ["oauth-broker", "provider-installation"] {
+            assert_eq!(
+                connector_redirect("http://127.0.0.1:43123", auth_mode),
+                "http://127.0.0.1:43123/callback"
+            );
+        }
+    }
 
     #[test]
     fn callback_page_never_reflects_untrusted_input() {

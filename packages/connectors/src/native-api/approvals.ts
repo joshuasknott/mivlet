@@ -68,6 +68,15 @@ function normalizeLocalBrowserUrl(raw: string): string | null {
 }
 
 /** Build the ApprovalRequest for a model-emitted tool call. */
+function canonicalValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalValue);
+  if (value && typeof value === "object") return Object.fromEntries(
+    Object.entries(value).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
+      .map(([key, nested]) => [key, canonicalValue(nested)])
+  );
+  return value;
+}
+
 export function buildToolApproval(
   providerId: string,
   toolName: string,
@@ -81,9 +90,10 @@ export function buildToolApproval(
   const mode = registered?.defaultMode ?? "full-access";
   const risk = registered?.defaultRisk ?? "critical";
   const dataUsed = Object.entries(parsed)
+    .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .slice(0, 16)
     .map(([key, value]) => {
-      let vstr = typeof value === "string" ? value : JSON.stringify(value);
+      let vstr = typeof value === "string" ? value : JSON.stringify(canonicalValue(value));
       if (toolName === "web-fetch" && key === "url" && typeof value === "string") {
         const norm = normalizeWebFetchUrl(value);
         if (norm) vstr = norm;

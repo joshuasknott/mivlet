@@ -1,0 +1,35 @@
+import { useState } from "react";
+import type { ProviderModelOption } from "../../lib/provider-models";
+
+export function ProviderModelSettings({ models, hiddenModelIds, onChange }: {
+  models: ProviderModelOption[];
+  hiddenModelIds: string[];
+  onChange: (id: string, visible: boolean) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const providers = [...new Map(models.map((model) => [model.providerId, model.providerLabel])).entries()];
+  if (!providers.length) return null;
+  return <section className="provider-model-settings" aria-label="Models in conversations">
+    <div className="settings-section-heading"><h3>Models in conversations</h3><p>Choose which models appear when you message a agent.</p></div>
+    <input className="input" type="search" aria-label="Search models" placeholder="Search models" value={query} onChange={(event) => setQuery(event.target.value)} />
+    {providers.map(([id, label]) => {
+      const catalogue = models.filter((model) => model.providerId === id);
+      const visible = catalogue.filter((model) => `${model.label} ${model.modelId}`.toLowerCase().includes(query.trim().toLowerCase()));
+      const selected = catalogue.filter((model) => !hiddenModelIds.includes(model.id));
+      return <details className="settings-disclosure" key={id} open={query ? true : undefined}>
+        <summary>{label}<span>{selected.length} of {catalogue.length} shown</span></summary>
+        <div className="provider-model-settings__actions">
+          <button type="button" onClick={() => catalogue.forEach((model) => onChange(model.id, true))}>Show all</button>
+          <button type="button" onClick={() => catalogue.forEach((model) => onChange(model.id, false))}>Hide all</button>
+        </div>
+        <div className="provider-model-settings__list">
+          {visible.map((model) => <label className="provider-model-settings__row" key={model.id}>
+            <input type="checkbox" checked={!hiddenModelIds.includes(model.id)} onChange={(event) => onChange(model.id, event.target.checked)} />
+            <span><strong>{model.label}</strong><small>{model.modelId}{model.available ? "" : " · Currently unavailable"}</small></span>
+          </label>)}
+          {!visible.length ? <p>No matching models.</p> : null}
+        </div>
+      </details>;
+    })}
+  </section>;
+}

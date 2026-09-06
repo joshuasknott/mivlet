@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
@@ -13,14 +13,24 @@ const profile: FableAgentProfile = {
 const props = { models: [], connectors: [], knowledgeSources: [], canDelete: false, onClose: vi.fn(), onDelete: vi.fn() };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-describe("teammate portrait ownership", () => {
-  it("saves the exact generated portrait shown during creation and gives the next teammate a fresh seed", async () => {
+describe("agent portrait ownership", () => {
+  it("previews and persists the selected colour through editing", async () => {
+    const onSave = vi.fn();
+    const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
+    fireEvent.input(screen.getByLabelText("Agent colour"), { target: { value: "#24bb77" } });
+    expect(view.container.querySelector("feColorMatrix")).toHaveAttribute("values", expect.any(String));
+    await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#24bb77" }));
+    view.rerender(<AgentEditor {...props} open agent={onSave.mock.calls[0][0]} onSave={onSave} />);
+    expect(screen.getByLabelText("Agent colour")).toHaveValue("#24bb77");
+  });
+  it("saves the exact generated portrait shown during creation and gives the next agent a fresh seed", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const view = render(<AgentEditor {...props} open agent={null} onSave={onSave} />);
     const image = view.container.querySelector(".agent-editor__identity img")!;
     const firstPortrait = image.getAttribute("src");
-    await user.type(screen.getByLabelText("Name"), "New teammate");
+    await user.type(screen.getByLabelText("Name"), "New agent");
     expect(image.getAttribute("src")).toBe(firstPortrait);
     await user.click(screen.getByRole("button", { name: "Create agent" }));
     const draft = onSave.mock.calls[0][0] as FableAgentProfile;
@@ -37,15 +47,15 @@ describe("teammate portrait ownership", () => {
     const view = render(<AgentEditor {...props} open agent={{ ...profile, iconImageDataUrl: customImage }} onSave={onSave} />);
     expect(view.container.querySelector(".agent-editor__identity img")).toHaveAttribute("src", customImage);
     await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "Renamed teammate");
+    await user.type(screen.getByLabelText("Name"), "Renamed agent");
     expect(view.container.querySelector(".agent-editor__identity img")).toHaveAttribute("src", customImage);
     await user.click(screen.getByRole("button", { name: "Remove image" }));
     expect(view.container.querySelector(".agent-editor__identity img")).toHaveAttribute("src", blobAvatarDataUrl(profile.avatarSeed!));
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ avatarSeed: profile.avatarSeed, iconImageDataUrl: undefined, name: "Renamed teammate" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ avatarSeed: profile.avatarSeed, iconImageDataUrl: undefined, name: "Renamed agent" }));
   });
 
-  it("normalizes uploaded images and prevents a late upload from replacing another teammate's portrait", async () => {
+  it("normalizes uploaded images and prevents a late upload from replacing another agent's portrait", async () => {
     const user = userEvent.setup();
     const pendingImages: { onload: (() => void) | null }[] = [];
     vi.stubGlobal("Image", class {

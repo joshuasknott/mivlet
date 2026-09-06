@@ -342,14 +342,13 @@ impl LocalComputerState {
         let scope = self.scope(workspace_id, agent_id)?;
         let workspace = scope.directory.join("workspace");
         if !workspace.is_dir() {
-            return Err("Set up this teammate's local computer before using its files.".into());
+            return Err("Set up this agent's local computer before using its files.".into());
         }
         if !workspace.starts_with(&self.root) {
-            return Err("The teammate computer workspace is invalid.".into());
+            return Err("The agent computer workspace is invalid.".into());
         }
-        crate::paths::strict_canonicalize(&workspace).map_err(|_| {
-            "The teammate computer workspace failed its security check.".to_string()
-        })?;
+        crate::paths::strict_canonicalize(&workspace)
+            .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
         Ok(workspace)
     }
 
@@ -362,7 +361,7 @@ impl LocalComputerState {
         let url = normalize_agent_navigation(&raw_url)?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
-            return Err("Set up this teammate's local computer before using its browser.".into());
+            return Err("Set up this agent's local computer before using its browser.".into());
         }
         ensure_browser_session(self.clone(), scope).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
@@ -372,11 +371,11 @@ impl LocalComputerState {
             .map_err(|_| "The local computer state is unavailable.".to_string())?
             .get(&scope.key)
             .cloned()
-            .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+            .ok_or_else(|| "The agent browser is not running.".to_string())?;
         tauri::async_runtime::spawn_blocking(move || {
             let mut session = session
                 .lock()
-                .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
             expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
@@ -408,7 +407,7 @@ impl LocalComputerState {
     ) -> Result<LocalBrowserAgentObservation, String> {
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
-            return Err("Set up this teammate's local computer before using its browser.".into());
+            return Err("Set up this agent's local computer before using its browser.".into());
         }
         ensure_browser_session(self.clone(), scope).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
@@ -418,11 +417,11 @@ impl LocalComputerState {
             .map_err(|_| "The local computer state is unavailable.".to_string())?
             .get(&scope.key)
             .cloned()
-            .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+            .ok_or_else(|| "The agent browser is not running.".to_string())?;
         tauri::async_runtime::spawn_blocking(move || {
             let mut session = session
                 .lock()
-                .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
             expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
@@ -453,11 +452,11 @@ impl LocalComputerState {
             .map_err(|_| "The local computer state is unavailable.".to_string())?
             .get(&scope.key)
             .cloned()
-            .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+            .ok_or_else(|| "The agent browser is not running.".to_string())?;
         tauri::async_runtime::spawn_blocking(move || {
             let mut session = session
                 .lock()
-                .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
             expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
@@ -519,7 +518,7 @@ impl LocalComputerState {
     ) -> Result<LocalComputerShellResult, String> {
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
-            return Err("Set up this teammate's local computer before using its terminal.".into());
+            return Err("Set up this agent's local computer before using its terminal.".into());
         }
         ensure_browser_session(self.clone(), scope.clone()).await?;
         let session = self
@@ -528,11 +527,11 @@ impl LocalComputerState {
             .map_err(|_| "The local computer state is unavailable.".to_string())?
             .get(&scope.key)
             .cloned()
-            .ok_or_else(|| "The teammate computer is not running.".to_string())?;
+            .ok_or_else(|| "The agent computer is not running.".to_string())?;
         tauri::async_runtime::spawn_blocking(move || {
             let mut session = session
                 .lock()
-                .map_err(|_| "The teammate computer state is unavailable.".to_string())?;
+                .map_err(|_| "The agent computer state is unavailable.".to_string())?;
             expire_human_lease(&mut session)?;
             if session.controller != LocalComputerController::Agent {
                 return Err(
@@ -994,7 +993,7 @@ async fn ensure_browser_session(
             .map(|session| {
                 let session = session
                     .lock()
-                    .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                    .map_err(|_| "The agent browser state is unavailable.".to_string())?;
                 Ok::<_, String>((session.tab.get_target_info().is_ok(), session.generation))
             })
             .transpose()?
@@ -1017,19 +1016,19 @@ async fn ensure_browser_session(
 fn next_browser_generation(previous: u64) -> Result<u64, String> {
     previous
         .checked_add(1)
-        .ok_or_else(|| "The teammate browser control generation is exhausted.".to_string())
+        .ok_or_else(|| "The agent browser control generation is exhausted.".to_string())
 }
 
 fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     std::fs::create_dir_all(&scope.directory)
-        .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
+        .map_err(|_| "Fable could not create the agent computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&scope.directory)
-        .map_err(|_| "The teammate computer directory failed its security check.".to_string())?;
+        .map_err(|_| "The agent computer directory failed its security check.".to_string())?;
     let workspace = scope.directory.join("workspace");
     std::fs::create_dir_all(&workspace)
-        .map_err(|_| "Fable could not create the teammate computer workspace.".to_string())?;
+        .map_err(|_| "Fable could not create the agent computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&workspace)
-        .map_err(|_| "A teammate computer directory failed its security check.".to_string())?;
+        .map_err(|_| "A agent computer directory failed its security check.".to_string())?;
     Ok(())
 }
 
@@ -1043,7 +1042,7 @@ fn launch_browser(
     let debugger_url = container::debugger_websocket_url(scope)?;
     let browser = Browser::connect_with_timeout(debugger_url, Duration::from_secs(24 * 60 * 60))
         .map_err(|_| {
-            "Fable could not connect to Chromium inside the teammate computer.".to_string()
+            "Fable could not connect to Chromium inside the agent computer.".to_string()
         })?;
     browser.set_default_timeout(Duration::from_secs(15));
     let tabs = browser.get_tabs();
@@ -1053,9 +1052,7 @@ fn launch_browser(
         .and_then(|tabs| tabs.first().cloned())
         .map(Ok)
         .unwrap_or_else(|| browser.new_tab())
-        .map_err(|_| {
-            "Fable could not open the browser inside the teammate computer.".to_string()
-        })?;
+        .map_err(|_| "Fable could not open the browser inside the agent computer.".to_string())?;
     tab.set_default_timeout(Duration::from_secs(15));
     Ok(LocalBrowserSession {
         _browser: browser,
@@ -1157,7 +1154,7 @@ fn computer_snapshot(
         .map(|value| {
             let mut value = value
                 .lock()
-                .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
             expire_human_lease(&mut value)?;
             Ok::<_, String>((
                 value.controller,
@@ -1223,9 +1220,9 @@ fn computer_snapshot(
         } else if !container_status.image_available && !container_status.container_exists {
             Some("Set up this computer to build its private Linux desktop.".into())
         } else if container_status.container_exists && !container_status.running {
-            Some("Start this teammate's private Linux desktop.".into())
+            Some("Start this agent's private Linux desktop.".into())
         } else if container_status.running && !container_status.healthy {
-            Some("This teammate's Linux desktop is still starting.".into())
+            Some("This agent's Linux desktop is still starting.".into())
         } else {
             None
         },
@@ -1236,21 +1233,21 @@ fn computer_snapshot(
 fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesSnapshot, String> {
     let workspace = scope.directory.join("workspace");
     let canonical_root = crate::paths::strict_canonicalize(&workspace)
-        .map_err(|_| "The teammate computer workspace failed its security check.".to_string())?;
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
     let mut pending = VecDeque::from([(canonical_root.clone(), 0_usize)]);
     let mut entries = Vec::new();
     let mut truncated = false;
 
     while let Some((directory, depth)) = pending.pop_front() {
         let canonical_directory = crate::paths::strict_canonicalize(&directory)
-            .map_err(|_| "A teammate folder failed its security check.".to_string())?;
+            .map_err(|_| "A agent folder failed its security check.".to_string())?;
         if !canonical_directory.starts_with(&canonical_root) {
-            return Err("A teammate folder escaped its private workspace.".into());
+            return Err("A agent folder escaped its private workspace.".into());
         }
         let mut children = std::fs::read_dir(&canonical_directory)
-            .map_err(|_| "Fable could not list this teammate's files.".to_string())?
+            .map_err(|_| "Fable could not list this agent's files.".to_string())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "Fable could not list this teammate's files.".to_string())?;
+            .map_err(|_| "Fable could not list this agent's files.".to_string())?;
         children.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
 
         for child in children {
@@ -1271,7 +1268,7 @@ fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesS
             }
             let relative = path
                 .strip_prefix(&canonical_root)
-                .map_err(|_| "A teammate file escaped its private workspace.".to_string())?;
+                .map_err(|_| "A agent file escaped its private workspace.".to_string())?;
             let Some(relative_path) = relative.to_str() else {
                 continue;
             };
@@ -1351,13 +1348,13 @@ fn workspace_file_preview(
     }
     let workspace = scope.directory.join("workspace");
     let canonical_root = crate::paths::strict_canonicalize(&workspace)
-        .map_err(|_| "The teammate computer workspace failed its security check.".to_string())?;
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
     let confined = crate::tools::confine_path(requested_path, &workspace)
-        .map_err(|_| "That file is outside this teammate's private workspace.".to_string())?;
+        .map_err(|_| "That file is outside this agent's private workspace.".to_string())?;
     let canonical_file = crate::paths::strict_canonicalize(&confined)
         .map_err(|_| "Choose an existing private file.".to_string())?;
     if !canonical_file.starts_with(&canonical_root) {
-        return Err("That file is outside this teammate's private workspace.".into());
+        return Err("That file is outside this agent's private workspace.".into());
     }
     let metadata = std::fs::metadata(&canonical_file)
         .map_err(|_| "Fable could not inspect that private file.".to_string())?;
@@ -1366,7 +1363,7 @@ fn workspace_file_preview(
     }
     let relative = canonical_file
         .strip_prefix(&canonical_root)
-        .map_err(|_| "That file is outside this teammate's private workspace.".to_string())?;
+        .map_err(|_| "That file is outside this agent's private workspace.".to_string())?;
     let path = relative
         .to_str()
         .map(|value| value.replace('\\', "/"))
@@ -1438,7 +1435,7 @@ pub async fn local_computer_files(
 ) -> Result<LocalComputerFilesSnapshot, String> {
     let scope = state.scope(&target.workspace_id, &target.agent_id)?;
     if !scope.directory.join("workspace").is_dir() {
-        return Err("Set up this teammate's local computer before viewing its files.".into());
+        return Err("Set up this agent's local computer before viewing its files.".into());
     }
     tauri::async_runtime::spawn_blocking(move || workspace_files_snapshot(&scope))
         .await
@@ -1452,7 +1449,7 @@ pub async fn local_computer_file_preview(
 ) -> Result<LocalComputerFilePreview, String> {
     let scope = state.scope(&request.workspace_id, &request.agent_id)?;
     if !scope.directory.join("workspace").is_dir() {
-        return Err("Set up this teammate's local computer before viewing its files.".into());
+        return Err("Set up this agent's local computer before viewing its files.".into());
     }
     tauri::async_runtime::spawn_blocking(move || workspace_file_preview(&scope, &request.path))
         .await
@@ -1473,11 +1470,11 @@ pub async fn local_browser_navigate(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "Set up this teammate's local computer first.".to_string())?;
+        .ok_or_else(|| "Set up this agent's local computer first.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         require_human_control(&mut session, request.expected_generation)?;
         session.observation = None;
         container::focus_browser(&scope)?;
@@ -1506,11 +1503,11 @@ pub async fn local_browser_snapshot(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+        .ok_or_else(|| "The agent browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         snapshot_from_session(&scope, &mut session)
     })
     .await
@@ -1530,16 +1527,14 @@ pub async fn local_computer_set_controller(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+        .ok_or_else(|| "The agent browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         expire_human_lease(&mut session)?;
         if session.generation != request.expected_generation {
-            return Err(
-                "The teammate computer changed. Refresh it before changing control.".into(),
-            );
+            return Err("The agent computer changed. Refresh it before changing control.".into());
         }
         if session.controller != request.controller {
             session.controller = request.controller;
@@ -1574,11 +1569,11 @@ pub async fn local_browser_pointer(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+        .ok_or_else(|| "The agent browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         require_human_control(&mut session, request.expected_generation)?;
         if request.x > f64::from(VIEWPORT_WIDTH) || request.y > f64::from(VIEWPORT_HEIGHT) {
             return Err("The pointer position is outside the live desktop.".into());
@@ -1627,11 +1622,11 @@ pub async fn local_browser_key(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+        .ok_or_else(|| "The agent browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         require_human_control(&mut session, request.expected_generation)?;
         if request.key.chars().count() != 1
             && !matches!(
@@ -1670,7 +1665,7 @@ pub async fn local_computer_launch_app(
         request.application.as_str(),
         "browser" | "files" | "terminal"
     ) {
-        return Err("That teammate computer application is not supported.".into());
+        return Err("That agent computer application is not supported.".into());
     }
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
@@ -1680,18 +1675,18 @@ pub async fn local_computer_launch_app(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate computer is not running.".to_string())?;
+        .ok_or_else(|| "The agent computer is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate computer state is unavailable.".to_string())?;
+            .map_err(|_| "The agent computer state is unavailable.".to_string())?;
         require_human_control(&mut session, request.expected_generation)?;
         container::launch_application(&scope, &request.application)?;
         renew_human_lease(&mut session);
         snapshot_from_session(&scope, &mut session)
     })
     .await
-    .map_err(|_| "The teammate application task stopped unexpectedly.".to_string())?
+    .map_err(|_| "The agent application task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1710,11 +1705,11 @@ pub async fn local_browser_history(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned()
-        .ok_or_else(|| "The teammate browser is not running.".to_string())?;
+        .ok_or_else(|| "The agent browser is not running.".to_string())?;
     tauri::async_runtime::spawn_blocking(move || {
         let mut session = session
             .lock()
-            .map_err(|_| "The teammate browser state is unavailable.".to_string())?;
+            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
         require_human_control(&mut session, request.expected_generation)?;
         container::focus_browser(&scope)?;
         let history = session
@@ -1754,7 +1749,7 @@ fn require_human_control(
         return Err("Take control before interacting with this computer.".into());
     }
     if session.generation != expected_generation {
-        return Err("The teammate computer changed. Refresh it before interacting.".into());
+        return Err("The agent computer changed. Refresh it before interacting.".into());
     }
     Ok(())
 }

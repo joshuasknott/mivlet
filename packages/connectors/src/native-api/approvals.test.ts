@@ -2,6 +2,12 @@ import { describe, expect, it } from "vitest";
 import { buildToolApproval } from "./approvals";
 
 describe("buildToolApproval", () => {
+  it("matches native canonical JSON for nested input independent of provider key order", () => {
+    const first = buildToolApproval("Codex", "github-read", '{"input":{"repository":"owner/repo","path":"README.md"},"capability":"files.read"}');
+    const second = buildToolApproval("Codex", "github-read", '{"capability":"files.read","input":{"path":"README.md","repository":"owner/repo"}}');
+    expect(first.dataUsed).toEqual(second.dataUsed);
+    expect(first.dataUsed).toEqual(['capability: files.read', 'input: {"path":"README.md","repository":"owner/repo"}']);
+  });
   it("shapes a read-only tool into a read-only, low-risk approval", () => {
     const approval = buildToolApproval("openai", "read-file", '{"path":"a.md"}');
     expect(approval.service).toBe("openai");
@@ -72,10 +78,10 @@ describe("buildToolApproval", () => {
     });
     expect(action.dataUsed).toEqual([
       "action: fill",
-      "observationId: observation-1234567890abcdef",
-      "elementRef: control-1234567890abcdef-0",
-      "controlRole: textbox",
       "controlName: Search",
+      "controlRole: textbox",
+      "elementRef: control-1234567890abcdef-0",
+      "observationId: observation-1234567890abcdef",
       "value: Fable"
     ]);
 
@@ -116,10 +122,10 @@ describe("buildToolApproval", () => {
 
     expect(approval.dataUsed).toEqual([
       "action: fill",
-      "observationId: observation-1234567890abcdef",
-      "elementRef: control-1234567890abcdef-1",
-      "controlRole: textbox",
       "controlName: Search",
+      "controlRole: textbox",
+      "elementRef: control-1234567890abcdef-1",
+      "observationId: observation-1234567890abcdef",
       "value: quarterly plan"
     ]);
   });

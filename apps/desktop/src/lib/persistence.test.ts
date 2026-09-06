@@ -11,7 +11,7 @@ import {
 describe("conversation shell persistence", () => {
   beforeEach(() => window.localStorage.clear());
 
-  it("keeps teammate skills, reasoning and previous conversations across snapshots", () => {
+  it("keeps agent skills, reasoning and previous conversations across snapshots", () => {
     const profile = { ...defaultShellState.agents![0], avatarSeed: "blob-v1:stable-avatar", reasoningEffort: "high", threadId: "current", threadIds: ["earlier", "earlier"], learnedTasks: [{ id: "weekly", title: "Plan", instruction: "Ask about priorities", createdAt: "2026-09-04", updatedAt: "2026-09-04" }] };
     const restored = shellStateFromRuntimeSnapshot(shellStateToRuntimeSnapshot({ ...defaultShellState, agents: [profile] }), defaultShellState);
     expect(restored.agents![0]).toMatchObject({ avatarSeed: profile.avatarSeed, reasoningEffort: "high", threadIds: ["earlier", "current"], learnedTasks: profile.learnedTasks });
@@ -20,6 +20,7 @@ describe("conversation shell persistence", () => {
   it("round-trips the supported local state without orchestration collections", () => {
     const snapshot = shellStateToRuntimeSnapshot({
       ...defaultShellState,
+      hiddenModelIds: ["codex::hidden-model"],
       composerValue: "Continue this conversation",
       connectedBackendIds: ["xai"]
     });

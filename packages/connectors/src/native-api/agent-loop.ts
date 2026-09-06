@@ -138,7 +138,8 @@ export async function* runAgentLoop(
   const modelSupportsTools =
     options.modelSupportsTools ??
     catalogueCapabilities(request.providerId, request.model)?.tools;
-  const tools = options.toolsEnabled === false || modelSupportsTools !== true ? [] : registeredToolSpecs();
+  const tools = options.toolsEnabled === false || modelSupportsTools !== true ? []
+    : request.tools.length ? request.tools.filter((tool) => lookupTool(tool.name)) : registeredToolSpecs();
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);

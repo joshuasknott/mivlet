@@ -25,6 +25,8 @@ mod connector_api;
 mod connector_approvals;
 mod connector_auth;
 mod connector_cache;
+#[cfg(debug_assertions)]
+mod connector_check;
 mod connector_sync;
 mod connectors;
 mod conversations;
@@ -49,6 +51,7 @@ mod product_spine_parity;
 mod snapshot;
 mod store;
 pub mod tools;
+mod window_controls;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install
 /// the audited ring provider before constructing any native HTTP client.
@@ -62,6 +65,12 @@ pub fn open_antigravity_browser_helper(raw_url: &str) -> bool {
     antigravity_acp::open_validated_browser_helper(raw_url)
 }
 
+/// Developer-only live check; prints status/counts, never credentials or source content.
+#[cfg(debug_assertions)]
+pub fn check_connectors() {
+    connector_check::run();
+}
+
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -72,12 +81,15 @@ pub fn run() {
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
+            // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
+            let _ = connector_auth::provision_connector_configuration();
             app.manage(std::sync::Arc::new(
                 local_computer::LocalComputerState::initialize(&handle)?,
             ));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            window_controls::control_main_window,
             snapshot::runtime_status,
             execution_attempts::save_execution_attempt,
             execution_attempts::list_execution_attempts,
@@ -159,6 +171,7 @@ pub fn run() {
             connectors::set_connector_knowledge_source_disabled,
             connectors::delete_connector_knowledge_source,
             connectors::prepare_connector_action,
+            connectors::prepare_connector_tool_action,
             connectors::execute_approved_connector_action,
             connector_cache::list_connector_cache,
             connector_cache::search_connector_cache,

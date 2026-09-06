@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { isRoutineConnectorRead } from "@fable/connectors/native-api/tool-executor";
 import type {
   AgentTurnRequest,
   BackendAgentEvent,
@@ -67,6 +68,9 @@ function hasDesktopRuntime(): boolean {
 
 export interface NativeAgentState {
   transcript: string;
+  progressThreadId?: string;
+  reasoningSummaries?: Record<string, string>;
+  activity?: string;
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -144,6 +148,8 @@ export interface UseNativeAgentOptions {
 export function useNativeAgent(options: UseNativeAgentOptions) {
   const [state, setState] = useState<NativeAgentState>({
     transcript: "",
+        reasoningSummaries: {},
+        activity: "",
     usage: null,
     running: false,
     lastError: null,
@@ -431,6 +437,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       setState((current) => ({
         ...current,
         transcript: "",
+        reasoningSummaries: {},
+        activity: "",
+        progressThreadId: requestThreadId,
         usage: null,
         running: true,
         lastError: null,
@@ -610,7 +619,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             terminalized = true;
             break;
           }
-          if (event.type === "text-delta") {
+          if (event.type === "reasoning-summary") {
+            const key = `${event.itemId}:${event.summaryIndex}`;
+            setState((current) => {
+              const summaries = { ...current.reasoningSummaries };
+              summaries[key] = ((summaries[key] ?? "") + event.text).slice(-16000);
+              for (const staleKey of Object.keys(summaries).slice(0, -32)) delete summaries[staleKey];
+              return { ...current, reasoningSummaries: summaries };
+            });
+          } else if (event.type === "text-delta") {
             setState((current) => ({
               ...current,
               transcript: current.transcript + event.text,
@@ -657,21 +674,24 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString(),
             };
           } else if (event.type === "tool-call") {
+            const needsApproval = !isRoutineConnectorRead(event.approval)
+              && !["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0]);
             onToolCallRef.current?.(event);
-            pendingApprovalByCall.set(event.callId, event.approval.id);
+            if (needsApproval) pendingApprovalByCall.set(event.callId, event.approval.id);
             toolNameByCall.set(event.callId, event.tool);
             persisted = {
               ...persisted,
-              status: "awaiting-approval",
+              status: needsApproval ? "awaiting-approval" : "streaming",
               pendingApprovalIds: [
                 ...persisted.pendingApprovalIds,
-                event.approval.id,
+                ...(needsApproval ? [event.approval.id] : []),
               ],
               updatedAt: new Date().toISOString(),
             };
             setState((current) => ({
               ...current,
-              status: "awaiting-approval",
+              status: needsApproval ? "awaiting-approval" : "streaming",
+              activity: `${needsApproval ? "Waiting for approval" : "Using"}: ${event.tool}`,
             }));
             if (durableWriter) {
               await durableWriter.record({
@@ -682,7 +702,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               });
               // Historical evidence only: a recovered request must never become
               // a new permit or standing grant after restart.
-              await durableWriter.record({
+              if (needsApproval) await durableWriter.record({
                 kind: "approval-request",
                 content: `Approval requested for ${event.tool}.`,
                 approvalRequestId: event.approval.id,
@@ -709,7 +729,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
               updatedAt: new Date().toISOString(),
             };
-            setState((current) => ({ ...current, status: "streaming" }));
+            setState((current) => ({ ...current, status: "streaming", activity: `${event.ok ? "Finished" : "Could not complete"}: ${toolNameByCall.get(event.callId) ?? "app action"}` }));
             if (durableWriter)
               await durableWriter.record({
                 kind: "tool-result",
@@ -921,7 +941,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   );
 
   const retry = useCallback(
-    async (attemptToRetry: ExecutionAttempt) => {
+    async (attemptToRetry: ExecutionAttempt, tools: AgentTurnRequest["tools"] = []) => {
       const userExchange = attemptToRetry.exchanges
         ?.filter((exchange) => exchange.role === "user")
         .at(-1);
@@ -960,7 +980,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         {
           model: attemptToRetry.model,
           messages: [{ role: "user", content: userExchange.content }],
-          tools: [],
+          tools,
           maxTokens: 2_048,
         },
         undefined,
@@ -1027,6 +1047,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       running: false,
       lastError: message,
       transcript: "",
+        reasoningSummaries: {},
+        activity: "",
       usage: null,
       status: "failed",
       currentAttemptId: null,

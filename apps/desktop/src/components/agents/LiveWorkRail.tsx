@@ -10,13 +10,12 @@ import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import restingWallpaper from "../../assets/computer-wallpaper.png";
-import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, type WheelEvent } from "react";
+import { useRef, useState, type FormEvent, type KeyboardEvent, type MouseEvent, type WheelEvent } from "react";
 import type { LocalComputerApplication, LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
 export function LiveWorkRail({
   agentName,
-  approvalPanel,
   localComputer,
   hostedComputer,
   screenPreviewUrl,
@@ -28,7 +27,6 @@ export function LiveWorkRail({
   onClose
 }: {
   agentName: string;
-  approvalPanel?: ReactNode;
   localComputer: {
     available: boolean;
     status?: "unprovisioned" | "provisioning" | "ready" | "degraded";
@@ -205,7 +203,6 @@ export function LiveWorkRail({
           else setComputerDetailsOpen(true);
         }}>{screenPreviewUrl ? "Open computer" : "Set up computer"}</button>
       </section>
-      {approvalPanel}
       <details className="computer-details" open={computerDetailsOpen} onToggle={(event) => setComputerDetailsOpen(event.currentTarget.open)}>
       <summary>Computer options</summary>
       <section className={`hosted-computer-card local-computer-card${localComputer.recoveryNeeded || localComputer.status === "degraded" ? " is-attention" : localComputer.status === "ready" ? " is-ready" : ""}`} aria-label="Computer on this PC">
@@ -219,7 +216,7 @@ export function LiveWorkRail({
                 ? `${localComputer.browserProduct ?? "Private Linux desktop"} · persistent home and workspace`
                 : "The private Linux desktop is ready. Start it when needed."
             : localComputer.provisioning || localComputer.status === "provisioning"
-              ? "Building this teammate's private Linux desktop…"
+              ? "Building this agent's private Linux desktop…"
               : localComputer.browserAvailable
                 ? "Docker/WSL isolation is ready for setup"
                 : "Start Docker Desktop with its WSL 2 engine"}</small>
@@ -237,7 +234,7 @@ export function LiveWorkRail({
               value={localBrowserUrl}
               onChange={(event) => setLocalBrowserUrl(event.target.value)}
               placeholder="https://example.com"
-              aria-label="Page to open on this teammate's local computer"
+              aria-label="Page to open on this agent's local computer"
               disabled={localComputer.busy}
               required
             />
@@ -289,7 +286,7 @@ export function LiveWorkRail({
                           </li>
                         ))}
                       </ul>
-                    ) : <small>No files yet. This teammate can create one after you approve a write.</small>}
+                    ) : <small>No files yet. This agent can create one after you approve a write.</small>}
                 {localComputer.files?.truncated ? <small>Showing the first 200 entries.</small> : null}
                 {localComputer.filePreviewError ? <small role="alert">{localComputer.filePreviewError}</small> : null}
               </div>
@@ -298,7 +295,7 @@ export function LiveWorkRail({
         ) : null}
         {localComputer.error && !localComputer.recoveryNeeded ? <small className="hosted-browser-launcher__error" role="alert">{localComputer.error}</small> : null}
         {localComputer.status === "ready" ? (
-          <small className="local-computer-card__boundary">A separate Linux container holds this teammate&apos;s persistent desktop, browser profile, terminal, and files. Human control uses a renewable five-minute lease.</small>
+          <small className="local-computer-card__boundary">A separate Linux container holds this agent&apos;s persistent desktop, browser profile, terminal, and files. Human control uses a renewable five-minute lease.</small>
         ) : null}
       </section>
 
@@ -313,7 +310,7 @@ export function LiveWorkRail({
               : hostedComputer.error
                 ? hostedComputer.error
                 : hostedComputer.available
-                  ? "Not set up for this teammate"
+                  ? "Not set up for this agent"
                   : "Available with a signed-in hosted workspace"}</small>
         </span>
         {hostedComputer.available && hostedComputer.status !== "ready" ? (
@@ -446,5 +443,5 @@ function formatControlLease(expiresAt?: string): string {
   const expiry = new Date(expiresAt);
   if (Number.isNaN(expiry.getTime())) return "You have a renewable five-minute control lease.";
   const time = expiry.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return `Control returns to the teammate automatically at ${time}.`;
+  return `Control returns to the agent automatically at ${time}.`;
 }

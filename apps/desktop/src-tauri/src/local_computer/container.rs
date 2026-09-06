@@ -91,7 +91,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "stop".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not stop the previous teammate computer.",
+                "Fable could not stop the previous agent computer.",
             )?;
             checked(
                 vec![
@@ -99,7 +99,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "rm".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not replace the previous teammate computer.",
+                "Fable could not replace the previous agent computer.",
             )?;
             create_container(scope)?;
         } else if !inspection.running {
@@ -109,7 +109,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "start".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not start the teammate computer.",
+                "Fable could not start the agent computer.",
             )?;
         }
     } else {
@@ -130,21 +130,21 @@ pub(super) fn debugger_websocket_url(scope: &ComputerScope) -> Result<String, St
             "--show-error".into(),
             "http://127.0.0.1:9222/json/version".into(),
         ],
-        "Fable could not reach Chromium inside the teammate computer.",
+        "Fable could not reach Chromium inside the agent computer.",
     )?;
     let value: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "The teammate computer returned invalid browser metadata.".to_string())?;
+        .map_err(|_| "The agent computer returned invalid browser metadata.".to_string())?;
     let raw = value
         .get("webSocketDebuggerUrl")
         .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "The teammate computer did not expose its browser session.".to_string())?;
+        .ok_or_else(|| "The agent computer did not expose its browser session.".to_string())?;
     let port = published_debug_port(scope)?;
     let mut url = Url::parse(raw)
-        .map_err(|_| "The teammate computer returned an invalid browser session.".to_string())?;
+        .map_err(|_| "The agent computer returned an invalid browser session.".to_string())?;
     url.set_host(Some("127.0.0.1"))
-        .map_err(|_| "The teammate computer browser session is invalid.".to_string())?;
+        .map_err(|_| "The agent computer browser session is invalid.".to_string())?;
     url.set_port(Some(port))
-        .map_err(|_| "The teammate computer browser port is invalid.".to_string())?;
+        .map_err(|_| "The agent computer browser port is invalid.".to_string())?;
     Ok(url.to_string())
 }
 
@@ -155,10 +155,10 @@ pub(super) fn capture_desktop(scope: &ComputerScope) -> Result<Vec<u8>, String> 
             container_name(scope).into(),
             "/usr/local/bin/fable-screenshot".into(),
         ],
-        "Fable could not capture the teammate computer.",
+        "Fable could not capture the agent computer.",
     )?;
     if output.stdout.is_empty() || output.stdout.len() > MAX_DESKTOP_FRAME_BYTES {
-        return Err("The teammate computer returned an invalid desktop frame.".into());
+        return Err("The agent computer returned an invalid desktop frame.".into());
     }
     Ok(output.stdout)
 }
@@ -184,7 +184,7 @@ pub(super) fn pointer(
     }
     checked(
         args,
-        "The teammate computer could not apply that pointer action.",
+        "The agent computer could not apply that pointer action.",
     )?;
     Ok(())
 }
@@ -198,7 +198,7 @@ pub(super) fn key(scope: &ComputerScope, value: &str) -> Result<(), String> {
             "key".into(),
             value.into(),
         ],
-        "The teammate computer could not apply that key.",
+        "The agent computer could not apply that key.",
     )?;
     Ok(())
 }
@@ -211,7 +211,7 @@ pub(super) fn launch_application(scope: &ComputerScope, application: &str) -> Re
             "/usr/local/bin/fable-launch-app".into(),
             application.into(),
         ],
-        "The teammate computer could not open that application.",
+        "The agent computer could not open that application.",
     )?;
     Ok(())
 }
@@ -293,7 +293,7 @@ fn ensure_image(image_context: &Path) -> Result<(), String> {
     let gate = IMAGE_BUILD_GATE.get_or_init(|| Mutex::new(()));
     let _guard = gate
         .lock()
-        .map_err(|_| "The teammate computer image build state is unavailable.".to_string())?;
+        .map_err(|_| "The agent computer image build state is unavailable.".to_string())?;
     if image_exists() {
         return Ok(());
     }
@@ -346,7 +346,7 @@ fn ensure_volume(scope: &ComputerScope) -> Result<(), String> {
             format!("{SCOPE_LABEL}={}", scope.key).into(),
             name.into(),
         ],
-        "Fable could not create persistent storage for the teammate computer.",
+        "Fable could not create persistent storage for the agent computer.",
     )?;
     Ok(())
 }
@@ -421,7 +421,7 @@ fn create_container(scope: &ComputerScope) -> Result<(), String> {
             "30s".into(),
             IMAGE_TAG.into(),
         ],
-        "Fable could not create the teammate computer.",
+        "Fable could not create the agent computer.",
     )?;
     Ok(())
 }
@@ -438,7 +438,7 @@ fn wait_until_ready(scope: &ComputerScope) -> Result<(), String> {
         }
         thread::sleep(Duration::from_millis(500));
     }
-    Err("The teammate computer did not become ready in time.".into())
+    Err("The agent computer did not become ready in time.".into())
 }
 
 fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection>, String> {
@@ -449,7 +449,7 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
         OsStr::new("{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.Config.Image}}|{{ index .Config.Labels \"com.fable.local-computer\" }}|{{ index .Config.Labels \"com.fable.scope\" }}"),
         OsStr::new(&container_name(scope)),
     ])
-    .map_err(|_| "Fable could not inspect the teammate computer.".to_string())?;
+    .map_err(|_| "Fable could not inspect the agent computer.".to_string())?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -461,7 +461,7 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
     let owner_label = fields.next().unwrap_or_default().to_string();
     let scope_label = fields.next().unwrap_or_default().to_string();
     if fields.next().is_some() {
-        return Err("The teammate computer returned invalid lifecycle metadata.".into());
+        return Err("The agent computer returned invalid lifecycle metadata.".into());
     }
     Ok(Some(ContainerInspection {
         running,
@@ -477,7 +477,7 @@ fn validate_owned_container(
     inspection: &ContainerInspection,
 ) -> Result<(), String> {
     if inspection.owner_label != "true" || inspection.scope_label != scope.key {
-        return Err("The teammate computer name is already owned by another resource.".into());
+        return Err("The agent computer name is already owned by another resource.".into());
     }
     Ok(())
 }
@@ -489,7 +489,7 @@ fn published_debug_port(scope: &ComputerScope) -> Result<u16, String> {
             container_name(scope).into(),
             "9223/tcp".into(),
         ],
-        "Fable could not resolve the teammate browser port.",
+        "Fable could not resolve the agent browser port.",
     )?;
     let text = String::from_utf8_lossy(&output.stdout);
     let port = text
@@ -497,7 +497,7 @@ fn published_debug_port(scope: &ComputerScope) -> Result<u16, String> {
         .find_map(|line| line.trim().rsplit_once(':').map(|(_, port)| port))
         .and_then(|port| port.parse::<u16>().ok())
         .filter(|port| *port > 0)
-        .ok_or_else(|| "The teammate browser port is invalid.".to_string())?;
+        .ok_or_else(|| "The agent browser port is invalid.".to_string())?;
     Ok(port)
 }
 

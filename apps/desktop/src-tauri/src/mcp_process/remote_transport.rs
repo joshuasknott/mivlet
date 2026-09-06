@@ -359,10 +359,7 @@ async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<St
     let Some(tokens) = load_mcp_oauth_tokens(credential_key)? else {
         return Err("MCP Connection credentials are unavailable; reconnect this server.".into());
     };
-    let resource = validate_remote_endpoint(&tokens.resource)?;
-    if resource != session.endpoint {
-        return Err("Stored MCP OAuth credentials target a different server.".into());
-    }
+    validate_mcp_token_binding(&tokens, &session.endpoint)?;
     if tokens.expires_at > chrono::Utc::now().timestamp() + 30 {
         return Ok(Some(tokens.access_token));
     }
@@ -370,6 +367,7 @@ async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<St
     let Some(mut tokens) = load_mcp_oauth_tokens(credential_key)? else {
         return Err("MCP Connection credentials are unavailable; reconnect this server.".into());
     };
+    let resource = validate_mcp_token_binding(&tokens, &session.endpoint)?;
     if tokens.expires_at > chrono::Utc::now().timestamp() + 30 {
         return Ok(Some(tokens.access_token));
     }
@@ -387,7 +385,7 @@ async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<St
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token.as_str()),
             ("client_id", tokens.client_id.as_str()),
-            ("resource", resource.as_str()),
+            ("resource", tokens.resource.as_str()),
         ])
         .send()
         .await
@@ -411,6 +409,8 @@ async fn usable_mcp_access_token(session: &McpRemoteSession) -> Result<Option<St
         refreshed.refresh_token = tokens.refresh_token.take();
     }
     refreshed.revocation_endpoint = tokens.revocation_endpoint.take();
+    refreshed.resource = tokens.resource;
+    refreshed.transport_endpoint = tokens.transport_endpoint;
     let access_token = refreshed.access_token.clone();
     store_mcp_oauth_tokens(credential_key, &refreshed)?;
     Ok(Some(access_token))
@@ -728,6 +728,33 @@ async fn fetch_remote_metadata(url: &Url) -> Result<Option<Value>, String> {
         .map_err(|_| "Remote MCP authorization metadata was malformed.".into())
 }
 
+// Some servers publish their origin as the canonical OAuth audience for /mcp.
+// Accept only that root alias or the exact endpoint, never another origin/path.
+fn validate_mcp_oauth_resource(endpoint: &Url, raw: &str) -> Result<Url, String> {
+    let resource = validate_remote_endpoint(raw)?;
+    if resource != *endpoint
+        && !(resource.origin() == endpoint.origin()
+            && resource.path() == "/"
+            && resource.query().is_none()
+            && endpoint.query().is_none())
+    {
+        return Err("Remote MCP protected-resource metadata named a different resource.".into());
+    }
+    Ok(resource)
+}
+
+fn validate_mcp_token_binding(
+    tokens: &RemoteMcpOAuthTokens,
+    endpoint: &Url,
+) -> Result<Url, String> {
+    // Legacy credentials used the resource as the exact transport binding.
+    let binding = tokens.transport_endpoint.as_deref().unwrap_or(&tokens.resource);
+    if validate_remote_endpoint(binding)? != *endpoint {
+        return Err("Stored MCP OAuth credentials target a different server.".into());
+    }
+    validate_mcp_oauth_resource(endpoint, &tokens.resource)
+}
+
 fn parse_protected_resource_metadata(
     endpoint: &Url,
     value: &Value,
@@ -741,9 +768,7 @@ fn parse_protected_resource_metadata(
         .ok_or_else(|| {
             "Remote MCP protected-resource metadata omitted its resource.".to_string()
         })?;
-    if validate_remote_endpoint(resource)? != *endpoint {
-        return Err("Remote MCP protected-resource metadata named a different resource.".into());
-    }
+    validate_mcp_oauth_resource(endpoint, resource)?;
     let servers = object
         .get("authorization_servers")
         .and_then(Value::as_array)
@@ -867,6 +892,7 @@ fn parse_authorization_server_metadata(
         dynamic_registration_supported,
     )?;
     Ok(RemoteMcpAuthorizationDiscovery {
+        resource: None,
         summary: RemoteMcpAuthorizationSummary {
             issuer: issuer.to_string(),
             scopes,
@@ -1263,13 +1289,14 @@ fn parse_mcp_token_response(
         token_endpoint: token_endpoint.to_string(),
         client_id: client_id.to_string(),
         resource: resource.to_string(),
+        transport_endpoint: None,
         revocation_endpoint: None,
     })
 }
 
 async fn exchange_mcp_authorization_code(
     discovery: &RemoteMcpAuthorizationDiscovery,
-    resource: &Url,
+    resource: &str,
     client_id: &str,
     redirect_uri: &str,
     code: &str,
@@ -1286,7 +1313,7 @@ async fn exchange_mcp_authorization_code(
             ("redirect_uri", redirect_uri),
             ("code", code),
             ("code_verifier", verifier),
-            ("resource", resource.as_str()),
+            ("resource", resource),
         ])
         .send()
         .await
@@ -1302,8 +1329,10 @@ async fn exchange_mcp_authorization_code(
         &discovery.summary.scopes,
         &discovery.token_endpoint,
         client_id,
-        resource,
+        &validate_remote_endpoint(resource)?,
     )?;
+    // Preserve the advertised audience byte-for-byte, including a root without '/'.
+    tokens.resource = resource.to_string();
     tokens.revocation_endpoint = discovery.revocation_endpoint.as_ref().map(Url::to_string);
     Ok(tokens)
 }
@@ -1363,7 +1392,10 @@ async fn discover_remote_authorization(
     for issuer in servers {
         for candidate in authorization_metadata_candidates(&issuer) {
             if let Some(value) = fetch_remote_metadata(&candidate).await? {
-                return parse_authorization_server_metadata(&issuer, scopes.clone(), &value);
+                let mut discovery =
+                    parse_authorization_server_metadata(&issuer, scopes.clone(), &value)?;
+                discovery.resource = protected.get("resource").and_then(Value::as_str).map(str::to_string);
+                return Ok(discovery);
             }
         }
     }

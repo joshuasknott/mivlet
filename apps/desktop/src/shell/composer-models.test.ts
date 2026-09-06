@@ -40,7 +40,7 @@ describe("composerModelsFor", () => {
     ).toEqual(["gemini-3.0"]);
   });
 
-  it("returns a bounded provider-specific fallback list", () => {
+  it("keeps every enabled model in a large provider catalogue", () => {
     expect(
       composerModelsFor(
         "anthropic",
@@ -48,6 +48,6 @@ describe("composerModelsFor", () => {
           model(`claude-${index}`, "anthropic"),
         ),
       ).length,
-    ).toBe(24);
+    ).toBe(25);
   });
 });

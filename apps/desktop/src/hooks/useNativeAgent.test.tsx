@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { registeredToolSpecs } from "@fable/connectors/native-api/tools";
 import type {
   AgentTurnRequest,
   BackendAgentEvent,
@@ -411,10 +412,11 @@ describe("useNativeAgent", () => {
     await waitFor(() => expect(result.current.state.recoverableAttempts).toHaveLength(1));
 
     await act(async () => {
-      await result.current.retry(result.current.state.recoverableAttempts[0]);
+      await result.current.retry(result.current.state.recoverableAttempts[0], registeredToolSpecs().filter((tool) => tool.name === "gmail-read"));
     });
 
     expect(result.current.state.transcript).toBe("Recovered");
+    expect(mocks.streamRequests[0].body).toMatchObject({ tools: [expect.objectContaining({ function: expect.objectContaining({ name: "gmail-read" }) })] });
     expect(result.current.state.recoverableAttempts).toHaveLength(0);
     const finalRun = mocks.savedRuns.at(-1) as ExecutionAttempt;
     expect(finalRun.parentAttemptId).toBe("attempt-interrupted");
@@ -427,7 +429,7 @@ describe("useNativeAgent", () => {
     });
     // A retry starts a child attempt from the safe user turn; it does not replay
     // a completed tool call from the parent as a new side effect.
-    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["system", "user"]);
+    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["user"]);
   });
 
   it("accumulates text-delta events into the transcript", async () => {

@@ -45,6 +45,8 @@ import {
 const DECISION_ORDER: ApprovalDecision[] = ["once", "session", "rule", "modify", "deny"];
 
 export function ApprovalPanel({
+  compact = false,
+  previews = {},
   approvals,
   audit,
   sessionGrants,
@@ -62,6 +64,8 @@ export function ApprovalPanel({
   onConfirmDecision,
   onCancelConfirmation
 }: {
+  compact?: boolean;
+  previews?: Record<string, { summary: string; details: string }>;
   approvals: ApprovalRequest[];
   audit: ApprovalAuditEntry[];
   sessionGrants: ApprovalGrant[];
@@ -82,8 +86,8 @@ export function ApprovalPanel({
   const hasGrantsOrRules = sessionGrants.length > 0 || approvalRules.length > 0;
 
   return (
-    <section className="context-panel" aria-label="Approvals and memory">
-      <SectionHeading title="Approvals" meta={`${approvals.length} waiting`} />
+    <section className={`context-panel${compact ? " context-panel--inline-approval" : ""}`} aria-label={compact ? "Confirm action" : "Approvals and memory"}>
+      {!compact ? <SectionHeading title="Approvals" meta={`${approvals.length} waiting`} /> : null}
       <div className="approval-list">
         {approvals.length === 0 ? (
           <div className="empty-state">
@@ -103,16 +107,20 @@ export function ApprovalPanel({
               >
                 <header className="approval-card__header">
                   <span className="approval-card__summary">{actionSummary(approval)}</span>
-                  <span className={`approval-risk approval-risk--${tone}`}>
+                  {!compact ? <span className={`approval-risk approval-risk--${tone}`}>
                     {isHighRisk(approval.mode, approval.riskLevel) ? (
                       <ShieldWarning size={14} aria-hidden="true" />
                     ) : (
                       <ShieldCheck size={14} aria-hidden="true" />
                     )}
                     {riskLabel(approval.riskLevel)}
-                  </span>
+                  </span> : null}
                 </header>
-                <p className="approval-card__why">{whyApprovalIsNeeded(approval)}</p>
+                {previews[approval.id] ? <p className="approval-card__context">{previews[approval.id].summary.split("\n").slice(0, 3).join(" · ")}</p> : compact ? <p className="approval-card__context">{approval.consequence}</p> : null}
+                {!compact ? <p className="approval-card__why">{whyApprovalIsNeeded(approval)}</p> : null}
+                <details className="approval-inspection" open={compact ? undefined : true}>
+                <summary>{compact ? "View action details" : "Action details"}</summary>
+                {previews[approval.id] ? <pre className="approval-card__payload">{previews[approval.id].summary}{"\n\n"}{previews[approval.id].details}</pre> : null}
                 <dl className="approval-details">
                   <div>
                     <dt>Service</dt>
@@ -142,6 +150,7 @@ export function ApprovalPanel({
                     <dd>{whyApprovalIsNeeded(approval)}</dd>
                   </div>
                 </dl>
+                </details>
 
                 {isEditing ? (
                   <ApprovalModifyForm
@@ -165,6 +174,7 @@ export function ApprovalPanel({
                     {DECISION_ORDER.filter(
                       (decision) =>
                         approval.decisions.includes(decision) &&
+                        (!compact || decision === "once" || decision === "deny") &&
                         !(
                           isHighRisk(approval.mode, approval.riskLevel) &&
                           (decision === "session" || decision === "rule")
@@ -178,7 +188,7 @@ export function ApprovalPanel({
                             ? "approval-action approval-action--deny"
                             : "approval-action"
                         }
-                        aria-label={decisionLabel(decision)}
+                        aria-label={compact && decision === "once" ? "Approve" : decisionLabel(decision)}
                         title={decisionDescription(decision)}
                         onClick={() =>
                           decision === "modify"
@@ -186,10 +196,10 @@ export function ApprovalPanel({
                             : onDecision(approval, decision)
                         }
                       >
-                        {decision === "deny" ? (
+                        {!compact && decision === "deny" ? (
                           <XCircle size={15} aria-hidden="true" />
                         ) : null}
-                        {decisionLabel(decision)}
+                        {compact && decision === "once" ? "Approve" : decisionLabel(decision)}
                       </button>
                     ))}
                   </div>
@@ -199,7 +209,7 @@ export function ApprovalPanel({
           })
         )}
       </div>
-      {hasGrantsOrRules ? (
+      {!compact && hasGrantsOrRules ? (
         <div className="approval-grants" aria-label="Active approval grants and rules">
           {sessionGrants.map((grant) => (
             <span key={grant.id} className="approval-grant">
@@ -213,7 +223,7 @@ export function ApprovalPanel({
           ))}
         </div>
       ) : null}
-      {audit.length > 0 ? (
+      {!compact && audit.length > 0 ? (
         <div className="audit-strip" aria-label="Approval audit history">
           {audit.slice(0, 3).map((entry) => (
             <span key={entry.id}>

@@ -67,7 +67,7 @@
     }
 
     #[test]
-    fn oauth_metadata_requires_exact_resource_issuer_and_s256() {
+    fn oauth_metadata_requires_bound_resource_exact_issuer_and_s256() {
         let endpoint = validate_remote_endpoint("https://example.com/mcp").unwrap();
         let protected = serde_json::json!({
             "resource": "https://example.com/mcp",
@@ -108,6 +108,54 @@
         let mut no_pkce = metadata;
         no_pkce["code_challenge_methods_supported"] = serde_json::json!(["plain"]);
         assert!(parse_authorization_server_metadata(&servers[0], vec![], &no_pkce).is_err());
+    }
+
+    #[test]
+    fn oauth_root_audience_does_not_allow_credentials_on_another_transport() {
+        let endpoint = validate_remote_endpoint("https://example.com/mcp").unwrap();
+        let root = "https://example.com";
+        let metadata = serde_json::json!({
+            "resource": root,
+            "authorization_servers": ["https://auth.example.com"]
+        });
+        assert!(parse_protected_resource_metadata(&endpoint, &metadata).is_ok());
+        for resource in [
+            "https://other.example.com",
+            "https://example.com:8443",
+            "https://example.com/other",
+            "https://example.com/?tenant=other",
+        ] {
+            assert!(validate_mcp_oauth_resource(&endpoint, resource).is_err(), "{resource}");
+        }
+        let tenant_endpoint = validate_remote_endpoint("https://example.com/mcp?tenant=a").unwrap();
+        assert!(validate_mcp_oauth_resource(&tenant_endpoint, root).is_err());
+        let token = serde_json::json!({
+            "access_token": "test-token",
+            "expires_at": 1,
+            "scopes": [],
+            "token_endpoint": "https://auth.example.com/token",
+            "client_id": "test-client",
+            "resource": root,
+            "transport_endpoint": endpoint.as_str()
+        });
+        let tokens: RemoteMcpOAuthTokens = serde_json::from_value(token.clone()).unwrap();
+        assert!(validate_mcp_token_binding(&tokens, &endpoint).is_ok());
+        for other in ["https://example.com/other", root, "https://other.example.com/mcp"] {
+            assert!(validate_mcp_token_binding(&tokens, &validate_remote_endpoint(other).unwrap()).is_err());
+        }
+        let stored = serde_json::to_value(&tokens).unwrap();
+        assert_eq!(stored["resource"], root);
+        assert_eq!(stored["transport_endpoint"], endpoint.as_str());
+        let mut legacy = token;
+        legacy.as_object_mut().unwrap().remove("transport_endpoint");
+        let legacy_root: RemoteMcpOAuthTokens = serde_json::from_value(legacy.clone()).unwrap();
+        assert!(validate_mcp_token_binding(&legacy_root, &endpoint).is_err());
+        legacy["resource"] = Value::String(endpoint.to_string());
+        let legacy_exact: RemoteMcpOAuthTokens = serde_json::from_value(legacy).unwrap();
+        assert!(validate_mcp_token_binding(&legacy_exact, &endpoint).is_ok());
+        let mut wrong_audience: RemoteMcpOAuthTokens = serde_json::from_value(stored).unwrap();
+        wrong_audience.resource = "https://other.example.com".into();
+        assert!(validate_mcp_token_binding(&wrong_audience, &endpoint).is_err());
     }
 
     #[test]

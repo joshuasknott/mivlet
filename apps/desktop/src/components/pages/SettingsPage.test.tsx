@@ -148,12 +148,13 @@ describe("SettingsPage", () => {
     expect(screen.getByText(/credentials in your device.s secure storage/i)).toBeInTheDocument();
   });
 
-  it("keeps advanced tool servers separate from the connector marketplace", () => {
+  it("keeps advanced tool servers separate from the connector marketplace", async () => {
     renderTab("connections");
 
     expect(screen.getByRole("heading", { name: "Tool servers" })).toBeInTheDocument();
-    expect(screen.getByText(/Manage app connections from Connectors/i)).toBeInTheDocument();
+    expect(screen.getByText(/App connections live in Connectors/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Installed" })).not.toBeInTheDocument();
+    expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeInTheDocument();
   });
 
   it("keeps approvals, memory, and explicit local data controls together", async () => {
@@ -161,6 +162,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByRole("heading", { name: "Privacy & data" })).toBeInTheDocument();
     expect(screen.getByText("Personal memory")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Approvals", { exact: true }));
     fireEvent.click(screen.getByText("Manage local data"));
     expect(screen.getByText("Local data recovery")).toBeInTheDocument();
     expect(screen.getByRole("radio", { name: /Ask first/ })).toHaveAttribute("aria-checked", "true");
@@ -168,5 +170,14 @@ describe("SettingsPage", () => {
     expect(view.container.textContent).not.toMatch(/\b(?:mission|routine|schedule|workflow|run history)\b/i);
     fireEvent.click(screen.getByRole("button", { name: "Check local health" }));
     await screen.findByText(/local health checks are available in the installed desktop app/i);
+  });
+
+  it("keeps action feedback in the settings section that produced it", () => {
+    const runtime = stubRuntime();
+    const view = renderTab("general", runtime);
+    fireEvent.click(screen.getByRole("button", { name: "Light" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Light theme applied.");
+    view.rerender(<SettingsPage runtime={runtime} theme="light" onThemeChange={() => {}} activeTab="providers" workspaceName="Joshua's workspace" />);
+    expect(screen.queryByText("Light theme applied.")).not.toBeInTheDocument();
   });
 });

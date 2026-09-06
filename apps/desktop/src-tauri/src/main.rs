@@ -6,6 +6,11 @@ fn main() {
     // turns retain an inert helper so expired sessions cannot open a browser.
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
+        #[cfg(debug_assertions)]
+        Some("--check-connectors") => {
+            fable_desktop_lib::check_connectors();
+            return;
+        }
         Some("--antigravity-browser-open") => {
             if let Some(raw_url) = args.next() {
                 let _ = fable_desktop_lib::open_antigravity_browser_helper(&raw_url);

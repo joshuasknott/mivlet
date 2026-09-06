@@ -190,9 +190,6 @@ kbd {
   border-radius: 0;
 }
 
-.conversation-message-actions {
-  display: flex;
-}
 
 .hero {
   display: flex;

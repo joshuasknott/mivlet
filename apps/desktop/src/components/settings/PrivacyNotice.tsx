@@ -8,7 +8,7 @@ export function PrivacySummary() {
       <div>
         <dt>On this device</dt>
         <dd>
-          Your conversations, teammates, and workspace data are saved locally.
+          Your conversations, agents, and workspace data are saved locally.
           API keys and connection tokens are held by the desktop credential
           store.
         </dd>

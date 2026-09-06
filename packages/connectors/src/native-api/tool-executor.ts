@@ -124,6 +124,17 @@ export function createApprovalGate(): ProductionApprovalGate {
   return new ProductionApprovalGate();
 }
 
+/** Connected reads use their existing account consent; native scopes and exact
+ * request validation still run. Unknown tools and consequential calls never qualify. */
+export function isRoutineConnectorRead(approval: ApprovalRequest): boolean {
+  const name = approval.action.split(/\s+/)[0];
+  const tool = lookupTool(name);
+  return Boolean(name !== "connection-read" && tool && effectForTool(name) === "connector-read"
+    && tool.defaultMode === "read-only" && approval.mode === "read-only"
+    && tool.defaultRisk === approval.riskLevel
+    && (approval.riskLevel === "low" || approval.riskLevel === "medium"));
+}
+
 /**
  * The production gate: tracks standing (session/rule) grants and pending calls.
  * Legacy standing grants may auto-satisfy matching low-risk calls. High-risk
@@ -160,6 +171,7 @@ export class ProductionApprovalGate implements ApprovalGate {
 
   /** Register a pending call (keyed by approval id) before the executor awaits. */
   register(approval: ApprovalRequest): boolean {
+    if (isRoutineConnectorRead(approval)) return false;
     if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
       return false;
     }
@@ -206,6 +218,7 @@ export class ProductionApprovalGate implements ApprovalGate {
   }
 
   async waitForDecision(approval: ApprovalRequest): Promise<DecisionResult> {
+    if (isRoutineConnectorRead(approval)) return "granted";
     // A legacy standing grant can cover only an exact low-risk request.
     if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
       return "granted";
@@ -381,7 +394,7 @@ async function dispatch(
     case "local-browser": {
       const url = requireString(parsed, toolName, "url");
       if (!runtime.openLocalBrowser) {
-        throw new Error("The local teammate browser is unavailable in this runtime.");
+        throw new Error("The local agent browser is unavailable in this runtime.");
       }
       return runtime.openLocalBrowser(url);
     }

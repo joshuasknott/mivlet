@@ -225,7 +225,7 @@ describe("OnboardingPage", () => {
     expect(screen.queryByRole("button", { name: /subscription/i })).not.toBeInTheDocument();
   });
 
-  it("replaces teammate setup with optional live connector actions", async () => {
+  it("replaces agent setup with optional live connector actions", async () => {
     const user = userEvent.setup();
     const onConnectConnector = vi.fn().mockResolvedValue(undefined);
     const onComplete = vi.fn();
@@ -239,7 +239,7 @@ describe("OnboardingPage", () => {
     await user.click(screen.getByRole("button", { name: "Continue with Google" }));
     await user.click(await screen.findByRole("button", { name: "Continue with OpenAI / ChatGPT" }));
     expect(await screen.findByRole("heading", { name: "Connect the apps you use" })).toBeInTheDocument();
-    expect(screen.queryByText(/first teammate|Chief of Staff/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/first agent|Chief of Staff/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(await screen.findByRole("heading", { name: "Choose your provider" })).toBeInTheDocument();

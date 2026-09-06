@@ -14,6 +14,7 @@ import {
   type RuntimeLocalDiagnosticsSnapshot
 } from "../../runtime";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
+import { ProviderModelSettings } from "../settings/ProviderModelSettings";
 import { LocalMcpSettings } from "../settings/LocalMcpSettings";
 import { PrivacySummary } from "../settings/PrivacyNotice";
 import {
@@ -55,7 +56,8 @@ export function SettingsPage({
   dictationCapability?: VoiceCapability;
   titleId?: string;
 }) {
-  const [status, setStatus] = useState("");
+  const [status, setStatus] = useState<{ tab: SettingsTab; message: string } | null>(null);
+  const reportStatus = (message: string) => setStatus({ tab: activeTab, message });
 
   return (
     <section className="settings-page" aria-labelledby={titleId}>
@@ -72,23 +74,23 @@ export function SettingsPage({
             workspaceName={workspaceName}
             theme={theme}
             onThemeChange={onThemeChange}
-            onStatus={setStatus}
+            onStatus={reportStatus}
           />
         ) : activeTab === "providers" ? (
-          <ProviderSettings runtime={runtime} onStatus={setStatus} />
+          <ProviderSettings runtime={runtime} onStatus={reportStatus} />
         ) : activeTab === "connections" ? (
-          <ConnectionSettings runtime={runtime} onStatus={setStatus} />
+          <ConnectionSettings runtime={runtime} onStatus={reportStatus} />
         ) : (
           <PrivacyAndDataSettings
             runtime={runtime}
             dictationCapability={dictationCapability}
-            onStatus={setStatus}
+            onStatus={reportStatus}
           />
         )}
 
-        {status ? (
+        {status?.tab === activeTab && status.message ? (
           <p className="settings-status" role="status">
-            {status}
+            {status.message}
           </p>
         ) : null}
       </div>
@@ -282,6 +284,7 @@ function ProviderSettings({
         onStartBrowserLogin={(providerId) => runtime.startBackendBrowserLogin(providerId)}
         onStatus={onStatus}
       />
+      <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
       <div className="settings-local-storage">
         <span aria-hidden="true">
           <LockKey size={18} />
@@ -308,7 +311,7 @@ function ConnectionSettings({
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Add custom tools with an MCP server. Manage app connections from Connectors.
+          Add custom tools with an MCP server. App connections live in Connectors.
         </p>
       </div>
       <LocalMcpSettings
@@ -340,7 +343,10 @@ function PrivacyAndDataSettings({
         onStatus={onStatus}
       />
       <MemorySettings runtime={runtime} onStatus={onStatus} />
-      <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
+      <details className="settings-disclosure">
+        <summary>Approvals</summary>
+        <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
+      </details>
       <details className="settings-disclosure">
         <summary>Manage local data</summary>
         <LocalDataSettings runtime={runtime} onStatus={onStatus} />
@@ -386,7 +392,7 @@ function MemorySettings({
             >
               <span>
                 <strong id="memory-settings-title">Personal memory</strong>
-                <small>Let teammates recall facts you have approved.</small>
+                <small>Let agents recall facts you have approved.</small>
               </span>
               <span className="toggle-switch" aria-hidden="true">
                 <span />

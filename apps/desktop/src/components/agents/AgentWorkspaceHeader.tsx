@@ -26,12 +26,12 @@ export function AgentWorkspaceHeader({
           aria-label={
             attentionCount
               ? `Open work panel, ${attentionCount} needs attention`
-              : "Open teammate computer"
+              : "Open agent computer"
           }
           title={
             attentionCount
               ? `${attentionCount} approval${attentionCount === 1 ? "" : "s"} waiting`
-              : "Teammate computer"
+              : "Agent computer"
           }
         >
           <SidebarSimple size={18} />

@@ -16,6 +16,9 @@ import {
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
+import { listRuntimeMcpServerConfigurations } from "../runtime";
+import { remoteConnectors, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
+import { chatConnectorIds } from "../lib/connector-chat";
 import {
   navigateRuntimeHostedBrowser,
   prepareRuntimeHostedBrowser,
@@ -52,6 +55,11 @@ export function useShellAgentController({
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : undefined;
   const activeAgentId = runtime.activeAgentId ?? runtime.agents[0]?.id;
+  const connectorAccessRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[] });
+  const turnConnectorsRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[] });
+  const turn = turnConnectorsRef.current;
+  connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId,
+    ids: chatConnectorIds(turn.workspaceId === activeWorkspaceId && turn.agentId === activeAgentId ? turn.ids : [], runtime.connectorManifests) };
   const hostedWorkspaceId =
     runtime.accountWorkspaceStatus.workspaces.find(
       (workspace) =>
@@ -82,6 +90,7 @@ export function useShellAgentController({
 
   const queueToolApproval = useCallback(
     (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => {
+      if (["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0])) return;
       if (approvalGate.register(event.approval))
         runtime.recordBackendToolCall(event);
     },
@@ -102,7 +111,7 @@ export function useShellAgentController({
       !hostedComputer.node.keepAlive
     ) {
       throw new Error(
-        "Set up this teammate's hosted computer before opening its browser.",
+        "Set up this agent's hosted computer before opening its browser.",
       );
     }
     setHostedBrowserPhase("preparing");
@@ -194,6 +203,9 @@ export function useShellAgentController({
   const executor = useMemo(
     () =>
       createDesktopToolExecutor(approvalGate, {
+        connectorIds: connectorAccessRef.current.ids,
+        connectorAccessCurrent: (connectorId) => connectorAccessRef.current.workspaceId === activeWorkspaceId
+          && connectorAccessRef.current.agentId === activeAgentId && connectorAccessRef.current.ids.includes(connectorId),
         workspaceId: activeWorkspaceId,
         ...(activeWorkspaceId && activeAgentId
           ? {
@@ -217,18 +229,20 @@ export function useShellAgentController({
             }
           : {}),
         onHostedBrowserSnapshot: setHostedBrowserSnapshot,
-        queueApproval: (approval, tool, argumentsJson) =>
-          queueToolApproval({
+        queueApproval: (approval, tool, argumentsJson) => {
+          if (approvalGate.register(approval)) runtime.recordBackendToolCall({
             callId: approval.id,
             tool,
             arguments: argumentsJson,
             approval,
-          }),
+          });
+        },
       }),
     [
       approvalGate,
       activeWorkspaceId,
       activeAgentId,
+      runtime.agents,
       localComputer.node?.lifecycle,
       hostedWorkspaceId,
       activeHostedDeviceId,
@@ -294,6 +308,23 @@ export function useShellAgentController({
     },
     resetCancellation: () => {
       cancelRequestedRef.current = false;
+    },
+    beginConnectorTurn: async () => {
+      const saved = activeWorkspaceId ? await listRuntimeMcpServerConfigurations(activeWorkspaceId) : [];
+      if (connectorAccessRef.current.workspaceId !== activeWorkspaceId || connectorAccessRef.current.agentId !== activeAgentId) throw new Error("The active conversation changed. Send your message again.");
+      const remoteIds = remoteConnectors.filter((preset) => saved?.some((server) => server.id === remoteConnectorServerId(preset.id) && !server.disabled)).map((preset) => preset.id);
+      const ids = chatConnectorIds(remoteIds, runtime.connectorManifests);
+      turnConnectorsRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: remoteIds };
+      connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids };
+      return ids;
+    },
+    endConnectorTurn: () => {
+      if (turnConnectorsRef.current.workspaceId === activeWorkspaceId && turnConnectorsRef.current.agentId === activeAgentId) {
+        turnConnectorsRef.current.ids = [];
+      }
+      if (connectorAccessRef.current.workspaceId === activeWorkspaceId && connectorAccessRef.current.agentId === activeAgentId) {
+        connectorAccessRef.current.ids = [];
+      }
     },
   };
 }

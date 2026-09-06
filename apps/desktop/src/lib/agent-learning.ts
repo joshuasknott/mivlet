@@ -35,7 +35,7 @@ export function suggestTeammateName(brief: string): string {
     .map((word) => `${word.charAt(0).toLocaleUpperCase()}${word.slice(1).toLocaleLowerCase()}`)
     .join(" ")
     .slice(0, 48);
-  return title || "New teammate";
+  return title || "New agent";
 }
 
 export function suggestedLearnedTask(prompt: string): Pick<FableLearnedTask, "title" | "instruction"> {

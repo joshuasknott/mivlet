@@ -33,7 +33,7 @@ describe("useLocalComputer", () => {
     mocks.previewFile.mockReset();
   });
 
-  it("never projects a private file preview across teammate scopes", async () => {
+  it("never projects a private file preview across agent scopes", async () => {
     let resolveFirst!: (value: {
       computerId: string;
       path: string;

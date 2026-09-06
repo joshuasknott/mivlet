@@ -129,6 +129,7 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "cloud-browser-action":
       return "browser-state-mutation";
     case "connection-read":
+    case "connector-tools":
     case "github-read":
     case "vercel-read":
     case "linear-read":
@@ -138,6 +139,9 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "search-notion":
     case "search-slack":
       return "connector-read";
+    case "connector-call":
+    case "connector-action":
+      return "connector-write";
     default:
       return null;
   }

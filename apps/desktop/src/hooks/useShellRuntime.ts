@@ -1,6 +1,5 @@
 import {
   ChangeEvent,
-  FormEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -21,11 +20,9 @@ import type {
   ConnectorManifest,
   CustomApprovalSettings,
   FableAgentProfile,
-  KnowledgeCitation,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
-  MemoryPromotionRequest,
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
@@ -33,13 +30,11 @@ import type {
   ThreadSummary,
   IdentityStatus,
   AccountWorkspaceStatus,
-  WorkspaceDirective,
 } from "@fable/protocol";
 import {
   assembleContext,
   chunkSourceText,
   disableMemory as disableMemoryRecord,
-  editMemory,
   exportMemories,
   forgetMemory as forgetMemoryRecord,
   isLiveMemory,
@@ -80,7 +75,6 @@ import {
   chatThreads,
   connectors,
   knowledgeSources,
-  workspaceDirectives,
 } from "../data/workspace";
 import {
   beginRuntimeConnectorOAuth,
@@ -90,7 +84,6 @@ import {
   clearRuntimeBackend,
   connectRuntimeBackend,
   exportRuntimeMemoryState,
-  deleteRuntimeConnectorKnowledgeSource,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorStatuses,
   listRuntimeConnectorSyncStates,
@@ -108,14 +101,10 @@ import {
   loadRuntimeAccountWorkspaceStatus,
   reconcileRuntimeAccountWorkspace,
   clearRuntimeAccountWorkspaceSession,
-  promoteRuntimeKnowledgeSourceToMemory,
-  refreshRuntimeLocalKnowledgeSource,
   refreshRuntimeConnectorHealth,
   resolveRuntimeApprovalRequest,
   saveRuntimeMemoryState,
-  saveRuntimeImportedKnowledgeSources,
   saveRuntimeSnapshot,
-  setRuntimeConnectorKnowledgeSourceDisabled,
   switchRuntimeConnectorAccount,
   syncRuntimeConnector,
   refreshRuntimeIdentity,
@@ -131,12 +120,13 @@ import {
   type ManagedRuntimeProviderId,
   verifyRuntimeBackend,
 } from "../runtime";
-import { buildLocalKnowledgeRefreshRequest } from "../lib/local-knowledge-refresh";
 import {
   clearActiveRuntimeDataScope,
   setActiveRuntimeDataScope,
 } from "../runtime-scope";
-import { MAX_IMPORTED_KNOWLEDGE_SOURCES } from "../lib/constants";
+import {
+  MAX_IMPORTED_KNOWLEDGE_SOURCES,
+} from "../lib/constants";
 import {
   EMPTY_APPROVAL_MODIFICATION,
   type WorkspacePage,
@@ -146,7 +136,6 @@ import {
   type ComposerAttachment,
 } from "../lib/types";
 import {
-  importedSourceDirective,
   mergeKnowledgeSources,
   prependAuditEntry,
   readFileAsDataUrl,
@@ -154,7 +143,6 @@ import {
   toSlug,
 } from "../lib/helpers";
 import {
-  promoteKnowledgeSourceFallback,
   resolveApprovalFallback,
 } from "../lib/approval-fallbacks";
 import {
@@ -165,13 +153,14 @@ import {
   shellStateFromRuntimeSnapshot,
   shellStateToRuntimeSnapshot,
 } from "../lib/persistence";
-import type { ModelDiscoveryOutcome } from "../lib/backend-state";
+import type {
+  ModelDiscoveryOutcome,
+} from "../lib/backend-state";
 import {
   enabledFableProviders,
   isFableProviderEnabled,
 } from "../lib/provider-availability";
 import {
-  ALLOW_PREVIEW_FALLBACKS,
   CURRENT_ONBOARDING_VERSION,
   DEFAULT_ACCOUNT_WORKSPACE_STATUS,
   DEFAULT_IDENTITY_STATUS,
@@ -180,7 +169,9 @@ import {
   defaultShellState,
   runtimeOrPreview,
 } from "./shell-runtime/defaults";
-import { isSupportedConnectorId } from "./shell-runtime/backend-normalization";
+import {
+  isSupportedConnectorId,
+} from "./shell-runtime/backend-normalization";
 import type {
   ShellRuntime,
   UseShellRuntimeOptions,
@@ -299,6 +290,7 @@ export function useShellRuntime(
   const [approvalAudit, setApprovalAudit] = useState<ApprovalAuditEntry[]>(
     initialState.approvalAudit,
   );
+  const [approvalPreviews, setApprovalPreviews] = useState<Record<string, { summary: string; details: string }>>({});
   const [backendToolApprovals, setBackendToolApprovals] = useState<
     ApprovalRequest[]
   >([]);
@@ -341,17 +333,30 @@ export function useShellRuntime(
   const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<
     LocalFileImport[]
   >(initialState.importedKnowledgeSources);
-  const [knowledgeCitations, setKnowledgeCitations] = useState<
-    KnowledgeCitation[]
-  >([]);
-  const [knowledgeSearchMode, setKnowledgeSearchMode] =
-    useState("lexical-fallback");
   const [importStatus, setImportStatus] = useState<string | null>(null);
   const [composerAttachments, setComposerAttachments] = useState<
     ComposerAttachment[]
   >([]);
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
+  const connectorScopeRef = useRef(workspaceScopeGeneration);
+  connectorScopeRef.current = workspaceScopeGeneration;
+  const refreshConnectorStatuses = useCallback(async () => {
+    const scopeGeneration = connectorScopeRef.current;
+    const latest = await listRuntimeConnectorStatuses();
+    if (latest && scopeGeneration === connectorScopeRef.current) {
+      setConnectorManifests((current) => latest.map((manifest) => {
+        const previous = current.find((candidate) => candidate.id === manifest.id);
+        return previous?.sync ? { ...manifest, sync: previous.sync } : manifest;
+      }));
+    }
+    return latest;
+  }, []);
+  useEffect(() => {
+    const refresh = () => { void refreshConnectorStatuses().catch(() => undefined); };
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [refreshConnectorStatuses]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     Record<string, ConnectorAccountOption[]>
   >({});
@@ -365,16 +370,8 @@ export function useShellRuntime(
   const [memoryDisabled, setMemoryDisabled] = useState(
     initialState.memoryDisabled,
   );
-  const [editingMemoryId, setEditingMemoryId] = useState<string | null>(null);
-  const [editingMemoryDraft, setEditingMemoryDraft] = useState<
-    Pick<MemoryRecord, "title" | "value">
-  >({
-    title: "",
-    value: "",
-  });
   const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
-  const [knowledgeExportText, setKnowledgeExportText] = useState("");
   const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Agent-runtime backends. The Rust credential boundary resolves auth state
@@ -408,6 +405,7 @@ export function useShellRuntime(
   const [selectedModelId, setSelectedModelId] = useState(
     initialState.selectedModelId,
   );
+  const [hiddenModelIds, setHiddenModelIds] = useState<string[]>(initialState.hiddenModelIds ?? []);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     initialState.permissionMode,
   );
@@ -420,9 +418,8 @@ export function useShellRuntime(
     useState<CustomApprovalSettings>(
       normalizeCustomApprovalSettings(initialState.customApprovalSettings),
     );
-  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const composerRef = useRef<import("../components/ComposerInput").ComposerInputHandle>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const folderInputRef = useRef<HTMLInputElement>(null);
 
   const allThreads = useMemo(() => chatThreads, []);
   const activeThread = allThreads.find((thread) => thread.id === activeItem);
@@ -456,7 +453,7 @@ export function useShellRuntime(
       ),
     [backendProviders],
   );
-  const modelOptions = useMemo(
+  const allModelOptions = useMemo(
     () =>
       providerModelOptions(
         connectedAgentBackends.map((provider) => {
@@ -477,6 +474,10 @@ export function useShellRuntime(
       ),
     [connectedAgentBackends, discoveredModels],
   );
+  const modelOptions = useMemo(
+    () => allModelOptions.filter((model) => !hiddenModelIds.includes(model.id)),
+    [allModelOptions, hiddenModelIds],
+  );
   const resolvedModelOption = useMemo(
     () => resolveProviderModelOption(modelOptions, selectedModelId),
     [modelOptions, selectedModelId],
@@ -494,14 +495,6 @@ export function useShellRuntime(
   );
   const resolvedSelectedModelId = resolvedModelOption?.modelId ?? "";
   const resolvedModelOptionId = resolvedModelOption?.id ?? "";
-  const contextualDirectives = useMemo(
-    () =>
-      [
-        ...importedKnowledgeSources.slice(0, 2).map(importedSourceDirective),
-        ...workspaceDirectives,
-      ].slice(0, 4),
-    [importedKnowledgeSources],
-  );
   const openApprovals = useMemo(
     () =>
       backendToolApprovals.filter(
@@ -534,6 +527,7 @@ export function useShellRuntime(
       onboardingComplete: onboardingDismissed,
       onboardingVersion,
       selectedModelId,
+      hiddenModelIds,
       permissionMode,
       permissionLabel,
       customApprovalSettings,
@@ -557,6 +551,7 @@ export function useShellRuntime(
       permissionLabel,
       pinnedSourceIds,
       selectedModelId,
+      hiddenModelIds,
       voiceEnabled,
     ],
   );
@@ -658,6 +653,7 @@ export function useShellRuntime(
       setActionHistory([]);
       setApprovalRules([]);
       setBackendToolApprovals([]);
+      setApprovalPreviews({});
       setDismissedApprovalIds([]);
       setSessionApprovalGrants([]);
       setEditingApprovalId(null);
@@ -675,13 +671,9 @@ export function useShellRuntime(
       setConnectorManifests(connectors);
       setConnectorAccounts({});
       setConnectorStatus(null);
-      setKnowledgeCitations([]);
-      setKnowledgeSearchMode("lexical-fallback");
       setManagedMemoryRecords([]);
       setMemoryDisabled(false);
-      setEditingMemoryId(null);
       setMemoryExportText("");
-      setKnowledgeExportText("");
     }
 
     void loadRuntimeSnapshot()
@@ -727,6 +719,7 @@ export function useShellRuntime(
         setOnboardingDismissed(recovered.onboardingComplete ?? false);
         setOnboardingVersion(recovered.onboardingVersion ?? 0);
         setSelectedModelId(recovered.selectedModelId);
+        setHiddenModelIds(recovered.hiddenModelIds ?? []);
         setPermissionMode(recovered.permissionMode);
         setPermissionLabel(
           isApprovalPresetLabel(recovered.permissionLabel)
@@ -1227,11 +1220,6 @@ export function useShellRuntime(
     fileInputRef.current?.click();
   };
 
-  const triggerFolderImport = () => {
-    setImportStatus("Choose a folder containing supported knowledge files.");
-    folderInputRef.current?.click();
-  };
-
   const addImportedKnowledgeSource = (source: LocalFileImport) => {
     setImportedKnowledgeSources((current) =>
       [
@@ -1247,6 +1235,7 @@ export function useShellRuntime(
   const importLocalKnowledgeFile = async (
     file: File,
     sourceName = file.name,
+    onImported?: (sourceId: string) => void,
   ) => {
     setImportStatus(`Reading ${sourceName}...`);
 
@@ -1284,6 +1273,7 @@ export function useShellRuntime(
       }
 
       addImportedKnowledgeSource(indexed);
+      onImported?.(indexed.id);
       setImportStatus(
         `Imported ${indexed.title}. It is pinned as untrusted knowledge.`,
       );
@@ -1300,14 +1290,6 @@ export function useShellRuntime(
       setLastAction(message);
       return false;
     }
-  };
-
-  const saveTextToKnowledge = (title: string, content: string) => {
-    const sourceName = `${toSlug(title).slice(0, 72)}.md`;
-    return importLocalKnowledgeFile(
-      new File([content], sourceName, { type: "text/markdown" }),
-      sourceName,
-    );
   };
 
   const supportedKnowledgeExtensions = useMemo(
@@ -1366,9 +1348,9 @@ export function useShellRuntime(
 
     if (isKnowledgeAttachment(file)) {
       updateComposerAttachment(id, { status: "Indexing" });
-      const imported = await importLocalKnowledgeFile(file);
+      const imported = await importLocalKnowledgeFile(file, file.name, (sourceId) => updateComposerAttachment(id, { sourceId }));
       updateComposerAttachment(id, {
-        status: imported ? "Imported as knowledge" : "Attached",
+        status: imported ? "Attached" : "Could not read file",
       });
       return;
     }
@@ -1388,69 +1370,6 @@ export function useShellRuntime(
   const removeComposerAttachment = (attachmentId: string) => {
     setComposerAttachments((current) =>
       current.filter((attachment) => attachment.id !== attachmentId),
-    );
-  };
-
-  const handleLocalKnowledgeFileChange = (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = event.currentTarget.files?.[0];
-    event.currentTarget.value = "";
-
-    if (!file) {
-      return;
-    }
-
-    void importLocalKnowledgeFile(file);
-  };
-
-  const handleLocalKnowledgeFolderChange = (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const files = Array.from(event.currentTarget.files ?? []).slice(
-      0,
-      MAX_IMPORTED_KNOWLEDGE_SOURCES,
-    );
-    event.currentTarget.value = "";
-
-    if (files.length === 0) {
-      return;
-    }
-
-    void (async () => {
-      let importedCount = 0;
-      for (const file of files) {
-        if (
-          await importLocalKnowledgeFile(
-            file,
-            file.webkitRelativePath || file.name,
-          )
-        ) {
-          importedCount += 1;
-        }
-      }
-      setImportStatus(
-        importedCount === files.length
-          ? `Imported ${importedCount} files from the selected folder.`
-          : `Imported ${importedCount} of ${files.length} files. Unsupported or invalid files were skipped.`,
-      );
-    })();
-  };
-
-  const runKnowledgeSearch = async (query: string) => {
-    const result = await retrieve(knowledgeRetrievalSources(), {
-      query,
-      scope: knowledgeScopeForRun(activeThread?.id),
-      limit: 8,
-      budgetChars: 6_000,
-    });
-
-    setKnowledgeCitations(result.citations);
-    setKnowledgeSearchMode(result.mode);
-    setLastAction(
-      result.citations.length > 0
-        ? `Found ${result.citations.length} cited workspace sources`
-        : "No matching workspace sources found",
     );
   };
 
@@ -1519,7 +1438,7 @@ export function useShellRuntime(
       }))
       .filter((record) => record.chunks.length > 0);
 
-  const assembleKnowledgeContext = async (
+  const assembleConversationContext = async (
     query: string,
     context?: KnowledgeRunContext,
   ): Promise<PreparedExecutionContext> => {
@@ -1552,8 +1471,6 @@ export function useShellRuntime(
         budgetChars: 6_000,
       },
     );
-    setKnowledgeCitations(result.citations);
-    setKnowledgeSearchMode(result.mode);
     const assembled = assembleContext({
       attemptId,
       assembledAt,
@@ -1572,172 +1489,6 @@ export function useShellRuntime(
       systemPrefix: assembled.systemPrefix,
       receipt: assembled.receipt,
     });
-  };
-
-  /**
-   * Persist local knowledge sources optimistically, rolling back to the prior
-   * authoritative state if the native save fails so the UI never shows a source
-   * change (delete/disable/refresh) that was never persisted. Connector-imported
-   * sources are mirrored in parallel since they share the same workspace view.
-   */
-  const persistLocalKnowledgeSources = (sources: LocalFileImport[]) => {
-    const previous = importedKnowledgeSources;
-    setImportedKnowledgeSources(sources);
-    void saveRuntimeImportedKnowledgeSources(sources).catch((error) => {
-      setImportedKnowledgeSources(previous);
-      setImportStatus(
-        error instanceof Error
-          ? error.message
-          : "Fable could not save source changes.",
-      );
-    });
-  };
-
-  const refreshKnowledgeSource = async (sourceId: string, file?: File) => {
-    const localTarget = importedKnowledgeSources.find(
-      (source) => source.id === sourceId,
-    );
-    if (localTarget) {
-      if (!file)
-        throw new Error(`Choose the current version of ${localTarget.title}.`);
-      try {
-        const request = await buildLocalKnowledgeRefreshRequest(
-          localTarget,
-          file,
-        );
-        const response = await refreshRuntimeLocalKnowledgeSource(request);
-        if (!response) throw new Error("Fable could not update that file.");
-        if (response.outcome === "updated") {
-          setImportedKnowledgeSources((current) =>
-            current.map((source) =>
-              source.id === sourceId
-                ? {
-                    ...response.source,
-                    pinned: source.pinned,
-                    disabled: source.disabled,
-                    ...(source.deletedAt
-                      ? { deletedAt: source.deletedAt }
-                      : {}),
-                  }
-                : source,
-            ),
-          );
-          setImportStatus(`Updated from ${file.name}.`);
-        } else {
-          setImportStatus("This source is already up to date.");
-        }
-        setLastAction(
-          response.outcome === "updated"
-            ? `Updated from ${file.name}.`
-            : "This source is already up to date.",
-        );
-        return;
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Fable could not update that file.";
-        setImportStatus(message);
-        setLastAction(message);
-        throw error;
-      }
-    }
-
-    const connectorTarget = connectorImportedSources.find(
-      (source) => source.id === sourceId,
-    );
-    if (connectorTarget) {
-      const message = `Open Connections and import ${connectorTarget.title} again to refresh it.`;
-      setImportStatus(message);
-      setLastAction(message);
-      return;
-    }
-    throw new Error("That knowledge source is no longer available.");
-  };
-
-  const toggleKnowledgeSourceDisabled = (sourceId: string) => {
-    const target = workspaceKnowledgeSources.find(
-      (source) => source.id === sourceId,
-    );
-    const becomingDisabled = target ? !target.disabled : true;
-    const toggle = <T extends KnowledgeSource>(sources: T[]) =>
-      sources.map((source) =>
-        source.id === sourceId
-          ? { ...source, disabled: !source.disabled }
-          : source,
-      );
-    if (importedKnowledgeSources.some((source) => source.id === sourceId)) {
-      persistLocalKnowledgeSources(toggle(importedKnowledgeSources));
-    } else if (
-      connectorImportedSources.some((source) => source.id === sourceId)
-    ) {
-      const previous = connectorImportedSources;
-      setConnectorImportedSources(toggle(previous));
-      void setRuntimeConnectorKnowledgeSourceDisabled(
-        sourceId,
-        becomingDisabled,
-      )
-        .then((saved) => {
-          if (saved) {
-            setConnectorImportedSources((current) =>
-              current.map((source) =>
-                source.id === sourceId ? saved : source,
-              ),
-            );
-          }
-        })
-        .catch((error) => {
-          setConnectorImportedSources(previous);
-          setImportStatus(
-            error instanceof Error
-              ? error.message
-              : "Fable could not save that source change.",
-          );
-        });
-    }
-    // A disabled source cannot remain pinned: drop the pin so disabled material
-    // can never enter a run via the pinned-context path.
-    if (becomingDisabled) {
-      setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
-    }
-    setLastAction(
-      becomingDisabled
-        ? "Knowledge source disabled"
-        : "Knowledge source re-enabled",
-    );
-  };
-
-  const deleteKnowledgeSource = (sourceId: string) => {
-    const deletedAt = new Date().toISOString();
-    // Permanently remove the source from search, citations, pins, and context.
-    // Pins for the deleted source are cleared so they cannot resolve to a
-    // missing source or bypass the removal via pinned context.
-    if (importedKnowledgeSources.some((source) => source.id === sourceId)) {
-      persistLocalKnowledgeSources(
-        importedKnowledgeSources.map((source) =>
-          source.id === sourceId
-            ? { ...source, pinned: false, disabled: true, deletedAt }
-            : source,
-        ),
-      );
-    } else if (
-      connectorImportedSources.some((source) => source.id === sourceId)
-    ) {
-      const previous = connectorImportedSources;
-      setConnectorImportedSources((current) =>
-        current.filter((source) => source.id !== sourceId),
-      );
-      void deleteRuntimeConnectorKnowledgeSource(sourceId).catch((error) => {
-        setConnectorImportedSources(previous);
-        setImportStatus(
-          error instanceof Error
-            ? error.message
-            : "Fable could not delete that source.",
-        );
-      });
-    }
-    setPinnedSourceIds((current) => current.filter((id) => id !== sourceId));
-    setLastAction("Knowledge source deleted");
   };
 
   const commitMemoryState = (state: MemoryControlState, status: string) => {
@@ -1773,48 +1524,6 @@ export function useShellRuntime(
       });
   };
 
-  const startMemoryEdit = (record: MemoryRecord) => {
-    setEditingMemoryId(record.id);
-    setEditingMemoryDraft({
-      title: record.title,
-      value: record.value,
-    });
-    setMemoryStatus(`Editing memory: ${record.title}`);
-  };
-
-  const saveMemoryEdit = (recordId: string) => {
-    const title = editingMemoryDraft.title.trim();
-    const value = editingMemoryDraft.value.trim();
-
-    if (!title || !value) {
-      setMemoryStatus("Memory title and value are required.");
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId
-        ? {
-            ...editMemory(record, { title, value }, now),
-            freshness: "Updated now",
-          }
-        : record,
-    );
-
-    setEditingMemoryId(null);
-    setEditingMemoryDraft({ title: "", value: "" });
-    commitMemoryState(
-      { disabled: memoryDisabled, records: nextRecords },
-      "Memory updated.",
-    );
-  };
-
-  const cancelMemoryEdit = () => {
-    setEditingMemoryId(null);
-    setEditingMemoryDraft({ title: "", value: "" });
-    setMemoryStatus("Memory edit cancelled.");
-  };
-
   const forgetMemory = (recordId: string) => {
     const now = new Date().toISOString();
     const target = managedMemoryRecords.find(
@@ -1827,7 +1536,6 @@ export function useShellRuntime(
     const nextRecords = managedMemoryRecords.map((record) =>
       record.id === recordId ? forgetMemoryRecord(record, now) : record,
     );
-    setEditingMemoryId((current) => (current === recordId ? null : current));
     // A forgotten memory can no longer be pinned; drop the pin so it cannot
     // bypass exclusion via the pinned-context path.
     setManagedMemoryRecords(nextRecords);
@@ -1935,104 +1643,6 @@ export function useShellRuntime(
     }
   };
 
-  /**
-   * Export the current workspace's knowledge (live sources + live memories) as
-   * plain text. Disabled sources and forgotten/disabled memories are excluded;
-   * secrets, connector tokens, and raw audit payloads are never part of a
-   * source or memory record, so they cannot appear. Source content is capped to
-   * a readable preview to avoid dumping full provider cache payloads.
-   */
-  const exportKnowledge = async () => {
-    try {
-      const liveSources = workspaceKnowledgeSources.filter(isLiveSource);
-      const liveMemories = managedMemoryRecords.filter(isLiveMemory);
-      const lines: string[] = ["# Knowledge export", ""];
-
-      lines.push("## Sources", "");
-      if (liveSources.length === 0) {
-        lines.push("(no live sources)");
-      } else {
-        for (const source of liveSources) {
-          lines.push(`- ${source.title}`);
-          const meta = [
-            `provenance: ${source.provenance}`,
-            `freshness: ${source.freshness}`,
-            `connector: ${source.connectorId}`,
-            source.account ? `account: ${source.account}` : "",
-            source.trust ? `trust: ${source.trust}` : "",
-          ].filter(Boolean);
-          lines.push(`  _(${meta.join(" | ")})_`);
-        }
-      }
-      lines.push("");
-      lines.push(exportMemories(liveMemories));
-
-      setKnowledgeExportText(lines.join("\n").trimEnd());
-      setLastAction("Knowledge export ready.");
-    } catch (error) {
-      setKnowledgeExportText("");
-      setLastAction(
-        error instanceof Error
-          ? error.message
-          : "Fable could not export knowledge.",
-      );
-    }
-  };
-
-  const promoteSourceToMemory = async (source: KnowledgeSource) => {
-    // Promotion must respect the same exclusion rules as retrieval: a disabled
-    // source, or one from a disconnected/unauthorized connector, cannot be
-    // promoted into memory (it would bypass the disable/authorization gate).
-    if (!isLiveSource(source)) {
-      setMemoryStatus("Disabled sources cannot be promoted to memory.");
-      return;
-    }
-    if (!sourceIsAuthorized(source)) {
-      setMemoryStatus(
-        "Connect the source's service before promoting it to memory.",
-      );
-      return;
-    }
-    const request: MemoryPromotionRequest = {
-      source,
-      decision: "once",
-      decidedAt: new Date().toISOString(),
-      state: memoryState,
-    };
-
-    try {
-      const response = runtimeOrPreview(
-        await promoteRuntimeKnowledgeSourceToMemory(request),
-        () => promoteKnowledgeSourceFallback(request),
-        "Memory changes require the desktop runtime.",
-      );
-      setApprovalAudit((current) =>
-        prependAuditEntry(current, response.auditEntry),
-      );
-      commitMemoryState(
-        response.state,
-        `Approved memory: ${response.record.title}`,
-      );
-      setPinnedSourceIds((current) =>
-        current.includes(source.id) ? current : [...current, source.id],
-      );
-      setLastAction(`Approved ${source.title} into memory`);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Fable could not approve that source into memory.";
-      setMemoryStatus(message);
-      setLastAction(message);
-    }
-  };
-
-  const useDirective = (directive: WorkspaceDirective) => {
-    setComposerValue(directive.prompt);
-    setLastAction(`Loaded directive: ${directive.label}`);
-    focusComposer(directive.prompt);
-  };
-
   const openThread = (thread: ThreadSummary, label: string) => {
     setActiveItem(thread.id);
     setMobileNavOpen(false);
@@ -2047,25 +1657,8 @@ export function useShellRuntime(
     focusComposer("");
   };
 
-  const submitPrompt = (prompt: string) => {
-    const trimmed = prompt.trim();
-    if (!trimmed) {
-      setKnowledgeCitations([]);
-      setLastAction("Choose a directive or write a prompt.");
-      return;
-    }
-
-    setComposerValue(trimmed);
-    void runKnowledgeSearch(trimmed);
-  };
-
-  const submitComposer = (event: FormEvent) => {
-    event.preventDefault();
-    submitPrompt(composerValue);
-  };
-
   const useConnector = (connector: ConnectorManifest) => {
-    const prompt = `Use @${connector.id} with the current workspace context.`;
+    const prompt = `${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${connector.id} `;
     setComposerValue(prompt);
     setLastAction(`${connector.name} is ready in the composer`);
     focusComposer(prompt);
@@ -2097,6 +1690,7 @@ export function useShellRuntime(
       // exchange through the configured broker and fail closed if it is absent.
       const result = await beginRuntimeConnectorOAuth({
         connectorId: connector.id,
+        requestedScopes: connector.scopes?.map((scope) => scope.id),
       });
       if (!result) {
         const message = `${connector.name} connections require the installed desktop app.`;
@@ -2691,6 +2285,14 @@ export function useShellRuntime(
     arguments: string;
     approval: ApprovalRequest;
   }) => {
+    if (event.tool === "connector-action") {
+      try {
+        const context = JSON.parse(event.arguments) as { preview?: string; payload?: Record<string, string> };
+        if (typeof context.preview === "string") setApprovalPreviews((current) => ({
+          ...current, [event.approval.id]: { summary: context.preview as string, details: JSON.stringify(context.payload, null, 2) },
+        }));
+      } catch { /* Invalid previews never replace the exact native approval. */ }
+    }
     setBackendToolApprovals((current) => {
       const existingIndex = current.findIndex(
         (approval) => approval.id === event.approval.id,
@@ -2705,6 +2307,7 @@ export function useShellRuntime(
 
   const clearBackendToolApprovals = () => {
     setBackendToolApprovals([]);
+    setApprovalPreviews({});
   };
 
   // A usable workspace, a verified provider, and explicit completion of the
@@ -2733,10 +2336,10 @@ export function useShellRuntime(
   // agent run; the approval preset maps its label onto a PermissionMode that
   // gates tool execution in the agent loop.
   const selectModel = (modelId: string) => {
-    const chosen = modelOptions.find(
+    const chosen = allModelOptions.find(
       (model) => model.id === modelId || model.modelId === modelId,
     );
-    setSelectedModelId(chosen?.id ?? "");
+    setSelectedModelId(chosen?.id ?? modelId);
     setLastAction(
       chosen
         ? `${chosen.providerLabel} · ${chosen.label} selected`
@@ -2936,35 +2539,6 @@ export function useShellRuntime(
     );
   };
 
-  const toggleSourcePin = (sourceId: string) => {
-    setPinnedSourceIds((current) => {
-      if (current.includes(sourceId)) {
-        setLastAction("Source removed from pinned context");
-        return current.filter((id) => id !== sourceId);
-      }
-      // Pinning must not bypass exclusion: a disabled source cannot be pinned,
-      // and the source must belong to the current workspace + an authorized
-      // (connected) connector. Unpinning is always allowed.
-      const source = workspaceKnowledgeSources.find(
-        (entry) => entry.id === sourceId,
-      );
-      if (!source) {
-        setLastAction("That source is no longer available.");
-        return current;
-      }
-      if (!isLiveSource(source)) {
-        setLastAction("Disabled sources cannot be pinned.");
-        return current;
-      }
-      if (!sourceIsAuthorized(source)) {
-        setLastAction("Connect the source's service before pinning it.");
-        return current;
-      }
-      setLastAction("Source pinned to workspace context");
-      return [...current, sourceId];
-    });
-  };
-
   const createAgent = (input: Omit<FableAgentProfile, "id" | "threadId">) => {
     const id = `agent-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
     const created: FableAgentProfile = {
@@ -2980,7 +2554,6 @@ export function useShellRuntime(
     setActiveAgentId(id);
     setActiveItem(id);
     selectModel(created.modelId);
-    selectPermissionLabel(created.permissionLabel);
     return created;
   };
 
@@ -3003,8 +2576,6 @@ export function useShellRuntime(
     );
     if (agentId === activeAgentId) {
       if (patch.modelId !== undefined) selectModel(patch.modelId);
-      if (patch.permissionLabel !== undefined)
-        selectPermissionLabel(patch.permissionLabel);
     }
   };
 
@@ -3014,7 +2585,6 @@ export function useShellRuntime(
     setActiveAgentId(agentId);
     setActiveItem(agentId);
     selectModel(selected.modelId);
-    selectPermissionLabel(selected.permissionLabel);
   };
 
   const removeAgent = (agentId: string) => {
@@ -3027,7 +2597,6 @@ export function useShellRuntime(
         setActiveAgentId(next.id);
         setActiveItem(next.id);
         selectModel(next.modelId);
-        selectPermissionLabel(next.permissionLabel);
       }
     }
   };
@@ -3053,27 +2622,19 @@ export function useShellRuntime(
     toggleVoice,
     setImportStatus,
     triggerAttach,
-    triggerFolderImport,
     toolPickerOpen,
     commandOpen,
     importStatus,
     composerAttachments,
-    knowledgeCitations,
-    knowledgeSearchMode,
     composerRef,
     fileInputRef,
-    folderInputRef,
-    submitComposer,
-    submitPrompt,
     removeComposerAttachment,
-    handleLocalKnowledgeFileChange,
     handleComposerAttachmentChange,
-    handleLocalKnowledgeFolderChange,
     focusComposer,
-    useDirective,
     useConnector,
     runCommand,
     connectorManifests,
+    refreshConnectorStatuses,
     connectorAccounts,
     connectorStatus,
     connectorImportedSources,
@@ -3100,34 +2661,18 @@ export function useShellRuntime(
     confirmApprovalDecision,
     clearApprovalInteraction,
     workspaceKnowledgeSources,
-    saveTextToKnowledge,
-    contextualDirectives,
     pinnedSourceIds,
     managedMemoryRecords,
     memoryDisabled,
     memoryState,
-    editingMemoryId,
-    editingMemoryDraft,
     memoryExportText,
     memoryStatus,
-    setEditingMemoryDraft,
-    toggleSourcePin,
-    promoteSourceToMemory,
-    startMemoryEdit,
-    saveMemoryEdit,
     toggleMemoryPin,
     forgetMemory,
     toggleMemoryRecordDisabled,
     toggleMemoryDisabled,
     exportMemory,
-    exportKnowledge,
-    knowledgeExportText,
-    cancelMemoryEdit,
-    searchKnowledge: runKnowledgeSearch,
-    refreshKnowledgeSource,
-    toggleKnowledgeSourceDisabled,
-    deleteKnowledgeSource,
-    assembleKnowledgeContext,
+    assembleConversationContext,
     backendProviders,
     connectedBackendIds,
     backendStatus,
@@ -3144,6 +2689,12 @@ export function useShellRuntime(
     connectedAgentBackend,
     selectableModels,
     modelOptions,
+    allModelOptions,
+    hiddenModelIds,
+    setModelVisible: (modelId: string, visible: boolean) => {
+      if (!allModelOptions.some((model) => model.id === modelId)) return;
+      setHiddenModelIds((current) => visible ? current.filter((id) => id !== modelId) : [...new Set([...current, modelId])]);
+    },
     resolvedSelectedModelId,
     resolvedModelOptionId,
     selectedModelId,
@@ -3154,6 +2705,7 @@ export function useShellRuntime(
     customApprovalSettings,
     updateCustomApprovalSetting,
     recordBackendToolCall,
+    approvalPreviews,
     identityStatus,
     identityPending,
     accountWorkspaceStatus,

@@ -64,6 +64,16 @@ const GOOGLE_PROFILES: Record<GoogleConnectorId, GoogleConnectorProfile> = {
     identityScope: GOOGLE_IDENTITY_SCOPE,
     scopes: [
       {
+        id: "https://www.googleapis.com/auth/drive",
+        label: "Read and manage all Drive files", access: "write", required: false,
+        description: "Search, read, create, and manage Drive files after provider consent."
+      },
+      {
+        id: "https://www.googleapis.com/auth/drive.readonly",
+        label: "Search and read all Drive files", access: "read", required: false,
+        description: "Search and read existing Drive files after provider consent."
+      },
+      {
         id: "https://www.googleapis.com/auth/drive.file",
         label: "Selected Drive files",
         access: "read",
