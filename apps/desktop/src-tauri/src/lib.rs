@@ -83,12 +83,43 @@ pub fn run() {
             store::initialize(&app_data)?;
             // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
             let _ = connector_auth::provision_connector_configuration();
-            app.manage(std::sync::Arc::new(
-                local_computer::LocalComputerState::initialize(&handle)?,
-            ));
+            let computers =
+                std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
+            local_computer::lifecycle::start_idle_monitor(computers.clone());
+            app.manage(computers);
             Ok(())
         })
+        .on_window_event(|window, event| {
+            if window.label() != "main" {
+                return;
+            }
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                use std::sync::atomic::{AtomicBool, Ordering};
+                static CLOSING: AtomicBool = AtomicBool::new(false);
+                api.prevent_close();
+                if CLOSING.swap(true, Ordering::AcqRel) {
+                    return;
+                }
+                let app = window.app_handle().clone();
+                let computers = app
+                    .state::<std::sync::Arc<local_computer::LocalComputerState>>()
+                    .inner()
+                    .clone();
+                let _ = window.hide();
+                local_computer::viewer::close_all(&app);
+                tauri::async_runtime::spawn(async move {
+                    codex_app_server::shutdown_all_runs();
+                    local_computer::shutdown_all(computers).await;
+                    app.exit(0);
+                });
+            }
+        })
         .invoke_handler(tauri::generate_handler![
+            local_computer::viewer::local_computer_open_viewer,
+            local_computer::viewer::local_computer_close_viewer,
+            local_computer::artifacts::local_computer_open_artifact,
+            local_computer::local_computer_cancel,
+            local_computer::lifecycle::local_computer_lifecycle,
             window_controls::control_main_window,
             snapshot::runtime_status,
             execution_attempts::save_execution_attempt,

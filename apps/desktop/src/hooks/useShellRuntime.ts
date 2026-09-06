@@ -246,6 +246,8 @@ export function useShellRuntime(
     options.approvalGate ?? null,
   );
   approvalGateRef.current = options.approvalGate ?? null;
+  const scopeResetRef = useRef(options.onScopeReset);
+  scopeResetRef.current = options.onScopeReset;
   const initialState = useMemo(
     () =>
       // Desktop: the runtime snapshot is the source of truth; localStorage is
@@ -280,6 +282,9 @@ export function useShellRuntime(
     ? DEFAULT_ACCOUNT_WORKSPACE_STATUS
     : PREVIEW_ACCOUNT_WORKSPACE_STATUS;
   const [workspaceScopeGeneration, setWorkspaceScopeGeneration] = useState(0);
+  const workspaceIdentityRef = useRef<string | null>(null);
+  const hydratedWorkspaceRef = useRef<string | null>(null);
+  const snapshotLoadFailedRef = useRef(false);
   const accountRequestGenerationRef = useRef(0);
   const activeWorkspaceScope =
     accountWorkspaceStatus.accountBound &&
@@ -373,6 +378,7 @@ export function useShellRuntime(
   const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
   const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
+  const [runtimeSnapshotError, setRuntimeSnapshotError] = useState<string | null>(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   // Agent-runtime backends. The Rust credential boundary resolves auth state
   // + capabilities; outside Tauri the preview registry is used so the onboarding
@@ -571,6 +577,7 @@ export function useShellRuntime(
   // the timer; only the trailing write fires.
   const persistTimerRef = useRef<number | null>(null);
   const snapshotTimerRef = useRef<number | null>(null);
+  const pendingSnapshotRef = useRef<{ identity: string; workspaceId: string; snapshot: RuntimeSnapshot } | null>(null);
 
   useEffect(() => {
     if (persistTimerRef.current !== null) {
@@ -594,20 +601,25 @@ export function useShellRuntime(
   }, [workspaceScopeGeneration]);
 
   useEffect(() => {
-    if (!runtimeSnapshotReady || !activeWorkspaceScope) {
+    const identity = workspaceIdentityRef.current;
+    if (!runtimeSnapshotReady || !activeWorkspaceScope || !identity || hydratedWorkspaceRef.current !== identity) {
       return;
     }
 
     // Debounced to coalesce rapid shellState changes (notably composer typing)
-    // into a single trailing snapshot save through the Rust boundary, reading
-    // the latest state from the ref so no keystroke's draft is lost.
+    // into a single trailing snapshot save. Bind both the captured draft and
+    // its owner/workspace so a later scope cannot receive this write.
     if (snapshotTimerRef.current !== null) {
       window.clearTimeout(snapshotTimerRef.current);
     }
+    const pending = { identity, workspaceId: activeWorkspaceScope.workspaceId, snapshot: shellStateToRuntimeSnapshot(shellState) };
+    pendingSnapshotRef.current = pending;
     snapshotTimerRef.current = window.setTimeout(() => {
       snapshotTimerRef.current = null;
+      pendingSnapshotRef.current = null;
+      if (workspaceIdentityRef.current !== pending.identity || hydratedWorkspaceRef.current !== pending.identity) return;
       void saveRuntimeSnapshot(
-        shellStateToRuntimeSnapshot(shellStateRef.current),
+        pending.snapshot, pending.workspaceId,
       ).catch((error) => {
         setLastAction(
           error instanceof Error
@@ -624,9 +636,11 @@ export function useShellRuntime(
       if (snapshotTimerRef.current !== null) {
         window.clearTimeout(snapshotTimerRef.current);
         snapshotTimerRef.current = null;
-        void saveRuntimeSnapshot(
-          shellStateToRuntimeSnapshot(shellStateRef.current),
-        ).catch(() => undefined);
+        const pending = pendingSnapshotRef.current;
+        pendingSnapshotRef.current = null;
+        if (pending && workspaceIdentityRef.current === pending.identity && hydratedWorkspaceRef.current === pending.identity) {
+          void saveRuntimeSnapshot(pending.snapshot, pending.workspaceId).catch(() => undefined);
+        }
       }
     };
   }, [workspaceScopeGeneration]);
@@ -634,16 +648,28 @@ export function useShellRuntime(
   useEffect(() => {
     let active = true;
     if (!activeWorkspaceScope) {
+      approvalGateRef.current?.cancelPending();
+      scopeResetRef.current?.();
+      setBackendToolApprovals([]);
+      hydratedWorkspaceRef.current = null;
       setRuntimeSnapshotReady(false);
       return () => {
         active = false;
       };
     }
 
+    // Fast Refresh may replay effects while preserving the live gate and run.
+    // A completed hydration of this exact owner/workspace needs no replay.
+    const hydrationIdentity = workspaceIdentityRef.current;
+    if (hasTauriRuntime() && hydrationIdentity === null) return;
+    if (hydrationIdentity !== null && hydratedWorkspaceRef.current === hydrationIdentity) return;
+
     // A switch is a hard tenant boundary. Drop everything that can have been
     // loaded for the prior scope before any new asynchronous hydration lands.
     // Preview is an intentional in-memory fixture, so retain its seeded data.
     if (hasTauriRuntime()) {
+      approvalGateRef.current?.cancelPending();
+      scopeResetRef.current?.();
       setActiveItem(defaultShellState.activeItem);
       setComposerValue(defaultShellState.composerValue);
       setToolPickerOpen(false);
@@ -675,12 +701,16 @@ export function useShellRuntime(
       setMemoryDisabled(false);
       setMemoryExportText("");
     }
-
-    void loadRuntimeSnapshot()
+    snapshotLoadFailedRef.current = false;
+    setRuntimeSnapshotError(null);
+    void loadRuntimeSnapshot(activeWorkspaceScope.workspaceId)
       .then((snapshot: RuntimeSnapshot | null) => {
-        if (!active || !snapshot) {
+        if (!active) {
           return;
         }
+        hydratedWorkspaceRef.current = hydrationIdentity;
+        setRuntimeSnapshotReady(true);
+        if (!snapshot) return;
 
         const recovered = shellStateFromRuntimeSnapshot(
           snapshot,
@@ -731,9 +761,14 @@ export function useShellRuntime(
         );
         setLastAction("Recovered workspace from local runtime");
       })
-      .finally(() => {
+      .catch((error) => {
         if (active) {
-          setRuntimeSnapshotReady(true);
+          hydratedWorkspaceRef.current = null;
+          snapshotLoadFailedRef.current = true;
+          setRuntimeSnapshotReady(false);
+          const message = error instanceof Error ? error.message : "Fable could not load the saved workspace.";
+          setRuntimeSnapshotError(message);
+          setLastAction(message);
         }
       });
 
@@ -776,13 +811,32 @@ export function useShellRuntime(
         status.accountBound &&
         (status.state === "ready" || status.state === "offline") &&
         status.activeWorkspace.localWorkspaceId.length > 0;
+      const identity = canUseWorkspace ? JSON.stringify([
+        status.activeWorkspace.localWorkspaceId,
+        status.activeContextOwner?.internalUserId ?? "",
+        status.activeContextOwner?.memberId ?? "",
+      ]) : null;
+      const changed = workspaceIdentityRef.current !== identity;
+      if (changed) {
+        // Settle old promises before dropping the visible queue or changing the
+        // active native data scope. Historical requests never become permits.
+        approvalGateRef.current?.cancelPending();
+        scopeResetRef.current?.();
+        workspaceIdentityRef.current = identity;
+        hydratedWorkspaceRef.current = null;
+        if (snapshotTimerRef.current !== null) {
+          window.clearTimeout(snapshotTimerRef.current);
+          snapshotTimerRef.current = null;
+        }
+        pendingSnapshotRef.current = null;
+      }
       if (canUseWorkspace) {
         setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId);
       } else {
         clearActiveRuntimeDataScope();
       }
       setAccountWorkspaceStatus(status);
-      setWorkspaceScopeGeneration((current) => current + 1);
+      if (changed || snapshotLoadFailedRef.current) setWorkspaceScopeGeneration((current) => current + 1);
     },
     [],
   );
@@ -2709,6 +2763,8 @@ export function useShellRuntime(
     identityStatus,
     identityPending,
     accountWorkspaceStatus,
+    runtimeSnapshotError,
+    runtimeSnapshotReady,
     accountWorkspacePending,
     signInIdentity,
     recoverIdentity,

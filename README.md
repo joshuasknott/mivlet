@@ -2,7 +2,7 @@
 
 Fable is an independent, provider-neutral AI agent workspace. Its default
 experience is a quiet desktop conversation with named agents. Connections,
-files, approvals, and a agent's computer appear only when the work needs
+files, approvals, and an agent's computer appear only when the work needs
 them.
 
 Fable is local-first: conversations, workspace data, provider credentials, and
@@ -85,8 +85,8 @@ a deployed or production-validated service.
 - Signed public installers, updater channels, supported macOS/Linux releases,
   and mobile control.
 
-The [local computer](docs/architecture/local-agent-computer.md) and
-[hosted computer](docs/architecture/hosted-agent-computer.md) documents define
+The [local computer](docs/architecture/local-teammate-computer.md) and
+[hosted computer](docs/architecture/hosted-teammate-computer.md) documents define
 their separate trust boundaries.
 
 ## Repository layout

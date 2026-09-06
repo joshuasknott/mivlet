@@ -1,0 +1,103 @@
+#!/usr/bin/python3
+"""Bounded shell supervisor. Revocation drains every process with the agent UID."""
+import fcntl
+import os
+from pathlib import Path
+import signal
+import subprocess
+import sys
+import time
+
+PRIVATE = Path('/run/fable-private')
+AGENT_UID = 1001
+
+
+def agent_processes():
+    result = []
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            fields = (entry / 'status').read_text().splitlines()
+            # Zombies cannot act; their parents/init reap them asynchronously.
+            if any(line.startswith('State:') and '\tZ' in line for line in fields):
+                continue
+            uid_line = next(line for line in fields if line.startswith('Uid:'))
+            if AGENT_UID in map(int, uid_line.split()[1:]):
+                result.append(int(entry.name))
+        except (FileNotFoundError, ProcessLookupError):
+            pass
+    return result
+
+
+def cancel():
+    # Freeze first, then kill all UID-owned processes. No fork/session escape
+    # survives a successful drain, and no background command is intentionally kept.
+    for _ in range(100):
+        remaining = agent_processes()
+        if not remaining:
+            return
+        for pid in remaining:
+            with_ignore_process_gone(pid, signal.SIGSTOP)
+        for pid in agent_processes():
+            with_ignore_process_gone(pid, signal.SIGKILL)
+        time.sleep(0.01)
+    raise RuntimeError('Agent processes did not stop; human control is unavailable.')
+
+
+def with_ignore_process_gone(pid, sig):
+    try:
+        descriptor = os.pidfd_open(pid)
+        try:
+            # PID reuse cannot turn a stale process list into a signal to a
+            # desktop/service process: verify the UID, then signal the pidfd.
+            uid = next(line for line in Path(f'/proc/{pid}/status').read_text().splitlines()
+                       if line.startswith('Uid:'))
+            if AGENT_UID in map(int, uid.split()[1:]):
+                signal.pidfd_send_signal(descriptor, sig)
+        finally:
+            os.close(descriptor)
+    except (ProcessLookupError, FileNotFoundError):
+        pass
+
+
+def main():
+    if os.getuid() != 0:
+        raise SystemExit('Only the native supervisor can run this helper.')
+    if sys.argv[1:] == ['cancel']:
+        cancel()
+        return 0
+    if len(sys.argv) != 2 or sys.argv[1] != 'run':
+        return 2
+    command = sys.stdin.read(65537)
+    if not command.strip() or len(command) > 65536 or '\0' in command:
+        return 2
+    lock = open(PRIVATE / 'shell.lock', 'a')
+    # Reject concurrent execution instead of leaving a queued root wrapper that
+    # could start fresh agent work after a takeover cancelled its native ticket.
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    cancel()
+    env = {'HOME': '/home/agent', 'USER': 'agent', 'LOGNAME': 'agent',
+           'PATH': '/usr/local/bin:/usr/bin:/bin', 'LANG': 'C.UTF-8',
+           'TMPDIR': '/tmp', 'SHELL': '/bin/bash'}
+    child = subprocess.Popen([
+        'setpriv', '--reuid=1001', '--regid=1001', '--clear-groups',
+        '--no-new-privs', '--inh-caps=-all', '--ambient-caps=-all',
+        '--bounding-set=-all', '/bin/bash', '--noprofile', '--norc', '-c', command,
+    ], cwd='/home/fable/Workspace', env=env, start_new_session=True, umask=0o007)
+    try:
+        return child.wait(timeout=60)
+    except subprocess.TimeoutExpired:
+        return 124
+    finally:
+        cancel()
+        child.wait(timeout=5)
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception:
+        # Never echo command arguments or contents into the diagnostic.
+        sys.stderr.write('The isolated command could not be completed safely.\n')
+        sys.exit(125)

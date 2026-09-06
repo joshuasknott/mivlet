@@ -173,7 +173,9 @@ async fn check_chat(app: &tauri::AppHandle) -> Value {
                 }
                 calls.push(json!({"tool":tool,"ok":ok,"result":output}));
                 let response = serde_json::from_value(json!({"requestId":request_id,"approvalRequestId":event["requestId"],"result":{"callId":event["callId"],"ok":ok,"output":output.to_string()}})).expect("tool response");
-                if crate::codex_app_server::respond_codex_app_server_approval(response).is_err() {
+                if crate::codex_app_server::respond_codex_app_server_approval(response, app.state())
+                    .is_err()
+                {
                     break;
                 }
             }

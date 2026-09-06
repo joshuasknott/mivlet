@@ -183,7 +183,7 @@ export interface CodexTurnRequest {
   request: AgentTurnRequest;
   options: Pick<
     AgentTurnOptions,
-    "contextPrefix" | "permissionMode" | "attemptId"
+    "contextPrefix" | "permissionMode" | "attemptId" | "computer"
   >;
 }
 

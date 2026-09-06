@@ -58,6 +58,9 @@ export {
   provisionRuntimeLocalComputer,
   setRuntimeLocalComputerController,
   snapshotRuntimeLocalBrowser,
+  openRuntimeLocalComputerViewer,
+  closeRuntimeLocalComputerViewer,
+  cancelRuntimeLocalComputer,
 } from "./runtime/domains/local-computer";
 import type { LocalTextFileCandidate } from "@fable/connectors/local-files";
 import type {
@@ -270,31 +273,29 @@ export async function loadRuntimeMemoryState() {
   }
 }
 
-export async function loadRuntimeSnapshot() {
+export async function loadRuntimeSnapshot(workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
-  const scope = activeDataScope();
-  if (!scope) return null;
+  if (!workspaceId) return null;
 
   try {
-    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", scope);
-  } catch {
-    return null;
+    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", { workspaceId });
+  } catch (error) {
+    throw toRuntimeError(error);
   }
 }
 
-export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot) {
+export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot, workspaceId = activeDataScope()?.workspaceId) {
   if (!hasTauriRuntime()) {
     return null;
   }
-  const scope = activeDataScope();
-  if (!scope) return null;
+  if (!workspaceId) return null;
 
   try {
     return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
       snapshot,
-      ...scope,
+      workspaceId,
     });
   } catch (error) {
     throw toRuntimeError(error);
@@ -807,11 +808,15 @@ export async function loadRuntimeConversationDraft(draftKey: string) {
     return (
       previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null
     );
-  const result = await invoke<unknown>("conversation_load_draft", {
+  const response = await invoke<unknown>("conversation_load_draft", {
     id: draftKey,
     threadId: draftThreadId(draftKey),
   });
-  if (result === null) return null;
+  if (response === null) return null;
+  // Tauri serializes an absent optional threadId as null in saved payloads.
+  const result = isRecord(response) && response.threadId === null
+    ? { ...response, threadId: undefined }
+    : response;
   assertDraft(result, scope.workspaceId);
   return result;
 }
@@ -1566,6 +1571,7 @@ export interface RuntimeCodexTurnStartRequest {
     contextPrefix?: string;
     permissionMode?: string;
     runId?: string;
+    computer?: { workspaceId: string; agentId: string };
   };
 }
 
@@ -2460,6 +2466,8 @@ export interface RuntimeToolRequest {
   agentId?: string;
   /** Native-owned live MCP session selected from an explicit semantic binding. */
   mcpSessionId?: string;
+  /** Computer authority captured before approval; never refreshed to replay a stale action. */
+  computerGeneration?: number;
   /** Test-only compatibility field. Production Rust ignores caller-supplied roots. */
   workspaceRoot?: string;
 }

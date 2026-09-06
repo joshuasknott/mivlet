@@ -11,6 +11,8 @@ import type {
   LocalComputerLaunchRequest,
   LocalComputerSnapshot,
   LocalComputerTarget,
+  LocalComputerEpochRequest,
+  LocalComputerViewerReceipt,
 } from "@fable/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
@@ -134,3 +136,29 @@ export const historyRuntimeLocalBrowser = (
 export const launchRuntimeLocalComputerApplication = (
   request: LocalComputerLaunchRequest,
 ) => port().launchApplication(request);
+
+async function nativeComputerCommand<T>(
+  command: string,
+  args: Record<string, unknown>,
+): Promise<T | null> {
+  const adapter = getRuntimeAdapter();
+  if (adapter.kind !== "native") return null;
+  return adapter.invoke<T>(command, args).catch((error: unknown) => {
+    throw toRuntimeError(error);
+  });
+}
+export const openRuntimeLocalComputerViewer = (
+  request: LocalComputerEpochRequest,
+) =>
+  nativeComputerCommand<LocalComputerViewerReceipt>(
+    "local_computer_open_viewer",
+    { request },
+  );
+export const closeRuntimeLocalComputerViewer = (sessionId: string) =>
+  nativeComputerCommand<void>("local_computer_close_viewer", { sessionId });
+export const cancelRuntimeLocalComputer = (
+  request: LocalComputerEpochRequest,
+) =>
+  nativeComputerCommand<LocalComputerSnapshot>("local_computer_cancel", {
+    request,
+  });

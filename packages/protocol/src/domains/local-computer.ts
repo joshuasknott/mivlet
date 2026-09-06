@@ -10,9 +10,11 @@ export type LocalComputerLifecycle =
   | "unprovisioned"
   | "provisioning"
   | "ready"
+  | "stopped"
+  | "sleeping"
   | "degraded";
 
-export type LocalComputerController = "agent" | "human";
+export type LocalComputerController = "agent" | "human" | "paused";
 
 export type LocalComputerCapability =
   | "persistent-files"
@@ -25,7 +27,14 @@ export type LocalComputerCapability =
   | "file-manager"
   | "process-execution";
 
-export type LocalComputerApplication = "browser" | "files" | "terminal";
+export type LocalComputerApplication = "browser" | "files" | "terminal" | "writer" | "spreadsheet";
+
+export type LocalComputerLifecycleAction = "stop" | "restart" | "update";
+
+export interface LocalComputerLifecycleRequest extends LocalComputerTarget {
+  action: LocalComputerLifecycleAction;
+  expectedGeneration: number;
+}
 
 export interface LocalComputerSnapshot {
   computerId: string;
@@ -110,6 +119,16 @@ export interface LocalComputerTarget {
   agentId: string;
 }
 
+export interface LocalComputerEpochRequest extends LocalComputerTarget {
+  expectedGeneration: number;
+}
+
+/** Native-owned viewer; gateway URLs and credentials never enter React. */
+export interface LocalComputerViewerReceipt {
+  sessionId: string;
+  generation: number;
+}
+
 export interface LocalBrowserNavigateRequest extends LocalComputerTarget {
   url: string;
   expectedGeneration: number;
@@ -141,4 +160,22 @@ export interface LocalBrowserKeyRequest extends LocalComputerTarget {
 export interface LocalBrowserHistoryRequest extends LocalComputerTarget {
   expectedGeneration: number;
   direction: "back" | "forward";
+}
+
+/** Receipt for an explicitly published, native-owned copy of a generated file. */
+export interface LocalComputerArtifact {
+  kind: "computer-artifact";
+  version: 1;
+  id: string;
+  computerId: string;
+  title: string;
+  mimeType: string;
+  sizeBytes: number;
+  relativePath: string;
+  createdAt: string;
+}
+
+export interface LocalComputerOpenArtifactRequest extends LocalComputerTarget {
+  artifactId: string;
+  expectedGeneration: number;
 }

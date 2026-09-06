@@ -114,6 +114,7 @@ export function normalizePermissionProfile(input: {
 export function effectForTool(toolName: string): PermissionEffect | null {
   switch (toolName) {
     case "read-file":
+    case "computer-artifact":
       return "local-read";
     case "write-file":
       return "local-write";
@@ -122,9 +123,12 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "web-fetch":
       return "web-fetch";
     case "local-browser-observe":
+    case "local-desktop-observe":
       return "browser-read";
     case "local-browser":
     case "local-browser-action":
+    case "local-browser-tab":
+    case "local-desktop-action":
     case "cloud-browser":
     case "cloud-browser-action":
       return "browser-state-mutation";

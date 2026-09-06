@@ -83,6 +83,13 @@ describe("resolveModelCapabilities", () => {
 });
 
 describe("validateModelForRun", () => {
+  it("preserves partial live capabilities without inventing limits", () => {
+    const model = { id: "live-vision", label: "Live vision", available: true, capabilities: { vision: true } };
+    const result = validateModelForRun("codex", model.id, [model], 2048);
+    expect(result).toMatchObject({ ok: true, maxTokens: 2048, capabilities: { vision: true } });
+    expect(result.capabilities?.contextWindow).toBeUndefined();
+    expect(result.capabilities?.tools).toBeUndefined();
+  });
   const models: BackendModel[] = [
     { id: "gpt-5", label: "GPT-5", available: true },
     { id: "old", label: "Old", available: false }

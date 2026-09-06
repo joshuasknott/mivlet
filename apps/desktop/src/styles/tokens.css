@@ -182,10 +182,6 @@ button:disabled,
   background: var(--shell);
 }
 
-.desktop-frame--sidebar-collapsed {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .sr-only {
   position: absolute;
   width: 1px;

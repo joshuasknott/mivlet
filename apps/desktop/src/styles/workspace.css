@@ -20,37 +20,6 @@
   content: "";
 }
 
-.topbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 18px;
-  height: 54px;
-  padding: 0 24px;
-  background: var(--surface);
-}
-
-.search-control {
-  display: flex;
-  align-items: center;
-  min-width: 210px;
-  height: 34px;
-  gap: 10px;
-  padding: 0 13px;
-  color: var(--ink-muted);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.search-control span {
-  margin-right: auto;
-  font-size: var(--text-14);
-}
-
 kbd {
   display: inline-flex;
   align-items: center;
@@ -61,43 +30,6 @@ kbd {
   border-radius: var(--radius-1);
   font-size: var(--text-12);
   font-family: inherit;
-}
-
-.notification-button,
-.mini-avatar {
-  width: 34px;
-  height: 34px;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-}
-
-.notification-button {
-  position: relative;
-  display: grid;
-  place-items: center;
-  border-radius: 50%;
-  transition: background 140ms ease;
-}
-
-.notification-button:hover {
-  background: var(--surface-hover);
-}
-
-.notification-button span {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 8px;
-  height: 8px;
-  background: var(--positive);
-  border: 2px solid var(--canvas-warm);
-  border-radius: var(--radius-pill);
-}
-
-.mini-avatar {
-  background: var(--line-strong);
-  font-weight: 500;
 }
 
 .workspace-center {
@@ -136,17 +68,6 @@ kbd {
   gap: 22px;
   width: min(100%, 840px);
   margin: 0 auto;
-}
-
-.conversation-feed__notice {
-  margin: 0;
-  padding: 10px 12px;
-  color: var(--ink-secondary);
-  background: var(--surface-raised);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-2);
-  font-size: var(--text-14);
-  line-height: 1.45;
 }
 
 .conversation-message {
@@ -188,47 +109,6 @@ kbd {
   padding: 2px 0;
   background: transparent;
   border-radius: 0;
-}
-
-
-.hero {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  margin-bottom: 6px;
-}
-
-.greeting {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  color: var(--ink-muted);
-  font-size: var(--text-14);
-  font-weight: 500;
-  line-height: 1.2;
-}
-
-.greeting svg {
-  color: var(--accent);
-}
-
-.hero h1 {
-  margin: 0;
-  color: var(--ink-muted);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
-  font-size: var(--text-13);
-  font-weight: 500;
-  letter-spacing: 0;
-  line-height: 1.3;
-  text-align: left;
 }
 
 .theme-toggle {
@@ -282,62 +162,8 @@ kbd {
   background: var(--surface);
 }
 
-.hero p {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: var(--text-16);
-  line-height: 1.4;
-}
-
-.connector-rail {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 8px;
-  margin-top: 14px;
-}
-
-.connector-pill {
-  display: inline-flex;
-  align-items: center;
-  height: 34px;
-  gap: 8px;
-  padding: 0 13px;
-  color: var(--ink);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-pill);
-  box-shadow: var(--shadow-1);
-  font-size: var(--text-13);
-  font-weight: 500;
-  line-height: 1;
-}
-
-.connector-pill:hover {
-  color: var(--accent);
-  background: var(--accent-subtle);
-  border-color: var(--accent-line);
-}
-
-.connector-pill svg {
-  width: 15px;
-  height: 15px;
-  flex: none;
-}
-
 /* Brand tones only affect monochrome marks (github/vercel/notion). Multi-color
    marks (drive/gmail/slack/calendar) carry their own fills. */
-.connector-pill--github svg {
-  color: var(--ink);
-}
-
-.connector-pill--vercel svg {
-  color: var(--ink);
-}
-
-.connector-pill--notion svg {
-  color: var(--ink);
-}
 
 .theme-toggle--settings {
   position: static;

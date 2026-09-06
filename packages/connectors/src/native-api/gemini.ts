@@ -17,7 +17,7 @@ import { extractPayload, splitLines } from "./transport";
 
 interface GeminiPart {
   text?: string;
-  functionCall?: { name?: string; args?: Record<string, unknown> };
+  functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
 }
 interface GeminiChunk {
   candidates?: Array<{
@@ -40,6 +40,7 @@ export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
         for (const call of message.toolCalls ?? []) {
           parts.push({
             functionCall: {
+              id: call.callId,
               name: call.tool,
               args: JSON.parse(call.arguments)
             }
@@ -49,6 +50,7 @@ export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
       if (message.role === "tool" && message.toolCallId) {
         parts.push({
           functionResponse: {
+            id: message.toolCallId,
             name: message.toolName ?? message.toolCallId,
             response: { output: message.content }
           }
@@ -88,7 +90,8 @@ export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
 /** Parse a single Gemini JSON line into zero or more normalized events. */
 export function parseGeminiLine(
   providerId: string,
-  line: string
+  line: string,
+  nextCallId: () => string = () => `gemini-${crypto.randomUUID()}`
 ): BackendAgentEvent[] {
   const payload = extractPayload(line);
   if (!payload) return [];
@@ -114,7 +117,7 @@ export function parseGeminiLine(
       const args = JSON.stringify(part.functionCall.args ?? {});
       events.push({
         type: "tool-call",
-        callId: part.functionCall.name,
+        callId: part.functionCall.id ?? nextCallId(),
         tool: part.functionCall.name,
         arguments: args,
         approval: buildToolApproval(providerId, part.functionCall.name, args)
@@ -155,9 +158,14 @@ export async function* streamGeminiEvents(
   transport: HttpTransport,
   request: NativeCompletionRequest
 ): AsyncIterable<BackendAgentEvent> {
+  // Older Gemini responses omit IDs. Names identify tools, not invocations:
+  // several calls to the same tool still need distinct approvals and results.
+  const streamId = crypto.randomUUID();
+  let callIndex = 0;
+  const nextCallId = () => `gemini-${streamId}-${callIndex++}`;
   for await (const chunk of transport.stream(request)) {
     for (const line of splitLines(chunk)) {
-      for (const event of parseGeminiLine(request.providerId, line)) {
+      for (const event of parseGeminiLine(request.providerId, line, nextCallId)) {
         yield event;
       }
     }

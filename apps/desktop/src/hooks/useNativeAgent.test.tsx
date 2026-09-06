@@ -616,6 +616,26 @@ describe("useNativeAgent", () => {
     expect(mocks.streamCalls).toBe(0);
   });
 
+  it("cancels the native provider and approval gate when the hook is remounted", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("partial")];
+    mocks.emitDone = false;
+    let cancelled = false;
+    const onCancel = vi.fn(() => { cancelled = true; });
+    const { result, unmount } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()], onCancel, shouldCancel: () => cancelled,
+    }));
+    let running!: Promise<void>;
+    act(() => { running = result.current.run(baseRequest); });
+    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+    unmount();
+    await waitFor(() => expect(mocks.cancelCalls).toHaveLength(1));
+    expect(onCancel).toHaveBeenCalledOnce();
+    mocks.onLine?.("[DONE]");
+    await act(async () => { await running; });
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe("cancelled");
+  });
+
   it("rejects an overlapping attempt while the active stream is pending", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("partial")];
@@ -803,12 +823,28 @@ describe("useNativeAgent", () => {
     // Real gate + real desktop executor (awaits the gate, then calls the Rust
     // boundary — which is mocked here). This is exactly what App.tsx wires.
     const gate = createApprovalGate();
+    let markExecuting: (id: string, tool: string) => void = () => {};
+    let completeNative!: () => void;
+    const pendingNative = new Promise<void>((resolve) => { completeNative = resolve; });
+    const { executeRuntimeToolCall } = await import("../runtime");
+    vi.mocked(executeRuntimeToolCall).mockImplementationOnce(async (request) => {
+      mocks.toolRequests.push(request);
+      await pendingNative;
+      return mocks.toolResult;
+    });
     const executor = createDesktopToolExecutor(gate, {
+      onExecuting: (approval, tool) => markExecuting(approval.id, tool),
       localComputer: {
         workspaceId: "workspace-test",
         agentId: "agent-test",
-        ready: true
-      }
+        ready: true,
+        generation: 1,
+        controller: "agent"
+      },
+      queueApproval: (approval) => {
+        registeredApproval = approval;
+        gate.register(approval);
+      },
     });
 
     let registeredApproval: Extract<BackendAgentEvent, { type: "tool-call" }>["approval"] | null =
@@ -817,14 +853,11 @@ describe("useNativeAgent", () => {
       useNativeAgent({
         providers: [connectedOpenAiProvider()],
         execute: executor,
-        onToolCall: (event) => {
-          // Mirror App.tsx: register the pending call on the shared gate so a
-          // grant can drive the executor the loop is blocked on.
-          registeredApproval = event.approval;
-          gate.register(event.approval);
-        }
+        // Computer approvals are queued by the executor after scope/epoch binding.
+        onToolCall: () => undefined
       })
     );
+    markExecuting = result.current.markToolExecuting;
 
     // Kick off the attempt, then grant the tool call once it surfaces. The executor
     // blocks on the gate until the grant, so run + grant interleave.
@@ -839,6 +872,11 @@ describe("useNativeAgent", () => {
     await waitFor(() => expect(gate.hasPending(approvalId)).toBe(true));
     // Grant the pending call — the executor unblocks and runs the tool.
     gate.resolveGrant(approvalId);
+
+    await waitFor(() => expect(result.current.state.activity).toBe("Using: read-file"));
+    expect(result.current.state.status).toBe("streaming");
+    expect(result.current.state.running).toBe(true);
+    completeNative();
 
     await act(async () => {
       await runPromise;

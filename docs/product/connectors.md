@@ -107,9 +107,9 @@ Reopening the detail view checks existing access without restarting OAuth or
 expanding a previously restricted tool list. Tools are used in conversations;
 manual server configuration remains in advanced Settings.
 
-Direct API and ChatGPT/Codex teammates receive native reads and supported write
-actions for their assigned connected apps. An explicit connector mention also
-selects that app for the conversation, including follow-up turns. Access is
+Direct API and ChatGPT/Codex agents receive native reads and supported write
+actions for connected workspace apps. Connector mentions identify the app the
+person wants to use; connected apps remain available on follow-up turns. Access is
 rechecked after approval and on result delivery. Native reads use the connected
 account's consent without an extra approval; external writes require a fresh,
 exact approval with a preview in the conversation. Connector status refreshes
@@ -118,9 +118,9 @@ Connector mentions display an inline logo and name while retaining stable IDs
 in stored messages. Codex turns disable host shell tools and provider memories;
 unadvertised tool requests are declined without opening an approval card.
 
-Direct API and ChatGPT/Codex teammates can use `connector-tools` to discover enabled tool schemas
-and `connector-call` to invoke them. The connector must be selected in the
-teammate editor or explicitly mentioned. Each call rediscovers the current Connection.
+Direct API and ChatGPT/Codex agents can use `connector-tools` to discover enabled tool schemas
+and `connector-call` to invoke them. Saved official remote connections are available
+across workspace conversations without individual agent assignment. Each call rediscovers the current Connection.
 Native policy recognizes a fixed list of Vercel documentation, project, deployment,
 and log reads at the exact official endpoint and runs these under account consent.
 Changes and unrecognized tools still require native approval bound to the exact

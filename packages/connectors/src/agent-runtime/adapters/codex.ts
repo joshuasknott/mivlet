@@ -46,6 +46,8 @@ async function* mapCodexEvents(
   capabilities: readonly BackendCapability[],
   advertisedTools: AgentTurnRequest["tools"]
 ): AsyncIterable<BackendAgentEvent> {
+  let toolCalls = 0;
+  const maxToolCalls = Math.max(1, Math.min(80, options.maxToolCalls ?? 80));
   for await (const event of events) {
     if (options.shouldCancel?.()) {
       await handle.cancel(threadId);
@@ -67,8 +69,15 @@ async function* mapCodexEvents(
         costUnknown: event.costUsd === undefined
       };
     } else if (event.type === "approval-request") {
+      if (++toolCalls > maxToolCalls) {
+        await handle.respondApproval(event.requestId, { callId: event.callId, ok: false, output: "Fable stopped this turn at its tool-call limit. Report current progress to the user." });
+        await handle.cancel(threadId);
+        yield { type: "error", message: "Computer work reached this turn's action limit. Review the current state before continuing." };
+        yield { type: "done", finishReason: "error" };
+        return;
+      }
       const dynamicTool = advertisedTools.some((tool) => tool.name === event.tool);
-      const approval = dynamicTool ? buildToolApproval("Codex", event.tool, event.arguments) : event.approval;
+      const approval = dynamicTool ? { ...buildToolApproval("Codex", event.tool, event.arguments), id: event.approval.id } : event.approval;
       if (!capabilities.includes("tool-requests") || !capabilities.includes("approvals")) {
         yield { type: "error", message: "Tool calls/approvals are not supported by this backend's capabilities." };
         yield { type: "done", finishReason: "error" };
@@ -157,7 +166,8 @@ export function createCodexBackend(
           options: {
             contextPrefix: options.contextPrefix,
             permissionMode: options.permissionMode,
-            attemptId: options.attemptId
+            attemptId: options.attemptId,
+            computer: options.computer
           }
         });
         yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities, request.tools);

@@ -45,18 +45,6 @@
   border-color: var(--accent-line);
 }
 
-.button--ghost {
-  color: var(--ink-muted);
-  background: transparent;
-  border-color: transparent;
-  box-shadow: none;
-}
-
-.button--ghost:hover {
-  color: var(--accent);
-  background: var(--accent-subtle);
-}
-
 .button--destructive {
   color: var(--destructive);
   background: var(--destructive-subtle);

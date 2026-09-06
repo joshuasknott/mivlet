@@ -57,6 +57,9 @@ pub struct ToolExecutionRequest {
     pub workspace_id: Option<String>,
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Native generation observed before approval; never inferred at execution.
+    #[serde(default)]
+    pub computer_generation: Option<u64>,
     #[serde(default)]
     pub mcp_session_id: Option<String>,
     /// Retained for wire compatibility and pure helper tests. The Tauri command
@@ -75,7 +78,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 16] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 20] = [
     "read-file",
     "write-file",
     "run-shell",
@@ -83,6 +86,10 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 16] = [
     "local-browser",
     "local-browser-observe",
     "local-browser-action",
+    "local-browser-tab",
+    "computer-artifact",
+    "local-desktop-observe",
+    "local-desktop-action",
     "connection-read",
     "github-read",
     "vercel-read",
@@ -230,6 +237,11 @@ pub(crate) fn execute_tool_outcome(
 }
 
 /// Reject tool names outside the closed registry.
+fn require_computer_generation(request: &ToolExecutionRequest) -> Result<u64, String> {
+    request.computer_generation.filter(|generation| *generation > 0 && *generation <= 9_007_199_254_740_991)
+        .ok_or_else(|| "Refresh this computer before requesting a tool action; its control generation is missing or invalid.".into())
+}
+
 fn validate_tool_name(tool: &str) -> Result<(), String> {
     if SUPPORTED_TOOLS.contains(&tool) {
         Ok(())
@@ -245,8 +257,11 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
         "local-browser" => Some(("full-access", "critical")),
-        "local-browser-observe" => Some(("read-only", "medium")),
-        "local-browser-action" => Some(("full-access", "critical")),
+        "local-browser-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
+        "local-browser-action" | "local-browser-tab" | "local-desktop-action" => {
+            Some(("full-access", "critical"))
+        }
+        "computer-artifact" => Some(("read-only", "low")),
         "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
         "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
@@ -276,7 +291,15 @@ fn routine_connector_read(tool: &str) -> bool {
 }
 
 fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<(), String> {
-    validate_tool_approval_binding(&request.tool, &request.arguments, &request.approval.request)?;
+    if is_computer_tool(&request.tool) {
+        validate_computer_approval_binding(request)?;
+    } else {
+        validate_tool_approval_binding(
+            &request.tool,
+            &request.arguments,
+            &request.approval.request,
+        )?;
+    }
     if routine_connector_read(&request.tool) {
         if request.approval.decision != "once" {
             return Err("Connector read was denied or has an invalid decision.".into());
@@ -288,6 +311,49 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
         &request.approval.request,
         &request.approval.decided_at,
     )
+}
+
+fn is_computer_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "run-shell"
+            | "read-file"
+            | "write-file"
+            | "local-browser"
+            | "local-browser-observe"
+            | "local-browser-action"
+            | "local-browser-tab"
+            | "computer-artifact"
+            | "local-desktop-observe"
+            | "local-desktop-action"
+    )
+}
+
+fn validate_computer_approval_binding(request: &ToolExecutionRequest) -> Result<(), String> {
+    let generation = require_computer_generation(request)?;
+    let workspace_id = request
+        .workspace_id
+        .as_deref()
+        .ok_or_else(|| "Computer approval requires its exact workspace.".to_string())?;
+    let agent_id = request
+        .agent_id
+        .as_deref()
+        .ok_or_else(|| "Computer approval requires its exact agent.".to_string())?;
+    let expected = [
+        format!("Computer workspace: {workspace_id}"),
+        format!("Computer agent: {agent_id}"),
+        format!("Computer generation: {generation}"),
+    ];
+    let mut argument_approval = request.approval.request.clone();
+    if !argument_approval.data_used.ends_with(&expected) {
+        return Err("Computer scope or control changed after this action was approved. Request a fresh approval.".into());
+    }
+    argument_approval
+        .data_used
+        .truncate(argument_approval.data_used.len() - expected.len());
+    validate_tool_approval_binding(&request.tool, &request.arguments, &argument_approval)
+    // verify_tool_authority consumes the original complete approval, retaining
+    // these exact scope/generation fields in the native permit fingerprint.
 }
 
 /// Bind an approval to the exact registered tool policy and argument preview.
@@ -972,6 +1038,151 @@ pub async fn execute_tool_call(
             crate::authorized_scope::ScopeAccess::Read,
         )?;
     }
+    let computer_generation = if is_computer_tool(&tool) {
+        let generation = require_computer_generation(&request)?;
+        local_computers.validate_target(
+            request
+                .workspace_id
+                .as_deref()
+                .ok_or_else(|| "Computer tools require an active workspace.".to_string())?,
+            request
+                .agent_id
+                .as_deref()
+                .ok_or_else(|| "Computer tools require a saved agent.".to_string())?,
+        )?;
+        generation
+    } else {
+        0
+    };
+    if matches!(
+        tool.as_str(),
+        "local-desktop-observe" | "local-desktop-action"
+    ) {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or("Desktop tools require a workspace.")?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or("Desktop tools require an agent.")?;
+        let claim = crate::codex_app_server::claim_desktop_tool(
+            &request_id,
+            &tool,
+            &arguments,
+            &workspace_id,
+            &agent_id,
+            computer_generation,
+        )?;
+        let computers = local_computers.inner().clone();
+        crate::local_computer::desktop_tools::prepare(
+            computers.clone(),
+            &workspace_id,
+            &agent_id,
+            computer_generation,
+        )
+        .await?;
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            if tool == "local-desktop-observe" {
+                if arguments != serde_json::json!({}) {
+                    return Err("Desktop observation takes no arguments.".into());
+                }
+                let capture = crate::local_computer::desktop_tools::observe(
+                    &computers,
+                    &workspace_id,
+                    &agent_id,
+                    computer_generation,
+                )?;
+                crate::codex_app_server::retain_desktop_capture(claim, capture)
+            } else {
+                let action = serde_json::from_value(arguments)
+                    .map_err(|_| "Desktop action fields are invalid.".to_string())?;
+                crate::local_computer::desktop_tools::act(
+                    &computers,
+                    &workspace_id,
+                    &agent_id,
+                    computer_generation,
+                    action,
+                )
+            }
+        })
+        .await
+        .map_err(|_| "The desktop tool stopped unexpectedly.".to_string())?;
+        return result.map(|output| ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-tab" || tool == "computer-artifact" {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "Computer tools require an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "Computer tools require a saved agent.".to_string())?;
+        let computers = local_computers.inner().clone();
+        let result = if tool == "local-browser-tab" {
+            computers
+                .tab_for_agent(
+                    workspace_id,
+                    agent_id,
+                    require_string_argument(&arguments, "observationId")?,
+                    require_string_argument(&arguments, "action")?,
+                    arguments
+                        .get("tabRef")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    arguments
+                        .get("url")
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_owned),
+                    computer_generation,
+                )
+                .await
+                .and_then(|result| {
+                    serde_json::to_string(&result)
+                        .map_err(|_| "The browser tab result is invalid.".to_string())
+                })
+        } else {
+            let path = require_string_argument(&arguments, "path")?;
+            let title = arguments
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned);
+            tauri::async_runtime::spawn_blocking(move || {
+                crate::local_computer::artifacts::publish_artifact(
+                    &computers,
+                    &workspace_id,
+                    &agent_id,
+                    computer_generation,
+                    &path,
+                    title.as_deref(),
+                )
+                .and_then(|result| {
+                    serde_json::to_string(&result)
+                        .map_err(|_| "The computer artifact receipt is invalid.".to_string())
+                })
+            })
+            .await
+            .map_err(|_| "The computer artifact task stopped unexpectedly.".to_string())?
+        };
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: if result.is_ok() { "ok" } else { "failed" },
+                error_code: if result.is_ok() {
+                    ""
+                } else {
+                    "computer-operation"
+                },
+                message: "Computer operation completed",
+            },
+            None,
+        );
+        return result.map(|output| ToolResult { ok: true, output });
+    }
     if tool == "run-shell" {
         let workspace_id = request
             .workspace_id
@@ -985,7 +1196,7 @@ pub async fn execute_tool_call(
         let result = local_computers
             .inner()
             .clone()
-            .run_shell_for_agent(workspace_id, agent_id, command)
+            .run_shell_for_agent(workspace_id, agent_id, command, computer_generation)
             .await
             .inspect_err(|error| {
                 audit_tool_outcome(
@@ -1031,7 +1242,7 @@ pub async fn execute_tool_call(
         let result = local_computers
             .inner()
             .clone()
-            .navigate_for_agent(workspace_id, agent_id, url)
+            .navigate_for_agent(workspace_id, agent_id, url, computer_generation)
             .await
             .inspect_err(|error| {
                 audit_tool_outcome(
@@ -1075,7 +1286,7 @@ pub async fn execute_tool_call(
         let result = local_computers
             .inner()
             .clone()
-            .observe_for_agent(workspace_id, agent_id)
+            .observe_for_agent(workspace_id, agent_id, computer_generation)
             .await
             .inspect_err(|error| {
                 audit_tool_outcome(
@@ -1117,8 +1328,13 @@ pub async fn execute_tool_call(
             .clone()
             .ok_or_else(|| "Local browser actions require an active agent.".to_string())?;
         let action = require_string_argument(&arguments, "action")?;
-        if !matches!(action.as_str(), "click" | "fill" | "press" | "select") {
-            return Err("The local browser action must be click, fill, press, or select.".into());
+        if !matches!(
+            action.as_str(),
+            "click" | "fill" | "press" | "select" | "upload"
+        ) {
+            return Err(
+                "The local browser action must be click, fill, press, select, or upload.".into(),
+            );
         }
         let observation_id = require_string_argument(&arguments, "observationId")?;
         let element_ref = require_string_argument(&arguments, "elementRef")?;
@@ -1145,6 +1361,7 @@ pub async fn execute_tool_call(
                 action,
                 value,
                 key,
+                computer_generation,
             )
             .await
             .inspect_err(|error| {
@@ -1243,22 +1460,27 @@ pub async fn execute_tool_call(
     // The caller may never select a filesystem path. File tools resolve an
     // opaque workspace/agent scope through the native local-computer state;
     // no browser profile, host path, or sibling teammate directory crosses IPC.
-    let root = if matches!(tool.as_str(), "read-file" | "write-file") {
+    let outcome = if matches!(tool.as_str(), "read-file" | "write-file") {
         let workspace_id = request
             .workspace_id
-            .as_deref()
+            .clone()
             .ok_or_else(|| "File tools require an active workspace.".to_string())?;
         let agent_id = request
             .agent_id
-            .as_deref()
+            .clone()
             .ok_or_else(|| "File tools require an active agent.".to_string())?;
-        local_computers.tool_workspace_root(workspace_id, agent_id)?
+        ToolOutcome::Done(local_computers.with_agent_files(
+            &workspace_id,
+            &agent_id,
+            computer_generation,
+            |root| match execute_tool_outcome(request, root) {
+                ToolOutcome::Done(result) => result,
+                _ => Err("The local file operation is unsupported.".into()),
+            },
+        ))
     } else {
-        // Non-file tools do not use this path, but the pure dispatcher retains
-        // an explicit root for compatibility and unit testing.
-        resolve_workspace_root(&app)?
+        execute_tool_outcome(request, &resolve_workspace_root(&app)?)
     };
-    let outcome = execute_tool_outcome(request, &root);
     let result = match outcome {
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
@@ -1629,6 +1851,62 @@ mod connector_authority_tests {
                 }
             }
         })).unwrap()
+    }
+
+    #[test]
+    fn computer_tools_require_an_explicit_representable_generation() {
+        let mut request = request("run-shell");
+        assert!(require_computer_generation(&request).is_err());
+        request.computer_generation = Some(0);
+        assert!(require_computer_generation(&request).is_err());
+        request.computer_generation = Some(u64::MAX);
+        assert!(require_computer_generation(&request).is_err());
+        request.computer_generation = Some(42);
+        assert_eq!(require_computer_generation(&request).unwrap(), 42);
+    }
+
+    #[test]
+    fn computer_approval_scope_and_generation_are_bound_to_the_original_single_use_permit() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("run-shell");
+        approved.workspace_id = Some("workspace-one".into());
+        approved.agent_id = Some("agent-one".into());
+        approved.computer_generation = Some(4);
+        approved.approval.request.data_used.extend([
+            "Computer workspace: workspace-one".into(),
+            "Computer agent: agent-one".into(),
+            "Computer generation: 4".into(),
+        ]);
+        let response = crate::models::ApprovalResolutionResponse {
+            persisted: true,
+            audit_entry: crate::models::ApprovalAuditEntry {
+                id: "computer-scope-test".into(),
+                request_id: approved.approval.request.id.clone(),
+                decision: "once".into(),
+                decided_at: approved.approval.decided_at.clone(),
+                note: "approved".into(),
+            },
+            effective_request: approved.approval.request.clone(),
+            dismissed: true,
+            grant: None,
+        };
+        crate::execution_approvals::record_execution_decision(&path, &response).unwrap();
+        approved.agent_id = Some("agent-two".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.agent_id = Some("agent-one".into());
+        approved.workspace_id = Some("workspace-two".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace-one".into());
+        approved.computer_generation = Some(5);
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        // Rewriting the matching suffix cannot rebind the saved native permit.
+        *approved.approval.request.data_used.last_mut().unwrap() = "Computer generation: 5".into();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.computer_generation = Some(4);
+        *approved.approval.request.data_used.last_mut().unwrap() = "Computer generation: 4".into();
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
     }
 
     #[test]

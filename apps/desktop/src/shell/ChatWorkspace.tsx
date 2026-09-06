@@ -24,6 +24,7 @@ import {
 } from "../components/agents/agent-icons";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
+import { ComputerArtifacts } from "../components/ComputerArtifacts";
 import { ConnectorMentionText } from "../components/ConnectorMention";
 import {
   buildAgentRequest,
@@ -33,6 +34,7 @@ import {
 import { agentExecutionInstructions } from "../lib/agent-learning";
 import { insertDictation } from "../lib/insert-dictation";
 import { chatConnectorTools } from "../lib/connector-chat";
+import { conversationComputerTools, COMPUTER_WORK_INSTRUCTIONS, supportsComputerVision } from "../lib/computer-tools";
 import {
   type SettingsTab,
 } from "../components/pages/settings-tabs";
@@ -89,6 +91,12 @@ export function ChatWorkspace() {
     null,
   );
   const [workPanelOpen, setWorkPanelOpen] = useState(true);
+  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== "hidden");
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -101,6 +109,7 @@ export function ChatWorkspace() {
 
   const controller = useShellAgentController({
     threadId: selectedThreadId,
+    thumbnailEnabled: workPanelOpen && pageVisible,
     onDictation: addDictationToComposer,
     onVoiceCancel: focusComposer,
   });
@@ -230,7 +239,7 @@ export function ChatWorkspace() {
   const submissionPending = useRef(false);
   const executePrompt = useCallback(
     async (prompt: string) => {
-      if (!activeAgent || !selectedThreadId || agent.state.running || submissionPending.current) return;
+      if (!activeAgent || !selectedThreadId || agent.state.running || submissionPending.current || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
       const connected = runtime.connectedAgentBackend;
       if (!connected) {
         setSettingsTab("providers");
@@ -261,7 +270,7 @@ export function ChatWorkspace() {
       resetCancellation();
       try {
         const connectorIds = await beginConnectorTurn();
-        const instructions = agentExecutionInstructions(activeAgent);
+        const instructions = [agentExecutionInstructions(activeAgent), COMPUTER_WORK_INSTRUCTIONS].join("\n\n");
         const preparedContext = await runtime.assembleConversationContext(prompt, {
           allowedConnectorIds: connectorIds,
           allowedKnowledgeSourceIds: runtime.composerAttachments.flatMap((attachment) => attachment.sourceId ? [attachment.sourceId] : []),
@@ -272,7 +281,8 @@ export function ChatWorkspace() {
             reasoningEffort: selectedReasoningEffort,
             prompt,
             instructions,
-            tools: chatConnectorTools(connectorIds, runtime.connectorManifests),
+            tools: conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready",
+              supportsComputerVision(connected, composerModels.find((model) => model.id === selectedModelOptionId))),
             maxTokens: validation.maxTokens,
           }),
           preparedContext,
@@ -309,8 +319,13 @@ export function ChatWorkspace() {
       runtime.refreshConnectorStatuses,
       runtime.permissionMode,
       runtime.selectableModels,
+      runtime.runtimeSnapshotError,
+      runtime.runtimeSnapshotReady,
       runtime.setComposerValue,
       selectedModelId,
+      selectedModelOptionId,
+      composerModels,
+      localComputer.node?.lifecycle,
       selectedReasoningEffort,
       selectedThreadId,
     ],
@@ -321,6 +336,17 @@ export function ChatWorkspace() {
     setQueuedPrompt(null);
     void executePrompt(queuedPrompt.prompt);
   }, [executePrompt, queuedPrompt, selectedThreadId]);
+
+  if (runtime.runtimeSnapshotError || !runtime.runtimeSnapshotReady) {
+    return (
+      <main className="og-frame">
+        <section className="empty-state" role={runtime.runtimeSnapshotError ? "alert" : "status"} aria-busy={!runtime.runtimeSnapshotError}>
+          <p>{runtime.runtimeSnapshotError ?? "Loading your workspace…"}</p>
+          {runtime.runtimeSnapshotError && <button type="button" disabled={runtime.accountWorkspacePending} onClick={() => void runtime.reconcileAccountWorkspace()}>Retry</button>}
+        </section>
+      </main>
+    );
+  }
 
   if (!activeAgent) {
     return (
@@ -359,7 +385,7 @@ export function ChatWorkspace() {
 
   const submitComposer = async () => {
     const prompt = runtime.composerValue.trim();
-    if (!prompt || agent.state.running || queuedPrompt) return;
+    if (!prompt || agent.state.running || queuedPrompt || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
     if (!selectedThreadId) {
       const thread = await durableConversation.createThread({
         authorityScope: {
@@ -554,7 +580,10 @@ export function ChatWorkspace() {
                 revision.state === "redacted"
                   ? "This message was removed."
                   : revision.content;
-              if (entry.message.kind === "tool" && revision.state !== "redacted") return <details key={entry.message.id} className="conversation-progress"><summary>{entry.message.detail.toolName} · {entry.message.detail.phase === "call" ? "Requested" : entry.message.detail.outcome === "failed" ? "Failed" : "Completed"}</summary><p>{content}</p></details>;
+              if (entry.message.kind === "tool" && revision.state !== "redacted") return <div key={entry.message.id}>
+                <ComputerArtifacts output={content} workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""} agentId={activeAgent.id} expectedGeneration={localComputer.node?.generation} />
+                <details className="conversation-progress"><summary>{entry.message.detail.toolName} · {entry.message.detail.phase === "call" ? "Requested" : entry.message.detail.outcome === "failed" ? "Failed" : "Completed"}</summary><p>{content}</p></details>
+              </div>;
               const role = entry.message.kind === "user" ? "user" : "assistant";
               if (
                 ![
@@ -634,7 +663,7 @@ export function ChatWorkspace() {
                     const connectorIds = await beginConnectorTurn();
                     resetCancellation();
                     void agent
-                      .retry(attempt, chatConnectorTools(connectorIds, runtime.connectorManifests))
+                      .retry(attempt, conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready"))
                       .finally(async () => { endConnectorTurn(); await runtime.refreshConnectorStatuses(); return durableConversation.refresh(); });
                   }}
                 >
@@ -739,10 +768,7 @@ export function ChatWorkspace() {
             filePreview: localComputer.filePreview,
             filePreviewLoading: localComputer.filePreviewLoading,
             filePreviewError: localComputer.filePreviewError,
-            controller:
-              localComputer.snapshot?.controller ??
-              localComputer.node?.controller ??
-              "agent",
+            controller: localComputer.controller,
             loading: localComputer.loading,
             provisioning: localComputer.provisioning,
             busy: localComputer.browserBusy,
@@ -750,10 +776,14 @@ export function ChatWorkspace() {
             error: localComputer.error,
             browserUrl: localComputer.snapshot?.currentUrl,
             browserTitle: localComputer.snapshot?.title,
-            generation: localComputer.snapshot?.generation ?? 0,
-            leaseExpiresAt: localComputer.snapshot?.leaseExpiresAt,
+            generation: localComputer.node?.generation ?? 0,
+            leaseExpiresAt: localComputer.node?.leaseExpiresAt,
             viewport: localComputer.snapshot?.viewport,
             onProvision: localComputer.provision,
+            onOpenViewer: localComputer.openViewer,
+            onStop: localComputer.stop,
+            onRestart: localComputer.restart,
+            onUpdateSystem: localComputer.updateSystem,
             onOpenBrowser: localComputer.navigate,
             onRefreshBrowser: localComputer.refresh,
             onGoBack: localComputer.goBack,
@@ -763,9 +793,6 @@ export function ChatWorkspace() {
             onCloseFilePreview: localComputer.closeFilePreview,
             onTakeControl: localComputer.takeControl,
             onReturnControl: localComputer.returnControl,
-            onClick: localComputer.click,
-            onScroll: localComputer.scroll,
-            onKey: localComputer.key,
             onLaunchApplication: localComputer.launchApplication,
           }}
           hostedComputer={{

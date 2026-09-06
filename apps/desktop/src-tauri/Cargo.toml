@@ -65,6 +65,8 @@ headless_chrome = { version = "1.0.22", default-features = false }
 # Managed Google Antigravity runtime archives are ZIP files. Only DEFLATE
 # decoding is enabled; Fable never creates archives or enables legacy codecs.
 zip = { version = "6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+axum = { version = "0.8.9", features = ["ws"] }
+tokio-tungstenite = "0.29"
 
 [target.'cfg(windows)'.dependencies]
 # The managed Antigravity binary launches a child ACP process. A Windows job
@@ -73,4 +75,6 @@ zip = { version = "6", default-features = false, features = ["deflate-flate2-zli
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_System_JobObjects",
+    "Win32_Storage_FileSystem",
+    "Win32_UI_Shell",
 ] }

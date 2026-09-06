@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@fable/protocol";
-import { FixtureTransport } from "./transport";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import { FixtureTransport, SequencedFixtureTransport } from "./transport";
+import { runAgentLoop } from "./agent-loop";
 import type { HttpTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { parseGeminiLine, shapeGeminiRequest, streamGeminiEvents } from "./gemini";
@@ -61,6 +62,36 @@ describe("gemini shaping", () => {
     );
     expect(events.some((e) => e.type === "usage")).toBe(true);
     expect(events.some((e) => e.type === "done")).toBe(true);
+  });
+
+  it("preserves provider call IDs in events and matching history responses", () => {
+    const [event] = parseGeminiLine("gemini", JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { id: "provider-call-7", name: "read-file", args: { path: "a.md" } } }] } }] }));
+    expect(event).toMatchObject({ type: "tool-call", callId: "provider-call-7" });
+    expect(shapeGeminiRequest({ ...request, messages: [
+      { role: "assistant", content: "", toolCalls: [{ callId: "provider-call-7", tool: "read-file", arguments: '{"path":"a.md"}' }] },
+      { role: "tool", content: "file contents", toolCallId: "provider-call-7", toolName: "read-file" },
+    ] })).toMatchObject({ contents: [
+      { parts: [{ functionCall: { id: "provider-call-7", name: "read-file" } }] },
+      { parts: [{ text: "file contents" }, { functionResponse: { id: "provider-call-7", name: "read-file" } }] },
+    ] });
+  });
+
+  it("executes repeated same-name tools within a stream and across agent turns", async () => {
+    const calls = (paths: string[]) => JSON.stringify({ candidates: [{ content: { parts: paths.map((path) => ({ functionCall: { name: "read-file", args: { path } } })) }, finishReason: "STOP" }] });
+    const transport = SequencedFixtureTransport.fromTexts([
+      calls(["a.md", "b.md"]), calls(["c.md"]), '{"candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}]}',
+    ]);
+    const executed: string[] = [];
+    const events: BackendAgentEvent[] = [];
+    for await (const event of runAgentLoop(transport, request, {
+      runId: "gemini-repeated-call-test", modelSupportsTools: true,
+      execute: async (approval, args) => { executed.push(approval.id); return `read ${args}`; },
+    })) events.push(event);
+    expect(executed).toHaveLength(3);
+    expect(new Set(executed).size).toBe(3);
+    expect(events.filter((event) => event.type === "tool-result")).toHaveLength(3);
+    expect(events.filter((event) => event.type === "tool-result" && !event.ok)).toEqual([]);
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
   });
 
   it("streams the recorded fixture into ordered events", async () => {

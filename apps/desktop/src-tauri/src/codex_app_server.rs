@@ -12,14 +12,18 @@ use std::{
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
-    sync::{mpsc, Arc, Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex, OnceLock,
+    },
     thread,
     time::{Duration, Instant},
 };
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
 const CODEX_LOGIN_START_TIMEOUT: Duration = Duration::from_secs(20);
@@ -48,6 +52,7 @@ pub(crate) struct CodexModelCatalogEntry {
     pub(crate) id: String,
     pub(crate) label: String,
     pub(crate) is_default: bool,
+    pub(crate) supports_images: bool,
     pub(crate) reasoning: Option<Value>,
 }
 
@@ -80,9 +85,18 @@ struct CodexMessage {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexTurnOptions {
+    #[serde(default)]
+    computer: Option<CodexComputerScope>,
     context_prefix: Option<String>,
     permission_mode: Option<String>,
     run_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CodexComputerScope {
+    workspace_id: String,
+    agent_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -96,7 +110,6 @@ pub struct CodexApprovalResponseRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CodexApprovalResult {
-    #[allow(dead_code)]
     call_id: String,
     ok: bool,
     output: String,
@@ -113,18 +126,37 @@ pub struct CodexInterruptRequest {
 struct ActiveCodexRun {
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<Child>>,
-    approval_kinds: Arc<Mutex<HashMap<String, ApprovalKind>>>,
+    computer: Option<CodexComputerScope>,
+    supports_images: bool,
+    approval_kinds: Arc<Mutex<HashMap<String, PendingApproval>>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum ApprovalKind {
     Command,
     FileChange,
     DynamicTool,
-    Other,
 }
 
+struct PendingApproval {
+    kind: ApprovalKind,
+    approval_id: String,
+    call_id: String,
+    tool: String,
+    arguments: Value,
+    desktop_claimed: bool,
+    desktop_capture: Option<crate::local_computer::desktop_tools::NativeDesktopCapture>,
+}
+
+pub(crate) struct DesktopToolClaim {
+    run_id: String,
+    approval_id: String,
+    generation: u64,
+}
+static IMAGE_MODELS: OnceLock<Mutex<HashMap<String, (bool, Instant)>>> = OnceLock::new();
+
 static ACTIVE_RUNS: OnceLock<Mutex<HashMap<String, ActiveCodexRun>>> = OnceLock::new();
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 fn active_runs() -> &'static Mutex<HashMap<String, ActiveCodexRun>> {
     ACTIVE_RUNS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -620,6 +652,12 @@ pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, Strin
                         id: id.to_string(),
                         label: label.to_string(),
                         reasoning: model_reasoning(model),
+                        supports_images: model
+                            .get("inputModalities")
+                            .and_then(Value::as_array)
+                            .is_some_and(|items| {
+                                items.iter().any(|item| item.as_str() == Some("image"))
+                            }),
                         is_default: model
                             .get("isDefault")
                             .and_then(Value::as_bool)
@@ -630,6 +668,15 @@ pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, Strin
             models.sort_by_key(|model| !model.is_default);
             if models.is_empty() {
                 return Err("Codex app-server returned no available models.".to_string());
+            }
+            if let Ok(mut catalog) = IMAGE_MODELS
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+            {
+                catalog.clear();
+                for model in &models {
+                    catalog.insert(model.id.clone(), (model.supports_images, Instant::now()));
+                }
             }
             return Ok(models);
         }
@@ -645,10 +692,34 @@ pub fn start_codex_app_server_turn(
     app: AppHandle,
     request: CodexTurnStartRequest,
 ) -> Result<(), String> {
+    if SHUTTING_DOWN.load(Ordering::Acquire) {
+        return Err("Fable is closing. Provider work has stopped.".into());
+    }
     crate::execution_control::ensure_active_execution_allowed()?;
     if request.provider_id != "codex" {
         return Err("Codex app-server can only run the Codex provider.".to_string());
     }
+    let desktop_tools = request.request.tools.iter().any(|tool| {
+        matches!(
+            tool.get("name").and_then(Value::as_str),
+            Some("local-desktop-observe" | "local-desktop-action")
+        )
+    });
+    let supports_images = if desktop_tools {
+        let computer = request
+            .options
+            .computer
+            .as_ref()
+            .ok_or("Visual desktop tools require an agent computer scope.")?;
+        app.state::<Arc<crate::local_computer::LocalComputerState>>()
+            .validate_target(&computer.workspace_id, &computer.agent_id)?;
+        if !model_supports_images(&request.request.model)? {
+            return Err("This Codex model has not advertised image input. Use structured browser and file tools or choose a vision model.".into());
+        }
+        true
+    } else {
+        false
+    };
     let Some(path) = find_codex_executable() else {
         return Err(missing_codex_runtime_message());
     };
@@ -701,11 +772,19 @@ pub fn start_codex_app_server_turn(
         let mut runs = active_runs()
             .lock()
             .map_err(|_| "Fable could not track Codex app-server state.".to_string())?;
+        if SHUTTING_DOWN.load(Ordering::Acquire) {
+            if let Ok(mut child) = child.lock() {
+                let _ = child.kill();
+            }
+            return Err("Fable is closing. Provider work has stopped.".into());
+        }
         runs.insert(
             request.request_id.clone(),
             ActiveCodexRun {
                 stdin: Arc::clone(&stdin),
                 child: Arc::clone(&child),
+                computer: request.options.computer.clone(),
+                supports_images,
                 approval_kinds: Arc::clone(&approval_kinds),
             },
         );
@@ -748,7 +827,7 @@ fn read_codex_stdout(
     request: CodexTurnStartRequest,
     stdout: std::process::ChildStdout,
     stdin: Arc<Mutex<ChildStdin>>,
-    approval_kinds: Arc<Mutex<HashMap<String, ApprovalKind>>>,
+    approval_kinds: Arc<Mutex<HashMap<String, PendingApproval>>>,
 ) {
     let channel = format!("fable://codex/{}", request.request_id);
     let reader = BufReader::new(stdout);
@@ -935,7 +1014,7 @@ fn handle_codex_method(
     channel: &str,
     method: &str,
     value: &Value,
-    approval_kinds: &Arc<Mutex<HashMap<String, ApprovalKind>>>,
+    approval_kinds: &Arc<Mutex<HashMap<String, PendingApproval>>>,
 ) {
     match method {
         "turn/started" => {
@@ -1021,7 +1100,7 @@ fn emit_approval(
     app: &AppHandle,
     channel: &str,
     value: &Value,
-    approval_kinds: &Arc<Mutex<HashMap<String, ApprovalKind>>>,
+    approval_kinds: &Arc<Mutex<HashMap<String, PendingApproval>>>,
     kind: ApprovalKind,
 ) {
     let request_id = value
@@ -1041,14 +1120,30 @@ fn emit_approval(
             ApprovalKind::Command => "run-shell",
             ApprovalKind::FileChange => "file-change",
             ApprovalKind::DynamicTool => "dynamic-tool",
-            ApprovalKind::Other => "codex-tool",
         });
     let args = value
         .pointer("/params/arguments")
         .cloned()
         .unwrap_or_else(|| json!({ "command": tool }));
+    let Ok(opaque) = crate::local_computer::desktop_tools::opaque_id() else {
+        return;
+    };
+    let approval_id = format!("codex-native-{opaque}");
     if let Ok(mut map) = approval_kinds.lock() {
-        map.insert(request_id.clone(), kind);
+        map.insert(
+            request_id.clone(),
+            PendingApproval {
+                kind,
+                approval_id: approval_id.clone(),
+                call_id: call_id.into(),
+                tool: tool.into(),
+                arguments: args.clone(),
+                desktop_claimed: false,
+                desktop_capture: None,
+            },
+        );
+    } else {
+        return;
     }
     let _ = app.emit(
         channel,
@@ -1059,7 +1154,7 @@ fn emit_approval(
             "tool": tool,
             "arguments": args.to_string(),
             "approval": {
-                "id": format!("codex-{call_id}"),
+                "id": approval_id,
                 "service": "Codex",
                 "action": format!("Approve {tool}"),
                 "mode": "full-access",
@@ -1073,9 +1168,131 @@ fn emit_approval(
     );
 }
 
+fn model_supports_images(model: &str) -> Result<bool, String> {
+    if let Some(supported) = IMAGE_MODELS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|catalog| {
+            catalog
+                .get(model)
+                .filter(|(_, checked)| checked.elapsed() < Duration::from_secs(300))
+                .map(|(supported, _)| *supported)
+        })
+    {
+        return Ok(supported);
+    }
+    Ok(codex_model_catalog()?
+        .into_iter()
+        .any(|entry| entry.id == model && entry.supports_images))
+}
+
+pub(crate) fn claim_desktop_tool(
+    approval_id: &str,
+    tool: &str,
+    arguments: &Value,
+    workspace_id: &str,
+    agent_id: &str,
+    generation: u64,
+) -> Result<DesktopToolClaim, String> {
+    let runs = active_runs()
+        .lock()
+        .map_err(|_| "Native provider tool state is unavailable.")?;
+    for (run_id, run) in runs.iter() {
+        if !run.supports_images
+            || !run.computer.as_ref().is_some_and(|scope| {
+                scope.workspace_id == workspace_id && scope.agent_id == agent_id
+            })
+        {
+            continue;
+        }
+        let mut pending = run
+            .approval_kinds
+            .lock()
+            .map_err(|_| "Native provider approvals are unavailable.")?;
+        if let Some(call) = pending
+            .values_mut()
+            .find(|call| call.approval_id == approval_id)
+        {
+            if !desktop_call_matches(call, tool, arguments) {
+                return Err("The desktop tool does not match its pending native provider call, or was already executed.".into());
+            }
+            call.desktop_claimed = true;
+            return Ok(DesktopToolClaim {
+                run_id: run_id.clone(),
+                approval_id: approval_id.into(),
+                generation,
+            });
+        }
+    }
+    Err("Visual desktop tools require a current native Codex call from a model with verified image support. Structured browser and file tools remain available.".into())
+}
+
+fn desktop_call_matches(call: &PendingApproval, tool: &str, arguments: &Value) -> bool {
+    call.kind == ApprovalKind::DynamicTool
+        && matches!(tool, "local-desktop-observe" | "local-desktop-action")
+        && call.tool == tool
+        && call.arguments == *arguments
+        && !call.desktop_claimed
+}
+
+pub(crate) fn retain_desktop_capture(
+    claim: DesktopToolClaim,
+    capture: crate::local_computer::desktop_tools::NativeDesktopCapture,
+) -> Result<String, String> {
+    let runs = active_runs()
+        .lock()
+        .map_err(|_| "Native provider tool state is unavailable.")?;
+    let run = runs
+        .get(&claim.run_id)
+        .ok_or("The provider turn ended before the desktop observation was ready.")?;
+    let mut pending = run
+        .approval_kinds
+        .lock()
+        .map_err(|_| "Native provider approvals are unavailable.")?;
+    let call = pending
+        .values_mut()
+        .find(|call| call.approval_id == claim.approval_id)
+        .ok_or("The native desktop tool call is no longer pending.")?;
+    if !call.desktop_claimed
+        || call.tool != "local-desktop-observe"
+        || call.desktop_capture.is_some()
+        || claim.generation != capture.generation
+        || !run.computer.as_ref().is_some_and(|scope| {
+            scope.workspace_id == capture.workspace_id && scope.agent_id == capture.agent_id
+        })
+    {
+        return Err("The desktop observation does not match its native tool request.".into());
+    }
+    let output = capture.output.clone();
+    call.desktop_capture = Some(capture);
+    Ok(output)
+}
+
+fn take_desktop_capture(
+    pending: &mut PendingApproval,
+    result: &CodexApprovalResult,
+) -> Result<Option<crate::local_computer::desktop_tools::NativeDesktopCapture>, String> {
+    if pending.call_id != result.call_id {
+        return Err("The tool response did not match its native call.".into());
+    }
+    if pending.tool != "local-desktop-observe" || !result.ok {
+        return Ok(None);
+    }
+    let capture = pending
+        .desktop_capture
+        .take()
+        .ok_or("No native desktop observation exists for this provider call.")?;
+    if !pending.desktop_claimed || capture.output != result.output {
+        return Err("The desktop observation response was changed. Pixels were discarded.".into());
+    }
+    Ok(Some(capture))
+}
+
 #[tauri::command]
 pub fn respond_codex_app_server_approval(
     request: CodexApprovalResponseRequest,
+    computers: tauri::State<'_, Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<(), String> {
     let runs = active_runs()
         .lock()
@@ -1083,34 +1300,55 @@ pub fn respond_codex_app_server_approval(
     let run = runs
         .get(&request.request_id)
         .ok_or_else(|| "Codex app-server run is no longer active.".to_string())?;
-    let kind = run
+    let mut pending = run
         .approval_kinds
         .lock()
-        .ok()
-        .and_then(|mut map| map.remove(&request.approval_request_id))
-        .unwrap_or(ApprovalKind::Other);
-    let response = match kind {
-        ApprovalKind::Command => json!({
+        .map_err(|_| "Codex approval state is unavailable.")?
+        .remove(&request.approval_request_id)
+        .ok_or("The native Codex tool response was already consumed or is unknown.")?;
+    let mut delivery = None;
+    let response = match pending.kind {
+        ApprovalKind::Command | ApprovalKind::FileChange => json!({
             "id": approval_rpc_id(&request.approval_request_id),
             "result": { "decision": if request.result.ok { "accept" } else { "decline" } }
         }),
-        ApprovalKind::FileChange => json!({
-            "id": approval_rpc_id(&request.approval_request_id),
-            "result": { "decision": if request.result.ok { "accept" } else { "decline" } }
-        }),
-        ApprovalKind::DynamicTool => json!({
-            "id": approval_rpc_id(&request.approval_request_id),
-            "result": {
-                "contentItems": [{ "type": "inputText", "text": request.result.output }],
-                "success": request.result.ok
+        ApprovalKind::DynamicTool => {
+            let mut ok = request.result.ok;
+            let mut items = vec![json!({"type":"inputText","text":request.result.output})];
+            match take_desktop_capture(&mut pending, &request.result) {
+                Ok(Some(image)) => match crate::local_computer::desktop_tools::delivery_ticket(
+                    computers.inner(),
+                    &image,
+                ) {
+                    Ok(ticket) => {
+                        items.push(json!({"type":"inputImage","imageUrl":format!("data:image/jpeg;base64,{}", STANDARD.encode(&image.jpeg))}));
+                        delivery = Some(ticket);
+                    }
+                    Err(_) => {
+                        ok = false;
+                        items = vec![
+                            json!({"type":"inputText","text":"Computer control changed or the observation expired. The previous image was discarded. Wait for agent control and observe again."}),
+                        ];
+                    }
+                },
+                Ok(None) => {}
+                Err(message) => {
+                    ok = false;
+                    items = vec![json!({"type":"inputText","text":message})];
+                }
             }
-        }),
-        ApprovalKind::Other => json!({
-            "id": approval_rpc_id(&request.approval_request_id),
-            "result": {}
-        }),
+            json!({"id":approval_rpc_id(&request.approval_request_id),"result":{"contentItems":items,"success":ok}})
+        }
     };
-    write_json_line(&run.stdin, &response)
+    if let Some(ticket) = &delivery {
+        ticket.check()?;
+    }
+    let result = write_json_line(&run.stdin, &response);
+    if let Some(ticket) = delivery {
+        ticket.finish(result)
+    } else {
+        result
+    }
 }
 
 fn approval_rpc_id(encoded: &str) -> Value {
@@ -1160,6 +1398,23 @@ pub fn shutdown_codex_app_server_turn(request_id: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Called by native application shutdown, independently of renderer cleanup.
+pub(crate) fn shutdown_all_runs() {
+    SHUTTING_DOWN.store(true, Ordering::Release);
+    let runs = active_runs()
+        .lock()
+        .map(|mut runs| runs.drain().map(|(_, run)| run).collect::<Vec<_>>())
+        .unwrap_or_default();
+    for run in runs {
+        if let Ok(mut approvals) = run.approval_kinds.lock() {
+            approvals.clear();
+        }
+        if let Ok(mut child) = run.child.lock() {
+            let _ = child.kill();
+        }
+    }
+}
+
 fn public_reasoning_summary(value: &Value) -> Option<Value> {
     if value.get("method")?.as_str()? != "item/reasoning/summaryTextDelta" {
         return None;
@@ -1174,6 +1429,79 @@ fn public_reasoning_summary(value: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
+    fn desktop_pending() -> super::PendingApproval {
+        super::PendingApproval {
+            kind: super::ApprovalKind::DynamicTool,
+            approval_id: "native-opaque".into(),
+            call_id: "provider-call".into(),
+            tool: "local-desktop-observe".into(),
+            arguments: serde_json::json!({}),
+            desktop_claimed: false,
+            desktop_capture: None,
+        }
+    }
+
+    #[test]
+    fn desktop_pending_calls_bind_exact_arguments_and_cannot_be_claimed_twice() {
+        let mut pending = desktop_pending();
+        assert!(super::desktop_call_matches(
+            &pending,
+            "local-desktop-observe",
+            &serde_json::json!({})
+        ));
+        assert!(!super::desktop_call_matches(
+            &pending,
+            "local-desktop-action",
+            &serde_json::json!({})
+        ));
+        assert!(!super::desktop_call_matches(
+            &pending,
+            "local-desktop-observe",
+            &serde_json::json!({"image":"forged"})
+        ));
+        pending.desktop_claimed = true;
+        assert!(!super::desktop_call_matches(
+            &pending,
+            "local-desktop-observe",
+            &serde_json::json!({})
+        ));
+    }
+
+    #[test]
+    fn renderer_json_cannot_forge_rebind_or_replay_native_pixels() {
+        let mut pending = desktop_pending();
+        let mut response = super::CodexApprovalResult {
+            call_id: "provider-call".into(),
+            ok: true,
+            output: "{\"imageUrl\":\"data:image/jpeg;base64,forged\"}".into(),
+        };
+        assert!(super::take_desktop_capture(&mut pending, &response).is_err());
+        let capture = || crate::local_computer::desktop_tools::NativeDesktopCapture {
+            output: "native-metadata".into(),
+            jpeg: vec![1, 2, 3],
+            generation: 1,
+            workspace_id: "workspace-a".into(),
+            agent_id: "agent-a".into(),
+            created: std::time::Instant::now(),
+        };
+        pending.desktop_claimed = true;
+        pending.desktop_capture = Some(capture());
+        assert!(super::take_desktop_capture(&mut pending, &response).is_err());
+        pending.desktop_capture = Some(capture());
+        response.output = "native-metadata".into();
+        response.call_id = "different-call".into();
+        assert!(super::take_desktop_capture(&mut pending, &response).is_err());
+        response.call_id = "provider-call".into();
+        assert_eq!(
+            super::take_desktop_capture(&mut pending, &response)
+                .unwrap()
+                .unwrap()
+                .jpeg,
+            vec![1, 2, 3]
+        );
+        assert!(super::take_desktop_capture(&mut pending, &response).is_err());
+    }
+
     #[test]
     fn forwards_only_public_summary_deltas() {
         let mut event = serde_json::json!({ "method": "item/reasoning/summaryTextDelta", "params": { "delta": "Checking the relevant files.", "itemId": "r1", "summaryIndex": 2 } });

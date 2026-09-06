@@ -4,6 +4,40 @@ import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 import { buildToolApproval } from "@fable/connectors/native-api/approvals";
 
+describe("computer authority across approvals", () => {
+  const args = '{"path":"report.txt","content":"draft"}';
+  const approval = () => buildToolApproval("Fable", "write-file", args);
+  const computer = () => ({ workspaceId: "workspace-a", agentId: "agent-a", ready: true, generation: 4, controller: "agent" as const });
+  it("rejects approval granted after takeover and return without replaying the action", async () => {
+    runtime.executeTool.mockClear();
+    const current = computer();
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => { current.generation += 2; return "granted"; } }, {
+      localComputer: current, localComputerCurrent: () => current,
+    });
+    await expect(execute(approval(), args)).rejects.toThrow("control changed");
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+  it("binds a valid native call to the generation captured before approval", async () => {
+    runtime.executeTool.mockResolvedValue({ ok: true, output: "Saved" });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { localComputer: computer() });
+    await expect(execute(approval(), args)).resolves.toBe("Saved");
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 4, workspaceId: "workspace-a", agentId: "agent-a" }));
+  });
+  it("discards an in-flight result after a scope/control change", async () => {
+    const current = computer();
+    runtime.executeTool.mockImplementationOnce(async () => { current.generation++; return { ok: true, output: "old private result" }; });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { localComputer: current, localComputerCurrent: () => current });
+    await expect(execute(approval(), args)).rejects.toThrow("control changed");
+  });
+  it("does not execute when cancellation arrives during approval", async () => {
+    runtime.executeTool.mockClear();
+    let cancelled = false;
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => { cancelled = true; return "granted"; } }, { localComputer: computer(), shouldCancel: () => cancelled });
+    await expect(execute(approval(), args)).rejects.toThrow("cancelled");
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+});
+
 describe("native connector chat tools", () => {
   it("passes an approved Drive read to the scoped native boundary", async () => {
     runtime.executeTool.mockResolvedValue({ ok: true, output: "live result" });
@@ -223,13 +257,14 @@ describe("local computer tool isolation", () => {
     const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
     const executor = createDesktopToolExecutor(gate, {
       workspaceId: "workspace-local",
-      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" }
     });
     runtime.executeTool.mockResolvedValue({ ok: true, output: "isolated\n" });
 
     await expect(executor(shellApproval, JSON.stringify({ command: "pwd" })))
       .resolves.toBe("isolated\n");
-    expect(gate.waitForDecision).toHaveBeenCalledWith(shellApproval);
+    expect(gate.waitForDecision).toHaveBeenCalledWith({ ...shellApproval, dataUsed: [...shellApproval.dataUsed,
+      "Computer workspace: workspace-local", "Computer agent: agent-research", "Computer generation: 1"] });
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
       tool: "run-shell",
       workspaceId: "workspace-local",
@@ -256,7 +291,7 @@ describe("local computer tool isolation", () => {
       { waitForDecision: async () => "granted" },
       {
         workspaceId: "workspace-local",
-        localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+        localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" }
       }
     );
 
@@ -292,12 +327,13 @@ describe("local computer tool isolation", () => {
     const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
     const executor = createDesktopToolExecutor(gate, {
       workspaceId: "workspace-local",
-      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true }
+      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" }
     });
 
     await expect(executor(browserApproval, JSON.stringify({ url: "https://example.com/" })))
       .resolves.toBe(output);
-    expect(gate.waitForDecision).toHaveBeenCalledWith(browserApproval);
+    expect(gate.waitForDecision).toHaveBeenCalledWith({ ...browserApproval, dataUsed: [...browserApproval.dataUsed,
+      "Computer workspace: workspace-local", "Computer agent: agent-research", "Computer generation: 1"] });
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
       tool: "local-browser",
       workspaceId: "workspace-local",

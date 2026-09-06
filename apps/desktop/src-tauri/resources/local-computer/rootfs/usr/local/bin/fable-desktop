@@ -1,18 +1,119 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/python3
+"""Initialize private service state, then supervise the desktop and gateway."""
+import os
+from pathlib import Path
+import secrets
+import signal
+import subprocess
+import time
 
-export DISPLAY=:99
-export HOME=/home/fable
 
-rm -f /tmp/.X99-lock /tmp/.X11-unix/X99
-Xvfb :99 -screen 0 1280x800x24 -nolisten tcp >/tmp/fable-xvfb.log 2>&1 &
+def directory(path, owner, group, mode):
+    Path(path).mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        os.fchown(descriptor, owner, group)
+        os.fchmod(descriptor, mode)
+    finally:
+        os.close(descriptor)
 
-for _ in $(seq 1 60); do
-  if xdpyinfo -display :99 >/dev/null 2>&1; then
-    exec dbus-run-session -- /usr/local/bin/fable-session
-  fi
-  sleep 0.25
-done
 
-echo "Fable desktop display did not start." >&2
-exit 1
+def main():
+    os.umask(0o077)
+    directory('/run/fable-private', 0, 0, 0o700)
+    directory('/run/fable-desktop', 1000, 1000, 0o700)
+    directory('/run/fable-gui', 0, 1002, 0o750)
+    directory('/run/fable-gui/runtime', 1002, 1002, 0o700)
+    directory('/tmp/fable-apps', 1002, 1002, 0o700)
+    directory('/tmp/fable-uploads', 0, 1000, 0o750)
+    directory('/home/fable', 1000, 1000, 0o711)
+    directory('/home/fable/.config', 1000, 1000, 0o700)
+    directory('/home/fable/.cache', 1000, 1000, 0o700)
+    directory('/home/fable/.vnc', 1000, 1000, 0o700)
+    directory('/home/fable/.app-home', 1002, 1002, 0o700)
+    directory('/home/fable/.downloads', 1000, 1000, 0o700)
+    directory('/home/agent', 1001, 1001, 0o700)
+    directory('/home/fable/Workspace', 1000, 1001, 0o2770)
+    directory('/home/fable/Workspace/Downloads', 1000, 1001, 0o2770)
+    directory('/home/fable/Downloads', 1000, 1001, 0o2770)
+    for path in ('/home/fable', '/home/agent', '/home/fable/Workspace', '/tmp', '/run'):
+        if subprocess.run(['mountpoint', '-q', path]).returncode:
+            subprocess.run(['mount', '--bind', path, path], check=True)
+        subprocess.run(['mount', '-o', 'remount,bind,noexec,nosuid,nodev', path], check=True)
+    for name in ('/tmp/.X99-lock', '/tmp/.X11-unix/X99'):
+        Path(name).unlink(missing_ok=True)
+    Path('/home/fable/.vnc/.de-was-selected').unlink(missing_ok=True)
+    Path('/home/fable/.vnc/.de-was-selected').touch()
+    os.chown('/home/fable/.vnc/.de-was-selected', 1000, 1000)
+    Path('/run/fable-private/gateway-token').write_text(secrets.token_urlsafe(48))
+    subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                    '-days', '3', '-subj', '/CN=localhost',
+                    '-keyout', '/run/fable-desktop/key.pem',
+                    '-out', '/run/fable-desktop/certificate.pem'], check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for name in ('key.pem', 'certificate.pem'):
+        os.chown('/run/fable-desktop/' + name, 1000, 1000)
+        os.chmod('/run/fable-desktop/' + name, 0o600)
+    password = secrets.token_urlsafe(48)
+    Path('/run/fable-private/view-password').write_text(password)
+    Path('/home/fable/.kasmpasswd').unlink(missing_ok=True)
+    subprocess.run(
+        ['kasmvncpasswd', '-u', 'fable-view', '-r', '/home/fable/.kasmpasswd'],
+        input=f'{password}\n{password}\n', text=True, check=True,
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    os.chown('/home/fable/.kasmpasswd', 1000, 1000)
+    os.chmod('/home/fable/.kasmpasswd', 0o600)
+    env = dict(os.environ, HOME='/home/fable', DISPLAY=':99',
+               XAUTHORITY='/run/fable-desktop/Xauthority')
+    children = []
+
+    def stop(*_):
+        for child in children:
+            if child.poll() is None:
+                child.terminate()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    log = open('/run/fable-private/desktop.log', 'ab', buffering=0)
+    bus = subprocess.Popen(
+        ['dbus-daemon', '--session', '--address=unix:path=/run/fable-desktop/bus', '--nofork', '--nopidfile'],
+        user=1000, group=1000, env=env, stdout=log, stderr=log)
+    children.append(bus)
+    desktop = subprocess.Popen(
+        ['vncserver', ':99', '-fg', '-xstartup', '/usr/local/bin/fable-session',
+         '-SecurityTypes', 'None', '-rfbport', '0', '-Log', '*:stdout:30'],
+        user=1000, group=1000, extra_groups=[1001], env=env,
+        stdout=log, stderr=log,
+    )
+    children.append(desktop)
+    for _ in range(120):
+        if desktop.poll() is not None:
+            raise SystemExit('The desktop display stopped during startup.')
+        if subprocess.run(['xdpyinfo'], env=env, user=1000, group=1000,
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            break
+        time.sleep(0.25)
+    else:
+        stop()
+        raise SystemExit('The desktop display did not become ready.')
+    # Authenticate fixed GUI applications by the Unix socket peer's UID. No
+    # cookie is readable by those apps and therefore transferable to a shell.
+    subprocess.run(['xhost', '+SI:localuser:apps'], env=env, user=1000, group=1000,
+                   check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    gateway = subprocess.Popen(['/usr/local/bin/fable-gateway'], env=env,
+                               stdout=log, stderr=log)
+    children.append(gateway)
+    while all(child.poll() is None for child in children):
+        time.sleep(0.25)
+    stop()
+    for child in children:
+        try:
+            child.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            child.kill()
+    raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    main()

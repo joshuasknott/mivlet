@@ -44,7 +44,7 @@ const localComputer: ComponentProps<typeof LiveWorkRail>["localComputer"] = {
   provisioning: false, busy: false, recoveryNeeded: false, error: null, generation: 0,
   onProvision: asyncNoop, onOpenBrowser: asyncNoop, onRefreshBrowser: asyncNoop, onGoBack: asyncNoop, onGoForward: asyncNoop,
   onRefreshFiles: asyncNoop, onPreviewFile: asyncNoop, onCloseFilePreview: noop, onTakeControl: asyncNoop, onReturnControl: asyncNoop,
-  onClick: asyncNoop, onScroll: asyncNoop, onKey: asyncNoop, onLaunchApplication: asyncNoop,
+  onOpenViewer: asyncNoop, onLaunchApplication: asyncNoop,
 };
 const hostedComputer: ComponentProps<typeof LiveWorkRail>["hostedComputer"] = {
   available: false, runtimeActive: false, keepAlive: false, loading: false, provisioning: false,

@@ -1,62 +1,9 @@
 #!/bin/bash
 set -euo pipefail
-
-export DISPLAY=:99
-export HOME=/home/fable
-export XDG_CONFIG_HOME="$HOME/.config"
-export XDG_CACHE_HOME="$HOME/.cache"
-
-mkdir -p "$HOME/Workspace" "$HOME/Downloads" "$HOME/Desktop" "$XDG_CONFIG_HOME" "$XDG_CACHE_HOME"
-
-cat >"$HOME/Desktop/Browser.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Browser
-Exec=/usr/local/bin/fable-launch-app browser
-Icon=chromium
-Terminal=false
-EOF
-cat >"$HOME/Desktop/Files.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Files
-Exec=/usr/local/bin/fable-launch-app files
-Icon=system-file-manager
-Terminal=false
-EOF
-cat >"$HOME/Desktop/Terminal.desktop" <<'EOF'
-[Desktop Entry]
-Type=Application
-Name=Terminal
-Exec=/usr/local/bin/fable-launch-app terminal
-Icon=utilities-terminal
-Terminal=false
-EOF
-chmod 0755 "$HOME/Desktop/Browser.desktop" "$HOME/Desktop/Files.desktop" "$HOME/Desktop/Terminal.desktop"
-
-xfsettingsd >/tmp/fable-xfsettings.log 2>&1 &
-xfwm4 --replace --compositor=off >/tmp/fable-xfwm.log 2>&1 &
-xfdesktop --disable-wm-check >/tmp/fable-xfdesktop.log 2>&1 &
-xfce4-panel --disable-wm-check >/tmp/fable-panel.log 2>&1 &
-
-sleep 1
-socat TCP-LISTEN:9223,bind=0.0.0.0,reuseaddr,fork TCP:127.0.0.1:9222 >/tmp/fable-cdp-proxy.log 2>&1 &
-chromium \
-  --disable-background-networking \
-  --disable-component-update \
-  --disable-features=Translate \
-  --disable-gpu \
-  --no-default-browser-check \
-  --no-first-run \
-  --remote-allow-origins='*' \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port=9222 \
-  --user-data-dir="$HOME/.config/chromium-fable" \
-  --window-position=0,36 \
-  --window-size=1280,764 \
-  about:blank >/tmp/fable-chromium.log 2>&1 &
-
-while true; do
-  sleep 3600 &
-  wait $!
-done
+export DISPLAY=:99 HOME=/home/fable XAUTHORITY=/run/fable-desktop/Xauthority
+export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
+umask 0007
+# Fable owns fixed application launch actions. A generic desktop/panel Run or
+# custom-launcher surface would execute outside the GUI process sandbox.
+xsetroot -solid '#20242b'
+exec xfwm4 --replace --compositor=off

@@ -1,0 +1,114 @@
+#!/usr/bin/python3
+"""Return only safe/private/unavailable status. Never emit accessibility data."""
+import os
+import re
+import signal
+import subprocess
+import sys
+
+SECRET = re.compile(r'password|passcode|authentication|authenticate|sign[ -]?in|log[ -]?in|verification|security key|secret|credential|payment|credit card', re.I)
+CHOOSER = re.compile(r'^(open|open file|save|save as|save file|select file|select a file)(?:\s*[-–].*)?$', re.I)
+DOC_CLASSES = ('libreoffice', 'soffice', 'thunar', 'fable-apps')
+
+
+def run(*args):
+    result = subprocess.run(args, check=True, timeout=1.5, capture_output=True,
+                            env=dict(os.environ, DISPLAY=':99', LC_ALL='C',
+                                     XAUTHORITY='/run/fable-desktop/Xauthority'))
+    if len(result.stdout) > 65536:
+        raise ValueError('metadata limit')
+    return result.stdout.decode('utf-8', errors='replace')
+
+
+def private_window(title, window_class, modal, owner):
+    if SECRET.search(title):
+        return True
+    if not modal:
+        return False
+    # A browser-owned chooser can read the browser's private profile. Only
+    # confined UID1002 document applications may expose an ordinary chooser.
+    return not (owner == 1002 and any(name in window_class.lower() for name in DOC_CLASSES)
+                and CHOOSER.fullmatch(title.strip()))
+
+
+def property_text(metadata, name):
+    match = re.search(r'^' + re.escape(name) + r'\([^)]*\)\s*=\s*(.*)$', metadata, re.M)
+    return match.group(1).strip().strip('"') if match else ''
+
+
+def x11_private():
+    windows = re.findall(r'0x[0-9a-fA-F]+', run('xprop', '-root', '_NET_CLIENT_LIST_STACKING'))
+    if len(windows) > 64:
+        raise ValueError('window limit')
+    browser_visible = False
+    for window in windows:
+        if 'Map State: IsViewable' not in run('xwininfo', '-id', window, '-stats'):
+            continue
+        metadata = run('xprop', '-id', window, 'WM_CLASS', '_NET_WM_NAME', 'WM_NAME',
+                       '_NET_WM_STATE', '_NET_WM_WINDOW_TYPE', 'WM_TRANSIENT_FOR', '_NET_WM_PID')
+        title = property_text(metadata, '_NET_WM_NAME') or property_text(metadata, 'WM_NAME')
+        window_class = property_text(metadata, 'WM_CLASS')
+        browser_visible |= 'chromium' in window_class.lower()
+        modal = ('_NET_WM_STATE_MODAL' in metadata or '_NET_WM_WINDOW_TYPE_DIALOG' in metadata
+                 or bool(re.search(r'WM_TRANSIENT_FOR\([^)]*\).*0x[1-9a-fA-F]', metadata)))
+        owner = None
+        pid = property_text(metadata, '_NET_WM_PID')
+        if pid.isdecimal():
+            try:
+                owner = os.stat('/proc/' + pid).st_uid
+            except FileNotFoundError:
+                raise ValueError('window changed')
+        if private_window(title, window_class, modal, owner):
+            return True, browser_visible
+    return False, browser_visible
+
+
+def private_accessibility(api, desktop):
+    queue = [(desktop, 0)]
+    visited = 0
+    browser_seen = False
+    while queue:
+        item, depth = queue.pop()
+        if item is None:
+            raise ValueError('missing accessibility node')
+        visited += 1
+        if visited > 5000 or depth > 32:
+            raise ValueError('accessibility limit')
+        role = item.getRole()
+        states = item.getState()
+        if role == api.ROLE_APPLICATION and 'chromium' in item.name.lower():
+            browser_seen = True
+        showing = states.contains(api.STATE_SHOWING)
+        if showing and role == api.ROLE_PASSWORD_TEXT:
+            return True, browser_seen
+        if showing and (states.contains(api.STATE_MODAL) or role in (api.ROLE_DIALOG, api.ROLE_ALERT)):
+            # This accessibility bus is UID1000's browser/desktop service bus.
+            # Isolated document applications have a separate bus and X11 guard.
+            return True, browser_seen
+        count = item.childCount
+        if count > 5000:
+            raise ValueError('accessibility limit')
+        queue.extend((item.getChildAtIndex(index), depth + 1) for index in range(count))
+    return False, browser_seen
+
+
+def main():
+    signal.signal(signal.SIGALRM, lambda *_: sys.exit(3))
+    signal.alarm(4)
+    try:
+        private, browser_visible = x11_private()
+        if private:
+            return 2
+        import pyatspi
+        private, browser_seen = private_accessibility(pyatspi, pyatspi.Registry.getDesktop(0))
+        if private:
+            return 2
+        # If Chromium is visible but its tree cannot be inspected, no image is
+        # safe to release. Reconnect after accessibility becomes available.
+        return 0 if not browser_visible or browser_seen else 3
+    except Exception:
+        return 3
+
+
+if __name__ == '__main__':
+    sys.exit(main())

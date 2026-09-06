@@ -213,6 +213,8 @@ export interface ShellRuntime {
   identityStatus: IdentityStatus;
   identityPending: boolean;
   accountWorkspaceStatus: AccountWorkspaceStatus;
+  runtimeSnapshotError: string | null;
+  runtimeSnapshotReady: boolean;
   accountWorkspacePending: boolean;
   signInIdentity: () => Promise<void>;
   recoverIdentity: () => Promise<void>;
@@ -246,4 +248,6 @@ export interface UseShellRuntimeOptions {
    * bridge. Omit for the pre-tool-execution behavior (no dispatch).
    */
   approvalGate?: ToolApprovalGate;
+  /** Interrupt the active provider when hydration discards its pending UI. */
+  onScopeReset?: () => void;
 }

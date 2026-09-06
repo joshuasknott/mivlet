@@ -50,6 +50,7 @@ import {
 } from "../runtime";
 import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime";
 import { openConnectorTools } from "./connector-mcp";
+import { isLocalComputerTool } from "./computer-tools";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 import { remoteConnectorFor, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
 import {
@@ -66,7 +67,13 @@ export interface DesktopToolExecutorOptions {
     workspaceId: string;
     agentId: string;
     ready: boolean;
+    generation?: number;
+    controller?: "agent" | "human" | "paused";
   };
+  /** Current scope/authority, including during an in-flight approval. */
+  localComputerCurrent?: () => DesktopToolExecutorOptions["localComputer"];
+  shouldCancel?: () => boolean;
+  onExecuting?: (approval: ApprovalRequest, tool: string) => void;
   hostedComputer?: {
     workspaceId: string;
     agentId: string;
@@ -91,7 +98,8 @@ export function createDesktopToolExecutor(
   gate: ApprovalGate,
   options: DesktopToolExecutorOptions = {}
 ): ToolExecutor {
-  return async (approval, args) => {
+  return async (sourceApproval, args) => {
+    let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
     const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
@@ -134,6 +142,20 @@ export function createDesktopToolExecutor(
       throw new Error("Set up this agent's cloud computer before asking it to use hosted work.");
     }
     const hostedShellRequested = parsed.location === "hosted";
+    const computerTool = isLocalComputerTool(toolName, args);
+    const admittedComputer = computerTool
+      ? { ...(options.localComputerCurrent?.() ?? options.localComputer) }
+      : undefined;
+    const checkComputerAuthority = () => {
+      if (options.shouldCancel?.()) throw new Error("This task was cancelled. Refresh the computer before continuing.");
+      if (!admittedComputer) return;
+      const current = options.localComputerCurrent?.() ?? options.localComputer;
+      if (!current?.ready || !Number.isSafeInteger(admittedComputer.generation) || admittedComputer.controller !== "agent"
+        || current.workspaceId !== admittedComputer.workspaceId || current.agentId !== admittedComputer.agentId
+        || current.generation !== admittedComputer.generation || current.controller !== "agent") {
+        throw new Error("Computer control changed or is paused. Wait for the user to return control, then observe the current state before acting.");
+      }
+    };
     if (toolName === "run-shell" && !options.localComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
       throw new Error("Set up this agent's isolated local computer before asking it to run terminal commands.");
     }
@@ -142,6 +164,17 @@ export function createDesktopToolExecutor(
     }
     if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !options.localComputer?.ready) {
       throw new Error("Set up this agent's local computer before asking it to use its browser.");
+    }
+    checkComputerAuthority();
+    if (admittedComputer) {
+      approval = { ...sourceApproval, dataUsed: [...sourceApproval.dataUsed,
+        `Computer workspace: ${admittedComputer.workspaceId}`,
+        `Computer agent: ${admittedComputer.agentId}`,
+        `Computer generation: ${admittedComputer.generation}`,
+      ] };
+      // Computer approvals are queued here so their exact persisted record
+      // includes the native scope and epoch captured before any user decision.
+      options.queueApproval?.(approval, toolName, args);
     }
     let mcpRoute: RuntimeResolvedMcpCapabilityRoute | null = null;
     if (toolName === "connection-read") {
@@ -161,6 +194,7 @@ export function createDesktopToolExecutor(
       throw new Error(`Tool call denied: ${approval.action}.`);
     }
     checkConnectorAccess();
+    checkComputerAuthority();
     if (mcpRoute) {
       return runMcpSemanticRead(approval, parsed, options, mcpRoute);
     }
@@ -173,7 +207,8 @@ export function createDesktopToolExecutor(
     if (toolName === "cloud-browser-action") {
       return runHostedBrowserAction(gate, approval, parsed, options);
     }
-    const result = await runOnDesktop(approval, parsed, options);
+    const result = await runOnDesktop(approval, parsed, options, undefined, admittedComputer?.generation);
+    checkComputerAuthority();
     checkConnectorAccess();
     return result;
   };
@@ -501,7 +536,8 @@ async function runOnDesktop(
   approval: ApprovalRequest,
   parsed: Record<string, unknown>,
   options: DesktopToolExecutorOptions,
-  mcpSessionId?: string
+  mcpSessionId?: string,
+  computerGeneration?: number
 ): Promise<string> {
   const toolName = approval.action.split(/\s+/)[0];
   // The gate already guaranteed a grant; synthesize the resolution request Rust
@@ -513,12 +549,14 @@ async function runOnDesktop(
     decidedAt: new Date().toISOString()
   };
 
+  options.onExecuting?.(approval, toolName);
   const result = await executeRuntimeToolCall({
     tool: toolName,
     arguments: parsed,
     approval: resolution,
     workspaceId: options.localComputer?.workspaceId ?? options.workspaceId,
     agentId: options.localComputer?.agentId,
+    computerGeneration,
     mcpSessionId
   });
   if (result === null) {

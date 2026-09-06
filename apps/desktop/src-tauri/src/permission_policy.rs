@@ -62,14 +62,17 @@ pub(crate) fn normalize_permission_route(
 
 pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
     match tool {
-        "read-file" => Some("local-read"),
+        "read-file" | "computer-artifact" => Some("local-read"),
         "write-file" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
-        "local-browser-observe" => Some("browser-read"),
-        "local-browser" | "local-browser-action" | "cloud-browser" | "cloud-browser-action" => {
-            Some("browser-state-mutation")
-        }
+        "local-browser-observe" | "local-desktop-observe" => Some("browser-read"),
+        "local-browser"
+        | "local-browser-action"
+        | "local-browser-tab"
+        | "local-desktop-action"
+        | "cloud-browser"
+        | "cloud-browser-action" => Some("browser-state-mutation"),
         "connection-read"
         | "github-read"
         | "vercel-read"
@@ -92,7 +95,7 @@ pub(crate) fn evaluate_permission_policy(
     let (mode, profile) = normalize_permission_route(mode, profile)?;
     let read_only_allowed = matches!(
         effect,
-        "local-read" | "connector-read" | "web-fetch" | "cache-read"
+        "local-read" | "connector-read" | "web-fetch" | "cache-read" | "browser-read"
     );
     let trusted_allowed = read_only_allowed
         || matches!(

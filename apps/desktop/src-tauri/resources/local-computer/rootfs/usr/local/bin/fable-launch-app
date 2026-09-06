@@ -10,13 +10,15 @@ case "${1:-}" in
     if [[ -n "$window" ]]; then
       exec xdotool windowactivate --sync "$window"
     fi
-    chromium --no-default-browser-check --no-first-run about:blank >/tmp/fable-chromium-extra.log 2>&1 &
+    # The gateway owns the one browser profile and debugging pipe.
+    # Starting an unrelated fallback browser would split visible and structured state.
+    exit 3
     ;;
   terminal)
-    xfce4-terminal --working-directory=/home/fable/Workspace >/tmp/fable-terminal.log 2>&1 &
+    exec sudo -n /usr/local/bin/fable-agent-terminal
     ;;
-  files)
-    thunar /home/fable/Workspace >/tmp/fable-thunar.log 2>&1 &
+  files|writer|spreadsheet)
+    exec sudo -n /usr/local/bin/fable-gui-launch "$1"
     ;;
   *) exit 2 ;;
 esac

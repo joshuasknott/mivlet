@@ -383,7 +383,7 @@ export interface BackendModel {
    * catalogue knows them. Callers must treat `undefined` as "capabilities
    * unknown" (fail conservatively), never as "all capabilities present".
    */
-  capabilities?: ModelCapabilities;
+  capabilities?: Partial<ModelCapabilities>;
   /** Only levels advertised by this runtime or verified for this exact model. */
   reasoning?: {
     supportedEfforts: string[];
@@ -624,6 +624,8 @@ export interface AgentTurnOptions {
   permissionMode?: PermissionMode;
   /** Stable attempt id used to bind approvals and reject replayed calls. */
   attemptId?: string;
+  /** Exact local computer scope; native authority validates it independently. */
+  computer?: { workspaceId: string; agentId: string };
   /** Max turns before the backend stops (safety). */
   maxTurns?: number;
   /** Maximum accepted tool calls across the whole run. */

@@ -288,14 +288,6 @@
   font-weight: 500;
 }
 
-.composer-model > .composer-model__provider {
-  display: inline-flex;
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  overflow: visible;
-}
-
 .composer-permissions-card {
   gap: 8px;
   padding: 0 12px;
@@ -393,11 +385,6 @@
   backdrop-filter: var(--glass-filter);
 }
 
-.composer-menu__section {
-  display: grid;
-  gap: 1px;
-}
-
 .composer-menu__heading {
   padding: 4px 8px 2px;
   color: var(--ink-soft);
@@ -438,23 +425,6 @@
   gap: 2px;
 }
 
-.composer-add-menu__divider {
-  height: 1px;
-  margin: 4px 6px 2px;
-  background: var(--line);
-}
-
-.composer-add-menu__commands {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px;
-}
-
-.composer-add-menu__commands button {
-  display: block;
-  min-width: 0;
-}
-
 .composer-add-menu button strong {
   color: var(--ink);
   font-size: var(--text-13);
@@ -471,80 +441,9 @@
   font-size: var(--text-12);
 }
 
-.composer-menu__plugin {
-  display: flex;
-  align-items: baseline;
-  gap: 7px;
-}
-
-.composer-menu__plugin strong {
-  color: var(--accent-strong);
-  font-size: var(--text-13);
-  font-weight: 500;
-}
-
-.composer-menu__command {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: var(--text-13);
-}
-
 /* Permissions view — a read-only list of connectors and their scopes. */
 .composer-permissions {
   min-width: 280px;
-}
-
-.composer-permissions__row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: baseline;
-  gap: 3px 8px;
-  padding: 9px 10px;
-  border-radius: var(--radius-2);
-}
-
-.composer-permissions__row:hover {
-  background: var(--line);
-}
-
-.composer-permissions__lead {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--accent-strong);
-  font-size: var(--text-13);
-}
-
-.composer-permissions__lead strong {
-  font-weight: 500;
-}
-
-.composer-permissions__row small {
-  grid-column: 1 / 2;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.35;
-}
-
-.composer-permissions__status {
-  justify-self: end;
-  align-self: start;
-  padding: 2px 8px;
-  color: var(--ink-muted);
-  background: var(--accent-subtle);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-11);
-  font-weight: 500;
-  text-transform: capitalize;
-}
-
-.composer-permissions__status--connected {
-  color: var(--accent-strong);
-  background: var(--accent-subtle);
-}
-
-.composer-permissions__status--needs-auth {
-  color: var(--ink-muted);
-  background: var(--caution-subtle);
 }
 
 .composer-permissions {
@@ -847,11 +746,6 @@
   animation: composerSubmenuFadeIn 120ms ease-out;
 }
 
-.composer-submenu-sidebar--align-bottom {
-  top: auto;
-  bottom: -8px;
-}
-
 @keyframes composerSubmenuFadeIn {
   from {
     opacity: 0;
@@ -888,19 +782,6 @@
   align-items: center;
   gap: 8px;
   width: 100%;
-}
-
-.composer-submenu-item-title {
-  font-size: var(--text-13);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 180px;
-}
-
-.composer-submenu-sidebar--commands button {
-  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
 }
 
 /* Disabled styling for empty dropdown options */

@@ -7,6 +7,7 @@ import { createNativeApiBackend } from "./adapters/native-api";
 import { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 import { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
 import type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
+import type { CodexAppServerEvent } from "./contract";
 
 /** Connected, streaming native-API provider. */
 function mockNativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
@@ -399,6 +400,33 @@ describe("AgentBackend Conformance Tests", () => {
   // Area 6: Approval Requests & Response Loops
   // ==========================================
   describe("Approval Requests & Tool Execution", () => {
+    it("Codex: stops at the tool limit without executing later requests", async () => {
+      const requests: CodexAppServerEvent[] = Array.from({ length: 4 }, (_, index) => ({
+        type: "approval-request",
+        requestId: `request-${index}`,
+        callId: `call-${index}`,
+        tool: "local-browser-observe",
+        arguments: "{}",
+        approval: {
+          id: `native-approval-${index}`, service: "codex", action: "local-browser-observe",
+          mode: "full-access", riskLevel: "low", dataUsed: [], consequence: "Observe the computer",
+          requestedAt: "", decisions: []
+        }
+      }));
+      const handle = new MockCodexAppServer({ events: requests });
+      const execute = vi.fn().mockResolvedValue("observed");
+      const events = await collectEvents(createCodexBackend(mockCodexProvider(), mockCodexDeps(handle))?.run({
+        ...baseRequest,
+        tools: registeredToolSpecs().filter((tool) => tool.name === "local-browser-observe")
+      }, { execute, permissionMode: "full-access", maxToolCalls: 2 }));
+      expect(execute).toHaveBeenCalledTimes(2);
+      expect(handle.approvalResponses).toHaveLength(3);
+      expect(handle.approvalResponses[2]).toMatchObject({ requestId: "request-2", ok: false });
+      expect(handle.cancelledThreadId).toBe("codex-thread-mock-1");
+      expect(handle.shutdownCalled).toBe(true);
+      expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
+    });
+
     it("Codex: routes approval request to options.execute and returns tool-result", async () => {
       const handle = new MockCodexAppServer({
         events: [
@@ -430,6 +458,7 @@ describe("AgentBackend Conformance Tests", () => {
       const events = await collectEvents(stream);
 
       expect(executeSpy).toHaveBeenCalled();
+      expect(executeSpy.mock.calls[0][0].id).toBe("app-id");
       expect(events).toContainEqual({
         type: "tool-result",
         callId: "call-1",

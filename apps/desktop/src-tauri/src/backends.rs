@@ -1587,7 +1587,9 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
                             id: model.id,
                             label: model.label,
                             available: true,
-                            capabilities: None,
+                            capabilities: Some(
+                                serde_json::json!({ "vision": model.supports_images }),
+                            ),
                             reasoning: model.reasoning,
                         })
                         .collect();

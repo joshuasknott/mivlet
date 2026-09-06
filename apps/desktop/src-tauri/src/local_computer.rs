@@ -5,17 +5,28 @@
 //! lease. Docker/Chromium endpoints, container names, volume names, host paths,
 //! cookies, and process handles never cross into the renderer.
 
+pub(crate) mod artifacts;
+pub(crate) mod authority;
+mod browser_tools;
 mod container;
+pub(crate) mod desktop_tools;
+pub(crate) mod lifecycle;
+pub(crate) mod viewer;
+
+use authority::ComputerAuthority;
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::Duration,
 };
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::Utc;
 use headless_chrome::{
     browser::tab::Tab,
     protocol::cdp::Page::{GetNavigationHistory, NavigateToHistoryEntry},
@@ -35,27 +46,39 @@ const MAX_FILE_PREVIEW_BYTES: usize = 256 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 const HUMAN_CONTROL_LEASE_MINUTES: i64 = 5;
 
+/// Drain both independently running guest commands and browser download writes.
+/// Attempt each cleanup even when the other transport has already failed.
+pub(super) fn cancel_external_operations(scope: &ComputerScope) -> Result<(), String> {
+    let commands = container::cancel_agent_processes(scope);
+    let downloads = container::cancel_browser_downloads(scope);
+    commands.and(downloads)
+}
+
 pub struct LocalComputerState {
+    closing: AtomicBool,
     root: PathBuf,
     image_context: PathBuf,
+    snapshot_path: PathBuf,
     sessions: Mutex<HashMap<String, Arc<Mutex<LocalBrowserSession>>>>,
     launch_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
+    authorities: Mutex<HashMap<String, Arc<ComputerAuthority>>>,
+    desktop_observations: Mutex<HashMap<String, desktop_tools::DesktopObservationState>>,
 }
 
 struct LocalBrowserSession {
     _browser: Browser,
     tab: Arc<Tab>,
-    controller: LocalComputerController,
-    generation: u64,
+    authority: Arc<ComputerAuthority>,
     browser_product: String,
-    human_lease_expires_at: Option<DateTime<Utc>>,
     observation_counter: u64,
     observation: Option<LocalBrowserObservationState>,
 }
 
 struct LocalBrowserObservationState {
     id: String,
+    generation: u64,
     controls: HashMap<String, LocalBrowserObservedControl>,
+    tabs: HashMap<String, Arc<Tab>>,
 }
 
 struct LocalBrowserObservedControl {
@@ -70,13 +93,15 @@ struct LocalBrowserObservedControl {
 pub enum LocalComputerController {
     Agent,
     Human,
+    Paused,
 }
 
 impl LocalComputerController {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Agent => "agent",
             Self::Human => "human",
+            Self::Paused => "paused",
         }
     }
 }
@@ -174,6 +199,7 @@ pub(crate) struct LocalBrowserAgentResult {
     current_url: String,
     title: String,
     trust: &'static str,
+    generation: u64,
     updated_at: String,
 }
 
@@ -194,7 +220,12 @@ pub(crate) struct LocalBrowserAgentObservation {
     current_url: String,
     title: String,
     trust: &'static str,
+    generation: u64,
     controls: Vec<LocalBrowserAgentControl>,
+    text: String,
+    tabs: Vec<browser_tools::BrowserTabObservation>,
+    active_tab_ref: String,
+    downloads: serde_json::Value,
     updated_at: String,
 }
 
@@ -232,6 +263,14 @@ pub struct LocalComputerControlRequest {
     workspace_id: String,
     agent_id: String,
     controller: LocalComputerController,
+    expected_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerCancelRequest {
+    workspace_id: String,
+    agent_id: String,
     expected_generation: u64,
 }
 
@@ -294,10 +333,14 @@ impl LocalComputerState {
         .find(|candidate| candidate.join("Dockerfile").is_file())
         .unwrap_or_else(|| resource_root.join("local-computer"));
         Ok(Self {
+            closing: AtomicBool::new(false),
             root,
             image_context,
+            snapshot_path: crate::paths::runtime_snapshot_path(app)?,
             sessions: Mutex::new(HashMap::new()),
             launch_gates: Mutex::new(HashMap::new()),
+            authorities: Mutex::new(HashMap::new()),
+            desktop_observations: Mutex::new(HashMap::new()),
         })
     }
 
@@ -307,14 +350,23 @@ impl LocalComputerState {
             .join("resources")
             .join("local-computer");
         Self {
+            closing: AtomicBool::new(false),
+            snapshot_path: root.join("runtime-snapshot.json"),
             root,
             image_context,
             sessions: Mutex::new(HashMap::new()),
             launch_gates: Mutex::new(HashMap::new()),
+            authorities: Mutex::new(HashMap::new()),
+            desktop_observations: Mutex::new(HashMap::new()),
         }
     }
 
-    fn scope(&self, workspace_id: &str, agent_id: &str) -> Result<ComputerScope, String> {
+    pub(crate) fn scope(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+    ) -> Result<ComputerScope, String> {
+        self.ensure_open()?;
         validate_scope_id(workspace_id)?;
         validate_scope_id(agent_id)?;
         let mut digest = Sha256::new();
@@ -332,6 +384,99 @@ impl LocalComputerState {
             computer_id: format!("local-{}", &key[..24]),
             directory,
         })
+    }
+
+    pub(crate) fn validate_target(&self, workspace_id: &str, agent_id: &str) -> Result<(), String> {
+        self.ensure_open()?;
+        validate_scope_id(agent_id)?;
+        let scope = crate::authorized_scope::command_scope(
+            Some(workspace_id.into()),
+            None,
+            crate::authorized_scope::ScopeAccess::Write,
+        )?;
+        let snapshot: Option<crate::models::RuntimeSnapshot> =
+            crate::store::read_workspace_document(&self.snapshot_path, &scope.data)?;
+        if !snapshot
+            .is_some_and(|snapshot| snapshot.agents.iter().any(|agent| agent.id == agent_id))
+        {
+            return Err(
+                "Choose a saved agent in this workspace before accessing its computer.".into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_viewer_generation(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        generation: u64,
+    ) -> Result<(), String> {
+        self.authority_for(workspace_id, agent_id)?
+            .check_generation(generation)
+            .map(|_| ())
+    }
+
+    pub(crate) fn pause_disconnected_viewer(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        generation: u64,
+    ) -> Result<(), String> {
+        self.validate_target(workspace_id, agent_id)?;
+        let authority = self.authority_for(workspace_id, agent_id)?;
+        authority.pause_disconnected(generation)
+    }
+
+    pub(crate) fn authority_for(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+    ) -> Result<Arc<ComputerAuthority>, String> {
+        self.authority(&self.scope(workspace_id, agent_id)?)
+    }
+
+    fn authority(&self, scope: &ComputerScope) -> Result<Arc<ComputerAuthority>, String> {
+        let mut authorities = self
+            .authorities
+            .lock()
+            .map_err(|_| "Computer control state is unavailable.".to_string())?;
+        self.ensure_open()?;
+        if let Some(authority) = authorities.get(&scope.key) {
+            return Ok(authority.clone());
+        }
+        let cancel_scope = scope.clone();
+        let authority = ComputerAuthority::load_with_cancellation(
+            &scope.directory,
+            Some(Arc::new(move || cancel_external_operations(&cancel_scope))),
+        )?;
+        authorities.insert(scope.key.clone(), authority.clone());
+        Ok(authority)
+    }
+
+    fn ensure_open(&self) -> Result<(), String> {
+        if self.closing.load(Ordering::Acquire) {
+            Err("Fable is closing. Computer actions are paused.".into())
+        } else {
+            Ok(())
+        }
+    }
+
+    pub(crate) fn with_agent_files<T>(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        expected_generation: u64,
+        operation: impl FnOnce(&Path) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let root = self.tool_workspace_root(workspace_id, agent_id)?;
+        let ticket = self
+            .authority_for(workspace_id, agent_id)?
+            .begin_agent(expected_generation)?;
+        ticket.check()?;
+        // Revocation drains this admitted operation before human input is enabled.
+        let result = operation(&root);
+        ticket.finish(result)
     }
 
     pub(crate) fn tool_workspace_root(
@@ -357,13 +502,14 @@ impl LocalComputerState {
         workspace_id: String,
         agent_id: String,
         raw_url: String,
+        expected_generation: u64,
     ) -> Result<LocalBrowserAgentResult, String> {
         let url = normalize_agent_navigation(&raw_url)?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its browser.".into());
         }
-        ensure_browser_session(self.clone(), scope).await?;
+        ensure_browser_session(self.clone(), scope, Some(expected_generation)).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         let session = self
             .sessions
@@ -376,25 +522,21 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            expire_human_lease(&mut session)?;
-            if session.controller != LocalComputerController::Agent {
-                return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
-            }
+            let operation = session.authority.begin_agent(expected_generation)?;
+            operation.check()?;
+            browser_tools::follow_active_tab(&mut session)?;
             session.observation = None;
             container::focus_browser(&scope)?;
+            session
+                .tab
+                .activate()
+                .map_err(|_| "The browser could not show its active tab.".to_string())?;
             session
                 .tab
                 .navigate_to(&url)
                 .map_err(|_| "The local browser could not open that page.".to_string())?;
             let _ = session.tab.wait_until_navigated();
-            let snapshot = snapshot_from_session(&scope, &mut session)?;
-            Ok(LocalBrowserAgentResult {
-                computer_id: snapshot.computer_id,
-                current_url: sanitize_agent_result_url(&snapshot.current_url),
-                title: snapshot.title,
-                trust: "external-untrusted",
-                updated_at: snapshot.updated_at,
-            })
+            operation.finish(agent_result_from_session(&scope, &session))
         })
         .await
         .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -404,12 +546,13 @@ impl LocalComputerState {
         self: Arc<Self>,
         workspace_id: String,
         agent_id: String,
+        expected_generation: u64,
     ) -> Result<LocalBrowserAgentObservation, String> {
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its browser.".into());
         }
-        ensure_browser_session(self.clone(), scope).await?;
+        ensure_browser_session(self.clone(), scope, Some(expected_generation)).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         let session = self
             .sessions
@@ -422,11 +565,9 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            expire_human_lease(&mut session)?;
-            if session.controller != LocalComputerController::Agent {
-                return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
-            }
-            observe_agent_controls(&scope, &mut session)
+            let operation = session.authority.begin_agent(expected_generation)?;
+            operation.check()?;
+            operation.finish(observe_agent_controls(&scope, &mut session))
         })
         .await
         .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -444,6 +585,7 @@ impl LocalComputerState {
         action: String,
         value: Option<String>,
         key: Option<String>,
+        expected_generation: u64,
     ) -> Result<LocalBrowserAgentResult, String> {
         let scope = self.scope(&workspace_id, &agent_id)?;
         let session = self
@@ -457,15 +599,13 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            expire_human_lease(&mut session)?;
-            if session.controller != LocalComputerController::Agent {
-                return Err("The user currently has control of this browser. Ask them to pause control before continuing.".into());
-            }
+            let operation = session.authority.begin_agent(expected_generation)?;
+            operation.check()?;
             let observation = session
                 .observation
                 .take()
                 .ok_or_else(|| "Observe the local browser again before acting.".to_string())?;
-            if observation.id != observation_id {
+            if observation.id != observation_id || observation.generation != operation.generation {
                 return Err("That local browser observation is stale.".into());
             }
             let control = observation
@@ -478,36 +618,85 @@ impl LocalComputerState {
             if !control.actions.iter().any(|allowed| allowed == &action) {
                 return Err("That action is not allowed for the observed browser control.".into());
             }
-            validate_observed_control_action(
-                control,
-                &action,
-                value.as_deref(),
-                key.as_deref(),
-            )?;
+            validate_observed_control_action(control, &action, value.as_deref(), key.as_deref())?;
             container::focus_browser(&scope)?;
-            perform_agent_control_action(
-                &session,
-                &control_ref,
-                &control_role,
-                &control_name,
-                &action,
-                value.as_deref(),
-                key.as_deref(),
-            )?;
+            session
+                .tab
+                .activate()
+                .map_err(|_| "The browser could not show the observed tab.".to_string())?;
+            if action == "upload" {
+                browser_tools::upload_to_observed_control(
+                    &scope,
+                    &session,
+                    &control_ref,
+                    &control_name,
+                    value.as_deref().unwrap_or_default(),
+                )?;
+            } else {
+                perform_agent_control_action(
+                    &session,
+                    &control_ref,
+                    &control_role,
+                    &control_name,
+                    &action,
+                    value.as_deref(),
+                    key.as_deref(),
+                )?;
+            }
             if matches!(action.as_str(), "click" | "press" | "select") {
                 let _ = session.tab.wait_until_navigated();
             }
-            let snapshot = snapshot_from_session(&scope, &mut session)?;
-            Ok(LocalBrowserAgentResult {
-                computer_id: snapshot.computer_id,
-                current_url: sanitize_agent_result_url(&snapshot.current_url),
-                title: snapshot.title,
-                trust: "external-untrusted",
-                updated_at: snapshot.updated_at,
-            })
+            operation.finish(agent_result_from_session(&scope, &session))
         })
         .await
         .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn tab_for_agent(
+        self: Arc<Self>,
+        workspace_id: String,
+        agent_id: String,
+        observation_id: String,
+        action: String,
+        tab_ref: Option<String>,
+        url: Option<String>,
+        expected_generation: u64,
+    ) -> Result<LocalBrowserAgentResult, String> {
+        browser_tools::validate_tab_arguments(&action, tab_ref.as_deref(), url.as_deref())?;
+        let scope = self.scope(&workspace_id, &agent_id)?;
+        let session = self
+            .sessions
+            .lock()
+            .map_err(|_| "The local computer state is unavailable.".to_string())?
+            .get(&scope.key)
+            .cloned()
+            .ok_or_else(|| "Reconnect this computer before using its browser.".to_string())?;
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut session = session
+                .lock()
+                .map_err(|_| "The local browser state is unavailable.".to_string())?;
+            let operation = session.authority.begin_agent(expected_generation)?;
+            let observation = session
+                .observation
+                .take()
+                .ok_or_else(|| "Observe the browser before changing tabs.".to_string())?;
+            if observation.id != observation_id || observation.generation != operation.generation {
+                return Err("That browser tab observation is stale. Observe again.".into());
+            }
+            operation.check()?;
+            container::focus_browser(&scope)?;
+            browser_tools::act_on_tab(
+                &mut session,
+                observation,
+                &action,
+                tab_ref.as_deref(),
+                url.as_deref(),
+            )?;
+            operation.finish(agent_result_from_session(&scope, &session))
+        })
+        .await
+        .map_err(|_| "The browser tab task stopped unexpectedly.".to_string())?
     }
 
     pub(crate) async fn run_shell_for_agent(
@@ -515,31 +704,20 @@ impl LocalComputerState {
         workspace_id: String,
         agent_id: String,
         command: String,
+        expected_generation: u64,
     ) -> Result<LocalComputerShellResult, String> {
         let scope = self.scope(&workspace_id, &agent_id)?;
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its terminal.".into());
         }
-        ensure_browser_session(self.clone(), scope.clone()).await?;
-        let session = self
-            .sessions
-            .lock()
-            .map_err(|_| "The local computer state is unavailable.".to_string())?
-            .get(&scope.key)
-            .cloned()
-            .ok_or_else(|| "The agent computer is not running.".to_string())?;
+        ensure_browser_session(self.clone(), scope.clone(), Some(expected_generation)).await?;
+        let authority = self.authority(&scope)?;
         tauri::async_runtime::spawn_blocking(move || {
-            let mut session = session
-                .lock()
-                .map_err(|_| "The agent computer state is unavailable.".to_string())?;
-            expire_human_lease(&mut session)?;
-            if session.controller != LocalComputerController::Agent {
-                return Err(
-                    "The user currently controls this computer. Ask them to return control before running a command."
-                        .into(),
-                );
-            }
-            container::run_shell(&scope, &command)
+            let operation = authority.begin_agent(expected_generation)?;
+            operation.check()?;
+            let result =
+                container::run_shell_cancellable(&scope, &command, operation.cancellation());
+            operation.finish(result)
         })
         .await
         .map_err(|_| "The isolated terminal task stopped unexpectedly.".to_string())?
@@ -576,6 +754,7 @@ fn observe_agent_controls(
     scope: &ComputerScope,
     session: &mut LocalBrowserSession,
 ) -> Result<LocalBrowserAgentObservation, String> {
+    browser_tools::follow_active_tab(session)?;
     session.observation_counter = session.observation_counter.saturating_add(1);
     let mut digest = Sha256::new();
     digest.update(b"fable-local-browser-observation-v1\0");
@@ -597,6 +776,7 @@ fn observe_agent_controls(
             const tag = el.tagName.toLowerCase();
             const type = clean(el.getAttribute("type")).toLowerCase();
             if (tag === "select") return el.multiple ? "listbox" : "combobox";
+            if (type === "file") return "file";
             const explicit = clean(el.getAttribute("role"));
             if (explicit) return explicit;
             if (tag === "a") return "link";
@@ -609,7 +789,7 @@ fn observe_agent_controls(
             const labelledBy = clean(el.getAttribute("aria-labelledby"));
             const labelled = labelledBy ? clean(labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent).join(" ")) : "";
             const ownLabel = el.id ? clean(document.querySelector(`label[for="${{CSS.escape(el.id)}}"]`)?.textContent) : "";
-            return clean(el.getAttribute("aria-label")) || labelled || ownLabel || clean(el.getAttribute("placeholder")) || clean(el.getAttribute("title")) || clean(el.innerText) || `Unnamed ${{role}}`;
+            return clean(el.getAttribute("aria-label")) || labelled || ownLabel || clean(el.getAttribute("placeholder")) || clean(el.getAttribute("title")) || (role !== "textbox" && role !== "file" ? clean(el.innerText) : "") || `Unnamed ${{role}}`;
           }};
           const isSecret = (el) => {{
             const hint = [el.getAttribute("type"), el.getAttribute("autocomplete"), el.getAttribute("name"), el.id, el.getAttribute("placeholder"), el.getAttribute("aria-label")].join(" ").toLowerCase();
@@ -635,7 +815,7 @@ fn observe_agent_controls(
                   .filter(Boolean))).slice(0, 50)
               : [];
             if (isNativeSelect && options.length === 0) continue;
-            const actions = isNativeSelect ? ["select"] : role === "textbox" ? ["fill", "press"] : ["click", "press"];
+            const actions = role === "file" ? ["upload"] : isNativeSelect ? ["select"] : role === "textbox" ? ["fill", "press"] : ["click", "press"];
             const ref = `${{prefix}}-${{output.length}}`;
             el.setAttribute("data-fable-control", ref);
             output.push({{ ref, role, name, actions, options }});
@@ -674,9 +854,13 @@ fn observe_agent_controls(
             return Err("The local browser returned duplicate controls.".into());
         }
     }
+    let generation = session.authority.snapshot()?.generation;
+    let page = browser_tools::observe_page(session, &observation_id)?;
     session.observation = Some(LocalBrowserObservationState {
         id: observation_id.clone(),
+        generation,
         controls: retained,
+        tabs: page.retained_tabs,
     });
     Ok(LocalBrowserAgentObservation {
         observation_id,
@@ -689,7 +873,14 @@ fn observe_agent_controls(
                 .unwrap_or_else(|_| "Local browser".into()),
         ),
         trust: "external-untrusted",
+        generation,
         controls,
+        text: page.text,
+        tabs: page.tabs,
+        active_tab_ref: page.active_tab_ref,
+        downloads: container::download_status(scope).unwrap_or_else(|_| {
+            serde_json::json!({"state":"unavailable", "message":"Download status is unavailable. Reconnect before downloading more files."})
+        }),
         updated_at: Utc::now().to_rfc3339(),
     })
 }
@@ -711,10 +902,12 @@ fn validate_agent_control_observation(
         || control.actions.is_empty()
         || control.actions.len() > 2
         || actions.len() != control.actions.len()
-        || control
-            .actions
-            .iter()
-            .any(|action| !matches!(action.as_str(), "click" | "fill" | "press" | "select"))
+        || control.actions.iter().any(|action| {
+            !matches!(
+                action.as_str(),
+                "click" | "fill" | "press" | "select" | "upload"
+            )
+        })
         || control.options.len() > 50
         || options.len() != control.options.len()
         || control.options.iter().any(|option| {
@@ -722,6 +915,8 @@ fn validate_agent_control_observation(
                 || option.chars().count() > 120
                 || option.chars().any(char::is_control)
         })
+        || (control.actions.iter().any(|action| action == "upload")
+            && (control.role != "file" || control.actions != ["upload"]))
         || has_select == control.options.is_empty()
         || (has_select
             && (control.role != "combobox"
@@ -745,6 +940,11 @@ fn validate_observed_control_action(
     let valid = match action {
         "click" => value.is_none() && key.is_none(),
         "fill" => value.is_some() && key.is_none(),
+        "upload" => {
+            control.role == "file"
+                && value.is_some_and(|value| !value.trim().is_empty())
+                && key.is_none()
+        }
         "press" => value.is_none() && key.is_some(),
         "select" => {
             key.is_none()
@@ -816,6 +1016,7 @@ fn perform_agent_control_action(
             const tag = el.tagName.toLowerCase();
             const type = clean(el.getAttribute("type")).toLowerCase();
             if (tag === "select") return el.multiple ? "listbox" : "combobox";
+            if (type === "file") return "file";
             const explicit = clean(el.getAttribute("role"));
             if (explicit) return explicit;
             if (tag === "a") return "link";
@@ -828,7 +1029,7 @@ fn perform_agent_control_action(
             const labelledBy = clean(el.getAttribute("aria-labelledby"));
             const labelled = labelledBy ? clean(labelledBy.split(/\s+/).map((id) => document.getElementById(id)?.textContent).join(" ")) : "";
             const ownLabel = el.id ? clean(document.querySelector(`label[for="${{CSS.escape(el.id)}}"]`)?.textContent) : "";
-            return clean(el.getAttribute("aria-label")) || labelled || ownLabel || clean(el.getAttribute("placeholder")) || clean(el.getAttribute("title")) || clean(el.innerText) || `Unnamed ${{role}}`;
+            return clean(el.getAttribute("aria-label")) || labelled || ownLabel || clean(el.getAttribute("placeholder")) || clean(el.getAttribute("title")) || (role !== "textbox" && role !== "file" ? clean(el.innerText) : "") || `Unnamed ${{role}}`;
           }};
           const isSecret = (el) => {{
             const hint = [el.getAttribute("type"), el.getAttribute("autocomplete"), el.getAttribute("name"), el.id, el.getAttribute("placeholder"), el.getAttribute("aria-label")].join(" ").toLowerCase();
@@ -893,7 +1094,7 @@ fn perform_agent_control_action(
 }
 
 #[derive(Clone)]
-struct ComputerScope {
+pub(crate) struct ComputerScope {
     key: String,
     computer_id: String,
     directory: PathBuf,
@@ -965,6 +1166,7 @@ fn normalize_agent_navigation(value: &str) -> Result<String, String> {
 async fn ensure_browser_session(
     state: Arc<LocalComputerState>,
     scope: ComputerScope,
+    agent_generation: Option<u64>,
 ) -> Result<(), String> {
     let key = scope.key.clone();
     let launch_gate = {
@@ -982,41 +1184,57 @@ async fn ensure_browser_session(
         let _launch_guard = launch_gate
             .lock()
             .map_err(|_| "The local computer launch state is unavailable.".to_string())?;
+        let authority = launch_state.authority(&scope)?;
+        let admission = agent_generation
+            .map(|generation| authority.begin_agent(generation))
+            .transpose()?;
         let existing = launch_state
             .sessions
             .lock()
             .map_err(|_| "The local computer state is unavailable.".to_string())?
             .get(&key)
             .cloned();
-        let (healthy, previous_generation) = existing
+        let healthy = existing
             .as_ref()
             .map(|session| {
                 let session = session
                     .lock()
                     .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-                Ok::<_, String>((session.tab.get_target_info().is_ok(), session.generation))
+                Ok::<_, String>(session.tab.get_target_info().is_ok())
             })
             .transpose()?
-            .unwrap_or((false, 0));
+            .unwrap_or(false);
         if !healthy {
-            let generation = next_browser_generation(previous_generation)?;
-            let session = launch_browser(&scope, &launch_state.image_context, generation)?;
+            let expected_generation = agent_generation.unwrap_or(authority.snapshot()?.generation);
+            if let Some(admission) = admission {
+                admission.finish(Ok(()))?;
+            }
+            if existing.is_some() {
+                let generation = authority.revoke(expected_generation)?;
+                let result = cancel_external_operations(&scope)
+                    .and_then(|()| authority.drain(generation, Duration::from_secs(20)))
+                    .and_then(|()| cancel_external_operations(&scope));
+                if let Err(error) = result {
+                    authority.abandon_transition(generation);
+                    return Err(error);
+                }
+                authority.complete_transition(generation, LocalComputerController::Paused)?;
+            }
+            let launch_generation = authority.snapshot()?.generation;
+            let session = launch_browser(&scope, &launch_state.image_context, authority.clone())?;
+            authority.check_generation(launch_generation)?;
             launch_state
                 .sessions
                 .lock()
                 .map_err(|_| "The local computer state is unavailable.".to_string())?
                 .insert(key, Arc::new(Mutex::new(session)));
+        } else if let Some(admission) = admission {
+            admission.finish(Ok(()))?;
         }
         Ok::<_, String>(())
     })
     .await
     .map_err(|_| "Fable could not start the local browser.".to_string())?
-}
-
-fn next_browser_generation(previous: u64) -> Result<u64, String> {
-    previous
-        .checked_add(1)
-        .ok_or_else(|| "The agent browser control generation is exhausted.".to_string())
 }
 
 fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
@@ -1035,10 +1253,16 @@ fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
 fn launch_browser(
     scope: &ComputerScope,
     image_context: &Path,
-    generation: u64,
+    authority: Arc<ComputerAuthority>,
 ) -> Result<LocalBrowserSession, String> {
     ensure_scope_directories(scope)?;
     container::ensure_running(scope, image_context)?;
+    if authority.snapshot()?.controller != LocalComputerController::Agent {
+        // A newly started native process has no inherited operation tickets.
+        // Remove guest jobs left by the previous process before exposing its
+        // restored paused desktop or accepting an explicit human transition.
+        cancel_external_operations(scope)?;
+    }
     let debugger_url = container::debugger_websocket_url(scope)?;
     let browser = Browser::connect_with_timeout(debugger_url, Duration::from_secs(24 * 60 * 60))
         .map_err(|_| {
@@ -1057,10 +1281,8 @@ fn launch_browser(
     Ok(LocalBrowserSession {
         _browser: browser,
         tab,
-        controller: LocalComputerController::Agent,
-        generation,
+        authority,
         browser_product: "Chromium in Docker/WSL".into(),
-        human_lease_expires_at: None,
         observation_counter: 0,
         observation: None,
     })
@@ -1070,7 +1292,10 @@ fn snapshot_from_session(
     scope: &ComputerScope,
     session: &mut LocalBrowserSession,
 ) -> Result<LocalBrowserSnapshot, String> {
-    expire_human_lease(session)?;
+    let authority = session.authority.snapshot()?;
+    if authority.transitioning {
+        return Err("Computer control is changing. Wait for the previous action to stop.".into());
+    }
     let viewport = LocalBrowserViewportSnapshot {
         width: VIEWPORT_WIDTH,
         height: VIEWPORT_HEIGHT,
@@ -1092,11 +1317,13 @@ fn snapshot_from_session(
         viewport,
         can_go_back,
         can_go_forward,
-        controller: session.controller.as_str(),
-        generation: session.generation,
-        lease_expires_at: session
-            .human_lease_expires_at
-            .map(|value| value.to_rfc3339()),
+        controller: session
+            .authority
+            .check_generation(authority.generation)?
+            .controller
+            .as_str(),
+        generation: authority.generation,
+        lease_expires_at: authority.lease_expires_at,
         updated_at: Utc::now().to_rfc3339(),
     })
 }
@@ -1122,18 +1349,23 @@ fn browser_history_availability(session: &LocalBrowserSession) -> Result<(bool, 
     ))
 }
 
-fn expire_human_lease(session: &mut LocalBrowserSession) -> Result<(), String> {
-    if session.controller == LocalComputerController::Human
-        && session
-            .human_lease_expires_at
-            .is_none_or(|expires_at| expires_at <= Utc::now())
-    {
-        session.controller = LocalComputerController::Agent;
-        session.generation = next_browser_generation(session.generation)?;
-        session.human_lease_expires_at = None;
-        session.observation = None;
-    }
-    Ok(())
+fn agent_result_from_session(
+    scope: &ComputerScope,
+    session: &LocalBrowserSession,
+) -> Result<LocalBrowserAgentResult, String> {
+    Ok(LocalBrowserAgentResult {
+        computer_id: scope.computer_id.clone(),
+        current_url: sanitize_agent_result_url(&session.tab.get_url()),
+        title: sanitize_browser_title(
+            session
+                .tab
+                .get_title()
+                .unwrap_or_else(|_| "Local browser".into()),
+        ),
+        trust: "external-untrusted",
+        generation: session.authority.snapshot()?.generation,
+        updated_at: Utc::now().to_rfc3339(),
+    })
 }
 
 fn computer_snapshot(
@@ -1149,29 +1381,22 @@ fn computer_snapshot(
         .map_err(|_| "The local computer state is unavailable.".to_string())?
         .get(&scope.key)
         .cloned();
-    let session_projection = session
-        .as_ref()
-        .map(|value| {
-            let mut value = value
-                .lock()
-                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            expire_human_lease(&mut value)?;
-            Ok::<_, String>((
-                value.controller,
-                value.generation,
-                value.browser_product.clone(),
-                value
-                    .human_lease_expires_at
-                    .map(|expires_at| expires_at.to_rfc3339()),
-            ))
-        })
-        .transpose()?;
-    let lifecycle = if !container_status.container_exists {
+    let authority = state.authority(&scope)?.snapshot()?;
+    let browser_product = session.as_ref().and_then(|session| {
+        session
+            .try_lock()
+            .ok()
+            .map(|session| session.browser_product.clone())
+    });
+    let lifecycle = if !container_status.engine_available {
+        "degraded"
+    } else if !container_status.container_exists {
         "unprovisioned"
-    } else if !container_status.engine_available
-        || !container_status.running
-        || !container_status.healthy
-    {
+    } else if container_status.suspended {
+        "sleeping"
+    } else if !container_status.running {
+        "stopped"
+    } else if !container_status.healthy {
         "degraded"
     } else {
         "ready"
@@ -1185,18 +1410,12 @@ fn computer_snapshot(
         isolation: "linux-container",
         lifecycle,
         browser_available: container_status.engine_available,
-        browser_active: container_status.running && session_projection.is_some(),
-        controller: session_projection
-            .as_ref()
-            .map(|(controller, _, _, _)| controller.as_str())
-            .unwrap_or("agent"),
-        generation: session_projection
-            .as_ref()
-            .map(|(_, generation, _, _)| *generation)
-            .unwrap_or(0),
-        lease_expires_at: session_projection
-            .as_ref()
-            .and_then(|(_, _, _, lease)| lease.clone()),
+        browser_active: container_status.running
+            && !container_status.suspended
+            && session.is_some(),
+        controller: authority.controller.as_str(),
+        generation: authority.generation,
+        lease_expires_at: authority.lease_expires_at,
         capabilities: vec![
             "persistent-files",
             "persistent-home",
@@ -1208,19 +1427,23 @@ fn computer_snapshot(
             "file-manager",
             "process-execution",
         ],
-        browser_product: session_projection
-            .map(|(_, _, product, _)| product)
-            .or_else(|| {
-                container_status
-                    .container_exists
-                    .then(|| "Chromium in Docker/WSL".into())
-            }),
-        message: if !container_status.engine_available {
+        browser_product: browser_product.or_else(|| {
+            container_status
+                .container_exists
+                .then(|| "Chromium in Docker/WSL".into())
+        }),
+        message: if authority.transitioning {
+            Some("Stopping the previous computer action before changing control.".into())
+        } else if !container_status.engine_available {
             Some("Start Docker Desktop with its WSL 2 Linux engine to use this computer.".into())
         } else if !container_status.image_available && !container_status.container_exists {
             Some("Set up this computer to build its private Linux desktop.".into())
+        } else if container_status.suspended {
+            Some("This computer is sleeping after being idle. Start it to restore the open applications.".into())
         } else if container_status.container_exists && !container_status.running {
             Some("Start this agent's private Linux desktop.".into())
+        } else if authority.controller == LocalComputerController::Paused {
+            Some("Computer actions and agent observation are paused. Explicitly return control when ready.".into())
         } else if container_status.running && !container_status.healthy {
             Some("This agent's Linux desktop is still starting.".into())
         } else {
@@ -1413,6 +1636,7 @@ pub async fn local_computer_status(
     agent_id: String,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerSnapshot, String> {
+    state.validate_target(&workspace_id, &agent_id)?;
     computer_snapshot(&state, workspace_id, agent_id)
 }
 
@@ -1422,9 +1646,10 @@ pub async fn local_computer_provision(
     agent_id: String,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerSnapshot, String> {
+    state.validate_target(&workspace_id, &agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&workspace_id, &agent_id)?;
-    ensure_browser_session(owned_state.clone(), scope).await?;
+    ensure_browser_session(owned_state.clone(), scope, None).await?;
     computer_snapshot(&owned_state, workspace_id, agent_id)
 }
 
@@ -1433,6 +1658,7 @@ pub async fn local_computer_files(
     target: LocalComputerTarget,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerFilesSnapshot, String> {
+    state.validate_target(&target.workspace_id, &target.agent_id)?;
     let scope = state.scope(&target.workspace_id, &target.agent_id)?;
     if !scope.directory.join("workspace").is_dir() {
         return Err("Set up this agent's local computer before viewing its files.".into());
@@ -1447,6 +1673,7 @@ pub async fn local_computer_file_preview(
     request: LocalComputerFileRequest,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerFilePreview, String> {
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let scope = state.scope(&request.workspace_id, &request.agent_id)?;
     if !scope.directory.join("workspace").is_dir() {
         return Err("Set up this agent's local computer before viewing its files.".into());
@@ -1462,6 +1689,7 @@ pub async fn local_browser_navigate(
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalBrowserSnapshot, String> {
     let url = normalize_user_navigation(&request.url)?;
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
     let session = owned_state
@@ -1475,7 +1703,8 @@ pub async fn local_browser_navigate(
         let mut session = session
             .lock()
             .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-        require_human_control(&mut session, request.expected_generation)?;
+        let operation = session.authority.begin_human(request.expected_generation)?;
+        operation.check()?;
         session.observation = None;
         container::focus_browser(&scope)?;
         session
@@ -1483,8 +1712,8 @@ pub async fn local_browser_navigate(
             .navigate_to(&url)
             .map_err(|_| "The local browser could not open that page.".to_string())?;
         let _ = session.tab.wait_until_navigated();
-        renew_human_lease(&mut session);
-        snapshot_from_session(&scope, &mut session)
+        operation.renew_human()?;
+        operation.finish(snapshot_from_session(&scope, &mut session))
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1495,6 +1724,7 @@ pub async fn local_browser_snapshot(
     target: LocalComputerTarget,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalBrowserSnapshot, String> {
+    state.validate_target(&target.workspace_id, &target.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&target.workspace_id, &target.agent_id)?;
     let session = owned_state
@@ -1515,42 +1745,112 @@ pub async fn local_browser_snapshot(
 }
 
 #[tauri::command]
+pub async fn local_computer_cancel(
+    request: LocalComputerCancelRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<LocalComputerSnapshot, String> {
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
+    let owned_state = state.inner().clone();
+    let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
+    let authority = owned_state.authority(&scope)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let generation = authority.revoke(request.expected_generation)?;
+        let stopped = cancel_external_operations(&scope)
+            .and_then(|()| authority.drain(generation, Duration::from_secs(20)))
+            .and_then(|()| cancel_external_operations(&scope));
+        if let Err(error) = stopped {
+            authority.abandon_transition(generation);
+            return Err(error);
+        }
+        authority.complete_transition(generation, LocalComputerController::Paused)?;
+        computer_snapshot(&owned_state, request.workspace_id, request.agent_id)
+    })
+    .await
+    .map_err(|_| {
+        "The computer cancellation task stopped unexpectedly. Control remains paused.".to_string()
+    })?
+}
+
+/// Main-window shutdown revokes every scope before waiting for any process.
+/// No renderer unmount or provider turn completion is needed to stop admission.
+pub(crate) async fn shutdown_all(state: Arc<LocalComputerState>) {
+    if state.closing.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    let authorities = state
+        .authorities
+        .lock()
+        .map(|registry| registry.values().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let draining = authorities
+        .into_iter()
+        .filter_map(|authority| {
+            authority
+                .pause_for_shutdown()
+                .ok()
+                .map(|generation| (authority, generation))
+        })
+        .collect::<Vec<_>>();
+    if let Ok(mut observations) = state.desktop_observations.lock() {
+        observations.clear();
+    }
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        let deadline = std::time::Instant::now() + Duration::from_secs(25);
+        for (authority, generation) in draining {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let _ = authority.drain(generation, remaining);
+        }
+    })
+    .await;
+}
+
+#[tauri::command]
 pub async fn local_computer_set_controller(
     request: LocalComputerControlRequest,
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalBrowserSnapshot, String> {
-    let owned_state = state.inner().clone();
+    change_controller(state.inner().clone(), request).await
+}
+
+pub(crate) async fn change_controller(
+    owned_state: Arc<LocalComputerState>,
+    request: LocalComputerControlRequest,
+) -> Result<LocalBrowserSnapshot, String> {
+    owned_state.validate_target(&request.workspace_id, &request.agent_id)?;
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
-    let session = owned_state
-        .sessions
-        .lock()
-        .map_err(|_| "The local computer state is unavailable.".to_string())?
-        .get(&scope.key)
-        .cloned()
-        .ok_or_else(|| "The agent browser is not running.".to_string())?;
+    let authority = owned_state.authority(&scope)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let mut session = session
-            .lock()
-            .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-        expire_human_lease(&mut session)?;
-        if session.generation != request.expected_generation {
-            return Err("The agent computer changed. Refresh it before changing control.".into());
+        let generation = authority.revoke(request.expected_generation)?;
+        let transition = (|| {
+            cancel_external_operations(&scope)?;
+            authority.drain(generation, Duration::from_secs(20))?;
+            // A previously admitted root launch may have created its UID1001
+            // child while the first cancellation was running. Launches must
+            // acknowledge their actual child before their native ticket drops.
+            cancel_external_operations(&scope)?;
+            let session = owned_state
+                .sessions
+                .lock()
+                .map_err(|_| "The local computer state is unavailable.".to_string())?
+                .get(&scope.key)
+                .cloned()
+                .ok_or_else(|| "Reconnect this computer before changing control.".to_string())?;
+            let mut session = session
+                .lock()
+                .map_err(|_| "The agent browser state is unavailable.".to_string())?;
+            session.observation = None;
+            authority.complete_transition(generation, request.controller)?;
+            snapshot_from_session(&scope, &mut session)
+        })();
+        if transition.is_err() {
+            authority.abandon_transition(generation);
         }
-        if session.controller != request.controller {
-            session.controller = request.controller;
-            session.generation = next_browser_generation(session.generation)?;
-        }
-        session.human_lease_expires_at = match request.controller {
-            LocalComputerController::Human => {
-                Some(Utc::now() + ChronoDuration::minutes(HUMAN_CONTROL_LEASE_MINUTES))
-            }
-            LocalComputerController::Agent => None,
-        };
-        session.observation = None;
-        snapshot_from_session(&scope, &mut session)
+        transition
     })
     .await
-    .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
+    .map_err(|_| {
+        "The computer control task stopped unexpectedly. Control remains paused.".to_string()
+    })?
 }
 
 #[tauri::command]
@@ -1561,6 +1861,7 @@ pub async fn local_browser_pointer(
     if !request.x.is_finite() || !request.y.is_finite() || request.x < 0.0 || request.y < 0.0 {
         return Err("The browser pointer position is invalid.".into());
     }
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
     let session = owned_state
@@ -1574,7 +1875,8 @@ pub async fn local_browser_pointer(
         let mut session = session
             .lock()
             .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-        require_human_control(&mut session, request.expected_generation)?;
+        let operation = session.authority.begin_human(request.expected_generation)?;
+        operation.check()?;
         if request.x > f64::from(VIEWPORT_WIDTH) || request.y > f64::from(VIEWPORT_HEIGHT) {
             return Err("The pointer position is outside the live desktop.".into());
         }
@@ -1596,8 +1898,8 @@ pub async fn local_browser_pointer(
             &request.action,
             delta,
         )?;
-        renew_human_lease(&mut session);
-        snapshot_from_session(&scope, &mut session)
+        operation.renew_human()?;
+        operation.finish(snapshot_from_session(&scope, &mut session))
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1614,6 +1916,7 @@ pub async fn local_browser_key(
     {
         return Err("The browser key is invalid.".into());
     }
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
     let session = owned_state
@@ -1627,7 +1930,8 @@ pub async fn local_browser_key(
         let mut session = session
             .lock()
             .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-        require_human_control(&mut session, request.expected_generation)?;
+        let operation = session.authority.begin_human(request.expected_generation)?;
+        operation.check()?;
         if request.key.chars().count() != 1
             && !matches!(
                 request.key.as_str(),
@@ -1649,8 +1953,8 @@ pub async fn local_browser_key(
             return Err("That desktop key is not supported.".into());
         }
         container::key(&scope, &request.key)?;
-        renew_human_lease(&mut session);
-        snapshot_from_session(&scope, &mut session)
+        operation.renew_human()?;
+        operation.finish(snapshot_from_session(&scope, &mut session))
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
@@ -1663,10 +1967,11 @@ pub async fn local_computer_launch_app(
 ) -> Result<LocalBrowserSnapshot, String> {
     if !matches!(
         request.application.as_str(),
-        "browser" | "files" | "terminal"
+        "browser" | "files" | "terminal" | "writer" | "spreadsheet"
     ) {
         return Err("That agent computer application is not supported.".into());
     }
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
     let session = owned_state
@@ -1680,10 +1985,11 @@ pub async fn local_computer_launch_app(
         let mut session = session
             .lock()
             .map_err(|_| "The agent computer state is unavailable.".to_string())?;
-        require_human_control(&mut session, request.expected_generation)?;
+        let operation = session.authority.begin_human(request.expected_generation)?;
+        operation.check()?;
         container::launch_application(&scope, &request.application)?;
-        renew_human_lease(&mut session);
-        snapshot_from_session(&scope, &mut session)
+        operation.renew_human()?;
+        operation.finish(snapshot_from_session(&scope, &mut session))
     })
     .await
     .map_err(|_| "The agent application task stopped unexpectedly.".to_string())?
@@ -1697,6 +2003,7 @@ pub async fn local_browser_history(
     if !matches!(request.direction.as_str(), "back" | "forward") {
         return Err("The browser history direction is not supported.".into());
     }
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
     let owned_state = state.inner().clone();
     let scope = owned_state.scope(&request.workspace_id, &request.agent_id)?;
     let session = owned_state
@@ -1710,7 +2017,8 @@ pub async fn local_browser_history(
         let mut session = session
             .lock()
             .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-        require_human_control(&mut session, request.expected_generation)?;
+        let operation = session.authority.begin_human(request.expected_generation)?;
+        operation.check()?;
         container::focus_browser(&scope)?;
         let history = session
             .tab
@@ -1733,32 +2041,11 @@ pub async fn local_browser_history(
             })
             .map_err(|_| "The local browser could not move through its history.".to_string())?;
         let _ = session.tab.wait_until_navigated();
-        renew_human_lease(&mut session);
-        snapshot_from_session(&scope, &mut session)
+        operation.renew_human()?;
+        operation.finish(snapshot_from_session(&scope, &mut session))
     })
     .await
     .map_err(|_| "The local browser task stopped unexpectedly.".to_string())?
-}
-
-fn require_human_control(
-    session: &mut LocalBrowserSession,
-    expected_generation: u64,
-) -> Result<(), String> {
-    expire_human_lease(session)?;
-    if session.controller != LocalComputerController::Human {
-        return Err("Take control before interacting with this computer.".into());
-    }
-    if session.generation != expected_generation {
-        return Err("The agent computer changed. Refresh it before interacting.".into());
-    }
-    Ok(())
-}
-
-fn renew_human_lease(session: &mut LocalBrowserSession) {
-    if session.controller == LocalComputerController::Human {
-        session.human_lease_expires_at =
-            Some(Utc::now() + ChronoDuration::minutes(HUMAN_CONTROL_LEASE_MINUTES));
-    }
 }
 
 #[cfg(test)]
@@ -1766,6 +2053,23 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    struct LiveComputerCleanup(ComputerScope);
+    impl Drop for LiveComputerCleanup {
+        fn drop(&mut self) {
+            let _ = container::cleanup_test_computer(&self.0);
+        }
+    }
+
+    fn live_test_scope(state: &LocalComputerState) -> (String, String, ComputerScope) {
+        let mut nonce = [0u8; 8];
+        getrandom::fill(&mut nonce).unwrap();
+        let suffix = hex::encode(nonce);
+        let workspace_id = format!("workspace-native-test-{suffix}");
+        let agent_id = format!("agent-native-test-{suffix}");
+        let scope = state.scope(&workspace_id, &agent_id).unwrap();
+        (workspace_id, agent_id, scope)
+    }
 
     #[test]
     fn scope_directories_are_stable_and_agent_isolated() {
@@ -1778,6 +2082,45 @@ mod tests {
         assert_eq!(first.computer_id, replay.computer_id);
         assert_ne!(first.directory, second.directory);
         assert!(first.directory.starts_with(temp.path()));
+    }
+
+    #[test]
+    fn native_shutdown_revokes_every_scope_and_prevents_new_admission() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = Arc::new(LocalComputerState::for_test(temp.path().to_path_buf()));
+        let mut retained = Vec::new();
+        for agent in ["agent-one", "agent-two"] {
+            let scope = state.scope("workspace-one", agent).unwrap();
+            let authority = ComputerAuthority::load(&scope.directory).unwrap();
+            let ticket = authority.begin_agent(1).unwrap();
+            state
+                .authorities
+                .lock()
+                .unwrap()
+                .insert(scope.key, authority.clone());
+            retained.push((authority, ticket));
+        }
+        let owned = state.clone();
+        let shutdown =
+            std::thread::spawn(move || tauri::async_runtime::block_on(shutdown_all(owned)));
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !state.closing.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            std::thread::yield_now();
+        }
+        assert!(state.scope("workspace-one", "agent-new").is_err());
+        for (authority, ticket) in retained {
+            while ticket.check().is_ok() && std::time::Instant::now() < deadline {
+                std::thread::yield_now();
+            }
+            assert!(ticket.check().is_err());
+            assert_eq!(
+                authority.snapshot().unwrap().controller,
+                LocalComputerController::Paused
+            );
+            assert!(authority.begin_agent(1).is_err());
+            drop(ticket);
+        }
+        shutdown.join().unwrap();
     }
 
     #[test]
@@ -1854,6 +2197,45 @@ mod tests {
         );
         assert!(state
             .tool_workspace_root("workspace-one", "agent-two")
+            .is_err());
+    }
+
+    #[test]
+    fn file_operation_is_drained_before_human_control_and_its_revoked_output_is_discarded() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = Arc::new(LocalComputerState::for_test(temp.path().to_path_buf()));
+        let scope = state.scope("workspace-files", "agent-files").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let authority = state.authority(&scope).unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finish_tx, finish_rx) = std::sync::mpsc::channel();
+        let worker_state = state.clone();
+        let worker = std::thread::spawn(move || {
+            worker_state.with_agent_files("workspace-files", "agent-files", 1, |root| {
+                started_tx.send(()).unwrap();
+                finish_rx.recv().unwrap();
+                std::fs::write(root.join("in-flight.txt"), "completed before human input")
+                    .map_err(|error| error.to_string())?;
+                Ok("stale file observation")
+            })
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let generation = authority.revoke(1).unwrap();
+        assert!(authority
+            .complete_transition(generation, LocalComputerController::Human)
+            .is_err());
+        assert!(state
+            .with_agent_files("workspace-files", "agent-files", 1, |_| Ok(()))
+            .is_err());
+        finish_tx.send(()).unwrap();
+        assert!(worker.join().unwrap().is_err());
+        authority.drain(generation, Duration::from_secs(2)).unwrap();
+        authority
+            .complete_transition(generation, LocalComputerController::Human)
+            .unwrap();
+        assert!(scope.directory.join("workspace/in-flight.txt").is_file());
+        assert!(state
+            .with_agent_files("workspace-files", "agent-files", generation, |_| Ok(()))
             .is_err());
     }
 
@@ -1947,13 +2329,6 @@ mod tests {
     }
 
     #[test]
-    fn browser_restarts_advance_the_control_generation() {
-        assert_eq!(next_browser_generation(0).unwrap(), 1);
-        assert_eq!(next_browser_generation(41).unwrap(), 42);
-        assert!(next_browser_generation(u64::MAX).is_err());
-    }
-
-    #[test]
     fn browser_history_availability_fails_closed_at_every_boundary() {
         assert_eq!(history_availability(0, 0), (false, false));
         assert_eq!(history_availability(0, 1), (false, false));
@@ -2040,12 +2415,20 @@ mod tests {
         });
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
-        let scope = state.scope("workspace-live", "agent-live").unwrap();
-        let mut session = launch_browser(&scope, &state.image_context, 1).unwrap();
-        session.controller = LocalComputerController::Human;
-        session.generation = 2;
-        renew_human_lease(&mut session);
-        require_human_control(&mut session, 2).unwrap();
+        let (_, _, scope) = live_test_scope(&state);
+        let _cleanup = LiveComputerCleanup(scope.clone());
+        let mut session = launch_browser(
+            &scope,
+            &state.image_context,
+            state.authority(&scope).unwrap(),
+        )
+        .unwrap();
+        let generation = session.authority.revoke(1).unwrap();
+        session
+            .authority
+            .complete_transition(generation, LocalComputerController::Human)
+            .unwrap();
+        let operation = session.authority.begin_human(generation).unwrap();
         session
             .tab
             .navigate_to(&format!("http://host.docker.internal:{port}/"))
@@ -2083,6 +2466,7 @@ mod tests {
             browser_history_availability(&session).unwrap(),
             (false, true)
         );
+        operation.finish(Ok(())).unwrap();
         drop(session);
         let _ = server.join();
     }
@@ -2097,7 +2481,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut request = [0_u8; 2_048];
                 let _ = stream.read(&mut request);
-                let body = r#"<!doctype html><html><head><title>Agent browser result</title></head><body>local</body></html>"#;
+                let body = r#"<!doctype html><html><head><title>Agent browser result</title></head><body><label for="visual">Notes</label><input id="visual">local</body></html>"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -2108,12 +2492,14 @@ mod tests {
         });
         let temp = tempfile::tempdir().unwrap();
         let state = Arc::new(LocalComputerState::for_test(temp.path().to_path_buf()));
-        let scope = state.scope("workspace-agent", "agent-browser").unwrap();
+        let (workspace_id, agent_id, scope) = live_test_scope(&state);
+        let _cleanup = LiveComputerCleanup(scope.clone());
         ensure_scope_directories(&scope).unwrap();
-        let result = tauri::async_runtime::block_on(state.navigate_for_agent(
-            "workspace-agent".into(),
-            "agent-browser".into(),
+        let result = tauri::async_runtime::block_on(state.clone().navigate_for_agent(
+            workspace_id.clone(),
+            agent_id.clone(),
             format!("http://host.docker.internal:{port}/"),
+            1,
         ))
         .unwrap();
         assert_eq!(result.title, "Agent browser result");
@@ -2122,6 +2508,88 @@ mod tests {
             .starts_with("http://host.docker.internal:"));
         assert!(result.computer_id.starts_with("local-"));
         assert_eq!(result.trust, "external-untrusted");
+        let retained = state
+            .sessions
+            .lock()
+            .unwrap()
+            .get(&scope.key)
+            .unwrap()
+            .clone();
+        retained
+            .lock()
+            .unwrap()
+            .tab
+            .find_element("#visual")
+            .unwrap()
+            .click()
+            .unwrap();
+        let capture = desktop_tools::observe(&state, &workspace_id, &agent_id, 1).unwrap();
+        assert!(capture.jpeg.len() > 1000);
+        assert!(!capture.output.contains("base64"));
+        let observation: serde_json::Value = serde_json::from_str(&capture.output).unwrap();
+        let action = serde_json::json!({"observationId":observation["observationId"],"action":"type","text":"Visual fixture"});
+        desktop_tools::act(
+            &state,
+            &workspace_id,
+            &agent_id,
+            1,
+            serde_json::from_value(action.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            retained
+                .lock()
+                .unwrap()
+                .tab
+                .evaluate("document.querySelector('#visual').value", false)
+                .unwrap()
+                .value
+                .unwrap(),
+            serde_json::json!("Visual fixture")
+        );
+        assert!(desktop_tools::act(
+            &state,
+            &workspace_id,
+            &agent_id,
+            1,
+            serde_json::from_value(action).unwrap()
+        )
+        .is_err());
+        retained
+            .lock()
+            .unwrap()
+            .tab
+            .evaluate(
+                "setTimeout(() => alert('Continue fixture'), 0); true",
+                false,
+            )
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(150));
+        assert!(container::desktop_privacy_check(&scope).is_err());
+        retained
+            .lock()
+            .unwrap()
+            .tab
+            .call_method(
+                headless_chrome::protocol::cdp::Page::HandleJavaScriptDialog {
+                    accept: false,
+                    prompt_text: None,
+                },
+            )
+            .unwrap();
+        retained
+            .lock()
+            .unwrap()
+            .tab
+            .evaluate("document.querySelector('#visual').type='password'", false)
+            .unwrap();
+        assert!(desktop_tools::observe(&state, &workspace_id, &agent_id, 1).is_err());
+        let authority = state.authority(&scope).unwrap();
+        let generation = authority.revoke(1).unwrap();
+        authority
+            .complete_transition(generation, LocalComputerController::Human)
+            .unwrap();
+        assert!(desktop_tools::observe(&state, &workspace_id, &agent_id, generation).is_err());
         let _ = server.join();
     }
 
@@ -2135,7 +2603,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut request = [0_u8; 2_048];
                 let _ = stream.read(&mut request);
-                let body = r#"<!doctype html><html><head><title>Controls</title></head><body><label for="query">Query</label><input id="query"><input value="private@example.com"><label for="password">Password</label><input id="password" type="password"><label for="region">Region</label><select id="region"><option value="private-eu-code">Europe</option><option value="private-asia-code">Asia</option><option disabled value="private-hidden-code">Hidden</option></select><button>Save</button></body></html>"#;
+                let body = r#"<!doctype html><html><head><title>Controls</title></head><body><p>Visible research evidence</p><p hidden>hiddenresearch</p><div id="secret-panel">privatesecretpanel</div><div contenteditable="true">privateeditable</div><label for="upload">Upload report</label><input id="upload" type="file"><label for="query">Query</label><input id="query"><input value="private@example.com"><label for="password">Password</label><input id="password" type="password"><label for="region">Region</label><select id="region"><option value="private-eu-code">Europe</option><option value="private-asia-code">Asia</option><option disabled value="private-hidden-code">Hidden</option></select><button>Save</button></body></html>"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -2146,8 +2614,14 @@ mod tests {
         });
         let temp = tempfile::tempdir().unwrap();
         let state = LocalComputerState::for_test(temp.path().to_path_buf());
-        let scope = state.scope("workspace-controls", "agent-controls").unwrap();
-        let mut session = launch_browser(&scope, &state.image_context, 1).unwrap();
+        let (_, _, scope) = live_test_scope(&state);
+        let _cleanup = LiveComputerCleanup(scope.clone());
+        let mut session = launch_browser(
+            &scope,
+            &state.image_context,
+            state.authority(&scope).unwrap(),
+        )
+        .unwrap();
         session
             .tab
             .navigate_to(&format!("http://host.docker.internal:{port}/"))
@@ -2155,6 +2629,46 @@ mod tests {
             .wait_until_navigated()
             .unwrap();
         let observation = observe_agent_controls(&scope, &mut session).unwrap();
+        assert!(observation.text.contains("Visible research evidence"));
+        assert!(!observation.text.contains("hiddenresearch"));
+        assert!(!observation.text.contains("privatesecretpanel"));
+        assert!(!observation.text.contains("privateeditable"));
+        assert!(!serde_json::to_string(&observation)
+            .unwrap()
+            .contains("privateeditable"));
+        assert_eq!(observation.generation, 1);
+        assert!(observation.active_tab_ref.starts_with("tab-"));
+        assert_eq!(observation.tabs.iter().filter(|tab| tab.active).count(), 1);
+        assert!(observation
+            .tabs
+            .iter()
+            .any(|tab| tab.active && tab.tab_ref == observation.active_tab_ref));
+        let upload = observation
+            .controls
+            .iter()
+            .find(|control| control.role == "file")
+            .unwrap();
+        assert_eq!(upload.actions, ["upload"]);
+        std::fs::write(
+            scope.directory.join("workspace/upload.txt"),
+            "upload fixture",
+        )
+        .unwrap();
+        browser_tools::upload_to_observed_control(
+            &scope,
+            &session,
+            &upload.control_ref,
+            &upload.name,
+            "upload.txt",
+        )
+        .unwrap();
+        let uploaded = session
+            .tab
+            .evaluate("document.getElementById('upload').files[0].name", false)
+            .unwrap()
+            .value
+            .unwrap();
+        assert_eq!(uploaded, serde_json::json!("upload.txt"));
         assert!(observation
             .controls
             .iter()

@@ -1,0 +1,38 @@
+desktop:
+  resolution:
+    width: 1280
+    height: 800
+  allow_resize: false
+network:
+  interface: 127.0.0.1
+  websocket_port: 6901
+  use_ipv6: false
+  ssl:
+    require_ssl: false
+    pem_certificate: /run/fable-desktop/certificate.pem
+    pem_key: /run/fable-desktop/key.pem
+runtime_configuration:
+  allow_client_to_override_kasm_server_settings: false
+  allow_override_standard_vnc_server_settings: false
+  allow_override_list: []
+pointer:
+  enabled: false
+data_loss_prevention:
+  clipboard:
+    server_to_client:
+      enabled: false
+      primary_clipboard_enabled: false
+    client_to_server:
+      enabled: false
+  keyboard:
+    enabled: false
+  logging:
+    level: off
+encoding:
+  max_frame_rate: 30
+server:
+  advanced:
+    x_authority_file: /run/fable-desktop/Xauthority
+  allow_environment_variables_to_override_config_settings: false
+command_line:
+  prompt: false

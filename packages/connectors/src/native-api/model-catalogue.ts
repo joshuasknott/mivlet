@@ -115,7 +115,7 @@ export function defaultDiscoveredCapabilities(
 export function resolveModelCapabilities(
   providerId: string,
   model: BackendModel | undefined
-): ModelCapabilities | undefined {
+): Partial<ModelCapabilities> | undefined {
   if (model?.capabilities) return model.capabilities;
   if (model?.id) return catalogueCapabilities(providerId, model.id);
   return undefined;
@@ -124,7 +124,7 @@ export function resolveModelCapabilities(
 export interface ModelValidation {
   ok: boolean;
   error?: string;
-  capabilities?: ModelCapabilities;
+  capabilities?: Partial<ModelCapabilities>;
   maxTokens: number;
 }
 
@@ -156,7 +156,7 @@ export function validateModelForRun(
   if (!capabilities) {
     return { ok: true, maxTokens: requestedMaxTokens };
   }
-  if (!capabilities.streaming) {
+  if (capabilities.streaming === false) {
     return {
       ok: false,
       error: `Model "${modelId}" does not support streaming runs.`,
@@ -167,6 +167,6 @@ export function validateModelForRun(
   return {
     ok: true,
     capabilities,
-    maxTokens: Math.min(capabilities.maxOutputTokens, Math.max(1, requestedMaxTokens))
+    maxTokens: Math.min(capabilities.maxOutputTokens ?? requestedMaxTokens, Math.max(1, requestedMaxTokens))
   };
 }

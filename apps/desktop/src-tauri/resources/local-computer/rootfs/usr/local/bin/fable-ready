@@ -1,5 +1,4 @@
 #!/bin/bash
 set -euo pipefail
 
-DISPLAY=:99 xdpyinfo >/dev/null 2>&1
-curl --fail --silent --max-time 2 http://127.0.0.1:9222/json/version >/dev/null
+exec python3 -c 'from pathlib import Path; import urllib.request; token = Path("/run/fable-private/gateway-token").read_text().strip(); urllib.request.urlopen("http://127.0.0.1:9223/" + token + "/status", timeout=3).read()' >/dev/null 2>&1

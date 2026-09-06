@@ -1,0 +1,332 @@
+#!/usr/bin/python3
+"""Root-owned authenticated transport; no provider or autonomous agent runtime.
+
+Chromium's debugging API exists only on anonymous pipes. A separate UID owns
+agent terminal processes, which cannot read this gateway's token, pipes, browser
+profile, or X authorization. The Kasm account has server-enforced read-only access.
+"""
+import asyncio
+import contextlib
+import json
+import os
+from pathlib import Path
+import secrets
+import subprocess
+
+from aiohttp import BasicAuth, ClientSession, ClientTimeout, WSMsgType, web
+from fable_downloads import MAX_DOWNLOAD_BYTES, discard_download, publish_download
+
+PRIVATE = Path('/run/fable-private')
+ASSETS = Path('/usr/share/fable-viewer')
+MAX_MESSAGE = 8 * 1024 * 1024
+
+
+class BrowserPipe:
+    def __init__(self):
+        self.pending = {}
+        self.clients = set()
+        self.sequence = 0
+        self.reader_task = None
+        self.process = None
+        self.write_lock = asyncio.Lock()
+        self.downloads = {}
+        self.download_tasks = set()
+        self.download_results = []
+
+    async def start(self):
+        command_read, command_write = os.pipe()
+        response_read, response_write = os.pipe()
+        log = open(PRIVATE / 'chromium.log', 'ab', buffering=0)
+        self.process = subprocess.Popen(
+            ['/usr/local/bin/fable-chromium-pipe', str(command_read), str(response_write)],
+            user=1000, group=1000, extra_groups=[1001],
+            pass_fds=(command_read, response_write), stdin=subprocess.DEVNULL,
+            stdout=log, stderr=log,
+            env=dict(os.environ, HOME='/home/fable', DISPLAY=':99',
+                     XAUTHORITY='/run/fable-desktop/Xauthority'),
+        )
+        log.close()
+        os.close(command_read)
+        os.close(response_write)
+        self.command_write = command_write
+        self.response_read = response_read
+        os.set_blocking(command_write, False)
+        reader = asyncio.StreamReader(limit=MAX_MESSAGE)
+        await asyncio.get_running_loop().connect_read_pipe(
+            lambda: asyncio.StreamReaderProtocol(reader), os.fdopen(response_read, 'rb', buffering=0))
+        self.reader_task = asyncio.create_task(self.receive(reader))
+        await self.command({'method': 'Browser.getVersion'}, timeout=20)
+        # Chromium never writes into an agent-controlled directory. Completed
+        # GUID-named files cross into Workspace through the bounded copy below.
+        await self.command({'method': 'Browser.setDownloadBehavior', 'params': {
+            'behavior': 'allowAndName', 'downloadPath': '/home/fable/.downloads',
+            'eventsEnabled': True,
+        }})
+
+    async def finish_download(self, guid, filename):
+        try:
+            result = await asyncio.to_thread(publish_download, guid, filename)
+        except (OSError, ValueError):
+            result = {'state': 'failed', 'message':
+                      'Download could not be copied into Workspace/Downloads. '
+                      'Use an ordinary Downloads folder and a file under 25 MiB, then download again.'}
+            with contextlib.suppress(OSError, ValueError):
+                await asyncio.to_thread(discard_download, guid)
+        self.download_results.append(result)
+        self.download_results = self.download_results[-20:]
+
+    async def cancel_downloads(self):
+        active = tuple(self.downloads)
+        self.downloads.clear()
+        for guid in active:
+            result = await self.command({'method': 'Browser.cancelDownload', 'params': {'guid': guid}})
+            if 'error' in result:
+                raise RuntimeError('The browser did not confirm download cancellation.')
+            await asyncio.to_thread(discard_download, guid)
+        # A completed copy already admitted before revocation must drain before
+        # native control can be handed over. Do not abandon a running thread.
+        if self.download_tasks:
+            await asyncio.gather(*tuple(self.download_tasks))
+
+    async def reject_download(self, guid):
+        await self.command({'method': 'Browser.cancelDownload', 'params': {'guid': guid}})
+        with contextlib.suppress(OSError, ValueError):
+            await asyncio.to_thread(discard_download, guid)
+        self.download_results.append({'state': 'failed', 'message':
+                                      'Download stopped: use a file under 25 MiB and fewer than 100 pending downloads.'})
+        self.download_results = self.download_results[-20:]
+
+    def download_event(self, value):
+        params = value.get('params', {})
+        guid = params.get('guid')
+        if not isinstance(guid, str):
+            return
+        if value.get('method') == 'Browser.downloadWillBegin':
+            if len(self.downloads) >= 100:
+                task = asyncio.create_task(self.reject_download(guid))
+                self.download_tasks.add(task)
+                task.add_done_callback(self.download_tasks.discard)
+            else:
+                self.downloads[guid] = params.get('suggestedFilename', 'download')
+        elif value.get('method') == 'Browser.downloadProgress':
+            if max(params.get('totalBytes', 0), params.get('receivedBytes', 0)) > MAX_DOWNLOAD_BYTES and guid in self.downloads:
+                self.downloads.pop(guid, None)
+                task = asyncio.create_task(self.reject_download(guid))
+                self.download_tasks.add(task)
+                task.add_done_callback(self.download_tasks.discard)
+            elif params.get('state') == 'completed' and guid in self.downloads:
+                task = asyncio.create_task(self.finish_download(guid, self.downloads.pop(guid)))
+                self.download_tasks.add(task)
+                task.add_done_callback(self.download_tasks.discard)
+            elif params.get('state') == 'canceled':
+                self.downloads.pop(guid, None)
+
+    async def command(self, value, client=None, timeout=10):
+        self.sequence += 1
+        request_id = self.sequence
+        original_id = value.get('id')
+        value = dict(value, id=request_id)
+        future = asyncio.get_running_loop().create_future() if client is None else None
+        self.pending[request_id] = (client, original_id, future)
+        payload = json.dumps(value, separators=(',', ':')).encode() + b'\0'
+        if len(payload) > MAX_MESSAGE:
+            self.pending.pop(request_id, None)
+            raise ValueError('Browser command is too large.')
+        try:
+            # Bounded CDP commands fit the pipe after ordinary draining. Await
+            # readiness rather than blocking the service event loop on a full pipe.
+            async with self.write_lock:
+                offset = 0
+                deadline = asyncio.get_running_loop().time() + timeout
+                while offset < len(payload):
+                    if asyncio.get_running_loop().time() >= deadline:
+                        raise TimeoutError('Browser command transport stalled.')
+                    try:
+                        offset += os.write(self.command_write, payload[offset:])
+                    except BlockingIOError:
+                        await asyncio.sleep(0.001)
+            if future is not None:
+                return await asyncio.wait_for(future, timeout)
+        except BaseException:
+            self.pending.pop(request_id, None)
+            raise
+
+    async def receive(self, reader):
+        try:
+            while True:
+                encoded = await reader.readuntil(b'\0')
+                value = json.loads(encoded[:-1])
+                if 'id' in value:
+                    entry = self.pending.pop(value['id'], None)
+                    if entry is None:
+                        continue
+                    client, original_id, future = entry
+                    if future is not None and not future.done():
+                        future.set_result(value)
+                    elif client is not None and not client.closed:
+                        value['id'] = original_id
+                        await client.send_json(value)
+                else:
+                    self.download_event(value)
+                    for client in tuple(self.clients):
+                        if not client.closed:
+                            await client.send_json(value)
+        except (asyncio.IncompleteReadError, ConnectionError):
+            pass
+        finally:
+            for client in tuple(self.clients):
+                await client.close(code=1011)
+            for _, _, future in self.pending.values():
+                if future is not None and not future.done():
+                    future.set_exception(ConnectionError('Browser stopped.'))
+            self.pending.clear()
+
+    async def close(self):
+        await self.cancel_downloads()
+        for client in tuple(self.clients):
+            await client.close()
+        if self.process is not None and self.process.poll() is None:
+            self.process.terminate()
+        if self.reader_task is not None:
+            self.reader_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.reader_task
+
+
+async def app_factory():
+    token = (PRIVATE / 'gateway-token').read_text().strip()
+    password = (PRIVATE / 'view-password').read_text().strip()
+    browser = BrowserPipe()
+    await browser.start()
+    http = ClientSession(timeout=ClientTimeout(total=10),
+                         auth=BasicAuth('fable-view', password))
+
+    @web.middleware
+    async def authenticated(request, handler):
+        supplied = request.match_info.get('token', '')
+        if not supplied or not secrets.compare_digest(supplied, token):
+            raise web.HTTPNotFound()
+        return await handler(request)
+
+    app = web.Application(middlewares=[authenticated], client_max_size=MAX_MESSAGE)
+    input_lock = asyncio.Lock()
+
+    async def status(_request):
+        value = await browser.command({'method': 'Browser.getVersion'})
+        if 'result' not in value:
+            raise web.HTTPServiceUnavailable()
+        async with http.get('http://127.0.0.1:6901/') as response:
+            if response.status != 200:
+                raise web.HTTPServiceUnavailable()
+        return web.json_response({'ready': True, 'transport': 'kasmvnc', 'image': '0.1.0-v4'})
+
+    async def cdp(request):
+        socket = web.WebSocketResponse(max_msg_size=MAX_MESSAGE, heartbeat=20)
+        await socket.prepare(request)
+        # A reconnect replaces the former transport; old connections keep no
+        # independent access to this browser after replacement.
+        for old in tuple(browser.clients):
+            await old.close(code=1001)
+        browser.clients.add(socket)
+        try:
+            async for message in socket:
+                if message.type != WSMsgType.TEXT:
+                    break
+                value = json.loads(message.data)
+                if not isinstance(value, dict) or not isinstance(value.get('method'), str):
+                    break
+                await browser.command(value, client=socket)
+        finally:
+            browser.clients.discard(socket)
+            browser.pending = {key: value for key, value in browser.pending.items() if value[0] is not socket}
+            await socket.close()
+        return socket
+
+    async def downloads(_request):
+        return web.json_response({'pending': len(browser.downloads),
+                                  'recent': browser.download_results})
+
+    async def cancel_downloads(_request):
+        await browser.cancel_downloads()
+        return web.json_response({'cancelled': True})
+
+    async def desktop_input(request):
+        value = await request.json()
+        if not isinstance(value, dict):
+            raise web.HTTPBadRequest()
+        payload = json.dumps(value).encode()
+        if len(payload) > 20 * 1024:
+            raise web.HTTPRequestEntityTooLarge(max_size=20 * 1024, actual_size=len(payload))
+        async with input_lock:
+            process = await asyncio.create_subprocess_exec(
+                '/usr/local/bin/fable-desktop-input', stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                user=1000, group=1000, extra_groups=[1001],
+                env=dict(os.environ, HOME='/home/fable', DISPLAY=':99',
+                         XAUTHORITY='/run/fable-desktop/Xauthority'))
+            try:
+                await asyncio.wait_for(process.communicate(payload), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+                raise web.HTTPGatewayTimeout()
+            if process.returncode != 0:
+                raise web.HTTPBadRequest()
+        return web.json_response({'applied': True})
+
+    async def viewer(request):
+        relative = request.match_info.get('asset', '') or 'index.html'
+        target = (ASSETS / relative).resolve()
+        if not target.is_relative_to(ASSETS) or not target.is_file():
+            raise web.HTTPNotFound()
+        response = web.FileResponse(target)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
+
+    async def websockify(request):
+        downstream = web.WebSocketResponse(protocols=('binary',), max_msg_size=MAX_MESSAGE, heartbeat=20)
+        upstream = await http.ws_connect('http://127.0.0.1:6901/websockify',
+                                         origin='http://127.0.0.1:6901',
+                                         protocols=('binary',), max_msg_size=MAX_MESSAGE)
+        await downstream.prepare(request)
+
+        async def relay(source, destination):
+            async for message in source:
+                if message.type == WSMsgType.BINARY:
+                    await destination.send_bytes(message.data)
+                elif message.type == WSMsgType.TEXT:
+                    await destination.send_str(message.data)
+                else:
+                    break
+
+        tasks = [asyncio.create_task(relay(downstream, upstream)),
+                 asyncio.create_task(relay(upstream, downstream))]
+        try:
+            await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            await upstream.close()
+            await downstream.close()
+        return downstream
+
+    app.router.add_get('/{token}/status', status)
+    app.router.add_get('/{token}/cdp', cdp)
+    app.router.add_get('/{token}/downloads', downloads)
+    app.router.add_post('/{token}/cancel-downloads', cancel_downloads)
+    app.router.add_get('/{token}/viewer/{asset:.*}', viewer)
+    app.router.add_get('/{token}/websockify', websockify)
+    app.router.add_post('/{token}/input', desktop_input)
+
+    async def cleanup(_app):
+        await http.close()
+        await browser.close()
+
+    app.on_cleanup.append(cleanup)
+    return app
+
+
+if __name__ == '__main__':
+    # Access logging is disabled because the URL contains native credentials.
+    web.run_app(app_factory(), host='0.0.0.0', port=9223, access_log=None, print=None)

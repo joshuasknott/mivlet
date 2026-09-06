@@ -15,27 +15,36 @@ import {
 } from "../hooks/useDurableConversation";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
-import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
+import { createDesktopToolExecutor, type DesktopToolExecutorOptions } from "../lib/desktop-tool-runtime";
 import { listRuntimeMcpServerConfigurations } from "../runtime";
 import { remoteConnectors, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
 import { chatConnectorIds } from "../lib/connector-chat";
+import { isLocalComputerTool } from "../lib/computer-tools";
 import {
   navigateRuntimeHostedBrowser,
   prepareRuntimeHostedBrowser,
   snapshotRuntimeHostedBrowser,
+  cancelRuntimeLocalComputer,
 } from "../runtime";
 
 export function useShellAgentController({
   onDictation,
   onVoiceCancel,
   threadId,
+  thumbnailEnabled = true,
 }: {
   onDictation: (transcript: string) => void;
   onVoiceCancel: () => void;
   threadId?: string;
+  thumbnailEnabled?: boolean;
 }) {
-  const approvalGate = useMemo(() => createApprovalGate(), []);
-  const runtime = useShellRuntime({ approvalGate });
+  const gateRef = useRef<ReturnType<typeof createApprovalGate> | null>(null);
+  if (!gateRef.current) gateRef.current = createApprovalGate();
+  const approvalGate = gateRef.current;
+  const scopeResetRef = useRef<() => void>(() => {});
+  const cancelledScopeAttemptRef = useRef<string | null>(null);
+  const executionActivityRef = useRef<(approvalId: string, tool: string) => void>(() => {});
+  const runtime = useShellRuntime({ approvalGate, onScopeReset: () => scopeResetRef.current() });
   const cancelRequestedRef = useRef(false);
   const [hostedBrowserSnapshot, setHostedBrowserSnapshot] =
     useState<HostedBrowserSnapshot | null>(null);
@@ -46,8 +55,10 @@ export function useShellAgentController({
     null,
   );
 
+  const resolvedWorkspaceRef = useRef(false);
+  if (!runtime.accountWorkspacePending) resolvedWorkspaceRef.current = true;
   const activeWorkspaceId =
-    !runtime.accountWorkspacePending &&
+    resolvedWorkspaceRef.current &&
     runtime.accountWorkspaceStatus.accountBound &&
     (runtime.accountWorkspaceStatus.state === "ready" ||
       runtime.accountWorkspaceStatus.state === "offline") &&
@@ -74,7 +85,15 @@ export function useShellAgentController({
   const localComputer = useLocalComputer({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId ?? "agent-unavailable",
+    thumbnailEnabled,
   });
+  const localComputerRef = useRef<DesktopToolExecutorOptions["localComputer"]>(undefined);
+  localComputerRef.current = activeWorkspaceId && activeAgentId ? {
+    workspaceId: activeWorkspaceId, agentId: activeAgentId,
+    ready: localComputer.node?.lifecycle === "ready",
+    generation: localComputer.node?.generation,
+    controller: localComputer.node?.controller,
+  } : undefined;
   const hostedComputer = useHostedComputer({
     workspaceId: hostedWorkspaceId,
     agentId: activeAgentId ?? "agent-unavailable",
@@ -90,7 +109,7 @@ export function useShellAgentController({
 
   const queueToolApproval = useCallback(
     (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => {
-      if (["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0])) return;
+      if (["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0]) || isLocalComputerTool(event.tool, event.arguments)) return;
       if (approvalGate.register(event.approval))
         runtime.recordBackendToolCall(event);
     },
@@ -207,12 +226,17 @@ export function useShellAgentController({
         connectorAccessCurrent: (connectorId) => connectorAccessRef.current.workspaceId === activeWorkspaceId
           && connectorAccessRef.current.agentId === activeAgentId && connectorAccessRef.current.ids.includes(connectorId),
         workspaceId: activeWorkspaceId,
+        localComputerCurrent: () => localComputerRef.current,
+        shouldCancel: () => cancelRequestedRef.current,
+        onExecuting: (approval, tool) => executionActivityRef.current(approval.id, tool),
         ...(activeWorkspaceId && activeAgentId
           ? {
               localComputer: {
                 workspaceId: activeWorkspaceId,
                 agentId: activeAgentId,
                 ready: localComputer.node?.lifecycle === "ready",
+                generation: localComputer.node?.generation,
+                controller: localComputer.node?.controller,
               },
             }
           : {}),
@@ -261,6 +285,7 @@ export function useShellAgentController({
     threadId,
   });
   const agent = useNativeAgent({
+    computer: activeWorkspaceId && activeAgentId ? { workspaceId: activeWorkspaceId, agentId: activeAgentId } : undefined,
     providers: runtime.backendProviders,
     activeProviderId: runtime.connectedAgentBackend?.id,
     models: runtime.selectableModels,
@@ -281,6 +306,14 @@ export function useShellAgentController({
     onToolCall: queueToolApproval,
   });
   const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
+  executionActivityRef.current = agent.markToolExecuting;
+  scopeResetRef.current = () => {
+    const attemptId = agent.state.currentAttemptId;
+    if (!agent.state.running || !attemptId || cancelledScopeAttemptRef.current === attemptId) return;
+    cancelledScopeAttemptRef.current = attemptId;
+    cancelRequestedRef.current = true;
+    void agent.cancel();
+  };
   const voice = useVoice(voiceProvider, onDictation, {
     disabled: false,
     onCancel: onVoiceCancel,
@@ -303,7 +336,17 @@ export function useShellAgentController({
     },
     stopCurrentWork: async () => {
       if (!agent.state.running) return false;
-      await agent.cancel();
+      cancelRequestedRef.current = true;
+      const computer = localComputerRef.current;
+      // Native cancellation revokes admitted computer operations even while the
+      // provider is stopping or waiting for a tool result.
+      const cancellation = computer?.ready && computer.generation !== undefined && computer.controller === "agent"
+        ? cancelRuntimeLocalComputer({ workspaceId: computer.workspaceId, agentId: computer.agentId, expectedGeneration: computer.generation })
+        : Promise.resolve(null);
+      const results = await Promise.allSettled([agent.cancel(), cancellation]);
+      await localComputer.refresh().catch(() => undefined);
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
       return true;
     },
     resetCancellation: () => {

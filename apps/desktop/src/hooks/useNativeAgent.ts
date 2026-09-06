@@ -38,6 +38,7 @@ import {
 } from "@fable/connectors";
 import { validateReasoningEffort } from "@fable/connectors/native-api/reasoning";
 import { describeBackendError } from "../lib/backend-errors";
+import { createComputerTaskExecutor } from "../lib/computer-task-executor";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopAntigravityAcp } from "../lib/antigravity-acp";
 import { createDesktopManagedRuntime } from "../lib/managed-runtime";
@@ -95,6 +96,7 @@ export interface NativeAgentState {
 }
 
 export interface UseNativeAgentOptions {
+  computer?: { workspaceId: string; agentId: string };
   providers: BackendProvider[];
   /** Provider selected by the combined model picker. */
   activeProviderId?: string;
@@ -572,16 +574,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           // the fail-closed stub keeps tool calls surfacing as approvals that
           // refuse to execute. The permission mode still gates which tool calls
           // may reach the executor.
-          execute:
+          execute: createComputerTaskExecutor(
             executeRef.current ??
             (async () => {
               throw new Error("Tool execution pending approval in the shell.");
             }),
+            (activity) => setState((current) => ({ ...current, activity })),
+          ),
           authorize: authorizeRef.current,
           shouldCancel: shouldCancelRef.current ?? (() => false),
           contextPrefix: prepared.systemPrefix,
           permissionMode,
           attemptId,
+          computer: options.computer,
           onRetry: () => {
             if (!persisted) return;
             persisted = {
@@ -991,18 +996,26 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     [run],
   );
 
-  const cancel = useCallback(async () => {
-    // Delegate real in-flight cancellation to the active backend. The native-API
-    // adapter routes it to the Rust cancel map via the requestId it captured from
-    // the transport. No-op when no run is active.
-    if (activeBackendRef.current) {
-      await activeBackendRef.current.cancel(activeAttemptIdRef.current ?? "");
-    }
-    // Tear down any tool-call still awaiting approval on the shared gate so a
-    // cancelled-but-never-granted call (and its unresolved promise) does not
-    // linger for the session. No-op when no onCancel is wired.
-    onCancelRef.current?.();
+  const markToolExecuting = useCallback((approvalId: string, tool: string) => {
     const persisted = activePersistedRef.current;
+    if (!persisted || !persisted.pendingApprovalIds.includes(approvalId) || persisted.status === "cancelled") return;
+    activePersistedRef.current = { ...persisted, status: "streaming", pendingApprovalIds: persisted.pendingApprovalIds.filter((id) => id !== approvalId) };
+    setState((current) => current.running && current.currentAttemptId === persisted.id
+      ? { ...current, status: "streaming", activity: `Using: ${tool}` } : current);
+  }, []);
+
+  const cancel = useCallback(async () => {
+    const backendToCancel = activeBackendRef.current;
+    const attemptToCancel = activeAttemptIdRef.current;
+    const writerToCancel = activeWriterRef.current;
+    const persisted = activePersistedRef.current;
+    // Reject approval waiters immediately, even when native cancellation is
+    // slow or unavailable. No lost card may leave a provider waiting forever.
+    onCancelRef.current?.();
+    const nativeCancellation = Promise.resolve().then(() => backendToCancel?.cancel(attemptToCancel ?? "")).catch(() => {
+      setState((current) => current.currentAttemptId === attemptToCancel
+        ? { ...current, lastError: "The response stopped locally, but provider cancellation could not be confirmed." } : current);
+    });
     if (persisted && persisted.status !== "cancelled") {
       const terminalRun: ExecutionAttempt = {
         ...persisted,
@@ -1013,11 +1026,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       };
       activePersistedRef.current = terminalRun;
       try {
-        await activeWriterRef.current?.checkpointAssistant(
+        await writerToCancel?.checkpointAssistant(
           terminalRun.transcript,
           true,
         );
-        await activeWriterRef.current?.record({
+        await writerToCancel?.record({
           kind: "interruption",
           content: "The response was stopped.",
           reason: "user-stop",
@@ -1028,12 +1041,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         // the next scoped recovery can surface the adapter state safely.
       }
     }
-    setState((current) => ({
+    setState((current) => current.currentAttemptId === attemptToCancel ? ({
       ...current,
       running: false,
       status: "cancelled",
-    }));
+    }) : current);
+    await nativeCancellation;
   }, []);
+
+  useEffect(() => () => {
+    // A renderer remount cannot retain the visible approval queue. Stop its
+    // native provider and settle its gate before those refs become unreachable.
+    if (activeAttemptIdRef.current) void cancel();
+  }, [cancel]);
 
   /**
    * Surface a pre-run validation error (e.g. an invalid model selection) through
@@ -1055,5 +1075,5 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     }));
   }, []);
 
-  return { state, run, retry, cancel, reportError, backend, resolveBackend };
+  return { state, run, retry, cancel, markToolExecuting, reportError, backend, resolveBackend };
 }

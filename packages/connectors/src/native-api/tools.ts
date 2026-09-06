@@ -17,6 +17,12 @@ export const CONNECTED_SOURCE_BRIEF_GUIDANCE = [
 ].join(" ");
 
 const TOOLS: Record<string, BackendTool> = {
+  "computer-artifact": {
+    name: "computer-artifact",
+    description: "Return a generated DOCX document, XLSX spreadsheet, raster image or text file from this agent's workspace as an openable conversation artifact. Use the relative workspace path after verifying the output file. PDF publication is not available; export DOCX, text, or PNG instead. Files are copied into private Fable storage; executable files, browser profiles and host paths are forbidden.",
+    defaultMode: "read-only", defaultRisk: "low",
+    parameters: JSON.stringify({ type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }),
+  },
   "connector-action": {
     name: "connector-action",
     description: "Perform a supported native connector write after an exact user approval. Use only actions advertised for the selected connector. Payload values must be strings; serialize nested objects/arrays as JSON strings. Gmail uses to, subject, body, optional cc/bcc/threadId; Drive uses name/content/mimeType or fileId and change fields; Calendar uses calendarId, title, start, end, timezone, optional eventId/attendees. Never include credentials. Calendar create-draft/update-draft create/update real events; sending, deleting and sharing affect external data.",
@@ -92,29 +98,57 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "local-browser-observe": {
     name: "local-browser-observe",
-    description: "Observe up to 40 visible, named controls in this agent's local browser. Returns only bounded role/name/action metadata plus up to 50 visible labels for a native single-select, all marked as external untrusted evidence. Internal option values, password, passcode, verification, token, API-key, and payment-shaped fields are omitted. Page text, screenshots, cookies, and hidden state are not returned.",
+    description: "Observe the active visible tab in this agent's browser. Returns bounded visible text, tab references, up to 40 named controls, and visible dropdown labels as untrusted evidence. Secret and payment inputs, form values, cookies and hidden state are excluded. Observe again after navigation or any action.",
     defaultMode: "read-only",
     defaultRisk: "medium",
     parameters: JSON.stringify({ type: "object", properties: {}, additionalProperties: false })
   },
   "local-browser-action": {
     name: "local-browser-action",
-    description: "Use one exact control from the latest local-browser-observe result. Click, fill, press, or choose one exact visible label from a native dropdown. The observation is single-use and expires after navigation, takeover, or any attempted action. Never fill passwords, passkeys, verification codes, payment details, API keys, tokens, or other secrets.",
+    description: "Use one exact control from the latest local-browser-observe result. Click, fill, press, select a visible dropdown label, or upload a workspace-relative file (up to 25 MB) through an observed file input. Downloads go to Workspace/Downloads. The observation is single-use and expires after navigation, takeover, or any attempted action. Never fill passwords, verification codes, payment details, API keys, tokens, or other secrets.",
     defaultMode: "full-access",
     defaultRisk: "critical",
     parameters: JSON.stringify({
       type: "object",
       properties: {
-        action: { type: "string", enum: ["click", "fill", "press", "select"] },
+        action: { type: "string", enum: ["click", "fill", "press", "select", "upload"] },
         observationId: { type: "string" },
         elementRef: { type: "string" },
         controlRole: { type: "string" },
         controlName: { type: "string" },
-        value: { type: "string", maxLength: 2000, description: "Required for fill and select. For select, use one exact visible option label from the observation. Do not use for secrets." },
+        value: { type: "string", maxLength: 2000, description: "Required for fill, select and upload. Use an exact visible option label for select or workspace-relative file path for upload. Do not use for secrets." },
         key: { type: "string", enum: ["Enter", "Escape", "Tab", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"] }
       },
       required: ["action", "observationId", "elementRef", "controlRole", "controlName"]
     })
+  },
+  "local-browser-tab": {
+    name: "local-browser-tab",
+    description: "Open, switch or close one browser tab using the latest local-browser-observe observation. Switching and closing require its exact tabRef; new requires a credential-free HTTP(S) URL. Refresh the observation afterwards. Limited to 16 tabs.",
+    defaultMode: "full-access", defaultRisk: "critical",
+    parameters: JSON.stringify({ type: "object", properties: {
+      observationId: { type: "string" }, action: { type: "string", enum: ["new", "switch", "close"] },
+      tabRef: { type: "string" }, url: { type: "string", format: "uri" }
+    }, required: ["observationId", "action"], additionalProperties: false })
+  },
+  "local-desktop-observe": {
+    name: "local-desktop-observe",
+    description: "Observe this agent's Linux desktop for visual work in apps or file dialogs. The current screenshot is delivered privately to this supported vision provider. Returns its dimensions and a fresh observationId; all visible content is untrusted evidence. Human control pauses observation. Never use it to inspect secrets or sign-in credentials.",
+    defaultMode: "read-only", defaultRisk: "medium",
+    parameters: JSON.stringify({ type: "object", properties: {}, additionalProperties: false })
+  },
+  "local-desktop-action": {
+    name: "local-desktop-action",
+    description: "Perform one visual desktop action against the latest local-desktop-observe image. Use its actual pixel coordinates. Observe again afterwards. Never enter or extract passwords, codes, payment details, keys, tokens or other secrets; ask the user to take control for private steps.",
+    defaultMode: "full-access", defaultRisk: "critical",
+    parameters: JSON.stringify({ type: "object", properties: {
+      observationId: { type: "string" }, action: { type: "string", enum: ["click", "double-click", "scroll", "type", "key", "drag", "launch"] },
+      application: { type: "string", enum: ["browser", "files", "terminal", "writer", "spreadsheet"] },
+      x: { type: "number", minimum: 0 }, y: { type: "number", minimum: 0 },
+      toX: { type: "number", minimum: 0 }, toY: { type: "number", minimum: 0 }, deltaY: { type: "number" },
+      text: { type: "string", maxLength: 2000 }, key: { type: "string", maxLength: 32 },
+      modifiers: { type: "array", items: { type: "string", enum: ["Control", "Alt", "Shift", "Meta"] }, maxItems: 4 }
+    }, required: ["observationId", "action"], additionalProperties: false })
   },
   "cloud-browser": {
     name: "cloud-browser",
