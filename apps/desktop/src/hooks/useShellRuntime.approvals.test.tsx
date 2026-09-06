@@ -10,8 +10,11 @@ import { PREVIEW_ACCOUNT_WORKSPACE_STATUS } from "./shell-runtime/defaults";
 import { useShellRuntime } from "./useShellRuntime";
 import { defaultShellState } from "./shell-runtime/defaults";
 import { shellStateToRuntimeSnapshot } from "../lib/persistence";
+import { resolveApprovalFallback } from "../lib/approval-fallbacks";
+import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@fable/protocol";
 
 const mocks = vi.hoisted(() => ({ status: null as AccountWorkspaceStatus | null,
+  resolveApproval: vi.fn<(request: ApprovalResolutionRequest) => Promise<ApprovalResolutionResponse>>(),
   loadSnapshot: vi.fn<() => Promise<RuntimeSnapshot | null>>(async () => null),
   saveSnapshot: vi.fn(async (_snapshot: RuntimeSnapshot, _workspaceId?: string) => null),
 }));
@@ -21,6 +24,7 @@ vi.mock("../runtime", async (original) => ({
   reconcileRuntimeAccountWorkspace: async () => mocks.status,
   loadRuntimeSnapshot: mocks.loadSnapshot,
   saveRuntimeSnapshot: mocks.saveSnapshot,
+  resolveRuntimeApprovalRequest: mocks.resolveApproval,
 }));
 vi.mock("../lib/persistence", async (original) => ({
   ...await original<typeof import("../lib/persistence")>(),
@@ -35,7 +39,35 @@ describe("approval queue workspace hydration", () => {
     clearActiveRuntimeDataScope();
     mocks.loadSnapshot.mockReset().mockResolvedValue(null);
     mocks.saveSnapshot.mockClear();
+    mocks.resolveApproval.mockReset().mockImplementation(async (request) => resolveApprovalFallback(request));
     mocks.status = { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, activeWorkspace: { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS.activeWorkspace, localWorkspaceId: "local-default" }, activeContextOwner: { internalUserId: "owner-a" } };
+  });
+
+  it.each(["success", "failure", "downgrade", "workspace"] as const)("full access authorization: %s", async (scenario) => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
+    await act(async () => {});
+    act(() => result.current.selectPermissionLabel("Work Freely"));
+    let finish!: (value: ApprovalResolutionResponse) => void;
+    if (scenario === "failure") mocks.resolveApproval.mockRejectedValueOnce(new Error("Audit unavailable"));
+    if (scenario === "downgrade" || scenario === "workspace") mocks.resolveApproval.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const approval = buildToolApproval("Codex", "local-browser", '{"url":"https://example.test"}');
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval).catch(() => "cancelled");
+    await act(async () => result.current.recordBackendToolCall({ callId: approval.id, tool: "local-browser", arguments: "{}", approval }));
+    expect(result.current.openApprovals).toEqual([]);
+    expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once" }));
+    if (scenario === "downgrade") {
+      act(() => result.current.selectPermissionLabel("Ask Me"));
+      await act(async () => finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0][0])));
+    }
+    if (scenario === "workspace") {
+      mocks.status = { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
+      await act(async () => { await result.current.reconcileAccountWorkspace(); });
+      await act(async () => finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0][0])));
+    }
+    await expect(outcome).resolves.toBe(scenario === "success" ? "granted" : scenario === "workspace" ? "cancelled" : "denied");
   });
 
   it("keeps a pending approval and its waiter through a same-owner workspace refresh", async () => {

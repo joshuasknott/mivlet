@@ -52,7 +52,7 @@ export const PERMISSION_PROFILES: readonly PermissionProfile[] = [
   },
   {
     label: "Work Freely",
-    description: "Fable handles everyday work, but asks before risky actions.",
+    description: "Your agent works without approval prompts. You can stop it or take control at any time.",
     mode: "full-access"
   },
   {

@@ -663,7 +663,7 @@ export function ChatWorkspace() {
                     const connectorIds = await beginConnectorTurn();
                     resetCancellation();
                     void agent
-                      .retry(attempt, conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready"))
+                      .retry(attempt, conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready"), runtime.permissionMode)
                       .finally(async () => { endConnectorTurn(); await runtime.refreshConnectorStatuses(); return durableConversation.refresh(); });
                   }}
                 >

@@ -22,6 +22,9 @@ describe("computer authority across approvals", () => {
     const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { localComputer: computer() });
     await expect(execute(approval(), args)).resolves.toBe("Saved");
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 4, workspaceId: "workspace-a", agentId: "agent-a" }));
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      approval: expect.objectContaining({ decision: "once", confirmationText: "approve write-file" }),
+    }));
   });
   it("discards an in-flight result after a scope/control change", async () => {
     const current = computer();

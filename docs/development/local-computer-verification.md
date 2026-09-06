@@ -110,3 +110,71 @@ to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
   fix covered above. `perf-runtime-final.log` is **not** a pass: its native test
   link failed with Windows `LNK1104`. No broad suites were repeated.
 - Local logs and temporary files are retained outside the implementation commit.
+
+### Native acceptance follow-up — 6 September 2026
+
+- Docker became available. The saved agent computer started through Fable and
+  reported healthy; the native viewer showed Chromium. Human takeover and
+  explicit return switched the viewer between human control and watching.
+- A user-submitted public Python research and DOCX/XLSX task failed after Retry
+  with `Blocked by Fable's read-only permission mode`, although the composer
+  displayed Full access. The user confirmed using Retry. Its hook hardcoded
+  read-only; the retry action now supplies the current permission mode. It
+  starts a new attempt and retains fresh tool approvals rather than reusing
+  historical approval IDs. Default callers without an explicit mode remain
+  read-only.
+- The 33 native-agent hook tests passed, including regressions for full-access
+  and read-only retries. Another 26 focused tests passed for computer state,
+  artifacts, task execution and shell approvals. Desktop typecheck and scoped
+  ESLint passed.
+- The real lifecycle test passed in 24.28 seconds. The real container isolation,
+  document generation, process cancellation and persistence test passed in
+  20.20 seconds. Both use separate test resources.
+- The three-test live browser command stalled in its first test,
+  `real_agent_navigation_uses_the_isolated_browser_and_returns_no_frame`, and
+  was interrupted without a result. Its remaining labelled test container was
+  stopped. This is not a pass.
+- The Windows automation helper could read the app but returned
+  `coordinate input geometry is unavailable` for native controls and a UIA
+  CacheRequest error for setting the composer value, including after reconnect.
+  The user submitted the test prompt manually. Full live research, artifact
+  publication/opening and repeated end-to-end tasks remain incomplete.
+- The fixed frontend production build and bundle budget passed. The native
+  rebuild could not replace `target/debug/fable-desktop.exe` because the old
+  app remained running (`Access is denied`, Windows error 5). Normal closure
+  was requested after the automation helper also failed on the Close button.
+  The Retry fix is not yet present in the running native app.
+
+### Full access follow-up — 6 September 2026
+
+- After normal app closure, the native rebuild succeeded. A live task then
+  exposed a second issue: Full access still queued interactive approvals for
+  each computer action. Full access now resolves each exact tool authorization
+  automatically through native persistence; Ask first keeps its queue. Native
+  failures, permission downgrades, cancellation and workspace changes do not
+  release the pending action. The permission description matches this behavior.
+- Nine shell approval tests and 33 native-agent tests passed, including automatic
+  authorization, native failure, permission downgrade, workspace change and Retry.
+  Desktop types, scoped production-source ESLint, production frontend build,
+  performance budget and native debug build passed. The updated app was launched.
+- Screenshot-coordinate interaction worked after raising the Fable window;
+  accessibility-index clicks remain unreliable. The live acceptance task was
+  submitted through the composer using the user's selected GPT-5.6-Luna High.
+  Browser and short shell actions completed without interactive approval. File
+  creation failed with `Execution blocked: approval metadata changed after the
+  user decision.` Native approval resolution shortened/normalized the request
+  before recording its fingerprint, while execution supplied the original.
+- Native resolution now retains the exact unmodified request for the permit;
+  audit display normalization remains bounded. A long multiline regression proves
+  unchanged content executes, changed suffixes fail and permits remain single-use.
+  All 447 enabled native tests passed (six live tests ignored), along with Rust
+  formatting and all-target/all-feature Clippy with warnings denied.
+- The subsequent live agent run created both files through the isolated shell,
+  reported reading both back and returned two working artifact cards in the
+  conversation (XLSX 8 KB, DOCX 37 KB), with no approval interaction. Direct
+  `write-file` exposed a missing confirmation field in the desktop dispatch
+  resolution; that dispatch now uses the shared exact resolution builder. All
+  22 desktop tool executor tests passed, including the forwarding regression.
+  External opening of the returned copies and repeated complete tasks have not
+  yet been verified. The lifecycle controls also have a narrow-layout defect
+  visible when Computer options is expanded; this pass does not fix that layout.

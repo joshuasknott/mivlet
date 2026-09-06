@@ -236,6 +236,38 @@ mod tests {
     }
 
     #[test]
+    fn resolved_long_multiline_request_keeps_exact_execution_authority() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("approvals.json");
+        let mut approved = request();
+        approved.data_used = vec![format!(
+            "content: first line\n  {}\nlast line",
+            "x".repeat(2000)
+        )];
+        let resolved =
+            crate::approvals::resolve_approval(crate::models::ApprovalResolutionRequest {
+                request: approved.clone(),
+                decision: "once".into(),
+                decided_at: "2026-06-27T12:00:01Z".into(),
+                modification: None,
+                confirmation_text: Some("write file".into()),
+            })
+            .expect("resolve exact approval");
+        record_execution_decision(&path, &resolved).expect("persist");
+        let mut changed = approved.clone();
+        changed.data_used[0].push_str("changed suffix");
+        assert!(
+            verify_and_consume_execution_approval(&path, &changed, "2026-06-27T12:00:02Z").is_err()
+        );
+        verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:02Z")
+            .expect("unchanged long request executes");
+        assert!(
+            verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:03Z")
+                .is_err()
+        );
+    }
+
+    #[test]
     fn unpersisted_model_claim_cannot_authorize_execution() {
         let path = std::env::temp_dir().join("fable-missing-execution-approval.json");
         let _ = fs::remove_file(&path);

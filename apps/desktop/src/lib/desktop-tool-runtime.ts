@@ -543,11 +543,7 @@ async function runOnDesktop(
   // The gate already guaranteed a grant; synthesize the resolution request Rust
   // re-validates (decision "once" — the standing session/rule grants are
   // tracked separately on the gate and auto-satisfied before this point).
-  const resolution: ApprovalResolutionRequest = {
-    request: approval,
-    decision: "once",
-    decidedAt: new Date().toISOString()
-  };
+  const resolution = resolutionFor(approval);
 
   options.onExecuting?.(approval, toolName);
   const result = await executeRuntimeToolCall({

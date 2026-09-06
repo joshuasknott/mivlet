@@ -946,7 +946,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   );
 
   const retry = useCallback(
-    async (attemptToRetry: ExecutionAttempt, tools: AgentTurnRequest["tools"] = []) => {
+    async (
+      attemptToRetry: ExecutionAttempt,
+      tools: AgentTurnRequest["tools"] = [],
+      permissionMode: PermissionMode = "read-only",
+    ) => {
       const userExchange = attemptToRetry.exchanges
         ?.filter((exchange) => exchange.role === "user")
         .at(-1);
@@ -989,7 +993,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           maxTokens: 2_048,
         },
         undefined,
-        "read-only",
+        permissionMode,
         attemptToRetry.id,
       );
     },

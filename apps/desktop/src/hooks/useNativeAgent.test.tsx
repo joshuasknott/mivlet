@@ -432,6 +432,39 @@ describe("useNativeAgent", () => {
     expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["user"]);
   });
 
+  it.each(["read-only", "full-access"] as const)("retries with the current %s mode and a fresh executor decision", async (mode) => {
+    installDesktopRuntime();
+    const previous: ExecutionAttempt = {
+      id: "retry-permissions", providerId: "openai", model: "gpt-5",
+      status: "interrupted", transcript: "", threadId: "thread-1",
+      exchanges: [{ role: "user", content: "Create a new file" }],
+      turn: 0, pendingApprovalIds: ["old-approval"], recoverable: true,
+      retryCount: 0, createdAt: "2026-09-06T10:00:00Z", updatedAt: "2026-09-06T10:00:00Z",
+    };
+    mocks.lines = [
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fresh-call","function":{"name":"write-file","arguments":"{\\"path\\":\\"new.txt\\",\\"content\\":\\"verified\\"}"}}]}}]}',
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}',
+    ];
+    mocks.turnTwoLines = [openAiChunk("Finished"), finishStop];
+    const freshApprovalIds: string[] = [];
+    const execute = vi.fn(async (approval: { id: string }) => {
+      freshApprovalIds.push(approval.id);
+      return "Fresh approval executed";
+    });
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()], threadId: "thread-1", execute,
+      models: [{ id: "gpt-5", label: "GPT-5", available: true,
+        capabilities: { contextWindow: 128_000, maxOutputTokens: 8_192,
+          streaming: true, tools: true, vision: false, reasoning: true, structuredOutput: true } }],
+    }));
+    await act(async () => {
+      await result.current.retry(previous, registeredToolSpecs().filter((tool) => tool.name === "write-file"), mode);
+    });
+    expect(execute).toHaveBeenCalledTimes(mode === "full-access" ? 1 : 0);
+    if (mode === "full-access") expect(freshApprovalIds[0]).not.toBe("old-approval");
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).parentAttemptId).toBe(previous.id);
+  });
+
   it("accumulates text-delta events into the transcript", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Hello"), openAiChunk(" world"), finishStop];

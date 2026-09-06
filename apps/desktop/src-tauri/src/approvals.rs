@@ -322,6 +322,10 @@ pub(crate) fn persist_approval_rule(
 pub(crate) fn resolve_approval(
     request: ApprovalResolutionRequest,
 ) -> Result<ApprovalResolutionResponse, String> {
+    // Validate and shorten display/audit fields below, but retain the exact
+    // request for execution permits. Truncated command/file content cannot
+    // fingerprint the original request (or distinguish changes past the cut).
+    let exact_request = request.request.clone();
     let original = normalize_approval_request(request.request)?;
     let decision = normalize_spaces(&request.decision).to_ascii_lowercase();
     let decided_at = normalize_spaces(&request.decided_at);
@@ -421,6 +425,11 @@ pub(crate) fn resolve_approval(
         note,
     })?;
 
+    let effective_request = if audit_entry.decision == "modify" {
+        effective_request
+    } else {
+        exact_request
+    };
     Ok(ApprovalResolutionResponse {
         persisted: false,
         audit_entry,

@@ -415,6 +415,8 @@ export function useShellRuntime(
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(
     initialState.permissionMode,
   );
+  const permissionModeRef = useRef(permissionMode);
+  permissionModeRef.current = permissionMode;
   const [permissionLabel, setPermissionLabel] = useState(
     isApprovalPresetLabel(initialState.permissionLabel)
       ? initialState.permissionLabel
@@ -2330,15 +2332,19 @@ export function useShellRuntime(
     setLastAction("Fable setup complete");
   };
 
-  // Queue a backend-originated tool call until the user decides. This is
-  // deliberately transient: a pending executor cannot survive an app restart,
-  // and recording a deny/allow audit entry before a decision would be false.
+  // Full access makes the decision automatically, through the same persisted
+  // single-use authorization boundary. Other modes retain the interactive queue.
   const recordBackendToolCall = (event: {
     callId: string;
     tool: string;
     arguments: string;
     approval: ApprovalRequest;
   }) => {
+    if (permissionModeRef.current === "full-access") {
+      void resolveApprovalDecision(event.approval, "once", undefined,
+        event.approval.confirmationPhrase, true);
+      return;
+    }
     if (event.tool === "connector-action") {
       try {
         const context = JSON.parse(event.arguments) as { preview?: string; payload?: Record<string, string> };
@@ -2454,7 +2460,10 @@ export function useShellRuntime(
     decision: ApprovalDecision,
     modification?: ApprovalModification,
     confirmationText?: string,
+    automatic = false,
   ) => {
+    const gate = approvalGateRef.current;
+    const identity = workspaceIdentityRef.current;
     const request = {
       request: approval,
       decision,
@@ -2469,6 +2478,15 @@ export function useShellRuntime(
         () => resolveApprovalFallback(request),
         "Approvals require the desktop runtime.",
       );
+
+      // A permission change, cancellation, or workspace switch while native
+      // persistence is pending must never release an obsolete tool call.
+      if (automatic && (permissionModeRef.current !== "full-access"
+        || identity !== workspaceIdentityRef.current
+        || gate !== approvalGateRef.current || !gate?.hasPending(approval.id))) {
+        gate?.resolveDeny(approval.id);
+        return;
+      }
 
       setApprovalAudit((current) =>
         prependAuditEntry(current, response.auditEntry),
@@ -2496,7 +2514,6 @@ export function useShellRuntime(
       // refuses (deny). Only approvals the shell registered as pending tool
       // calls are dispatched — a regular connector approval with no pending
       // entry is a no-op here. A deny never executes the tool.
-      const gate = approvalGateRef.current;
       if (gate?.hasPending(approval.id)) {
         if (decision === "deny") {
           gate.resolveDeny(approval.id);
@@ -2521,6 +2538,7 @@ export function useShellRuntime(
           : `${decision} recorded for ${approval.service}`,
       );
     } catch (error) {
+      if (automatic) gate?.resolveDeny(approval.id);
       setLastAction(
         error instanceof Error
           ? error.message
