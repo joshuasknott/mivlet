@@ -1,3 +1,31 @@
+import outlook from "../../assets/connectors/outlook.ico?no-inline";
+import microsoft_teams from "../../assets/connectors/microsoft-teams.ico?no-inline";
+import granola from "../../assets/connectors/granola.svg?no-inline";
+import canva from "../../assets/connectors/canva.png?no-inline";
+import productboard from "../../assets/connectors/productboard.svg?no-inline";
+import bigquery from "../../assets/connectors/bigquery.svg?no-inline";
+import amplitude from "../../assets/connectors/amplitude.png?no-inline";
+import tableau from "../../assets/connectors/tableau.ico?no-inline";
+import salesforce from "../../assets/connectors/salesforce.ico?no-inline";
+import pipedrive from "../../assets/connectors/pipedrive.png?no-inline";
+import apollo from "../../assets/connectors/apollo.svg?no-inline";
+import linkedin from "../../assets/connectors/linkedin.ico?no-inline";
+import meta_ads from "../../assets/connectors/meta-ads.svg?no-inline";
+import gorgias from "../../assets/connectors/gorgias.png?no-inline";
+import netsuite from "../../assets/connectors/netsuite.ico?no-inline";
+import ramp from "../../assets/connectors/ramp.ico?no-inline";
+import docusign from "../../assets/connectors/docusign.png?no-inline";
+import ironclad from "../../assets/connectors/ironclad.png?no-inline";
+import vanta from "../../assets/connectors/vanta.png?no-inline";
+import drata from "../../assets/connectors/drata.png?no-inline";
+import onetrust from "../../assets/connectors/onetrust.ico?no-inline";
+import lever from "../../assets/connectors/lever.png?no-inline";
+import workday from "../../assets/connectors/workday.ico?no-inline";
+import deel from "../../assets/connectors/deel.png?no-inline";
+import bamboohr from "../../assets/connectors/bamboohr.ico?no-inline";
+import servicenow from "../../assets/connectors/servicenow.png?no-inline";
+import consensus from "../../assets/connectors/consensus.svg?no-inline";
+import scispace from "../../assets/connectors/scispace.svg?no-inline";
 import google_drive from "../../assets/connectors/google-drive.svg?no-inline";
 import notion from "../../assets/connectors/notion.svg?no-inline";
 import dropbox from "../../assets/connectors/dropbox.svg?no-inline";
@@ -45,6 +73,34 @@ import arxiv from "../../assets/connectors/arxiv.svg?no-inline";
 import wolfram from "../../assets/connectors/wolfram.svg?no-inline";
 
 export const connectorLogos: Record<string, string> = {
+  "outlook": outlook,
+  "microsoft-teams": microsoft_teams,
+  "granola": granola,
+  "canva": canva,
+  "productboard": productboard,
+  "bigquery": bigquery,
+  "amplitude": amplitude,
+  "tableau": tableau,
+  "salesforce": salesforce,
+  "pipedrive": pipedrive,
+  "apollo": apollo,
+  "linkedin": linkedin,
+  "meta-ads": meta_ads,
+  "gorgias": gorgias,
+  "netsuite": netsuite,
+  "ramp": ramp,
+  "docusign": docusign,
+  "ironclad": ironclad,
+  "vanta": vanta,
+  "drata": drata,
+  "onetrust": onetrust,
+  "lever": lever,
+  "workday": workday,
+  "deel": deel,
+  "bamboohr": bamboohr,
+  "servicenow": servicenow,
+  "consensus": consensus,
+  "scispace": scispace,
   "google-drive": google_drive,
   "notion": notion,
   "dropbox": dropbox,

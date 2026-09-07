@@ -50,7 +50,7 @@ export function AgentWorkspaceHeader({
               : "Agent computer"
           }
         >
-          <SidebarSimple size={18} />
+          <SidebarSimple size={22} />
           {attentionCount ? (
             <span className="agent-workspace-header__count agent-workspace-header__count--attention">
               {attentionCount}

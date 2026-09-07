@@ -80,6 +80,12 @@ export function AgentSidebar({
       <div className="agent-sidebar__topline">
 
         <span className="agent-sidebar__title">Fable</span>
+      </div>
+
+      <label className="agent-search"><MagnifyingGlass size={16} aria-hidden="true" /><input type="search" aria-label="Search agents" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+
+      <div className="agent-sidebar__agents-heading">
+        <span>Agents</span>
         <button
           className="agent-sidebar__new"
           type="button"
@@ -90,8 +96,6 @@ export function AgentSidebar({
           <Plus size={17} aria-hidden="true" />
         </button>
       </div>
-
-      <label className="agent-search"><MagnifyingGlass size={16} aria-hidden="true" /><input type="search" aria-label="Search agents" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
 
       <div className="agent-list" role="list">
         {visibleAgents.map((agent) => {
