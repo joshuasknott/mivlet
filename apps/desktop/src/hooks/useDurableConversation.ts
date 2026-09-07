@@ -3,6 +3,7 @@ import {
   appendRuntimeConversationMessage,
   createRuntimeConversationThread,
   deleteRuntimeConversationDraft,
+  deleteRuntimeConversationThread,
   getRuntimeConversationThread,
   listRuntimeConversationMessages,
   listRuntimeConversationThreads,
@@ -147,6 +148,19 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
     [refresh],
   );
 
+  const deleteThread = useCallback(async (threadId: string) => {
+    const workspaceId = workspaceRef.current;
+    await deleteRuntimeConversationThread(threadId);
+    if (workspaceRef.current !== workspaceId) return;
+    generation.current += 1;
+    setState((current) => ({ ...current,
+      threads: current.threads.filter((thread) => thread.id !== threadId),
+      conversation: current.conversation?.thread.id === threadId ? null : current.conversation,
+      draft: current.draft?.threadId === threadId ? null : current.draft,
+      loading: false, error: null,
+    }));
+  }, []);
+
   const updateThread = useCallback(
     async (input: ConversationThreadUpdate) => {
       const thread = await runtime.updateThread(input);
@@ -211,6 +225,7 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
       draftKey,
       refresh,
       createThread,
+      deleteThread,
       updateThread,
       appendMessage,
       reviseMessage,
@@ -220,6 +235,7 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
     [
       appendMessage,
       createThread,
+      deleteThread,
       deleteDraft,
       draftKey,
       refresh,

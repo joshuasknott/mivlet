@@ -12,7 +12,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { PrivacyNotice } from "../settings/PrivacyNotice";
 import { OnboardingProviderStep } from "./OnboardingProviderStep";
-import fableMark from "../../assets/fable-mark.png";
 import "../../styles/routes/onboarding.css";
 
 type OnboardingStage = "account" | "provider" | "connectors";
@@ -154,13 +153,7 @@ export function OnboardingPage({
         </button>
       ) : null}
       <div className="og-center">
-        <img
-          className="fable-mark og-brand"
-          src={fableMark}
-          alt="Fable"
-          width={60}
-          height={60}
-        />
+
 
         {stage === "account" ? (
           <section

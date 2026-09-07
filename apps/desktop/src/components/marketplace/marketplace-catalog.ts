@@ -75,7 +75,7 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
       entry(
         "google-drive",
         "Google Drive",
-        "Find and work with selected Drive files",
+        "Find and work with your Drive files",
         "google",
         true,
       ),
@@ -104,7 +104,7 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
       entry(
         "gmail",
         "Gmail",
-        "Read selected mail and prepare approved replies",
+        "Search mail and prepare replies",
         "communication",
         true,
       ),

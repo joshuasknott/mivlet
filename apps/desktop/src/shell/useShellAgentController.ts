@@ -16,9 +16,7 @@ import {
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
 import { createDesktopToolExecutor, type DesktopToolExecutorOptions } from "../lib/desktop-tool-runtime";
-import { listRuntimeMcpServerConfigurations } from "../runtime";
-import { remoteConnectors, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
-import { chatConnectorIds } from "../lib/connector-chat";
+import { chatConnectorIds, chatConnectorTools } from "../lib/connector-chat";
 import { isLocalComputerTool } from "../lib/computer-tools";
 import {
   navigateRuntimeHostedBrowser,
@@ -67,10 +65,12 @@ export function useShellAgentController({
       : undefined;
   const activeAgentId = runtime.activeAgentId ?? runtime.agents[0]?.id;
   const connectorAccessRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[] });
-  const turnConnectorsRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[] });
+  const turnConnectorsRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[], routes: {} as Record<string, string> });
   const turn = turnConnectorsRef.current;
   connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId,
-    ids: chatConnectorIds(turn.workspaceId === activeWorkspaceId && turn.agentId === activeAgentId ? turn.ids : [], runtime.connectorManifests) };
+    ids: turn.workspaceId === activeWorkspaceId && turn.agentId === activeAgentId
+      ? chatConnectorIds([], runtime.connectorManifests).filter((id) => turn.ids.includes(id)
+        && turn.routes[id] === (runtime.connectorManifests.find((manifest) => manifest.id === id)?.connectionRoute ?? "native")) : [] };
   const hostedWorkspaceId =
     runtime.accountWorkspaceStatus.workspaces.find(
       (workspace) =>
@@ -353,13 +353,14 @@ export function useShellAgentController({
       cancelRequestedRef.current = false;
     },
     beginConnectorTurn: async () => {
-      const saved = activeWorkspaceId ? await listRuntimeMcpServerConfigurations(activeWorkspaceId) : [];
+      const latest = await runtime.refreshConnectorStatuses();
       if (connectorAccessRef.current.workspaceId !== activeWorkspaceId || connectorAccessRef.current.agentId !== activeAgentId) throw new Error("The active conversation changed. Send your message again.");
-      const remoteIds = remoteConnectors.filter((preset) => saved?.some((server) => server.id === remoteConnectorServerId(preset.id) && !server.disabled)).map((preset) => preset.id);
-      const ids = chatConnectorIds(remoteIds, runtime.connectorManifests);
-      turnConnectorsRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: remoteIds };
+      const manifests = latest ?? [];
+      const ids = chatConnectorIds([], manifests);
+      turnConnectorsRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids,
+        routes: Object.fromEntries(manifests.map((manifest) => [manifest.id, manifest.connectionRoute ?? "native"])) };
       connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids };
-      return ids;
+      return { ids, tools: chatConnectorTools(ids, manifests) };
     },
     endConnectorTurn: () => {
       if (turnConnectorsRef.current.workspaceId === activeWorkspaceId && turnConnectorsRef.current.agentId === activeAgentId) {

@@ -9,6 +9,63 @@ struct ToolProposalContext {
 // Curated provider operations, never name prefixes or server-supplied annotations.
 // Keep unknown tools and arbitrary MCP endpoints behind exact approval.
 fn is_official_read(endpoint: &Url, configuration: &str, tool: &str) -> bool {
+    // Provider-owned tool references: developers.notion.com/guides/mcp/mcp-supported-tools,
+    // developers.figma.com/docs/figma-mcp-server/tools-and-prompts and canva.dev/docs/mcp/tools.
+    // General execution/editing tools remain gated even on these endpoints.
+    let other_read = match (configuration, endpoint.as_str()) {
+        ("marketplace-notion", "https://mcp.notion.com/mcp") => matches!(
+            tool,
+            "notion-search"
+                | "notion-ai-search"
+                | "notion-fetch"
+                | "notion-search-skills"
+                | "notion-get-comments"
+                | "notion-get-users"
+                | "notion-get-user"
+                | "notion-query-data-sources"
+                | "notion-download-attachment"
+        ),
+        ("marketplace-figma", "https://mcp.figma.com/mcp") => matches!(
+            tool,
+            "whoami"
+                | "get_design_context"
+                | "get_metadata"
+                | "get_screenshot"
+                | "get_variable_defs"
+                | "get_figjam"
+                | "get_code_connect_map"
+                | "get_libraries"
+                | "search_design_system"
+                | "get_motion_context"
+                | "get_shader"
+                | "list_file_shaders"
+                | "list_shaders"
+                | "get_generative_plugin"
+                | "list_generative_plugins"
+        ),
+        ("marketplace-canva", "https://mcp.canva.com/mcp") => matches!(
+            tool,
+            "search-designs"
+                | "get-design"
+                | "get-design-content"
+                | "get-design-pages"
+                | "get-presenter-notes"
+                | "get-export-formats"
+                | "get-assets"
+                | "get-brand-template-dataset"
+                | "search-brand-templates"
+                | "list-brand-kits"
+                | "list-comments"
+                | "list-replies"
+                | "list-folder-items"
+                | "search-folders"
+                | "get-design-thumbnail"
+        ),
+        _ => false,
+    };
+    if other_read {
+        return true;
+    }
     configuration == "marketplace-vercel"
         && endpoint.as_str() == "https://mcp.vercel.com/"
         && matches!(
@@ -58,7 +115,11 @@ fn official_read_policy_requires_exact_provider_endpoint_and_tool() {
     ] {
         assert!(!is_official_read(&endpoint, "marketplace-vercel", tool));
     }
-    assert!(!is_official_read(&endpoint, "custom-vercel", "list_projects"));
+    assert!(!is_official_read(
+        &endpoint,
+        "custom-vercel",
+        "list_projects"
+    ));
     for url in [
         "https://mcp.vercel.com/other",
         "https://mcp.vercel.com/?target=other",
@@ -150,15 +211,11 @@ pub(crate) fn prepare_semantic_capability_call(
                 connection_revision,
                 &capability_id,
             )?;
-            let connection = crate::store::repos::connection_record::get(
-                tx,
-                store,
-                &scope,
-                &connection_id,
-            )?
-            .ok_or_else(|| {
-                crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
-            })?;
+            let connection =
+                crate::store::repos::connection_record::get(tx, store, &scope, &connection_id)?
+                    .ok_or_else(|| {
+                        crate::store::StoreError::Invalid("MCP Connection is unavailable.".into())
+                    })?;
             Ok((binding, connection))
         })
         .map_err(|error| error.to_string())?;
@@ -250,9 +307,7 @@ pub(crate) fn prepare_semantic_capability_call(
     })
 }
 
-fn validate_tool_proposal(
-    proposal: &McpToolProposal,
-) -> Result<ToolProposalContext, String> {
+fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalContext, String> {
     if !valid_session_id(&proposal.session_id) {
         return Err("The MCP session id is invalid.".into());
     }

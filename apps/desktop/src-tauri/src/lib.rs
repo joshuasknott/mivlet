@@ -29,6 +29,7 @@ mod connector_cache;
 mod connector_check;
 mod connector_sync;
 mod connectors;
+mod conversation_links;
 mod conversations;
 mod diagnostics;
 mod execution_approvals;
@@ -118,6 +119,8 @@ pub fn run() {
             local_computer::viewer::local_computer_open_viewer,
             local_computer::viewer::local_computer_close_viewer,
             local_computer::artifacts::local_computer_open_artifact,
+            local_computer::artifacts::local_computer_preview_artifact,
+            conversation_links::open_conversation_link,
             local_computer::local_computer_cancel,
             local_computer::lifecycle::local_computer_lifecycle,
             window_controls::control_main_window,
@@ -135,6 +138,7 @@ pub fn run() {
             conversations::conversation_load_draft,
             conversations::conversation_save_draft,
             conversations::conversation_delete_draft,
+            conversations::conversation_delete_thread,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             approvals::list_approval_audit,
@@ -259,6 +263,7 @@ pub fn run() {
             mcp_process::inspect_remote_mcp_authorization,
             mcp_process::begin_remote_mcp_authorization,
             mcp_process::disconnect_remote_mcp_authorization,
+            mcp_process::list_remote_mcp_connections,
             mcp_process::send_remote_mcp_frame,
             mcp_process::poll_remote_mcp_messages,
             mcp_process::close_remote_mcp_session,

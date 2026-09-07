@@ -20,6 +20,13 @@ for the teammate workspace. It never returns the host path, Docker resource
 name, browser-debug endpoint, cookie store, or process handle to React or the
 model.
 
+Conversation artifact previews read the immutable published copy through the
+same encrypted receipt, digest, workspace/agent and generation checks as opening
+a file. The main window receives at most 256 KB of UTF-8 text or an 8 MB raster
+image as an ephemeral preview. Office files and larger images retain the verified
+open-copy action. Previewing never navigates to a model-provided local path or
+renders executable HTML. Narrow layouts use a focus-trapped preview dialog.
+
 ## Storage and lifecycle
 
 Each opaque workspace/teammate scope owns:

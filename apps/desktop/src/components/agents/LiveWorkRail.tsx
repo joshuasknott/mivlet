@@ -7,10 +7,12 @@ import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import restingWallpaper from "../../assets/computer-wallpaper.png";
 import { useRef, useState, type FormEvent } from "react";
 import type { LocalComputerApplication, LocalComputerFilePreview, LocalComputerFilesSnapshot } from "@fable/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 
 export function LiveWorkRail({
   agentName,
@@ -22,6 +24,7 @@ export function LiveWorkRail({
   conversationBusy = false,
   onNewConversation,
   onSelectConversation,
+  onDeleteConversation,
   onClose
 }: {
   agentName: string;
@@ -92,9 +95,13 @@ export function LiveWorkRail({
   conversationBusy?: boolean;
   onNewConversation?: () => void;
   onSelectConversation?: (id: string) => void;
+  onDeleteConversation?: (id: string) => void;
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
+  const compact = useMediaQuery("(max-width: 920px)");
+  const railRef = useRef<HTMLElement>(null);
+  useModalFocusTrap({ active: compact, containerRef: railRef, onClose });
   const [computerDetailsOpen, setComputerDetailsOpen] = useState(false);
   const screenDialogRef = useRef<HTMLDivElement>(null);
   useModalFocusTrap({ active: screenOpen && Boolean(screenPreviewUrl), containerRef: screenDialogRef, onClose: () => setScreenOpen(false) });
@@ -138,8 +145,8 @@ export function LiveWorkRail({
     onClose: localComputer.onCloseFilePreview
   });
   return (
-    <aside className="live-rail" aria-label="Work">
-      <header className="live-rail__header"><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
+    <aside ref={railRef} className="live-rail" role={compact ? "dialog" : undefined} aria-modal={compact || undefined} aria-label="Work">
+      <header className="live-rail__header"><strong>{agentName}’s computer</strong><button type="button" onClick={onClose} aria-label="Close work"><X size={17} /></button></header>
       <section className="computer-overview" aria-label={`${agentName}'s computer`}>
         <button className="computer-overview__preview" type="button" onClick={() => {
           if (localComputer.browserActive && localComputer.onOpenViewer) void localComputer.onOpenViewer().catch(() => undefined);
@@ -326,7 +333,7 @@ export function LiveWorkRail({
       </details>
       <section className="rail-conversations" aria-labelledby="rail-conversations-title">
         <header><h2 id="rail-conversations-title">Conversations</h2><button type="button" onClick={onNewConversation} disabled={conversationBusy || !onNewConversation} aria-label="New conversation"><Plus size={18} /></button></header>
-        {conversations.length ? <ul>{conversations.map((conversation) => <li key={conversation.id}><button type="button" disabled={conversationBusy} aria-current={activeConversationId === conversation.id ? "page" : undefined} onClick={() => onSelectConversation?.(conversation.id)}><span>{conversation.title}</span><time>{conversation.time}</time></button></li>)}</ul> : <p>Your conversations with {agentName} will appear here.</p>}
+        {conversations.length ? <ul>{conversations.map((conversation) => <li key={conversation.id}><button type="button" disabled={conversationBusy} aria-current={activeConversationId === conversation.id ? "page" : undefined} onClick={() => onSelectConversation?.(conversation.id)}><span>{conversation.title}</span><time>{conversation.time}</time></button>{onDeleteConversation ? <button className="rail-conversation-delete" type="button" disabled={conversationBusy} onClick={() => onDeleteConversation(conversation.id)} aria-label={`Delete conversation: ${conversation.title}`} title="Delete conversation"><Trash size={15} aria-hidden="true" /></button> : null}</li>)}</ul> : <p>Your conversations with {agentName} will appear here.</p>}
       </section>
 
       {screenOpen && screenPreviewUrl && !localComputer.browserActive ? (

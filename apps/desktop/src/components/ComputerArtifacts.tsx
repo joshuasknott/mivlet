@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { FileArrowDown } from "@phosphor-icons/react/dist/csr/FileArrowDown";
+import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { artifactSize, canOpenComputerArtifact, openComputerArtifact, parseComputerArtifact } from "../lib/computer-artifacts";
 import "./ComputerArtifacts.css";
 
@@ -8,9 +8,11 @@ interface ComputerArtifactsProps {
   workspaceId: string;
   agentId: string;
   expectedGeneration: number | undefined;
+  onPreview?: (output: string) => void;
+  compact?: boolean;
 }
 
-export function ComputerArtifacts({ output, workspaceId, agentId, expectedGeneration }: ComputerArtifactsProps) {
+export function ComputerArtifacts({ output, workspaceId, agentId, expectedGeneration, onPreview, compact = false }: ComputerArtifactsProps) {
   const artifact = parseComputerArtifact(output);
   const scope = `${workspaceId}\0${agentId}\0${expectedGeneration}\0${artifact?.id ?? ""}`;
   const currentScope = useRef({ scope, epoch: 0 });
@@ -41,14 +43,14 @@ export function ComputerArtifacts({ output, workspaceId, agentId, expectedGenera
   };
   return (
     <div className="computer-artifact">
-      <button type="button" onClick={() => { void open(); }} disabled={!available}
-        aria-label={`Open ${artifact.title}`} aria-busy={pending} aria-disabled={pending || !available}
-        title={available ? "Open a copy of this file" : "Open the computer in Fable to access this file"}
+      <button type="button" onClick={() => { if (onPreview) onPreview(output); else void open(); }} disabled={!onPreview && (!available || pending)}
+        aria-label={`${onPreview ? "Preview" : "Open"} ${artifact.title}`} aria-busy={pending} aria-disabled={!onPreview && (pending || !available)}
+        title={onPreview ? "Preview this file" : available ? "Open in your default app" : "Open the computer in Fable to access this file"}
         className="computer-artifact__open">
-        <FileArrowDown size={22} aria-hidden className="computer-artifact__icon" />
+        <FileText size={22} aria-hidden className="computer-artifact__icon" />
         <span className="computer-artifact__copy">
-          <span className="computer-artifact__title">{artifact.title}</span>
-          <span className="computer-artifact__meta">{pending ? "Opening…" : `${artifact.relativePath.split(".").at(-1)?.toUpperCase()} · ${artifactSize(artifact.sizeBytes)}`}</span>
+          <span className="computer-artifact__title">{compact ? pending ? "Opening…" : "Open file" : artifact.title}</span>
+          <span className="computer-artifact__meta">{compact ? "In your default app" : pending ? "Opening…" : `${artifact.relativePath.split(".").at(-1)?.toUpperCase()} · ${artifactSize(artifact.sizeBytes)}`}</span>
         </span>
       </button>
       {error && <p role="alert" className="computer-artifact__error">{error}</p>}

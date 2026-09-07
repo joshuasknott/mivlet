@@ -120,31 +120,13 @@ function GeneralSettings({
         <div className="settings-section-heading">
           <p>Your account and workspace preferences.</p>
         </div>
-        <article className="profile-clean-card settings-open-section">
-          <div className="profile-clean-card__content">
-            <section className="profile-section" aria-labelledby="local-workspace-title">
-              <div className="profile-section__heading">
-                <span className="settings-panel__icon" aria-hidden="true">
-                  <LockKey size={19} />
-                </span>
-                <span>
-                  <strong id="local-workspace-title">Local workspace</strong>
-                  <small>Encrypted on this device</small>
-                </span>
-              </div>
-              <p>{workspaceName}</p>
-              <p>
-                Your conversations and preferences are saved on this computer.
-              </p>
-            </section>
-          </div>
-        </article>
-      </div>
+        <div className="settings-preference-row"><span><strong>Local workspace</strong><small>Saved on this computer.</small></span><span>{workspaceName}</span></div></div>
 
       {accountConfigured ? (
         <ConfiguredAccountSettings runtime={runtime} onStatus={onStatus} />
       ) : null}
 
+      <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
       <AppearanceSettingsView
         theme={theme}
         onThemeChange={onThemeChange}
@@ -284,7 +266,9 @@ function ProviderSettings({
         onStartBrowserLogin={(providerId) => runtime.startBackendBrowserLogin(providerId)}
         onStatus={onStatus}
       />
+      <details className="settings-disclosure"><summary>Available models</summary>
       <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
+      </details>
       <div className="settings-local-storage">
         <span aria-hidden="true">
           <LockKey size={18} />
@@ -311,7 +295,7 @@ function ConnectionSettings({
     <div className="settings-page__body">
       <div className="settings-section-heading">
         <p>
-          Add custom tools with an MCP server. App connections live in Connectors.
+          Add custom tools with an MCP server. App connections live in Plugins.
         </p>
       </div>
       <LocalMcpSettings
@@ -337,16 +321,12 @@ function PrivacyAndDataSettings({
         <summary>How Fable uses your data</summary>
         <PrivacySummary />
       </details>
+      <MemorySettings runtime={runtime} onStatus={onStatus} />
       <DictationPrivacySettings
         runtime={runtime}
         capability={dictationCapability}
         onStatus={onStatus}
       />
-      <MemorySettings runtime={runtime} onStatus={onStatus} />
-      <details className="settings-disclosure">
-        <summary>Approvals</summary>
-        <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
-      </details>
       <details className="settings-disclosure">
         <summary>Manage local data</summary>
         <LocalDataSettings runtime={runtime} onStatus={onStatus} />

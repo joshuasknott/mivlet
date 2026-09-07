@@ -284,6 +284,13 @@ pub(crate) fn normalize_execution_attempt(
         .thread_id
         .map(|value| truncate_characters(&normalize_spaces(&value), 160))
         .filter(|value| !value.is_empty());
+    attempt.reasoning_summaries = attempt
+        .reasoning_summaries
+        .into_iter()
+        .filter(|(key, value)| !key.is_empty() && key.len() <= 240 && !contains_secret_shape(value))
+        .take(32)
+        .map(|(key, value)| (key, truncate_characters(&value, 16_000)))
+        .collect();
     attempt.parent_attempt_id = attempt
         .parent_attempt_id
         .map(|value| truncate_characters(&normalize_spaces(&value), 160))
@@ -782,6 +789,7 @@ mod tests {
             model: "gpt-5".to_string(),
             status: status.to_string(),
             transcript: "partial response".to_string(),
+            reasoning_summaries: Default::default(),
             turn: 1,
             usage: Some(ExecutionAttemptUsage {
                 input_tokens: 10,
@@ -843,6 +851,36 @@ mod tests {
         assert!(ensure_attempt_evidence_immutable(&initial, &changed).is_err());
         let legacy = fixture("streaming");
         assert!(ensure_attempt_evidence_immutable(&legacy, &initial).is_err());
+    }
+
+    #[test]
+    fn public_summaries_round_trip_with_bounds_and_secret_filtering() {
+        let mut attempt = fixture("streaming");
+        attempt
+            .reasoning_summaries
+            .insert("public:0".into(), "Checking the evidence.".into());
+        attempt.reasoning_summaries.insert(
+            "secret:0".into(),
+            "Authorization: Bearer private-token".into(),
+        );
+        attempt
+            .reasoning_summaries
+            .insert("long:0".into(), "x".repeat(20_000));
+        let normalized = normalize_execution_attempt(attempt).unwrap();
+        assert_eq!(normalized.reasoning_summaries["long:0"].len(), 16_000);
+        assert!(!normalized.reasoning_summaries.contains_key("secret:0"));
+        let decoded: ExecutionAttempt =
+            serde_json::from_str(&serde_json::to_string(&normalized).unwrap()).unwrap();
+        assert_eq!(
+            decoded.reasoning_summaries["public:0"],
+            "Checking the evidence."
+        );
+        let mut legacy = serde_json::to_value(decoded).unwrap();
+        legacy.as_object_mut().unwrap().remove("reasoningSummaries");
+        assert!(serde_json::from_value::<ExecutionAttempt>(legacy)
+            .unwrap()
+            .reasoning_summaries
+            .is_empty());
     }
 
     fn receipt() -> ExecutionContextReceipt {

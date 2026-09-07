@@ -25,6 +25,7 @@ import type {
   ApprovalResolutionRequest,
   HostedBrowserSnapshot
 } from "@fable/protocol";
+import { assertConnectorToolSucceeded } from "./connector-errors";
 import {
   McpClient,
   normalizeMcpConnectedSourceSearch,
@@ -221,7 +222,7 @@ async function runOfficialConnector(
   const accessCurrent = () => options.connectorAccessCurrent
     ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId);
   if (!options.workspaceId || !remoteConnectorFor(connectorId) || !accessCurrent()) {
-    throw new Error("Connect this app in the workspace's Connectors page first.");
+    throw new Error("Connect this app in the workspace's Plugins page first.");
   }
   const connection = await openConnectorTools(options.workspaceId, remoteConnectorServerId(connectorId));
   try {
@@ -248,6 +249,7 @@ async function runOfficialConnector(
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    assertConnectorToolSucceeded(result);
     return JSON.stringify(result);
   } finally { await connection.client.close().catch(() => undefined); }
 }

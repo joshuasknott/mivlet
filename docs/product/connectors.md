@@ -1,13 +1,14 @@
-# Connections
+# Plugins
 
-Fable calls model providers, service connectors, MCP servers, and local files
-Connections. A Connection is available only after the native desktop boundary
+Plugins is the user-facing home for app integrations. Connector and Connection
+remain internal adapter and authorization terms; model providers remain separate.
+A Connection is available only after the native desktop boundary
 proves its configuration and authorization. Missing credentials never produce
 sample results or a synthetic connected state.
 
 Connected apps and approval preferences belong to the workspace, not individual
-teammates. Every conversation advertises the connected native apps and saved
-official remote connections. Remote tools are rediscovered and checked against
+teammates. Every conversation advertises verified native and official remote
+connections. Incomplete and disconnected setups are excluded. Remote tools are rediscovered and checked against
 the current enabled tool list before use. Switching teammates preserves the
 workspace approval preference; exact action, workspace, and freshness checks
 still apply.
@@ -82,13 +83,15 @@ Provider mutations additionally require a fresh approval bound to the exact
 account, request, workspace, and action. A denied, expired, replayed, changed,
 or mismatched approval fails before egress.
 
-The desktop marketplace is opened from the compact Connectors row at the bottom
+The desktop marketplace is opened from the compact Plugins row at the bottom
 of the teammate sidebar. Connected apps appear as compact icons in Installed;
 Popular and category sections use two-column rows with expandable lists. Search
 covers names, descriptions, permissions, and section names. Each implemented
-connector has a detail page with usage examples, permissions, and connection
-controls. Skills are specific to a teammate and live in that teammate's editor,
-outside Connectors.
+connector has a compact detail page with Connect or Reconnect, an account/access
+summary, and optional examples and permissions under About. Back to chat remains
+available while work runs. Skills are specific to a teammate and live in that teammate's editor,
+outside Plugins. See the [plugin and daily-driver assessment](daily-driver.md)
+for the proposed Browser and Computer Use plugins and remaining capability gaps.
 Official remote connection routes are also available for Notion, Linear,
 Vercel, Canva, Figma, Jira, Sentry, Stripe, Miro, Cloudflare,
 Granola, Airtable, Amplitude, Mixpanel, Vanta, and Ramp. These use the existing native MCP OAuth
@@ -101,7 +104,9 @@ The endpoint registry is `apps/desktop/src/components/marketplace/remote-connect
 
 Choose Connect and complete the provider's browser sign-in. Fable discovers and
 enables the returned tools automatically, then shows Connected only once usable
-tool access is saved. The Connect click authorizes the exact official endpoint;
+tool access is saved. Native providers are health-checked automatically; Vercel
+additionally performs an authenticated account read because public discovery is
+insufficient. The Connect click authorizes the exact official endpoint;
 its native configuration receipt is retained without a second typed confirmation.
 Reopening the detail view checks existing access without restarting OAuth or
 expanding a previously restricted tool list. Tools are used in conversations;
@@ -119,15 +124,23 @@ in stored messages. Codex turns disable host shell tools and provider memories;
 unadvertised tool requests are declined without opening an approval card.
 
 Direct API and ChatGPT/Codex agents can use `connector-tools` to discover enabled tool schemas
-and `connector-call` to invoke them. Saved official remote connections are available
+and `connector-call` to invoke them. Verified official remote connections are available
 across workspace conversations without individual agent assignment. Each call rediscovers the current Connection.
-Native policy recognizes a fixed list of Vercel documentation, project, deployment,
-and log reads at the exact official endpoint and runs these under account consent.
+Native policy recognizes fixed lists of Vercel, Notion, Figma and Canva reads at
+their exact official endpoints and runs these under account consent.
 Changes and unrecognized tools still require native approval bound to the exact
 tool and inputs. All executions retain current account, workspace, discovery,
 enablement, revision, and single-use permit checks. Server annotations and tool
 name prefixes cannot grant read status. Other provider-owned runtimes still
 require their own tool integration.
+
+An Approve click confirms the exact queued connector action without a second
+typed phrase; Work Freely resolves the same single-use receipt automatically.
+Native developer-connector writes are never automatically replayed after network
+or ambiguous provider failure. The result reports uncertainty for reconciliation.
+Google reads retain complete JSON records and pagination; large text excerpts
+are labelled, and results that remain too large return a request-for-smaller-page
+error. Provider MCP `isError` results propagate as failures with safe details.
 
 Entries without a native adapter or official remote route remain Planned and
 cannot begin authorization or appear installed. Box and HubSpot, for example,

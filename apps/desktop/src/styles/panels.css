@@ -724,6 +724,24 @@
   contain: layout style;
 }
 
+.marketplace-back, .connector-detail__text-action {
+  min-height: 40px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  cursor: pointer;
+}
+.marketplace-back:hover, .connector-detail__text-action:hover { color: var(--ink); }
+.connector-detail__intro, .connector-detail__notice { margin: 0; font-size: var(--text-13); line-height: 1.55; overflow-wrap: anywhere; }
+.connector-detail__notice[role="alert"] { color: var(--danger, #b34b35); }
+.connector-detail__hint { margin: 0; color: var(--ink-muted); font-size: var(--text-12); line-height: 1.55; }
+.connector-detail__account { overflow-wrap: anywhere; }
+.connector-detail__account select, .remote-connector-region select { max-width: 100%; min-height: 40px; }
+.connector-detail__actions button:disabled { cursor: default; opacity: .55; }
+.marketplace-back:focus-visible, .connector-detail button:focus-visible, .connector-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
 .connector-detail__actions .button--primary { color: var(--surface); background: var(--accent); border-color: var(--accent); }
 .connector-detail__actions .button--primary:hover { color: var(--surface); background: var(--accent); opacity: .86; }
 

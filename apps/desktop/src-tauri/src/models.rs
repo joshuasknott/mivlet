@@ -491,6 +491,8 @@ pub struct ExecutionAttempt {
     pub model: String,
     pub status: String,
     pub transcript: String,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub reasoning_summaries: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]

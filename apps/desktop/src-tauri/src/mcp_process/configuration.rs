@@ -116,6 +116,32 @@ pub fn list_mcp_server_configurations(
 }
 
 #[tauri::command]
+pub fn list_remote_mcp_connections(
+    workspace_id: String,
+) -> Result<Vec<crate::store::repos::connection_record::SafeMcpConnectionDetails>, String> {
+    let scope = crate::authorized_scope::command_scope(
+        Some(workspace_id),
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    store
+        .with_conn(|tx| {
+            crate::store::repos::mcp_local_server::list(tx, store, &scope)?
+                .into_iter()
+                .filter(|server| !server.disabled && server.transport == "streamable-http")
+                .map(|server| {
+                    crate::store::repos::connection_record::mcp_details_for_remote(
+                        tx, store, &scope, &server.id,
+                    )
+                })
+                .collect()
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 pub fn open_remote_mcp_session(
     request: OpenRemoteMcpSessionRequest,
 ) -> Result<OpenedRemoteMcpSession, String> {

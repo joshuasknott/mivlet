@@ -46,6 +46,7 @@ async fn request_json(
     url: &str,
     query: &[(String, String)],
     body: Option<Value>,
+    read_only: bool,
 ) -> Result<ApiResponse, ConnectorCommandError> {
     crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
@@ -76,21 +77,32 @@ async fn request_json(
         }
         let response = match builder.send().await {
             Ok(response) => response,
-            Err(_) if attempt < MAX_RETRIES => {
+            Err(_) if read_only && attempt < MAX_RETRIES => {
                 tokio::time::sleep(Duration::from_millis(100 * 2_u64.pow(attempt as u32))).await;
                 continue;
             }
             Err(_) => {
+                if !read_only {
+                    return Err(uncertain_action(connector_id));
+                }
                 return Err(error(
                     "provider-unavailable",
                     connector_id,
                     "Provider network request failed.",
                     true,
-                ))
+                ));
             }
         };
         if response.status().is_success() {
-            return decode_response(connector_id, response).await;
+            return decode_response(connector_id, response)
+                .await
+                .map_err(|failure| {
+                    if read_only {
+                        failure
+                    } else {
+                        uncertain_action(connector_id)
+                    }
+                });
         }
         let status = response.status();
         let retry_after = response
@@ -99,6 +111,9 @@ async fn request_json(
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
         let retryable = status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+        if retryable && !read_only {
+            return Err(uncertain_action(connector_id));
+        }
         if retryable && attempt < MAX_RETRIES {
             let wait = retry_after
                 .as_deref()
@@ -143,6 +158,10 @@ async fn request_json(
         "Provider request failed.",
         true,
     ))
+}
+
+fn uncertain_action(connector_id: &str) -> ConnectorCommandError {
+    error("outcome-unknown", connector_id, "The provider may have applied this action, but its response was lost. Check the current state before trying again.", false)
 }
 
 async fn decode_response(
@@ -261,7 +280,7 @@ pub(crate) async fn search(
             if let Some(cursor) = &request.cursor {
                 query.push(("page".into(), cursor.clone()));
             }
-            request_json(connector_id, &token, Method::GET, url, &query, None).await?
+            request_json(connector_id, &token, Method::GET, url, &query, None, true).await?
         }
         "vercel" => {
             let mut query = vec![("limit".into(), limit.to_string())];
@@ -275,12 +294,13 @@ pub(crate) async fn search(
                 "https://api.vercel.com/v9/projects",
                 &query,
                 None,
+                true,
             )
             .await?
         }
         "linear" => {
             let query = "query Search($term:String!,$first:Int!,$after:String){ searchIssues(term:$term,first:$first,after:$after){ nodes { id identifier title description url updatedAt team { id key name } state { id name type } } pageInfo { hasNextPage endCursor } } }";
-            request_json(connector_id, &token, Method::POST, "https://api.linear.app/graphql", &[], Some(json!({"query": query, "variables": {"term": request.query, "first": limit, "after": request.cursor}}))).await?
+            request_json(connector_id, &token, Method::POST, "https://api.linear.app/graphql", &[], Some(json!({"query": query, "variables": {"term": request.query, "first": limit, "after": request.cursor}})), true).await?
         }
         _ => {
             return Err(error(
@@ -449,7 +469,7 @@ pub(crate) async fn read_capability_for_connection(
     )
     .await?;
     let (method, url, query, body) = map_read(&request)?;
-    let response = request_json(&connector_id, &token, method, &url, &query, body).await?;
+    let response = request_json(&connector_id, &token, method, &url, &query, body, true).await?;
     let (items, cursor) = extract_items(&request, &response.value);
     Ok(ConnectorCapabilityResult {
         connector_id,
@@ -722,7 +742,7 @@ pub(crate) async fn execute_action(
     let id = action.connector_id.as_str();
     let token = provider_access_token(app, id).await?;
     let (method, url, query, body) = map_write(action)?;
-    let response = request_json(id, &token, method, &url, &query, Some(body)).await?;
+    let response = request_json(id, &token, method, &url, &query, Some(body), false).await?;
     Ok(response
         .value
         .get("id")
@@ -934,6 +954,52 @@ pub(crate) async fn probe_health(app: &tauri::AppHandle, connector_id: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn writes_are_not_replayed_but_reads_can_retry() {
+        use tokio::{
+            io::{AsyncReadExt, AsyncWriteExt},
+            net::TcpListener,
+        };
+        for read_only in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let url = format!("http://{}/", listener.local_addr().unwrap());
+            let server = tokio::spawn(async move {
+                let mut count = 0;
+                while let Ok(Ok((mut stream, _))) =
+                    tokio::time::timeout(Duration::from_millis(700), listener.accept()).await
+                {
+                    count += 1;
+                    let mut buffer = [0u8; 4096];
+                    let _ = stream.read(&mut buffer).await;
+                    let response = if count == 1 {
+                        "HTTP/1.1 503 Unavailable\r\nRetry-After: 0\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    } else {
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}"
+                    };
+                    stream.write_all(response.as_bytes()).await.unwrap();
+                }
+                count
+            });
+            let result = request_json(
+                "github",
+                "fixture",
+                Method::POST,
+                &url,
+                &[],
+                Some(json!({})),
+                read_only,
+            )
+            .await;
+            if read_only {
+                assert!(result.is_ok());
+            } else {
+                let failure = result.err().unwrap();
+                assert_eq!(failure.code, "outcome-unknown");
+                assert!(!failure.retryable);
+            }
+            assert_eq!(server.await.unwrap(), if read_only { 2 } else { 1 });
+        }
+    }
 
     fn github_request(
         capability: &str,

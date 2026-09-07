@@ -1,0 +1,1 @@
+export const AGENT_COLOURS = [["Lavender", "#B1A1CF"], ["Cornflower", "#91ADD7"], ["Apricot", "#DEB28F"], ["Aqua", "#86B8AF"], ["Sage", "#A6BA97"], ["Rose", "#D49AA6"], ["Butter", "#D6C38C"], ["Slate", "#A1A9BA"]] as const;

@@ -55,6 +55,7 @@ import type {
 } from "../lib/conversation-runtime";
 import { buildContinuationMessages } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
+import { appendResponseText, CONVERSATION_STYLE_INSTRUCTIONS, resolveResponseTool, toolActivity, toolConnectorId, type ResponsePart } from "../lib/conversation-presentation";
 
 /** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
 function hasDesktopRuntime(): boolean {
@@ -69,8 +70,13 @@ function hasDesktopRuntime(): boolean {
 
 export interface NativeAgentState {
   transcript: string;
+  responseParts?: ResponsePart[];
+  progressPrompt?: string;
+  startedAt?: string;
+  endedAt?: string;
   progressThreadId?: string;
   reasoningSummaries?: Record<string, string>;
+  progressReceipts?: Record<string, { summaries: Record<string, string>; startedAt: string; endedAt: string }>;
   activity?: string;
   usage: {
     inputTokens: number;
@@ -231,6 +237,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             (run.status === "interrupted" || run.status === "failed") &&
             run.recoverable,
         ),
+        progressReceipts: Object.fromEntries(runs.map((run) => [run.id, { summaries: run.reasoningSummaries ?? {}, startedAt: run.createdAt, endedAt: run.updatedAt }])),
       }));
     })();
   }, []);
@@ -442,6 +449,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         reasoningSummaries: {},
         activity: "",
         progressThreadId: requestThreadId,
+        progressPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content,
+        responseParts: [],
+        startedAt: createdAt,
+        endedAt: undefined,
         usage: null,
         running: true,
         lastError: null,
@@ -626,16 +637,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
           if (event.type === "reasoning-summary") {
             const key = `${event.itemId}:${event.summaryIndex}`;
+            const summaries: Record<string, string> = { ...persisted.reasoningSummaries };
+            summaries[key] = ((summaries[key] ?? "") + event.text).slice(-16000);
+            for (const staleKey of Object.keys(summaries).slice(0, -32)) delete summaries[staleKey];
+            persisted = { ...persisted, reasoningSummaries: summaries };
             setState((current) => {
-              const summaries = { ...current.reasoningSummaries };
-              summaries[key] = ((summaries[key] ?? "") + event.text).slice(-16000);
-              for (const staleKey of Object.keys(summaries).slice(0, -32)) delete summaries[staleKey];
               return { ...current, reasoningSummaries: summaries };
             });
           } else if (event.type === "text-delta") {
             setState((current) => ({
               ...current,
               transcript: current.transcript + event.text,
+              responseParts: appendResponseText(current.responseParts ?? [], event.text),
+              activity: "",
             }));
             const exchanges: ExecutionExchange[] = [
               ...(persisted.exchanges ?? []),
@@ -696,7 +710,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             setState((current) => ({
               ...current,
               status: needsApproval ? "awaiting-approval" : "streaming",
-              activity: `${needsApproval ? "Waiting for approval" : "Using"}: ${event.tool}`,
+              activity: toolActivity(event.tool, "running"),
+              responseParts: [...(current.responseParts ?? []), { id: event.callId, kind: "tool", tool: event.tool, connectorId: toolConnectorId(event.tool, event.arguments), content: "", state: "running" }],
             }));
             if (durableWriter) {
               await durableWriter.record({
@@ -734,7 +749,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
               updatedAt: new Date().toISOString(),
             };
-            setState((current) => ({ ...current, status: "streaming", activity: `${event.ok ? "Finished" : "Could not complete"}: ${toolNameByCall.get(event.callId) ?? "app action"}` }));
+            setState((current) => ({ ...current, status: "streaming", activity: "",
+              responseParts: resolveResponseTool(current.responseParts ?? [], event.callId, event.output, event.ok) }));
             if (durableWriter)
               await durableWriter.record({
                 kind: "tool-result",
@@ -756,6 +772,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             setState((current) => ({
               ...current,
               lastError: described.message,
+              endedAt: new Date().toISOString(),
             }));
             persisted = {
               ...persisted,
@@ -824,6 +841,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ...current,
               running: false,
               status: terminalStatus,
+              endedAt: terminalRun.updatedAt,
+              progressReceipts: { ...current.progressReceipts, [attemptId]: { summaries: terminalRun.reasoningSummaries ?? {}, startedAt: terminalRun.createdAt, endedAt: terminalRun.updatedAt } },
               recoverableAttempts:
                 terminalStatus === "failed"
                   ? [
@@ -921,6 +940,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           running: false,
           lastError: message,
           status: terminalRun.status,
+          endedAt: terminalRun.updatedAt,
           recoverableAttempts: cancelled
             ? current.recoverableAttempts
             : [
@@ -950,6 +970,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       attemptToRetry: ExecutionAttempt,
       tools: AgentTurnRequest["tools"] = [],
       permissionMode: PermissionMode = "read-only",
+      instructions: string = CONVERSATION_STYLE_INSTRUCTIONS,
     ) => {
       const userExchange = attemptToRetry.exchanges
         ?.filter((exchange) => exchange.role === "user")
@@ -988,7 +1009,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       await run(
         {
           model: attemptToRetry.model,
-          messages: [{ role: "user", content: userExchange.content }],
+          messages: [{ role: "system", content: instructions }, { role: "user", content: userExchange.content }],
           tools,
           maxTokens: 2_048,
         },
@@ -1005,7 +1026,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     if (!persisted || !persisted.pendingApprovalIds.includes(approvalId) || persisted.status === "cancelled") return;
     activePersistedRef.current = { ...persisted, status: "streaming", pendingApprovalIds: persisted.pendingApprovalIds.filter((id) => id !== approvalId) };
     setState((current) => current.running && current.currentAttemptId === persisted.id
-      ? { ...current, status: "streaming", activity: `Using: ${tool}` } : current);
+      ? { ...current, status: "streaming", activity: toolActivity(tool, "running") } : current);
   }, []);
 
   const cancel = useCallback(async () => {
@@ -1049,6 +1070,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       ...current,
       running: false,
       status: "cancelled",
+      endedAt: new Date().toISOString(),
     }) : current);
     await nativeCancellation;
   }, []);

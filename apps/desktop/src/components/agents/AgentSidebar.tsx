@@ -1,16 +1,20 @@
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
+import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { useEffect, useState } from "react";
 import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
 import { AccountMenu } from "./AccountMenu";
-import fableMark from "../../assets/fable-mark.png";
+import { PRESENCE_LABELS, type AgentPresence } from "../../lib/agent-presence";
 
 export interface AgentSidebarPreview {
   message: string;
   time: string;
   status: "idle" | "running" | "attention";
+  presence?: AgentPresence;
+  completionId?: string;
 }
 
 export function AgentSidebar({
@@ -27,6 +31,7 @@ export function AgentSidebar({
   onOpenSettings,
   onOpenUsage,
   onSignOut,
+  hidden = false,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -41,16 +46,40 @@ export function AgentSidebar({
   onOpenSettings: () => void;
   onOpenUsage: () => void;
   onSignOut: () => void;
+  hidden?: boolean;
 }) {
+  const [query, setQuery] = useState("");
+  const [completions, setCompletions] = useState<Record<string, { id: string; unread: boolean }>>({});
+  useEffect(() => {
+    setCompletions((current) => {
+      const next = { ...current };
+      let changed = false;
+      for (const [id, preview] of Object.entries(previews)) {
+        if (preview.status === "running" && next[id]) {
+          delete next[id];
+          changed = true;
+        } else if (preview.presence === "done") {
+          const completionId = preview.completionId ?? "completed";
+          if (next[id]?.id !== completionId) {
+            next[id] = { id: completionId, unread: true };
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [previews]);
+  const visibleAgents = agents.filter((agent) => `${agent.name} ${previews[agent.id]?.message ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
   const installedConnectors = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
   );
 
   return (
-    <aside className="agent-sidebar" aria-label="Agents">
+    <aside className="agent-sidebar" aria-label="Agents" hidden={hidden}>
       <div className="agent-sidebar__topline">
-        <img className="fable-mark" src={fableMark} alt="Fable" width={32} height={32} />
+
+        <span className="agent-sidebar__title">Fable</span>
         <button
           className="agent-sidebar__new"
           type="button"
@@ -62,14 +91,17 @@ export function AgentSidebar({
         </button>
       </div>
 
+      <label className="agent-search"><MagnifyingGlass size={16} aria-hidden="true" /><input type="search" aria-label="Search agents" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+
       <div className="agent-list" role="list">
-        {agents.map((agent) => {
+        {visibleAgents.map((agent) => {
           const active = agent.id === activeAgentId && !marketplaceActive;
           const preview = previews[agent.id] ?? {
             message: "Start a conversation",
             time: "",
             status: "idle" as const,
           };
+          const presence = preview.presence ?? (preview.status === "running" ? "working" : preview.status === "attention" ? "waiting" : "idle");
           return (
             <div
               key={agent.id}
@@ -79,25 +111,28 @@ export function AgentSidebar({
               <button
                 className="agent-row__select"
                 type="button"
-                onClick={() => onSelectAgent(agent)}
+                onClick={() => {
+                  setCompletions((current) => current[agent.id]
+                    ? { ...current, [agent.id]: { ...current[agent.id], unread: false } }
+                    : current);
+                  onSelectAgent(agent);
+                }}
                 aria-current={active ? "page" : undefined}
               >
-                <ProfileAgentAvatar agent={agent} iconSize={32} thinking={preview.status === "running"} />
+                <ProfileAgentAvatar agent={agent} iconSize={36} presence={presence} />
                 <span className="agent-row__copy">
                   <span className="agent-row__line">
-                    <strong>{agent.name}</strong>
-
+                    <strong title={agent.name}>{agent.name}</strong>
+                    <time>{preview.time}</time>
                   </span>
-                  <span className="agent-row__meta"><span className="agent-row__preview">{preview.message}</span><time>{preview.time}</time></span>
+                  <span className="agent-row__meta"><span className="agent-row__preview">{preview.message}</span></span>
                 </span>
-                {preview.status !== "idle" ? (
+                {preview.status === "running" || completions[agent.id]?.unread ? (
                   <span
-                    className={`agent-status agent-status--${preview.status}`}
-                    aria-label={
-                      preview.status === "running"
-                        ? "Active"
-                        : "Needs attention"
-                    }
+                    className={`agent-status agent-status--${preview.status === "running" ? "working" : "unread"}`}
+                    role="status"
+                    aria-label={preview.status === "running" ? PRESENCE_LABELS[presence] : "New completed work"}
+                    title={preview.status === "running" ? PRESENCE_LABELS[presence] : "New completed work"}
                   />
                 ) : null}
               </button>
@@ -117,6 +152,7 @@ export function AgentSidebar({
             Create your first agent to get started.
           </p>
         ) : null}
+        {agents.length > 0 && !visibleAgents.length ? <p className="agent-list__empty" role="status">No agents match “{query}”.</p> : null}
       </div>
 
       <button
@@ -126,7 +162,7 @@ export function AgentSidebar({
         aria-current={marketplaceActive ? "page" : undefined}
       >
         <PlugsConnected size={16} aria-hidden="true" />
-        <span>Connectors</span>
+        <span>Plugins</span>
         {installedConnectors.length ? (
           <span
             className="agent-sidebar__connector-stack"

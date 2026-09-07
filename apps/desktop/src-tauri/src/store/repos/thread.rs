@@ -112,3 +112,35 @@ pub fn update(
     tx.execute("UPDATE thread SET title=?1,lifecycle=?2,project_id=?3,revision=revision+1,updated_at=?4 WHERE workspace_id=?5 AND id=?6",rusqlite::params![title.trim(),life,project,updated_at,scope.workspace_id(),id])?;
     get(tx, store, scope, id)?.ok_or_else(|| StoreError::Invalid("Thread disappeared.".into()))
 }
+
+pub fn delete(tx: &Connection, scope: &DataScope, id: &str, deleted_at: &str) -> Result<()> {
+    scope.ensure_exists(tx)?;
+    let id = normalize_id(id, "Thread")?;
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE workspace_id=?1 AND id=?2)",
+        rusqlite::params![scope.workspace_id(), id],
+        |r| r.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::Invalid(
+            "Conversation was not found in this workspace.".into(),
+        ));
+    }
+    let active: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM run WHERE workspace_id=?1 AND thread_id=?2 AND status NOT IN ('completed','failed','cancelled','interrupted'))", rusqlite::params![scope.workspace_id(), id], |r| r.get(0))?;
+    if active {
+        return Err(StoreError::Invalid(
+            "Stop the response before deleting this conversation.".into(),
+        ));
+    }
+    tx.execute("INSERT INTO conversation_tombstone(workspace_id,target,thread_id,message_id,idempotency_key,deleted_at,reason) VALUES(?1,'thread',?2,NULL,?3,?4,'user-request')", rusqlite::params![scope.workspace_id(), id, format!("delete:{id}"), deleted_at])?;
+    tx.execute(
+        "DELETE FROM draft WHERE workspace_id=?1 AND thread_id=?2",
+        rusqlite::params![scope.workspace_id(), id],
+    )?;
+    // Associated messages, revisions and execution attempts cascade with the thread.
+    tx.execute(
+        "DELETE FROM thread WHERE workspace_id=?1 AND id=?2",
+        rusqlite::params![scope.workspace_id(), id],
+    )?;
+    Ok(())
+}

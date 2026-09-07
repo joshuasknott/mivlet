@@ -35,12 +35,12 @@ describe("chat connector access", () => {
     ).toEqual(tools);
     expect(chatConnectorTools([])).toEqual([]);
   });
-  it("shares saved remote connections and excludes unconfigured remote apps", () => {
-    const native = [{ id: "notion", status: "configured" }] as ConnectorManifest[];
+  it("shares only verified remote connections and excludes saved incomplete apps", () => {
+    const native = [{ id: "notion", status: "connected", connectionRoute: "remote" }, { id: "canva", status: "needs-auth", connectionRoute: "remote" }] as ConnectorManifest[];
     const ids = chatConnectorIds(["notion", "canva"], native);
-    expect(ids).toEqual(["notion", "canva"]);
+    expect(ids).toEqual(["notion"]);
     expect(chatConnectorTools(ids, native).map((tool) => tool.name)).toEqual(["connector-tools", "connector-call"]);
-    expect(chatConnectorIds([], native)).toEqual([]);
+    expect(chatConnectorIds(["canva"], [{ id: "canva", status: "needs-auth" }] as ConnectorManifest[])).toEqual([]);
     expect(chatConnectorTools(["notion"], [{ id: "notion", status: "connected" }] as ConnectorManifest[]).map((tool) => tool.name)).toEqual(["search-notion"]);
   });
 });

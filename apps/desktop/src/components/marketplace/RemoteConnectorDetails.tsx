@@ -1,27 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import type { ApprovalResolutionRequest } from "@fable/protocol";
+import type { ConnectorManifest } from "@fable/protocol";
 import { openConnectorTools } from "../../lib/connector-mcp";
-import {
-  beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration,
-  disconnectRuntimeRemoteMcpAuthorization, listRuntimeMcpServerConfigurations,
-  prepareRuntimeMcpServerConfiguration, resolveRuntimeApprovalRequest, setRuntimeMcpEnablement,
-  type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration,
-} from "../../runtime";
+import { connectRemoteConnector } from "../../lib/connect-remote-connector";
+import { connectorConnectionsChanged, remoteConnectionReady } from "../../lib/connector-connections";
+import { connectorErrorMessage } from "../../lib/connector-errors";
+import { disconnectRuntimeRemoteMcpAuthorization, listRuntimeMcpServerConfigurations, type RuntimeMcpConnectionDetails } from "../../runtime";
 import { MarketplaceIcon } from "./MarketplaceIcon";
 import type { MarketplaceConnectorEntry } from "./marketplace-catalog";
 import { remoteConnectorServerId, type RemoteConnector } from "./remote-connectors";
 
-export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, onSaved }: {
+export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, onSaved, onUseConnector }: {
   entry: MarketplaceConnectorEntry;
   preset: RemoteConnector;
   workspaceId?: string;
   titleId: string;
   onSaved: () => void;
+  onUseConnector?: (connector: ConnectorManifest) => void;
 }) {
   const [saved, setSaved] = useState(false);
   const [available, setAvailable] = useState(false);
   const [busy, setBusy] = useState(true);
   const [notice, setNotice] = useState("");
+  const [failed, setFailed] = useState(false);
   const [discovery, setDiscovery] = useState<RuntimeMcpConnectionDetails | null>(null);
   const [endpoint, setEndpoint] = useState(preset.endpoint);
   const mounted = useRef(false);
@@ -42,13 +42,11 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
         setSaved(exists);
         if (servers === null) setNotice("Account connections require the desktop app.");
         if (!exists) return;
-        // Reopening checks existing access without starting OAuth or expanding it.
         const connection = await openConnectorTools(workspaceId, serverId);
-        try {
-          if (!cancelled) setDiscovery(connection.discovery);
-        } finally { await connection.client.close().catch(() => undefined); }
+        try { if (!cancelled) setDiscovery(connection.discovery); }
+        finally { await connection.client.close().catch(() => undefined); }
       }).catch(() => {
-        if (!cancelled) setNotice("Connect to finish setup or restore access.");
+        if (!cancelled) setNotice("Connect again to restore access.");
       }).finally(() => { if (!cancelled) setBusy(false); });
     }
     return () => { cancelled = true; mounted.current = false; };
@@ -57,90 +55,47 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
   const run = async (task: () => Promise<void>) => {
     if (operation.current) return;
     operation.current = true;
-    setBusy(true);
-    setNotice("");
+    setBusy(true); setNotice(""); setFailed(false);
     try { await task(); }
-    catch (error) {
-      if (mounted.current) setNotice(error instanceof Error ? error.message : "Connection failed. Try again.");
-    } finally {
+    catch (error) { if (mounted.current) { setNotice(connectorErrorMessage(error)); setFailed(true); } }
+    finally {
       operation.current = false;
-      if (mounted.current) setBusy(false);
+      if (workspaceId) connectorConnectionsChanged(workspaceId);
+      if (mounted.current) { setBusy(false); onSaved(); }
     }
   };
 
-  const connect = () => run(async () => {
-    if (!workspaceId) return;
-    setDiscovery(null);
-    if (!saved) {
-      const configuration: RuntimeMcpServerConfiguration = {
-        workspaceId, id: serverId, displayName: entry.name,
-        transport: "streamable-http", endpoint,
-      };
-      const prepared = await prepareRuntimeMcpServerConfiguration(configuration);
-      if (!prepared) throw new Error("Account connections require the desktop app.");
-      if (!mounted.current) return;
-      // Connect is consent to this fixed official endpoint. Keep the exact native
-      // configuration receipt without asking for a second, typed confirmation.
-      const resolution: ApprovalResolutionRequest = {
-        request: prepared.approval, decision: "once", decidedAt: new Date().toISOString(),
-        confirmationText: prepared.approval.confirmationPhrase,
-      };
-      await resolveRuntimeApprovalRequest(resolution);
-      if (!mounted.current) return;
-      const configured = await commitRuntimeMcpServerConfiguration(configuration, resolution);
-      if (!configured) throw new Error("Account connections require the desktop app.");
-      if (!mounted.current) return;
-      setSaved(true);
-      onSaved();
-    }
-    const authorization = await beginRuntimeRemoteMcpAuthorization(workspaceId, serverId);
-    if (!authorization) throw new Error("Account connections require the desktop app.");
-    if (!mounted.current) return;
-    const connection = await openConnectorTools(workspaceId, serverId);
-    try {
-      if (!mounted.current) return;
-      const current = connection.discovery;
-      const updated = await setRuntimeMcpEnablement(workspaceId, current.connectionId,
-        current.connectionRevision, connection.tools.map((tool) => tool.name),
-        current.enabledResources, current.capabilityBindings);
-      if (!updated) throw new Error("Could not finish connecting. Try again.");
-      if (!mounted.current) return;
-      setDiscovery(updated);
-      onSaved();
-      setNotice(updated.enabledTools.length ? `${entry.name} is ready to use in your conversations.` : "Signed in, but this account has no available tools. Check its permissions.");
-    } finally { await connection.client.close().catch(() => undefined); }
-  });
-
-  const connected = Boolean(discovery?.enabledTools.length);
+  const connected = Boolean(discovery && remoteConnectionReady(discovery));
   const disabled = busy || !available;
-  return <article className="connector-detail" aria-label={`${entry.name} connection`}>
+  return <article className="connector-detail" aria-label={`${entry.name} connection`} aria-busy={busy}>
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>
       <div><h2 id={titleId}>{entry.name}</h2><p>{entry.description}</p></div>
       <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : "Not connected"}</span>
     </div>
-    <section className="connector-guide">
-      <p>{connected ? `Ask any agent to use ${entry.name} in a conversation.` : `Connect ${entry.name} to use it with all your agents.`}</p>
-      <p>Tools are available after sign-in. Fable asks before changes or actions it cannot verify as read-only.</p>
-      {preset.prerequisite ? <p>{preset.prerequisite}</p> : null}
-      {!saved && preset.regions ? <label className="remote-connector-region">Account data region
-        <select disabled={disabled} value={endpoint} onChange={(event) => setEndpoint(event.target.value)}>{preset.regions.map((region) => <option key={region.endpoint} value={region.endpoint}>{region.name}</option>)}</select>
-      </label> : null}
-    </section>
+    <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
+    {!saved && preset.regions ? <label className="remote-connector-region">Account data region
+      <select disabled={disabled} value={endpoint} onChange={(event) => setEndpoint(event.target.value)}>{preset.regions.map((region) => <option key={region.endpoint} value={region.endpoint}>{region.name}</option>)}</select>
+    </label> : null}
     <div className="connector-detail__actions">
-      {!connected ? <button type="button" disabled={disabled} onClick={() => void connect()}>{busy ? "Connecting…" : "Connect"}</button> : null}
-      {saved ? <button type="button" disabled={disabled} onClick={() => void run(async () => {
+      {connected && onUseConnector ? <button type="button" disabled={disabled} onClick={() => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" })}>Use in chat</button> : null}
+      {!connected ? <button type="button" disabled={disabled} onClick={() => void run(async () => {
         if (!workspaceId) return;
-        const disconnected = await disconnectRuntimeRemoteMcpAuthorization(workspaceId, serverId);
-        if (!disconnected) throw new Error("Account connections require the desktop app.");
         setDiscovery(null);
-        setNotice("Disconnected.");
-        onSaved();
+        const result = await connectRemoteConnector(workspaceId, preset, endpoint);
+        if (mounted.current) { setSaved(true); setDiscovery(result); }
+      })}>{busy ? "Connecting…" : saved ? "Reconnect" : "Connect"}</button> : null}
+      {connected ? <button type="button" disabled={disabled} onClick={() => void run(async () => {
+        if (!workspaceId) return;
+        if (!await disconnectRuntimeRemoteMcpAuthorization(workspaceId, serverId)) throw new Error("Could not disconnect. Try again.");
+        if (mounted.current) { setDiscovery(null); setNotice("Disconnected."); }
       })}>Disconnect</button> : null}
     </div>
-    {notice ? <p role="status">{notice}</p> : null}
-    <details className="connector-guide"><summary>Connection details</summary>
+    {notice ? <p className="connector-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
+    <p className="connector-detail__hint">Read access is included when you connect. Actions follow your workspace approval preference.</p>
+    <details className="connector-guide"><summary>About this connection</summary>
       <p>Account access is managed by {entry.name}. You can disconnect at any time.</p>
+      {preset.prerequisite ? <p>{preset.prerequisite}</p> : null}
       <a href={preset.documentation} target="_blank" rel="noreferrer">Connection help</a>
     </details>
   </article>;

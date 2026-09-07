@@ -1,0 +1,12 @@
+/* A still avatar is the default. Motion never moves a name or status label. */
+.agent-avatar { position: relative; }
+.agent-avatar > img { transform-origin: 50% 65%; }
+.agent-avatar--generated[data-presence="received"] > img { animation: presence-received 280ms var(--ease-out) both; }
+.agent-avatar--generated[data-presence="thinking"] > img { animation: presence-thinking 3.8s var(--ease-presence) infinite; }
+.agent-avatar--generated[data-presence="working"] > img { animation: presence-working 2.6s var(--ease-presence) infinite; }
+.agent-avatar--generated[data-presence="done"] > img { animation: presence-done 320ms var(--ease-out) both; }
+@keyframes presence-received { 0% { transform: scale(1); } 45% { transform: scale(1.06); } 100% { transform: scale(1); } }
+@keyframes presence-thinking { 0%, 65%, 100% { transform: rotate(0); } 25%, 40% { transform: rotate(-3deg); } }
+@keyframes presence-working { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035, .98); } }
+@keyframes presence-done { 0% { transform: scale(.96); } 60% { transform: scale(1.04); } 100% { transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .agent-avatar > img { animation: none !important; transform: none !important; } }

@@ -56,6 +56,12 @@
   --space-8: 32px;
   --space-12: 48px;
 
+  /* Shared motion: feedback is quick; spatial transitions are slightly slower. */
+  --motion-fast: 140ms;
+  --motion-panel: 220ms;
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --ease-presence: cubic-bezier(.45, 0, .55, 1);
+
   /* Geometry and elevation */
   --radius-1: 5px;
   --radius-2: 7px;

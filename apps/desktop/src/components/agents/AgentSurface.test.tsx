@@ -19,6 +19,37 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
+  it("shows work in progress, then a completion dot until selected, and rearms for the next task", () => {
+    const onSelectAgent = vi.fn();
+    const sidebar = (presence: "idle" | "working" | "done" | "waiting" | "blocked", completionId = "turn-1") => (
+      <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
+        marketplaceActive={false} previews={{ [agent.id]: { message: "Draft", time: "", presence,
+          status: presence === "working" ? "running" : "idle", completionId } }}
+        onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()} onEditAgent={vi.fn()}
+        onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />
+    );
+    const { rerender } = render(sidebar("idle"));
+    expect(screen.getByText("Fable")).toBeVisible();
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(sidebar("working"));
+    expect(screen.getByRole("status", { name: "Working" })).toHaveClass("agent-status--working");
+    rerender(sidebar("done"));
+    expect(screen.getByRole("status", { name: "New completed work" })).toHaveClass("agent-status--unread");
+    rerender(sidebar("idle"));
+    expect(screen.getByRole("status", { name: "New completed work" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /Mira.*Draft/ }));
+    expect(onSelectAgent).toHaveBeenCalledOnce();
+    rerender(sidebar("done"));
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(sidebar("working", "turn-2"));
+    rerender(sidebar("waiting", "turn-2"));
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(sidebar("blocked", "turn-2"));
+    expect(screen.queryByRole("status")).toBeNull();
+    rerender(sidebar("done", "turn-2"));
+    expect(screen.getByRole("status", { name: "New completed work" })).toBeVisible();
+  });
+
   it("keeps agent switching and settings in the sidebar without product navigation", () => {
     const onCreateAgent = vi.fn();
     const onOpenSettings = vi.fn();
@@ -51,7 +82,7 @@ describe("quiet agent surface", () => {
     expect(
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /Connectors/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Plugins/i }));
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     fireEvent.click(screen.getByRole("button", { name: /Local workspace/i }));
     expect(onOpenSettings).not.toHaveBeenCalled();
@@ -113,6 +144,7 @@ describe("quiet agent surface", () => {
     render(
       <AgentWorkspaceHeader
         agent={agent}
+        presence="done"
         attentionCount={1}
         panelOpen={false}
         onTogglePanel={vi.fn()}
@@ -120,6 +152,7 @@ describe("quiet agent surface", () => {
     );
 
     expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.queryByText("Finished")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Learned work/i })).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {

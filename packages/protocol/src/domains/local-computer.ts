@@ -175,6 +175,14 @@ export interface LocalComputerArtifact {
   createdAt: string;
 }
 
+export interface LocalComputerArtifactPreview {
+  artifactId: string;
+  mimeType: string;
+  text: string | null;
+  imageDataUrl: string | null;
+  truncated: boolean;
+}
+
 export interface LocalComputerOpenArtifactRequest extends LocalComputerTarget {
   artifactId: string;
   expectedGeneration: number;

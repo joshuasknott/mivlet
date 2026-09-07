@@ -1,44 +1,19 @@
-import { ChangeEvent, FormEvent, RefObject, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
 import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
-import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { FileArrowUp } from "@phosphor-icons/react/dist/csr/FileArrowUp";
-import { GearSix } from "@phosphor-icons/react/dist/csr/GearSix";
-import { HandPalm } from "@phosphor-icons/react/dist/csr/HandPalm";
+import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
+import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
-import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ACCEPTED_COMPOSER_ATTACHMENTS } from "../lib/constants";
-import type { PermissionProfile } from "../lib/agent-run";
 import type { ProviderModelOption } from "../lib/provider-models";
 import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { ModelPicker } from "./ModelPicker";
-
-const PERMISSION_PRESENTATION = {
-  "Read Only": {
-    label: "Read only",
-    icon: HandPalm
-  },
-  "Ask Me": {
-    label: "Ask first",
-    icon: ShieldCheck
-  },
-  "Work Freely": {
-    label: "Full access",
-    icon: ShieldWarning
-  },
-  Custom: {
-    label: "Custom",
-    icon: GearSix
-  }
-} as const;
 
 export function Composer({
   composerRef,
@@ -56,9 +31,7 @@ export function Composer({
   onDismissVoice,
   onAttach,
   addMenuOpen,
-  permissionsOpen,
   onToggleAddMenu,
-  onTogglePermissions,
   onOpenTool,
   onFileChange,
   importStatus,
@@ -69,9 +42,6 @@ export function Composer({
   onSelectReasoningEffort,
   placeholder = "Ask anything…",
   onSelectModel,
-  permissionLabel,
-  permissionProfiles,
-  onSelectPermissionLabel,
   inThread = false,
   isWorking = false,
   onStop,
@@ -95,10 +65,8 @@ export function Composer({
   onDismissVoice: () => void;
   onAttach: () => void;
   addMenuOpen: boolean;
-  permissionsOpen: boolean;
   onToggleAddMenu: () => void;
-  onTogglePermissions: () => void;
-  onOpenTool: (tool: "Connectors") => void;
+  onOpenTool: (tool: "Plugins") => void;
   onRunCommand: (command: string) => void;
   onFileChange: (event: ChangeEvent<HTMLInputElement>) => void;
   importStatus?: string | null;
@@ -112,11 +80,6 @@ export function Composer({
   onSelectReasoningEffort?: (effort: string | undefined) => void;
   placeholder?: string;
   onSelectModel: (modelId: string) => void;
-  /** Label of the active approval preset (drives the chip text). */
-  permissionLabel: string;
-  /** Approval presets available in the picker. */
-  permissionProfiles: readonly PermissionProfile[];
-  onSelectPermissionLabel: (label: string) => void;
   inThread?: boolean;
   isWorking?: boolean;
   onStop?: () => void;
@@ -126,20 +89,18 @@ export function Composer({
   compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
-  const [activeSubmenu, setActiveSubmenu] = useState<"connectors" | null>(null);
-  const activePermissionPresentation =
-    PERMISSION_PRESENTATION[permissionLabel as keyof typeof PERMISSION_PRESENTATION];
-  const visiblePermissionLabel = activePermissionPresentation?.label ?? permissionLabel;
-
-  const closeExternalMenus = () => {
-    if (addMenuOpen) onToggleAddMenu();
-    if (permissionsOpen) onTogglePermissions();
-    setActiveSubmenu(null);
-  };
-  const openSubmenu = (submenu: "connectors") => {
-    if (submenu === "connectors" && connectedConnectors.length === 0) return;
-    setActiveSubmenu(submenu);
-  };
+  const formRef = useRef<HTMLFormElement>(null);
+  const addTrigger = useRef<HTMLButtonElement>(null);
+  const closeExternalMenus = () => { if (addMenuOpen) onToggleAddMenu(); };
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    formRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!formRef.current?.contains(event.target as Node)) closeExternalMenus();
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [addMenuOpen]);
 
   const isNewThread = !inThread;
   const menuPlacementClass = isNewThread ? "composer-glow--new-thread" : "composer-glow--in-thread";
@@ -228,7 +189,7 @@ export function Composer({
                 </a>
               ) : (
                 <span className="composer-attachment__icon" aria-hidden="true">
-                  <FileArrowUp size={14} />
+                  <FileText size={14} />
                 </span>
               )}
               <span className="composer-attachment__body">
@@ -250,12 +211,17 @@ export function Composer({
         </div>
       ) : null}
       <form
+        ref={formRef}
         className={`composer-glow ${menuPlacementClass}${compactAgentSurface ? " composer-glow--compact-agent" : ""}`}
         onSubmit={onSubmit}
         onKeyDown={(event) => {
           if (event.key === "Escape" && voiceCancelable) {
             event.preventDefault();
             onCancelVoice();
+          } else if (event.key === "Escape" && addMenuOpen) {
+            event.preventDefault();
+            event.stopPropagation();
+            closeExternalMenus(); addTrigger.current?.focus();
           }
         }}
       >
@@ -313,12 +279,12 @@ export function Composer({
           <div className="composer-control-group">
             <div className="composer-control-anchor">
               <button
+                ref={addTrigger}
                 type="button"
                 className={`composer-chip composer-chip--attach${addMenuOpen ? " composer-chip--active composer-trigger--open" : ""}`}
                 onClick={() => {
                   setModelOpen(false);
                   onToggleAddMenu();
-                  setActiveSubmenu(null);
                 }}
                 aria-expanded={addMenuOpen}
                 aria-label="Add files and context"
@@ -326,138 +292,37 @@ export function Composer({
                 <Plus size={20} />
               </button>
               {addMenuOpen ? (
-                <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt">
-                  <span className="composer-menu__heading">Add to prompt</span>
-
-                  <button type="button" role="menuitem" onClick={onAttach}>
-                    <FileArrowUp size={18} />
-                    <span><strong>Files</strong><small>Upload documents or attachments</small></span>
+                <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt" onKeyDown={(event) => {
+                  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+                  event.preventDefault();
+                  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+                  const index = items.indexOf(document.activeElement as HTMLButtonElement);
+                  items[event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+                }}>
+                  <button type="button" role="menuitem" onClick={() => { onAttach(); closeExternalMenus(); }}>
+                    <UploadSimple size={18} /><span>Upload files</span>
                   </button>
-
-                  <div
-                    className={`composer-menu-item-wrapper${activeSubmenu === "connectors" ? " is-active" : ""}`}
-                    onPointerEnter={() => openSubmenu("connectors")}
-                    onMouseEnter={() => openSubmenu("connectors")}
-                    onPointerLeave={() => setActiveSubmenu(null)}
-                    onMouseLeave={() => setActiveSubmenu(null)}
-                    onFocus={() => {
-                      openSubmenu("connectors");
-                    }}
-                  >
-                    <button
-                      type="button"
-                      role="menuitem"
-                      onClick={() => {
-                        if (connectedConnectors.length > 0) {
-                          openSubmenu("connectors");
-                        } else {
-                          onOpenTool("Connectors");
-                        }
-                      }}
-                      className="composer-menu-item"
-                      onPointerEnter={() => openSubmenu("connectors")}
-                      onMouseEnter={() => openSubmenu("connectors")}
-                    >
-                      <PlugsConnected size={18} />
-                      <span>
-                        <strong>Connections</strong>
-                        <small>
-                          {connectedConnectors.length > 0
-                            ? "Bring in context from your tools"
-                            : "No connections added. Add a connection"}
-                        </small>
-                      </span>
-                      {connectedConnectors.length > 0 && <CaretRight size={14} className="composer-menu-item__arrow" />}
-                    </button>
-                    {activeSubmenu === "connectors" && connectedConnectors.length > 0 && (
-                      <div className="composer-submenu-sidebar" role="menu" aria-label="Connections list">
-                        <span className="composer-menu__heading">Your connections</span>
-                        {connectedConnectors.map((connector) => (
-                          <button
-                            key={connector.id}
-                            type="button"
-                            role="menuitem"
-                            onClick={() => {
-                              const prompt = `${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${connector.id} `;
-                              onComposerChange(prompt);
-                              composerRef.current?.focus();
-                              onToggleAddMenu();
-                              setActiveSubmenu(null);
-                            }}
-                          >
-                            <div className="composer-submenu-item-content">
-                              <ConnectorIcon id={connector.id} />
-                              <span>{connector.name}</span>
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-
+                  {connectedConnectors.length > 0 && <span className="composer-menu__heading">Connected apps</span>}
+                  {connectedConnectors.map((connector) => <button key={connector.id} type="button" role="menuitem" onClick={() => {
+                    const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + connector.id + " ";
+                    onComposerChange(prompt); closeExternalMenus(); composerRef.current?.focus();
+                  }}><ConnectorIcon id={connector.id} /><span>{connector.name}</span></button>)}
+                  <button type="button" role="menuitem" className="composer-add-menu__manage" onClick={() => { closeExternalMenus(); onOpenTool("Plugins"); }}>
+                    <PlugsConnected size={18} /><span>Manage plugins</span>
+                  </button>
                 </div>
               ) : null}
             </div>
 
-            {!compactAgentSurface ? <div className="composer-control-anchor composer-control-anchor--permissions">
-              <button
-                type="button"
-                className={`composer-permissions-card${permissionsOpen ? " composer-chip--active composer-trigger--open" : ""}`}
-                onClick={() => {
-                  setModelOpen(false);
-                  onTogglePermissions();
-                }}
-                aria-expanded={permissionsOpen}
-                aria-label="Approval preset"
-              >
-                <span>{visiblePermissionLabel}</span>
-                <CaretDown size={13} />
-              </button>
-              {permissionsOpen ? (
-                <div className="composer-menu composer-permissions" role="menu" aria-label="Approval preset">
-                  <span className="composer-menu__heading">How Fable should work</span>
-                  {permissionProfiles.map((profile) => {
-                    const presentation =
-                      PERMISSION_PRESENTATION[
-                        profile.label as keyof typeof PERMISSION_PRESENTATION
-                      ];
-                    const PermissionIcon = presentation?.icon ?? ShieldCheck;
-                    return (
-                      <button
-                        key={profile.label}
-                        type="button"
-                        role="menuitemradio"
-                        aria-checked={permissionLabel === profile.label}
-                        className={profile.custom ? "composer-permissions__custom" : undefined}
-                        onClick={() => {
-                          onSelectPermissionLabel(profile.label);
-                          onTogglePermissions();
-                        }}
-                      >
-                        <PermissionIcon
-                          className="composer-permissions__icon"
-                          size={17}
-                          aria-hidden="true"
-                        />
-                        <span>
-                          <strong>{presentation?.label ?? profile.label}</strong>
-                          <small>{profile.description}</small>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : null}
-            </div> : null}
+
+            {!compactAgentSurface && <ModelPicker models={models} selectedId={selectedModelId}
+              label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
+              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
-            {!compactAgentSurface ? <ModelPicker models={models} selectedId={selectedModelId}
-              label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
-              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
-              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} /> : null}
-            {!isWorking ? (
+            {!isWorking && (!hasComposerText || voiceListening || voiceTransitioning) ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
                   <button
@@ -495,7 +360,7 @@ export function Composer({
                 </button>
               </div>
             ) : null}
-              <button
+              {isWorking || (hasComposerText && !voiceListening && !voiceTransitioning) ? <button
                 className={`send-button${isWorking ? " send-button--stop" : ""}`}
                 type={isWorking ? "button" : "submit"}
                 aria-label={isWorking ? "Stop response" : "Send prompt"}
@@ -507,7 +372,7 @@ export function Composer({
                 ) : (
                   <PaperPlaneTilt size={20} />
                 )}
-              </button>
+              </button> : null}
           </div>
         </div>
 

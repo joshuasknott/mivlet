@@ -16,10 +16,15 @@ export function isLocalComputerTool(name: string, argumentsJson: string): boolea
 /** Merge computer and connector tools without re-enabling unrelated runtimes. */
 export function conversationComputerTools(connectedTools: NativeToolSpec[], ready: boolean, visualSupported = false): NativeToolSpec[] {
   const tools = new Map(connectedTools.map((tool) => [tool.name, tool]));
-  if (ready) for (const tool of registeredToolSpecs()) {
-    if (COMPUTER_TOOLS.has(tool.name) && (visualSupported || !tool.name.startsWith("local-desktop-"))) tools.set(tool.name, tool);
+  for (const tool of registeredToolSpecs()) {
+    if (tool.name === "web-fetch" || (ready && COMPUTER_TOOLS.has(tool.name) && (visualSupported || !tool.name.startsWith("local-desktop-")))) tools.set(tool.name, tool);
   }
   return [...tools.values()];
+}
+
+/** Both new turns and retries resolve tools against the model actually executing. */
+export function conversationToolsForModel(connectedTools: NativeToolSpec[], ready: boolean, provider: BackendProvider | undefined, model: BackendModel | undefined): NativeToolSpec[] {
+  return conversationComputerTools(connectedTools, ready, supportsComputerVision(provider, model));
 }
 
 export function supportsComputerVision(provider: BackendProvider | undefined, model: BackendModel | undefined): boolean {

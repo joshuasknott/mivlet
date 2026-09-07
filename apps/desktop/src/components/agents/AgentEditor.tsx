@@ -2,12 +2,14 @@ import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
-import { createAvatarSeed } from "../../lib/blob-avatar";
-import { AgentLearningDialog } from "./AgentLearningDialog";
+import { AVATAR_SHAPES, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
+import { AGENT_COLOURS } from "../../lib/agent-colours";
+import { AgentColourPicker } from "./AgentColourPicker";
+const AgentLearningDialog = lazy(() => import("./AgentLearningDialog").then((module) => ({ default: module.AgentLearningDialog })));
 import { ModelPicker } from "../ModelPicker";
 
 
@@ -18,7 +20,7 @@ const emptyDraft: AgentDraft = {
   instructions: "",
   modelId: "",
   icon: "agent",
-  iconColor: DEFAULT_AGENT_COLOR,
+  iconColor: AGENT_COLOURS[0][1],
   connectorIds: [],
   knowledgeSourceIds: [],
   permissionLabel: "Ask Me"
@@ -75,6 +77,7 @@ export function AgentEditor({
   open,
   agent,
   models,
+  existingAvatarSeeds,
   canDelete,
   onClose,
   onSave,
@@ -85,6 +88,7 @@ export function AgentEditor({
   open: boolean;
   agent: FableAgentProfile | null;
   models: ProviderModelOption[];
+  existingAvatarSeeds?: string[];
   canDelete: boolean;
   onClose: () => void;
   onSave: (draft: AgentDraft) => void;
@@ -110,6 +114,7 @@ export function AgentEditor({
     setSkillsOpen(false);
     setModelOpen(false);
     setImageError("");
+    const newSeed = agent ? undefined : createAvatarSeed(existingAvatarSeeds);
     setDraft(agent ? {
       name: agent.name,
       instructions: agent.instructions,
@@ -122,7 +127,7 @@ export function AgentEditor({
       connectorIds: agent.connectorIds,
       knowledgeSourceIds: agent.knowledgeSourceIds,
       permissionLabel: agent.permissionLabel
-    } : { ...emptyDraft, avatarSeed: createAvatarSeed() });
+    } : { ...emptyDraft, avatarSeed: newSeed, iconColor: AGENT_COLOURS[avatarVariant(newSeed!)][1] });
     return () => { imageRequestRef.current++; };
   }, [agent?.id, open]);
 
@@ -137,12 +142,19 @@ export function AgentEditor({
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={40} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
           <fieldset className="agent-icon-picker">
-            <legend>Agent icon</legend>
+            <legend className="agent-editor__sr-only">Agent image</legend>
+            <div className="agent-shape-picker" role="group" aria-label="Character shape">
+              {AVATAR_SHAPES.map((shape, index) => <button key={shape} type="button" aria-label={`${shape} character`}
+                aria-pressed={!draft.iconImageDataUrl && avatarVariant(draft.avatarSeed ?? "") === index}
+                onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined, iconColor: AGENT_COLOURS[index][1], avatarSeed: `rounded-v2:${index}:${crypto.randomUUID()}` }); }}>
+                <AgentAvatar seed={`rounded-v2:${index}:preview`} color={AGENT_COLOURS[index][1]} iconSize={40} />
+              </button>)}
+            </div>
             <div className="agent-icon-picker__options">
               <div className="agent-image-upload">
                 <input
@@ -171,11 +183,11 @@ export function AgentEditor({
                 {draft.iconImageDataUrl ? <button type="button" onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined }); }}>Remove image</button> : null}
               </div>
             </div>
-            <small>A unique portrait is made for every agent. Upload an image to make it your own.</small>
             {imageError ? <p className="agent-image-error" role="alert">{imageError}</p> : null}
           </fieldset>
 
-          <label className="agent-editor__colour"><span>Agent colour</span><input aria-label="Agent colour" type="color" value={draft.iconColor} onInput={(event) => setDraft({ ...draft, iconColor: event.currentTarget.value })} /><small>{draft.iconImageDataUrl ? "Applies to the generated icon when you remove the uploaded image." : "Choose your agent’s colour."}</small></label>
+          <AgentColourPicker key={`${agent?.id ?? "new"}:${draft.avatarSeed}`} value={draft.iconColor} onChange={(iconColor) => setDraft({ ...draft, iconColor })} />
+          {draft.iconImageDataUrl && <small>Colour applies to the generated portrait when you remove the uploaded image.</small>}
 
           <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this agent work with you?" /></label>
 
@@ -196,10 +208,10 @@ export function AgentEditor({
             <div><button type="button" onClick={onClose}>Cancel</button><button className="agent-editor__save" type="submit" disabled={!draft.name.trim() || imagePending}>{agent ? "Save changes" : "Create agent"}</button></div>
           </footer>
         </form>
-        {agent && onSkillsChange ? <AgentLearningDialog open={skillsOpen} agent={agent}
+        {agent && onSkillsChange && skillsOpen ? <Suspense fallback={null}><AgentLearningDialog open={skillsOpen} agent={agent}
           onClose={() => setSkillsOpen(false)} onChange={onSkillsChange} onRun={(task) => {
             setSkillsOpen(false); onClose(); onUseSkill?.(task);
-          }} /> : null}
+          }} /></Suspense> : null}
       </div>
     </div>
   );

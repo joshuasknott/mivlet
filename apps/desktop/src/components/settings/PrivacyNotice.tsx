@@ -32,7 +32,7 @@ export function PrivacySummary() {
         <dt>Connected apps</dt>
         <dd>
           Fable requests the permissions shown during connection. You can review
-          and disconnect each app in Connectors.
+          and disconnect each app in Plugins.
         </dd>
       </div>
     </dl>

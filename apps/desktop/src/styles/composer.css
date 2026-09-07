@@ -168,10 +168,6 @@
 .connector-mention > span { display: inline; }
 .connector-mention svg, .connector-mention img { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2px; object-fit: contain; }
 
-.composer-input::placeholder {
-  color: var(--ink-soft);
-  transition: color 150ms ease;
-}
 
 .composer-input:focus-visible {
   box-shadow: none;
@@ -192,11 +188,6 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
   box-shadow: var(--shadow-2);
-}
-
-.composer-glow--new-thread .composer-suggestions {
-  top: calc(100% + 8px);
-  bottom: auto;
 }
 
 .composer-suggestions button {
@@ -235,9 +226,6 @@
   white-space: nowrap;
 }
 
-.composer-glow:hover .composer-input::placeholder {
-  color: var(--ink-muted);
-}
 
 /* Control row: left group pinned left, right group pinned right. */
 .composer-controls {
@@ -442,9 +430,6 @@
 }
 
 /* Permissions view — a read-only list of connectors and their scopes. */
-.composer-permissions {
-  min-width: 280px;
-}
 
 .composer-permissions {
   min-width: 310px;
@@ -680,116 +665,9 @@
   }
 }
 
-/* Submenu Wrapper & Sidebars */
-.composer-menu-item-wrapper {
-  position: relative;
-  display: block;
-  width: 100%;
-}
 
-.composer-menu-item-wrapper::after {
-  position: absolute;
-  top: -2px;
-  left: 100%;
-  width: 12px;
-  height: calc(100% + 4px);
-  content: "";
-}
-
-.composer-menu-item {
-  background: transparent;
-  border: 0;
-  padding: 8px 10px;
-  color: var(--ink);
-  border-radius: var(--radius-2);
-  text-align: left;
-  transition: background 120ms ease;
-}
-
-.composer-menu-item:hover:not(:disabled) {
-  background: var(--line);
-}
-
-.composer-menu-item__arrow {
-  color: var(--ink-soft);
-  opacity: 0.7;
-  transition:
-    transform 150ms ease,
-    color 150ms ease;
-  margin-right: 4px;
-}
-
-.composer-menu-item-wrapper:hover .composer-menu-item__arrow {
-  color: var(--accent);
-  transform: translateX(2px);
-}
-
-/* Sidebar styling: flies out to the right of the dropdown menu */
-.composer-submenu-sidebar {
-  position: absolute;
-  left: calc(100% + 6px);
-  top: -8px;
-  z-index: 15;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 240px;
-  max-width: 320px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding: 8px;
-  background: var(--surface-overlay);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-2);
-  box-shadow: var(--shadow-3);
-  backdrop-filter: var(--glass-filter);
-  animation: composerSubmenuFadeIn 120ms ease-out;
-}
-
-@keyframes composerSubmenuFadeIn {
-  from {
-    opacity: 0;
-    transform: translateX(-4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
-}
-
-.composer-submenu-sidebar button {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
-  padding: 8px 10px;
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-2);
-  text-align: left;
-  transition:
-    background 120ms ease,
-    color 120ms ease;
-}
-
-.composer-submenu-sidebar button:hover {
-  background: var(--line);
-  color: var(--accent-strong);
-}
-
-.composer-submenu-item-content {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-}
-
-/* Disabled styling for empty dropdown options */
-.composer-menu button:disabled,
-.composer-menu button:disabled:hover,
-.composer-menu-item:disabled,
-.composer-menu-item:disabled:hover {
-  opacity: 0.5;
-  background: transparent !important;
-  cursor: not-allowed;
-}
+.composer-add-menu { width: min(320px, calc(100vw - 48px)); max-height: min(420px, 60dvh); overflow-y: auto; padding: 8px; border-radius: 16px; }
+.composer-add-menu button { min-height: 44px; gap: 12px; padding: 10px 12px; border-radius: 9px; }
+.composer-add-menu button > svg { flex: 0 0 18px; }
+.composer-add-menu .composer-menu__heading { padding: 14px 12px 6px; margin-top: 6px; border-top: 1px solid var(--line); }
+.composer-add-menu .composer-add-menu__manage { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 9px 9px; color: var(--ink-muted); }

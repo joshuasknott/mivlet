@@ -152,20 +152,19 @@ describe("SettingsPage", () => {
     renderTab("connections");
 
     expect(screen.getByRole("heading", { name: "Tool servers" })).toBeInTheDocument();
-    expect(screen.getByText(/App connections live in Connectors/i)).toBeInTheDocument();
+    expect(screen.getByText(/App connections live in Plugins/i)).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Installed" })).not.toBeInTheDocument();
     expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeInTheDocument();
   });
 
-  it("keeps approvals, memory, and explicit local data controls together", async () => {
+  it("keeps memory and explicit local data controls in privacy", async () => {
     const view = renderTab("privacy");
 
     expect(screen.getByRole("heading", { name: "Privacy & data" })).toBeInTheDocument();
     expect(screen.getByText("Personal memory")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Approvals", { exact: true }));
     fireEvent.click(screen.getByText("Manage local data"));
     expect(screen.getByText("Local data recovery")).toBeInTheDocument();
-    expect(screen.getByRole("radio", { name: /Ask first/ })).toHaveAttribute("aria-checked", "true");
+    expect(screen.queryByRole("combobox", { name: "Approvals" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Delete local data" })).toBeDisabled();
     expect(view.container.textContent).not.toMatch(/\b(?:mission|routine|schedule|workflow|run history)\b/i);
     fireEvent.click(screen.getByRole("button", { name: "Check local health" }));
@@ -180,4 +179,14 @@ describe("SettingsPage", () => {
     view.rerender(<SettingsPage runtime={runtime} theme="light" onThemeChange={() => {}} activeTab="providers" workspaceName="Joshua's workspace" />);
     expect(screen.queryByText("Light theme applied.")).not.toBeInTheDocument();
   });
+});
+
+it("keeps the existing custom policy until a preset is explicitly selected", () => {
+  const runtime = stubRuntime({ permissionLabel: "Custom" });
+  renderTab("general", runtime);
+  const select = screen.getByRole("combobox", { name: "Approvals" });
+  expect(select).toHaveValue("Custom");
+  expect(runtime.selectPermissionLabel).not.toHaveBeenCalled();
+  fireEvent.change(select, { target: { value: "Ask Me" } });
+  expect(runtime.selectPermissionLabel).toHaveBeenCalledWith("Ask Me");
 });

@@ -113,6 +113,8 @@ export function createDurableRunWriter(
   let previousMessageId: string | undefined;
   let ordinal = 0;
   let assistant: ConversationMessageView | null = null;
+  let transcriptOffset = 0;
+  let latestTranscript = "";
 
   const initialize = async () => {
     if (!initialized) {
@@ -180,10 +182,11 @@ export function createDurableRunWriter(
     if (record.kind === "assistant") assistant = view;
   };
 
-  return {
-    record: (record) => enqueue(() => append(record)),
-    checkpointAssistant: (content, terminal = false) => enqueue(async () => {
+  const checkpoint = async (transcript: string, terminal = false) => {
+      latestTranscript = transcript;
+      const content = transcript.slice(transcriptOffset);
       if (!assistant) {
+        if (!content) return;
         await append({ kind: "assistant", content, state: terminal ? "terminal" : "streaming" });
         return;
       }
@@ -192,18 +195,30 @@ export function createDurableRunWriter(
       const revision = await transport.reviseMessage({
         threadId: assistant.message.threadId,
         messageId: assistant.message.id,
-        revisionId: `revision-${runId}-assistant-${revisionNumber}` as never,
+        revisionId: `revision-${assistant.message.id}-${revisionNumber}` as never,
         baseMessageRevisionNumber: assistant.message.currentRevisionNumber,
         previousRevisionId: assistant.message.currentRevisionId,
         state: terminal ? "terminal" : "streaming",
         content,
         reason: terminal ? "completion" : "stream-checkpoint",
-        idempotencyKey: `${runId}:assistant:revision:${revisionNumber}`,
+        idempotencyKey: `${assistant.message.id}:revision:${revisionNumber}`,
         correlationKey: `${runId}:assistant`,
         checkpointedAt: now,
         runId: runId as never
       } as ConversationMessageRevision);
       assistant = revision;
-    })
+  };
+  return {
+    record: (record) => enqueue(async () => {
+      // Close the current spoken update before the next action. The caller's
+      // transcript stays cumulative; each persisted message is one segment.
+      if (["tool-call", "error", "interruption"].includes(record.kind)) {
+        if (assistant) await checkpoint(latestTranscript, true);
+        assistant = null;
+        transcriptOffset = latestTranscript.length;
+      }
+      await append(record);
+    }),
+    checkpointAssistant: (content, terminal = false) => enqueue(() => checkpoint(content, terminal)),
   };
 }

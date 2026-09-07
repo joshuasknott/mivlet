@@ -17,6 +17,14 @@ const fixture = () => ({
 });
 beforeEach(() => vi.clearAllMocks());
 describe("official connector agent tools", () => {
+  it("propagates provider isError as failure and closes the connection", async () => {
+    const connection = fixture(); connection.client.close.mockResolvedValue(undefined);
+    connection.transport.executeAuthorizedToolCall.mockResolvedValue({ isError: true, content: [{ type: "text", text: "Permission denied. Reconnect Notion." }] });
+    open.mockResolvedValue(connection);
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, options);
+    await expect(executor(approval, input)).rejects.toThrow("Permission denied. Reconnect Notion.");
+    expect(connection.client.close).toHaveBeenCalledOnce();
+  });
   it("executes native-classified routine reads without a user prompt and retains exact permits", async () => {
     const connection = fixture();
     connection.client.close.mockResolvedValue(undefined);
@@ -31,7 +39,7 @@ describe("official connector agent tools", () => {
   });
   it("blocks unavailable workspace connectors before network access", async () => {
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, { ...options, connectorIds: [] });
-    await expect(executor(approval, input)).rejects.toThrow(/workspace's Connectors page/);
+    await expect(executor(approval, input)).rejects.toThrow(/workspace's Plugins page/);
     expect(open).not.toHaveBeenCalled();
   });
   it("lists only enabled tools as untrusted metadata", async () => {

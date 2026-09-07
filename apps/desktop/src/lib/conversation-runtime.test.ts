@@ -125,4 +125,18 @@ describe("conversation runtime", () => {
     expect(transport.views[1].currentRevision.content).toBe("Complete");
     expect(transport.views[1].currentRevision.reason).toBe("completion");
   });
+
+  it("keeps updates on either side of tools in order with unique revision keys", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({ kind: "user", content: "Check it" });
+    await writer.checkpointAssistant("I will check. ");
+    await writer.record({ kind: "tool-call", content: "Requested", callId: "call-1", toolName: "read-file" });
+    await writer.record({ kind: "tool-result", content: "Found it", callId: "call-1", toolName: "read-file", ok: true });
+    await writer.checkpointAssistant("I will check. Here is the ");
+    await writer.checkpointAssistant("I will check. Here is the answer.", true);
+    expect(transport.views.map((view) => view.currentRevision.content)).toEqual(["Check it", "I will check. ", "Requested", "Found it", "Here is the answer."]);
+    expect(transport.views[1].currentRevision.state).toBe("terminal");
+    expect(new Set(transport.views.map((view) => view.currentRevision.id)).size).toBe(5);
+  });
 });

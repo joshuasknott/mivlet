@@ -355,12 +355,14 @@ describe("useNativeAgent", () => {
       contextReceipt: { ...preparedContext.receipt, attemptId: `attempt-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
       providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } },
       usage: { inputTokens: 40 + index, outputTokens: 5 + index, costUsd: 0, costUnknown: true }
+      ,reasoningSummaries: { public: `Summary for ${status}` }
     }));
     const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
     await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
     expect(result.current.state.contextReceipts["attempt-interrupted"]?.contributions[0].reason).toBe("retrieved");
     expect(result.current.state.providerRoutes["attempt-completed"]?.selection.reason).toBe("Selected route completed.");
     expect(result.current.state.usageReceipts["attempt-failed"]).toMatchObject({ inputTokens: 41, outputTokens: 6, costUnknown: true });
+    expect(result.current.state.progressReceipts?.["attempt-completed"].summaries).toEqual({ public: "Summary for completed" });
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {
@@ -412,10 +414,13 @@ describe("useNativeAgent", () => {
     await waitFor(() => expect(result.current.state.recoverableAttempts).toHaveLength(1));
 
     await act(async () => {
-      await result.current.retry(result.current.state.recoverableAttempts[0], registeredToolSpecs().filter((tool) => tool.name === "gmail-read"));
+      await result.current.retry(result.current.state.recoverableAttempts[0], registeredToolSpecs().filter((tool) => tool.name === "gmail-read"), "read-only", "Use the isolated agent computer. Verify each result before continuing.");
     });
 
     expect(result.current.state.transcript).toBe("Recovered");
+    expect(mocks.streamRequests[0].body).toMatchObject({ messages: expect.arrayContaining([
+      expect.objectContaining({ role: "system", content: expect.stringContaining("Use the isolated agent computer.") }),
+    ]) });
     expect(mocks.streamRequests[0].body).toMatchObject({ tools: [expect.objectContaining({ function: expect.objectContaining({ name: "gmail-read" }) })] });
     expect(result.current.state.recoverableAttempts).toHaveLength(0);
     const finalRun = mocks.savedRuns.at(-1) as ExecutionAttempt;
@@ -429,7 +434,7 @@ describe("useNativeAgent", () => {
     });
     // A retry starts a child attempt from the safe user turn; it does not replay
     // a completed tool call from the parent as a new side effect.
-    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["user"]);
+    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["system", "user"]);
   });
 
   it.each(["read-only", "full-access"] as const)("retries with the current %s mode and a fresh executor decision", async (mode) => {
@@ -906,8 +911,10 @@ describe("useNativeAgent", () => {
     // Grant the pending call — the executor unblocks and runs the tool.
     gate.resolveGrant(approvalId);
 
-    await waitFor(() => expect(result.current.state.activity).toBe("Using: read-file"));
-    expect(result.current.state.status).toBe("streaming");
+    await waitFor(() => {
+      expect(result.current.state.activity).toBe("Reading a file");
+      expect(result.current.state.status).toBe("streaming");
+    });
     expect(result.current.state.running).toBe(true);
     completeNative();
 

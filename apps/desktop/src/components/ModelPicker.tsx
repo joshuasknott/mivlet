@@ -57,7 +57,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   }, [open]);
   const close = () => { onOpenChange(false); trigger.current?.focus(); };
   const navigate = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
+    if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (showEffort || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
     if (event.target instanceof HTMLInputElement && event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     const options = [...(root.current?.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]:not(:disabled)') ?? [])];
@@ -81,7 +81,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       aria-label="Select model" aria-haspopup="dialog" aria-controls={open ? panelId : undefined} aria-expanded={open}
       onClick={() => { if (!open) { setView("effort"); setQuery(""); setProvider(""); } onOpenChange(!open); }}>
       <span>{label}</span>
-      {effort ? <small className="composer-model__effort">{effortLabel(effort)}</small> : null}
+      {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
     {open ? <div id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}`} role="dialog" aria-label="Model and reasoning">

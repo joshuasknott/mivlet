@@ -36,6 +36,13 @@ use crate::paths::{
 pub(crate) trait ConnectorCredentialBoundary {
     fn connection(&self, connector_id: &str) -> Option<ConnectorConnection>;
     fn workspace_id(&self) -> Option<&str>;
+    fn health(
+        &self,
+        _connector_id: &str,
+        _connection: &ConnectorConnection,
+    ) -> Option<ConnectorHealth> {
+        None
+    }
 }
 
 struct UnavailableCredentialBoundary;
@@ -62,6 +69,40 @@ impl ConnectorCredentialBoundary for NativeCredentialBoundary<'_> {
 
     fn workspace_id(&self) -> Option<&str> {
         Some(self.scope.data.workspace_id())
+    }
+
+    fn health(
+        &self,
+        connector_id: &str,
+        connection: &ConnectorConnection,
+    ) -> Option<ConnectorHealth> {
+        let store = crate::store::try_global()?;
+        let id = crate::connector_auth::derive_native_connection_id(
+            self.scope.data.workspace_id(),
+            connector_id,
+            &connection.account.id,
+        );
+        let record = store
+            .with_conn(|tx| crate::store::repos::connection_record::get(tx, store, self.scope, &id))
+            .ok()??;
+        let (state, summary) = match record.health_state.as_str() {
+            "healthy" => ("healthy", "Account connected."),
+            "degraded" => (
+                "degraded",
+                "Access needs attention. Reconnect to restore access.",
+            ),
+            "unhealthy" => (
+                "error",
+                "The connection could not be reached. Try connecting again.",
+            ),
+            _ => return None,
+        };
+        Some(ConnectorHealth {
+            state: state.into(),
+            summary: summary.into(),
+            checked_at: record.updated_at,
+            retry_after: None,
+        })
     }
 }
 
@@ -727,6 +768,11 @@ fn build_manifest_with_health(
         .and_then(|_| boundary.connection(entry.id));
     let configuration_state = connector_configuration_state(entry);
     let configured = configuration_state == "configured";
+    let health = health.or_else(|| {
+        connection
+            .as_ref()
+            .and_then(|connection| boundary.health(entry.id, connection))
+    });
     let status = connector_manifest_status(entry, connection.as_ref(), health.as_ref());
     let connected = status == "connected";
     let missing_required = connected

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getThread: vi.fn(),
   listMessages: vi.fn(),
   loadDraft: vi.fn(),
+  deleteThread: vi.fn(),
 }));
 
 vi.mock("../runtime", () => ({
@@ -20,6 +21,7 @@ vi.mock("../runtime", () => ({
   loadRuntimeConversationDraft: mocks.loadDraft,
   saveRuntimeConversationDraft: vi.fn(async (draft) => draft),
   deleteRuntimeConversationDraft: vi.fn(async () => {}),
+  deleteRuntimeConversationThread: mocks.deleteThread,
 }));
 
 const thread = (id: string) => ({
@@ -37,6 +39,21 @@ describe("useDurableConversation", () => {
     mocks.getThread.mockResolvedValue(null);
     mocks.listMessages.mockResolvedValue([]);
     mocks.loadDraft.mockResolvedValue(null);
+    mocks.deleteThread.mockReset().mockResolvedValue(undefined);
+  });
+
+  it("removes a deleted thread and its open transcript only after storage succeeds", async () => {
+    mocks.listThreads.mockResolvedValue([thread("old"), thread("keep")]);
+    mocks.getThread.mockResolvedValue(thread("old"));
+    const { result } = renderHook(() => useDurableConversation({ workspaceId: "workspace", threadId: "old" }));
+    await waitFor(() => expect(result.current.state.conversation?.thread.id).toBe("old"));
+    mocks.deleteThread.mockRejectedValueOnce(new Error("Busy"));
+    await act(async () => { await expect(result.current.deleteThread("old")).rejects.toThrow("Busy"); });
+    expect(result.current.state.threads).toHaveLength(2);
+    await act(async () => result.current.deleteThread("old"));
+    expect(result.current.state.threads.map((item) => item.id)).toEqual(["keep"]);
+    expect(result.current.state.conversation).toBeNull();
+    expect(mocks.deleteThread).toHaveBeenCalledWith("old");
   });
 
   it("waits for the installation-local workspace boundary before hydrating", async () => {

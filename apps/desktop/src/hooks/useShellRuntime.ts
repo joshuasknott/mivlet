@@ -1,3 +1,4 @@
+import { listVerifiedConnectorStatuses as listRuntimeConnectorStatuses } from "../lib/load-connector-connections";
 import {
   ChangeEvent,
   useCallback,
@@ -6,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { CONNECTOR_CONNECTIONS_CHANGED } from "../lib/connector-connections";
 import type {
   ActionHistoryEvent,
   ApprovalAuditEntry,
@@ -85,7 +87,6 @@ import {
   connectRuntimeBackend,
   exportRuntimeMemoryState,
   importRuntimeLocalKnowledgeSource,
-  listRuntimeConnectorStatuses,
   listRuntimeConnectorSyncStates,
   listRuntimeConnectorAccounts,
   listRuntimeConnectorKnowledgeSources,
@@ -349,6 +350,7 @@ export function useShellRuntime(
   const refreshConnectorStatuses = useCallback(async () => {
     const scopeGeneration = connectorScopeRef.current;
     const latest = await listRuntimeConnectorStatuses();
+    if (scopeGeneration !== connectorScopeRef.current) return null;
     if (latest && scopeGeneration === connectorScopeRef.current) {
       setConnectorManifests((current) => latest.map((manifest) => {
         const previous = current.find((candidate) => candidate.id === manifest.id);
@@ -360,12 +362,18 @@ export function useShellRuntime(
   useEffect(() => {
     const refresh = () => { void refreshConnectorStatuses().catch(() => undefined); };
     window.addEventListener("focus", refresh);
-    return () => window.removeEventListener("focus", refresh);
+    window.addEventListener(CONNECTOR_CONNECTIONS_CHANGED, refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener(CONNECTOR_CONNECTIONS_CHANGED, refresh);
+    };
   }, [refreshConnectorStatuses]);
   const [connectorAccounts, setConnectorAccounts] = useState<
     Record<string, ConnectorAccountOption[]>
   >({});
   const [connectorStatus, setConnectorStatus] = useState<string | null>(null);
+  const connectorOperations = useRef(new Map<string, Promise<void>>());
+  const connectorApprovalRequests = useRef(new Map<string, ApprovalRequest>());
   const [connectorImportedSources, setConnectorImportedSources] = useState<
     KnowledgeSource[]
   >([]);
@@ -1728,7 +1736,12 @@ export function useShellRuntime(
     );
   };
 
-  const connectConnector = async (connector: ConnectorManifest) => {
+  const connectConnector = (connector: ConnectorManifest): Promise<void> => {
+    const generation = connectorScopeRef.current;
+    const key = `${generation}:${connector.id}`;
+    const pending = connectorOperations.current.get(key);
+    if (pending) return pending;
+    const task = (async () => {
     if (!isSupportedConnectorId(connector.id)) {
       setConnectorStatus(
         connector.id === "local-files"
@@ -1752,17 +1765,25 @@ export function useShellRuntime(
         const message = `${connector.name} connections require the installed desktop app.`;
         setConnectorStatus(message);
         setLastAction(message);
-        return;
+        throw new Error(message);
       }
       // On a real connection, re-read the boundary so the manifest reflects the
       // live account, granted scopes, and (after refresh) provider health.
       if (result.status === "connected") {
+        if (connectorScopeRef.current !== generation) return;
         const refreshed = await refreshRuntimeConnectorHealth(connector.id);
+        if (connectorScopeRef.current !== generation) return;
         if (refreshed) {
           replaceConnectorManifest(refreshed);
         }
+        if (!refreshed || refreshed.status !== "connected" || refreshed.health?.state !== "healthy") {
+          throw new Error(refreshed?.healthSummary ?? "Could not finish connecting. Try again.");
+        }
         await loadConnectorAccounts(connector.id);
+      } else {
+        throw new Error(result.message || "Sign-in did not finish. Try again.");
       }
+      if (connectorScopeRef.current !== generation) return;
       setConnectorStatus(result.message);
       setLastAction(result.message);
     } catch (error) {
@@ -1770,12 +1791,18 @@ export function useShellRuntime(
         error instanceof Error
           ? error.message
           : `${connector.name} authorization is unavailable.`;
+      if (connectorScopeRef.current !== generation) throw new Error(message);
       setConnectorStatus(message);
       setLastAction(message);
+      throw new Error(message);
     }
+    })().finally(() => { connectorOperations.current.delete(key); });
+    connectorOperations.current.set(key, task);
+    return task;
   };
 
   const disconnectConnector = async (connectorId: string) => {
+    const generation = connectorScopeRef.current;
     const connector = connectorManifests.find(
       (manifest) => manifest.id === connectorId,
     );
@@ -1785,20 +1812,17 @@ export function useShellRuntime(
 
     try {
       const manifest = await clearRuntimeConnectorAuth(connectorId);
+      if (connectorScopeRef.current !== generation) return;
       if (manifest) {
         replaceConnectorManifest(manifest);
         setConnectorStatus(`${connector.name} disconnected.`);
       } else {
-        setConnectorStatus(
-          `${connector.name} connections require the installed desktop app.`,
-        );
+        throw new Error(`${connector.name} connections require the installed desktop app.`);
       }
     } catch (error) {
-      setConnectorStatus(
-        error instanceof Error
-          ? error.message
-          : `${connector.name} could not be disconnected.`,
-      );
+      const message = error instanceof Error ? error.message : `${connector.name} could not be disconnected.`;
+      if (connectorScopeRef.current === generation) setConnectorStatus(message);
+      throw new Error(message);
     }
   };
 
@@ -2340,6 +2364,9 @@ export function useShellRuntime(
     arguments: string;
     approval: ApprovalRequest;
   }) => {
+    if (event.tool === "connector-action" || event.tool === "connector-call") {
+      connectorApprovalRequests.current.set(event.approval.id, event.approval);
+    }
     if (permissionModeRef.current === "full-access") {
       void resolveApprovalDecision(event.approval, "once", undefined,
         event.approval.confirmationPhrase, true);
@@ -2366,6 +2393,7 @@ export function useShellRuntime(
   };
 
   const clearBackendToolApprovals = () => {
+    connectorApprovalRequests.current.clear();
     setBackendToolApprovals([]);
     setApprovalPreviews({});
   };
@@ -2530,6 +2558,7 @@ export function useShellRuntime(
       setBackendToolApprovals((current) =>
         current.filter((candidate) => candidate.id !== approval.id),
       );
+      connectorApprovalRequests.current.delete(approval.id);
 
       clearApprovalInteraction();
       setLastAction(
@@ -2552,6 +2581,14 @@ export function useShellRuntime(
     decision: ApprovalDecision,
     modification?: ApprovalModification,
   ) => {
+    // The visible Approve button confirms this exact queued connector operation.
+    // Preserve the native single-use receipt without a second typing ceremony.
+    const queued = connectorApprovalRequests.current.get(approval.id);
+    if (decision === "once" && !modification && queued === approval
+      && approvalGateRef.current?.hasPending(approval.id)) {
+      void resolveApprovalDecision(approval, decision, undefined, approval.confirmationPhrase);
+      return;
+    }
     if (
       decision !== "deny" &&
       approvalNeedsConfirmation(approval, modification)
@@ -2638,7 +2675,7 @@ export function useShellRuntime(
         agent.id === agentId ? {
           ...agent,
           ...patch,
-          threadIds: [...new Set([
+          threadIds: patch.threadIds ?? [...new Set([
             ...(agent.threadIds ?? []),
             ...(agent.threadId ? [agent.threadId] : []),
             ...(patch.threadId ? [patch.threadId] : []),

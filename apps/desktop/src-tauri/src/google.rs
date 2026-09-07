@@ -29,6 +29,7 @@ const GMAIL_API: &str = "https://gmail.googleapis.com/gmail/v1/";
 const CALENDAR_API: &str = "https://www.googleapis.com/calendar/v3/";
 const MAX_RESPONSE_BYTES: usize = 4 * 1024 * 1024;
 const MAX_PREVIEW_CHARACTERS: usize = 20_000;
+const MAX_TOOL_RESULT_CHARACTERS: usize = 64_000;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_RETRIES: usize = 2;
 
@@ -1762,29 +1763,90 @@ pub(crate) async fn execute_read_tool(
     };
     let call_id = new_call_id(connector_id);
     let value = run_read_operation(app, &call_id, connector_id, operation, object).await?;
-    let encoded = serde_json::to_string(&value).map_err(|_| {
-        error(
-            connector_id,
-            "unknown",
-            "Google result could not be encoded.",
-            false,
-        )
-    })?;
-    if encoded.chars().count() > MAX_PREVIEW_CHARACTERS {
-        return serde_json::to_string(&json!({
-            "truncated": true,
-            "contentPreview": truncate_characters(&encoded, MAX_PREVIEW_CHARACTERS),
-        }))
-        .map_err(|_| {
+    encode_read_result(connector_id, value)
+}
+
+/// Keep records and continuation tokens intact. A prefix of serialized JSON is
+/// neither a page nor a usable document, and makes the model try to repair it.
+fn encode_read_result(
+    connector_id: &str,
+    mut value: Value,
+) -> Result<String, ConnectorCommandError> {
+    let encode = |value: &Value| {
+        serde_json::to_string(value).map_err(|_| {
             error(
                 connector_id,
                 "unknown",
-                "Google result could not be bounded.",
+                "Google result could not be encoded.",
                 false,
             )
-        });
+        })
+    };
+    let encoded = encode(&value)?;
+    if encoded.chars().count() <= MAX_TOOL_RESULT_CHARACTERS {
+        return Ok(encoded);
+    }
+    // Large message bodies/event descriptions are excerpts, but list entries,
+    // identifiers and pagination remain complete. Never silently drop records.
+    bound_read_text(&mut value, "");
+    if let Some(object) = value.as_object_mut() {
+        object.insert("truncated".into(), json!(true));
+        object.insert("coverage".into(), json!("All returned records and pagination are preserved. Long text fields are excerpts; do not describe them as complete content."));
+    }
+    let encoded = encode(&value)?;
+    if encoded.chars().count() > MAX_TOOL_RESULT_CHARACTERS {
+        return Err(error(connector_id, "response-too-large", "This result is too large. Request a smaller page with limit, or read individual messages/files. No partial JSON was returned.", false));
     }
     Ok(encoded)
+}
+
+fn bound_read_text(value: &mut Value, key: &str) {
+    match value {
+        // Gmail body.data is base64url, not prose. Excerpt decoded UTF-8 and
+        // re-encode it; never insert a text marker into an encoded payload.
+        Value::String(data) if key == "data" => {
+            if let Ok(decoded) = URL_SAFE_NO_PAD.decode(data.trim_end_matches('=')) {
+                if let Ok(text) = String::from_utf8(decoded) {
+                    if text.chars().count() > 1_000 {
+                        *data = URL_SAFE_NO_PAD.encode(truncate_characters(&text, 1_000));
+                    }
+                }
+            }
+        }
+        Value::String(text)
+            if !matches!(
+                key,
+                "id" | "fileId"
+                    | "threadId"
+                    | "messageId"
+                    | "nextCursor"
+                    | "nextPageToken"
+                    | "nextSyncToken"
+                    | "historyId"
+                    | "url"
+                    | "webViewLink"
+                    | "htmlLink"
+                    | "mimeType"
+                    | "kind"
+                    | "etag"
+            ) =>
+        {
+            if text.chars().count() > 1_000 {
+                *text = format!("{}… [text shortened]", truncate_characters(text, 1_000));
+            }
+        }
+        Value::Object(object) => {
+            for (key, child) in object {
+                bound_read_text(child, key);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                bound_read_text(item, key);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Resolve a single read operation against Google. Kept separate so the
@@ -2091,6 +2153,46 @@ async fn run_read_operation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_read_keeps_records_and_cursor_as_valid_json() {
+        let items: Vec<Value> = (0..50).map(|index| json!({"id": format!("file-{index}"), "name": "Report", "description": "x".repeat(500)})).collect();
+        let source = json!({"items": items, "nextCursor": "opaque-page-2"});
+        let result: Value =
+            serde_json::from_str(&encode_read_result("google-drive", source.clone()).unwrap())
+                .unwrap();
+        assert_eq!(result, source);
+    }
+
+    #[test]
+    fn gmail_excerpt_keeps_body_data_decodable() {
+        let source = json!({"id":"message-1", "payload":{"body":{"data":URL_SAFE_NO_PAD.encode("😀".repeat(20_000))}}});
+        let result: Value =
+            serde_json::from_str(&encode_read_result("gmail", source).unwrap()).unwrap();
+        let body = URL_SAFE_NO_PAD
+            .decode(result["payload"]["body"]["data"].as_str().unwrap())
+            .unwrap();
+        assert_eq!(String::from_utf8(body).unwrap().chars().count(), 1_000);
+        assert_eq!(result["truncated"], true);
+    }
+
+    #[test]
+    fn oversized_text_is_explicitly_excerpted_without_losing_pagination() {
+        let source = json!({"items": [{"id":"file-1", "description":"😀".repeat(70_000)}], "nextCursor":"opaque-page-2"});
+        let result: Value =
+            serde_json::from_str(&encode_read_result("google-drive", source).unwrap()).unwrap();
+        assert_eq!(result["nextCursor"], "opaque-page-2");
+        assert_eq!(result["items"][0]["id"], "file-1");
+        assert_eq!(result["truncated"], true);
+        assert!(result["coverage"].as_str().unwrap().contains("excerpts"));
+        assert!(
+            result["items"][0]["description"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count()
+                < 1100
+        );
+    }
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
     use tokio::sync::oneshot;

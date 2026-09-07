@@ -30,9 +30,7 @@ function propsFor(
     onDismissVoice: vi.fn(),
     onAttach: vi.fn(),
     addMenuOpen: false,
-    permissionsOpen: false,
     onToggleAddMenu: vi.fn(),
-    onTogglePermissions: vi.fn(),
     onOpenTool: vi.fn(),
     onRunCommand: vi.fn(),
     onFileChange: vi.fn(),
@@ -49,26 +47,23 @@ function propsFor(
     selectedModelId: "test",
     selectedModelLabel: "Test",
     onSelectModel: vi.fn(),
-    permissionLabel: "Full access",
-    permissionProfiles: [],
-    onSelectPermissionLabel: vi.fn(),
     ...overrides
   };
 }
 
 describe("Composer dictation controls", () => {
-  it("keeps dictation and Send separate and only enables Send for text", () => {
+  it("switches between dictation and Send using trimmed text", () => {
     const { rerender } = render(
       <Composer {...propsFor("idle", { composerValue: "" })} />
     );
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
 
     rerender(<Composer {...propsFor("idle", { composerValue: "Draft reply" })} />);
 
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start dictation" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeEnabled();
   });
 
@@ -76,7 +71,7 @@ describe("Composer dictation controls", () => {
     render(<Composer {...propsFor("idle", { composerValue: "   " })} />);
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
   });
 
   it("shows truthful listening controls while keeping typing available", () => {
@@ -91,7 +86,7 @@ describe("Composer dictation controls", () => {
       screen.getByRole("button", { name: "Cancel dictation" })
     ).toBeVisible();
     expect(screen.getByLabelText("Universal composer")).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
     expect(screen.getByText("State: listening")).toBeInTheDocument();
     expect(document.querySelectorAll("[aria-live='polite']")).toHaveLength(1);
   });
@@ -173,4 +168,31 @@ describe("Composer dictation controls", () => {
     });
     expect(onCancelVoice).toHaveBeenCalledOnce();
   });
+  it("exposes the model directly without approval configuration", () => {
+    render(<Composer {...propsFor("idle")} />);
+    expect(screen.getByRole("button", { name: "Select model" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Approval preset" })).not.toBeInTheDocument();
+  });
+  it("keeps Stop available during work even with an empty draft", () => {
+    const onStop = vi.fn();
+    render(<Composer {...propsFor("idle", { composerValue: "", isWorking: true, onStop })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Stop response" }));
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: "Start dictation" })).not.toBeInTheDocument();
+  });
+
+});
+
+it("uses one keyboard-accessible menu and inserts connected app context", () => {
+  const onComposerChange = vi.fn(); const onToggleAddMenu = vi.fn();
+  render(<Composer {...propsFor("idle", { addMenuOpen: true, composerValue: "Check", onComposerChange, onToggleAddMenu, connectedConnectors: [{ id: "gmail", name: "Gmail", status: "connected" }] })} />);
+  const upload = screen.getByRole("menuitem", { name: "Upload files" });
+  expect(upload).toHaveFocus();
+  fireEvent.keyDown(upload, { key: "ArrowDown" });
+  const gmail = screen.getByRole("menuitem", { name: "Gmail" });
+  expect(gmail).toHaveFocus();
+  fireEvent.click(gmail);
+  expect(onComposerChange).toHaveBeenCalledWith("Check @gmail ");
+  expect(onToggleAddMenu).toHaveBeenCalledOnce();
+  expect(screen.getAllByRole("menu")).toHaveLength(1);
 });

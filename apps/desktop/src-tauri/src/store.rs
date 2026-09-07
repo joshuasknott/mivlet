@@ -1586,6 +1586,91 @@ mod tests {
     }
 
     #[test]
+    fn conversation_delete_is_scoped_cascades_and_prevents_resurrection() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let scope = repos::scope::DataScope::legacy_default();
+        store
+            .transaction(|tx| {
+                repos::thread::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "delete-me",
+                    None,
+                    "Test",
+                    "t",
+                    &serde_json::json!({}),
+                )?;
+                repos::thread::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "keep-me",
+                    None,
+                    "Keep",
+                    "t",
+                    &serde_json::json!({}),
+                )?;
+                repos::draft::upsert_scoped(
+                    tx,
+                    &store,
+                    &scope,
+                    Some("delete-me"),
+                    "draft",
+                    &serde_json::json!({"content":"draft"}),
+                    "t",
+                )?;
+                repos::execution_attempt::upsert(
+                    tx,
+                    &store,
+                    "run-delete",
+                    Some("delete-me"),
+                    "openai",
+                    "test",
+                    "streaming",
+                    0,
+                    false,
+                    0,
+                    "t",
+                    "t",
+                    &serde_json::json!({}),
+                )?;
+                assert!(repos::thread::delete(tx, &scope, "delete-me", "t").is_err());
+                tx.execute(
+                    "UPDATE run SET status='completed' WHERE id='run-delete'",
+                    [],
+                )?;
+                repos::thread::delete(tx, &scope, "delete-me", "t")?;
+                assert!(repos::thread::get(tx, &store, &scope, "delete-me")?.is_none());
+                assert!(repos::thread::get(tx, &store, &scope, "keep-me")?.is_some());
+                assert!(
+                    repos::draft::get_scoped(tx, &store, &scope, Some("delete-me"), "draft")?
+                        .is_none()
+                );
+                let remaining: i64 = tx.query_row(
+                    "SELECT count(*) FROM run WHERE id='run-delete'",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert_eq!(remaining, 0);
+                assert!(repos::thread::create(
+                    tx,
+                    &store,
+                    &scope,
+                    "delete-me",
+                    None,
+                    "Restored",
+                    "t",
+                    &serde_json::json!({})
+                )
+                .is_err());
+                assert!(repos::thread::delete(tx, &scope, "missing", "t").is_err());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
     fn deleting_project_keeps_its_thread_as_a_standalone_conversation() {
         let store = Store::open_in_memory(vault()).unwrap();
         let sealed = store.seal_payload(b"{}", "project:p").unwrap();

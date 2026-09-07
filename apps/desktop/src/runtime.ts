@@ -1,4 +1,5 @@
 import { getActiveRuntimeDataScope } from "./runtime-scope";
+import { mergeConnectorConnections } from "./lib/connector-connections";
 import {
   getRuntimeAdapter,
   hasNativeRuntimeAdapter,
@@ -630,6 +631,18 @@ export async function listRuntimeConversationThreads() {
   return result.map((thread) => fromNativeThread(thread, scope.workspaceId));
 }
 
+export async function deleteRuntimeConversationThread(threadId: string) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const store = previewConversationStore(scope.workspaceId);
+    store.threads = store.threads.filter((thread) => thread.id !== threadId);
+    store.messages = store.messages.filter((view) => view.message.threadId !== threadId);
+    store.drafts.delete(`thread:${threadId}`);
+    return;
+  }
+  await invoke<void>("conversation_delete_thread", { threadId });
+}
+
 export async function getRuntimeConversationThread(threadId: string) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
@@ -991,7 +1004,21 @@ export async function listRuntimeConnectorStatuses() {
   const scope = activeDataScope();
   if (!scope) return null;
   try {
-    return await invoke<ConnectorManifest[]>("list_connector_statuses", scope);
+    const [native, remote] = await Promise.all([
+      invoke<ConnectorManifest[]>("list_connector_statuses", scope),
+      invoke<RuntimeMcpConnectionDetails[]>("list_remote_mcp_connections", scope),
+    ]);
+    const projected = mergeConnectorConnections(native, remote);
+    // Finish verification automatically for accounts connected by an older
+    // build. A user never needs to find or press a separate test button.
+    return await Promise.all(projected.map(async (connector) => {
+      if (connector.connectionRoute === "remote" || connector.status !== "connected" || connector.health?.state !== "unknown") return connector;
+      try {
+        return await invoke<ConnectorManifest>("refresh_connector_health", { ...scope, connectorId: connector.id });
+      } catch {
+        return { ...connector, status: "provider-error" as const, healthSummary: "Could not finish connecting. Try again." };
+      }
+    }));
   } catch {
     return null;
   }
@@ -1975,6 +2002,10 @@ export interface RuntimeSpawnedMcpProcess {
 export interface RuntimeMcpConnectionDetails {
   connectionId: string;
   connectionRevision: number;
+  displayName?: string;
+  authorizationState?: string;
+  credentialState?: string;
+  healthState?: string;
   transport: "stdio" | "streamable-http";
   launchReference: string;
   discoveryState: string;

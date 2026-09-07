@@ -150,6 +150,8 @@ export interface ExecutionAttempt {
   model: string;
   status: ExecutionAttemptStatus;
   transcript: string;
+  /** Public provider-supplied summaries; never private chain-of-thought. */
+  reasoningSummaries?: Record<string, string>;
   /** Active chat thread this exchange belongs to. */
   threadId?: string;
   /** Durable completed/checkpointed user, assistant, and tool exchanges. */

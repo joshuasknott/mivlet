@@ -34,6 +34,21 @@ vi.mock("../lib/persistence", async (original) => ({
 function wrapper({ children }: PropsWithChildren) { return <FableQueryProvider>{children}</FableQueryProvider>; }
 
 describe("approval queue workspace hydration", () => {
+  it("confirms an exact pending connector action with one Approve click", async () => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
+    await act(async () => {});
+    act(() => result.current.selectPermissionLabel("Ask Me"));
+    const approval = { ...buildToolApproval("Codex", "connector-action", "{}"), riskLevel: "critical" as const, confirmationPhrase: "Confirm exact action" };
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval);
+    act(() => result.current.recordBackendToolCall({ callId: approval.id, tool: "connector-action", arguments: "{}", approval }));
+    await act(async () => result.current.requestApprovalDecision(approval, "once"));
+    await expect(outcome).resolves.toBe("granted");
+    expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once", confirmationText: "Confirm exact action" }));
+    expect(result.current.pendingApprovalConfirmation).toBeNull();
+  });
   beforeEach(() => {
     window.localStorage.clear();
     clearActiveRuntimeDataScope();

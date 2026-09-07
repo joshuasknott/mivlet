@@ -152,6 +152,22 @@ pub fn conversation_list_messages(thread_id: String) -> Result<Vec<message::Mess
         .with_conn(|tx| message::list(tx, store, &scope, &thread_id))
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn conversation_delete_thread(
+    window: tauri::WebviewWindow,
+    thread_id: String,
+) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("Delete conversations from the Fable window.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+    let scope = scope()?;
+    store
+        .transaction(|tx| thread::delete(tx, &scope, &thread_id, &now()))
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 pub fn conversation_append_message(input: AppendMessage) -> Result<message::MessageRow, String> {
     let store = crate::store::try_global()

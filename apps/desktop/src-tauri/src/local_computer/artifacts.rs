@@ -387,10 +387,10 @@ fn validate_receipt(
     Ok(())
 }
 
-fn prepare_open(
+fn verified_artifact(
     computers: &LocalComputerState,
     request: &OpenArtifactRequest,
-) -> Result<PathBuf, String> {
+) -> Result<(ArtifactReceipt, Vec<u8>), String> {
     computers.validate_target(&request.workspace_id, &request.agent_id)?;
     computers.validate_viewer_generation(
         &request.workspace_id,
@@ -424,6 +424,15 @@ fn prepare_open(
         &request.agent_id,
         request.expected_generation,
     )?;
+    Ok((receipt, bytes))
+}
+
+fn prepare_open(
+    computers: &LocalComputerState,
+    request: &OpenArtifactRequest,
+) -> Result<PathBuf, String> {
+    let (receipt, bytes) = verified_artifact(computers, request)?;
+    let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
     // Editors can save their own copy without altering the published result.
     write_copy(
         &scope.directory.join("artifact-open"),
@@ -431,6 +440,67 @@ fn prepare_open(
         &receipt.export_name,
         &bytes,
     )
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactPreview {
+    artifact_id: String,
+    mime_type: String,
+    text: Option<String>,
+    image_data_url: Option<String>,
+    truncated: bool,
+}
+
+fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPreview {
+    use base64::Engine;
+    let mut preview = ArtifactPreview {
+        artifact_id: artifact.id.clone(),
+        mime_type: artifact.mime_type.clone(),
+        text: None,
+        image_data_url: None,
+        truncated: false,
+    };
+    if artifact.mime_type.starts_with("text/") {
+        let text = String::from_utf8_lossy(bytes);
+        let mut end = text.len().min(256 * 1024);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        preview.truncated = end < text.len();
+        preview.text = Some(text[..end].to_string());
+    } else if artifact.mime_type.starts_with("image/") && bytes.len() <= 8 * 1024 * 1024 {
+        preview.image_data_url = Some(format!(
+            "data:{};base64,{}",
+            artifact.mime_type,
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        ));
+    }
+    preview
+}
+
+#[tauri::command]
+pub async fn local_computer_preview_artifact(
+    window: tauri::WebviewWindow,
+    request: OpenArtifactRequest,
+    computers: tauri::State<'_, Arc<LocalComputerState>>,
+) -> Result<ArtifactPreview, String> {
+    if window.label() != "main" {
+        return Err("Preview the artifact from its Fable conversation.".into());
+    }
+    let computers = computers.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let (receipt, bytes) = verified_artifact(&computers, &request)?;
+        let preview = preview_bytes(&receipt.artifact, &bytes);
+        computers.validate_viewer_generation(
+            &request.workspace_id,
+            &request.agent_id,
+            request.expected_generation,
+        )?;
+        Ok(preview)
+    })
+    .await
+    .map_err(|_| "Fable could not preview the artifact.".to_string())?
 }
 
 #[cfg(windows)]
@@ -494,6 +564,40 @@ pub async fn local_computer_open_artifact(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previews_are_bounded_plain_text_or_raster_data() {
+        let mut artifact = LocalComputerArtifact {
+            kind: "computer-artifact".into(),
+            version: 1,
+            id: random_id().unwrap(),
+            computer_id: "computer".into(),
+            title: "Notes".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 0,
+            relative_path: "notes.txt".into(),
+            created_at: "now".into(),
+        };
+        let text = "é".repeat(150_000);
+        let preview = preview_bytes(&artifact, text.as_bytes());
+        assert!(preview.truncated);
+        assert!(preview.text.unwrap().len() <= 256 * 1024);
+        assert!(preview.image_data_url.is_none());
+        artifact.mime_type = "image/png".into();
+        let preview = preview_bytes(&artifact, b"\x89PNG\r\n\x1a\n");
+        assert!(preview
+            .image_data_url
+            .unwrap()
+            .starts_with("data:image/png;base64,"));
+        assert!(preview.text.is_none());
+        let oversized = preview_bytes(&artifact, &vec![0; 8 * 1024 * 1024 + 1]);
+        assert!(oversized.image_data_url.is_none());
+        artifact.mime_type =
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document".into();
+        assert!(preview_bytes(&artifact, b"<script>not rendered</script>")
+            .text
+            .is_none());
+    }
 
     #[test]
     fn paths_reject_host_traversal_secrets_and_executable_types() {

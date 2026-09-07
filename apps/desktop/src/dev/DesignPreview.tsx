@@ -1,5 +1,8 @@
+import { useMediaQuery } from "../hooks/useMediaQuery";
 import { WindowControls } from "../components/WindowControls";
-import { AgentProgress } from "../components/agents/AgentProgress";
+import { ArtifactPreview } from "../components/conversation/ArtifactPreview";
+import { ConversationSample } from "./ConversationSample";
+import { useConversationScroll } from "../hooks/useConversationScroll";
 /** Development-only component preview. No account, credentials, or model transport. */
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
@@ -13,7 +16,6 @@ import { AccountDialog } from "../components/agents/AccountDialog";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
 import { MarketplacePage } from "../components/pages/MarketplacePage";
-import { PERMISSION_PROFILES } from "../lib/agent-run";
 import type { ProviderModelOption } from "../lib/provider-models";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import { SettingsPage } from "../components/pages/SettingsPage";
@@ -53,18 +55,25 @@ const hostedComputer: ComponentProps<typeof LiveWorkRail>["hostedComputer"] = {
 };
 
 function DesignPreview() {
+  const [previewConversations, setPreviewConversations] = useState(() => new URLSearchParams(window.location.search).get("view") === "conversations" ? [
+    { id: "preview-one", title: "Plan my week", time: "17:04" },
+    { id: "preview-two", title: "Find my latest email", time: "16:32" },
+  ] : []);
   const [showApproval, setShowApproval] = useState(new URLSearchParams(window.location.search).get("view") === "approval");
   const [profiles, setProfiles] = useState(samples);
   const [agentId, setAgentId] = useState("ava");
   const [page, setPage] = useState("chat");
-  const [rail, setRail] = useState(true);
+  const [rail, setRail] = useState(false);
+  const isPhone = useMediaQuery("(max-width: 650px)");
+  const [mobileConversation, setMobileConversation] = useState(false);
   const [editor, setEditor] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [account, setAccount] = useState<"usage" | "sign-out" | null>(null);
   const [message, setMessage] = useState("");
+  const [artifactPreview, setArtifactPreview] = useState<string | null>(null);
+  const scroll = useConversationScroll("sample", message);
   const [permission, setPermission] = useState("Ask Me");
   const [addOpen, setAddOpen] = useState(false);
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [notice, setNotice] = useState("");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
@@ -92,43 +101,44 @@ function DesignPreview() {
   const agent = profiles.find((profile) => profile.id === agentId)!;
   const editingAgent = profiles.find((profile) => profile.id === editingAgentId) ?? null;
   return <>
-    <main className={`desktop-frame desktop-frame--agents${rail && page === "chat" ? "" : " desktop-frame--live-closed"}`} data-theme={theme}>
-      <WindowControls preview /><AgentSidebar agents={profiles} activeAgentId={agentId} previews={{ ava: { message: "Checking your priorities", time: "01:34", status: "running" }, leo: { message: "Research", time: "", status: "idle" }, maya: { message: "Design", time: "", status: "idle" } }} profileName="Joshua" connectors={[]} marketplaceActive={page === "connectors"}
-        onSelectAgent={(profile) => { setAgentId(profile.id); setPage("chat"); }} onCreateAgent={() => { setEditingAgentId(null); setEditor(true); }} onEditAgent={(profile) => { setEditingAgentId(profile.id); setEditor(true); }}
+    <main className={`desktop-frame desktop-frame--agents${(rail || artifactPreview) && page === "chat" ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`} data-theme={theme} data-mobile-view={mobileConversation || page !== "chat" ? "conversation" : "list"}>
+      <WindowControls preview /><AgentSidebar hidden={isPhone && (mobileConversation || page !== "chat")} agents={profiles} activeAgentId={agentId} previews={{ ava: { message: showApproval ? "Waiting for your approval" : "Project comparison ready", time: "01:34", status: showApproval ? "attention" : "idle", presence: showApproval ? "waiting" : "done" }, leo: { message: "Research", time: "", status: "idle" }, maya: { message: "Design", time: "", status: "idle" } }} profileName="Joshua" connectors={[]} marketplaceActive={page === "connectors"}
+        onSelectAgent={(profile) => { setAgentId(profile.id); setPage("chat"); setMobileConversation(true); }} onCreateAgent={() => { setEditingAgentId(null); setEditor(true); }} onEditAgent={(profile) => { setEditingAgentId(profile.id); setEditor(true); }}
         onOpenMarketplace={() => setPage("connectors")} onOpenSettings={() => setSettingsOpen(true)}
         onOpenUsage={() => setAccount("usage")} onSignOut={() => setAccount("sign-out")} />
-      {page === "connectors" ? <MarketplacePage manifests={connectors} accounts={{}} connectorStatus={notice || null}
+      {page === "connectors" ? <MarketplacePage manifests={connectors} accounts={{}} connectorStatus={notice || null} onBack={() => setPage("chat")}
         onUseConnector={noop} onConnect={() => setNotice("Design preview: no account connection was started.")} onDisconnect={noop} onRefresh={noop} onSelectConnector={noop} onSwitchAccount={noop} /> :
-        <section className="workspace agent-workspace">
-          <AgentWorkspaceHeader agent={agent} attentionCount={0} panelOpen={rail} onTogglePanel={() => setRail(!rail)} />
+        <section className="workspace agent-workspace" hidden={isPhone && !mobileConversation}>
+          <AgentWorkspaceHeader agent={agent} presence={showApproval ? "waiting" : "idle"} onBack={isPhone ? () => setMobileConversation(false) : undefined} attentionCount={showApproval ? 1 : 0} panelOpen={rail} onTogglePanel={() => setRail(!rail)} />
           <div className="workspace-center workspace-center--composer workspace-center--conversation">
-            <div className="conversation-scroll"><div className="conversation-feed">
-              <article className="conversation-message conversation-message--user"><div className="conversation-message__author"><strong>You</strong></div><p>Help me plan this week</p></article>
-              <article className="conversation-message conversation-message--assistant"><div className="conversation-message__author"><ProfileAgentAvatar agent={agent} iconSize={28} /><strong>{agent.name}</strong></div><p>Let's start with your priorities. What needs to happen this week, and which days are already busy?</p></article>
-              {new URLSearchParams(window.location.search).get("view") === "thinking" ? <AgentProgress agent={agent} running transcript="" summaries={{ example: "Checking the relevant files before making changes." }} activity="Using: read-file" /> : null}
+            <div className="conversation-scroll" ref={scroll.scrollRef} onScroll={scroll.onScroll}><div className="conversation-feed" ref={scroll.contentRef} onClickCapture={(event) => {
+              if (event.target instanceof Element && event.target.closest("summary")) scroll.pauseFollowing();
+            }}>
+              <ConversationSample agent={agent} onPreviewArtifact={setArtifactPreview} />
               {showApproval ? <article className="conversation-message conversation-message--assistant conversation-message--approval"><div className="conversation-message__author"><ProfileAgentAvatar agent={agent} iconSize={28} /><strong>{agent.name}</strong></div><div className="conversation-message__approval"><ApprovalPanel compact approvals={[{ id: "preview", service: "Gmail", action: "Send the project update to Alex?", mode: "full-access", riskLevel: "high", dataUsed: ["Draft message", "alex@example.com"], consequence: "Sends one email from your connected account.", requestedAt: "2026-09-05T12:00:00Z", decisions: ["once", "deny"] }]}
                 audit={[]} sessionGrants={[]} approvalRules={[]} editingApprovalId={null} modificationDraft={{ mode: "read-only", dataUsed: "", consequence: "" }} pendingConfirmation={null} confirmationText=""
                 onDecision={() => { setShowApproval(false); setNotice("Preview only: no action was taken."); }} onStartModify={noop} onUpdateModification={noop} onSaveModify={noop} onCancelModify={noop} onUpdateConfirmation={noop} onConfirmDecision={noop} onCancelConfirmation={noop} /></div></article> : null}
             </div></div>
             <div className="conversation-composer-dock">
+              {scroll.showLatest ? <button type="button" className="conversation-latest" onClick={scroll.toLatest} aria-label="Scroll to latest message" title="Scroll to latest message"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16m-7-7 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></button> : null}
               <Composer composerRef={composerRef} fileInputRef={fileRef} composerValue={message} onComposerChange={setMessage}
               onSubmit={(event) => { event.preventDefault(); if (message.trim()) { setNotice("Design preview: no model request was sent."); setMessage(""); } }}
               voiceStatus="unsupported" voiceMessage="Dictation is unavailable in this preview." voiceCanStart={false} voiceDisclosure="No microphone access is requested in the preview."
-              onStartVoice={noop} onStopVoice={noop} onCancelVoice={noop} onDismissVoice={noop} onAttach={noop} addMenuOpen={addOpen} permissionsOpen={permissionsOpen}
-              onToggleAddMenu={() => setAddOpen(!addOpen)} onTogglePermissions={() => setPermissionsOpen(!permissionsOpen)} onOpenTool={() => setPage("connectors")} onRunCommand={noop}
+              onStartVoice={noop} onStopVoice={noop} onCancelVoice={noop} onDismissVoice={noop} onAttach={noop} addMenuOpen={addOpen}
+              onToggleAddMenu={() => setAddOpen(!addOpen)} onOpenTool={() => setPage("connectors")} onRunCommand={noop}
               onFileChange={noop} models={models} selectedModelId={models[0].id} selectedModelLabel={models[0].label} onSelectModel={noop}
               connectedConnectors={[{ id: "google-drive", name: "Google Drive", status: "connected" }, { id: "gmail", name: "Gmail", status: "connected" }, { id: "github", name: "GitHub", status: "connected" }]}
               selectedReasoningEffort={reasoning} onSelectReasoningEffort={setReasoning} placeholder={`Message ${agent.name}…`}
-              permissionLabel={permission} permissionProfiles={PERMISSION_PROFILES} onSelectPermissionLabel={setPermission} inThread /></div>
+              inThread /></div>
           </div>
         </section>}
-      {rail && page === "chat" ? <LiveWorkRail agentName={agent.name} localComputer={localComputer} hostedComputer={hostedComputer} onClose={() => setRail(false)}
-        conversations={[{ id: "sample-1", title: "Weekly planning", time: "Today" }, { id: "sample-2", title: "A first draft", time: "Sep 2" }]}
+      {artifactPreview ? <ArtifactPreview output={artifactPreview} workspaceId="sample-workspace" agentId={agent.id} onClose={() => setArtifactPreview(null)} /> : null}
+      {rail && page === "chat" && !artifactPreview ? <LiveWorkRail conversations={previewConversations} onDeleteConversation={(id) => setPreviewConversations((items) => items.filter((item) => item.id !== id))} agentName={agent.name} localComputer={localComputer} hostedComputer={hostedComputer} onClose={() => setRail(false)}
         onNewConversation={() => { setMessage(""); composerRef.current?.focus(); }} onSelectConversation={noop} /> : null}
-      <AgentEditor open={editor} agent={editingAgent} models={models} canDelete={false}
+      <AgentEditor existingAvatarSeeds={profiles.map((profile) => profile.avatarSeed ?? `blob-v1:${profile.id}`)} open={editor} agent={editingAgent} models={models} canDelete={false}
         onClose={() => setEditor(false)} onDelete={noop} onSave={(draft) => {
           if (editingAgent) setProfiles(profiles.map((profile) => profile.id === editingAgent.id ? { ...profile, ...draft } : profile));
-          else { const created = { ...draft, id: crypto.randomUUID() }; setProfiles([...profiles, created]); setAgentId(created.id); setPage("chat"); }
+          else { const created = { ...draft, id: crypto.randomUUID() }; setProfiles([...profiles, created]); setAgentId(created.id); setPage("chat"); setMobileConversation(true); }
           setEditor(false);
         }}
         onSkillsChange={(learnedTasks) => setProfiles(profiles.map((profile) => profile.id === editingAgent?.id ? { ...profile, learnedTasks } : profile))} onUseSkill={(task) => setMessage(task.instruction)} />

@@ -1,4 +1,9 @@
-import { AgentProgress } from "../components/agents/AgentProgress";
+import { ConversationFeed } from "../components/conversation/ConversationFeed";
+import { useConversationScroll } from "../hooks/useConversationScroll";
+import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
+import { ArtifactPreview } from "../components/conversation/ArtifactPreview";
+import { useMediaQuery } from "../hooks/useMediaQuery";
+import { agentPresence, PRESENCE_LABELS } from "../lib/agent-presence";
 import {
   lazy,
   Suspense,
@@ -19,22 +24,18 @@ import {
 } from "../components/agents/AgentSidebar";
 import { AgentWelcome } from "../components/agents/AgentWelcome";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
-import {
-  ProfileAgentAvatar,
-} from "../components/agents/agent-icons";
+
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
-import { ComputerArtifacts } from "../components/ComputerArtifacts";
-import { ConnectorMentionText } from "../components/ConnectorMention";
+
+
 import {
   buildAgentRequest,
-  PERMISSION_PROFILES,
   validateModelSelection,
 } from "../lib/agent-run";
 import { agentExecutionInstructions } from "../lib/agent-learning";
 import { insertDictation } from "../lib/insert-dictation";
-import { chatConnectorTools } from "../lib/connector-chat";
-import { conversationComputerTools, COMPUTER_WORK_INSTRUCTIONS, supportsComputerVision } from "../lib/computer-tools";
+import { conversationToolsForModel, COMPUTER_WORK_INSTRUCTIONS } from "../lib/computer-tools";
 import {
   type SettingsTab,
 } from "../components/pages/settings-tabs";
@@ -90,21 +91,27 @@ export function ChatWorkspace() {
   const [marketplaceTab, setMarketplaceTab] = useState<"plugins" | null>(
     null,
   );
-  const [workPanelOpen, setWorkPanelOpen] = useState(true);
+  const [marketplaceConnectorId, setMarketplaceConnectorId] = useState<string>();
+  const [workPanelOpen, setWorkPanelOpen] = useState(false);
+  const isPhone = useMediaQuery("(max-width: 650px)");
+  const [mobileConversation, setMobileConversation] = useState(false);
   const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== "hidden");
   useEffect(() => {
     const update = () => setPageVisible(document.visibilityState !== "hidden");
     document.addEventListener("visibilitychange", update);
     return () => document.removeEventListener("visibilitychange", update);
   }, []);
+  const navigationPending = useRef(false);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const [permissionsOpen, setPermissionsOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState<QueuedPrompt | null>(null);
   const [optimisticUserMessage, setOptimisticUserMessage] = useState("");
   const [submissionError, setSubmissionError] = useState("");
-  const conversationScrollRef = useRef<HTMLDivElement>(null);
+  const [deletingConversation, setDeletingConversation] = useState(false);
+  const [artifactPreview, setArtifactPreview] = useState<string | null>(null);
+  const artifactTrigger = useRef<HTMLElement | null>(null);
+
   const wasRunningRef = useRef(false);
 
   const controller = useShellAgentController({
@@ -130,6 +137,8 @@ export function ChatWorkspace() {
     runtime.agents.find(
       (candidate) => candidate.id === runtime.activeAgentId,
     ) ?? runtime.agents[0];
+
+  useEffect(() => { setArtifactPreview(null); }, [activeAgent?.id, selectedThreadId, runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId, localComputer.node?.generation]);
 
   useEffect(() => {
     window.localStorage.setItem("fable-theme", theme);
@@ -179,17 +188,10 @@ export function ChatWorkspace() {
     wasRunningRef.current = agent.state.running;
   }, [agent.state.running, durableConversation.refresh]);
 
-  useEffect(() => {
-    conversationScrollRef.current?.scrollTo({
-      top: conversationScrollRef.current.scrollHeight,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-    });
-  }, [
-    agent.state.transcript,
-    durableConversation.state.conversation?.messages.length,
-    optimisticUserMessage,
-    runtime.openApprovals.length,
-  ]);
+  const conversationScroll = useConversationScroll(
+    `${runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}:${activeAgent?.id}:${selectedThreadId}`,
+    `${agent.state.transcript}:${agent.state.activity}:${agent.state.running}:${durableConversation.state.conversation?.messages.length}:${optimisticUserMessage}:${runtime.openApprovals.length}`,
+  );
 
   const composerModels = useMemo(
     // The composer is the provider switcher. Passing no provider filter keeps
@@ -269,8 +271,8 @@ export function ChatWorkspace() {
       await durableConversation.deleteDraft().catch(() => undefined);
       resetCancellation();
       try {
-        const connectorIds = await beginConnectorTurn();
-        const instructions = [agentExecutionInstructions(activeAgent), COMPUTER_WORK_INSTRUCTIONS].join("\n\n");
+        const { ids: connectorIds, tools: connectorTools } = await beginConnectorTurn();
+        const instructions = [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS].join("\n\n");
         const preparedContext = await runtime.assembleConversationContext(prompt, {
           allowedConnectorIds: connectorIds,
           allowedKnowledgeSourceIds: runtime.composerAttachments.flatMap((attachment) => attachment.sourceId ? [attachment.sourceId] : []),
@@ -281,8 +283,8 @@ export function ChatWorkspace() {
             reasoningEffort: selectedReasoningEffort,
             prompt,
             instructions,
-            tools: conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready",
-              supportsComputerVision(connected, composerModels.find((model) => model.id === selectedModelOptionId))),
+            tools: conversationToolsForModel(connectorTools, localComputer.node?.lifecycle === "ready",
+              connected, composerModels.find((model) => model.id === selectedModelOptionId)),
             maxTokens: validation.maxTokens,
           }),
           preparedContext,
@@ -385,7 +387,7 @@ export function ChatWorkspace() {
 
   const submitComposer = async () => {
     const prompt = runtime.composerValue.trim();
-    if (!prompt || agent.state.running || queuedPrompt || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
+    if (!prompt || agent.state.running || queuedPrompt || deletingConversation || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
     if (!selectedThreadId) {
       const thread = await durableConversation.createThread({
         authorityScope: {
@@ -403,18 +405,40 @@ export function ChatWorkspace() {
     await executePrompt(prompt);
   };
 
-  const selectAgent = (profile: FableAgentProfile) => {
+  const selectAgent = async (profile: FableAgentProfile) => {
+    if (navigationPending.current) return false;
+    // Returning to the current chat is navigation, even while a tool or an
+    // approval is pending. Keep its response and draft intact.
+    if (profile.id === activeAgent.id) {
+      setMarketplaceTab(null);
+      setMobileConversation(true);
+      focusConversationBack();
+      return true;
+    }
+    if (deletingConversation) return false;
     if (agent.state.running) {
       runtime.setLastAction(
         "Stop the current response before switching agents.",
       );
-      return;
+      return false;
     }
+    navigationPending.current = true;
+    try {
+      // Flush before changing scope: a quick navigation must not discard the debounce's draft.
+      await durableConversation.saveDraft(runtime.composerValue);
+    } catch {
+      runtime.setLastAction("Your draft could not be saved. Try again before switching agents.");
+      return false;
+    } finally { navigationPending.current = false; }
     runtime.selectAgent(profile.id);
+    setMobileConversation(true);
+    setWorkPanelOpen(false);
+    focusConversationBack();
     setMarketplaceTab(null);
     setSelectedThreadId(profile.threadId);
     runtime.setComposerValue("");
     setSubmissionError("");
+    return true;
   };
   const createTeammate = () => {
     setMarketplaceTab(null);
@@ -446,18 +470,16 @@ export function ChatWorkspace() {
       const thread = profile.threadId
         ? threadById.get(profile.threadId)
         : undefined;
-      const status: AgentSidebarPreview["status"] =
-        profile.id === activeAgent.id && agent.state.running
-          ? "running"
-          : profile.id === activeAgent.id && runtime.openApprovals.length
-            ? "attention"
-            : "idle";
+      const presence = profile.id === activeAgent.id ? agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt)) : "idle";
+      const status: AgentSidebarPreview["status"] = presence === "waiting" || presence === "blocked" ? "attention" : ["received", "working", "thinking"].includes(presence) ? "running" : "idle";
       return [
         profile.id,
         {
-          message: thread?.title ?? "Start a conversation",
+          message: presence !== "idle" && presence !== "done" ? PRESENCE_LABELS[presence] : thread?.title ?? "Start a conversation",
           time: compactTime(thread?.updatedAt),
           status,
+          presence,
+          completionId: presence === "done" ? agent.state.currentAttemptId ?? undefined : undefined,
         } satisfies AgentSidebarPreview,
       ];
     }),
@@ -466,7 +488,7 @@ export function ChatWorkspace() {
     runtime.identityStatus.authentication?.verifiedDisplayAttributes;
   const profileName =
     verifiedDisplay?.displayName ?? verifiedDisplay?.email ?? "Local workspace";
-  const conversation = durableConversation.state.conversation;
+  const conversation = durableConversation.state.conversation?.thread.id === selectedThreadId ? durableConversation.state.conversation : null;
   const messages = conversation?.messages ?? [];
   const screenPreviewUrl =
     localComputer.snapshot?.previewDataUrl ??
@@ -498,10 +520,12 @@ export function ChatWorkspace() {
 
   return (
     <main
-      className={`desktop-frame desktop-frame--agents${workPanelOpen && !marketplaceTab ? "" : " desktop-frame--live-closed"}`}
+      className={`desktop-frame desktop-frame--agents${(workPanelOpen || artifactPreview) && !marketplaceTab ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`}
       data-theme={theme}
+      data-mobile-view={mobileConversation || marketplaceTab ? "conversation" : "list"}
     >
       <AgentSidebar
+        hidden={isPhone && (mobileConversation || marketplaceTab !== null)}
         connectors={runtime.connectorManifests}
         agents={runtime.agents}
         activeAgentId={activeAgent.id}
@@ -512,6 +536,7 @@ export function ChatWorkspace() {
         onCreateAgent={createTeammate}
         onEditAgent={editTeammate}
         onOpenMarketplace={() => {
+          setMarketplaceConnectorId(undefined);
           setMarketplaceTab("plugins");
           setWorkPanelOpen(false);
         }}
@@ -523,6 +548,8 @@ export function ChatWorkspace() {
       {marketplaceTab ? (
         <Suspense fallback={null}>
           <MarketplacePage
+            initialConnectorId={marketplaceConnectorId}
+            onBack={() => setMarketplaceTab(null)}
             workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}
             manifests={runtime.connectorManifests.filter(
               (connector) => connector.id !== "local-files",
@@ -533,9 +560,9 @@ export function ChatWorkspace() {
               runtime.useConnector(connector);
               setMarketplaceTab(null);
             }}
-            onConnect={(connector) => void runtime.connectConnector(connector)}
+            onConnect={runtime.connectConnector}
             onDisconnect={(connectorId) =>
-              void runtime.disconnectConnector(connectorId)
+              runtime.disconnectConnector(connectorId)
             }
             onRefresh={(connectorId) =>
               void runtime.refreshConnector(connectorId)
@@ -549,19 +576,24 @@ export function ChatWorkspace() {
           />
         </Suspense>
       ) : (
-      <section className="workspace agent-workspace">
+      <section className="workspace agent-workspace" hidden={isPhone && !mobileConversation}>
         <AgentWorkspaceHeader
           agent={activeAgent}
-          attentionCount={0}
-          panelOpen={workPanelOpen}
-          onTogglePanel={() => setWorkPanelOpen((open) => !open)}
+          attentionCount={runtime.openApprovals.length}
+          presence={agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt))}
+          activity={agent.state.activity}
+          computerActive={Boolean(localComputer.node?.browserActive || hostedBrowser.opening)}
+          onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.focus()); } : undefined}
+          panelOpen={workPanelOpen && !artifactPreview}
+          onTogglePanel={() => { if (artifactPreview) { setArtifactPreview(null); setWorkPanelOpen(true); } else setWorkPanelOpen((open) => !open); }}
         />
 
         <div className="workspace-center workspace-center--composer workspace-center--conversation">
           <div
-            ref={conversationScrollRef}
+            ref={conversationScroll.scrollRef}
+            onScroll={conversationScroll.onScroll}
             className="conversation-scroll"
-            aria-live="polite"
+            aria-label="Conversation"
           >
             {messages.length === 0 &&
             !optimisticUserMessage &&
@@ -574,106 +606,48 @@ export function ChatWorkspace() {
                 }}
               />
             ) : null}
-            {messages.map((entry) => {
-              const revision = entry.currentRevision;
-              const content =
-                revision.state === "redacted"
-                  ? "This message was removed."
-                  : revision.content;
-              if (entry.message.kind === "tool" && revision.state !== "redacted") return <div key={entry.message.id}>
-                <ComputerArtifacts output={content} workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""} agentId={activeAgent.id} expectedGeneration={localComputer.node?.generation} />
-                <details className="conversation-progress"><summary>{entry.message.detail.toolName} · {entry.message.detail.phase === "call" ? "Requested" : entry.message.detail.outcome === "failed" ? "Failed" : "Completed"}</summary><p>{content}</p></details>
-              </div>;
-              const role = entry.message.kind === "user" ? "user" : "assistant";
-              if (
-                ![
-                  "user",
-                  "assistant",
-                ].includes(entry.message.kind)
-              ) {
-                return null;
-              }
-              return (
-                <article
-                  key={entry.message.id}
-                  className={`conversation-message conversation-message--${role}`}
-                >
-                  <div className="conversation-message__author">
-                    {role === "assistant" ? (
-                      <ProfileAgentAvatar agent={activeAgent} iconSize={28} />
-                    ) : (
-                      <span className="conversation-message__user-avatar">
-                        {profileName.trim().slice(0, 1).toUpperCase() || "F"}
-                      </span>
-                    )}
-                    <strong>
-                      {role === "assistant" ? activeAgent.name : profileName}
-                    </strong>
-                  </div>
-                  <p>{role === "user" ? <ConnectorMentionText text={content} connectors={runtime.connectorManifests} /> : content}</p>
-                </article>
-              );
-            })}
-            {optimisticUserMessage ? (
-              <article className="conversation-message conversation-message--user">
-                <div className="conversation-message__author">
-                  <span className="conversation-message__user-avatar">
-                    {profileName.trim().slice(0, 1).toUpperCase() || "F"}
-                  </span>
-                  <strong>{profileName}</strong>
-                </div>
-                <p><ConnectorMentionText text={optimisticUserMessage} connectors={runtime.connectorManifests} /></p>
-              </article>
-            ) : null}
-            <AgentProgress agent={activeAgent} running={agent.state.running} transcript={agent.state.transcript}
-              summaries={agent.state.progressThreadId === selectedThreadId ? agent.state.reasoningSummaries : undefined} activity={agent.state.activity} />
-            {approvalPanel ? <article className="conversation-message conversation-message--assistant conversation-message--approval">
-              <div className="conversation-message__author"><ProfileAgentAvatar agent={activeAgent} iconSize={28} /><strong>{activeAgent.name}</strong></div>
-              <div className="conversation-message__approval">{approvalPanel}</div>
-            </article> : null}
-            {submissionError || agent.state.lastError ? (
-              <p
-                className="conversation-status conversation-status--error"
-                role="alert"
-              >
-                {submissionError || agent.state.lastError}
-              </p>
-            ) : null}
-            {durableConversation.state.error ? (
-              <p
-                className="conversation-status conversation-status--error"
-                role="alert"
-              >
-                {durableConversation.state.error}
-              </p>
-            ) : null}
-            {agent.state.recoverableAttempts.slice(0, 2).map((attempt) => (
-              <section className="agent-panel__recovery" key={attempt.id}>
-                <p>
-                  A previous response was interrupted. Retry it from its
-                  original prompt?
-                </p>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const retryPrompt = attempt.exchanges
-                        ?.filter((exchange) => exchange.role === "user")
-                        .at(-1)?.content ?? "";
-                    setOptimisticUserMessage(retryPrompt);
-                    const connectorIds = await beginConnectorTurn();
-                    resetCancellation();
-                    void agent
-                      .retry(attempt, conversationComputerTools(chatConnectorTools(connectorIds, runtime.connectorManifests), localComputer.node?.lifecycle === "ready"), runtime.permissionMode)
-                      .finally(async () => { endConnectorTurn(); await runtime.refreshConnectorStatuses(); return durableConversation.refresh(); });
-                  }}
-                >
-                  Retry response
-                </button>
-              </section>
-            ))}
+            <div className="conversation-feed" ref={conversationScroll.contentRef} onClickCapture={(event) => {
+              if (event.target instanceof Element && event.target.closest("summary")) conversationScroll.pauseFollowing();
+            }}>
+              <ConversationFeed messages={messages} agent={activeAgent} state={agent.state} threadId={selectedThreadId}
+                profileName={profileName} connectors={runtime.connectorManifests} optimisticPrompt={optimisticUserMessage}
+                onOpenConnector={(id) => { setMarketplaceConnectorId(id); setMarketplaceTab("plugins"); }}
+                workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""}
+                generation={localComputer.node?.generation} approval={approvalPanel}
+                onPreviewArtifact={(output) => { artifactTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setArtifactPreview(output); }}
+                interruption={<>
+                  {submissionError || agent.state.lastError ? <div className="conversation-attention" role="alert">
+                    <p>{submissionError || agent.state.lastError}</p>
+                    {/sign.in|authenticat|credential|provider.*connect|api.key/i.test(submissionError || agent.state.lastError || "") ? <button type="button" onClick={() => { setSettingsTab("providers"); setSettingsOpen(true); }}>Check provider connection</button> : null}
+                  </div> : null}
+                  {agent.state.status === "cancelled" && agent.state.progressThreadId === selectedThreadId ? <div className="conversation-attention">
+                    <p>Stopped. Your completed work is still here.</p>
+                    <button type="button" onClick={() => void executePrompt("Continue from where you stopped. Check the completed work before taking further actions; do not repeat actions that already succeeded.")}>Continue</button>
+                  </div> : null}
+                  {agent.state.recoverableAttempts.filter((attempt) => attempt.threadId === selectedThreadId).slice(0, 2).map((attempt) => <div className="conversation-attention" key={attempt.id}>
+                    <p>This response was interrupted. Your completed work remains in the conversation.</p>
+                    <button type="button" disabled={agent.state.running} onClick={async () => {
+                      const retryPrompt = attempt.exchanges?.filter((exchange) => exchange.role === "user").at(-1)?.content ?? "";
+                      setOptimisticUserMessage(retryPrompt);
+                      try {
+                        const { tools: connectorTools } = await beginConnectorTurn();
+                        resetCancellation();
+                        const retryProvider = runtime.backendProviders.find((provider) => provider.id === attempt.providerId);
+                        const retryModel = composerModels.find((model) => model.providerId === attempt.providerId && model.modelId === attempt.model);
+                        await agent.retry(attempt, conversationToolsForModel(connectorTools, localComputer.node?.lifecycle === "ready", retryProvider, retryModel), runtime.permissionMode,
+                          [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS].join("\n\n"));
+                      } catch (error) { setSubmissionError(error instanceof Error ? error.message : "Could not retry this response."); }
+                      finally { endConnectorTurn(); await Promise.allSettled([runtime.refreshConnectorStatuses(), durableConversation.refresh()]); setOptimisticUserMessage(""); }
+                    }}>Retry response</button>
+                    <small>Starts a new attempt from your original request, with fresh permissions.</small>
+                  </div>)}
+                </>} />
+              {durableConversation.state.error ? <p className="conversation-status conversation-status--error" role="alert">{durableConversation.state.error}</p> : null}
+            </div>
           </div>
 
           <div className="conversation-composer-dock">
+            {conversationScroll.showLatest ? <button className="conversation-latest" type="button" onClick={conversationScroll.toLatest} aria-label="Scroll to latest message" title="Scroll to latest message"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16m-7-7 7 7 7-7" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></button> : null}
             <Composer
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
@@ -693,14 +667,9 @@ export function ChatWorkspace() {
               onDismissVoice={voice.dismiss}
               onAttach={runtime.triggerAttach}
               addMenuOpen={addMenuOpen}
-              permissionsOpen={permissionsOpen}
+
               onToggleAddMenu={() => {
                 setAddMenuOpen((open) => !open);
-                setPermissionsOpen(false);
-              }}
-              onTogglePermissions={() => {
-                setPermissionsOpen((open) => !open);
-                setAddMenuOpen(false);
               }}
               onOpenTool={() => {
                 setMarketplaceTab("plugins");
@@ -720,9 +689,9 @@ export function ChatWorkspace() {
                 runtime.selectModel(modelId);
                 runtime.updateAgent(activeAgent.id, { modelId, reasoningEffort: undefined });
               }}
-              permissionLabel={runtime.permissionLabel}
-              permissionProfiles={PERMISSION_PROFILES}
-              onSelectPermissionLabel={runtime.selectPermissionLabel}
+
+
+
               inThread={Boolean(selectedThreadId)}
               isWorking={agent.state.running}
               onStop={() => void stopCurrentWork()}
@@ -735,13 +704,29 @@ export function ChatWorkspace() {
       </section>
       )}
 
-      {workPanelOpen && !marketplaceTab ? (
+      {artifactPreview && !marketplaceTab ? <ArtifactPreview key={`${activeAgent.id}:${selectedThreadId}:${localComputer.node?.generation}:${artifactPreview}`}
+        output={artifactPreview} workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""}
+        agentId={activeAgent.id} generation={localComputer.node?.generation}
+        onClose={() => { setArtifactPreview(null); artifactTrigger.current?.focus(); }} /> : null}
+      {workPanelOpen && !marketplaceTab && !artifactPreview ? (
         <LiveWorkRail
           conversations={durableConversation.state.threads.filter((thread) =>
             thread.lifecycle === "active" && (activeAgent.threadIds ?? [activeAgent.threadId]).includes(thread.id)
           ).map((thread) => ({ id: thread.id, title: thread.title, time: compactTime(thread.updatedAt) }))}
           activeConversationId={selectedThreadId}
-          conversationBusy={agent.state.running || Boolean(queuedPrompt)}
+          conversationBusy={agent.state.running || Boolean(queuedPrompt) || deletingConversation}
+          onDeleteConversation={async (id) => {
+            if (agent.state.running || queuedPrompt || deletingConversation) return;
+            setDeletingConversation(true);
+            try {
+              await durableConversation.deleteThread(id);
+              const threadIds = (activeAgent.threadIds ?? [activeAgent.threadId]).filter((threadId): threadId is string => Boolean(threadId) && threadId !== id);
+              runtime.updateAgent(activeAgent.id, { threadIds, ...(activeAgent.threadId === id ? { threadId: undefined } : {}) });
+              if (selectedThreadId === id) { setSelectedThreadId(undefined); runtime.setComposerValue(""); setOptimisticUserMessage(""); }
+              setSubmissionError("");
+            } catch (error) { setSubmissionError(error instanceof Error ? error.message : "Could not delete this conversation."); }
+            finally { setDeletingConversation(false); }
+          }}
           onNewConversation={startNewConversation}
           onSelectConversation={(id) => {
             if (agent.state.running || queuedPrompt) return;
@@ -821,12 +806,13 @@ export function ChatWorkspace() {
 
       <AgentEditor
         onSkillsChange={(learnedTasks) => { if (editingAgentId) runtime.updateAgent(editingAgentId, { learnedTasks }); }}
-        onUseSkill={(task) => {
+        onUseSkill={async (task) => {
           const profile = runtime.agents.find((candidate) => candidate.id === editingAgentId);
-          if (profile) selectAgent(profile);
+          if (profile && !await selectAgent(profile)) return;
           runtime.setComposerValue(task.instruction);
           focusComposer();
         }}
+        existingAvatarSeeds={runtime.agents.map((profile) => profile.avatarSeed ?? `blob-v1:${profile.id}`)}
         open={agentEditorOpen}
         agent={
           editingAgentId
@@ -848,6 +834,8 @@ export function ChatWorkspace() {
             const created = runtime.createAgent(draft);
             runtime.selectAgent(created.id);
             setSelectedThreadId(undefined);
+            setMobileConversation(true);
+            setWorkPanelOpen(false);
           }
           setAgentEditorOpen(false);
           setEditingAgentId(null);
@@ -886,6 +874,10 @@ export function ChatWorkspace() {
 
   function focusComposer() {
     window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+  }
+
+  function focusConversationBack() {
+    if (isPhone) window.requestAnimationFrame(() => document.querySelector<HTMLElement>(".agent-workspace-header__back")?.focus());
   }
 
   function addDictationToComposer(transcript: string) {

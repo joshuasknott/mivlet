@@ -14,22 +14,15 @@ export const CONNECTOR_READ_TOOLS: Record<string, string> = {
 };
 
 export function chatConnectorIds(
-  savedRemoteIds: readonly string[],
+  _savedRemoteIds: readonly string[],
   manifests: readonly ConnectorManifest[],
 ): string[] {
-  const requested = new Set([...manifests.filter((connector) => connector.status === "connected").map((connector) => connector.id), ...savedRemoteIds]);
-  return [...requested].filter(
-    (id) =>
-      manifests.some(
-        (connector) => connector.id === id && connector.status === "connected",
-      ) ||
-      (savedRemoteIds.includes(id) && Boolean(remoteConnectorFor(id))),
-  );
+  return [...new Set(manifests.filter((connector) => connector.status === "connected").map((connector) => connector.id))];
 }
 
 export function chatConnectorTools(ids: readonly string[], manifests?: readonly ConnectorManifest[]): NativeToolSpec[] {
   const nativeIds = ids.filter((id) => Object.values(CONNECTOR_READ_TOOLS).includes(id)
-    && (!manifests || manifests.some((manifest) => manifest.id === id && manifest.status === "connected")));
+    && (!manifests || manifests.some((manifest) => manifest.id === id && manifest.status === "connected" && manifest.connectionRoute !== "remote")));
   return registeredToolSpecs().filter((tool) => {
     if (tool.name === "connector-action") return manifests?.some((manifest) => nativeIds.includes(manifest.id) && manifest.supportedActions?.length) ?? false;
     const connectorId = CONNECTOR_READ_TOOLS[tool.name];

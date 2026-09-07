@@ -1,4 +1,4 @@
-import type { LocalComputerArtifact, LocalComputerOpenArtifactRequest } from "@fable/protocol";
+import type { LocalComputerArtifact, LocalComputerArtifactPreview, LocalComputerOpenArtifactRequest } from "@fable/protocol";
 import { getRuntimeAdapter, hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 
 const artifactTypes: Readonly<Record<string, string>> = {
@@ -49,4 +49,10 @@ export function artifactSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export async function previewComputerArtifact(request: LocalComputerOpenArtifactRequest): Promise<LocalComputerArtifactPreview> {
+  if (!hasNativeRuntimeAdapter()) throw new Error("Preview this file in the Fable desktop app.");
+  if (!Number.isSafeInteger(request.expectedGeneration) || request.expectedGeneration < 0) throw new Error("Refresh the computer before previewing this file.");
+  return getRuntimeAdapter().invoke<LocalComputerArtifactPreview>("local_computer_preview_artifact", { request });
 }

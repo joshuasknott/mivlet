@@ -14,7 +14,7 @@ vi.mock("../../runtime", () => ({
 }));
 vi.mock("../../lib/connector-mcp", () => ({ openConnectorTools: api.open }));
 const approval = { id: "approval-1", confirmationPhrase: "approve", consequence: "Connect to this provider." };
-const discovery = { connectionId: "connection-1", connectionRevision: 2, enabledTools: [], enabledResources: [], capabilityBindings: [] };
+const discovery = { connectionId: "connection-1", connectionRevision: 2, authorizationState: "authorized", credentialState: "available", healthState: "healthy", discoveryState: "discovered", discoveredTools: ["search", "update"], enabledTools: [], enabledResources: [], capabilityBindings: [] };
 const fixture = () => ({
   tools: [{ name: "search", inputSchema: { type: "object" } }, { name: "update", inputSchema: { type: "object" } }], discovery,
   client: { close: vi.fn().mockResolvedValue(undefined) },
@@ -71,7 +71,7 @@ describe("official connector setup", () => {
     show(); await connect(); await screen.findByText("Sign-in cancelled");
     expect(api.open).not.toHaveBeenCalled(); expect(api.enable).not.toHaveBeenCalled();
   });
-  it("fails closed in preview and stops continuation after unmount", async () => {
+  it("fails closed in preview and finishes authorized setup after closing the dialog", async () => {
     api.list.mockResolvedValue(null); const view = show();
     await screen.findByText("Account connections require the desktop app.");
     expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled(); view.unmount();
@@ -80,6 +80,7 @@ describe("official connector setup", () => {
     api.auth.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     const signedIn = show(); await connect(); await waitFor(() => expect(api.auth).toHaveBeenCalled()); signedIn.unmount();
     await act(async () => { finish({}); });
-    expect(api.open).not.toHaveBeenCalled();
+    expect(api.open).toHaveBeenCalledTimes(1);
+    expect(api.enable).toHaveBeenCalledTimes(1);
   });
 });

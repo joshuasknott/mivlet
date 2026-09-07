@@ -120,6 +120,10 @@ pub struct SafeMcpCapabilityBinding {
 pub struct SafeMcpConnectionDetails {
     pub connection_id: String,
     pub connection_revision: i64,
+    pub display_name: String,
+    pub authorization_state: String,
+    pub credential_state: String,
+    pub health_state: String,
     pub transport: String,
     pub launch_reference: String,
     pub discovery_state: String,
@@ -1297,6 +1301,10 @@ fn mcp_projection(store: &Store, row: &Partial) -> Result<SafeMcpConnectionDetai
     Ok(SafeMcpConnectionDetails {
         connection_id: row.id.clone(),
         connection_revision: row.revision,
+        display_name: content.display_name,
+        authorization_state: row.authorization_state.clone(),
+        credential_state: row.credential_state.clone(),
+        health_state: row.health_state.clone(),
         transport,
         launch_reference: local_launch_reference,
         discovery_state,

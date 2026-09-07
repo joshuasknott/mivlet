@@ -9,7 +9,7 @@ import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectorManifest } from "@fable/protocol";
-import { PluginPanel, resolveDetailedStatus } from "./PluginPanel";
+import { PluginPanel, resolveDetailedStatus, connectorAccessSummary } from "./PluginPanel";
 
 afterEach(cleanup);
 
@@ -51,6 +51,11 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it("describes granted Drive access without promising ungranted writes", () => {
+    const scope = (name: string, granted: boolean) => ({ id: `https://www.googleapis.com/auth/${name}`, label: name, access: "read" as const, required: false, granted });
+    expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", false), scope("drive", false)] })).toBe("Read your Drive files.");
+    expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", true)] })).toContain("Updates are limited to files shared with Fable");
+  });
   it("reports syncing only for an active sync and keeps unhealthy connections actionable", async () => {
     const unchecked = { ...gmail, health: { ...gmail.health!, state: "unknown" as const } };
     expect(resolveDetailedStatus(unchecked).label).toBe("Not checked");
@@ -60,8 +65,8 @@ describe("Connector Connection selection", () => {
     const user = userEvent.setup();
     render(<PluginPanel manifests={[unhealthy]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
     await user.click(screen.getByRole("button", { name: "Manage Gmail from Installed" }));
-    expect(screen.getByRole("button", { name: "Use in composer" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Use in chat" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
   });
   it("labels and selects the opaque Fable Connection instead of provider account authority", async () => {
     const user = userEvent.setup();
@@ -110,7 +115,7 @@ describe("Connector Connection selection", () => {
     await user.click(opener);
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Close connector setup" }),
+        screen.getByRole("button", { name: "Close plugin setup" }),
       ).toHaveFocus(),
     );
     const select = screen.getByLabelText("Active connection");
@@ -147,7 +152,7 @@ describe("Connector Connection selection", () => {
     expect(
       screen.getAllByRole("button", { name: "Connect GitHub" })[0],
     ).toBeVisible();
-    expect(screen.getByRole("heading", { name: "Popular" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Featured" })).toBeVisible();
     expect(
       screen.getByRole("heading", { name: "Product & design" }),
     ).toBeVisible();
@@ -156,7 +161,7 @@ describe("Connector Connection selection", () => {
     ).toBeVisible();
 
     await user.type(
-      screen.getByRole("searchbox", { name: "Search connectors" }),
+      screen.getByRole("searchbox", { name: "Search plugins" }),
       "github",
     );
     expect(

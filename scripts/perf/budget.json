@@ -1,5 +1,5 @@
 {
-  "version": 5,
+  "version": 6,
   "recordedAt": "2026-08-29",
   "recordedBaseline": {
     "totalJsCss": {
@@ -39,8 +39,8 @@
   "ceilings": {
     "totalJsCss": {
       "rawBytes": 1086261,
-      "gzipBytes": 279902,
-      "marginNote": "+128 KiB raw / +24 KiB gzip above the measured conversation-first build"
+      "gzipBytes": 300382,
+      "marginNote": "+128 KiB raw / +24 KiB gzip above the original baseline, plus 20 KiB gzip for the September conversation renderer, Markdown lexer and artifact preview. Raw, entry, CSS and route ceilings are unchanged."
     },
     "css": {
       "rawBytes": 187614,

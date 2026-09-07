@@ -39,6 +39,9 @@ export default defineConfig({
   // modules do not ride along with the initial shell.
   build: {
     target: "esnext",
+    // Keep the expanded connector flow inside the existing download budgets.
+    minify: "terser",
+    terserOptions: { maxWorkers: 2, compress: { passes: 2 } },
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

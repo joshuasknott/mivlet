@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { conversationComputerTools, supportsComputerVision } from "./computer-tools";
+import { conversationComputerTools, conversationToolsForModel, supportsComputerVision } from "./computer-tools";
 import type { BackendProvider } from "@fable/protocol";
 
 describe("conversation computer tools", () => {
@@ -11,7 +11,19 @@ describe("conversation computer tools", () => {
     expect(new Set(tools).size).toBe(tools.length);
   });
   it("does not advertise unavailable computers", () => {
-    expect(conversationComputerTools([connector], false)).toEqual([connector]);
+    expect(conversationComputerTools([connector], false).map((tool) => tool.name)).toEqual(["gmail-read", "web-fetch"]);
+  });
+  it("keeps public URL reads available without Docker and deduplicates them", () => {
+    const tools = conversationComputerTools([], false);
+    expect(tools.map((tool) => tool.name)).toEqual(["web-fetch"]);
+    expect(conversationComputerTools(tools, false)).toEqual(tools);
+  });
+  it("resolves visual access against the executing model on every turn", () => {
+    const provider = { backendType: "codex-app-server", authState: "connected", capabilities: ["tool-requests"] } as BackendProvider;
+    const vision = { id: "vision", label: "Vision", available: true, capabilities: { vision: true } };
+    expect(conversationToolsForModel([], true, provider, vision).map((tool) => tool.name)).toContain("local-desktop-observe");
+    expect(conversationToolsForModel([], true, provider, { ...vision, available: false }).map((tool) => tool.name)).not.toContain("local-desktop-observe");
+    expect(conversationToolsForModel([], false, provider, vision).map((tool) => tool.name)).toEqual(["web-fetch"]);
   });
   it("only advertises visual tools with a supported native image route", () => {
     expect(conversationComputerTools([], true).map((tool) => tool.name)).not.toContain("local-desktop-observe");

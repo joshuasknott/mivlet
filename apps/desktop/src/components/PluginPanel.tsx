@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listRuntimeMcpServerConfigurations } from "../runtime";
+import { useMemo, useRef, useState } from "react";
 import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
-import { remoteConnectorFor, remoteConnectorServerId, remoteConnectors } from "./marketplace/remote-connectors";
+import { remoteConnectorFor } from "./marketplace/remote-connectors";
+import { connectorConnectionsChanged } from "../lib/connector-connections";
+import { connectorErrorMessage } from "../lib/connector-errors";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
@@ -37,6 +38,7 @@ const INSTALLED_CONNECTOR_PRIORITY = [
  * routes. A saved endpoint never establishes a connected or installed state.
  */
 export function PluginPanel({
+  initialConnectorId,
   workspaceId,
   manifests,
   onUseConnector,
@@ -47,11 +49,12 @@ export function PluginPanel({
   accounts,
   onSwitchAccount,
 }: {
+  initialConnectorId?: string;
   workspaceId?: string;
   manifests: ConnectorManifest[];
   onUseConnector: (connector: ConnectorManifest) => void;
-  onConnect: (connector: ConnectorManifest) => void;
-  onDisconnect: (connectorId: string) => void;
+  onConnect: (connector: ConnectorManifest) => void | Promise<void>;
+  onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
   onSelect: (connector: ConnectorManifest) => void;
   accounts: Record<string, ConnectorAccountOption[]>;
@@ -59,21 +62,11 @@ export function PluginPanel({
 }) {
   const [query, setQuery] = useState("");
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
-  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
-  const [useRemote, setUseRemote] = useState(false);
-  const [savedRemoteIds, setSavedRemoteIds] = useState<string[]>([]);
-  const refreshSaved = useCallback(async () => {
-    if (!workspaceId) return;
-    const servers = await listRuntimeMcpServerConfigurations(workspaceId).catch(() => null);
-    return servers?.filter((server) => !server.disabled).map((server) => server.id) ?? [];
-  }, [workspaceId]);
-  useEffect(() => {
-    let active = true;
-    setSavedRemoteIds([]);
-    if (!workspaceId) return;
-    void refreshSaved().then((ids) => { if (active) setSavedRemoteIds(ids ?? []); });
-    return () => { active = false; };
-  }, [refreshSaved, workspaceId]);
+  const [selectedEntryId, setSelectedEntryId] = useState<string | null>(initialConnectorId ?? null);
+  const [useRemote, setUseRemote] = useState(() => {
+    const connector = manifests.find((candidate) => candidate.id === initialConnectorId);
+    return Boolean(initialConnectorId && remoteConnectorFor(initialConnectorId)) && (connector?.connectionRoute === "remote" || (!connector?.account && (!connector || ["configured", "unconfigured", "needs-auth"].includes(connector.status))));
+  });
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
   const manifestById = useMemo(
@@ -156,8 +149,9 @@ export function PluginPanel({
   const openEntry = (entry: MarketplaceConnectorEntry) => {
     setSelectedEntryId(entry.id);
     const connector = manifestById.get(entry.id);
-    setUseRemote(Boolean(remoteConnectorFor(entry.id)) && (!connector || connector.status !== "connected" || savedRemoteIds.includes(remoteConnectorServerId(entry.id))));
-    if (connector) onSelect(connector);
+    const remote = Boolean(remoteConnectorFor(entry.id)) && (connector?.connectionRoute === "remote" || (!connector?.account && (!connector || ["configured", "unconfigured", "needs-auth"].includes(connector.status))));
+    setUseRemote(remote);
+    if (connector && !remote) onSelect(connector);
   };
 
   const renderConnectorRow = (
@@ -217,18 +211,18 @@ export function PluginPanel({
   };
 
   return (
-    <section className="connectors-marketplace" aria-label="Connectors">
+    <section className="connectors-marketplace" aria-label="Plugins">
       <header className="marketplace-page-header">
         <div>
-          <h1>Connectors</h1>
+          <h1>Plugins</h1>
           <p>Give your agents access to the tools you use.</p>
         </div>
         <label className="connections-search">
           <MagnifyingGlass size={17} aria-hidden="true" />
-          <span className="sr-only">Search connectors</span>
+          <span className="sr-only">Search plugins</span>
           <input
             type="search"
-            placeholder="Search connectors"
+            placeholder="Search plugins"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -275,23 +269,18 @@ export function PluginPanel({
         ) : (
           <p className="marketplace-section__empty">
             {query.trim()
-              ? "No installed connectors match this search."
+              ? "No installed plugins match this search."
               : "Connect an app and it will appear here."}
           </p>
         )}
       </section>
 
-      {savedRemoteIds.length ? <section className="marketplace-section" aria-label="Saved app connections">
-        <h2>Saved connections</h2><p>Open a connection to verify its account and enabled tools.</p>
-        <div className="marketplace-connector-grid">{remoteConnectors.filter((preset) => savedRemoteIds.includes(remoteConnectorServerId(preset.id))).map((preset) => findMarketplaceConnector(preset.id)).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter((entry) => !normalizedQuery || `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery)).map((entry) => renderConnectorRow(entry, "saved"))}</div>
-      </section> : null}
-
       {[
-        ...(!normalizedQuery ? [{ id: "popular", title: "Popular", connectors: ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
+        ...(!normalizedQuery ? [{ id: "featured", title: "Featured", connectors: ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
         ...visibleSections,
       ].map((section) => {
         const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
-        const limit = section.id === "popular" ? 6 : 4;
+        const limit = section.id === "featured" ? 6 : 4;
         const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
         const remaining = section.connectors.slice(limit);
         return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
@@ -306,7 +295,7 @@ export function PluginPanel({
 
       {!hasDirectoryMatches ? (
         <p className="marketplace-search-empty" role="status">
-          No connectors match “{query.trim()}”.
+          No plugins match “{query.trim()}”.
         </p>
       ) : null}
 
@@ -332,17 +321,18 @@ export function PluginPanel({
               ref={detailCloseRef}
               type="button"
               className="connector-detail-modal__close"
-              aria-label="Close connector setup"
+              aria-label="Close plugin setup"
               onClick={() => setSelectedEntryId(null)}
             >
               <X size={17} />
             </button>
             {(useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
-                titleId={`connector-detail-${selectedEntry.id}`} onSaved={() => setSavedRemoteIds((ids) => [...new Set([...ids, remoteConnectorServerId(selectedEntry.id)])])} />
+                titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} onSaved={() => { if (workspaceId) connectorConnectionsChanged(workspaceId); }} />
             ) : selectedConnector ? (
               <>
               <ConnectorDetails
+                key={selectedConnector.id}
                 connector={selectedConnector}
                 onUseConnector={onUseConnector}
                 onDisconnect={onDisconnect}
@@ -352,7 +342,6 @@ export function PluginPanel({
                 onConnect={onConnect}
                 titleId={`connector-detail-${selectedConnector.id}`}
               />
-              {remoteConnectorFor(selectedEntry.id) && selectedConnector.status !== "connected" ? <button type="button" className="button button--secondary" onClick={() => setUseRemote(true)}>Connect through {selectedEntry.name}'s official service</button> : null}
               </>
             ) : (
               <PlannedConnectorDetails
@@ -411,152 +400,80 @@ function PlannedConnectorDetails({
 }
 
 function ConnectorDetails({
-  connector,
-  onUseConnector,
-  onDisconnect,
-  onRefresh,
-  accounts,
-  onSwitchAccount,
-  onConnect,
-  titleId,
+  connector, onUseConnector, onDisconnect, onRefresh, accounts, onSwitchAccount, onConnect, titleId,
 }: {
   connector: ConnectorManifest;
   onUseConnector: (connector: ConnectorManifest) => void;
-  onDisconnect: (connectorId: string) => void;
+  onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
   accounts: ConnectorAccountOption[];
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
-  onConnect: (connector: ConnectorManifest) => void;
+  onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   titleId?: string;
 }) {
-  const permissions =
-    connector.scopes?.map((scope) => scope.label) ?? connector.permissions;
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const operation = useRef(false);
   const detail = resolveDetailedStatus(connector);
   const guide = connectorGuides[connector.id];
+  const connected = connector.status === "connected";
+  const needsRepair = ["failed", "permission-limited", "expired", "revoked", "unverified"].includes(detail.className);
+  const ready = connected && !needsRepair;
+  const configured = !["configuration-required", "unavailable"].includes(detail.className);
+  const run = async (task: () => void | Promise<void>) => {
+    if (operation.current) return;
+    operation.current = true; setBusy(true); setNotice("");
+    try { await task(); }
+    catch (error) { setNotice(connectorErrorMessage(error)); }
+    finally { operation.current = false; setBusy(false); }
+  };
+  const granted = connector.scopes?.filter((scope) => scope.granted) ?? [];
 
-  return (
-    <article
-      className="connector-detail"
-      aria-label={`${connector.name} details`}
-    >
-      <div className="connector-detail__header">
-        <span
-          className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}
-        >
-          <ConnectorIcon id={connector.id} />
-        </span>
-        <div>
-          <h2 id={titleId}>{connector.name}</h2>
-          <p>{guide?.description ?? detail.summary}</p>
-        </div>
-        <span
-          className={`connector-detail__status connector-detail__status--${detail.className}`}
-        >
-          {detail.label}
-        </span>
-      </div>
+  return <article className="connector-detail" aria-label={`${connector.name} details`} aria-busy={busy}>
+    <div className="connector-detail__header">
+      <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>
+      <div><h2 id={titleId}>{connector.name}</h2><p>{findMarketplaceConnector(connector.id)?.description ?? connector.name}</p></div>
+      <span className={`connector-detail__status connector-detail__status--${detail.className}`}>{busy ? "Connecting…" : ready ? "Connected" : connected ? "Reconnect" : detail.label}</span>
+    </div>
 
-      {guide ? <section className="connector-guide" aria-label="How to use this connector">
-        <h3>Try asking</h3>
-        <div className="connector-guide__examples">{guide.examples.map((example) => <p key={example}>{example}</p>)}</div>
-        <h3>How it works</h3>
-        <ol><li>Connect your account and choose the access you want to grant.</li><li>The connection is available to every agent in your workspace.</li><li>Mention <code>@{connector.id}</code> in a message, or choose it from the attachment menu.</li></ol>
-        <p>Fable uses the access you grant. Changes follow your workspace's approval settings.</p>
-      </section> : null}
-      <div className="connector-detail__body">
-        {connector.status !== "connected" ? <div><span>Connection setup</span><p>{detail.summary}</p></div> : null}
-        <div>
-          <span>Access</span>
-          {permissions.length ? <ul>
-            {permissions.map((permission) => (
-              <li key={permission}>{permission}</li>
-            ))}
-          </ul> : <p>Access is shown when you connect.</p>}
-        </div>
-        {connector.status === "connected" ? <>
-        <div>
-          <span>Connection</span>
-          <p>{detail.summary}</p>
-        </div>
-        <div>
-          <span>Sync</span>
-          <p>{syncLabel(connector)}</p>
-        </div>
-        </> : null}
-      </div>
-
-      {connector.status === "connected" && accounts.length > 1 ? (
-        <label className="connector-detail__account">
-          <span>Active connection</span>
-          <select
-            value={accounts.find((option) => option.active)?.connectionId ?? ""}
-            onChange={(event) =>
-              onSwitchAccount(connector.id, event.target.value)
-            }
-          >
-            {accounts.map(({ account, connectionId }) => (
-              <option key={connectionId} value={connectionId}>
-                {account.email ?? account.displayName}
-              </option>
-            ))}
-          </select>
-        </label>
-      ) : connector.status === "connected" && connector.account ? (
-        <p className="connector-detail__account">
-          Active connection:{" "}
-          {connector.account.email ?? connector.account.displayName}
-        </p>
-      ) : null}
-
-      <div className="connector-detail__actions">
-        {connector.status === "connected" ? (
-          <button type="button" disabled={detail.className === "failed" || detail.className === "permission-limited"} onClick={() => onUseConnector(connector)}>
-            Use in composer
-          </button>
-        ) : null}
-        {connector.status !== "connected" && connector.authMode !== "none" ? (
-          <button
-            type="button"
-            className="button button--primary"
-            disabled={detail.className === "configuration-required" || detail.className === "unavailable"}
-            onClick={() => onConnect(connector)}
-          >
-            {detail.className === "configuration-required" ? "Setup needed" : detail.className === "unavailable" ? "Unavailable" : detail.className === "expired" ||
-            detail.className === "revoked" ||
-            detail.className === "failed"
-              ? "Reconnect"
-              : "Connect"}
-          </button>
-        ) : null}
-        {connector.status === "connected" ? (
-          <button
-            type="button"
-            disabled={connector.sync?.phase === "syncing"}
-            onClick={() => onRefresh(connector.id)}
-          >
-            {connector.sync?.phase === "syncing" ? "Syncing…" : "Sync now"}
-          </button>
-        ) : null}
-        {connector.status === "connected" && connector.authMode !== "none" ? (
-          <button type="button" onClick={() => onDisconnect(connector.id)}>
-            Disconnect
-          </button>
-        ) : null}
-      </div>
-    </article>
-  );
+    {connector.account ? <p className="connector-detail__account">Active connection: {connector.account.email ?? connector.account.displayName}</p> : null}
+    {connected && accounts.length > 1 ? <label className="connector-detail__account">
+      <span>Account</span>
+      <select aria-label="Active connection" disabled={busy} value={accounts.find((option) => option.active)?.connectionId ?? ""}
+        onChange={(event) => onSwitchAccount(connector.id, event.target.value)}>
+        {accounts.map(({ account, connectionId }) => <option key={connectionId} value={connectionId}>{account.email ?? account.displayName}</option>)}
+      </select>
+    </label> : null}
+    <p className="connector-detail__intro">{ready ? "Ready to use with any of your agents." : configured ? `Sign in to use ${connector.name} in your conversations.` : "This connection is not available on this installation yet."}</p>
+    <div className="connector-detail__actions">
+      {ready ? <button type="button" disabled={busy} onClick={() => onUseConnector(connector)}>Use in chat</button> :
+        <button type="button" className="button--primary" disabled={busy || !configured} onClick={() => void run(() => onConnect(connector))}>
+          {busy ? "Connecting…" : configured ? needsRepair ? "Reconnect" : "Connect" : "Unavailable"}
+        </button>}
+      {connected || connector.account ? <button type="button" disabled={busy} onClick={() => void run(() => onDisconnect(connector.id))}>Disconnect</button> : null}
+    </div>
+    {notice ? <p className="connector-detail__notice" role="alert">{notice}</p> : null}
+    <p className="connector-detail__hint">{ready ? connectorAccessSummary(connector) : "Choose your account and grant access on the sign-in page."} Actions follow your workspace approval preference.</p>
+    <details className="connector-guide">
+      <summary>About this connection</summary>
+      {guide ? <><p>Try asking:</p><ul>{guide.examples.slice(0, 2).map((example) => <li key={example}>{example}</li>)}</ul></> : null}
+      {granted.length ? <><p>Access granted</p><ul>{granted.map((scope) => <li key={scope.id}>{scope.label}</li>)}</ul></> : null}
+      {!ready ? <p>{detail.summary}</p> : null}
+      {connected ? <button type="button" className="connector-detail__text-action" disabled={busy || connector.sync?.phase === "syncing"} onClick={() => onRefresh(connector.id)}>Sync files</button> : null}
+    </details>
+  </article>;
 }
 
-function syncLabel(connector: ConnectorManifest) {
-  const sync = connector.sync;
-  if (!sync || sync.phase === "idle") return "Not synced";
-  if (sync.phase === "succeeded")
-    return `Last synced ${sync.completedAt ?? "recently"}`;
-  if (sync.phase === "partial")
-    return `Partial: ${sync.failure?.message ?? "some items were skipped"}`;
-  if (sync.phase === "failed") return sync.failure?.message ?? "Sync failed";
-  if (sync.phase === "cancelled") return "Cancelled";
-  return "Syncing";
+export function connectorAccessSummary(connector: ConnectorManifest): string {
+  const granted = new Set(connector.scopes?.filter((scope) => scope.granted).map((scope) => scope.id));
+  if (connector.id === "google-drive") {
+    if (granted.has("https://www.googleapis.com/auth/drive")) return "Read and update your Drive files.";
+    if (granted.has("https://www.googleapis.com/auth/drive.readonly")) return granted.has("https://www.googleapis.com/auth/drive.file") ? "Read your Drive files. Updates are limited to files shared with Fable." : "Read your Drive files.";
+    return "Access files shared with Fable.";
+  }
+  if (connector.id === "gmail") return granted.has("https://www.googleapis.com/auth/gmail.send") ? "Read email and prepare or send messages." : "Read your email.";
+  if (connector.id === "google-calendar") return granted.has("https://www.googleapis.com/auth/calendar.events") ? "Read calendars and manage events." : "Read calendars and events.";
+  return "Uses the access you granted when connecting.";
 }
 
 export function resolveDetailedStatus(connector: ConnectorManifest): {
