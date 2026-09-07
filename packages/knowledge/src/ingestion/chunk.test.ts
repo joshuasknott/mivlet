@@ -1,6 +1,42 @@
 import { describe, expect, it } from "vitest";
 import { chunkSourceText, DEFAULT_MAX_CHARS, DEFAULT_OVERLAP_CHARS, mimeToType } from "./chunk";
 
+describe("chunk: no lost source content", () => {
+  it.each(["text", "markdown"] as const)("keeps citation spans identical to chunk text including whitespace (%s)", (type) => {
+    const text = "  Preamble.\n\n# Heading\n\n" + "some words. ".repeat(20) + "\n ";
+    const chunks = chunkSourceText(text, { sourceId: "s", type, maxChars: 60, overlapChars: 10 });
+    for (const chunk of chunks) {
+      expect(chunk.text).toBe(text.slice(chunk.charStart, chunk.charEnd));
+      expect(chunk.text.length).toBeLessThanOrEqual(60);
+    }
+  });
+
+  it.each(["text", "markdown", "yaml"] as const)("covers every non-whitespace character after boundary adjustment (%s)", (type) => {
+    const text = (type === "markdown" ? "# Heading\n" : type === "yaml" ? "body: " : "") +
+      "a".repeat(60) + "\n\n" + "b".repeat(170);
+    const chunks = chunkSourceText(text, { sourceId: "s", type, maxChars: 100, overlapChars: 0 });
+    for (let i = 0; i < text.length; i++) {
+      if (/\s/.test(text[i])) continue;
+      expect(chunks.some((chunk) => chunk.charStart <= i && chunk.charEnd > i), `missing offset ${i}`).toBe(true);
+    }
+  });
+
+  it("preserves YAML source positions with CRLF line endings", () => {
+    const text = "name: Fable\r\nkind: app\r\nversion: 1\r\n";
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "yaml" });
+    expect(chunks.map((chunk) => chunk.text.trim())).toEqual(["name: Fable", "kind: app", "version: 1"]);
+    expect(chunks.map((chunk) => chunk.charStart)).toEqual([0, text.indexOf("kind:"), text.indexOf("version:")]);
+    for (const chunk of chunks) expect(text.slice(chunk.charStart, chunk.charEnd)).toBe(chunk.text);
+  });
+
+  it.each([0, -1, NaN, Infinity, 1.5])("rejects invalid window sizes (%s)", (maxChars) => {
+    expect(() => chunkSourceText("content", { sourceId: "s", maxChars })).toThrow(RangeError);
+  });
+  it.each([-1, NaN, Infinity, 1.5])("rejects invalid overlap (%s)", (overlapChars) => {
+    expect(() => chunkSourceText("content", { sourceId: "s", overlapChars })).toThrow(RangeError);
+  });
+});
+
 describe("chunk: ids + offsets", () => {
   it("assigns stable ids `${sourceId}#${ordinal}` from 0", () => {
     const text = "para one.\n\npara two.\n\npara three.";
