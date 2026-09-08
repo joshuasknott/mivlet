@@ -74,13 +74,14 @@ function fixedWindowOffsets(
   if (text.length === 0) return windows;
 
   const safeOverlap = Math.min(overlapChars, maxChars - 1);
-  const step = Math.max(1, maxChars - safeOverlap);
   let start = 0;
   while (start < text.length) {
-    const end = Math.min(start + maxChars, text.length);
+    const end = Math.max(start + 1, adjustToBoundary(text, start, Math.min(start + maxChars, text.length)));
     windows.push({ start, end });
     if (end >= text.length) break;
-    start += step;
+    // Advance from the actual boundary, otherwise shortening a window can
+    // leave an unindexed gap before the next fixed start.
+    start = Math.max(start + 1, end - safeOverlap);
   }
   return windows;
 }
@@ -142,9 +143,9 @@ function buildChunksFromSegments(
     const windows = fixedWindowOffsets(segment.text, maxChars, overlapChars);
     let first = true;
     for (const window of windows) {
-      const end = adjustToBoundary(segment.text, window.start, window.end);
-      const slice = segment.text.slice(window.start, end).trim();
-      if (slice.length === 0) continue;
+      const end = window.end;
+      const slice = segment.text.slice(window.start, end);
+      if (slice.trim().length === 0) continue;
       chunks.push(
         makeChunk(
           sourceId,
@@ -174,12 +175,12 @@ function chunkPlainText(
   const chunks: SourceChunk[] = [];
   let ordinal = 0;
   for (const window of windows) {
-    const end = adjustToBoundary(text, window.start, window.end);
-    const slice = text.slice(window.start, end).trim();
-    if (slice.length === 0) continue;
+    const end = window.end;
+    const slice = text.slice(window.start, end);
+    if (slice.trim().length === 0) continue;
     chunks.push(makeChunk(sourceId, ordinal++, slice, window.start, end));
   }
-  return normalizeChunkList(chunks, sourceId, maxChars, overlapChars, true);
+  return normalizeChunkList(chunks, sourceId, maxChars, overlapChars, true, text);
 }
 
 /**
@@ -207,8 +208,8 @@ function chunkMarkdown(
   const segments: { text: string; start: number; end: number; heading?: string }[] = [];
 
   if (positions[0].index > 0) {
-    const preamble = text.slice(0, positions[0].index).trim();
-    if (preamble.length > 0) {
+    const preamble = text.slice(0, positions[0].index);
+    if (preamble.trim().length > 0) {
       segments.push({ text: preamble, start: 0, end: positions[0].index });
     }
   }
@@ -216,8 +217,8 @@ function chunkMarkdown(
   for (let i = 0; i < positions.length; i++) {
     const start = positions[i].index;
     const end = i + 1 < positions.length ? positions[i + 1].index : text.length;
-    const sectionText = text.slice(start, end).trim();
-    if (sectionText.length > 0) {
+    const sectionText = text.slice(start, end);
+    if (sectionText.trim().length > 0) {
       segments.push({ text: sectionText, start, end, heading: positions[i].heading });
     }
   }
@@ -413,7 +414,8 @@ function normalizeChunkList(
   sourceId: string,
   maxChars: number,
   overlapChars: number,
-  mergeTiny = false
+  mergeTiny = false,
+  originalText?: string
 ): SourceChunk[] {
   const tinyThreshold = Math.max(1, Math.floor(maxChars * 0.25));
 
@@ -430,7 +432,7 @@ function normalizeChunkList(
     const base = chunk.charStart;
     const windows = fixedWindowOffsets(chunk.text, maxChars, overlapChars);
     for (const w of windows) {
-      const end = adjustToBoundary(chunk.text, w.start, w.end);
+      const end = w.end;
       const slice = chunk.text.slice(w.start, end).trim();
       if (slice.length === 0) continue;
       expanded.push(
@@ -441,16 +443,18 @@ function normalizeChunkList(
 
   // Pass 3: merge a trailing tiny chunk into the previous chunk (windowed only).
   cleaned = expanded;
-  if (mergeTiny && cleaned.length >= 2) {
+  if (mergeTiny && originalText !== undefined && cleaned.length >= 2) {
     const last = cleaned[cleaned.length - 1];
     const prev = cleaned[cleaned.length - 2];
-    if (last.text.length <= tinyThreshold && prev.text.length + last.text.length <= maxChars) {
+    const start = Math.min(prev.charStart, last.charStart);
+    const end = Math.max(prev.charEnd, last.charEnd);
+    if (last.text.length <= tinyThreshold && end - start <= maxChars) {
       const merged = makeChunk(
         sourceId,
         prev.ordinal,
-        `${prev.text} ${last.text}`.trim(),
-        Math.min(prev.charStart, last.charStart),
-        Math.max(prev.charEnd, last.charEnd),
+        originalText.slice(start, end),
+        start,
+        end,
         prev.heading
       );
       cleaned = [...cleaned.slice(0, -2), merged];
@@ -542,8 +546,8 @@ function chunkYaml(
   // Split into documents on leading `---` separators. Each `---` (at column 0)
   // starts a new document; `...` ends one. We track document boundaries by
   // line index so offsets stay accurate against the original text.
-  const lines = text.split(/\r?\n/);
-  // Cumulative char offset of the start of each line (including its newline).
+  const lines = text.split(/\n/);
+  // Keep CR characters when counting offsets into the original Windows text.
   const lineOffsets: number[] = [0];
   for (let i = 0; i < lines.length; i++) {
     lineOffsets.push(lineOffsets[i] + lines[i].length + 1);
@@ -559,7 +563,7 @@ function chunkYaml(
   const segments: { start: number; end: number }[] = [];
   let keyLineIdx: number[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const raw = lines[i];
+    const raw = lines[i].replace(/\r$/, "");
     // Skip document separators / end markers.
     if (/^---\s*$/.test(raw) || /^\.\.\.\s*$/.test(raw)) continue;
     if (topLevelKey.test(raw)) {
@@ -625,6 +629,13 @@ export function chunkSourceText(text: string, options: ChunkOptions): SourceChun
   const maxChars = options.maxChars ?? DEFAULT_MAX_CHARS;
   const overlapChars = options.overlapChars ?? DEFAULT_OVERLAP_CHARS;
   const type = options.type ?? mimeToType(options.mimeType);
+
+  if (!Number.isSafeInteger(maxChars) || maxChars < 1) {
+    throw new RangeError("maxChars must be a positive safe integer");
+  }
+  if (!Number.isSafeInteger(overlapChars) || overlapChars < 0) {
+    throw new RangeError("overlapChars must be a non-negative safe integer");
+  }
 
   if (text.trim().length === 0) return [];
 
