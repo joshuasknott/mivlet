@@ -151,7 +151,30 @@ describe("retrieve — context budget + dedup", () => {
     ];
     const result = await retrieve(sources, { query: "connector", budgetChars: 500, snippetChars: 200 });
     const total = result.citations.reduce((sum, c) => sum + c.snippet.length, 0);
-    expect(total).toBeLessThanOrEqual(700); // budget + at most one snippet overshoot
+    expect(total).toBeLessThanOrEqual(500);
+  });
+
+  it.each([1, 3, 6, 7, 20, 100])("fits the first citation and ellipses within a %i-character budget", async (budgetChars) => {
+    const sources = [src(makeSource(), [makeChunk("s1", 0, "preamble ".repeat(30) + "connector " + "details ".repeat(100))])];
+    const result = await retrieve(sources, { query: "connector", budgetChars, snippetChars: 320 });
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0].snippet.length).toBeLessThanOrEqual(budgetChars);
+  });
+
+  it.each(["limit", "budgetChars", "snippetChars"] as const)("returns no citations for zero %s without embedding work", async (key) => {
+    let calls = 0;
+    const result = await retrieve([src(makeSource(), [makeChunk("s1", 0, "connector", { embedding: [1] })])], {
+      query: "connector", [key]: 0,
+      embeddingProvider: { id: "test", embedTexts: async () => { calls++; return [[1]]; } },
+    });
+    expect(result.citations).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  it.each([-1, NaN, Infinity, 1.5])("rejects invalid retrieval limits (%s)", async (value) => {
+    for (const key of ["limit", "budgetChars", "snippetChars"]) {
+      await expect(retrieve([], { query: "connector", [key]: value })).rejects.toThrow(RangeError);
+    }
   });
 
   it("deduplicates overlapping chunks from the same source", async () => {

@@ -208,6 +208,13 @@ export async function retrieve(
   const weights = options.rankingWeights ?? DEFAULT_RANKING_WEIGHTS;
   const query = options.query.trim();
 
+  for (const [name, value] of Object.entries({ limit, budgetChars, snippetChars })) {
+    if (!Number.isSafeInteger(value) || value < 0) throw new RangeError(`${name} must be a non-negative safe integer`);
+  }
+  if (limit === 0 || budgetChars === 0 || snippetChars === 0) {
+    return { query, mode: "lexical-fallback", citations: [] };
+  }
+
   const retrievable = filterRetrievable(sources, scope, {
     connectorId: options.connectorId,
     account: options.account,
@@ -349,8 +356,10 @@ export async function retrieve(
   const citations: AuthorityScopedKnowledgeCitation[] = [];
   let used = 0;
   for (const scored0 of limited) {
-    const snippet = makeSnippet(scored0.chunk.text, queryTokens, snippetChars);
-    if (used + snippet.length > budgetChars && citations.length > 0) break;
+    const remaining = budgetChars - used;
+    if (remaining <= 0) break;
+    const snippet = makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining));
+    if (!snippet) continue;
     citations.push(toCitation(scored0, snippet));
     used += snippet.length;
   }
@@ -408,9 +417,13 @@ function makeSnippet(text: string, queryTokens: string[], maxChars: number): str
     .filter((index) => index >= 0)
     .sort((left, right) => left - right)[0];
   const start = Math.max(0, (firstMatch ?? 0) - Math.floor(maxChars / 3));
-  const end = Math.min(clean.length, start + maxChars);
+  // Tiny snippets spend their budget on content rather than ellipses.
+  if (maxChars <= 6) return clean.slice(start, start + maxChars);
   const prefix = start > 0 ? "..." : "";
-  const suffix = end < clean.length ? "..." : "";
+  const available = maxChars - prefix.length;
+  const truncated = start + available < clean.length;
+  const suffix = truncated ? "..." : "";
+  const end = Math.min(clean.length, start + available - suffix.length);
   return `${prefix}${clean.slice(start, end).trim()}${suffix}`;
 }
 
