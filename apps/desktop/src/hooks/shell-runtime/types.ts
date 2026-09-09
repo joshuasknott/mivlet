@@ -62,6 +62,8 @@ export interface ShellRuntime {
   composerValue: string;
   setComposerValue: (value: string) => void;
   voiceEnabled: boolean;
+  voiceProvider: "browser" | "openai";
+  setVoiceProvider: (provider: "browser" | "openai") => void;
   setVoiceEnabled: (enabled: boolean) => void;
   toggleVoice: () => void;
   setImportStatus: (status: string | null) => void;
@@ -110,6 +112,7 @@ export interface ShellRuntime {
   clearApprovalInteraction: () => void;
   // knowledge + memory
   workspaceKnowledgeSources: KnowledgeSource[];
+  importKnowledgeFile: (file: File) => Promise<string | null>;
   pinnedSourceIds: string[];
   managedMemoryRecords: MemoryRecord[];
   memoryDisabled: boolean;
@@ -117,10 +120,11 @@ export interface ShellRuntime {
   memoryExportText: string;
   memoryStatus: string;
   toggleMemoryPin: (recordId: string) => void;
-  forgetMemory: (recordId: string) => void;
+  forgetMemory: (recordId: string) => Promise<void>;
+  correctMemory: (recordId: string, title: string, value: string, expectedUpdatedAt?: string) => Promise<void>;
   /** Soft-disable a single memory: excluded from retrieval/context/export, but stays in management views. */
-  toggleMemoryRecordDisabled: (recordId: string) => void;
-  toggleMemoryDisabled: () => void;
+  toggleMemoryRecordDisabled: (recordId: string) => Promise<void>;
+  toggleMemoryDisabled: () => Promise<void>;
   exportMemory: () => Promise<void>;
   /**
    * Assemble context for the authenticated active member. Fails closed when

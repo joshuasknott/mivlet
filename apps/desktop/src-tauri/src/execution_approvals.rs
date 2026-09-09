@@ -17,6 +17,8 @@ struct ExecutionApproval {
     decision: String,
     decided_at: String,
     consumed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    invalidated_at: Option<String>,
 }
 
 const EXECUTION_APPROVAL_TTL_SECONDS: i64 = 15 * 60;
@@ -132,10 +134,41 @@ pub(crate) fn record_execution_decision(
             decision: response.audit_entry.decision.clone(),
             decided_at: response.audit_entry.decided_at.clone(),
             consumed_at: None,
+            invalidated_at: None,
         },
     );
     records.truncate(500);
     write_records(path, &records)
+}
+
+/// Revoke approval permits that belonged to an interrupted attempt.
+///
+/// Recovery calls this before it marks the attempt interrupted. This closes the
+/// restart window where a stale provider callback could otherwise present the
+/// old exact request while its separately persisted permit was still fresh.
+pub(crate) fn invalidate_execution_approvals(
+    path: &Path,
+    request_ids: &[String],
+    invalidated_at: &str,
+) -> Result<(), String> {
+    if request_ids.is_empty() {
+        return Ok(());
+    }
+    let mut records = read_records(path)?;
+    let mut changed = false;
+    for record in &mut records {
+        if request_ids.contains(&record.request_id)
+            && record.consumed_at.is_none()
+            && record.invalidated_at.is_none()
+        {
+            record.invalidated_at = Some(invalidated_at.to_string());
+            changed = true;
+        }
+    }
+    if changed {
+        write_records(path, &records)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn verify_and_consume_execution_approval(
@@ -161,6 +194,11 @@ pub(crate) fn verify_and_consume_execution_approval(
         "once" | "session" | "rule" | "modify"
     ) {
         return Err("Execution blocked: the user did not approve this request.".to_string());
+    }
+    if record.invalidated_at.is_some() {
+        return Err(
+            "Execution blocked: this approval belongs to an interrupted attempt.".to_string(),
+        );
     }
     if record.consumed_at.is_some() {
         return Err("Execution blocked: this approval was already consumed.".to_string());
@@ -233,6 +271,30 @@ mod tests {
                 .is_err()
         );
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn interrupted_attempt_invalidates_only_its_unconsumed_permits() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("approvals.json");
+        let first = request();
+        let mut second = request();
+        second.id = "approval-2".into();
+        record_execution_decision(&path, &response(first.clone())).expect("record first");
+        record_execution_decision(&path, &response(second.clone())).expect("record second");
+
+        invalidate_execution_approvals(
+            &path,
+            std::slice::from_ref(&first.id),
+            "2026-06-27T12:00:02Z",
+        )
+        .expect("invalidate interrupted permit");
+
+        let error = verify_and_consume_execution_approval(&path, &first, "2026-06-27T12:00:03Z")
+            .expect_err("interrupted permit must fail closed");
+        assert!(error.contains("interrupted attempt"));
+        verify_and_consume_execution_approval(&path, &second, "2026-06-27T12:00:03Z")
+            .expect("unrelated permit remains usable");
     }
 
     #[test]

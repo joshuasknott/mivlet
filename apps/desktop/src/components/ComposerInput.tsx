@@ -7,6 +7,7 @@ import {
 } from "react";
 import { mentionParts, type MentionConnector } from "./ConnectorMention";
 import { connectorLogos } from "./marketplace/connector-logos";
+import { builtinPluginEntries } from "../lib/builtin-plugins";
 
 export interface ComposerInputHandle {
   focus(): void;
@@ -118,7 +119,7 @@ export function ComposerInput({
       chip.className = "connector-mention";
       chip.dataset.mention = part.text;
       chip.setAttribute("contenteditable", "false");
-      const logo = connectorLogos[part.connector.id];
+      const logo = builtinPluginEntries.find((entry) => entry.id === part.connector?.id)?.icon ?? connectorLogos[part.connector.id];
       if (logo) {
         const icon = document.createElement("img");
         icon.src = logo;

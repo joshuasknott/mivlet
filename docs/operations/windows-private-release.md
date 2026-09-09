@@ -34,6 +34,14 @@ are deterministic for identical artifact bytes. Installer bytes can still
 include toolchain or Windows packaging metadata; byte-for-byte reproducibility
 across runners is not yet claimed.
 
+The bundled local-computer Dockerfile pins the verified Debian and Node base
+image manifests by digest, and the desktop records a deterministic build-context
+digest on both its owned image and containers. A missing, foreign, or stale label
+causes a rebuild and replacement while the scoped persistent volumes remain in
+place. Debian apt indexes and package versions still follow the current Bookworm
+repositories; a release snapshot and package-lock policy is required before the
+guest image itself can be claimed byte-for-byte reproducible.
+
 Local manifest tests:
 
 ```bash

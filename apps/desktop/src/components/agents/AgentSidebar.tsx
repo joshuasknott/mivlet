@@ -2,12 +2,14 @@ import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
+import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
 import { useEffect, useState } from "react";
 import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
 import { AccountMenu } from "./AccountMenu";
 import { PRESENCE_LABELS, type AgentPresence } from "../../lib/agent-presence";
+import "../projects/projects.css";
 
 export interface AgentSidebarPreview {
   message: string;
@@ -15,6 +17,11 @@ export interface AgentSidebarPreview {
   status: "idle" | "running" | "attention";
   presence?: AgentPresence;
   completionId?: string;
+}
+
+export interface AgentSidebarProject {
+  id: string;
+  name: string;
 }
 
 export function AgentSidebar({
@@ -31,6 +38,10 @@ export function AgentSidebar({
   onOpenSettings,
   onOpenUsage,
   onSignOut,
+  projects = [],
+  selectedProjectId,
+  onSelectProject,
+  onCreateProject,
   hidden = false,
 }: {
   agents: FableAgentProfile[];
@@ -46,10 +57,16 @@ export function AgentSidebar({
   onOpenSettings: () => void;
   onOpenUsage: () => void;
   onSignOut: () => void;
+  projects?: AgentSidebarProject[];
+  selectedProjectId?: string | null;
+  onSelectProject?: (project: AgentSidebarProject) => void;
+  onCreateProject?: () => void;
   hidden?: boolean;
 }) {
   const [query, setQuery] = useState("");
-  const [completions, setCompletions] = useState<Record<string, { id: string; unread: boolean }>>({});
+  const [completions, setCompletions] = useState<
+    Record<string, { id: string; unread: boolean }>
+  >({});
   useEffect(() => {
     setCompletions((current) => {
       const next = { ...current };
@@ -69,7 +86,15 @@ export function AgentSidebar({
       return changed ? next : current;
     });
   }, [previews]);
-  const visibleAgents = agents.filter((agent) => `${agent.name} ${previews[agent.id]?.message ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleAgents = agents.filter((agent) =>
+    `${agent.name} ${previews[agent.id]?.message ?? ""}`
+      .toLowerCase()
+      .includes(normalizedQuery),
+  );
+  const visibleProjects = projects.filter((project) =>
+    project.name.toLowerCase().includes(normalizedQuery),
+  );
   const installedConnectors = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
@@ -78,7 +103,6 @@ export function AgentSidebar({
   return (
     <aside className="agent-sidebar" aria-label="Agents" hidden={hidden}>
       <div className="agent-sidebar__topline">
-
         <span className="agent-sidebar__title">Fable</span>
         <button
           className="agent-sidebar__new"
@@ -91,17 +115,89 @@ export function AgentSidebar({
         </button>
       </div>
 
-      <label className="agent-search"><MagnifyingGlass size={16} aria-hidden="true" /><input type="search" aria-label="Search agents" placeholder="Search" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
+      <label className="agent-search">
+        <MagnifyingGlass size={16} aria-hidden="true" />
+        <input
+          type="search"
+          aria-label="Search projects and agents"
+          placeholder="Search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+
+      {projects.length > 0 || onCreateProject ? (
+        <section
+          className="project-sidebar-section"
+          aria-labelledby="project-sidebar-title"
+        >
+          <header>
+            <span id="project-sidebar-title">Projects</span>
+            {onCreateProject ? (
+              <button
+                type="button"
+                onClick={onCreateProject}
+                aria-label="Create project"
+                title="Create project"
+              >
+                <Plus size={15} aria-hidden="true" />
+              </button>
+            ) : null}
+          </header>
+          <div className="project-sidebar-list">
+            {visibleProjects.map((project) => {
+              const active =
+                project.id === selectedProjectId && !marketplaceActive;
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  className={`project-sidebar-row${active ? " project-sidebar-row--active" : ""}`}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => onSelectProject?.(project)}
+                >
+                  <span
+                    className="project-sidebar-row__icon"
+                    aria-hidden="true"
+                  >
+                    <FolderSimple size={19} />
+                  </span>
+                  <span>
+                    <strong title={project.name}>{project.name}</strong>
+                    <small>Shared with all agents</small>
+                  </span>
+                </button>
+              );
+            })}
+            {projects.length > 0 && visibleProjects.length === 0 ? (
+              <p className="project-sidebar-empty" role="status">
+                No projects match “{query}”.
+              </p>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
+
+      <div className="agent-sidebar__section-label">Agents</div>
 
       <div className="agent-list" role="list">
         {visibleAgents.map((agent) => {
-          const active = agent.id === activeAgentId && !marketplaceActive;
+          const active =
+            agent.id === activeAgentId &&
+            !marketplaceActive &&
+            !selectedProjectId;
           const preview = previews[agent.id] ?? {
             message: "Start a conversation",
             time: "",
             status: "idle" as const,
           };
-          const presence = preview.presence ?? (preview.status === "running" ? "working" : preview.status === "attention" ? "waiting" : "idle");
+          const presence =
+            preview.presence ??
+            (preview.status === "running"
+              ? "working"
+              : preview.status === "attention"
+                ? "waiting"
+                : "idle");
           return (
             <div
               key={agent.id}
@@ -112,27 +208,49 @@ export function AgentSidebar({
                 className="agent-row__select"
                 type="button"
                 onClick={() => {
-                  setCompletions((current) => current[agent.id]
-                    ? { ...current, [agent.id]: { ...current[agent.id], unread: false } }
-                    : current);
+                  setCompletions((current) =>
+                    current[agent.id]
+                      ? {
+                          ...current,
+                          [agent.id]: { ...current[agent.id], unread: false },
+                        }
+                      : current,
+                  );
                   onSelectAgent(agent);
                 }}
                 aria-current={active ? "page" : undefined}
               >
-                <ProfileAgentAvatar agent={agent} iconSize={36} presence={presence} />
+                <ProfileAgentAvatar
+                  agent={agent}
+                  iconSize={36}
+                  presence={presence}
+                />
                 <span className="agent-row__copy">
                   <span className="agent-row__line">
                     <strong title={agent.name}>{agent.name}</strong>
                     <time>{preview.time}</time>
                   </span>
-                  <span className="agent-row__meta"><span className="agent-row__preview">{preview.message}</span></span>
+                  <span className="agent-row__meta">
+                    <span className="agent-row__preview">
+                      {preview.message}
+                    </span>
+                  </span>
                 </span>
-                {preview.status === "running" || completions[agent.id]?.unread ? (
+                {preview.status === "running" ||
+                completions[agent.id]?.unread ? (
                   <span
                     className={`agent-status agent-status--${preview.status === "running" ? "working" : "unread"}`}
                     role="status"
-                    aria-label={preview.status === "running" ? PRESENCE_LABELS[presence] : "New completed work"}
-                    title={preview.status === "running" ? PRESENCE_LABELS[presence] : "New completed work"}
+                    aria-label={
+                      preview.status === "running"
+                        ? PRESENCE_LABELS[presence]
+                        : "New completed work"
+                    }
+                    title={
+                      preview.status === "running"
+                        ? PRESENCE_LABELS[presence]
+                        : "New completed work"
+                    }
                   />
                 ) : null}
               </button>
@@ -152,7 +270,11 @@ export function AgentSidebar({
             Create your first agent to get started.
           </p>
         ) : null}
-        {agents.length > 0 && !visibleAgents.length ? <p className="agent-list__empty" role="status">No agents match “{query}”.</p> : null}
+        {agents.length > 0 && !visibleAgents.length ? (
+          <p className="agent-list__empty" role="status">
+            No agents match “{query}”.
+          </p>
+        ) : null}
       </div>
 
       <button
@@ -177,7 +299,12 @@ export function AgentSidebar({
         ) : null}
       </button>
 
-      <AccountMenu name={profileName} onUsage={onOpenUsage} onSettings={onOpenSettings} onSignOut={onSignOut} />
+      <AccountMenu
+        name={profileName}
+        onUsage={onOpenUsage}
+        onSettings={onOpenSettings}
+        onSignOut={onSignOut}
+      />
     </aside>
   );
 }

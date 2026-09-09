@@ -1,5 +1,6 @@
 import { Fragment } from "react";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { builtinPluginEntries } from "../lib/builtin-plugins";
 
 export type MentionConnector = { id: string; name: string };
 
@@ -51,7 +52,7 @@ export function ConnectorMentionText({
 }) {
   return (
     <>
-      {mentionParts(text, connectors).map((part, index) => (
+      {mentionParts(text, [...connectors, ...builtinPluginEntries]).map((part, index) => (
         <Fragment key={index}>
           {part.connector ? (
             <ConnectorMention connector={part.connector} />

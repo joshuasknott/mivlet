@@ -9,6 +9,7 @@ export function MarketplacePage({
   accounts,
   connectorStatus,
   onUseConnector,
+  onUseBuiltinPlugin,
   onConnect,
   onDisconnect,
   onRefresh,
@@ -22,6 +23,7 @@ export function MarketplacePage({
   accounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
   onUseConnector: (connector: ConnectorManifest) => void;
+  onUseBuiltinPlugin?: (id: "browser" | "computer") => void;
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
@@ -37,6 +39,7 @@ export function MarketplacePage({
               workspaceId={workspaceId}
               manifests={manifests}
               onUseConnector={onUseConnector}
+              onUseBuiltinPlugin={onUseBuiltinPlugin}
               onConnect={onConnect}
               onDisconnect={onDisconnect}
               onRefresh={onRefresh}

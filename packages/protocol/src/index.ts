@@ -7,6 +7,7 @@ export * from "./domains/provider-routing.js";
 export * from "./domains/hosted-computer.js";
 export * from "./domains/hosted-execution-capability.js";
 export * from "./domains/local-computer.js";
+export * from "./domains/local-projects.js";
 export * from "./domains/voice.js";
 
 import type {
@@ -999,6 +1000,7 @@ export interface RuntimeSnapshot {
   activeItem: string;
   composerDraft: string;
   voiceEnabled: boolean;
+  voiceProvider?: "browser" | "openai";
   approvalAudit: ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
   approvalRules: ApprovalGrant[];

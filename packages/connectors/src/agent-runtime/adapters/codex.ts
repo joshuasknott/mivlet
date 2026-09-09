@@ -59,6 +59,14 @@ async function* mapCodexEvents(
       yield { type: "text-delta", text: event.text };
     } else if (event.type === "reasoning-summary") {
       yield { ...event, text: redactSecretsFromString(event.text) };
+    } else if (event.type === "provider-tool") {
+      yield {
+        ...event,
+        arguments: redactSecretsFromString(event.arguments),
+        ...(event.output === undefined
+          ? {}
+          : { output: redactSecretsFromString(event.output) })
+      };
     } else if (event.type === "usage") {
       yield {
         type: "usage",

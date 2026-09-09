@@ -43,6 +43,9 @@ const MAX_CONTEXT_TITLE: usize = 256;
 const MAX_CONTEXT_SNIPPET: usize = 2_000;
 const MAX_CONTEXT_PROVENANCE: usize = 512;
 const MAX_CONTEXT_PATH: usize = 512;
+const MAX_ATTEMPT_IMAGES: usize = 4;
+const MAX_ATTEMPT_IMAGE_BYTES: usize = 1024 * 1024;
+const MAX_ATTEMPT_IMAGE_DIMENSION: u32 = 8192;
 
 fn bounded_id(value: &str, max: usize, label: &str) -> Result<String, String> {
     let normalized = normalize_spaces(value);
@@ -310,6 +313,48 @@ pub(crate) fn normalize_execution_attempt(
             &route.selection,
         )?;
     }
+    let mut image_count = 0usize;
+    let mut image_bytes = 0usize;
+    for exchange in &mut attempt.exchanges {
+        if !exchange.images.is_empty() && !exchange.role.trim().eq_ignore_ascii_case("user") {
+            return Err("Only user exchanges can retain image metadata.".to_string());
+        }
+        if exchange.images.len() > MAX_ATTEMPT_IMAGES {
+            return Err("Execution attempt image metadata exceeds its item limit.".to_string());
+        }
+        image_count = image_count
+            .checked_add(exchange.images.len())
+            .ok_or("Execution attempt image metadata has an invalid item count.".to_string())?;
+        for image in &mut exchange.images {
+            image.id = truncate_characters(&normalize_spaces(&image.id), 160);
+            image.name = truncate_characters(&normalize_spaces(&image.name), 256);
+            image.media_type = normalize_spaces(&image.media_type).to_ascii_lowercase();
+            if image.id.is_empty()
+                || image.name.is_empty()
+                || !matches!(
+                    image.media_type.as_str(),
+                    "image/png" | "image/jpeg" | "image/webp"
+                )
+                || image.size_bytes == 0
+                || image.size_bytes > MAX_ATTEMPT_IMAGE_BYTES
+                || image.width == 0
+                || image.height == 0
+                || image.width > MAX_ATTEMPT_IMAGE_DIMENSION
+                || image.height > MAX_ATTEMPT_IMAGE_DIMENSION
+            {
+                return Err("Execution attempt image metadata is invalid.".to_string());
+            }
+            image_bytes = image_bytes
+                .checked_add(image.size_bytes)
+                .ok_or("Execution attempt image metadata has an invalid total size.".to_string())?;
+        }
+    }
+    if image_count > MAX_ATTEMPT_IMAGES {
+        return Err("Execution attempt image metadata exceeds its item limit.".to_string());
+    }
+    if image_bytes > MAX_ATTEMPT_IMAGE_BYTES {
+        return Err("Execution attempt image metadata exceeds its total size limit.".to_string());
+    }
     attempt.exchanges = attempt
         .exchanges
         .into_iter()
@@ -503,6 +548,7 @@ pub(crate) fn recover_execution_attempts_at(
         ) {
             attempt.status = "interrupted".to_string();
             attempt.recoverable = true;
+            attempt.pending_approval_ids.clear();
             attempt.updated_at = recovered_at.to_string();
             changed = true;
         }
@@ -695,13 +741,51 @@ pub fn list_execution_attempts(_app: tauri::AppHandle) -> Result<Vec<ExecutionAt
 
 #[tauri::command]
 pub fn recover_interrupted_execution_attempts(
-    _app: tauri::AppHandle,
+    app: tauri::AppHandle,
     recovered_at: String,
 ) -> Result<Vec<ExecutionAttempt>, String> {
     let store = crate::store::try_global()
         .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     let recovered_at = normalize_spaces(&recovered_at);
+    if recovered_at.is_empty() {
+        return Err("Recovery time is required.".to_string());
+    }
+    let pending_approval_ids = store
+        .with_conn(|tx| {
+            let ids = execution_attempt::list_by_status_scoped(
+                tx,
+                &scope,
+                &["queued", "streaming", "awaiting-approval", "retrying"],
+            )?;
+            let mut pending = Vec::new();
+            for id in ids {
+                let row =
+                    execution_attempt::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
+                        crate::store::StoreError::Invalid(
+                            "Attempt disappeared during recovery.".into(),
+                        )
+                    })?;
+                let value =
+                    serde_json::from_value::<ExecutionAttempt>(row.payload).map_err(|_| {
+                        crate::store::StoreError::Invalid(
+                            "Execution attempt payload is invalid.".into(),
+                        )
+                    })?;
+                let value = normalize_execution_attempt(value)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                pending.extend(value.pending_approval_ids);
+            }
+            pending.sort();
+            pending.dedup();
+            Ok(pending)
+        })
+        .map_err(|e| e.to_string())?;
+    crate::execution_approvals::invalidate_execution_approvals(
+        &crate::paths::execution_approvals_path(&app)?,
+        &pending_approval_ids,
+        &recovered_at,
+    )?;
     store
         .transaction(|tx| {
             let ids = execution_attempt::list_by_status_scoped(
@@ -804,6 +888,7 @@ mod tests {
                 tool_call_id: None,
                 tool_name: None,
                 ok: None,
+                images: Vec::new(),
             }],
             parent_attempt_id: None,
             context_receipt: None,
@@ -881,6 +966,39 @@ mod tests {
             .unwrap()
             .reasoning_summaries
             .is_empty());
+    }
+
+    #[test]
+    fn image_checkpoints_keep_only_bounded_user_metadata() {
+        let metadata = |id: &str, size_bytes: usize| crate::models::ExecutionImageMetadata {
+            id: id.into(),
+            name: format!("{id}.png"),
+            media_type: "image/png".into(),
+            size_bytes,
+            width: 1,
+            height: 1,
+        };
+        let mut attempt = fixture("streaming");
+        attempt.exchanges[0].images = vec![metadata("one", 600_000)];
+        attempt.exchanges.push(crate::models::ExecutionExchange {
+            role: "user".into(),
+            content: "Second message".into(),
+            tool_call_id: None,
+            tool_name: None,
+            ok: None,
+            images: vec![metadata("two", 600_000)],
+        });
+        assert!(normalize_execution_attempt(attempt)
+            .unwrap_err()
+            .contains("total size"));
+
+        let mut encoded = serde_json::to_value(fixture("streaming")).unwrap();
+        encoded["exchanges"][0]["images"] = serde_json::json!([{
+            "id": "one", "name": "one.png", "mediaType": "image/png",
+            "sizeBytes": 64, "width": 1, "height": 1,
+            "dataUrl": "data:image/png;base64,private-pixels"
+        }]);
+        assert!(serde_json::from_value::<ExecutionAttempt>(encoded).is_err());
     }
 
     fn receipt() -> ExecutionContextReceipt {
@@ -1079,7 +1197,7 @@ mod tests {
             recover_execution_attempts_at(&path, "2026-06-27T12:01:00Z").expect("recover");
         assert_eq!(recovered[0].status, "interrupted");
         assert_eq!(recovered[0].transcript, "partial response");
-        assert_eq!(recovered[0].pending_approval_ids, vec!["approval-1"]);
+        assert!(recovered[0].pending_approval_ids.is_empty());
         assert_eq!(recovered[0].thread_id.as_deref(), Some("thread-1"));
         assert_eq!(recovered[0].exchanges.len(), 1);
         assert!(recovered[0].recoverable);

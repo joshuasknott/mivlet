@@ -1275,6 +1275,17 @@ mod tests {
                     )?;
                     assert!(!exists, "retired table {table} must not exist");
                 }
+                for table in ["local_schedule", "local_schedule_occurrence"] {
+                    let exists: bool = conn.query_row(
+                        "SELECT EXISTS(
+                           SELECT 1 FROM sqlite_master
+                           WHERE type='table' AND name=?1
+                         );",
+                        [table],
+                        |row| row.get(0),
+                    )?;
+                    assert!(exists, "current table {table} must exist");
+                }
                 Ok(())
             })
             .unwrap();

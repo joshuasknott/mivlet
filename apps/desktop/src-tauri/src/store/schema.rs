@@ -9,7 +9,49 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 39;
+pub const CURRENT_SCHEMA_VERSION: u32 = 41;
+
+/// Forward schema step `v40 -> v41`: adds the small member-private shared
+/// project room and its immutable run-author ledger. It does not reuse or infer
+/// rows from the retired project/orchestration hierarchy.
+pub const SCHEMA_V40_TO_V41: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS local_project (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active','archived')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE RESTRICT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,thread_id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_project_owner
+  ON local_project(workspace_id,owner_subject,lifecycle,updated_at);
+
+CREATE TABLE IF NOT EXISTS local_project_run_author (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,run_id),
+  FOREIGN KEY(workspace_id,owner_subject,project_id)
+    REFERENCES local_project(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_local_project_run_author_project
+  ON local_project_run_author(workspace_id,owner_subject,project_id,created_at);
+"#;
 
 /// Retired orchestration storage is removed from every opened database. The
 /// historical migration steps remain readable only so pre-release databases
@@ -53,6 +95,64 @@ DROP TABLE IF EXISTS artifact_legacy_unowned;
 DROP TABLE IF EXISTS artifact;
 DROP TABLE IF EXISTS goal;
 DROP TABLE IF EXISTS run_state;
+"#;
+
+/// Forward schema step `v39 -> v40`: adds the small local scheduling store.
+///
+/// This is a new member-private product surface. It does not recreate or read
+/// any of the retired Mission, Routine, workflow, or scheduler tables. The
+/// migration creates no schedules, occurrences, claims, or execution authority.
+pub const SCHEMA_V39_TO_V40: &str = r#"
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE IF NOT EXISTS local_schedule (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('enabled','paused','cancelled')),
+  trigger_kind TEXT NOT NULL CHECK(trigger_kind IN ('once','daily','weekly')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  prompt_revision INTEGER NOT NULL CHECK(prompt_revision >= 1),
+  next_run_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_due
+  ON local_schedule(workspace_id,owner_subject,status,next_run_at);
+
+CREATE TABLE IF NOT EXISTS local_schedule_occurrence (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  schedule_id TEXT NOT NULL,
+  schedule_revision INTEGER NOT NULL CHECK(schedule_revision >= 1),
+  prompt_revision INTEGER NOT NULL CHECK(prompt_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('claimed','running','completed','failed','interrupted')),
+  slot_fingerprint TEXT NOT NULL,
+  claim_fingerprint TEXT NOT NULL,
+  lease_expires_at TEXT NOT NULL,
+  execution_attempt_id TEXT,
+  scheduled_for TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,schedule_id,schedule_revision,slot_fingerprint),
+  FOREIGN KEY(workspace_id,owner_subject,schedule_id)
+    REFERENCES local_schedule(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(execution_attempt_id) REFERENCES run(id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_occurrence_lease
+  ON local_schedule_occurrence(workspace_id,owner_subject,state,lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_occurrence_schedule
+  ON local_schedule_occurrence(workspace_id,owner_subject,schedule_id,scheduled_for);
 "#;
 
 /// Forward schema step `v34 -> v35`: adds an encrypted, owner-qualified
@@ -1559,6 +1659,91 @@ CREATE TABLE IF NOT EXISTS cloud_record_tombstone (
   PRIMARY KEY (local_workspace_id, record_type, record_id)
 );
 CREATE INDEX IF NOT EXISTS idx_cloud_tombstone_workspace_revision ON cloud_record_tombstone(local_workspace_id, server_revision);
+
+-- Member-private local schedules. These tables are intentionally independent
+-- from the retired orchestration schemas removed in v38.
+CREATE TABLE IF NOT EXISTS local_schedule (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  agent_id TEXT NOT NULL,
+  status TEXT NOT NULL CHECK(status IN ('enabled','paused','cancelled')),
+  trigger_kind TEXT NOT NULL CHECK(trigger_kind IN ('once','daily','weekly')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  prompt_revision INTEGER NOT NULL CHECK(prompt_revision >= 1),
+  next_run_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_due
+  ON local_schedule(workspace_id,owner_subject,status,next_run_at);
+CREATE TABLE IF NOT EXISTS local_schedule_occurrence (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  schedule_id TEXT NOT NULL,
+  schedule_revision INTEGER NOT NULL CHECK(schedule_revision >= 1),
+  prompt_revision INTEGER NOT NULL CHECK(prompt_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('claimed','running','completed','failed','interrupted')),
+  slot_fingerprint TEXT NOT NULL,
+  claim_fingerprint TEXT NOT NULL,
+  lease_expires_at TEXT NOT NULL,
+  execution_attempt_id TEXT,
+  scheduled_for TEXT NOT NULL,
+  claimed_at TEXT NOT NULL,
+  started_at TEXT,
+  completed_at TEXT,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,schedule_id,schedule_revision,slot_fingerprint),
+  FOREIGN KEY(workspace_id,owner_subject,schedule_id)
+    REFERENCES local_schedule(workspace_id,owner_subject,id) ON DELETE CASCADE,
+  FOREIGN KEY(execution_attempt_id) REFERENCES run(id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_occurrence_lease
+  ON local_schedule_occurrence(workspace_id,owner_subject,state,lease_expires_at);
+CREATE INDEX IF NOT EXISTS idx_local_schedule_occurrence_schedule
+  ON local_schedule_occurrence(workspace_id,owner_subject,schedule_id,scheduled_for);
+
+-- Member-private project rooms shared by local agents.
+CREATE TABLE IF NOT EXISTS local_project (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  lifecycle TEXT NOT NULL CHECK(lifecycle IN ('active','archived')),
+  revision INTEGER NOT NULL CHECK(revision >= 1),
+  thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE RESTRICT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  archived_at TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,thread_id)
+);
+CREATE INDEX IF NOT EXISTS idx_local_project_owner
+  ON local_project(workspace_id,owner_subject,lifecycle,updated_at);
+CREATE TABLE IF NOT EXISTS local_project_run_author (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  project_id TEXT NOT NULL,
+  run_id TEXT NOT NULL REFERENCES run(id) ON DELETE CASCADE,
+  agent_id TEXT NOT NULL,
+  thread_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,run_id),
+  FOREIGN KEY(workspace_id,owner_subject,project_id)
+    REFERENCES local_project(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_local_project_run_author_project
+  ON local_project_run_author(workspace_id,owner_subject,project_id,created_at);
 
 -- migration bookkeeping (idempotency + diagnostics)
 CREATE TABLE IF NOT EXISTS migration_log (

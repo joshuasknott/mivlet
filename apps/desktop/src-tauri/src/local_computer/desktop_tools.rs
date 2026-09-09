@@ -96,7 +96,7 @@ pub(crate) async fn prepare(
     generation: u64,
 ) -> Result<(), String> {
     let scope = computers.scope(workspace_id, agent_id)?;
-    ensure_browser_session(computers, scope, Some(generation)).await
+    ensure_browser_session(computers, scope, Some((generation, false))).await
 }
 
 pub(crate) fn observe(

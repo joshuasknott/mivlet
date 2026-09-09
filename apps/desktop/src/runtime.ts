@@ -1,4 +1,9 @@
 import { getActiveRuntimeDataScope } from "./runtime-scope";
+export {
+  loadRuntimeBuiltinPlugins,
+  setRuntimeBuiltinPlugin,
+  prepareRuntimeBuiltinComputer,
+} from "./runtime/domains/local-computer";
 import { mergeConnectorConnections } from "./lib/connector-connections";
 import {
   getRuntimeAdapter,
@@ -274,20 +279,27 @@ export async function loadRuntimeMemoryState() {
   }
 }
 
-export async function loadRuntimeSnapshot(workspaceId = activeDataScope()?.workspaceId) {
+export async function loadRuntimeSnapshot(
+  workspaceId = activeDataScope()?.workspaceId,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
   if (!workspaceId) return null;
 
   try {
-    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", { workspaceId });
+    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", {
+      workspaceId,
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }
 }
 
-export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot, workspaceId = activeDataScope()?.workspaceId) {
+export async function saveRuntimeSnapshot(
+  snapshot: RuntimeSnapshot,
+  workspaceId = activeDataScope()?.workspaceId,
+) {
   if (!hasTauriRuntime()) {
     return null;
   }
@@ -303,10 +315,18 @@ export async function saveRuntimeSnapshot(snapshot: RuntimeSnapshot, workspaceId
   }
 }
 
-export async function saveRuntimeExecutionAttempt(attempt: ExecutionAttempt) {
+export async function saveRuntimeExecutionAttempt(
+  attempt: ExecutionAttempt,
+  expectedWorkspaceId?: string,
+) {
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
   if (!scope) return null;
+  if (expectedWorkspaceId && scope.workspaceId !== expectedWorkspaceId) {
+    throw new Error(
+      "The selected workspace changed before the execution attempt was saved.",
+    );
+  }
   try {
     return await invoke<ExecutionAttempt>("save_execution_attempt", {
       attempt,
@@ -595,8 +615,14 @@ function draftThreadId(draftKey: string) {
 
 export async function createRuntimeConversationThread(
   input: RuntimeConversationThreadCreate,
+  expectedWorkspaceId?: string,
 ) {
   const scope = conversationScopeOrThrow();
+  if (expectedWorkspaceId && scope.workspaceId !== expectedWorkspaceId) {
+    throw new Error(
+      "The selected workspace changed before the conversation was created.",
+    );
+  }
   if (!hasTauriRuntime()) {
     const thread = previewThread(input, scope.workspaceId);
     previewConversationStore(scope.workspaceId).threads.push(thread);
@@ -614,6 +640,7 @@ export async function createRuntimeConversationThread(
   };
   const result = await invoke<unknown>("conversation_create_thread", {
     input: nativeInput,
+    expectedWorkspaceId,
   });
   assertNativeThread(result);
   return fromNativeThread(result, scope.workspaceId);
@@ -636,7 +663,9 @@ export async function deleteRuntimeConversationThread(threadId: string) {
   if (!hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     store.threads = store.threads.filter((thread) => thread.id !== threadId);
-    store.messages = store.messages.filter((view) => view.message.threadId !== threadId);
+    store.messages = store.messages.filter(
+      (view) => view.message.threadId !== threadId,
+    );
     store.drafts.delete(`thread:${threadId}`);
     return;
   }
@@ -827,9 +856,10 @@ export async function loadRuntimeConversationDraft(draftKey: string) {
   });
   if (response === null) return null;
   // Tauri serializes an absent optional threadId as null in saved payloads.
-  const result = isRecord(response) && response.threadId === null
-    ? { ...response, threadId: undefined }
-    : response;
+  const result =
+    isRecord(response) && response.threadId === null
+      ? { ...response, threadId: undefined }
+      : response;
   assertDraft(result, scope.workspaceId);
   return result;
 }
@@ -868,6 +898,43 @@ export async function saveRuntimeMemoryState(state: MemoryControlState) {
   try {
     return await invoke<MemoryControlState>("save_memory_state", {
       state,
+      ...scope,
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function correctRuntimeMemoryRecord(correction: {
+  id: string;
+  title: string;
+  value: string;
+  expectedUpdatedAt?: string;
+}) {
+  const scope = activeDataScope();
+  if (!scope || !hasTauriRuntime())
+    throw new Error("Memory correction requires the desktop app.");
+  try {
+    return await invoke<MemoryControlState>("correct_memory_record", {
+      correction,
+      ...scope,
+    });
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+export async function changeRuntimeMemoryRecord(change: {
+  id: string;
+  state: "enabled" | "disabled" | "forgotten";
+  expectedUpdatedAt?: string;
+}) {
+  const scope = activeDataScope();
+  if (!scope || !hasTauriRuntime())
+    throw new Error("Memory controls require the desktop app.");
+  try {
+    return await invoke<MemoryControlState>("change_memory_record_state", {
+      change,
       ...scope,
     });
   } catch (error) {
@@ -1006,19 +1073,36 @@ export async function listRuntimeConnectorStatuses() {
   try {
     const [native, remote] = await Promise.all([
       invoke<ConnectorManifest[]>("list_connector_statuses", scope),
-      invoke<RuntimeMcpConnectionDetails[]>("list_remote_mcp_connections", scope),
+      invoke<RuntimeMcpConnectionDetails[]>(
+        "list_remote_mcp_connections",
+        scope,
+      ),
     ]);
     const projected = mergeConnectorConnections(native, remote);
     // Finish verification automatically for accounts connected by an older
     // build. A user never needs to find or press a separate test button.
-    return await Promise.all(projected.map(async (connector) => {
-      if (connector.connectionRoute === "remote" || connector.status !== "connected" || connector.health?.state !== "unknown") return connector;
-      try {
-        return await invoke<ConnectorManifest>("refresh_connector_health", { ...scope, connectorId: connector.id });
-      } catch {
-        return { ...connector, status: "provider-error" as const, healthSummary: "Could not finish connecting. Try again." };
-      }
-    }));
+    return await Promise.all(
+      projected.map(async (connector) => {
+        if (
+          connector.connectionRoute === "remote" ||
+          connector.status !== "connected" ||
+          connector.health?.state !== "unknown"
+        )
+          return connector;
+        try {
+          return await invoke<ConnectorManifest>("refresh_connector_health", {
+            ...scope,
+            connectorId: connector.id,
+          });
+        } catch {
+          return {
+            ...connector,
+            status: "provider-error" as const,
+            healthSummary: "Could not finish connecting. Try again.",
+          };
+        }
+      }),
+    );
   } catch {
     return null;
   }
@@ -1303,11 +1387,21 @@ export async function prepareRuntimeConnectorAction(
   }
 }
 
-export async function prepareRuntimeConnectorToolAction(workspaceId: string, connectorId: string, action: string, payload: Record<string, string>) {
+export async function prepareRuntimeConnectorToolAction(
+  workspaceId: string,
+  connectorId: string,
+  action: string,
+  payload: Record<string, string>,
+) {
   if (!hasTauriRuntime()) return null;
   try {
-    return await invoke<{ action: ConnectorActionRequest; preview: string }>("prepare_connector_tool_action", { workspaceId, connectorId, action, payload });
-  } catch (error) { throw toRuntimeError(error); }
+    return await invoke<{ action: ConnectorActionRequest; preview: string }>(
+      "prepare_connector_tool_action",
+      { workspaceId, connectorId, action, payload },
+    );
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
 }
 
 export async function executeRuntimeConnectorAction(request: {
@@ -1449,6 +1543,28 @@ export interface RuntimeStreamRequest {
   model: string;
   body: unknown;
   providerRoute?: import("@fable/protocol").ProviderRouteExecutionBinding;
+}
+
+export interface RuntimeMediaImageStatus {
+  providerId: "openai";
+  configured: boolean;
+  models: ["gpt-image-2"];
+  sizes: Array<"1024x1024" | "1536x1024" | "1024x1536">;
+  qualities: Array<"low" | "medium" | "high">;
+  outputMimeType: "image/png";
+  generationAvailable: boolean;
+  editingAvailable: boolean;
+  message: string;
+}
+
+/** Read local image prerequisites without provider egress or entitlement claims. */
+export async function getRuntimeMediaImageStatus() {
+  if (!hasTauriRuntime()) return null;
+  try {
+    return await invoke<RuntimeMediaImageStatus>("media_image_status");
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
 }
 
 export type RuntimeNativeProviderRoute = Spine.Connections.ProviderRoute & {
@@ -1616,7 +1732,12 @@ export type RuntimeCodexEvent =
       approval: import("@fable/protocol").ApprovalRequest;
     }
   | { type: "text-delta"; text: string }
-  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
+  | {
+      type: "reasoning-summary";
+      text: string;
+      itemId: string;
+      summaryIndex: number;
+    }
   | {
       type: "usage";
       inputTokens: number;

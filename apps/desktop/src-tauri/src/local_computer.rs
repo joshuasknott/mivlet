@@ -11,6 +11,9 @@ mod browser_tools;
 mod container;
 pub(crate) mod desktop_tools;
 pub(crate) mod lifecycle;
+pub(crate) mod plugins;
+pub(crate) mod project_files;
+pub(crate) mod repositories;
 pub(crate) mod viewer;
 
 use authority::ComputerAuthority;
@@ -55,6 +58,7 @@ pub(super) fn cancel_external_operations(scope: &ComputerScope) -> Result<(), St
 }
 
 pub struct LocalComputerState {
+    plugins: plugins::PluginAuthority,
     closing: AtomicBool,
     root: PathBuf,
     image_context: PathBuf,
@@ -109,6 +113,7 @@ impl LocalComputerController {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalComputerSnapshot {
+    plugins: plugins::BuiltinPlugins,
     computer_id: String,
     workspace_id: String,
     agent_id: String,
@@ -333,6 +338,7 @@ impl LocalComputerState {
         .find(|candidate| candidate.join("Dockerfile").is_file())
         .unwrap_or_else(|| resource_root.join("local-computer"));
         Ok(Self {
+            plugins: plugins::PluginAuthority::load(&root.join("plugins.json"))?,
             closing: AtomicBool::new(false),
             root,
             image_context,
@@ -350,6 +356,7 @@ impl LocalComputerState {
             .join("resources")
             .join("local-computer");
         Self {
+            plugins: plugins::PluginAuthority::for_test(),
             closing: AtomicBool::new(false),
             snapshot_path: root.join("runtime-snapshot.json"),
             root,
@@ -446,9 +453,10 @@ impl LocalComputerState {
             return Ok(authority.clone());
         }
         let cancel_scope = scope.clone();
-        let authority = ComputerAuthority::load_with_cancellation(
+        let authority = ComputerAuthority::load_with_plugins(
             &scope.directory,
             Some(Arc::new(move || cancel_external_operations(&cancel_scope))),
+            self.plugins.bits.clone(),
         )?;
         authorities.insert(scope.key.clone(), authority.clone());
         Ok(authority)
@@ -469,10 +477,53 @@ impl LocalComputerState {
         expected_generation: u64,
         operation: impl FnOnce(&Path) -> Result<T, String>,
     ) -> Result<T, String> {
+        self.with_scoped_files(
+            workspace_id,
+            agent_id,
+            expected_generation,
+            false,
+            operation,
+        )
+    }
+
+    /// Admit an asynchronous agent operation while preserving the same plugin,
+    /// lease, generation, cancellation, and drain semantics as file/browser work.
+    pub(crate) fn begin_agent_operation(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        expected_generation: u64,
+    ) -> Result<authority::OperationTicket, String> {
+        self.validate_target(workspace_id, agent_id)?;
+        self.authority_for(workspace_id, agent_id)?
+            .begin_agent(expected_generation)
+    }
+
+    pub(crate) fn with_artifact_files<T>(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        expected_generation: u64,
+        operation: impl FnOnce(&Path) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.with_scoped_files(workspace_id, agent_id, expected_generation, true, operation)
+    }
+
+    fn with_scoped_files<T>(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+        expected_generation: u64,
+        artifact: bool,
+        operation: impl FnOnce(&Path) -> Result<T, String>,
+    ) -> Result<T, String> {
         let root = self.tool_workspace_root(workspace_id, agent_id)?;
-        let ticket = self
-            .authority_for(workspace_id, agent_id)?
-            .begin_agent(expected_generation)?;
+        let authority = self.authority_for(workspace_id, agent_id)?;
+        let ticket = if artifact {
+            authority.begin_artifact(expected_generation)?
+        } else {
+            authority.begin_agent(expected_generation)?
+        };
         ticket.check()?;
         // Revocation drains this admitted operation before human input is enabled.
         let result = operation(&root);
@@ -509,7 +560,7 @@ impl LocalComputerState {
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its browser.".into());
         }
-        ensure_browser_session(self.clone(), scope, Some(expected_generation)).await?;
+        ensure_browser_session(self.clone(), scope, Some((expected_generation, true))).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         let session = self
             .sessions
@@ -522,7 +573,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            let operation = session.authority.begin_agent(expected_generation)?;
+            let operation = session.authority.begin_browser(expected_generation)?;
             operation.check()?;
             browser_tools::follow_active_tab(&mut session)?;
             session.observation = None;
@@ -552,7 +603,7 @@ impl LocalComputerState {
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its browser.".into());
         }
-        ensure_browser_session(self.clone(), scope, Some(expected_generation)).await?;
+        ensure_browser_session(self.clone(), scope, Some((expected_generation, true))).await?;
         let scope = self.scope(&workspace_id, &agent_id)?;
         let session = self
             .sessions
@@ -565,7 +616,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            let operation = session.authority.begin_agent(expected_generation)?;
+            let operation = session.authority.begin_browser(expected_generation)?;
             operation.check()?;
             operation.finish(observe_agent_controls(&scope, &mut session))
         })
@@ -599,7 +650,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The agent browser state is unavailable.".to_string())?;
-            let operation = session.authority.begin_agent(expected_generation)?;
+            let operation = session.authority.begin_browser(expected_generation)?;
             operation.check()?;
             let observation = session
                 .observation
@@ -676,7 +727,7 @@ impl LocalComputerState {
             let mut session = session
                 .lock()
                 .map_err(|_| "The local browser state is unavailable.".to_string())?;
-            let operation = session.authority.begin_agent(expected_generation)?;
+            let operation = session.authority.begin_browser(expected_generation)?;
             let observation = session
                 .observation
                 .take()
@@ -710,7 +761,12 @@ impl LocalComputerState {
         if !scope.directory.join("workspace").is_dir() {
             return Err("Set up this agent's local computer before using its terminal.".into());
         }
-        ensure_browser_session(self.clone(), scope.clone(), Some(expected_generation)).await?;
+        ensure_browser_session(
+            self.clone(),
+            scope.clone(),
+            Some((expected_generation, false)),
+        )
+        .await?;
         let authority = self.authority(&scope)?;
         tauri::async_runtime::spawn_blocking(move || {
             let operation = authority.begin_agent(expected_generation)?;
@@ -1166,7 +1222,7 @@ fn normalize_agent_navigation(value: &str) -> Result<String, String> {
 async fn ensure_browser_session(
     state: Arc<LocalComputerState>,
     scope: ComputerScope,
-    agent_generation: Option<u64>,
+    agent_generation: Option<(u64, bool)>,
 ) -> Result<(), String> {
     let key = scope.key.clone();
     let launch_gate = {
@@ -1186,7 +1242,13 @@ async fn ensure_browser_session(
             .map_err(|_| "The local computer launch state is unavailable.".to_string())?;
         let authority = launch_state.authority(&scope)?;
         let admission = agent_generation
-            .map(|generation| authority.begin_agent(generation))
+            .map(|(generation, browser)| {
+                if browser {
+                    authority.begin_browser(generation)
+                } else {
+                    authority.begin_agent(generation)
+                }
+            })
             .transpose()?;
         let existing = launch_state
             .sessions
@@ -1205,7 +1267,9 @@ async fn ensure_browser_session(
             .transpose()?
             .unwrap_or(false);
         if !healthy {
-            let expected_generation = agent_generation.unwrap_or(authority.snapshot()?.generation);
+            let expected_generation = agent_generation
+                .map(|(generation, _)| generation)
+                .unwrap_or(authority.snapshot()?.generation);
             if let Some(admission) = admission {
                 admission.finish(Ok(()))?;
             }
@@ -1402,6 +1466,7 @@ fn computer_snapshot(
         "ready"
     };
     Ok(LocalComputerSnapshot {
+        plugins: state.plugins.snapshot(),
         computer_id: scope.computer_id,
         workspace_id,
         agent_id,

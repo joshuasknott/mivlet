@@ -6,7 +6,11 @@
  * connector id; unknown ids fall back to a generic folder glyph.
  */
 
+import { builtinPluginEntries } from "../lib/builtin-plugins";
+
 export function ConnectorIcon({ id }: { id: string }) {
+  const builtin = builtinPluginEntries.find((entry) => entry.id === id);
+  if (builtin) return <img src={builtin.icon} className="connector-icon-svg" alt="" />;
   switch (id) {
     case "github":
       return (

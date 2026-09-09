@@ -10,7 +10,7 @@ use std::{
     io::Write,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
         Arc, Condvar, Mutex, Weak,
     },
     time::{Duration, Instant},
@@ -51,6 +51,7 @@ struct Inner {
 }
 
 pub(crate) struct ComputerAuthority {
+    plugins: Arc<AtomicU8>,
     path: PathBuf,
     inner: Mutex<Inner>,
     drained: Condvar,
@@ -72,9 +73,18 @@ impl ComputerAuthority {
         Self::load_with_cancellation(directory, None)
     }
 
+    #[cfg(test)]
     pub(super) fn load_with_cancellation(
         directory: &Path,
         process_cancel: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
+    ) -> Result<Arc<Self>, String> {
+        Self::load_with_plugins(directory, process_cancel, Arc::new(AtomicU8::new(3)))
+    }
+
+    pub(super) fn load_with_plugins(
+        directory: &Path,
+        process_cancel: Option<Arc<dyn Fn() -> Result<(), String> + Send + Sync>>,
+        plugins: Arc<AtomicU8>,
     ) -> Result<Arc<Self>, String> {
         std::fs::create_dir_all(directory)
             .map_err(|_| "Fable could not prepare computer authority storage.".to_string())?;
@@ -113,6 +123,7 @@ impl ComputerAuthority {
         };
         persist(&path, &durable)?;
         Ok(Arc::new_cyclic(|self_weak| Self {
+            plugins,
             path,
             inner: Mutex::new(Inner {
                 durable,
@@ -138,22 +149,59 @@ impl ComputerAuthority {
         self: &Arc<Self>,
         expected_generation: u64,
     ) -> Result<OperationTicket, String> {
-        self.begin(LocalComputerController::Agent, expected_generation)
+        self.begin(
+            LocalComputerController::Agent,
+            expected_generation,
+            super::plugins::COMPUTER,
+        )
+    }
+
+    pub(crate) fn begin_browser(
+        self: &Arc<Self>,
+        expected_generation: u64,
+    ) -> Result<OperationTicket, String> {
+        self.begin(
+            LocalComputerController::Agent,
+            expected_generation,
+            super::plugins::BROWSER,
+        )
+    }
+
+    pub(crate) fn begin_artifact(
+        self: &Arc<Self>,
+        expected_generation: u64,
+    ) -> Result<OperationTicket, String> {
+        self.begin(
+            LocalComputerController::Agent,
+            expected_generation,
+            super::plugins::BROWSER | super::plugins::COMPUTER,
+        )
     }
 
     pub(crate) fn begin_human(
         self: &Arc<Self>,
         expected_generation: u64,
     ) -> Result<OperationTicket, String> {
-        self.begin(LocalComputerController::Human, expected_generation)
+        self.begin(LocalComputerController::Human, expected_generation, 0)
     }
 
     fn begin(
         self: &Arc<Self>,
         controller: LocalComputerController,
         expected_generation: u64,
+        plugin: u8,
     ) -> Result<OperationTicket, String> {
         let mut inner = self.inner.lock().map_err(|_| unavailable())?;
+        if plugin != 0 && self.plugins.load(Ordering::Acquire) & plugin == 0 {
+            return Err(format!(
+                "Enable {} in Plugins before using this tool.",
+                match plugin {
+                    super::plugins::BROWSER => "Browser",
+                    super::plugins::COMPUTER => "Computer Use",
+                    _ => "Browser or Computer Use",
+                }
+            ));
+        }
         self.expire(&mut inner, Utc::now())?;
         if inner.transitioning
             || inner.durable.controller != controller
@@ -537,6 +585,39 @@ fn unavailable() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plugin_admission_is_separate_and_revocation_invalidates_old_authority() {
+        let temp = tempfile::tempdir().unwrap();
+        let plugins = Arc::new(AtomicU8::new(super::super::plugins::BROWSER));
+        let authority =
+            ComputerAuthority::load_with_plugins(temp.path(), None, plugins.clone()).unwrap();
+        assert!(authority
+            .begin_agent(1)
+            .err()
+            .unwrap()
+            .contains("Computer Use"));
+        let browser = authority.begin_browser(1).unwrap();
+        assert!(authority.begin_artifact(1).is_ok());
+        plugins.store(0, Ordering::Release);
+        assert!(authority.begin_artifact(1).is_err());
+        assert!(authority
+            .begin_browser(1)
+            .err()
+            .unwrap()
+            .contains("Browser"));
+        let generation = authority.pause_for_shutdown().unwrap();
+        assert!(browser.check().is_err());
+        drop(browser);
+        authority.drain(generation, Duration::from_secs(1)).unwrap();
+        authority
+            .complete_transition(generation, LocalComputerController::Agent)
+            .unwrap();
+        plugins.store(super::super::plugins::COMPUTER, Ordering::Release);
+        assert!(authority.begin_agent(1).is_err());
+        assert!(authority.begin_agent(generation).is_ok());
+        assert!(authority.begin_browser(generation).is_err());
+    }
 
     #[test]
     fn revocation_cancels_inflight_work_before_drain_and_blocks_both_actors() {

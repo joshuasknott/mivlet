@@ -4,6 +4,8 @@ import { getRuntimeAdapter, hasNativeRuntimeAdapter } from "../runtime/adapters/
 const artifactTypes: Readonly<Record<string, string>> = {
   docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  pdf: "application/pdf",
   csv: "text/csv", txt: "text/plain", md: "text/markdown",
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
 };

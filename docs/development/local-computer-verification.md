@@ -178,3 +178,50 @@ to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
   External opening of the returned copies and repeated complete tasks have not
   yet been verified. The lifecycle controls also have a narrow-layout defect
   visible when Computer options is expanded; this pass does not fix that layout.
+
+### Daily-driver implementation evidence — 7 September 2026
+
+- Browser and Computer built-ins now have native enablement/admission checks,
+  a shared lazy-start path and revocation/draining on disable. Browser-only
+  access does not grant desktop or shell tools. The 51 focused desktop tests
+  and native admission regression passed. The actual marketplace and composer
+  components were inspected at desktop and 390px widths in the labelled
+  browser preview. This does not exercise native enablement through the UI.
+- A direct ephemeral Codex app-server probe on the connected default
+  `gpt-6-astra` route performed a fresh search with 18 structured results,
+  then opened a returned page with one result and a linked citation. Shell,
+  unified execution, memories, apps and MCP were disabled in that probe.
+  It did not use the packaged Fable conversation. Public URL fetching now
+  returns readable content and bounded source metadata under existing SSRF,
+  redirect and body limits. Other provider routes still lack dedicated search.
+- The document guest image generated DOCX, XLSX, PDF and PPTX, recalculated the
+  workbook and rendered Office/PDF outputs. Eight focused native artifact
+  tests and the opt-in real-fixture test across seven files passed. Rendered
+  fixture pages/slides were visually inspected for clipping/overlap; the XLSX
+  formula `SUM(A1:A2)` had cached value `5`, matching its expected result.
+  These are simple fixture checks, not arbitrary-document layout guarantees.
+  Native external opening from an ordinary conversation remains unverified.
+- Four native repository import tests passed for scoped extraction, common
+  credential/dependency exclusions, traversal and case collisions. A separate
+  read-only-mounted synthetic repo ran inside image
+  `sha256:32cf0a743af2f566f5c28008bf77e83c35012d94958b9d48991fad6e3dbcf1f9`:
+  its baseline test failed, an isolated Git worktree fixed one source file,
+  the test and `git diff --check` passed, and the original source, unrelated
+  tracked file and untracked scratch file retained their contents. Network was
+  disabled. No remote write or PR was attempted. The native chooser-to-chat
+  journey is not covered by this probe.
+- Interrupted-attempt checkpoints preserve intent, successful tool results and
+  uncertainty while dropping reusable authority identifiers. Unused persisted
+  approvals are invalidated on recovery. Focused tests cover bounded recovery,
+  uncertain-write replay prevention and current-route retry behavior; real
+  crash/restart and consequential external-write reconciliation remain open.
+- Memory Settings now supports inspect/correct/disable/forget. The correction
+  test rejects stale revisions and forgotten records; two UI tests cover save
+  errors and management filtering. A labelled synthetic preview exercised
+  correction at desktop and phone widths. Native state-change and final broad
+  gates are still being completed; no packaged memory acceptance is claimed.
+
+The Linux Docker engine was available for these isolated checks. Native app
+automation was unavailable in this session, so private sign-in takeover,
+packaged conversation delivery and repeated end-to-end completion remain open.
+All implementation changes remain uncommitted in the isolated worktree.

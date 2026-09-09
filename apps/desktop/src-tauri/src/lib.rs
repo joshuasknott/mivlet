@@ -39,11 +39,15 @@ mod google;
 mod hosted_computer;
 mod knowledge;
 mod local_computer;
+mod local_projects;
+mod local_schedules;
 mod managed_runtime;
 mod mcp_process;
+mod media_images;
 mod memory;
 mod models;
 mod native_api;
+mod native_speech;
 mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
@@ -88,6 +92,7 @@ pub fn run() {
                 std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
             local_computer::lifecycle::start_idle_monitor(computers.clone());
             app.manage(computers);
+            app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -128,6 +133,23 @@ pub fn run() {
             execution_attempts::save_execution_attempt,
             execution_attempts::list_execution_attempts,
             execution_attempts::recover_interrupted_execution_attempts,
+            local_schedules::local_schedule_create,
+            local_schedules::local_schedule_update,
+            local_schedules::local_schedule_set_status,
+            local_schedules::local_schedule_list,
+            local_schedules::local_schedule_occurrence_list,
+            local_schedules::local_schedule_dispatch_claim,
+            local_schedules::local_schedule_dispatch_bind,
+            local_schedules::local_schedule_dispatch_renew,
+            local_schedules::local_schedule_dispatch_finish,
+            local_schedules::local_schedule_dispatch_abandon,
+            local_projects::local_project_create,
+            local_projects::local_project_list,
+            local_projects::local_project_update,
+            local_projects::local_project_archive,
+            local_projects::local_project_run_author_bind,
+            local_projects::local_project_run_author_list,
+            local_projects::local_project_run_author_get,
             conversations::conversation_create_thread,
             conversations::conversation_list_threads,
             conversations::conversation_get_thread,
@@ -153,8 +175,14 @@ pub fn run() {
             snapshot::refresh_local_knowledge_source,
             memory::list_memory_state,
             memory::save_memory_state,
+            memory::correct_memory_record,
+            memory::change_memory_record_state,
             memory::export_memory_state,
             memory::promote_knowledge_source_to_memory,
+            media_images::media_image_status,
+            native_speech::native_speech_prepare_recording,
+            native_speech::native_speech_cancel_recording,
+            native_speech::native_speech_transcribe_recording,
             snapshot::load_runtime_snapshot,
             snapshot::save_runtime_snapshot,
             backends::list_backends,
@@ -242,6 +270,10 @@ pub fn run() {
             hosted_computer::hosted_browser_action_prepare,
             hosted_computer::hosted_browser_action,
             hosted_computer::hosted_browser_snapshot,
+            local_computer::plugins::builtin_plugins_status,
+            local_computer::plugins::builtin_plugin_set,
+            local_computer::plugins::builtin_plugin_prepare_computer,
+            local_computer::repositories::local_computer_import_repository,
             local_computer::local_computer_status,
             local_computer::local_computer_provision,
             local_computer::local_computer_files,

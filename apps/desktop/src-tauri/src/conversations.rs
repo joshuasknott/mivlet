@@ -71,7 +71,18 @@ pub struct DraftInput {
     pub payload: Value,
 }
 #[tauri::command]
-pub fn conversation_create_thread(input: CreateThread) -> Result<thread::ThreadRow, String> {
+pub fn conversation_create_thread(
+    input: CreateThread,
+    expected_workspace_id: Option<String>,
+) -> Result<thread::ThreadRow, String> {
+    if expected_workspace_id
+        .as_deref()
+        .is_some_and(|workspace_id| {
+            workspace_id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID
+        })
+    {
+        return Err("The selected workspace changed before the conversation was created.".into());
+    }
     if input.project_id.is_some() {
         return Err("Project-scoped conversations are no longer part of Fable.".into());
     }

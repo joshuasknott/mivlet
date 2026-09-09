@@ -5,7 +5,7 @@ import type {
   BackendAgentEvent,
   BackendProvider,
   ExecutionAttempt,
-  PreparedExecutionContext
+  PreparedExecutionContext,
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -68,6 +68,8 @@ const mocks = vi.hoisted(() => ({
   saveError: null as Error | null,
   recoveredRuns: [] as ExecutionAttempt[],
   listedRuns: null as ExecutionAttempt[] | null,
+  codexEvents: [] as unknown[],
+  codexListener: null as ((event: unknown) => void) | null,
   toolResult: { ok: true, output: "Fetched body text from Rust." },
   selectRoute: vi.fn(async (input: { providerId: string; model: string }) => ({
     workspaceId: "workspace-1",
@@ -75,42 +77,50 @@ const mocks = vi.hoisted(() => ({
       providerRouteId: `route-${input.providerId}-${input.model}`,
       selectedAt: "2026-07-12T12:00:00.000Z",
       reason: `Selected ${input.providerId} ${input.model}.`,
-      boundaryPolicyRef: `boundary-${input.providerId}`
-    }
-  }))
+      boundaryPolicyRef: `boundary-${input.providerId}`,
+    },
+  })),
 }));
 
 vi.mock("../lib/provider-route-selection", () => ({
-  selectNativeProviderRoute: mocks.selectRoute
+  selectNativeProviderRoute: mocks.selectRoute,
 }));
 
 vi.mock("../runtime", () => ({
-  listenRuntimeBackendEvents: vi.fn(async (_requestId: string, onLine: (line: string) => void) => {
-    mocks.onLine = onLine;
-    const subscribeCount = ++listenCount;
-    // Turn 1 plays `lines`; turn 2+ plays `turnTwoLines` (a clean stop by default)
-    // so a multi-turn run does not replay the tool-call chunks each turn.
-    const replay =
-      subscribeCount > 1 && mocks.turnTwoLines !== null
-        ? mocks.turnTwoLines
-        : mocks.lines;
-    for (const line of replay) {
-      onLine(line);
-    }
-    if (mocks.emitDone) {
-      onLine("[DONE]");
-    }
-    return () => {};
-  }),
+  listenRuntimeBackendEvents: vi.fn(
+    async (_requestId: string, onLine: (line: string) => void) => {
+      mocks.onLine = onLine;
+      const subscribeCount = ++listenCount;
+      // Turn 1 plays `lines`; turn 2+ plays `turnTwoLines` (a clean stop by default)
+      // so a multi-turn run does not replay the tool-call chunks each turn.
+      const replay =
+        subscribeCount > 1 && mocks.turnTwoLines !== null
+          ? mocks.turnTwoLines
+          : mocks.lines;
+      for (const line of replay) {
+        onLine(line);
+      }
+      if (mocks.emitDone) {
+        onLine("[DONE]");
+      }
+      return () => {};
+    },
+  ),
   streamRuntimeCompletion: vi.fn(
-    async (request: { providerId: string; requestId: string; model: string; body: unknown; providerRoute?: unknown }) => {
+    async (request: {
+      providerId: string;
+      requestId: string;
+      model: string;
+      body: unknown;
+      providerRoute?: unknown;
+    }) => {
       mocks.streamCalls += 1;
       mocks.persistenceEvents.push("egress");
       // Record the egress request so the per-provider routing tests can assert
       // the body was shaped by the correct shaper before crossing to Rust.
       mocks.streamRequests.push(request);
       return null;
-    }
+    },
   ),
   cancelRuntimeCompletion: vi.fn(async (requestId: string) => {
     mocks.cancelCalls.push(requestId);
@@ -128,7 +138,27 @@ vi.mock("../runtime", () => ({
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
     return mocks.toolResult;
-  })
+  }),
+  listenRuntimeCodexEvents: vi.fn(
+    async (_requestId: string, onEvent: (event: unknown) => void) => {
+      mocks.codexListener = onEvent;
+      return () => {
+        mocks.codexListener = null;
+      };
+    },
+  ),
+  startRuntimeCodexTurn: vi.fn(async () => {
+    for (const event of mocks.codexEvents) mocks.codexListener?.(event);
+    return null;
+  }),
+  respondRuntimeCodexApproval: vi.fn(async () => null),
+  interruptRuntimeCodexTurn: vi.fn(async () => null),
+  shutdownRuntimeCodexTurn: vi.fn(async () => null),
+  getRuntimeCodexStatus: vi.fn(async () => ({
+    installed: true,
+    authenticated: true,
+    authMethod: "chatgpt",
+  })),
 }));
 
 // Tracks the number of transport subscribes so the mock can serve different
@@ -140,24 +170,25 @@ function installDesktopRuntime() {
   Object.defineProperty(window, "__TAURI_INTERNALS__", {
     value: { invoke: {} },
     configurable: true,
-    writable: true
+    writable: true,
   });
 }
 
 /** Clear any faked desktop runtime so hasDesktopRuntime() returns false. */
 function removeDesktopRuntime() {
   try {
-    delete (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
-  } catch {
-  }
-  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = undefined;
+    delete (window as unknown as { __TAURI_INTERNALS__?: unknown })
+      .__TAURI_INTERNALS__;
+  } catch {}
+  (window as unknown as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ =
+    undefined;
 }
 
 const baseRequest: AgentTurnRequest = {
   model: "gpt-5",
   messages: [{ role: "user", content: "summarize the conversation" }],
   tools: [],
-  maxTokens: 1024
+  maxTokens: 1024,
 };
 
 const preparedContext: PreparedExecutionContext = {
@@ -168,8 +199,10 @@ const preparedContext: PreparedExecutionContext = {
     assembledAt: "2026-07-11T12:00:00.000Z",
     scope: { level: "thread", threadId: "thread-1" },
     citations: [],
-    contributions: [{ id: "memory-1", kind: "memory", reason: "memory-approved" }]
-  }
+    contributions: [
+      { id: "memory-1", kind: "memory", reason: "memory-approved" },
+    ],
+  },
 };
 
 /** A connected, streaming native-API provider the hook can resolve to a backend. */
@@ -180,8 +213,33 @@ function connectedOpenAiProvider(): BackendProvider {
     label: "OpenAI",
     description: "OpenAI API",
     authState: "connected",
-    capabilities: ["authentication", "streaming", "tool-requests", "approvals", "cancellation"],
-    models: [{ id: "gpt-5", label: "GPT-5", available: true }]
+    capabilities: [
+      "authentication",
+      "streaming",
+      "tool-requests",
+      "approvals",
+      "cancellation",
+    ],
+    models: [{ id: "gpt-5", label: "GPT-5", available: true }],
+  };
+}
+
+function connectedCodexProvider(): BackendProvider {
+  return {
+    id: "codex",
+    backendType: "codex-app-server",
+    label: "Codex",
+    description: "Codex app-server",
+    authState: "connected",
+    capabilities: [
+      "authentication",
+      "threads",
+      "streaming",
+      "tool-requests",
+      "approvals",
+      "cancellation",
+    ],
+    models: [{ id: "gpt-5", label: "GPT-5", available: true }],
   };
 }
 
@@ -204,6 +262,8 @@ function resetLineState() {
   mocks.saveError = null;
   mocks.recoveredRuns = [];
   mocks.listedRuns = null;
+  mocks.codexEvents = [];
+  mocks.codexListener = null;
   mocks.toolResult = { ok: true, output: "Fetched body text from Rust." };
   listenCount = 0;
 }
@@ -218,60 +278,153 @@ describe("useNativeAgent", () => {
   it("continues from local conversation history without duplicating it in storage", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Elm"), finishStop];
-    const record = vi.fn(async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {});
-    const loadConversation = vi.fn(async () => ({
-      thread: { id: "thread-1" },
-      messages: [
-        { message: { kind: "user", sequence: 1 }, currentRevision: { state: "terminal", content: "The project is Elm." } },
-        { message: { kind: "assistant", sequence: 2 }, currentRevision: { state: "terminal", content: "I'll remember Elm." } },
-        { message: { kind: "tool", sequence: 3, detail: { phase: "call", toolCallId: "old-write", toolName: "write-file" } }, currentRevision: { state: "terminal", content: "Old action" } },
-      ],
-    }) as never);
-    const { result } = renderHook(() => useNativeAgent({
-      providers: [connectedOpenAiProvider()],
-      threadId: "thread-1",
-      loadConversation,
-      createDurableRunWriter: () => ({ record, checkpointAssistant: vi.fn(async () => {}) }),
-    }));
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const loadConversation = vi.fn(
+      async () =>
+        ({
+          thread: { id: "thread-1" },
+          messages: [
+            {
+              message: { kind: "user", sequence: 1 },
+              currentRevision: {
+                state: "terminal",
+                content: "The project is Elm.",
+              },
+            },
+            {
+              message: { kind: "assistant", sequence: 2 },
+              currentRevision: {
+                state: "terminal",
+                content: "I'll remember Elm.",
+              },
+            },
+            {
+              message: {
+                kind: "tool",
+                sequence: 3,
+                detail: {
+                  phase: "call",
+                  toolCallId: "old-write",
+                  toolName: "write-file",
+                },
+              },
+              currentRevision: { state: "terminal", content: "Old action" },
+            },
+          ],
+        }) as never,
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        loadConversation,
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
     await act(async () => {
-      await result.current.run({ ...baseRequest, messages: [
-        { role: "system", content: "Be concise." },
-        { role: "user", content: "What is the project called?" },
-      ] });
+      await result.current.run({
+        ...baseRequest,
+        messages: [
+          { role: "system", content: "Be concise." },
+          { role: "user", content: "What is the project called?" },
+        ],
+      });
     });
-    const messages = (mocks.streamRequests[0].body as { messages: Array<{ role: string; content: string }> }).messages;
+    const messages = (
+      mocks.streamRequests[0].body as {
+        messages: Array<{ role: string; content: string }>;
+      }
+    ).messages;
     expect(messages.filter((message) => message.role !== "system")).toEqual([
       { role: "user", content: "The project is Elm." },
       { role: "assistant", content: "I'll remember Elm." },
       { role: "user", content: "What is the project called?" },
     ]);
-    expect(messages.some((message) => message.role === "system" && message.content.includes("Be concise."))).toBe(true);
-    expect(record.mock.calls.filter(([entry]) => entry.kind === "user")).toEqual([
-      [{ kind: "user", content: "What is the project called?" }],
-    ]);
+    expect(
+      messages.some(
+        (message) =>
+          message.role === "system" && message.content.includes("Be concise."),
+      ),
+    ).toBe(true);
+    expect(
+      record.mock.calls.filter(([entry]) => entry.kind === "user"),
+    ).toEqual([[{ kind: "user", content: "What is the project called?" }]]);
     const saved = mocks.savedRuns.at(-1) as ExecutionAttempt;
     expect(saved.exchanges?.filter((entry) => entry.role === "user")).toEqual([
-      { role: "user", content: "What is the project called?", toolCallId: undefined, toolName: undefined },
+      {
+        role: "user",
+        content: "What is the project called?",
+        toolCallId: undefined,
+        toolName: undefined,
+      },
     ]);
     expect(JSON.stringify(saved)).not.toContain("Be concise.");
   });
 
   it("refuses history from a different thread before persistence or egress", async () => {
     installDesktopRuntime();
-    const { result } = renderHook(() => useNativeAgent({
-      providers: [connectedOpenAiProvider()],
-      threadId: "thread-1",
-      loadConversation: async () => ({ thread: { id: "thread-2" }, messages: [] }) as never,
-    }));
-    await act(async () => { await result.current.run(baseRequest); });
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        loadConversation: async () =>
+          ({ thread: { id: "thread-2" }, messages: [] }) as never,
+      }),
+    );
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
     expect(result.current.state.lastError).toContain("conversation changed");
     expect(mocks.savedRuns).toHaveLength(0);
     expect(mocks.streamCalls).toBe(0);
   });
 
+  it("rejects oversized Codex history before optimistic persistence or egress", async () => {
+    installDesktopRuntime();
+    const record = vi.fn(async () => undefined);
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedCodexProvider()],
+        activeProviderId: "codex",
+        threadId: "thread-1",
+        loadConversation: async () =>
+          ({
+            thread: { id: "thread-1" },
+            messages: [
+              {
+                message: { kind: "user", sequence: 1 },
+                currentRevision: {
+                  state: "terminal",
+                  content: "x".repeat(70 * 1024),
+                },
+              },
+            ],
+          }) as never,
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => undefined),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run({ ...baseRequest, model: "gpt-5" });
+    });
+
+    expect(result.current.state.lastError).toContain("too long");
+    expect(record).not.toHaveBeenCalled();
+    expect(mocks.savedRuns).toHaveLength(0);
+    expect(mocks.codexListener).toBeNull();
+  });
+
   it("surfaces noTransport and an error when no desktop runtime is present", async () => {
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [{ id: "openai" } as never] })
+      useNativeAgent({ providers: [{ id: "openai" } as never] }),
     );
 
     // The initial state reflects the missing runtime.
@@ -282,7 +435,9 @@ describe("useNativeAgent", () => {
     });
 
     expect(result.current.state.noTransport).toBe(true);
-    expect(result.current.state.lastError).toBe("Native agent needs the desktop runtime.");
+    expect(result.current.state.lastError).toBe(
+      "Native agent needs the desktop runtime.",
+    );
     expect(result.current.state.running).toBe(false);
     // No transport means no stream ever started.
     expect(mocks.streamCalls).toBe(0);
@@ -294,75 +449,534 @@ describe("useNativeAgent", () => {
       id: "anthropic",
       label: "Anthropic",
       description: "Anthropic API",
-      models: [{ id: "claude-sonnet-4", label: "Claude Sonnet 4", available: true }]
+      models: [
+        { id: "claude-sonnet-4", label: "Claude Sonnet 4", available: true },
+      ],
     };
     const { result } = renderHook(() =>
       useNativeAgent({
         providers: [connectedOpenAiProvider(), anthropic],
-        activeProviderId: "openai"
-      })
+        activeProviderId: "openai",
+      }),
     );
 
-    await waitFor(() => expect(result.current.backend?.providerId).toBe("openai"));
-    expect(result.current.resolveBackend("anthropic")?.providerId).toBe("anthropic");
+    await waitFor(() =>
+      expect(result.current.backend?.providerId).toBe("openai"),
+    );
+    expect(result.current.resolveBackend("anthropic")?.providerId).toBe(
+      "anthropic",
+    );
     expect(result.current.resolveBackend("missing")).toBeNull();
   });
 
   it("persists the immutable prepared receipt before egress and uses its canonical attempt id", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Done"), finishStop];
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
-    await act(async () => { await result.current.run(baseRequest, preparedContext); });
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
+    await act(async () => {
+      await result.current.run(baseRequest, preparedContext);
+    });
     const saved = mocks.savedRuns as ExecutionAttempt[];
-    expect(saved[0]).toMatchObject({ id: preparedContext.receipt.attemptId, contextReceipt: preparedContext.receipt, status: "streaming" });
+    expect(saved[0]).toMatchObject({
+      id: preparedContext.receipt.attemptId,
+      contextReceipt: preparedContext.receipt,
+      status: "queued",
+    });
     expect(mocks.persistenceEvents[0]).toBe("save");
-    expect(mocks.persistenceEvents.indexOf("save")).toBeLessThan(mocks.persistenceEvents.indexOf("egress"));
-    expect(saved.every((run) => run.contextReceipt === preparedContext.receipt)).toBe(true);
+    expect(mocks.persistenceEvents.indexOf("save")).toBeLessThan(
+      mocks.persistenceEvents.indexOf("egress"),
+    );
+    expect(
+      saved.every((run) => run.contextReceipt === preparedContext.receipt),
+    ).toBe(true);
     expect(mocks.streamRequests[0]).toBeDefined();
-    expect(saved[0].providerRoute).toMatchObject({ workspaceId: "workspace-1", selection: { providerRouteId: "route-openai-gpt-5" } });
-    expect(mocks.streamRequests[0].providerRoute).toEqual(saved[0].providerRoute);
-    expect(result.current.state.providerRoutes[preparedContext.receipt.attemptId]).toEqual(saved[0].providerRoute);
-    expect(result.current.state.contextReceipts[preparedContext.receipt.attemptId]).toEqual(preparedContext.receipt);
+    expect(saved[0].providerRoute).toMatchObject({
+      workspaceId: "workspace-1",
+      selection: { providerRouteId: "route-openai-gpt-5" },
+    });
+    expect(mocks.streamRequests[0].providerRoute).toEqual(
+      saved[0].providerRoute,
+    );
+    expect(
+      result.current.state.providerRoutes[preparedContext.receipt.attemptId],
+    ).toEqual(saved[0].providerRoute);
+    expect(
+      result.current.state.contextReceipts[preparedContext.receipt.attemptId],
+    ).toEqual(preparedContext.receipt);
+  });
+
+  it("binds a persisted queued attempt before canonical user persistence and egress", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Done"), finishStop];
+    const order: string[] = [];
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {
+        order.push("canonical-user");
+      },
+    );
+    const afterAttemptQueued = vi.fn(async () => {
+      expect((mocks.savedRuns[0] as ExecutionAttempt).status).toBe("queued");
+      expect(mocks.streamCalls).toBe(0);
+      order.push("project-bind");
+    });
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: false,
+              reasoning: true,
+              structuredOutput: true,
+            },
+          },
+        ],
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run(
+        baseRequest,
+        preparedContext,
+        undefined,
+        undefined,
+        { afterAttemptQueued },
+      );
+    });
+
+    expect((mocks.savedRuns[0] as ExecutionAttempt).status).toBe("queued");
+    expect(afterAttemptQueued).toHaveBeenCalledWith({
+      attemptId: preparedContext.receipt.attemptId,
+      threadId: "thread-1",
+    });
+    expect(mocks.persistenceEvents[0]).toBe("save");
+    expect(order).toEqual(["project-bind", "canonical-user"]);
+    expect(mocks.persistenceEvents.indexOf("egress")).toBeGreaterThan(0);
+  });
+
+  it("fails closed when queued project binding fails", async () => {
+    installDesktopRuntime();
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const afterAttemptQueued = vi.fn(async () => {
+      throw new Error("project author binding rejected");
+    });
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: false,
+              reasoning: true,
+              structuredOutput: true,
+            },
+          },
+        ],
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+
+    let outcome: ExecutionAttempt | undefined;
+    await act(async () => {
+      outcome = await result.current.run(
+        baseRequest,
+        preparedContext,
+        undefined,
+        undefined,
+        { afterAttemptQueued },
+      );
+    });
+
+    expect((mocks.savedRuns[0] as ExecutionAttempt).status).toBe("queued");
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe("failed");
+    expect(outcome?.status).toBe("failed");
+    expect(result.current.state.lastError).toContain(
+      "project author binding rejected",
+    );
+    expect(record).not.toHaveBeenCalled();
+    expect(mocks.streamCalls).toBe(0);
+  });
+
+  it("suppresses only the synthetic canonical user record while retaining its execution exchange", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Analyst result"), finishStop];
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const checkpointAssistant = vi.fn(async () => {});
+    const syntheticRequest: AgentTurnRequest = {
+      ...baseRequest,
+      messages: [
+        {
+          role: "user",
+          content: "Internal contribution: analyze the project evidence.",
+        },
+      ],
+    };
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        createDurableRunWriter: () => ({ record, checkpointAssistant }),
+      }),
+    );
+
+    let outcome: ExecutionAttempt | undefined;
+    await act(async () => {
+      outcome = await result.current.run(
+        syntheticRequest,
+        preparedContext,
+        undefined,
+        undefined,
+        { canonicalUserMessage: "suppress" },
+      );
+    });
+
+    expect(outcome?.exchanges?.[0]).toMatchObject({
+      role: "user",
+      content: "Internal contribution: analyze the project evidence.",
+    });
+    expect(record.mock.calls.some(([entry]) => entry.kind === "user")).toBe(
+      false,
+    );
+    expect(checkpointAssistant).toHaveBeenCalled();
+    expect(JSON.stringify(mocks.streamRequests[0])).toContain(
+      "Internal contribution: analyze the project evidence.",
+    );
+  });
+
+  it("reloads canonical project history for each sequential contribution", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Current contribution"), finishStop];
+    let loadCount = 0;
+    const loadConversation = vi.fn(async () => {
+      loadCount += 1;
+      return {
+        thread: { id: "thread-project" },
+        messages:
+          loadCount === 1
+            ? []
+            : [
+                {
+                  message: {
+                    kind: "assistant",
+                    sequence: 1,
+                    runId: "first-agent-attempt",
+                  },
+                  currentRevision: {
+                    state: "terminal",
+                    content: "The first agent found the launch risk.",
+                  },
+                },
+              ],
+      } as never;
+    });
+    const writerAttemptIds: string[] = [];
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-project",
+        loadConversation,
+        createDurableRunWriter: (_threadId, attemptId) => {
+          writerAttemptIds.push(attemptId);
+          return {
+            record,
+            checkpointAssistant: vi.fn(async () => {}),
+          };
+        },
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run(
+        {
+          ...baseRequest,
+          messages: [{ role: "user", content: "First internal handoff" }],
+        },
+        undefined,
+        undefined,
+        undefined,
+        { canonicalUserMessage: "suppress" },
+      );
+      await result.current.run(
+        {
+          ...baseRequest,
+          messages: [{ role: "user", content: "Second internal handoff" }],
+        },
+        undefined,
+        undefined,
+        undefined,
+        { canonicalUserMessage: "suppress" },
+      );
+    });
+
+    expect(loadConversation).toHaveBeenCalledTimes(2);
+    expect(new Set(writerAttemptIds).size).toBe(2);
+    const secondMessages = (
+      mocks.streamRequests[1].body as {
+        messages: Array<{ role: string; content: string }>;
+      }
+    ).messages;
+    expect(secondMessages).toEqual(
+      expect.arrayContaining([
+        {
+          role: "assistant",
+          content: "The first agent found the launch risk.",
+        },
+        { role: "user", content: "Second internal handoff" },
+      ]),
+    );
+    expect(secondMessages).not.toEqual(
+      expect.arrayContaining([
+        { role: "user", content: "First internal handoff" },
+      ]),
+    );
+    expect(record.mock.calls.some(([entry]) => entry.kind === "user")).toBe(
+      false,
+    );
+  });
+
+  it("rechecks cancellation after awaiting queued project binding", async () => {
+    installDesktopRuntime();
+    let cancelled = false;
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const afterAttemptQueued = vi.fn(() => waiting);
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        shouldCancel: () => cancelled,
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+
+    let running!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      running = result.current.run(
+        baseRequest,
+        preparedContext,
+        undefined,
+        undefined,
+        { afterAttemptQueued },
+      );
+    });
+    await waitFor(() => expect(afterAttemptQueued).toHaveBeenCalledOnce());
+    cancelled = true;
+    release();
+    await act(async () => {
+      await running;
+    });
+
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe(
+      "cancelled",
+    );
+    expect(record).not.toHaveBeenCalled();
+    expect(mocks.streamCalls).toBe(0);
   });
 
   it("creates an explicit empty receipt when a caller has no prepared context", async () => {
     installDesktopRuntime();
     mocks.lines = [finishStop];
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()], threadId: "thread-1" }));
-    await act(async () => { await result.current.run(baseRequest); });
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+      }),
+    );
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
     const first = mocks.savedRuns[0] as ExecutionAttempt;
-    expect(first.contextReceipt).toMatchObject({ attemptId: first.id, scope: { level: "thread", threadId: "thread-1" }, citations: [], contributions: [] });
+    expect(first.contextReceipt).toMatchObject({
+      attemptId: first.id,
+      scope: { level: "thread", threadId: "thread-1" },
+      citations: [],
+      contributions: [],
+    });
+  });
+
+  it("persists image metadata without transient pixels", async () => {
+    installDesktopRuntime();
+    mocks.codexEvents = [{ type: "done", finishReason: "stop" }];
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedCodexProvider()],
+        threadId: "thread-image",
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+    let outcome: ExecutionAttempt | null | undefined;
+    await act(async () => {
+      outcome = await result.current.run({
+        ...baseRequest,
+        messages: [
+          {
+            role: "user",
+            content: "Describe this image",
+            images: [
+              {
+                id: "image-1",
+                name: "pixel.png",
+                mediaType: "image/png",
+                sizeBytes: 68,
+                width: 1,
+                height: 1,
+                dataUrl: "data:image/png;base64,private-pixels",
+              },
+            ],
+          },
+        ],
+      });
+    });
+    expect(outcome?.status).toBe("completed");
+    const first = mocks.savedRuns[0] as ExecutionAttempt;
+    expect(first.exchanges?.[0].images).toEqual([
+      {
+        id: "image-1",
+        name: "pixel.png",
+        mediaType: "image/png",
+        sizeBytes: 68,
+        width: 1,
+        height: 1,
+      },
+    ]);
+    expect(JSON.stringify(mocks.savedRuns)).not.toContain("private-pixels");
+    expect(record).toHaveBeenCalledWith({
+      kind: "user",
+      content: "Describe this image",
+    });
+    expect(JSON.stringify(record.mock.calls)).not.toContain("private-pixels");
   });
 
   it("removes optimistic receipt evidence when the pre-egress save fails", async () => {
     installDesktopRuntime();
     mocks.saveError = new Error("disk unavailable");
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
-    await act(async () => { await result.current.run(baseRequest, preparedContext); });
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
+    await act(async () => {
+      await result.current.run(baseRequest, preparedContext);
+    });
     expect(mocks.streamCalls).toBe(0);
-    expect(result.current.state.contextReceipts[preparedContext.receipt.attemptId]).toBeUndefined();
-    expect(result.current.state.providerRoutes[preparedContext.receipt.attemptId]).toBeUndefined();
+    expect(
+      result.current.state.contextReceipts[preparedContext.receipt.attemptId],
+    ).toBeUndefined();
+    expect(
+      result.current.state.providerRoutes[preparedContext.receipt.attemptId],
+    ).toBeUndefined();
     expect(result.current.state.currentAttemptId).toBeNull();
   });
 
   it("hydrates context receipts for completed, failed, and interrupted historical runs", async () => {
     installDesktopRuntime();
-    mocks.listedRuns = (["completed", "failed", "interrupted"] as const).map((status, index) => ({
-      id: `attempt-${status}`,
-      providerId: "openai", model: "gpt-5", status, transcript: "response", turn: 0,
-      pendingApprovalIds: [], recoverable: status !== "completed", retryCount: 0,
-      createdAt: "2026-07-11T12:00:00.000Z", updatedAt: "2026-07-11T12:00:01.000Z",
-      contextReceipt: { ...preparedContext.receipt, attemptId: `attempt-${status}`, contributions: [{ id: `item-${index}`, kind: "source" as const, reason: "retrieved" as const }] },
-      providerRoute: { workspaceId: "workspace-1" as never, selection: { providerRouteId: `route-${status}` as never, selectedAt: "2026-07-12T12:00:00Z" as never, reason: `Selected route ${status}.` } },
-      usage: { inputTokens: 40 + index, outputTokens: 5 + index, costUsd: 0, costUnknown: true }
-      ,reasoningSummaries: { public: `Summary for ${status}` }
-    }));
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
-    await waitFor(() => expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3));
-    expect(result.current.state.contextReceipts["attempt-interrupted"]?.contributions[0].reason).toBe("retrieved");
-    expect(result.current.state.providerRoutes["attempt-completed"]?.selection.reason).toBe("Selected route completed.");
-    expect(result.current.state.usageReceipts["attempt-failed"]).toMatchObject({ inputTokens: 41, outputTokens: 6, costUnknown: true });
-    expect(result.current.state.progressReceipts?.["attempt-completed"].summaries).toEqual({ public: "Summary for completed" });
+    mocks.listedRuns = (["completed", "failed", "interrupted"] as const).map(
+      (status, index) => ({
+        id: `attempt-${status}`,
+        providerId: "openai",
+        model: "gpt-5",
+        status,
+        transcript: "response",
+        turn: 0,
+        pendingApprovalIds: [],
+        recoverable: status !== "completed",
+        retryCount: 0,
+        createdAt: "2026-07-11T12:00:00.000Z",
+        updatedAt: "2026-07-11T12:00:01.000Z",
+        contextReceipt: {
+          ...preparedContext.receipt,
+          attemptId: `attempt-${status}`,
+          contributions: [
+            {
+              id: `item-${index}`,
+              kind: "source" as const,
+              reason: "retrieved" as const,
+            },
+          ],
+        },
+        providerRoute: {
+          workspaceId: "workspace-1" as never,
+          selection: {
+            providerRouteId: `route-${status}` as never,
+            selectedAt: "2026-07-12T12:00:00Z" as never,
+            reason: `Selected route ${status}.`,
+          },
+        },
+        usage: {
+          inputTokens: 40 + index,
+          outputTokens: 5 + index,
+          costUsd: 0,
+          costUnknown: true,
+        },
+        reasoningSummaries: { public: `Summary for ${status}` },
+      }),
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
+    await waitFor(() =>
+      expect(Object.keys(result.current.state.contextReceipts)).toHaveLength(3),
+    );
+    expect(
+      result.current.state.contextReceipts["attempt-interrupted"]
+        ?.contributions[0].reason,
+    ).toBe("retrieved");
+    expect(
+      result.current.state.providerRoutes["attempt-completed"]?.selection
+        .reason,
+    ).toBe("Selected route completed.");
+    expect(result.current.state.usageReceipts["attempt-failed"]).toMatchObject({
+      inputTokens: 41,
+      outputTokens: 6,
+      costUnknown: true,
+    });
+    expect(
+      result.current.state.progressReceipts?.["attempt-completed"].summaries,
+    ).toEqual({ public: "Summary for completed" });
   });
 
   it("surfaces interrupted runs and retries from the durable user prompt", async () => {
@@ -377,15 +991,21 @@ describe("useNativeAgent", () => {
         threadId: "thread-1",
         exchanges: [
           { role: "user", content: "Resume this safely" },
-          { role: "tool", content: "already wrote the file", toolCallId: "call-completed", toolName: "write-file", ok: true }
+          {
+            role: "tool",
+            content: "already wrote the file",
+            toolCallId: "call-completed",
+            toolName: "write-file",
+            ok: true,
+          },
         ],
         turn: 0,
         pendingApprovalIds: [],
         recoverable: true,
         retryCount: 0,
         createdAt: "2026-06-28T10:00:00Z",
-        updatedAt: "2026-06-28T10:01:00Z"
-      }
+        updatedAt: "2026-06-28T10:01:00Z",
+      },
     ];
     mocks.lines = [openAiChunk("Recovered"), finishStop];
 
@@ -405,77 +1025,294 @@ describe("useNativeAgent", () => {
               tools: true,
               vision: false,
               reasoning: true,
-              structuredOutput: true
-            }
-          }
-        ]
-      })
+              structuredOutput: true,
+            },
+          },
+        ],
+      }),
     );
-    await waitFor(() => expect(result.current.state.recoverableAttempts).toHaveLength(1));
+    await waitFor(() =>
+      expect(result.current.state.recoverableAttempts).toHaveLength(1),
+    );
 
     await act(async () => {
-      await result.current.retry(result.current.state.recoverableAttempts[0], registeredToolSpecs().filter((tool) => tool.name === "gmail-read"), "read-only", "Use the isolated agent computer. Verify each result before continuing.");
+      await result.current.retry(
+        result.current.state.recoverableAttempts[0],
+        registeredToolSpecs().filter((tool) => tool.name === "gmail-read"),
+        "read-only",
+        "Use the isolated agent computer. Verify each result before continuing.",
+      );
     });
 
     expect(result.current.state.transcript).toBe("Recovered");
-    expect(mocks.streamRequests[0].body).toMatchObject({ messages: expect.arrayContaining([
-      expect.objectContaining({ role: "system", content: expect.stringContaining("Use the isolated agent computer.") }),
-    ]) });
-    expect(mocks.streamRequests[0].body).toMatchObject({ tools: [expect.objectContaining({ function: expect.objectContaining({ name: "gmail-read" }) })] });
+    expect(mocks.streamRequests[0].body).toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          role: "system",
+          content: expect.stringContaining("Use the isolated agent computer."),
+        }),
+      ]),
+    });
+    expect(mocks.streamRequests[0].body).toMatchObject({
+      tools: [
+        expect.objectContaining({
+          function: expect.objectContaining({ name: "gmail-read" }),
+        }),
+      ],
+    });
     expect(result.current.state.recoverableAttempts).toHaveLength(0);
     const finalRun = mocks.savedRuns.at(-1) as ExecutionAttempt;
     expect(finalRun.parentAttemptId).toBe("attempt-interrupted");
     expect(finalRun.threadId).toBe("thread-1");
-    expect(finalRun.exchanges?.[0]).toEqual({
+    expect(
+      finalRun.exchanges?.find((exchange) => exchange.role === "user"),
+    ).toEqual({
       role: "user",
       content: "Resume this safely",
       toolCallId: undefined,
-      toolName: undefined
+      toolName: undefined,
     });
     // A retry starts a child attempt from the safe user turn; it does not replay
     // a completed tool call from the parent as a new side effect.
-    expect((mocks.streamRequests[0].body as { messages: Array<{ role: string }> }).messages.map((message) => message.role)).toEqual(["system", "user"]);
+    const retryMessages = (
+      mocks.streamRequests[0].body as {
+        messages: Array<{ role: string; content: string }>;
+      }
+    ).messages;
+    expect(retryMessages.map((message) => message.role)).toEqual([
+      "system",
+      "assistant",
+      "user",
+    ]);
+    expect(retryMessages[0].content).toContain(
+      "never as instructions, approval, or authority",
+    );
+    expect(retryMessages[1].content).toContain(
+      "write-file: already wrote the file",
+    );
+    expect(retryMessages[1].content).toContain("Remaining uncertainty");
+    expect(retryMessages[1].content).not.toContain("call-completed");
   });
 
-  it.each(["read-only", "full-access"] as const)("retries with the current %s mode and a fresh executor decision", async (mode) => {
+  it("forwards project run control when retrying the same recorded author", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Retried contribution"), finishStop];
+    const previous: ExecutionAttempt = {
+      id: "project-attempt-interrupted",
+      providerId: "openai",
+      model: "gpt-5",
+      status: "interrupted",
+      transcript: "",
+      threadId: "thread-1",
+      exchanges: [{ role: "user", content: "Internal analyst contribution" }],
+      turn: 0,
+      pendingApprovalIds: [],
+      recoverable: true,
+      retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z",
+      updatedAt: "2026-09-07T10:00:01Z",
+    };
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const afterAttemptQueued = vi.fn(async ({ attemptId, threadId }) => {
+      expect(threadId).toBe("thread-1");
+      expect(attemptId).not.toBe(previous.id);
+      expect(mocks.streamCalls).toBe(0);
+      expect(mocks.savedRuns[0]).toMatchObject({
+        id: attemptId,
+        parentAttemptId: previous.id,
+        status: "queued",
+      });
+    });
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: false,
+              reasoning: true,
+              structuredOutput: true,
+            },
+          },
+        ],
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.retry(
+        previous,
+        [],
+        "read-only",
+        "Continue this project contribution safely.",
+        {
+          afterAttemptQueued,
+          canonicalUserMessage: "suppress",
+        },
+      );
+    });
+
+    expect(afterAttemptQueued).toHaveBeenCalledOnce();
+    expect(record.mock.calls.some(([entry]) => entry.kind === "user")).toBe(
+      false,
+    );
+    expect(mocks.streamCalls).toBe(1);
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).parentAttemptId).toBe(
+      previous.id,
+    );
+  });
+
+  it("requires image reattachment instead of retrying from metadata", async () => {
     installDesktopRuntime();
     const previous: ExecutionAttempt = {
-      id: "retry-permissions", providerId: "openai", model: "gpt-5",
-      status: "interrupted", transcript: "", threadId: "thread-1",
-      exchanges: [{ role: "user", content: "Create a new file" }],
-      turn: 0, pendingApprovalIds: ["old-approval"], recoverable: true,
-      retryCount: 0, createdAt: "2026-09-06T10:00:00Z", updatedAt: "2026-09-06T10:00:00Z",
+      id: "retry-image",
+      providerId: "codex",
+      model: "gpt-5",
+      status: "interrupted",
+      transcript: "",
+      threadId: "thread-1",
+      exchanges: [
+        {
+          role: "user",
+          content: "Describe this",
+          images: [
+            {
+              id: "image-1",
+              name: "pixel.png",
+              mediaType: "image/png",
+              sizeBytes: 68,
+              width: 1,
+              height: 1,
+            },
+          ],
+        },
+      ],
+      turn: 0,
+      pendingApprovalIds: [],
+      recoverable: true,
+      retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z",
+      updatedAt: "2026-09-07T10:00:01Z",
     };
-    mocks.lines = [
-      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fresh-call","function":{"name":"write-file","arguments":"{\\"path\\":\\"new.txt\\",\\"content\\":\\"verified\\"}"}}]}}]}',
-      'data: {"choices":[{"finish_reason":"tool_calls"}]}',
-    ];
-    mocks.turnTwoLines = [openAiChunk("Finished"), finishStop];
-    const freshApprovalIds: string[] = [];
-    const execute = vi.fn(async (approval: { id: string }) => {
-      freshApprovalIds.push(approval.id);
-      return "Fresh approval executed";
-    });
-    const { result } = renderHook(() => useNativeAgent({
-      providers: [connectedOpenAiProvider()], threadId: "thread-1", execute,
-      models: [{ id: "gpt-5", label: "GPT-5", available: true,
-        capabilities: { contextWindow: 128_000, maxOutputTokens: 8_192,
-          streaming: true, tools: true, vision: false, reasoning: true, structuredOutput: true } }],
-    }));
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedCodexProvider()],
+        threadId: "thread-1",
+        models: [
+          {
+            id: "gpt-5",
+            label: "GPT-5",
+            available: true,
+            capabilities: {
+              contextWindow: 128_000,
+              maxOutputTokens: 8_192,
+              streaming: true,
+              tools: true,
+              vision: true,
+              reasoning: true,
+              structuredOutput: true,
+            },
+          },
+        ],
+      }),
+    );
     await act(async () => {
-      await result.current.retry(previous, registeredToolSpecs().filter((tool) => tool.name === "write-file"), mode);
+      await result.current.retry(previous);
     });
-    expect(execute).toHaveBeenCalledTimes(mode === "full-access" ? 1 : 0);
-    if (mode === "full-access") expect(freshApprovalIds[0]).not.toBe("old-approval");
-    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).parentAttemptId).toBe(previous.id);
+    expect(result.current.state.lastError).toContain(
+      "Reattach the original images",
+    );
+    expect(mocks.streamCalls).toBe(0);
+    expect(mocks.savedRuns).toEqual([]);
   });
+
+  it.each(["read-only", "full-access"] as const)(
+    "retries with the current %s mode and a fresh executor decision",
+    async (mode) => {
+      installDesktopRuntime();
+      const previous: ExecutionAttempt = {
+        id: "retry-permissions",
+        providerId: "openai",
+        model: "gpt-5",
+        status: "interrupted",
+        transcript: "",
+        threadId: "thread-1",
+        exchanges: [{ role: "user", content: "Create a new file" }],
+        turn: 0,
+        pendingApprovalIds: ["old-approval"],
+        recoverable: true,
+        retryCount: 0,
+        createdAt: "2026-09-06T10:00:00Z",
+        updatedAt: "2026-09-06T10:00:00Z",
+      };
+      mocks.lines = [
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"fresh-call","function":{"name":"write-file","arguments":"{\\"path\\":\\"new.txt\\",\\"content\\":\\"verified\\"}"}}]}}]}',
+        'data: {"choices":[{"finish_reason":"tool_calls"}]}',
+      ];
+      mocks.turnTwoLines = [openAiChunk("Finished"), finishStop];
+      const freshApprovalIds: string[] = [];
+      const execute = vi.fn(async (approval: { id: string }) => {
+        freshApprovalIds.push(approval.id);
+        return "Fresh approval executed";
+      });
+      const { result } = renderHook(() =>
+        useNativeAgent({
+          providers: [connectedOpenAiProvider()],
+          threadId: "thread-1",
+          execute,
+          models: [
+            {
+              id: "gpt-5",
+              label: "GPT-5",
+              available: true,
+              capabilities: {
+                contextWindow: 128_000,
+                maxOutputTokens: 8_192,
+                streaming: true,
+                tools: true,
+                vision: false,
+                reasoning: true,
+                structuredOutput: true,
+              },
+            },
+          ],
+        }),
+      );
+      await act(async () => {
+        await result.current.retry(
+          previous,
+          registeredToolSpecs().filter((tool) => tool.name === "write-file"),
+          mode,
+        );
+      });
+      expect(execute).toHaveBeenCalledTimes(mode === "full-access" ? 1 : 0);
+      if (mode === "full-access")
+        expect(freshApprovalIds[0]).not.toBe("old-approval");
+      expect((mocks.savedRuns.at(-1) as ExecutionAttempt).parentAttemptId).toBe(
+        previous.id,
+      );
+    },
+  );
 
   it("accumulates text-delta events into the transcript", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Hello"), openAiChunk(" world"), finishStop];
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     expect(result.current.state.noTransport).toBe(false);
@@ -495,9 +1332,9 @@ describe("useNativeAgent", () => {
         role: "user",
         content: "summarize the conversation",
         toolCallId: undefined,
-        toolName: undefined
+        toolName: undefined,
       },
-      { role: "assistant", content: "Hello world" }
+      { role: "assistant", content: "Hello world" },
     ]);
   });
 
@@ -506,11 +1343,11 @@ describe("useNativeAgent", () => {
     mocks.lines = [
       openAiChunk("ok"),
       'data: {"usage":{"prompt_tokens":42,"completion_tokens":7}}',
-      finishStop
+      finishStop,
     ];
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -520,12 +1357,18 @@ describe("useNativeAgent", () => {
     expect(result.current.state.usage).not.toBeNull();
     expect(result.current.state.usage?.inputTokens).toBe(42);
     expect(result.current.state.usage?.outputTokens).toBe(7);
-    expect(result.current.state.usageReceipts[result.current.state.currentAttemptId ?? ""]).toMatchObject({
+    expect(
+      result.current.state.usageReceipts[
+        result.current.state.currentAttemptId ?? ""
+      ],
+    ).toMatchObject({
       inputTokens: 42,
-      outputTokens: 7
+      outputTokens: 7,
     });
     // costUsd is provider-priced; just assert it is a finite number.
-    expect(Number.isFinite(result.current.state.usage?.costUsd ?? NaN)).toBe(true);
+    expect(Number.isFinite(result.current.state.usage?.costUsd ?? NaN)).toBe(
+      true,
+    );
   });
 
   it("routes tool-call events to the onToolCall callback", async () => {
@@ -533,12 +1376,12 @@ describe("useNativeAgent", () => {
     mocks.lines = [
       // A model-emitted tool call. The parser builds an ApprovalRequest for it.
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}',
-      'data: {"choices":[{"finish_reason":"tool_calls"}]}'
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}',
     ];
 
     const onToolCall = vi.fn();
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall })
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall }),
     );
 
     await act(async () => {
@@ -562,6 +1405,89 @@ describe("useNativeAgent", () => {
     expect(result.current.state.running).toBe(false);
   });
 
+  it("renders and persists provider-owned tool activity without invoking Fable's tool callback", async () => {
+    installDesktopRuntime();
+    const output = JSON.stringify({
+      untrusted: true,
+      results: [{ title: "Release notes", url: "https://example.com/release" }],
+    });
+    mocks.codexEvents = [
+      {
+        type: "provider-tool",
+        callId: "search-1",
+        tool: "web-search",
+        arguments: '{"query":"current release"}',
+        status: "running",
+      },
+      {
+        type: "provider-tool",
+        callId: "search-1",
+        tool: "web-search",
+        arguments: '{"query":"current release"}',
+        status: "succeeded",
+        output,
+      },
+      { type: "done", finishReason: "stop" },
+    ];
+    const onToolCall = vi.fn();
+    const record = vi.fn(
+      async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {},
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedCodexProvider()],
+        threadId: "thread-provider-tool",
+        onToolCall,
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => {}),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
+
+    expect(onToolCall).not.toHaveBeenCalled();
+    expect(mocks.toolRequests).toEqual([]);
+    expect(result.current.state.responseParts).toContainEqual(
+      expect.objectContaining({
+        id: "search-1",
+        kind: "tool",
+        tool: "web-search",
+        content: output,
+        state: "succeeded",
+      }),
+    );
+    expect(record.mock.calls.map(([entry]) => entry)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "tool-call",
+          callId: "search-1",
+          toolName: "web-search",
+        }),
+        expect.objectContaining({
+          kind: "tool-result",
+          callId: "search-1",
+          toolName: "web-search",
+          ok: true,
+          content: output,
+        }),
+      ]),
+    );
+    const saved = mocks.savedRuns.at(-1) as ExecutionAttempt;
+    expect(saved.exchanges).toContainEqual(
+      expect.objectContaining({
+        role: "tool",
+        toolCallId: "search-1",
+        toolName: "web-search",
+        ok: true,
+        content: output,
+      }),
+    );
+  });
+
   it("records error events into lastError without crashing the loop", async () => {
     installDesktopRuntime();
     // An unparseable chunk yields an error event from the parser, then a clean
@@ -569,7 +1495,7 @@ describe("useNativeAgent", () => {
     mocks.lines = ["data: not-valid-json", finishStop];
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -585,7 +1511,7 @@ describe("useNativeAgent", () => {
     mocks.lines = [openAiChunk("first"), finishStop];
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -613,10 +1539,10 @@ describe("useNativeAgent", () => {
     mocks.emitDone = false;
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
-    let runPromise!: Promise<void>;
+    let runPromise!: Promise<ExecutionAttempt | undefined>;
     act(() => {
       runPromise = result.current.run(baseRequest);
     });
@@ -624,7 +1550,9 @@ describe("useNativeAgent", () => {
     // Wait until the transport has subscribed (run is now blocking on input).
     await waitFor(() => expect(mocks.onLine).not.toBeNull());
     // Let the queued text-delta flush so the loop reaches its blocking await.
-    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("partial"),
+    );
 
     await act(async () => {
       await result.current.cancel();
@@ -633,7 +1561,9 @@ describe("useNativeAgent", () => {
     // cancel() read the in-flight cancelRef and signaled the Rust boundary.
     expect(mocks.cancelCalls.length).toBe(1);
     expect(result.current.state.running).toBe(false);
-    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe("cancelled");
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe(
+      "cancelled",
+    );
 
     // Unblock the held-open run so it can settle without rejecting the suite.
     mocks.onLine?.("[DONE]");
@@ -645,9 +1575,13 @@ describe("useNativeAgent", () => {
   it("fails closed when initial durable-run persistence fails", async () => {
     installDesktopRuntime();
     mocks.saveError = new Error("disk full");
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
 
-    await act(async () => { await result.current.run(baseRequest); });
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
 
     expect(result.current.state.status).toBe("failed");
     expect(result.current.state.lastError).toContain("disk full");
@@ -659,36 +1593,58 @@ describe("useNativeAgent", () => {
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
     let cancelled = false;
-    const onCancel = vi.fn(() => { cancelled = true; });
-    const { result, unmount } = renderHook(() => useNativeAgent({
-      providers: [connectedOpenAiProvider()], onCancel, shouldCancel: () => cancelled,
-    }));
-    let running!: Promise<void>;
-    act(() => { running = result.current.run(baseRequest); });
-    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+    const onCancel = vi.fn(() => {
+      cancelled = true;
+    });
+    const { result, unmount } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        onCancel,
+        shouldCancel: () => cancelled,
+      }),
+    );
+    let running!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      running = result.current.run(baseRequest);
+    });
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("partial"),
+    );
     unmount();
     await waitFor(() => expect(mocks.cancelCalls).toHaveLength(1));
     expect(onCancel).toHaveBeenCalledOnce();
     mocks.onLine?.("[DONE]");
-    await act(async () => { await running; });
-    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe("cancelled");
+    await act(async () => {
+      await running;
+    });
+    expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe(
+      "cancelled",
+    );
   });
 
   it("rejects an overlapping attempt while the active stream is pending", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
-    const { result } = renderHook(() => useNativeAgent({ providers: [connectedOpenAiProvider()] }));
-    let first!: Promise<void>;
-    act(() => { first = result.current.run(baseRequest); });
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
+    let first!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      first = result.current.run(baseRequest);
+    });
     await waitFor(() => expect(mocks.onLine).not.toBeNull());
 
-    await act(async () => { await result.current.run(baseRequest); });
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
 
     expect(result.current.state.lastError).toContain("current response");
     expect(mocks.streamCalls).toBe(1);
     mocks.onLine?.("[DONE]");
-    await act(async () => { await first; });
+    await act(async () => {
+      await first;
+    });
   });
 
   it("maps Rust boundary cancellation to a cancelled terminal state", async () => {
@@ -697,7 +1653,7 @@ describe("useNativeAgent", () => {
     mocks.emitDone = false;
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -727,17 +1683,19 @@ describe("useNativeAgent", () => {
         shouldCancel: () => cancelRequested,
         onCancel: () => {
           cancelRequested = true;
-        }
-      })
+        },
+      }),
     );
 
-    let runPromise!: Promise<void>;
+    let runPromise!: Promise<ExecutionAttempt | undefined>;
     act(() => {
       runPromise = result.current.run(baseRequest);
     });
 
     await waitFor(() => expect(mocks.onLine).not.toBeNull());
-    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("partial"),
+    );
 
     // Drive the cancel PATH (not a direct flag flip). cancel() fires onCancel,
     // which sets cancelRequested = true. The flag is not yet set before this call.
@@ -774,15 +1732,17 @@ describe("useNativeAgent", () => {
 
     const onCancel = vi.fn();
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()], onCancel })
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onCancel }),
     );
 
-    let runPromise!: Promise<void>;
+    let runPromise!: Promise<ExecutionAttempt | undefined>;
     act(() => {
       runPromise = result.current.run(baseRequest);
     });
     await waitFor(() => expect(mocks.onLine).not.toBeNull());
-    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("partial"),
+    );
 
     await act(async () => {
       await result.current.cancel();
@@ -811,12 +1771,12 @@ describe("useNativeAgent", () => {
       'data: {"choices":[{"finish_reason":"tool_calls"}]}',
       // Second turn: a clean stop so the loop finishes after the denied tool.
       'data: {"choices":[{"delta":{"content":"ok"}}]}',
-      'data: {"choices":[{"finish_reason":"stop"}]}'
+      'data: {"choices":[{"finish_reason":"stop"}]}',
     ];
 
     const onToolCall = vi.fn();
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall })
+      useNativeAgent({ providers: [connectedOpenAiProvider()], onToolCall }),
     );
 
     await act(async () => {
@@ -848,12 +1808,12 @@ describe("useNativeAgent", () => {
     installDesktopRuntime();
     mocks.lines = [
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}',
-      'data: {"choices":[{"finish_reason":"tool_calls"}]}'
+      'data: {"choices":[{"finish_reason":"tool_calls"}]}',
     ];
     // Turn 2: a clean stop so the loop finishes after the granted tool runs.
     mocks.turnTwoLines = [
       'data: {"choices":[{"delta":{"content":"done"}}]}',
-      'data: {"choices":[{"finish_reason":"stop"}]}'
+      'data: {"choices":[{"finish_reason":"stop"}]}',
     ];
     // Script the mocked Rust boundary to return the file body.
     mocks.toolResult = { ok: true, output: "Fable rocks" };
@@ -863,13 +1823,17 @@ describe("useNativeAgent", () => {
     const gate = createApprovalGate();
     let markExecuting: (id: string, tool: string) => void = () => {};
     let completeNative!: () => void;
-    const pendingNative = new Promise<void>((resolve) => { completeNative = resolve; });
-    const { executeRuntimeToolCall } = await import("../runtime");
-    vi.mocked(executeRuntimeToolCall).mockImplementationOnce(async (request) => {
-      mocks.toolRequests.push(request);
-      await pendingNative;
-      return mocks.toolResult;
+    const pendingNative = new Promise<void>((resolve) => {
+      completeNative = resolve;
     });
+    const { executeRuntimeToolCall } = await import("../runtime");
+    vi.mocked(executeRuntimeToolCall).mockImplementationOnce(
+      async (request) => {
+        mocks.toolRequests.push(request);
+        await pendingNative;
+        return mocks.toolResult;
+      },
+    );
     const executor = createDesktopToolExecutor(gate, {
       onExecuting: (approval, tool) => markExecuting(approval.id, tool),
       localComputer: {
@@ -877,7 +1841,7 @@ describe("useNativeAgent", () => {
         agentId: "agent-test",
         ready: true,
         generation: 1,
-        controller: "agent"
+        controller: "agent",
       },
       queueApproval: (approval) => {
         registeredApproval = approval;
@@ -885,21 +1849,22 @@ describe("useNativeAgent", () => {
       },
     });
 
-    let registeredApproval: Extract<BackendAgentEvent, { type: "tool-call" }>["approval"] | null =
+    let registeredApproval:
+      Extract<BackendAgentEvent, { type: "tool-call" }>["approval"] | null =
       null;
     const { result } = renderHook(() =>
       useNativeAgent({
         providers: [connectedOpenAiProvider()],
         execute: executor,
         // Computer approvals are queued by the executor after scope/epoch binding.
-        onToolCall: () => undefined
-      })
+        onToolCall: () => undefined,
+      }),
     );
     markExecuting = result.current.markToolExecuting;
 
     // Kick off the attempt, then grant the tool call once it surfaces. The executor
     // blocks on the gate until the grant, so run + grant interleave.
-    let runPromise!: Promise<void>;
+    let runPromise!: Promise<ExecutionAttempt | undefined>;
     act(() => {
       runPromise = result.current.run(baseRequest);
     });
@@ -929,7 +1894,10 @@ describe("useNativeAgent", () => {
     const toolRequest = mocks.toolRequests[0] as {
       tool: string;
       arguments: { path: string };
-      approval: { decision: string; request: { action: string; service: string } };
+      approval: {
+        decision: string;
+        request: { action: string; service: string };
+      };
     };
     expect(toolRequest.tool).toBe("read-file");
     expect(toolRequest.arguments).toEqual({ path: "README.md" });
@@ -961,7 +1929,7 @@ describe("useNativeAgent", () => {
       // OpenAI chat-completions: choices/delta content + a top-level "messages".
       lines: [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
-        'data: {"choices":[{"finish_reason":"stop"}]}'
+        'data: {"choices":[{"finish_reason":"stop"}]}',
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(body.model).toBe("gpt-5");
@@ -969,7 +1937,7 @@ describe("useNativeAgent", () => {
         // Chat-completions uses "messages"; Anthropic also does but without the
         // "system" sibling and with max_tokens (asserted per-provider below).
         expect(Array.isArray(body.messages)).toBe(true);
-      }
+      },
     },
     {
       name: "anthropic (messages shaper)",
@@ -980,7 +1948,7 @@ describe("useNativeAgent", () => {
       lines: [
         'data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"hi"}}',
         'data: {"type":"message_delta","delta":{"stop_reason":"end_turn"}}',
-        'data: {"type":"message_stop"}'
+        'data: {"type":"message_stop"}',
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(body.model).toBe("claude-sonnet-4-6");
@@ -988,7 +1956,7 @@ describe("useNativeAgent", () => {
         // Anthropic's signature: stream + messages, NO stream_options/choices.
         expect(body.stream).toBe(true);
         expect(body.stream_options).toBeUndefined();
-      }
+      },
     },
     {
       name: "gemini (generateContent shaper)",
@@ -997,7 +1965,7 @@ describe("useNativeAgent", () => {
       // Gemini streams JSON-per-line with candidates/parts.
       lines: [
         '{"candidates":[{"content":{"role":"model","parts":[{"text":"hi"}]}}]}',
-        '{"candidates":[{"finishReason":"STOP"}]}'
+        '{"candidates":[{"finishReason":"STOP"}]}',
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(Array.isArray(body.contents)).toBe(true);
@@ -1005,7 +1973,7 @@ describe("useNativeAgent", () => {
         expect(body.generationConfig).toBeDefined();
         expect(body.model).toBeUndefined();
         expect(body.messages).toBeUndefined();
-      }
+      },
     },
     {
       name: "xai (openai-compat shaper)",
@@ -1013,13 +1981,13 @@ describe("useNativeAgent", () => {
       model: "grok-4",
       lines: [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
-        'data: {"choices":[{"finish_reason":"stop"}]}'
+        'data: {"choices":[{"finish_reason":"stop"}]}',
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(body.model).toBe("grok-4");
         expect(body.stream).toBe(true);
         expect(Array.isArray(body.messages)).toBe(true);
-      }
+      },
     },
     {
       name: "custom endpoint (openai-compat shaper)",
@@ -1027,14 +1995,14 @@ describe("useNativeAgent", () => {
       model: "custom-chat",
       lines: [
         'data: {"choices":[{"delta":{"content":"hi"}}]}',
-        'data: {"choices":[{"finish_reason":"stop"}]}'
+        'data: {"choices":[{"finish_reason":"stop"}]}',
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(body.model).toBe("custom-chat");
         expect(body.stream).toBe(true);
         expect(Array.isArray(body.messages)).toBe(true);
-      }
-    }
+      },
+    },
   ])(
     "routes $name through the desktop transport with the provider-shaped body",
     async ({ providerId, model, lines, expectBody }) => {
@@ -1050,17 +2018,25 @@ describe("useNativeAgent", () => {
         label: providerId,
         description: `${providerId} API`,
         authState: "connected",
-        capabilities: ["authentication", "streaming", "tool-requests", "approvals", "cancellation"],
-        models: [{ id: model, label: model, available: true }]
+        capabilities: [
+          "authentication",
+          "streaming",
+          "tool-requests",
+          "approvals",
+          "cancellation",
+        ],
+        models: [{ id: model, label: model, available: true }],
       };
-      const { result } = renderHook(() => useNativeAgent({ providers: [provider] }));
+      const { result } = renderHook(() =>
+        useNativeAgent({ providers: [provider] }),
+      );
 
       await act(async () => {
         await result.current.run({
           model,
           messages: [{ role: "user", content: "hello" }],
           tools: [],
-          maxTokens: 512
+          maxTokens: 512,
         });
       });
 
@@ -1076,26 +2052,26 @@ describe("useNativeAgent", () => {
       // The attempt completed without surfacing an error.
       expect(result.current.state.running).toBe(false);
       expect(result.current.state.lastError).toBeNull();
-    }
+    },
   );
 
   it("routes through the provider selected by the combined model picker", async () => {
     installDesktopRuntime();
     mocks.lines = [
       'data: {"choices":[{"delta":{"content":"selected"}}]}',
-      'data: {"choices":[{"finish_reason":"stop"}]}'
+      'data: {"choices":[{"finish_reason":"stop"}]}',
     ];
     const xai: BackendProvider = {
       ...connectedOpenAiProvider(),
       id: "xai",
       label: "xAI",
-      models: [{ id: "grok-4", label: "Grok 4", available: true }]
+      models: [{ id: "grok-4", label: "Grok 4", available: true }],
     };
     const { result } = renderHook(() =>
       useNativeAgent({
         providers: [connectedOpenAiProvider(), xai],
-        activeProviderId: "xai"
-      })
+        activeProviderId: "xai",
+      }),
     );
 
     await act(async () => {
@@ -1105,7 +2081,7 @@ describe("useNativeAgent", () => {
     expect(mocks.streamRequests).toHaveLength(1);
     expect(mocks.streamRequests[0]).toMatchObject({
       providerId: "xai",
-      model: "grok-4"
+      model: "grok-4",
     });
   });
 
@@ -1123,14 +2099,14 @@ describe("useNativeAgent", () => {
           message: "Provider rejected the API key.",
           retryable: false,
           attempt: 1,
-          retryAfterMs: null
-        }
-      })
+          retryAfterMs: null,
+        },
+      }),
     ];
     // emitDone stays true, but the transport error short-circuits the attempt.
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -1143,7 +2119,9 @@ describe("useNativeAgent", () => {
     // points the user at their key in Settings and preserves the provider detail.
     expect(result.current.state.lastError).toContain("API key");
     expect(result.current.state.lastError).toContain("Settings");
-    expect(result.current.state.lastError).toContain("Provider rejected the API key.");
+    expect(result.current.state.lastError).toContain(
+      "Provider rejected the API key.",
+    );
   });
 
   it("runtime provider errors are classified as retryable, not as a key problem", async () => {
@@ -1158,13 +2136,13 @@ describe("useNativeAgent", () => {
           message: "Provider request failed with HTTP 503.",
           retryable: true,
           attempt: 3,
-          retryAfterMs: null
-        }
-      })
+          retryAfterMs: null,
+        },
+      }),
     ];
 
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] })
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
     );
 
     await act(async () => {
@@ -1175,6 +2153,8 @@ describe("useNativeAgent", () => {
     expect(result.current.state.lastError).toContain("unavailable");
     expect(result.current.state.lastError).toContain("HTTP 503");
     // A runtime error must never be mislabeled as an API-key problem.
-    expect(result.current.state.lastError?.toLowerCase()).not.toContain("api key");
+    expect(result.current.state.lastError?.toLowerCase()).not.toContain(
+      "api key",
+    );
   });
 });

@@ -52,6 +52,24 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it("inserts a callable browser mention from keyboard completion", () => {
+    const props = propsFor("idle", { composerValue: "@bro", connectedConnectors: [{ id: "browser", name: "Browser", status: "enabled" }] });
+    const view = render(<Composer {...props} />);
+    expect(screen.getByRole("option", { name: "Browser" })).toBeInTheDocument();
+    fireEvent.keyDown(view.container.querySelector('[contenteditable="true"]')!, { key: "Tab" });
+    expect(props.onComposerChange).toHaveBeenCalledWith("@browser ");
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+  it("requires the recording upload decision and blocks typed submission while reviewing", () => {
+    const props = propsFor("reviewing", { voiceReview: { recordingId: "recording", providerLabel: "OpenAI", model: "gpt-4o-mini-transcribe", durationMs: 4_000, sizeBytes: 1_024, mediaType: "audio/webm", maxDurationMs: 120_000 }, onAuthorizeVoice: vi.fn() });
+    const view = render(<Composer {...props} />);
+    fireEvent.submit(view.container.querySelector("form")!);
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Upload & transcribe" }));
+    expect(props.onAuthorizeVoice).toHaveBeenCalledOnce();
+    expect(props.onStartVoice).not.toHaveBeenCalled();
+  });
   it("switches between dictation and Send using trimmed text", () => {
     const { rerender } = render(
       <Composer {...propsFor("idle", { composerValue: "" })} />

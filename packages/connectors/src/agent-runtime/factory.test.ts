@@ -200,6 +200,49 @@ describe("createCodexBackend", () => {
     expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
   });
 
+  it("surfaces provider-owned web search without invoking Fable's executor", async () => {
+    const result = JSON.stringify({
+      untrusted: true,
+      query: "current release",
+      results: [{ title: "Release notes", url: "https://example.com/release" }]
+    });
+    const handle = new MockCodexAppServer({
+      events: [
+        {
+          type: "provider-tool",
+          callId: "search-1",
+          tool: "web-search",
+          arguments: '{"query":"current release"}',
+          status: "running"
+        },
+        {
+          type: "provider-tool",
+          callId: "search-1",
+          tool: "web-search",
+          arguments: '{"query":"current release"}',
+          status: "succeeded",
+          output: result
+        },
+        { type: "done", finishReason: "stop" }
+      ]
+    });
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle));
+    let executed = false;
+    const events = await collect(backend!.run(baseRunRequest, {
+      execute: async () => { executed = true; return "unexpected"; }
+    })!);
+    expect(executed).toBe(false);
+    expect(handle.approvalResponses).toEqual([]);
+    expect(events).toContainEqual({
+      type: "provider-tool",
+      callId: "search-1",
+      tool: "web-search",
+      arguments: '{"query":"current release"}',
+      status: "succeeded",
+      output: result
+    });
+  });
+
   it("resumes an existing Codex thread when the run request carries a thread id", async () => {
     const handle = new MockCodexAppServer({ events: [{ type: "done", finishReason: "stop" }] });
     const backend = createCodexBackend(codexProvider(), codexDeps(handle));

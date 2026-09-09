@@ -77,12 +77,26 @@ state may remain alive; ordinary conversations do not continue after app exit.
 
 The explicit `computer-artifact` tool publishes one generated Workspace file
 under an exact approval and the current agent-control generation. It accepts
-DOCX, XLSX, CSV, TXT, Markdown, PNG, JPEG, GIF, and WebP files of at most
-25 MiB. Relative paths, opened file handles, size, and type signatures are
+PDF, DOCX, XLSX, PPTX, CSV, TXT, Markdown, PNG, JPEG, GIF, and WebP files of at
+most 25 MiB. Relative paths, opened file handles, size, and type signatures are
 checked; links, hidden path components, host paths, executables, HTML, SVG,
-macro-enabled Office files, and embedded Office programs are rejected.
-PDF publication and opening are disabled until a validated sanitizer can remove
-active document actions. The tool asks for DOCX, text, or PNG instead.
+macro-enabled Office files, embedded Office programs, and external Office
+relationships are rejected. Office packages must contain the matching standard
+main part, content type, and root relationship metadata.
+
+PDFs pass a strict parser-backed structural validator before publication and
+again before opening. The accepted subset has one PDF header and final marker,
+at least one page, bounded object, page, node, and stream expansion counts, and
+no encryption, forms, scripts, actions, external streams, multimedia, or
+embedded files. The validator parses indirect and compressed object-stream
+objects rather than relying on byte-pattern removal. It rejects unsafe input; it
+does not rewrite or claim to sanitize a document.
+
+The guest exposes PptxGenJS 4.0.1 through `NODE_PATH` for editable slide
+generation, LibreOffice Impress for presentation editing and PDF conversion,
+and Poppler command-line tools for PDF inspection and page rendering. The image
+build generates all four document formats, renders the document and
+presentation PDFs, and verifies LibreOffice's cached spreadsheet recalculation.
 
 Publication copies the bytes outside the guest mount. An opaque ID and
 credential-free metadata return in the tool result, which persists with the

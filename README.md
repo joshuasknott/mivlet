@@ -47,7 +47,8 @@ a deployed or production-validated service.
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Published text and raster images can be previewed beside the
-  conversation; Office documents open as verified copies in their associated app.
+  conversation; structurally validated Office documents and passive PDFs open
+  as verified copies in their associated app.
 - Workspace-wide app access and approval preferences shared by all agents,
   with exact approval checks for consequential tools and connector actions.
 - Provider model visibility controls in Settings. Hidden models stay out of

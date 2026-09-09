@@ -534,6 +534,14 @@ pub(crate) fn normalize_runtime_snapshot(
         active_item,
         composer_draft,
         voice_enabled: snapshot.voice_enabled,
+        voice_provider: Some(
+            if snapshot.voice_provider.as_deref() == Some("openai") {
+                "openai"
+            } else {
+                "browser"
+            }
+            .to_string(),
+        ),
         approval_audit,
         dismissed_approval_ids: normalize_snapshot_id_list(snapshot.dismissed_approval_ids),
         approval_rules,

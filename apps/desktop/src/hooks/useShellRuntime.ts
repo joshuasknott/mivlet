@@ -36,9 +36,7 @@ import type {
 import {
   assembleContext,
   chunkSourceText,
-  disableMemory as disableMemoryRecord,
   exportMemories,
-  forgetMemory as forgetMemoryRecord,
   isLiveMemory,
   isLiveSource,
   retrieve,
@@ -86,6 +84,8 @@ import {
   clearRuntimeBackend,
   connectRuntimeBackend,
   exportRuntimeMemoryState,
+  correctRuntimeMemoryRecord,
+  changeRuntimeMemoryRecord,
   importRuntimeLocalKnowledgeSource,
   listRuntimeConnectorSyncStates,
   listRuntimeConnectorAccounts,
@@ -139,10 +139,10 @@ import {
 import {
   mergeKnowledgeSources,
   prependAuditEntry,
-  readFileAsDataUrl,
   readFileAsText,
   toSlug,
 } from "../lib/helpers";
+import { prepareComposerImage } from "../lib/composer-images";
 import {
   resolveApprovalFallback,
 } from "../lib/approval-fallbacks";
@@ -264,6 +264,7 @@ export function useShellRuntime(
     initialState.composerValue,
   );
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
+  const [voiceProvider, setVoiceProvider] = useState<"browser" | "openai">(initialState.voiceProvider === "openai" ? "openai" : "browser");
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [lastAction, setLastAction] = useState("Workspace ready");
@@ -530,6 +531,7 @@ export function useShellRuntime(
       activeItem,
       composerValue,
       voiceEnabled,
+      voiceProvider,
       approvalAudit,
       dismissedApprovalIds,
       approvalRules,
@@ -569,6 +571,7 @@ export function useShellRuntime(
       selectedModelId,
       hiddenModelIds,
       voiceEnabled,
+      voiceProvider,
     ],
   );
 
@@ -729,6 +732,7 @@ export function useShellRuntime(
         setActiveItem(recovered.activeItem);
         setComposerValue(recovered.composerValue);
         setVoiceEnabled(recovered.voiceEnabled);
+        setVoiceProvider(recovered.voiceProvider === "openai" ? "openai" : "browser");
         setApprovalAudit(recovered.approvalAudit);
         setDismissedApprovalIds(recovered.dismissedApprovalIds);
         setApprovalRules(recovered.approvalRules);
@@ -1301,10 +1305,12 @@ export function useShellRuntime(
     sourceName = file.name,
     onImported?: (sourceId: string) => void,
   ) => {
+    const importScope = connectorScopeRef.current;
     setImportStatus(`Reading ${sourceName}...`);
 
     try {
       const content = await readFileAsText(file);
+      if (connectorScopeRef.current !== importScope) return null;
       const candidate: LocalTextFileCandidate = {
         name: sourceName,
         content,
@@ -1315,6 +1321,7 @@ export function useShellRuntime(
       // the user sees the source move reading -> indexing -> indexed.
       setImportStatus(`Indexing ${sourceName}...`);
       const nativeImported = await importRuntimeLocalKnowledgeSource(candidate);
+      if (connectorScopeRef.current !== importScope) return null;
       const imported = nativeImported ?? importLocalTextFile(candidate);
       // The imported source is indexed and healthy. Unchanged re-imports (same
       // content fingerprint) replace the existing row in place via
@@ -1342,8 +1349,9 @@ export function useShellRuntime(
         `Imported ${indexed.title}. It is pinned as untrusted knowledge.`,
       );
       setLastAction(`Imported source: ${indexed.title}`);
-      return true;
+      return indexed.id;
     } catch (error) {
+      if (connectorScopeRef.current !== importScope) return null;
       const message =
         error instanceof Error
           ? error.message
@@ -1352,7 +1360,7 @@ export function useShellRuntime(
       // state: nothing was added, so we surface the failure and clear indexing.
       setImportStatus(message);
       setLastAction(message);
-      return false;
+      return null;
     }
   };
 
@@ -1398,8 +1406,12 @@ export function useShellRuntime(
 
     if (file.type.startsWith("image/")) {
       try {
-        const previewUrl = await readFileAsDataUrl(file);
-        updateComposerAttachment(id, { previewUrl, status: "Attached" });
+        const imageInput = await prepareComposerImage(file, id);
+        updateComposerAttachment(id, {
+          previewUrl: imageInput.dataUrl,
+          imageInput,
+          status: "Attached",
+        });
       } catch (error) {
         updateComposerAttachment(id, {
           status:
@@ -1508,7 +1520,7 @@ export function useShellRuntime(
   ): Promise<PreparedExecutionContext> => {
     const attemptId = createExecutionAttemptId();
     const assembledAt = new Date().toISOString();
-    const scope = knowledgeScopeForRun(activeThread?.id);
+    const scope = knowledgeScopeForRun(context?.threadId ?? activeThread?.id);
     const audience = privateRunAudience(accountWorkspaceStatus);
     const selectedMemory = selectMemoryForRun(managedMemoryRecords);
     // Native records must already carry canonical ownership from migration.
@@ -1560,26 +1572,29 @@ export function useShellRuntime(
     // optimistic update instead of leaving a phantom record in the UI.
     const previousDisabled = memoryDisabled;
     const previousRecords = managedMemoryRecords;
+    const generation = connectorScopeRef.current;
     setMemoryDisabled(state.disabled);
     setManagedMemoryRecords(
       state.records.filter((record) => !record.forgottenAt),
     );
-    setMemoryStatus(status);
+    setMemoryStatus("Saving memory…");
 
-    void saveRuntimeMemoryState(state)
+    return saveRuntimeMemoryState(state)
       .then((runtimeState) => {
-        if (!runtimeState) {
+        if (!runtimeState || connectorScopeRef.current !== generation) {
           return;
         }
 
         setMemoryDisabled(runtimeState.disabled);
         setManagedMemoryRecords(runtimeState.records);
+        setMemoryStatus(status);
       })
-      .catch((error) => {
-        // The native save failed: roll back to the prior authoritative state so
-        // the UI does not falsely show a change that was never persisted.
-        setMemoryDisabled(previousDisabled);
-        setManagedMemoryRecords(previousRecords);
+      .catch(async (error) => {
+        const current = await loadRuntimeMemoryState().catch(() => null);
+        if (connectorScopeRef.current !== generation) return;
+        // A concurrent correction may be newer than this optimistic snapshot.
+        setMemoryDisabled(current?.disabled ?? previousDisabled);
+        setManagedMemoryRecords(current?.records ?? previousRecords);
         setMemoryStatus(
           error instanceof Error
             ? error.message
@@ -1588,45 +1603,25 @@ export function useShellRuntime(
       });
   };
 
-  const forgetMemory = (recordId: string) => {
-    const now = new Date().toISOString();
-    const target = managedMemoryRecords.find(
-      (record) => record.id === recordId,
-    );
-    // Forget is the durable exclusion signal: the record is tombstoned with
-    // `forgottenAt` so it disappears from every retrieval / context / export /
-    // management read path while remaining auditable. Distinct from a temporary
-    // disable (which keeps the record visible in management views).
-    const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId ? forgetMemoryRecord(record, now) : record,
-    );
-    // A forgotten memory can no longer be pinned; drop the pin so it cannot
-    // bypass exclusion via the pinned-context path.
-    setManagedMemoryRecords(nextRecords);
-    setMemoryDisabled(memoryDisabled);
-    setMemoryStatus(
-      target ? `Forgot memory: ${target.title}` : "Memory forgotten.",
-    );
-    void saveRuntimeMemoryState({
-      disabled: memoryDisabled,
-      records: nextRecords,
-    })
-      .then((runtimeState) => {
-        if (runtimeState) {
-          setMemoryDisabled(runtimeState.disabled);
-          setManagedMemoryRecords(runtimeState.records);
-        }
-      })
-      .catch((error) => {
-        setMemoryStatus(
-          error instanceof Error
-            ? error.message
-            : "Fable could not forget that memory.",
-        );
-      });
-    setLastAction(
-      target ? `Forgot memory: ${target.title}` : "Memory forgotten.",
-    );
+  const changeMemory = async (recordId: string, change: "enabled" | "disabled" | "forgotten") => {
+    const record = managedMemoryRecords.find((item) => item.id === recordId && !item.forgottenAt);
+    if (!record) throw new Error("That memory is no longer available.");
+    const generation = connectorScopeRef.current;
+    const state = await changeRuntimeMemoryRecord({ id: recordId, state: change, expectedUpdatedAt: record.updatedAt });
+    if (connectorScopeRef.current !== generation) return;
+    setMemoryDisabled(state.disabled);
+    setManagedMemoryRecords(state.records);
+    setMemoryStatus(change === "forgotten" ? "Memory forgotten." : change === "disabled" ? "Memory disabled." : "Memory enabled.");
+  };
+  const forgetMemory = (recordId: string) => changeMemory(recordId, "forgotten");
+
+  const correctMemory = async (recordId: string, title: string, value: string, expectedUpdatedAt?: string) => {
+    const generation = connectorScopeRef.current;
+    const state = await correctRuntimeMemoryRecord({ id: recordId, title, value, expectedUpdatedAt });
+    if (connectorScopeRef.current !== generation) return;
+    setMemoryDisabled(state.disabled);
+    setManagedMemoryRecords(state.records);
+    setMemoryStatus("Memory corrected.");
   };
 
   /**
@@ -1636,27 +1631,7 @@ export function useShellRuntime(
    * is dropped while disabled so it cannot bypass the exclusion via pinned
    * context.
    */
-  const toggleMemoryRecordDisabled = (recordId: string) => {
-    const now = new Date().toISOString();
-    const target = managedMemoryRecords.find(
-      (record) => record.id === recordId,
-    );
-    if (!target) return;
-    const becomingDisabled = !target.disabled;
-    const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId
-        ? becomingDisabled
-          ? disableMemoryRecord(record, now)
-          : { ...record, disabled: false, updatedAt: now }
-        : record,
-    );
-    commitMemoryState(
-      { disabled: memoryDisabled, records: nextRecords },
-      becomingDisabled
-        ? `Disabled memory: ${target.title}`
-        : `Re-enabled memory: ${target.title}`,
-    );
-  };
+  const toggleMemoryRecordDisabled = (recordId: string) => changeMemory(recordId, managedMemoryRecords.find((record) => record.id === recordId)?.disabled ? "enabled" : "disabled");
 
   const toggleMemoryPin = (recordId: string) => {
     const target = managedMemoryRecords.find(
@@ -1681,7 +1656,7 @@ export function useShellRuntime(
   };
 
   const toggleMemoryDisabled = () => {
-    commitMemoryState(
+    return commitMemoryState(
       { disabled: !memoryDisabled, records: managedMemoryRecords },
       memoryDisabled ? "Memory enabled." : "Memory disabled.",
     );
@@ -2728,6 +2703,8 @@ export function useShellRuntime(
     setComposerValue,
     voiceEnabled,
     setVoiceEnabled,
+    voiceProvider,
+    setVoiceProvider,
     toggleVoice,
     setImportStatus,
     triggerAttach,
@@ -2770,6 +2747,7 @@ export function useShellRuntime(
     confirmApprovalDecision,
     clearApprovalInteraction,
     workspaceKnowledgeSources,
+    importKnowledgeFile: (file: File) => importLocalKnowledgeFile(file),
     pinnedSourceIds,
     managedMemoryRecords,
     memoryDisabled,
@@ -2778,6 +2756,7 @@ export function useShellRuntime(
     memoryStatus,
     toggleMemoryPin,
     forgetMemory,
+    correctMemory,
     toggleMemoryRecordDisabled,
     toggleMemoryDisabled,
     exportMemory,

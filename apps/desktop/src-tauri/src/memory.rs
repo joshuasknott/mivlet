@@ -485,33 +485,184 @@ pub fn save_memory_state(
     let authorized = command_scope(workspace_id, project_id, ScopeAccess::Write)?;
     let scope = &authorized.private;
     let mut normalized = canonicalize_private_memory_state(state, scope)?;
-    if let Some(existing) =
-        crate::store::read_private_workspace_document::<MemoryControlState>(&path, scope)?
-    {
-        for record in existing
+    crate::store::update_private_workspace_document(
+        &path,
+        scope,
+        |existing: Option<MemoryControlState>| {
+            if let Some(existing) = existing {
+                merge_memory_controls(&mut normalized, existing)?;
+            }
+            normalized = canonicalize_private_memory_state(normalized, scope)?;
+            let result = live_memory_state(normalized.clone());
+            Ok((Some(normalized), result))
+        },
+    )
+}
+
+// Whole-state controls must not overwrite a concurrent correction or forget.
+// This merge executes inside the same SQLite transaction as its write.
+fn merge_memory_controls(
+    incoming: &mut MemoryControlState,
+    existing: MemoryControlState,
+) -> Result<(), String> {
+    for record in existing.records {
+        if let Some(candidate) = incoming
             .records
-            .into_iter()
-            .filter(|record| record.forgotten_at.is_some())
+            .iter_mut()
+            .find(|item| item.id == record.id)
         {
-            if let Some(candidate) = normalized
-                .records
-                .iter_mut()
-                .find(|candidate| candidate.id == record.id)
-            {
+            if record.forgotten_at.is_some() {
                 if candidate.forgotten_at.is_none() {
-                    return Err("Forgotten memory cannot be restored by a later save.".to_string());
+                    return Err("Forgotten memory cannot be restored by a later save.".into());
                 }
                 *candidate = record;
-            } else {
-                normalized.records.push(record);
+                continue;
             }
+            if candidate.updated_at != record.updated_at {
+                return Err(
+                    "Memory changed while you were editing. Refresh it before saving.".into(),
+                );
+            }
+            if candidate.title != record.title
+                || candidate.value != record.value
+                || candidate.pinned != record.pinned
+                || candidate.disabled != record.disabled
+                || candidate.approved != record.approved
+                || candidate.forgotten_at != record.forgotten_at
+            {
+                candidate.updated_at = Some(chrono::Utc::now().to_rfc3339());
+            }
+        } else {
+            // Omission is not deletion; forgetting has an explicit tombstone.
+            incoming.records.push(record);
         }
     }
-    normalized = canonicalize_private_memory_state(normalized, scope)?;
-    if crate::store::write_private_workspace_document(&path, scope, &normalized)? {
-        return Ok(live_memory_state(normalized));
+    Ok(())
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryCorrection {
+    id: String,
+    title: String,
+    value: String,
+    expected_updated_at: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MemoryStateChange {
+    id: String,
+    state: String,
+    expected_updated_at: Option<String>,
+}
+
+fn apply_state_change(
+    state: &mut MemoryControlState,
+    change: MemoryStateChange,
+) -> Result<(), String> {
+    if !matches!(change.state.as_str(), "enabled" | "disabled" | "forgotten") {
+        return Err("Choose enable, disable, or forget.".into());
     }
-    write_memory_state(&path, normalized).map(live_memory_state)
+    let record = state
+        .records
+        .iter_mut()
+        .find(|record| record.id == change.id && record.forgotten_at.is_none())
+        .ok_or("That memory is no longer available.")?;
+    if record.updated_at != change.expected_updated_at {
+        return Err("This memory changed. Refresh it before continuing.".into());
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    record.updated_at = Some(now.clone());
+    if change.state == "forgotten" {
+        record.forgotten_at = Some(now);
+    } else {
+        record.disabled = change.state == "disabled";
+    }
+    if change.state != "enabled" {
+        record.pinned = false;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn change_memory_record_state(
+    window: tauri::WebviewWindow,
+    change: MemoryStateChange,
+    workspace_id: Option<String>,
+) -> Result<MemoryControlState, String> {
+    use tauri::Manager;
+    if window.label() != "main" {
+        return Err("Memory controls belong to the main Fable window.".into());
+    }
+    let path = memory_state_path(window.app_handle())?;
+    let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;
+    crate::store::update_private_workspace_document(
+        &path,
+        &authorized.private,
+        |current: Option<MemoryControlState>| {
+            let mut state = canonicalize_private_memory_state(
+                current.unwrap_or_else(default_memory_state),
+                &authorized.private,
+            )?;
+            apply_state_change(&mut state, change)?;
+            let result = live_memory_state(state.clone());
+            Ok((Some(state), result))
+        },
+    )
+}
+
+fn apply_correction(
+    state: &mut MemoryControlState,
+    correction: MemoryCorrection,
+) -> Result<(), String> {
+    if correction.title.trim().is_empty()
+        || correction.value.trim().is_empty()
+        || correction.title.chars().count() > MAX_MEMORY_TITLE_CHARACTERS
+        || correction.value.chars().count() > MAX_MEMORY_VALUE_CHARACTERS
+    {
+        return Err("Use a title up to 120 characters and a memory up to 2,000 characters.".into());
+    }
+    let record = state
+        .records
+        .iter_mut()
+        .find(|record| record.id == correction.id && record.forgotten_at.is_none())
+        .ok_or("That memory is no longer available.")?;
+    if record.updated_at != correction.expected_updated_at {
+        return Err("This memory changed. Reopen it before saving your correction.".into());
+    }
+    record.title = correction.title.trim().into();
+    record.value = correction.value.trim().into();
+    record.updated_at = Some(chrono::Utc::now().to_rfc3339());
+    record.freshness = "Corrected by you".into();
+    Ok(())
+}
+
+#[tauri::command]
+pub fn correct_memory_record(
+    window: tauri::WebviewWindow,
+    correction: MemoryCorrection,
+    workspace_id: Option<String>,
+) -> Result<MemoryControlState, String> {
+    use tauri::Manager;
+    if window.label() != "main" {
+        return Err("Memory corrections belong to the main Fable window.".into());
+    }
+    let path = memory_state_path(window.app_handle())?;
+    let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;
+    crate::store::update_private_workspace_document(
+        &path,
+        &authorized.private,
+        |current: Option<MemoryControlState>| {
+            let mut state = canonicalize_private_memory_state(
+                current.unwrap_or_else(default_memory_state),
+                &authorized.private,
+            )?;
+            apply_correction(&mut state, correction)?;
+            let result = live_memory_state(state.clone());
+            Ok((Some(state), result))
+        },
+    )
 }
 
 #[tauri::command]
@@ -688,6 +839,96 @@ mod tests {
             forgotten_at: None,
             disabled: false,
         }
+    }
+
+    #[test]
+    fn correction_preserves_identity_and_rejects_stale_or_forgotten_memory() {
+        let mut state = MemoryControlState {
+            disabled: false,
+            records: vec![record("one")],
+        };
+        let correction = || MemoryCorrection {
+            id: "one".into(),
+            title: "Corrected title".into(),
+            value: "Corrected fact".into(),
+            expected_updated_at: None,
+        };
+        apply_correction(&mut state, correction()).unwrap();
+        assert_eq!(state.records[0].id, "one");
+        assert_eq!(state.records[0].value, "Corrected fact");
+        assert!(state.records[0].approved);
+        assert!(apply_correction(&mut state, correction()).is_err());
+        state.records[0].forgotten_at = Some("forgotten".into());
+        assert!(apply_correction(&mut state, correction()).is_err());
+    }
+
+    #[test]
+    fn memory_state_changes_clear_pins_and_cannot_restore_tombstones() {
+        let mut item = record("one");
+        item.pinned = true;
+        let mut state = MemoryControlState {
+            disabled: false,
+            records: vec![item],
+        };
+        apply_state_change(
+            &mut state,
+            MemoryStateChange {
+                id: "one".into(),
+                state: "disabled".into(),
+                expected_updated_at: None,
+            },
+        )
+        .unwrap();
+        assert!(state.records[0].disabled);
+        assert!(!state.records[0].pinned);
+        let revision = state.records[0].updated_at.clone();
+        apply_state_change(
+            &mut state,
+            MemoryStateChange {
+                id: "one".into(),
+                state: "forgotten".into(),
+                expected_updated_at: revision,
+            },
+        )
+        .unwrap();
+        let revision = state.records[0].updated_at.clone();
+        assert!(apply_state_change(
+            &mut state,
+            MemoryStateChange {
+                id: "one".into(),
+                state: "enabled".into(),
+                expected_updated_at: revision
+            }
+        )
+        .is_err());
+        assert!(live_memory_state(state).records.is_empty());
+    }
+
+    #[test]
+    fn whole_state_save_rejects_stale_corrections_and_preserves_new_records() {
+        let original = MemoryControlState {
+            disabled: false,
+            records: vec![record("one")],
+        };
+        let mut corrected = original.clone();
+        apply_correction(
+            &mut corrected,
+            MemoryCorrection {
+                id: "one".into(),
+                title: "Updated".into(),
+                value: "Updated value".into(),
+                expected_updated_at: None,
+            },
+        )
+        .unwrap();
+        assert!(merge_memory_controls(&mut original.clone(), corrected).is_err());
+        let mut incoming = MemoryControlState {
+            disabled: true,
+            records: Vec::new(),
+        };
+        merge_memory_controls(&mut incoming, original).unwrap();
+        assert!(incoming.disabled);
+        assert_eq!(incoming.records.len(), 1);
     }
 
     #[test]

@@ -37,6 +37,7 @@ export interface LocalComputerLifecycleRequest extends LocalComputerTarget {
 }
 
 export interface LocalComputerSnapshot {
+  plugins?: BuiltinPlugins;
   computerId: string;
   workspaceId: string;
   agentId: string;
@@ -53,6 +54,11 @@ export interface LocalComputerSnapshot {
   browserProduct?: string;
   message?: string;
   updatedAt: string;
+}
+
+export interface BuiltinPlugins {
+  browser: boolean;
+  computer: boolean;
 }
 
 export interface LocalBrowserViewportSnapshot {
