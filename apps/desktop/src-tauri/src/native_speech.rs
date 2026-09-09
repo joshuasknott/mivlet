@@ -241,7 +241,7 @@ fn prepare_into(
     if request.duration_ms == 0 || request.duration_ms > MAX_RECORDING_DURATION_MS {
         return Err("Recordings must be no longer than two minutes.".into());
     }
-    if request.audio_base64.len() > ((MAX_RECORDING_BYTES + 2) / 3) * 4 + 8 {
+    if request.audio_base64.len() > MAX_RECORDING_BYTES.div_ceil(3) * 4 + 8 {
         return Err("Recordings must be no larger than 16 MiB.".into());
     }
     let (media_type, _) = normalized_media_type(&request.mime_type)

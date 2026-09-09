@@ -703,7 +703,6 @@ fn replace_occurrence(
     let sealed = seal_json(store, &row.payload, &occurrence_aad(scope, &row.id))?;
     let (state_a, state_b) = expected_state
         .and_then(|value| value.split_once('|'))
-        .map(|(a, b)| (a, b))
         .unwrap_or_else(|| {
             (
                 expected_state.unwrap_or(&row.state),
