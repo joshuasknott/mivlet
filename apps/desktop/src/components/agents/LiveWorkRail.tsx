@@ -99,7 +99,7 @@ export function LiveWorkRail({
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
-  const compact = useMediaQuery("(max-width: 920px)");
+  const compact = useMediaQuery("(max-width: 650px)");
   const railRef = useRef<HTMLElement>(null);
   useModalFocusTrap({ active: compact, containerRef: railRef, onClose });
   const [computerDetailsOpen, setComputerDetailsOpen] = useState(false);

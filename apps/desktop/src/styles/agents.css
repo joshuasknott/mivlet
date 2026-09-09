@@ -27,6 +27,18 @@
   padding: 0 8px;
 }
 
+.agent-sidebar__agents-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  padding: 0 8px;
+  color: var(--ink-muted);
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+
 .agent-workspace-header button,
 .live-rail__header button {
   display: grid;
@@ -52,6 +64,13 @@
 .agent-workspace-header button:disabled { opacity: .38; cursor: not-allowed; }
 .agent-workspace-header button:disabled:hover { color: var(--ink-muted); background: transparent; }
 .agent-workspace-header__actions button { position: relative; }
+@media (min-width: 651px) {
+  .agent-workspace-header__actions { position: fixed; top: 8px; right: 18px; z-index: 60; }
+  .agent-workspace-header__actions button { width: 40px; height: 40px; }
+  .desktop-frame--live-closed .agent-workspace-header { padding-right: 76px; }
+  #root:has(.window-controls) .agent-workspace-header__actions { top: 0; right: 142px; z-index: 1001; }
+  #root:not(:has(.window-controls)) .live-rail__header { padding-right: 48px; }
+}
 .agent-workspace-header__count { position: absolute; top: 1px; right: 1px; min-width: 12px; height: 12px; padding: 0 2px; color: var(--surface); background: var(--accent); border: 1px solid var(--surface); border-radius: 7px; font-size: 8px; font-weight: 700; line-height: 10px; }
 .agent-workspace-header__count--attention { background: var(--caution); }
 

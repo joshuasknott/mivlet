@@ -8,7 +8,7 @@ import portrait6 from "../assets/agents/rounded-6.png";
 import portrait7 from "../assets/agents/rounded-7.png";
 
 const portraits = [portrait0, portrait1, portrait2, portrait3, portrait4, portrait5, portrait6, portrait7] as const;
-export const AVATAR_SHAPES = ["Round", "Square", "Oval", "Pebble", "Pear", "Dome", "Capsule", "Cushion"] as const;
+export const AVATAR_SHAPES = ["Round", "Square", "Oval", "Pebble", "Clover", "Dome", "Capsule", "Cushion"] as const;
 let nextPortrait = Math.floor(Math.random() * portraits.length);
 
 export function avatarVariant(seed: string) {

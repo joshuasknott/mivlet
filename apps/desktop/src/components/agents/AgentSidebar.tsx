@@ -104,15 +104,6 @@ export function AgentSidebar({
     <aside className="agent-sidebar" aria-label="Agents" hidden={hidden}>
       <div className="agent-sidebar__topline">
         <span className="agent-sidebar__title">Fable</span>
-        <button
-          className="agent-sidebar__new"
-          type="button"
-          onClick={onCreateAgent}
-          aria-label="Create agent"
-          title="Create agent"
-        >
-          <Plus size={17} aria-hidden="true" />
-        </button>
       </div>
 
       <label className="agent-search">
@@ -178,7 +169,12 @@ export function AgentSidebar({
         </section>
       ) : null}
 
-      <div className="agent-sidebar__section-label">Agents</div>
+      <div className="agent-sidebar__agents-heading">
+        <span>Agents</span>
+        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent} aria-label="Create agent" title="Create agent">
+          <Plus size={17} aria-hidden="true" />
+        </button>
+      </div>
 
       <div className="agent-list" role="list">
         {visibleAgents.map((agent) => {
