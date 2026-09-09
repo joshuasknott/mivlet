@@ -1,12 +1,34 @@
-/* A still avatar is the default. Motion never moves a name or status label. */
+/* Expressions carry meaning without motion. Shell colour never changes with status. */
 .agent-avatar { position: relative; }
-.agent-avatar > img { transform-origin: 50% 65%; }
-.agent-avatar--generated[data-presence="received"] > img { animation: presence-received 280ms var(--ease-out) both; }
-.agent-avatar--generated[data-presence="thinking"] > img { animation: presence-thinking 3.8s var(--ease-presence) infinite; }
-.agent-avatar--generated[data-presence="working"] > img { animation: presence-working 2.6s var(--ease-presence) infinite; }
-.agent-avatar--generated[data-presence="done"] > img { animation: presence-done 320ms var(--ease-out) both; }
-@keyframes presence-received { 0% { transform: scale(1); } 45% { transform: scale(1.06); } 100% { transform: scale(1); } }
-@keyframes presence-thinking { 0%, 65%, 100% { transform: rotate(0); } 25%, 40% { transform: rotate(-3deg); } }
-@keyframes presence-working { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035, .98); } }
-@keyframes presence-done { 0% { transform: scale(.96); } 60% { transform: scale(1.04); } 100% { transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .agent-avatar > img { animation: none !important; transform: none !important; } }
+.agent-avatar__filter { position: absolute; pointer-events: none; }
+.agent-avatar__character { position: relative; display: block; width: 100%; height: 100%; transform-origin: 50% 70%; }
+.agent-avatar__character > img { display: block; }
+.agent-avatar .agent-avatar__face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; color: var(--eye-colour); fill: none; stroke: currentColor; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
+.agent-avatar__eyes { transform-box: fill-box; transform-origin: center; }
+.agent-avatar[data-expression="unavailable"] .agent-avatar__eyes { opacity: .6; }
+.agent-avatar[data-expression="service"] .agent-avatar__eyes { opacity: .8; }
+.agent-avatar--generated[data-motion="expressive"] { --presence-tilt: -3deg; --presence-duration: 5.8s; }
+.agent-avatar--generated[data-character="2"] { --presence-tilt: -1deg; --presence-duration: 7s; }
+.agent-avatar--generated[data-character="3"] { --presence-tilt: 2deg; --presence-duration: 6.8s; }
+.agent-avatar--generated[data-character="4"] { --presence-tilt: -4deg; --presence-duration: 5.2s; }
+.agent-avatar--generated[data-character="5"] { --presence-tilt: -4deg; --presence-duration: 6.6s; }
+.agent-avatar--generated[data-character="6"] { --presence-tilt: 4deg; --presence-duration: 6s; }
+.agent-avatar--generated[data-character="7"] { --presence-tilt: -1deg; --presence-duration: 7.5s; }
+.agent-avatar--generated[data-motion="expressive"][data-expression="idle"] .agent-avatar__eyes { animation: presence-blink 8s ease-in-out infinite; }
+.agent-avatar--generated[data-motion="expressive"][data-expression="thinking"] .agent-avatar__character,
+.agent-avatar--generated[data-motion="expressive"][data-expression="working"] .agent-avatar__character { animation: presence-focus var(--presence-duration) ease-in-out infinite; }
+.agent-avatar--generated[data-motion="expressive"][data-character="1"][data-expression="working"] .agent-avatar__pupil { transform-box: fill-box; transform-origin: center; animation: presence-lens 4s ease-in-out infinite; }
+.agent-avatar--generated[data-motion="expressive"][data-expression="received"] .agent-avatar__character,
+.agent-avatar--generated[data-motion="expressive"][data-expression="waiting"] .agent-avatar__character,
+.agent-avatar--generated[data-motion="expressive"][data-expression="input"] .agent-avatar__character { animation: presence-attention 350ms ease-out both; }
+.agent-avatar--generated[data-motion="expressive"][data-expression="done"] .agent-avatar__character { animation: presence-nod 500ms ease-out both; }
+.agent-avatar[data-motion="expressive"] .agent-avatar__voice { animation: presence-voice 650ms ease-in-out infinite alternate; transform-origin: 50% 77%; stroke-width: 2; }
+@keyframes presence-blink { 0%, 43%, 47%, 100% { transform: scaleY(1); } 45% { transform: scaleY(.15); } }
+@keyframes presence-focus { 0%, 15%, 55%, 100% { transform: rotate(0); } 30%, 40% { transform: rotate(var(--presence-tilt)); } }
+@keyframes presence-lens { 0%, 65%, 100% { transform: scale(1); } 30%, 45% { transform: scale(.7); } }
+@keyframes presence-attention { 0% { transform: translateY(0); } 45% { transform: translateY(-2%); } 100% { transform: translateY(0); } }
+@keyframes presence-nod { 0%, 100% { transform: rotate(0); } 45% { transform: rotate(3deg); } }
+@keyframes presence-voice { from { transform: scaleY(.65); } to { transform: scaleY(1); } }
+@media (prefers-reduced-motion: reduce) {
+  .agent-avatar *, .agent-avatar *::before, .agent-avatar *::after { animation: none !important; transition: none !important; }
+}

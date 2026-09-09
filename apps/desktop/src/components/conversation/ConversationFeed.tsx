@@ -5,7 +5,7 @@ import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { conversationTurns, toolActivity, toolFailureSummary, type ConversationTurn, type ResponsePart } from "../../lib/conversation-presentation";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
-import { agentPresence } from "../../lib/agent-presence";
+import { agentPresence, type AgentPresence } from "../../lib/agent-presence";
 import { ConnectorMentionText } from "../ConnectorMention";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
@@ -18,6 +18,7 @@ interface Props {
   requireAuthor?: boolean;
   suppressLivePrompt?: boolean;
   state: NativeAgentState;
+  presence?: AgentPresence;
   threadId?: string;
   profileName: string;
   connectors: ConnectorManifest[];
@@ -103,7 +104,7 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
   return <section className="conversation-turn">
     {turn.prompt ? <UserMessage content={turn.prompt} {...props} /> : null}
     <article className="conversation-response" aria-label={`${props.agent.name}'s response`}>
-      <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} presence={live ? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header>
+      <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header>
       {hasActivity ? <details className="turn-activity" open={expanded}>
         <summary onClick={(event) => { event.preventDefault(); setDisclosure({ running, open: !expanded }); }}>
           <span>{label}</span>

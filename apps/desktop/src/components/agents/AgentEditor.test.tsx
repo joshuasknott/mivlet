@@ -14,15 +14,27 @@ const props = { models: [], connectors: [], knowledgeSources: [], canDelete: fal
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("agent portrait ownership", () => {
+  it("selects the new character's native colour and keeps recolouring separate from shape", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
+    await user.click(screen.getByRole("button", { name: "Lens character" }));
+    expect(screen.getByRole("button", { name: "Blue" })).toHaveAttribute("aria-pressed", "true");
+    expect(view.container.querySelector(".agent-editor__identity filter")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Orange" }));
+    expect(screen.getByRole("button", { name: "Lens character" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#FF994D", avatarSeed: expect.stringMatching(/^robot-v3:1:/) }));
+  });
   it("previews and persists the selected colour through editing", async () => {
     const onSave = vi.fn();
     const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
-    await userEvent.click(screen.getByRole("button", { name: "Sage" }));
+    await userEvent.click(screen.getByRole("button", { name: "Mint" }));
     expect(view.container.querySelector("feColorMatrix")).toHaveAttribute("values", expect.any(String));
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#A6BA97" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#79E5C2" }));
     view.rerender(<AgentEditor {...props} open agent={onSave.mock.calls[0][0]} onSave={onSave} />);
-    expect(screen.getByRole("button", { name: "Sage" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Mint" })).toHaveAttribute("aria-pressed", "true");
   });
   it("saves the exact generated portrait shown during creation and gives the next agent a fresh seed", async () => {
     const user = userEvent.setup();
@@ -94,12 +106,12 @@ describe("agent portrait ownership", () => {
 it("keeps character preview colours distinct when changing the selected colour", async () => {
   const user = userEvent.setup(); const onSave = vi.fn();
   const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
-  const colours = () => [...view.container.querySelectorAll('.agent-shape-picker feColorMatrix')].map((node) => node.getAttribute('values'));
+  const colours = () => [...view.container.querySelectorAll('.agent-shape-picker img')].map((node) => node.getAttribute('src'));
   const before = colours();
   expect(new Set(before).size).toBe(8);
-  await user.click(screen.getByRole("button", { name: "Aqua" }));
+  await user.click(screen.getByRole("button", { name: "Cyan" }));
   expect(colours()).toEqual(before);
   expect(screen.queryByRole("button", { name: "Custom" })).not.toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Save changes" }));
-  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#86B8AF" }));
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#57D5F4" }));
 });

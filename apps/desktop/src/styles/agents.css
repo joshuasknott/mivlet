@@ -827,3 +827,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .desktop-frame--agents .composer-control-group { display: flex; align-items: center; gap: 6px; }
 .desktop-frame--agents .composer-control-group--end { margin-left: auto; }
 @media (max-width: 650px) { .desktop-frame--agents .composer-model { max-width: min(210px, 48vw); } .agent-sidebar__title { margin-left: 0; } }
+.agent-status--attention { display: grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: var(--surface); background: var(--caution); font-size: 10px; font-weight: 700; }
+.agent-workspace-header__presence { max-width: min(44vw, 340px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-workspace-header__presence[data-presence="input"] { color: var(--caution); }
+.agent-shape-picker button:focus-visible { outline: 2px solid var(--ink-muted); outline-offset: 2px; }

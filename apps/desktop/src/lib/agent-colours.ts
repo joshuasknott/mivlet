@@ -1,1 +1,2 @@
-export const AGENT_COLOURS = [["Lavender", "#B1A1CF"], ["Cornflower", "#91ADD7"], ["Apricot", "#DEB28F"], ["Aqua", "#86B8AF"], ["Sage", "#A6BA97"], ["Rose", "#D49AA6"], ["Butter", "#D6C38C"], ["Slate", "#A1A9BA"]] as const;
+/** Shell colours shared by the character family and the colour picker. */
+export const AGENT_COLOURS = [["Cream", "#F5E8D7"], ["Blue", "#2879FA"], ["Purple", "#AD79EF"], ["Mint", "#79E5C2"], ["Coral", "#FF8584"], ["Yellow", "#FFDA76"], ["Cyan", "#57D5F4"], ["Orange", "#FF994D"]] as const;

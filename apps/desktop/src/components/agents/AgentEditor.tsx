@@ -6,8 +6,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
-import { AVATAR_SHAPES, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
-import { AGENT_COLOURS } from "../../lib/agent-colours";
+import { AVATAR_SHAPES, AVATAR_COLOURS, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
+
 import { AgentColourPicker } from "./AgentColourPicker";
 const AgentLearningDialog = lazy(() => import("./AgentLearningDialog").then((module) => ({ default: module.AgentLearningDialog })));
 import { ModelPicker } from "../ModelPicker";
@@ -20,7 +20,7 @@ const emptyDraft: AgentDraft = {
   instructions: "",
   modelId: "",
   icon: "agent",
-  iconColor: AGENT_COLOURS[0][1],
+  iconColor: AVATAR_COLOURS[0],
   connectorIds: [],
   knowledgeSourceIds: [],
   permissionLabel: "Ask Me"
@@ -105,6 +105,7 @@ export function AgentEditor({
   const [imagePending, setImagePending] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
+  const [previewPresence, setPreviewPresence] = useState<"idle" | "thinking">("idle");
   useModalFocusTrap({ active: open, containerRef: modalRef, initialFocusRef: nameRef, onClose });
 
   useEffect(() => {
@@ -127,7 +128,7 @@ export function AgentEditor({
       connectorIds: agent.connectorIds,
       knowledgeSourceIds: agent.knowledgeSourceIds,
       permissionLabel: agent.permissionLabel
-    } : { ...emptyDraft, avatarSeed: newSeed, iconColor: AGENT_COLOURS[avatarVariant(newSeed!)][1] });
+    } : { ...emptyDraft, avatarSeed: newSeed, iconColor: AVATAR_COLOURS[avatarVariant(newSeed!)] });
     return () => { imageRequestRef.current++; };
   }, [agent?.id, open]);
 
@@ -142,7 +143,7 @@ export function AgentEditor({
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} motion="expressive" presence={previewPresence} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
@@ -151,8 +152,10 @@ export function AgentEditor({
             <div className="agent-shape-picker" role="group" aria-label="Character shape">
               {AVATAR_SHAPES.map((shape, index) => <button key={shape} type="button" aria-label={`${shape} character`}
                 aria-pressed={!draft.iconImageDataUrl && avatarVariant(draft.avatarSeed ?? "") === index}
-                onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined, iconColor: AGENT_COLOURS[index][1], avatarSeed: `rounded-v2:${index}:${crypto.randomUUID()}` }); }}>
-                <AgentAvatar seed={`rounded-v2:${index}:preview`} color={AGENT_COLOURS[index][1]} iconSize={40} />
+                onMouseEnter={() => setPreviewPresence("thinking")} onMouseLeave={() => setPreviewPresence("idle")}
+                onFocus={() => setPreviewPresence("thinking")} onBlur={() => setPreviewPresence("idle")}
+                onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined, iconColor: AVATAR_COLOURS[index], avatarSeed: `robot-v3:${index}:${crypto.randomUUID()}` }); }}>
+                <AgentAvatar seed={`robot-v3:${index}:preview`} color={AVATAR_COLOURS[index]} iconSize={40} />
               </button>)}
             </div>
             <div className="agent-icon-picker__options">

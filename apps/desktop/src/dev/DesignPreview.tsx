@@ -35,6 +35,7 @@ import {
 import { resolveCodexProvider } from "@fable/connectors/backends/codex";
 import { resolveNativeProvider } from "@fable/connectors/backends/native";
 import { OnboardingPreview } from "./OnboardingPreview";
+import { AgentAvatarPreview } from "./AgentAvatarPreview";
 import { ProjectPreview } from "./ProjectPreview";
 import "../styles.css";
 
@@ -683,7 +684,7 @@ createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={previewQueryClient}>
     {previewView === "onboarding" ? (
       <OnboardingPreview />
-    ) : previewView === "projects" ? (
+    ) : previewView === "avatars" ? (<AgentAvatarPreview />) : previewView === "projects" ? (
       <ProjectPreview />
     ) : (
       <DesignPreview />

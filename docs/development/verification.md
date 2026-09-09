@@ -28,6 +28,16 @@ components with labelled sample data: streaming, completion, reasoning disclosur
 failure and stop/continue. Select a fixture with `?conversation=stream`,
 `?conversation=stopped` or `?conversation=failure`; the default is completed.
 Fixture controls stay out of the conversation. It does not call a provider or establish live acceptance.
+
+`?view=avatars` shows the eight production robot shells at 112, 32 and 18 px,
+with state, colour and background controls. Test the editor at 390 px and desktop
+widths. The sidebar stays still; the active conversation and picker allow gentle
+motion. Reduced motion disables all avatar animations. A newly completed turn
+settles after one brief expression; restored completion does not replay it.
+Runtime presence uses approvals, execution status, confirmed dictation listening,
+provider availability and relevant computer control. Speaking and explicit-input
+expressions are previewable contracts only until those runtime events exist;
+text streaming and question marks must never stand in for them.
 Conversation regressions cover ordered durable segments, call/result pairing,
 redaction, scroll following, safe Markdown and preview scope changes. Native
 tests cover bounded previews, public-summary persistence and external link schemes.
