@@ -1,13 +1,11 @@
 import type { FableAgentProfile } from "@fable/protocol";
-import { useMemo, useId } from "react";
-import { blobAvatarDataUrl } from "../../lib/blob-avatar";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { AVATAR_COLOURS, avatarVariant, blobAvatarDataUrl } from "../../lib/blob-avatar";
 import type { AgentPresence } from "../../lib/agent-presence";
 import "./agent-presence.css";
 
-// Saved profiles keep their colour across generated portraits.
 export const DEFAULT_AGENT_COLOR = "#865DFA";
-
-export function AgentAvatar({ seed, imageDataUrl, iconSize = 30, className = "", color = DEFAULT_AGENT_COLOR, thinking = false, presence }: {
+type AvatarProps = {
   seed: string;
   color?: string;
   thinking?: boolean;
@@ -15,23 +13,75 @@ export function AgentAvatar({ seed, imageDataUrl, iconSize = 30, className = "",
   imageDataUrl?: string;
   iconSize?: number;
   className?: string;
-}) {
+  motion?: "quiet" | "expressive";
+};
+
+// Coordinates registered to the generated artwork, including the lens pupil.
+const eyePositions = [[36, 62, 64, 62], [21, 54, 64, 57], [36, 60, 63, 62], [36, 61, 64, 61], [35, 57, 65, 57], [35, 58, 65, 58], [34, 61, 62, 66], [35, 57, 65, 57]];
+const eyeColours = ["#FFF5DE", "#91F1FF", "#F0DBFF", "#B9FFEA", "#BAF4FF", "#FFF0B0", "#A5F0FF", "#FFF2E8"];
+
+export function AgentAvatar({ seed, imageDataUrl, iconSize = 30, className = "", color, thinking = false, presence, motion = "quiet" }: AvatarProps) {
   const colorId = useId().replaceAll(":", "");
-  const source = useMemo(() => imageDataUrl ?? blobAvatarDataUrl(seed), [imageDataUrl, seed]);
-  return <span data-presence={presence ?? (thinking ? "thinking" : "idle")} className={`agent-avatar ${imageDataUrl ? "agent-avatar--image" : "agent-avatar--generated"}${className ? ` ${className}` : ""}`}
-    style={{ width: iconSize, height: iconSize, borderRadius: imageDataUrl ? "30%" : 0 }}>
-    {color && !imageDataUrl ? <svg width="0" height="0" aria-hidden="true" focusable="false"><defs><filter id={colorId} colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values={colorMatrix(color)} /></filter></defs></svg> : null}
-    <img src={source} alt="" aria-hidden="true" style={color && !imageDataUrl ? { filter: `url(#${colorId})` } : undefined} />
+  const variant = avatarVariant(seed);
+  const current = presence ?? (thinking ? "thinking" : "idle");
+  const previous = useRef(current);
+  const [celebrating, setCelebrating] = useState(false);
+  useEffect(() => {
+    // Restored completed history must not replay a success animation.
+    const completedNow = current === "done" && ["received", "thinking", "working", "service", "waiting"].includes(previous.current);
+    previous.current = current;
+    setCelebrating(completedNow);
+    if (completedNow) {
+      const timer = window.setTimeout(() => setCelebrating(false), 1100);
+      return () => window.clearTimeout(timer);
+    }
+  }, [current]);
+  const expression = current === "done" && !celebrating ? "idle" : current;
+  const tint = color && color.toUpperCase() !== AVATAR_COLOURS[variant] && !imageDataUrl;
+  const [lx, ly, rx, ry] = eyePositions[variant];
+  return <span aria-hidden="true" data-presence={current} data-expression={expression} data-character={variant} data-motion={motion}
+    className={`agent-avatar ${imageDataUrl ? "agent-avatar--image" : "agent-avatar--generated"}${className ? ` ${className}` : ""}`}
+    style={{ width: iconSize, height: iconSize, borderRadius: imageDataUrl ? "30%" : 0, "--eye-colour": eyeColours[variant] } as CSSProperties}>
+    {tint ? <svg className="agent-avatar__filter" width="0" height="0" focusable="false"><defs><filter id={colorId} colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values={colorMatrix(color, AVATAR_COLOURS[variant])} /></filter></defs></svg> : null}
+    <span className="agent-avatar__character">
+      <img src={imageDataUrl ?? blobAvatarDataUrl(seed)} alt="" draggable={false} style={tint ? { filter: `url(#${colorId})` } : undefined} />
+      {!imageDataUrl ? <svg className="agent-avatar__face" viewBox="0 0 100 100" focusable="false">
+        <g className="agent-avatar__eyes">
+          <g transform={`translate(${lx} ${ly})`}><Eye presence={expression} lens={variant === 1} /></g>
+          <g transform={`translate(${rx} ${ry})`}><Eye presence={expression} right /></g>
+        </g>
+        {expression === "speaking" ? <path className="agent-avatar__voice" d="M46 76v2m4-4v6m4-4v2" /> : null}
+      </svg> : null}
+    </span>
   </span>;
 }
 
-export function ProfileAgentAvatar({ agent, iconSize = 18, thinking = false, presence }: { agent: FableAgentProfile; iconSize?: number; thinking?: boolean; presence?: AgentPresence }) {
-  return <AgentAvatar seed={agent.avatarSeed ?? `blob-v1:${agent.id}`} imageDataUrl={agent.iconImageDataUrl} color={agent.iconColor} thinking={thinking} presence={presence} iconSize={iconSize} />;
+function Eye({ presence, right = false, lens = false }: { presence: AgentPresence; right?: boolean; lens?: boolean }) {
+  if (lens) return <circle className="agent-avatar__pupil" r={presence === "paused" || presence === "unavailable" ? 2.5 : 4} fill="currentColor" stroke="none" />;
+  if (["received", "waiting", "input", "listening", "human"].includes(presence)) return <path d="M0 -2v4" strokeWidth={presence === "listening" ? 6 : 5} />;
+  const path = presence === "done" ? "M-5 1Q0 -6 5 1"
+    : presence === "paused" || presence === "unavailable" ? "M-5 2h10"
+    : presence === "blocked" ? right ? "M-5 -2L5 1" : "M-5 1L5 -2"
+    : presence === "thinking" ? right ? "M-5 0h10" : "M-5 -1Q0 -4 5 -1"
+    : presence === "working" || presence === "service" ? "M-5 0h10"
+    : "M-5 0Q0 3 5 0";
+  return <path d={path} />;
 }
 
-// Tint the light clay body while retaining the dark eyes and natural shading.
-function colorMatrix(color: string) {
+export function ProfileAgentAvatar({ agent, ...props }: { agent: FableAgentProfile } & Omit<AvatarProps, "seed" | "color" | "imageDataUrl">) {
+  return <AgentAvatar seed={agent.avatarSeed ?? `blob-v1:${agent.id}`} imageDataUrl={agent.iconImageDataUrl} color={agent.iconColor} {...props} />;
+}
+
+// Recolour only the shell artwork, retaining dark screens and independent eyes.
+function colorMatrix(color: string, original: string) {
   const safeColor = /^#[0-9a-f]{6}$/i.test(color) ? color : DEFAULT_AGENT_COLOR;
-  const [r, g, b] = [1, 3, 5].map((offset) => parseInt(safeColor.slice(offset, offset + 2), 16) / 255);
-  return `${r} 0 0 0 0 0 ${g} 0 0 0 0 0 ${b} 0 0 0 0 0 1 0`;
+  const channels = [1, 3, 5].map((offset) => parseInt(safeColor.slice(offset, offset + 2), 16) / 255);
+  const source = [1, 3, 5].map((offset) => parseInt(original.slice(offset, offset + 2), 16) / 255);
+  const mean = source.reduce((sum, value) => sum + value, 0) / 3;
+  const chroma = source.map((value) => value - mean);
+  const energy = chroma.reduce((sum, value) => sum + value * value, 0);
+  // Cream is nearly neutral. For coloured shells, replace their chroma rather
+  // than multiplying already saturated pixels; neutral screens/highlights survive.
+  if (energy < .015) return channels.map((value) => `${.3 * value} ${.59 * value} ${.11 * value} 0 0`).join(" ") + " 0 0 0 1 0";
+  return channels.map((target, row) => chroma.map((value, column) => (row === column ? 1 : 0) + (target - source[row]) * value / energy).join(" ") + " 0 0").join(" ") + " 0 0 0 1 0";
 }

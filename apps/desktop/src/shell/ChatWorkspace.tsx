@@ -3,7 +3,7 @@ import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
 import { ArtifactPreview } from "../components/conversation/ArtifactPreview";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { agentPresence, PRESENCE_LABELS } from "../lib/agent-presence";
+import { agentPresence, presenceLabel } from "../lib/agent-presence";
 import {
   lazy,
   Suspense,
@@ -465,17 +465,23 @@ export function ChatWorkspace() {
       thread,
     ]),
   );
+  const computerToolActive = agent.state.responseParts?.some((part) => part.kind === "tool" && part.state === "running" && (part.tool.startsWith("local-") || part.tool === "run-shell"));
+  const activePresence = agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt), {
+    computerController: localComputer.node?.browserActive && (computerToolActive || (!agent.state.running && localComputer.controller === "human")) ? localComputer.controller : undefined,
+    providerUnavailable: runtime.runtimeSnapshotReady && !runtime.connectedAgentBackend,
+    listening: voice.state.status === "listening",
+  });
   const previews = Object.fromEntries(
     runtime.agents.map((profile) => {
       const thread = profile.threadId
         ? threadById.get(profile.threadId)
         : undefined;
-      const presence = profile.id === activeAgent.id ? agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt)) : "idle";
-      const status: AgentSidebarPreview["status"] = presence === "waiting" || presence === "blocked" ? "attention" : ["received", "working", "thinking"].includes(presence) ? "running" : "idle";
+      const presence = profile.id === activeAgent.id ? activePresence : "idle";
+      const status: AgentSidebarPreview["status"] = ["waiting", "input", "blocked", "unavailable"].includes(presence) ? "attention" : ["received", "working", "thinking", "service"].includes(presence) ? "running" : "idle";
       return [
         profile.id,
         {
-          message: presence !== "idle" && presence !== "done" ? PRESENCE_LABELS[presence] : thread?.title ?? "Start a conversation",
+          message: presence !== "idle" && presence !== "done" ? presenceLabel(presence, agent.state.activity) : thread?.title ?? "Start a conversation",
           time: compactTime(thread?.updatedAt),
           status,
           presence,
@@ -580,7 +586,7 @@ export function ChatWorkspace() {
         <AgentWorkspaceHeader
           agent={activeAgent}
           attentionCount={runtime.openApprovals.length}
-          presence={agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt))}
+          presence={activePresence}
           activity={agent.state.activity}
           computerActive={Boolean(localComputer.node?.browserActive || hostedBrowser.opening)}
           onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.focus()); } : undefined}
@@ -609,7 +615,7 @@ export function ChatWorkspace() {
             <div className="conversation-feed" ref={conversationScroll.contentRef} onClickCapture={(event) => {
               if (event.target instanceof Element && event.target.closest("summary")) conversationScroll.pauseFollowing();
             }}>
-              <ConversationFeed messages={messages} agent={activeAgent} state={agent.state} threadId={selectedThreadId}
+              <ConversationFeed messages={messages} agent={activeAgent} state={agent.state} presence={activePresence} threadId={selectedThreadId}
                 profileName={profileName} connectors={runtime.connectorManifests} optimisticPrompt={optimisticUserMessage}
                 onOpenConnector={(id) => { setMarketplaceConnectorId(id); setMarketplaceTab("plugins"); }}
                 workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""}

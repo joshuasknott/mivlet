@@ -25,6 +25,7 @@ import { DEFAULT_ACCOUNT_WORKSPACE_STATUS, DEFAULT_IDENTITY_STATUS, defaultShell
 import { resolveCodexProvider } from "@fable/connectors/backends/codex";
 import { resolveNativeProvider } from "@fable/connectors/backends/native";
 import { OnboardingPreview } from "./OnboardingPreview";
+import { AgentAvatarPreview } from "./AgentAvatarPreview";
 import "../styles.css";
 
 if (!import.meta.env.DEV) throw new Error("The component preview is available only in development.");
@@ -149,4 +150,5 @@ function DesignPreview() {
   </>;
 }
 
-createRoot(document.getElementById("root")!).render(new URLSearchParams(window.location.search).get("view") === "onboarding" ? <OnboardingPreview /> : <DesignPreview />);
+const previewView = new URLSearchParams(window.location.search).get("view");
+createRoot(document.getElementById("root")!).render(previewView === "avatars" ? <AgentAvatarPreview /> : previewView === "onboarding" ? <OnboardingPreview /> : <DesignPreview />);

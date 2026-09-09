@@ -1,7 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { agentPresence } from "./agent-presence";
+import { agentPresence, presenceLabel } from "./agent-presence";
 const idle: Parameters<typeof agentPresence>[0] = { running: false, status: "idle", lastError: null, activity: undefined, responseParts: [], transcript: "" };
 describe("agent presence", () => {
+  it("does not animate stale tools after a stop, interruption or failure", () => {
+    const stale = { ...idle, activity: "Writing a file", transcript: "Old answer" };
+    expect(agentPresence({ ...stale, status: "cancelled" })).toBe("paused");
+    expect(agentPresence({ ...stale, status: "interrupted" })).toBe("paused");
+    expect(agentPresence({ ...stale, status: "failed" })).toBe("blocked");
+    expect(agentPresence({ ...stale, status: "failed" }, false, true)).toBe("received");
+  });
+  it("separates provider waiting from human attention and respects control ownership", () => {
+    const retrying = { ...idle, running: true, status: "retrying" as const };
+    expect(agentPresence(retrying)).toBe("service");
+    expect(agentPresence(retrying, true)).toBe("waiting");
+    expect(agentPresence(retrying, false, false, { computerController: "human" })).toBe("human");
+    expect(agentPresence(retrying, false, false, { computerController: "paused" })).toBe("paused");
+    expect(agentPresence(retrying, true, false, { computerController: "human" })).toBe("waiting");
+    expect(agentPresence(idle, false, false, { awaitingInput: true })).toBe("input");
+  });
+  it("uses confirmed availability and voice facts, never transcript content", () => {
+    expect(agentPresence(idle, false, false, { providerUnavailable: true })).toBe("unavailable");
+    expect(agentPresence(idle, false, false, { listening: true })).toBe("listening");
+    expect(agentPresence(idle, false, false, { speaking: true })).toBe("speaking");
+    expect(agentPresence({ ...idle, running: true, transcript: "Do you want me to continue?" })).toBe("working");
+    expect(presenceLabel("working", "Reading Google Drive")).toBe("Reading Google Drive");
+    expect(presenceLabel("paused", "Reading Google Drive")).toBe("Paused");
+  });
   it("gives approval and failure priority over active work", () => {
     const active = { ...idle, running: true, activity: "Reading a file" };
     expect(agentPresence(active, true)).toBe("waiting");
@@ -13,6 +37,6 @@ describe("agent presence", () => {
     expect(agentPresence({ ...idle, running: true })).toBe("thinking");
     expect(agentPresence({ ...idle, running: true, transcript: "An answer" })).toBe("working");
     expect(agentPresence({ ...idle, status: "completed" })).toBe("done");
-    expect(agentPresence({ ...idle, status: "cancelled" })).toBe("idle");
+    expect(agentPresence({ ...idle, status: "cancelled" })).toBe("paused");
   });
 });

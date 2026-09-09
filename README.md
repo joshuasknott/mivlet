@@ -19,7 +19,7 @@ a deployed or production-validated service.
 ### Implemented locally
 
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
-  profiles, persistent Organic avatar identities or uploaded images, and model
+  profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Dictation and send have separate
   controls below the message text.
 - First-run setup with Google-first account sign-in, a verified model-provider
