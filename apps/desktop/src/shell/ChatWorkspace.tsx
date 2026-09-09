@@ -1,7 +1,6 @@
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
-import { ArtifactPreview } from "../components/conversation/ArtifactPreview";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { agentPresence, PRESENCE_LABELS } from "../lib/agent-presence";
 import {
@@ -17,8 +16,6 @@ import { X } from "@phosphor-icons/react/dist/csr/X";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import type { FableAgentProfile } from "@fable/protocol";
-import { AgentEditor } from "../components/agents/AgentEditor";
-import { AccountDialog } from "../components/agents/AccountDialog";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import {
   AgentSidebar,
@@ -27,7 +24,6 @@ import {
 import { AgentWelcome } from "../components/agents/AgentWelcome";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
 
-import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { Composer } from "../components/Composer";
 
 
@@ -55,10 +51,21 @@ import { createLocalProject, updateLocalProject, archiveLocalProject, bindLocalP
 import { projectContributions, projectContributionPrompt, type ProjectContribution } from "../lib/project-turn";
 import { modelsForProvider } from "../lib/provider-models";
 import type { ExecutionAttempt, LocalProject } from "@fable/protocol";
-import { ProjectEditor, ProjectFiles, ProjectInstructions, ProjectParticipants, ProjectWorkspace, type ProjectDraft } from "../components/projects/ProjectWorkspace";
+import type { ProjectDraft } from "../components/projects/ProjectWorkspace";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 import "./project-room.css";
+
+const ProjectEditor = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectEditor })));
+const ProjectFiles = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectFiles })));
+const ProjectInstructions = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectInstructions })));
+const ProjectParticipants = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectParticipants })));
+const ProjectWorkspace = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectWorkspace })));
+
+const ArtifactPreview = lazy(() => import("../components/conversation/ArtifactPreview").then((module) => ({ default: module.ArtifactPreview })));
+const AgentEditor = lazy(() => import("../components/agents/AgentEditor").then((module) => ({ default: module.AgentEditor })));
+const AccountDialog = lazy(() => import("../components/agents/AccountDialog").then((module) => ({ default: module.AccountDialog })));
+const LiveWorkRail = lazy(() => import("../components/agents/LiveWorkRail").then((module) => ({ default: module.LiveWorkRail })));
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -856,7 +863,7 @@ export function ChatWorkspace() {
           />
         </Suspense>
       ) : selectedProject ? (
-        isPhone && !mobileConversation ? null : <ProjectWorkspace name={selectedProject.name} activeTab={projectTab} onTabChange={setProjectTab}
+        isPhone && !mobileConversation ? null : <Suspense fallback={null}><ProjectWorkspace name={selectedProject.name} activeTab={projectTab} onTabChange={setProjectTab}
           onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); } : undefined}
           headerActions={<>
             <button type="button" className="project-room-action" aria-label={`Open ${activeAgent.name}'s computer`} onClick={() => { setArtifactPreview(null); setWorkPanelOpen((open) => !open); }}><Desktop size={19} aria-hidden="true" /></button>
@@ -872,7 +879,7 @@ export function ChatWorkspace() {
             }}><ProfileAgentAvatar agent={profile} iconSize={30} presence={agent.state.running && activeAgent.id === profile.id ? agentPresence(agent.state, runtime.openApprovals.length > 0) : "idle"} /></button>)}</div></section>
             {projectFilesView(true)}
             <button type="button" className="project-room-view-files" onClick={() => setProjectTab("files")}>View all files</button>
-          </> : undefined} />
+          </> : undefined} /></Suspense>
       ) : selectedProjectId ? (
         <section className="workspace agent-workspace"><div className="project-room-status" role={projects.error ? "alert" : "status"}>
           <p>{projects.error || (projects.loading ? "Loading project…" : "This project is no longer available.")}</p>
@@ -895,12 +902,12 @@ export function ChatWorkspace() {
       </section>
       )}
 
-      {artifactPreview && !marketplaceTab ? <ArtifactPreview key={`${activeAgent.id}:${selectedThreadId}:${localComputer.node?.generation}:${artifactPreview}`}
+      {artifactPreview && !marketplaceTab ? <Suspense fallback={null}><ArtifactPreview key={`${activeAgent.id}:${selectedThreadId}:${localComputer.node?.generation}:${artifactPreview}`}
         output={artifactPreview} workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""}
         agentId={artifactOwner?.agentId ?? activeAgent.id} generation={artifactOwner?.generation}
-        onClose={() => { setArtifactPreview(null); artifactTrigger.current?.focus(); }} /> : null}
+        onClose={() => { setArtifactPreview(null); artifactTrigger.current?.focus(); }} /></Suspense> : null}
       {workPanelOpen && !marketplaceTab && !artifactPreview ? (
-        <LiveWorkRail
+        <Suspense fallback={null}><LiveWorkRail
           conversations={durableConversation.state.threads.filter((thread) =>
             thread.lifecycle === "active" && (activeAgent.threadIds ?? [activeAgent.threadId]).includes(thread.id)
           ).map((thread) => ({ id: thread.id, title: thread.title, time: compactTime(thread.updatedAt) }))}
@@ -992,13 +999,13 @@ export function ChatWorkspace() {
           }}
           screenPreviewUrl={screenPreviewUrl}
           onClose={() => setWorkPanelOpen(false)}
-        />
+        /></Suspense>
       ) : null}
 
       <input ref={projectFileInput} type="file" accept={ACCEPTED_LOCAL_KNOWLEDGE_FILES} multiple hidden onChange={(event) => {
         const files = Array.from(event.currentTarget.files ?? []); event.currentTarget.value = ""; void importProjectFiles(files);
       }} />
-      <ProjectEditor open={projectEditorOpen} project={projects.projects.find((item) => item.id === editingProjectId) ?? null}
+      {projectEditorOpen ? <Suspense fallback={null}><ProjectEditor open={projectEditorOpen} project={projects.projects.find((item) => item.id === editingProjectId) ?? null}
         pending={projectSaving} error={projectError} onClose={() => { if (!projectSavingRef.current) setProjectEditorOpen(false); }} onSave={(draft) => { void saveProject(draft); }}
         onArchive={(id) => {
           const project = projects.projects.find((item) => item.id === id);
@@ -1010,9 +1017,9 @@ export function ChatWorkspace() {
             if (selectedProjectId === id) { setSelectedProjectId(undefined); setProjectExecutor(undefined); runtime.setComposerValue(""); }
             setProjectEditorOpen(false); void durableConversation.refresh();
           }).catch((error) => setProjectError(error instanceof Error ? error.message : "Could not archive this project.")).finally(() => { projectSavingRef.current = false; setProjectSaving(false); });
-        }} />
+        }} /></Suspense> : null}
 
-      <AgentEditor
+      {agentEditorOpen ? <Suspense fallback={null}><AgentEditor
         onSkillsChange={(learnedTasks) => { if (editingAgentId) runtime.updateAgent(editingAgentId, { learnedTasks }); }}
         onUseSkill={async (task) => {
           const profile = runtime.agents.find((candidate) => candidate.id === editingAgentId);
@@ -1053,11 +1060,11 @@ export function ChatWorkspace() {
           setAgentEditorOpen(false);
           setEditingAgentId(null);
         }}
-      />
+      /></Suspense> : null}
 
-      {accountDialog ? <AccountDialog key={accountDialog} kind={accountDialog} name={profileName}
+      {accountDialog ? <Suspense fallback={null}><AccountDialog key={accountDialog} kind={accountDialog} name={profileName}
         records={Object.values(agent.state.usageReceipts)} onClose={() => setAccountDialog(null)}
-        onSignOut={async () => { await stopCurrentWork(); await runtime.signOutIdentity(); }} /> : null}
+        onSignOut={async () => { await stopCurrentWork(); await runtime.signOutIdentity(); }} /></Suspense> : null}
 
       {settingsOpen ? (
         <SettingsModal activeTab={settingsTab} onSelectTab={setSettingsTab} onClose={() => setSettingsOpen(false)}>
