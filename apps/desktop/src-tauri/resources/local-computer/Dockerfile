@@ -1,10 +1,19 @@
-FROM debian:bookworm-slim AS gui-guard-build
+# Base manifests are registry-verified and pinned. Debian package indexes remain
+# intentionally current until the release process adopts an apt snapshot policy.
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS gui-guard-build
 RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 COPY gui/fable-gui-exec-guard.c /build/guard.c
 RUN gcc -shared -fPIC -O2 -Wall -Wextra -Werror /build/guard.c -o /build/fable-gui-exec-guard.so
 
-FROM node:22-bookworm-slim AS node-runtime
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS node-runtime
+FROM node-runtime AS document-tools-build
+WORKDIR /document-tools
+COPY documents/package*.json ./
+RUN npm ci --ignore-scripts --no-audit --no-fund
+COPY documents/smoke.mjs ./
+RUN npm test
+
 FROM node-runtime AS viewer-build
 WORKDIR /viewer-build
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
@@ -24,11 +33,14 @@ RUN node build.mjs \
     && cp upstream/LICENSE.txt /viewer-output/LICENSE.txt \
     && cp node_modules/pako/LICENSE /viewer-output/pako-LICENSE.txt
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
+
+ARG FABLE_BUILD_CONTEXT_SHA256
 
 LABEL com.fable.local-computer-image="true" \
+      com.fable.build-context-sha256="${FABLE_BUILD_CONTEXT_SHA256}" \
       org.opencontainers.image.title="Fable Local Computer" \
-      org.opencontainers.image.version="0.1.0-v4"
+      org.opencontainers.image.version="0.1.0-v5"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -45,8 +57,10 @@ RUN apt-get update \
         git \
         jq \
         libreoffice-calc \
+        libreoffice-impress \
         libreoffice-writer \
         procps \
+        poppler-utils \
         python3 \
         python3-aiohttp \
         python3-docx \
@@ -86,9 +100,11 @@ RUN apt-get update \
 
 COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-runtime /usr/local/lib/node_modules /usr/local/lib/node_modules
+COPY --from=document-tools-build /document-tools/node_modules /opt/fable/document-tools/node_modules
 COPY --from=viewer-build /viewer-output /usr/share/fable-viewer
 COPY --from=viewer-build /tmp/kasm-client-source.tar.gz /usr/share/doc/fable-local-computer/kasm-client-source.tar.gz
 COPY viewer/ /usr/share/doc/fable-local-computer/viewer-build/
+COPY documents/verify-guest-documents.sh /usr/local/bin/fable-verify-document-tools
 COPY --from=gui-guard-build /build/fable-gui-exec-guard.so /usr/local/lib/fable-gui-exec-guard.so
 COPY gui/ /usr/share/doc/fable-local-computer/gui/
 COPY rootfs/usr/local/bin/ /usr/local/bin/
@@ -107,13 +123,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends sudo xterm pyth
 
 RUN chmod 0755 /usr/local/bin/fable-* \
     && ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+    && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && NODE_PATH=/opt/fable/document-tools/node_modules fable-verify-document-tools
 
 # Root owns service state. Chromium uses UID 1000, approved commands UID 1001,
 # and closed-execution GUI applications UID 1002.
 USER root
 ENV DISPLAY=:99 \
     HOME=/home/fable \
+    NODE_PATH=/opt/fable/document-tools/node_modules \
     XAUTHORITY=/run/fable-desktop/Xauthority \
     DBUS_SESSION_BUS_ADDRESS=unix:path=/run/fable-desktop/bus \
     LANG=C.UTF-8

@@ -23,9 +23,23 @@ export class SpeechToTextError extends Error {
   }
 }
 
+export interface SpeechRecordingReview {
+  recordingId: string;
+  durationMs: number;
+  sizeBytes: number;
+  mediaType: string;
+  providerLabel: string;
+  model: "gpt-4o-mini-transcribe";
+  maxDurationMs: number;
+}
+
 export interface SpeechToTextSession {
   /** The only source of a completed transcript. Settles at natural or requested end. */
   completion: Promise<string>;
+  /** Present only when a completed recording needs an explicit upload review. */
+  review?: Promise<SpeechRecordingReview>;
+  /** Authorizes the reviewed recording once. It never grants an agent permit. */
+  authorize?(): void;
   stop(): void;
   cancel(): void;
   dispose(): void;

@@ -1,9 +1,11 @@
 # Plugins and daily-driver assessment
 
-Assessed 7 September 2026 against the current working tree. The label rename and
-the capability fixes recorded below are implemented; the wider architecture and
-priorities remain proposals, not a claim of product parity. Existing uncommitted work was
-preserved. No live provider or native computer acceptance run was performed here.
+Assessed 7 September 2026 against the current working tree. Implemented changes
+and their evidence are recorded below. Container checks, native unit tests,
+browser previews and direct provider probes are separate evidence classes;
+they do not establish repeated completion through the packaged application.
+The complete daily-driver criteria remain the assessment target. Implementation
+was stopped at the user's requested handoff; outstanding criteria are not closed.
 
 ## Recommended plugin model
 
@@ -30,11 +32,11 @@ authority without deleting the computer or browser profile. Both plugins share
 one lazy-started runtime, with concurrency controlled by the existing lease.
 Browser-only access must not silently grant shell or desktop access.
 
-Implementation would extend the current marketplace beyond its connector-only
-manifest/connection assumptions, then replace readiness-only advertisement in
-`apps/desktop/src/lib/computer-tools.ts` with enabled + healthy + compatible
-capability resolution. Use the same resolver for submission, retry and resume.
-Keep final authorization checks in Rust; hiding tools in React is insufficient.
+The marketplace now exposes both built-ins. Enabled + ready/lazily startable +
+compatible capability resolution is shared by submission and retry. Native
+admission checks enforce enablement, generation and control lease; disabling
+revokes admitted authority and pauses/drains the shared computer. Browser-only
+access includes scoped artifact publication, without shell or desktop access.
 
 ## What makes it effective
 
@@ -49,11 +51,12 @@ every integration at full size. Maintain a common result envelope for text,
 images, sources, artifacts and recoverable errors across provider adapters.
 Preserve secret-free native image delivery when adding additional visual providers.
 
-The current instruction stops after two unsuccessful attempts at a step. Replace
-that blunt limit with bounded recovery classes: re-observe stale state, reacquire
-a lost tab, wait for a loading page, or request human control for private steps.
-Budgets and cancellation still apply. Task checkpoints should retain intent and
-verified progress, never reusable approvals or stale observation identifiers.
+Recovery now distinguishes stale observations, lost tabs, loading and uncertain
+writes. It uses bounded class-specific recovery, keeps uncertain writes blocked
+against replay, and preserves task intent plus successful-result evidence for
+explicit continuation. Historical authority identifiers are stripped; unused
+persisted permits are invalidated during crash recovery. Live crash/side-effect
+acceptance remains required.
 
 KasmVNC is already in the current Dockerfile and viewer. Evaluate Browser Use or
 Cua only against concrete failures in the present adapters, behind Fable-owned
@@ -64,15 +67,15 @@ A dependency swap alone does not establish better task success.
 
 | Priority | Area | Current evidence and gap | Completion criterion |
 | --- | --- | --- | --- |
-| P0 | Everyday web research | Public URL fetching is now advertised without Docker; dedicated search and citation handling remain incomplete, and inherited Codex web search is disabled | Fresh search, page reading and traceable citations work from ordinary conversation, without manually opening the computer |
+| P0 | Everyday web research | Public URL fetching is advertised without Docker. The selected Codex app-server route now enables provider-owned live search and preserves its non-approvable activity/results, with direct ephemeral app-server evidence for fresh search, selected-result reading and linked citation. Packaged ordinary-chat acceptance remains unverified, and other provider routes have URL fetch but no dedicated search backend | Fresh search, page reading and traceable citations work repeatedly from packaged ordinary conversation on every advertised route, while unsupported routes explain the limitation |
 | P0 | Consistent tool access | Submission and retry now share capability resolution; retry uses its original provider/model and retains working instructions. Native visual delivery still supports only a connected vision-capable Codex route | Every supported provider route is tested or clearly reports its limitation |
 | P0 | Browser/computer completion | Real tools and control leases exist; the verification log still leaves repeated complete workflows and external artifact opening unverified | Research, sign-in takeover, download, file creation and opening succeed repeatedly through the packaged native app |
-| P0 | Useful deliverables | Guest includes Writer, Calc, Python, pandas, python-docx, openpyxl and reportlab; `computer-artifact` explicitly excludes PDF and does not offer a slide format | Generate, validate, preview/open and export PDF, DOCX, XLSX and slides; verify layout and formulas, not just file existence |
+| P0 | Useful deliverables | Native PDF/PPTX validation and publication added; guest adds Impress/PptxGenJS. Real generated/rendered DOCX/PDF/PPTX fixtures pass structural and visual checks; XLSX formula cache equals expected 5. Packaged conversation publication/opening remains unverified | Generate, validate, preview/open and export PDF, DOCX, XLSX and slides; verify layout and formulas, not just file existence |
 | P0 | Reliable continuation | Durable conversations and retry exist, but work is tied to an open app and awake PC | Stop/resume and crash recovery preserve progress, explain uncertain external writes and avoid duplicate actions |
-| P1 | Coding workflow | Git, shell and files exist in the isolated guest; these do not establish a usable local repository/review/worktree workflow | Import or attach an approved repo, edit, test, inspect diffs, create a PR and preserve unrelated work without exposing the host shell |
+| P1 | Coding workflow | Native ZIP chooser imports an isolated bounded snapshot and excludes common credential/dependency files. Native archive tests and a guest Git worktree/edit/test/diff/preservation probe pass. Ordinary-chat execution and approved GitHub PR creation remain unverified | Import or attach an approved repo, edit, test, inspect diffs, create a PR and preserve unrelated work without exposing the host shell |
 | P1 | Plugin completeness | Current marketplace handles authenticated app integrations; skills live separately and generic built-in runtime plugins are not represented | Install/enable/disable, health, permissions, skill loading and tool discovery work consistently for apps and built-ins |
-| P1 | Context and projects | Local memory, attachments and durable conversations exist; full project organization and long-session recall need acceptance evidence | Resume multi-day work with correct files, instructions and sources; inspect/correct memory; handle context limits without losing commitments |
-| P1 | Media and voice | Current user-facing voice is OS dictation; artifact display is not image generation or full spoken conversation | Validate image understanding, image generation/editing, audio transcription and interruptible voice through supported providers |
+| P1 | Context and projects | Settings now exposes memory inspection, correction, disabling and forgetting; targeted native updates reject stale edits and resurrection. Full project organization and bounded long-session recall remain incomplete | Resume multi-day work with correct files, instructions and sources; inspect/correct memory; handle context limits without losing commitments |
+| P1 | Media and voice | Bounded PNG/JPEG/WebP input is wired for a connected image-capable Codex route, with native staging and metadata-only persistence. Failed runs retain attachments; retries require reattachment. Other image routes, generation/editing and full voice remain incomplete | Validate image understanding, image generation/editing, audio transcription and interruptible voice through supported providers |
 | P1 | Scheduled and delegated work | Multiple named profiles and hosted foundations do not prove autonomous background execution | Persistent local scheduling, independent task state, cancellation, recovery and meaningful notifications; clearly explain sleep/close limitations |
 | P2 | Distribution and mobility | README marks signed installers, updater channels, multi-device sync and mobile control incomplete | Reliable upgrade/recovery path; add cross-device access only when intentionally expanding the local-first scope |
 
@@ -127,14 +130,15 @@ activity and upstream benchmarks do not establish task success in Fable.
 | Desktop drivers and evaluation | [Cua](https://github.com/trycua/cua) | Evaluate Linux driver and benchmark components if they improve measured desktop failures. Do not replace the computer or introduce a second authority model. Optional components have different licenses. |
 | Desktop viewing | [KasmVNC](https://github.com/kasmtech/KasmVNC) | Already used. Keep the native-authenticated viewer and control lease; this is the display layer, not reasoning or task recovery. |
 | Document ingestion | [MarkItDown](https://github.com/microsoft/markitdown) | Candidate for extracting Office/PDF content into model-readable text inside the guest. Extraction does not preserve full layout or supply editing/export. |
-| Slide output | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) | Strong candidate for generating editable PPTX in the guest. Add artifact validation/publication and rendered-slide QA before claiming support. |
-| PDF preview | [PDF.js](https://github.com/mozilla/pdf.js) | Candidate for a bounded, isolated viewer of verified immutable artifact bytes. Keep scripting and external actions disabled. PDF export also needs structural validation; do not merely remove the current rejection. |
+| Slide output | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) | The guest pins MIT-licensed 4.0.1 with a build-time generation smoke test and LibreOffice Impress for editing/rendering. Native PPTX publication rejects macros, embedded programs, duplicate or invalid package paths, and external relationships. Rendered-slide QA remains required before claiming a presentation is correct. |
+| PDF preview | [PDF.js](https://github.com/mozilla/pdf.js) | Still a candidate for a bounded, isolated in-app viewer. Native PDF export now uses MIT-licensed lopdf 0.44.0 as a strict, resource-bounded structural validator and rejects active or ambiguous documents before host opening; this is rejection, not sanitization. |
 | Search | [SearXNG](https://github.com/searxng/searxng) | Optional self-hosted search service, with operational and upstream-engine reliability costs. A supported search API behind a native adapter is the alternative; public instances are not a dependable product backend. |
 | Research orchestration | [GPT Researcher](https://github.com/assafelovic/gpt-researcher) | Reference for research decomposition and reporting. Avoid adding a parallel credential store or duplicating Fable's conversation execution loop. |
 | Durable execution | [LangGraph.js](https://github.com/langchain-ai/langgraphjs) | Reference/evaluation candidate for checkpoints and interrupted workflows. First extend Fable's existing encrypted execution records; adopting another persistence layer must have a demonstrated benefit. It cannot execute while the PC is asleep. |
 | Voice | [Pipecat](https://github.com/pipecat-ai/pipecat) | Candidate for a provider-neutral voice pipeline with turn handling and interruptions. Requires microphone lifecycle, native credential mediation and a supported audio provider; it does not inherit consumer subscription entitlements. |
 | MCP interoperability | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | Use for compatibility tests or new adapter components where it improves the existing implementation. Main is a changing v2 line; choose the supported release deliberately. Keep Fable's native OAuth custody. |
 | Coding workflow | [OpenHands](https://github.com/OpenHands/OpenHands) | Reference for sandboxed development workflows, not a replacement UI/runtime. Fable still needs its own repo attachment, diff review, worktree and PR experience. |
+| Native coding runtime | [Codex](https://github.com/openai/codex) | User-selected reference for repository workflows, native tool delivery, checkpoints and context handling. Apache-2.0 licensed; inspect the relevant version and retain required notices for any reused code. Fable's provider adapters, isolated computer and approval authority remain the integration boundaries. |
 | Capability evaluations | [promptfoo](https://github.com/promptfoo/promptfoo) | Candidate for repeatable prompt/tool/provider comparisons. Pair with actual native workflow tests; an evaluation configuration alone does not prove parity. |
 
 Retain the existing guest Python document/data libraries for DOCX and XLSX.
@@ -143,14 +147,19 @@ wrapper cannot supply model weights, account access or free inference. Project
 organization, memory correctness, notifications, signing/updating and multi-device
 behavior need Fable product engineering even when libraries cover individual parts.
 
-The intended scope remains every gap in this assessment. A gap closes only when
-its completion criterion is met, including relevant native/live evidence.
+A gap closes only when its completion criterion is met, including relevant
+native/live evidence. The entries below distinguish implemented work from that
+remaining acceptance work.
 
 ## Implementation evidence — 7 September 2026
 
 - Public URL fetching is included in ordinary conversation tool discovery without
   requiring Docker. Existing native URL, SSRF and exact approval checks remain.
-  This is URL fetching, not a new search engine or completed research feature.
+  The selected Codex route also enables its provider-owned live web search. A
+  direct ephemeral app-server probe completed a fresh search, selected and opened
+  one structured result, and returned a linked citation without an approval
+  request. This does not establish the packaged Fable conversation flow or add a
+  search backend to other provider routes.
 - New turns and retries share `conversationToolsForModel`. Retry resolves the
   original attempt's provider/model rather than the currently selected model's
   visual capabilities. Unsupported visual routes remain excluded.
@@ -159,3 +168,59 @@ its completion criterion is met, including relevant native/live evidence.
 - 68 focused tests passed across computer tool selection, native-agent retry,
   desktop execution and official connector execution. Desktop typecheck and
   production build passed. These are local/mocked checks, not live parity proof.
+
+## Handoff status — implementation stopped at user request
+
+All changes remain uncommitted in the isolated worktree. No push, deployment,
+external message, or metered media demonstration was performed.
+
+Implemented during this pass:
+
+- Built-in Browser/Computer plugin controls, safer retry/recovery, readable URL
+  extraction and Codex-native search, repository ZIP import, and stricter
+  document/image artifact validation.
+- Local research schedules with durable claims, memory inspection/correction,
+  bounded conversation-context admission, native image generation/editing
+  boundaries, and recording review with native OpenAI transcription custody.
+- The selected shared project room: private encrypted projects, create/edit/archive,
+  shared conversation/instructions/imported reference links, explicit all-agent
+  or individual recipients, each agent's configured model, and immutable native
+  run authorship. Sequential contributions reload canonical history and suppress
+  synthetic handoff messages in the human conversation. Individual chats remain.
+- A development-only project preview at
+  `http://localhost:1431/design-preview.html?view=projects` uses sample data and
+  explicitly does not send model requests or persist projects.
+
+Evidence actually obtained:
+
+- Earlier package tests, workspace typecheck, quality checks and production build
+  passed before the final project additions. They were not repeated at wrap-up
+  and are not claimed as gates for the complete final diff.
+- Project native tests passed 4/4; native-agent hook tests passed 43/43, including
+  queued author-binding failure, cancellation fences, and fresh shared history.
+- Final project route/feed regressions passed 10/10. Desktop TypeScript checking
+  passed after integration. The final native library passed `cargo check`.
+- The project preview was visually inspected at the available desktop viewport;
+  a concrete unused grid-column defect was fixed. Full reference-fidelity,
+  responsive, and packaged-native project acceptance remain unverified.
+
+Still incomplete or blocked:
+
+- Binary artifact handoff between agents is **unavailable**. The unreachable draft
+  was removed during consolidation; it remains in commit 8a15da1. Native
+  approval/run binding, integration, and regression tests are still required
+  before exposing this capability.
+- Project reference-file preview, historical author lookup beyond the recent
+  500-entry UI list, automatic delegation, and full multi-agent interruption/restart
+  acceptance remain unfinished. Unknown historical authors display a neutral label
+  rather than being attributed to the currently selected agent.
+- Full interruptible voice, automatic long-session compaction/recall, repeated
+  packaged workflows, and the remaining assessment criteria are not complete.
+- Live media/transcription calls were not exercised. Packaged GUI automation is
+  unavailable in this session; GitHub write acceptance needs an authorized test
+  destination; signed upgrades need signing credentials, an updater feed and
+  clean-machine upgrade verification.
+- Bundle limits still fail on the last measured pre-project build: total JS
+  1,117,319 B versus 1,086,261 B; gzip 311,705 B versus 300,382 B; initial JS
+  477,502 B versus 472,877 B. CSS passed. No limits were weakened, and no new
+  bundle investigation or full-suite rerun was started after the wrap-up request.

@@ -32,6 +32,7 @@ export type VoiceInputStatus =
   | "listening"
   | "permission-denied"
   | "processing"
+  | "reviewing"
   | "starting"
   | "stopping"
   | "success"

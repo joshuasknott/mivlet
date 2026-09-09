@@ -22,6 +22,7 @@ import {
   snapshotRuntimeLocalBrowser,
   openRuntimeLocalComputerViewer,
   closeRuntimeLocalComputerViewer,
+  prepareRuntimeBuiltinComputer,
 } from "../runtime";
 import { changeComputerLifecycle } from "../lib/computer-lifecycle";
 
@@ -137,6 +138,11 @@ export function useLocalComputer({ workspaceId, agentId, viewing = false, thumbn
     }
   };
   const computer = useQuery({ queryKey, queryFn: readNode, enabled: Boolean(scope.target), retry: false, gcTime: 0, refetchInterval: scope.target ? 2_000 : false });
+  useEffect(() => {
+    const refresh = () => { void queryClient.invalidateQueries({ queryKey: ["local-computer"] }); };
+    window.addEventListener("fable-builtin-plugins-changed", refresh);
+    return () => window.removeEventListener("fable-builtin-plugins-changed", refresh);
+  }, [queryClient]);
   const node = scope.disconnected ? null : computer.data ?? null;
   const leaseExpired = node?.controller === "human" && (!node.leaseExpiresAt || !Number.isFinite(Date.parse(node.leaseExpiresAt)) || Date.parse(node.leaseExpiresAt) <= Date.now());
   const effectiveController: LocalComputerController = leaseExpired ? "paused" : node?.controller ?? "paused";
@@ -284,6 +290,22 @@ export function useLocalComputer({ workspaceId, agentId, viewing = false, thumbn
     error: recoveryError ?? (viewer.error instanceof Error ? viewer.error.message : null),
     openViewer: () => viewer.mutateAsync(),
     provision: () => invokeAction({ kind: "provision" }),
+    prepareForTool: async (tool: string) => {
+      if (!scope.target || scope.pending || scope.disconnected) throw new Error("Refresh the agent's computer before continuing.");
+      const expected = scope.epoch;
+      const initial = await loadRuntimeLocalComputer(scope.target);
+      if (!current(expected) || !initial) throw new Error("The computer scope changed before startup.");
+      acceptNode(initial);
+      queryClient.setQueryData(queryKey, initial);
+      if (initial.lifecycle === "ready") return initial;
+      const startupEpoch = scope.epoch;
+      const plugin = tool.startsWith("local-browser") || (tool === "computer-artifact" && !initial.plugins?.computer) ? "browser" : "computer";
+      const result = await prepareRuntimeBuiltinComputer(scope.target, plugin, initial.generation);
+      if (!current(startupEpoch) || !result) throw new Error("The computer scope changed during startup. Refresh before continuing.");
+      acceptNode(result);
+      queryClient.setQueryData(queryKey, result);
+      return result;
+    },
     stop: () => invokeAction({ kind: "lifecycle", action: "stop" }),
     restart: () => invokeAction({ kind: "lifecycle", action: "restart" }),
     updateSystem: () => invokeAction({ kind: "lifecycle", action: "update" }),

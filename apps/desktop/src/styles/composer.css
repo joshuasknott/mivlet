@@ -473,6 +473,27 @@
   font-size: var(--text-13);
 }
 
+.recording-review {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-raised);
+}
+
+.recording-review__copy { display: grid; flex: 1 1 240px; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.recording-review__copy span, .recording-review__copy small { color: var(--ink-muted); }
+.recording-review__copy small { line-height: 1.35; }
+.recording-review__actions { display: flex; flex-shrink: 0; gap: 6px; }
+.composer-glow .recording-review__actions .composer-chip { width: auto; min-width: max-content; height: auto; min-height: 44px; padding: 8px 12px; border-radius: 8px; white-space: nowrap; }
+.recording-review__confirm { color: var(--accent-strong); }
+
 .voice-actions {
   position: relative;
   display: flex;

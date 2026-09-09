@@ -19,10 +19,11 @@ credential-store service and is never silently replaced if missing or invalid.
 
 ## Current schema
 
-Schema v38 retains the local conversation product:
+Schema v40 retains the local conversation product:
 
 - workspace, optional project context, threads, messages, and message revisions;
 - the minimal internal `run` execution attempt plus tool calls and approvals;
+- member-private local schedule definitions and an encrypted occurrence ledger;
 - audit history and preferences;
 - provider and Connection metadata, connector cache/settings, and migration
   quarantine;
@@ -33,8 +34,16 @@ Schema v38 retains the local conversation product:
 Fresh databases do not retain the retired orchestration stores. The v37 to v38
 migration deletes their pre-release data and tables in one forward-only cleanup,
 then verifies referential integrity. Historical migration code remains only so
-an older pre-release database can reach v38 without skipping intermediate schema
+an older pre-release database can reach the current version without skipping intermediate schema
 repairs; it is not an active product surface.
+
+Local schedules added in v40 use new `local_schedule` and
+`local_schedule_occurrence` tables. They do not read or recreate the retired
+Routine, workflow, Mission, or generic scheduler records. Prompt and civil-time
+details stay encrypted; query columns contain only private scope, opaque route
+and agent ids, states, revisions, timestamps, and one-way claim/slot
+fingerprints. A stored or claimed occurrence is not evidence that execution
+started or completed.
 
 Startup fails closed when the database is structurally corrupt, has unresolved
 foreign-key violations, or carries a schema newer than the binary understands.

@@ -36,6 +36,8 @@ export interface ComposerAttachment {
   type: string;
   sizeBytes: number;
   previewUrl?: string;
+  /** Prepared transient model input. Its data URL must never enter durable state. */
+  imageInput?: import("@fable/protocol").NativeImageInput;
   sourceId?: string;
   status?: string;
 }
@@ -44,6 +46,7 @@ export interface PersistedShellState {
   activeItem: string;
   composerValue: string;
   voiceEnabled: boolean;
+  voiceProvider?: "browser" | "openai";
   approvalAudit: import("@fable/protocol").ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
   approvalRules: import("@fable/protocol").ApprovalGrant[];

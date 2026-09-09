@@ -9,6 +9,12 @@ import {
 } from "./persistence";
 
 describe("conversation shell persistence", () => {
+  it("preserves explicit OpenAI dictation selection and defaults old snapshots to browser speech", () => {
+    const snapshot = shellStateToRuntimeSnapshot({ ...defaultShellState, voiceProvider: "openai" });
+    expect(shellStateFromRuntimeSnapshot(snapshot, defaultShellState).voiceProvider).toBe("openai");
+    delete snapshot.voiceProvider;
+    expect(shellStateFromRuntimeSnapshot(snapshot, defaultShellState).voiceProvider).toBe("browser");
+  });
   beforeEach(() => window.localStorage.clear());
 
   it("keeps agent skills, reasoning and previous conversations across snapshots", () => {

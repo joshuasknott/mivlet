@@ -53,9 +53,22 @@ import type {
   DurableRunWriter,
   HydratedConversation,
 } from "../lib/conversation-runtime";
-import { buildContinuationMessages } from "../lib/agent-run";
+import {
+  buildContinuationMessages,
+  buildInterruptedAttemptCheckpoint,
+  continuationMessagesForModel,
+  INTERRUPTED_CHECKPOINT_INSTRUCTION,
+} from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
-import { appendResponseText, CONVERSATION_STYLE_INSTRUCTIONS, resolveResponseTool, toolActivity, toolConnectorId, type ResponsePart } from "../lib/conversation-presentation";
+import { planConversationContext } from "../lib/conversation-context";
+import {
+  appendResponseText,
+  CONVERSATION_STYLE_INSTRUCTIONS,
+  resolveResponseTool,
+  toolActivity,
+  toolConnectorId,
+  type ResponsePart,
+} from "../lib/conversation-presentation";
 
 /** True when the desktop (Tauri) runtime is present (drives the noTransport state). */
 function hasDesktopRuntime(): boolean {
@@ -76,7 +89,10 @@ export interface NativeAgentState {
   endedAt?: string;
   progressThreadId?: string;
   reasoningSummaries?: Record<string, string>;
-  progressReceipts?: Record<string, { summaries: Record<string, string>; startedAt: string; endedAt: string }>;
+  progressReceipts?: Record<
+    string,
+    { summaries: Record<string, string>; startedAt: string; endedAt: string }
+  >;
   activity?: string;
   usage: {
     inputTokens: number;
@@ -153,11 +169,25 @@ export interface UseNativeAgentOptions {
   ) => DurableRunWriter;
 }
 
+export interface NativeAgentRunControl {
+  /**
+   * Runs after the queued execution journal exists, before canonical user
+   * persistence or provider egress. Project execution uses this boundary to
+   * bind the attempt to its native author authority.
+   */
+  afterAttemptQueued?: (context: {
+    attemptId: string;
+    threadId: string | undefined;
+  }) => void | Promise<void>;
+  /** Suppress only the canonical user record for an internal contribution. */
+  canonicalUserMessage?: "persist" | "suppress";
+}
+
 export function useNativeAgent(options: UseNativeAgentOptions) {
   const [state, setState] = useState<NativeAgentState>({
     transcript: "",
-        reasoningSummaries: {},
-        activity: "",
+    reasoningSummaries: {},
+    activity: "",
     usage: null,
     running: false,
     lastError: null,
@@ -237,7 +267,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             (run.status === "interrupted" || run.status === "failed") &&
             run.recoverable,
         ),
-        progressReceipts: Object.fromEntries(runs.map((run) => [run.id, { summaries: run.reasoningSummaries ?? {}, startedAt: run.createdAt, endedAt: run.updatedAt }])),
+        progressReceipts: Object.fromEntries(
+          runs.map((run) => [
+            run.id,
+            {
+              summaries: run.reasoningSummaries ?? {},
+              startedAt: run.createdAt,
+              endedAt: run.updatedAt,
+            },
+          ]),
+        ),
       }));
     })();
   }, []);
@@ -294,6 +333,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       preparedContext?: PreparedExecutionContext | string,
       requestedPermissionMode?: PermissionMode,
       parentAttemptId?: string,
+      control?: NativeAgentRunControl,
     ) => {
       let persisted: ExecutionAttempt | null = null;
       let terminalized = false;
@@ -317,9 +357,21 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       }
       const providerId = backend.providerId;
       try {
-        validateReasoningEffort(providerId, modelsRef.current.find((model) => model.id === request.model) ?? backend.backend.models.find((model) => model.id === request.model), request.reasoningEffort);
+        validateReasoningEffort(
+          providerId,
+          modelsRef.current.find((model) => model.id === request.model) ??
+            backend.backend.models.find((model) => model.id === request.model),
+          request.reasoningEffort,
+        );
       } catch (error) {
-        setState((current) => ({ ...current, lastError: error instanceof Error ? error.message : "Choose a reasoning level again.", status: "failed" }));
+        setState((current) => ({
+          ...current,
+          lastError:
+            error instanceof Error
+              ? error.message
+              : "Choose a reasoning level again.",
+          status: "failed",
+        }));
         return;
       }
       const generatedAttemptId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -346,7 +398,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // cannot both acquire provider authority before either durable write.
       activeAttemptIdRef.current = attemptId;
       const requestThreadId = threadIdRef.current;
-      let providerRequest = request;
+      let history: AgentTurnRequest["messages"] = [];
       if (requestThreadId && loadConversationRef.current) {
         try {
           const conversation =
@@ -362,24 +414,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
           // Completed conversation only. Orphaned tool results and tool calls
           // must not be replayed as requests or duplicated in the transcript.
-          const history = buildContinuationMessages(
-            conversation.messages.filter((view) => !parentAttemptId || view.message.runId !== parentAttemptId),
-          ).filter(
-            (message) =>
-              message.role === "user" || message.role === "assistant",
+          history = continuationMessagesForModel(
+            buildContinuationMessages(
+              conversation.messages.filter(
+                (view) =>
+                  !parentAttemptId || view.message.runId !== parentAttemptId,
+              ),
+            ),
           );
-          providerRequest = {
-            ...request,
-            messages: [
-              ...request.messages.filter(
-                (message) => message.role === "system",
-              ),
-              ...history,
-              ...request.messages.filter(
-                (message) => message.role !== "system",
-              ),
-            ],
-          };
         } catch (error) {
           activeAttemptIdRef.current = null;
           setState((current) => ({
@@ -399,23 +441,33 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const provider = options.providers.find(
         (candidate) => candidate.id === providerId,
       );
+      const selectedModel =
+        modelsRef.current.find((model) => model.id === request.model) ??
+        backend.backend.models.find((model) => model.id === request.model);
+      const contextPlan = planConversationContext({
+        history,
+        request,
+        contextPrefix: prepared.systemPrefix,
+        contextWindowTokens: selectedModel?.capabilities?.contextWindow,
+        backendType: provider?.backendType ?? backend.backend.backendType,
+      });
+      if (!contextPlan.ok) {
+        activeAttemptIdRef.current = null;
+        setState((current) => ({
+          ...current,
+          lastError: contextPlan.message,
+          status: "failed",
+          currentAttemptId: null,
+        }));
+        return;
+      }
+      const providerRequest = { ...request, messages: contextPlan.messages };
       if (provider?.backendType === "native-api") {
         try {
-          const requiredInputTokens = Math.max(
-            1,
-            Math.ceil(
-              (providerRequest.messages.reduce(
-                (total, message) => total + message.content.length,
-                0,
-              ) +
-                prepared.systemPrefix.length) /
-                4,
-            ),
-          );
           providerRoute = await selectNativeProviderRoute({
             providerId,
             model: request.model,
-            requiredInputTokens,
+            requiredInputTokens: contextPlan.estimatedInputTokens,
             requiredOutputTokens: request.maxTokens,
             requiresTools: request.tools.length > 0,
           });
@@ -449,14 +501,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         reasoningSummaries: {},
         activity: "",
         progressThreadId: requestThreadId,
-        progressPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content,
+        progressPrompt: request.messages
+          .filter((message) => message.role === "user")
+          .at(-1)?.content,
         responseParts: [],
         startedAt: createdAt,
         endedAt: undefined,
         usage: null,
         running: true,
         lastError: null,
-        status: "streaming",
+        status: "queued",
         recoverableAttempts: parentAttemptId
           ? current.recoverableAttempts.filter(
               (run) => run.id !== parentAttemptId,
@@ -487,12 +541,26 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           content: message.content,
           toolCallId: message.toolCallId,
           toolName: message.toolName,
+          ...(message.images?.length
+            ? {
+                images: message.images.map(
+                  ({ id, name, mediaType, sizeBytes, width, height }) => ({
+                    id,
+                    name,
+                    mediaType,
+                    sizeBytes,
+                    width,
+                    height,
+                  }),
+                ),
+              }
+            : {}),
         }));
       persisted = {
         id: attemptId,
         providerId,
         model: request.model,
-        status: "streaming",
+        status: "queued",
         transcript: "",
         threadId: requestThreadId,
         exchanges: initialExchanges,
@@ -513,18 +581,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         : null;
       activeWriterRef.current = durableWriter;
       try {
-        // Persist the canonical user turn before egress. A retry supplies only
-        // its new user input, never a replay of already-completed tool work.
-        if (durableWriter) {
-          for (const exchange of initialExchanges.filter(
-            (entry) => entry.role === "user",
-          )) {
-            await durableWriter.record({
-              kind: "user",
-              content: exchange.content,
-            });
-          }
-        }
+        // The queued journal is the authority callback's immutable anchor. It
+        // must exist before project binding and before any provider egress.
         await saveRuntimeExecutionAttempt(persisted);
       } catch (error) {
         const message =
@@ -565,6 +623,158 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         activeWriterRef.current = null;
         return;
       }
+      try {
+        await control?.afterAttemptQueued?.({
+          attemptId,
+          threadId: requestThreadId,
+        });
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not authorize the queued agent contribution.";
+        const failed: ExecutionAttempt = {
+          ...persisted,
+          status: "failed",
+          recoverable: true,
+          error: message,
+          updatedAt: new Date().toISOString(),
+        };
+        persisted = failed;
+        activePersistedRef.current = failed;
+        try {
+          await saveRuntimeExecutionAttempt(failed);
+        } catch {
+          /* the queued journal already records the failed boundary */
+        }
+        setState((current) => ({
+          ...current,
+          running: false,
+          status: "failed",
+          lastError: message,
+          endedAt: failed.updatedAt,
+          recoverableAttempts: [
+            failed,
+            ...current.recoverableAttempts.filter(
+              (run) => run.id !== attemptId,
+            ),
+          ],
+          currentAttemptId: null,
+        }));
+        activeAttemptIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
+        return failed;
+      }
+      const cancelledAfterQueue = Boolean(shouldCancelRef.current?.());
+      const staleAfterQueue =
+        activeAttemptIdRef.current !== attemptId ||
+        threadIdRef.current !== requestThreadId ||
+        activePersistedRef.current?.status === "cancelled";
+      if (cancelledAfterQueue || staleAfterQueue) {
+        const alreadyCancelled =
+          activePersistedRef.current?.status === "cancelled";
+        const message =
+          cancelledAfterQueue || alreadyCancelled
+            ? "The queued agent contribution was cancelled before it started."
+            : "The conversation changed before the queued agent contribution could start.";
+        const terminal: ExecutionAttempt = alreadyCancelled
+          ? activePersistedRef.current!
+          : {
+              ...persisted,
+              status: cancelledAfterQueue ? "cancelled" : "failed",
+              recoverable: !cancelledAfterQueue,
+              error: message,
+              updatedAt: new Date().toISOString(),
+            };
+        persisted = terminal;
+        if (!alreadyCancelled) {
+          try {
+            await saveRuntimeExecutionAttempt(terminal);
+          } catch {
+            /* the queued journal remains recoverable */
+          }
+        }
+        setState((current) => ({
+          ...current,
+          running: false,
+          status: terminal.status,
+          lastError: message,
+          endedAt: terminal.updatedAt,
+          recoverableAttempts: terminal.recoverable
+            ? [
+                terminal,
+                ...current.recoverableAttempts.filter(
+                  (run) => run.id !== attemptId,
+                ),
+              ]
+            : current.recoverableAttempts,
+          currentAttemptId: null,
+        }));
+        activeAttemptIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
+        return terminal;
+      }
+      try {
+        // A project contribution may be a synthetic instruction already
+        // represented by its queued execution exchange. Do not misattribute it
+        // as a human-authored canonical message when suppression is explicit.
+        if (durableWriter && control?.canonicalUserMessage !== "suppress") {
+          for (const exchange of initialExchanges.filter(
+            (entry) => entry.role === "user",
+          )) {
+            await durableWriter.record({
+              kind: "user",
+              content: exchange.content,
+            });
+          }
+        }
+        persisted = {
+          ...persisted,
+          status: "streaming",
+          updatedAt: new Date().toISOString(),
+        };
+        activePersistedRef.current = persisted;
+        await saveRuntimeExecutionAttempt(persisted);
+        setState((current) => ({ ...current, status: "streaming" }));
+      } catch (error) {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Could not save the conversation before it started.";
+        const failed: ExecutionAttempt = {
+          ...persisted,
+          status: "failed",
+          recoverable: true,
+          error: message,
+          updatedAt: new Date().toISOString(),
+        };
+        persisted = failed;
+        activePersistedRef.current = failed;
+        setState((current) => ({
+          ...current,
+          running: false,
+          status: "failed",
+          lastError: message,
+          recoverableAttempts: [
+            failed,
+            ...current.recoverableAttempts.filter(
+              (run) => run.id !== attemptId,
+            ),
+          ],
+          currentAttemptId: null,
+        }));
+        try {
+          await saveRuntimeExecutionAttempt(failed);
+        } catch {
+          /* preserve the original terminal failure */
+        }
+        activeAttemptIdRef.current = null;
+        activePersistedRef.current = null;
+        activeWriterRef.current = null;
+        return failed;
+      }
       let lastPersistedTranscriptLength = 0;
       let lastPersistedAt = Date.now();
       const pendingApprovalByCall = new Map<string, string>();
@@ -587,9 +797,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           // may reach the executor.
           execute: createComputerTaskExecutor(
             executeRef.current ??
-            (async () => {
-              throw new Error("Tool execution pending approval in the shell.");
-            }),
+              (async () => {
+                throw new Error(
+                  "Tool execution pending approval in the shell.",
+                );
+              }),
             (activity) => setState((current) => ({ ...current, activity })),
           ),
           authorize: authorizeRef.current,
@@ -637,9 +849,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
           if (event.type === "reasoning-summary") {
             const key = `${event.itemId}:${event.summaryIndex}`;
-            const summaries: Record<string, string> = { ...persisted.reasoningSummaries };
-            summaries[key] = ((summaries[key] ?? "") + event.text).slice(-16000);
-            for (const staleKey of Object.keys(summaries).slice(0, -32)) delete summaries[staleKey];
+            const summaries: Record<string, string> = {
+              ...persisted.reasoningSummaries,
+            };
+            summaries[key] = ((summaries[key] ?? "") + event.text).slice(
+              -16000,
+            );
+            for (const staleKey of Object.keys(summaries).slice(0, -32))
+              delete summaries[staleKey];
             persisted = { ...persisted, reasoningSummaries: summaries };
             setState((current) => {
               return { ...current, reasoningSummaries: summaries };
@@ -648,7 +865,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             setState((current) => ({
               ...current,
               transcript: current.transcript + event.text,
-              responseParts: appendResponseText(current.responseParts ?? [], event.text),
+              responseParts: appendResponseText(
+                current.responseParts ?? [],
+                event.text,
+              ),
               activity: "",
             }));
             const exchanges: ExecutionExchange[] = [
@@ -692,11 +912,85 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               usage,
               updatedAt: new Date().toISOString(),
             };
+          } else if (event.type === "provider-tool") {
+            toolNameByCall.set(event.callId, event.tool);
+            if (event.status === "running") {
+              persisted = {
+                ...persisted,
+                status: "streaming",
+                updatedAt: new Date().toISOString(),
+              };
+              setState((current) => ({
+                ...current,
+                activity: toolActivity(event.tool, "running"),
+                responseParts: [
+                  ...(current.responseParts ?? []),
+                  {
+                    id: event.callId,
+                    kind: "tool",
+                    tool: event.tool,
+                    content: "",
+                    state: "running",
+                  },
+                ],
+              }));
+              if (durableWriter) {
+                await durableWriter.record({
+                  kind: "tool-call",
+                  content: event.arguments,
+                  callId: event.callId,
+                  toolName: event.tool,
+                });
+              }
+            } else {
+              const ok = event.status === "succeeded";
+              const output = event.output ?? "";
+              persisted = {
+                ...persisted,
+                status: "streaming",
+                turn: persisted.turn + 1,
+                exchanges: [
+                  ...(persisted.exchanges ?? []),
+                  {
+                    role: "tool",
+                    content: output,
+                    toolCallId: event.callId,
+                    toolName: event.tool,
+                    ok,
+                  },
+                ],
+                updatedAt: new Date().toISOString(),
+              };
+              setState((current) => ({
+                ...current,
+                activity: "",
+                responseParts: resolveResponseTool(
+                  current.responseParts ?? [],
+                  event.callId,
+                  output,
+                  ok,
+                ),
+              }));
+              if (durableWriter) {
+                await durableWriter.record({
+                  kind: "tool-result",
+                  content: output,
+                  callId: event.callId,
+                  toolName: event.tool,
+                  ok,
+                });
+              }
+              toolNameByCall.delete(event.callId);
+            }
           } else if (event.type === "tool-call") {
-            const needsApproval = !isRoutineConnectorRead(event.approval)
-              && !["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0]);
+            const needsApproval =
+              !isRoutineConnectorRead(event.approval) &&
+              !["connector-call", "connector-action"].includes(
+                event.approval.action.split(/\s+/)[0],
+              );
             onToolCallRef.current?.(event);
-            if (needsApproval) pendingApprovalByCall.set(event.callId, event.approval.id);
+            if (needsApproval)
+              pendingApprovalByCall.set(event.callId, event.approval.id);
             toolNameByCall.set(event.callId, event.tool);
             persisted = {
               ...persisted,
@@ -711,7 +1005,17 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ...current,
               status: needsApproval ? "awaiting-approval" : "streaming",
               activity: toolActivity(event.tool, "running"),
-              responseParts: [...(current.responseParts ?? []), { id: event.callId, kind: "tool", tool: event.tool, connectorId: toolConnectorId(event.tool, event.arguments), content: "", state: "running" }],
+              responseParts: [
+                ...(current.responseParts ?? []),
+                {
+                  id: event.callId,
+                  kind: "tool",
+                  tool: event.tool,
+                  connectorId: toolConnectorId(event.tool, event.arguments),
+                  content: "",
+                  state: "running",
+                },
+              ],
             }));
             if (durableWriter) {
               await durableWriter.record({
@@ -722,14 +1026,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               });
               // Historical evidence only: a recovered request must never become
               // a new permit or standing grant after restart.
-              if (needsApproval) await durableWriter.record({
-                kind: "approval-request",
-                content: `Approval requested for ${event.tool}.`,
-                approvalRequestId: event.approval.id,
-              });
+              if (needsApproval)
+                await durableWriter.record({
+                  kind: "approval-request",
+                  content: `Approval requested for ${event.tool}.`,
+                  approvalRequestId: event.approval.id,
+                });
             }
           } else if (event.type === "tool-result") {
             const completedApprovalId = pendingApprovalByCall.get(event.callId);
+            const completedToolName = toolNameByCall.get(event.callId);
             pendingApprovalByCall.delete(event.callId);
             persisted = {
               ...persisted,
@@ -744,19 +1050,29 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                   role: "tool",
                   content: event.output,
                   toolCallId: event.callId,
+                  toolName: completedToolName,
                   ok: event.ok,
                 },
               ],
               updatedAt: new Date().toISOString(),
             };
-            setState((current) => ({ ...current, status: "streaming", activity: "",
-              responseParts: resolveResponseTool(current.responseParts ?? [], event.callId, event.output, event.ok) }));
+            setState((current) => ({
+              ...current,
+              status: "streaming",
+              activity: "",
+              responseParts: resolveResponseTool(
+                current.responseParts ?? [],
+                event.callId,
+                event.output,
+                event.ok,
+              ),
+            }));
             if (durableWriter)
               await durableWriter.record({
                 kind: "tool-result",
                 content: event.output,
                 callId: event.callId,
-                toolName: toolNameByCall.get(event.callId) ?? "unknown-tool",
+                toolName: completedToolName ?? "unknown-tool",
                 ok: event.ok,
               });
             toolNameByCall.delete(event.callId);
@@ -842,7 +1158,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               running: false,
               status: terminalStatus,
               endedAt: terminalRun.updatedAt,
-              progressReceipts: { ...current.progressReceipts, [attemptId]: { summaries: terminalRun.reasoningSummaries ?? {}, startedAt: terminalRun.createdAt, endedAt: terminalRun.updatedAt } },
+              progressReceipts: {
+                ...current.progressReceipts,
+                [attemptId]: {
+                  summaries: terminalRun.reasoningSummaries ?? {},
+                  startedAt: terminalRun.createdAt,
+                  endedAt: terminalRun.updatedAt,
+                },
+              },
               recoverableAttempts:
                 terminalStatus === "failed"
                   ? [
@@ -961,6 +1284,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         activePersistedRef.current = null;
         activeWriterRef.current = null;
       }
+      return persisted;
     },
     [backend, options.providers],
   );
@@ -971,6 +1295,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       tools: AgentTurnRequest["tools"] = [],
       permissionMode: PermissionMode = "read-only",
       instructions: string = CONVERSATION_STYLE_INSTRUCTIONS,
+      control?: NativeAgentRunControl,
     ) => {
       const userExchange = attemptToRetry.exchanges
         ?.filter((exchange) => exchange.role === "user")
@@ -983,8 +1308,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
+      if (userExchange.images?.length) {
+        setState((current) => ({
+          ...current,
+          lastError:
+            "Reattach the original images before retrying; image pixels are not stored.",
+        }));
+        return;
+      }
       if (attemptToRetry.threadId !== threadIdRef.current) {
-        setState((current) => ({ ...current, lastError: "Open this run's conversation before retrying it." }));
+        setState((current) => ({
+          ...current,
+          lastError: "Open this run's conversation before retrying it.",
+        }));
         return;
       }
       const model = modelsRef.current.find(
@@ -1009,13 +1345,24 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       await run(
         {
           model: attemptToRetry.model,
-          messages: [{ role: "system", content: instructions }, { role: "user", content: userExchange.content }],
+          messages: [
+            {
+              role: "system",
+              content: `${instructions.trim()}\n\n${INTERRUPTED_CHECKPOINT_INSTRUCTION}`,
+            },
+            {
+              role: "assistant",
+              content: buildInterruptedAttemptCheckpoint(attemptToRetry),
+            },
+            { role: "user", content: userExchange.content },
+          ],
           tools,
           maxTokens: 2_048,
         },
         undefined,
         permissionMode,
         attemptToRetry.id,
+        control,
       );
     },
     [run],
@@ -1023,10 +1370,28 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
 
   const markToolExecuting = useCallback((approvalId: string, tool: string) => {
     const persisted = activePersistedRef.current;
-    if (!persisted || !persisted.pendingApprovalIds.includes(approvalId) || persisted.status === "cancelled") return;
-    activePersistedRef.current = { ...persisted, status: "streaming", pendingApprovalIds: persisted.pendingApprovalIds.filter((id) => id !== approvalId) };
-    setState((current) => current.running && current.currentAttemptId === persisted.id
-      ? { ...current, status: "streaming", activity: toolActivity(tool, "running") } : current);
+    if (
+      !persisted ||
+      !persisted.pendingApprovalIds.includes(approvalId) ||
+      persisted.status === "cancelled"
+    )
+      return;
+    activePersistedRef.current = {
+      ...persisted,
+      status: "streaming",
+      pendingApprovalIds: persisted.pendingApprovalIds.filter(
+        (id) => id !== approvalId,
+      ),
+    };
+    setState((current) =>
+      current.running && current.currentAttemptId === persisted.id
+        ? {
+            ...current,
+            status: "streaming",
+            activity: toolActivity(tool, "running"),
+          }
+        : current,
+    );
   }, []);
 
   const cancel = useCallback(async () => {
@@ -1037,10 +1402,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     // Reject approval waiters immediately, even when native cancellation is
     // slow or unavailable. No lost card may leave a provider waiting forever.
     onCancelRef.current?.();
-    const nativeCancellation = Promise.resolve().then(() => backendToCancel?.cancel(attemptToCancel ?? "")).catch(() => {
-      setState((current) => current.currentAttemptId === attemptToCancel
-        ? { ...current, lastError: "The response stopped locally, but provider cancellation could not be confirmed." } : current);
-    });
+    const nativeCancellation = Promise.resolve()
+      .then(() => backendToCancel?.cancel(attemptToCancel ?? ""))
+      .catch(() => {
+        setState((current) =>
+          current.currentAttemptId === attemptToCancel
+            ? {
+                ...current,
+                lastError:
+                  "The response stopped locally, but provider cancellation could not be confirmed.",
+              }
+            : current,
+        );
+      });
     if (persisted && persisted.status !== "cancelled") {
       const terminalRun: ExecutionAttempt = {
         ...persisted,
@@ -1051,10 +1425,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       };
       activePersistedRef.current = terminalRun;
       try {
-        await writerToCancel?.checkpointAssistant(
-          terminalRun.transcript,
-          true,
-        );
+        await writerToCancel?.checkpointAssistant(terminalRun.transcript, true);
         await writerToCancel?.record({
           kind: "interruption",
           content: "The response was stopped.",
@@ -1066,20 +1437,27 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         // the next scoped recovery can surface the adapter state safely.
       }
     }
-    setState((current) => current.currentAttemptId === attemptToCancel ? ({
-      ...current,
-      running: false,
-      status: "cancelled",
-      endedAt: new Date().toISOString(),
-    }) : current);
+    setState((current) =>
+      current.currentAttemptId === attemptToCancel
+        ? {
+            ...current,
+            running: false,
+            status: "cancelled",
+            endedAt: new Date().toISOString(),
+          }
+        : current,
+    );
     await nativeCancellation;
   }, []);
 
-  useEffect(() => () => {
-    // A renderer remount cannot retain the visible approval queue. Stop its
-    // native provider and settle its gate before those refs become unreachable.
-    if (activeAttemptIdRef.current) void cancel();
-  }, [cancel]);
+  useEffect(
+    () => () => {
+      // A renderer remount cannot retain the visible approval queue. Stop its
+      // native provider and settle its gate before those refs become unreachable.
+      if (activeAttemptIdRef.current) void cancel();
+    },
+    [cancel],
+  );
 
   /**
    * Surface a pre-run validation error (e.g. an invalid model selection) through
@@ -1093,13 +1471,22 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       running: false,
       lastError: message,
       transcript: "",
-        reasoningSummaries: {},
-        activity: "",
+      reasoningSummaries: {},
+      activity: "",
       usage: null,
       status: "failed",
       currentAttemptId: null,
     }));
   }, []);
 
-  return { state, run, retry, cancel, markToolExecuting, reportError, backend, resolveBackend };
+  return {
+    state,
+    run,
+    retry,
+    cancel,
+    markToolExecuting,
+    reportError,
+    backend,
+    resolveBackend,
+  };
 }

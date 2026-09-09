@@ -22,8 +22,10 @@ use std::net::{IpAddr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use dom_smoothie::{Config as ReadabilityConfig, Readability, TextMode};
 use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::approvals::resolve_approval;
@@ -78,7 +80,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 20] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 22] = [
     "read-file",
     "write-file",
     "run-shell",
@@ -88,6 +90,8 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 20] = [
     "local-browser-action",
     "local-browser-tab",
     "computer-artifact",
+    "generate-image",
+    "edit-image",
     "local-desktop-observe",
     "local-desktop-action",
     "connection-read",
@@ -232,6 +236,9 @@ pub(crate) fn execute_tool_outcome(
         "search-notion" | "search-slack" => ToolOutcome::Done(Err(
             "connector searches must be executed through the async command boundary.".to_string(),
         )),
+        "generate-image" | "edit-image" => ToolOutcome::Done(Err(
+            "Image tools must be executed through the async native media boundary.".to_string(),
+        )),
         other => ToolOutcome::Done(Err(format!("Tool {other} is not supported."))),
     }
 }
@@ -262,6 +269,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
             Some(("full-access", "critical"))
         }
         "computer-artifact" => Some(("read-only", "low")),
+        "generate-image" | "edit-image" => Some(("full-access", "high")),
         "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
         "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
@@ -324,6 +332,8 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-action"
             | "local-browser-tab"
             | "computer-artifact"
+            | "generate-image"
+            | "edit-image"
             | "local-desktop-observe"
             | "local-desktop-action"
     )
@@ -522,6 +532,9 @@ pub(crate) const WEB_FETCH_TIMEOUT_SECS: u64 = 30;
 /// Max body bytes (decompressed) returned/copied for web-fetch. Matches other
 /// tool output bounds to avoid OOM or unbounded buffers.
 pub(crate) const WEB_FETCH_MAX_BODY_BYTES: usize = MAX_TOOL_OUTPUT_BYTES;
+
+/// Leave room for source metadata and the agent loop's truncation marker.
+pub(crate) const WEB_FETCH_MAX_READABLE_CHARACTERS: usize = 56_000;
 
 /// Return a canonical fingerprint form for a web-fetch URL (strips default
 /// ports and credentials). Used so approval binds the normalized request.
@@ -846,6 +859,124 @@ pub(crate) fn run_write_file(
     })
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WebPageSourceResult {
+    trust: &'static str,
+    instruction_authority: &'static str,
+    citation_id: String,
+    title: String,
+    final_uri: String,
+    fetched_at: String,
+    media_type: String,
+    extraction: &'static str,
+    truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    byline: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    site_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    published_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    modified_time: Option<String>,
+    content: String,
+}
+
+fn bounded_readable_content(content: &str) -> (String, bool) {
+    let mut chars = content.chars();
+    let bounded: String = chars
+        .by_ref()
+        .take(WEB_FETCH_MAX_READABLE_CHARACTERS)
+        .collect();
+    (bounded, chars.next().is_some())
+}
+
+fn web_citation_id(final_uri: &str) -> String {
+    let digest = Sha256::digest(final_uri.as_bytes());
+    format!("web-{}", &hex::encode(digest)[..16])
+}
+
+/// Convert an HTTP response into a traceable, explicitly untrusted source
+/// envelope before it enters model context. HTML is reduced to the main readable
+/// article; text/JSON responses retain their original text representation.
+fn format_web_page_source(
+    body: &str,
+    final_url: &Url,
+    content_type: &str,
+    fetched_at: &str,
+) -> String {
+    let mut citation_url = final_url.clone();
+    citation_url.set_fragment(None);
+    let final_uri = normalize_url_for_fingerprint(citation_url.as_str())
+        .unwrap_or_else(|| citation_url.to_string());
+    let media_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    let is_html = matches!(media_type.as_str(), "text/html" | "application/xhtml+xml")
+        || (media_type.is_empty() && body.trim_start().starts_with('<'));
+
+    let mut title = final_url.host_str().unwrap_or("Web page").to_string();
+    let mut byline = None;
+    let mut site_name = None;
+    let mut published_time = None;
+    let mut modified_time = None;
+    let mut extraction = "plain-text";
+    let readable = if is_html {
+        let config = ReadabilityConfig {
+            text_mode: TextMode::Markdown,
+            ..Default::default()
+        };
+        let parsed = Readability::new(body, Some(final_uri.as_str()), Some(config))
+            .and_then(|mut readability| readability.parse());
+        match parsed {
+            Ok(article) if !article.text_content.trim().is_empty() => {
+                if !article.title.trim().is_empty() {
+                    title = article.title.trim().to_string();
+                }
+                byline = article.byline.filter(|value| !value.trim().is_empty());
+                site_name = article.site_name.filter(|value| !value.trim().is_empty());
+                published_time = article
+                    .published_time
+                    .filter(|value| !value.trim().is_empty());
+                modified_time = article
+                    .modified_time
+                    .filter(|value| !value.trim().is_empty());
+                extraction = "readability";
+                article.text_content.to_string()
+            }
+            _ => body.to_string(),
+        }
+    } else {
+        body.to_string()
+    };
+    let (content, truncated) = bounded_readable_content(readable.trim());
+    let result = WebPageSourceResult {
+        trust: "untrusted",
+        instruction_authority: "none",
+        citation_id: web_citation_id(&final_uri),
+        title,
+        final_uri,
+        fetched_at: fetched_at.to_string(),
+        media_type: if media_type.is_empty() {
+            "text/plain".to_string()
+        } else {
+            media_type
+        },
+        extraction,
+        truncated,
+        byline,
+        site_name,
+        published_time,
+        modified_time,
+        content,
+    };
+    serde_json::to_string(&result)
+        .unwrap_or_else(|_| "{\"trust\":\"untrusted\",\"instructionAuthority\":\"none\",\"content\":\"Fable could not encode the fetched page.\"}".to_string())
+}
+
 /// The outcome shape the pure web-fetch layer returns to the async command.
 /// Keeping it pure (no reqwest) lets the command compose it after the GET, and
 /// lets tests pin the 2xx/non-2xx/transport contract without a live socket —
@@ -1054,6 +1185,46 @@ pub async fn execute_tool_call(
     } else {
         0
     };
+    if matches!(tool.as_str(), "generate-image" | "edit-image") {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "Image tools require an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "Image tools require a saved agent.".to_string())?;
+        let result = crate::media_images::execute_image_tool(
+            &tool,
+            arguments,
+            local_computers.inner().clone(),
+            workspace_id,
+            agent_id,
+            computer_generation,
+        )
+        .await
+        .and_then(|artifact| {
+            serde_json::to_string(&artifact)
+                .map_err(|_| "The generated image artifact receipt is invalid.".to_string())
+        });
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: if result.is_ok() { "ok" } else { "failed" },
+                error_code: if result.is_ok() {
+                    ""
+                } else {
+                    "image-operation"
+                },
+                message: "Image operation completed",
+            },
+            None,
+        );
+        return result.map(|output| ToolResult { ok: true, output });
+    }
     if matches!(
         tool.as_str(),
         "local-desktop-observe" | "local-desktop-action"
@@ -1664,6 +1835,7 @@ fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
         "read-file" | "write-file" => "path",
         "run-shell" => "command",
         "web-fetch" => "url",
+        "generate-image" | "edit-image" => "title",
         _ => "query",
     };
     let value = arguments
@@ -1810,7 +1982,9 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
 
             // Bounded read (protects size + decomp expansion).
             let body = read_bounded_text(resp, WEB_FETCH_MAX_BODY_BYTES).await?;
-            return Ok(WebFetchOutcome::success(status, body).into_tool_result());
+            let fetched_at = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            let source = format_web_page_source(&body, &current, &ct, &fetched_at);
+            return Ok(WebFetchOutcome::success(status, source).into_tool_result());
         }
     };
 
@@ -1854,6 +2028,59 @@ mod connector_authority_tests {
     }
 
     #[test]
+    fn fetched_html_becomes_readable_traceable_untrusted_evidence() {
+        let url = Url::parse("https://example.com/article?edition=uk#section").unwrap();
+        let paragraph =
+            "Fable keeps the useful article text and removes navigation noise. ".repeat(8);
+        let html = format!(
+            "<html><head><title>A useful page</title><meta name=\"author\" content=\"Ada Example\"></head><body><nav>Menu noise</nav><main><article><h1>A useful page</h1><p>{paragraph}</p></article></main><script>ignore_me()</script></body></html>"
+        );
+
+        let output = format_web_page_source(
+            &html,
+            &url,
+            "text/html; charset=utf-8",
+            "2026-09-07T12:00:00Z",
+        );
+        let source: serde_json::Value = serde_json::from_str(&output).unwrap();
+
+        assert_eq!(source["trust"], "untrusted");
+        assert_eq!(source["instructionAuthority"], "none");
+        assert_eq!(source["title"], "A useful page");
+        assert_eq!(source["finalUri"], "https://example.com/article?edition=uk");
+        assert_eq!(source["fetchedAt"], "2026-09-07T12:00:00Z");
+        assert_eq!(source["mediaType"], "text/html");
+        assert_eq!(source["extraction"], "readability");
+        assert!(source["citationId"]
+            .as_str()
+            .is_some_and(|id| id.starts_with("web-") && id.len() == 20));
+        assert!(source["content"]
+            .as_str()
+            .unwrap()
+            .contains("useful article text"));
+        assert!(!source["content"].as_str().unwrap().contains("ignore_me"));
+    }
+
+    #[test]
+    fn fetched_text_is_bounded_and_keeps_a_stable_source_identity() {
+        let url = Url::parse("https://example.com/data.txt").unwrap();
+        let body = "x".repeat(WEB_FETCH_MAX_READABLE_CHARACTERS + 12);
+        let first = format_web_page_source(&body, &url, "text/plain", "2026-09-07T12:00:00Z");
+        let second =
+            format_web_page_source("different body", &url, "text/plain", "2026-09-07T12:01:00Z");
+        let first: serde_json::Value = serde_json::from_str(&first).unwrap();
+        let second: serde_json::Value = serde_json::from_str(&second).unwrap();
+
+        assert_eq!(first["citationId"], second["citationId"]);
+        assert_eq!(first["extraction"], "plain-text");
+        assert_eq!(first["truncated"], true);
+        assert_eq!(
+            first["content"].as_str().unwrap().chars().count(),
+            WEB_FETCH_MAX_READABLE_CHARACTERS
+        );
+    }
+
+    #[test]
     fn computer_tools_require_an_explicit_representable_generation() {
         let mut request = request("run-shell");
         assert!(require_computer_generation(&request).is_err());
@@ -1863,6 +2090,56 @@ mod connector_authority_tests {
         assert!(require_computer_generation(&request).is_err());
         request.computer_generation = Some(42);
         assert_eq!(require_computer_generation(&request).unwrap(), 42);
+        assert!(is_computer_tool("generate-image"));
+        assert!(is_computer_tool("edit-image"));
+    }
+
+    #[test]
+    fn image_tool_permit_binds_model_options_scope_and_is_single_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("generate-image");
+        approved.arguments = json!({
+            "prompt": "A quiet workspace",
+            "model": "gpt-image-2",
+            "size": "1024x1024",
+            "quality": "medium",
+            "title": "Workspace"
+        });
+        approved.workspace_id = Some("workspace-one".into());
+        approved.agent_id = Some("agent-one".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.action = "generate-image exact request".into();
+        approved.approval.request.data_used = vec![
+            "model: gpt-image-2".into(),
+            "prompt: A quiet workspace".into(),
+            "quality: medium".into(),
+            "size: 1024x1024".into(),
+            "title: Workspace".into(),
+            "Computer workspace: workspace-one".into(),
+            "Computer agent: agent-one".into(),
+            "Computer generation: 7".into(),
+        ];
+        let response = crate::models::ApprovalResolutionResponse {
+            persisted: true,
+            audit_entry: crate::models::ApprovalAuditEntry {
+                id: "image-permit-test".into(),
+                request_id: approved.approval.request.id.clone(),
+                decision: "once".into(),
+                decided_at: approved.approval.decided_at.clone(),
+                note: "approved".into(),
+            },
+            effective_request: approved.approval.request.clone(),
+            dismissed: true,
+            grant: None,
+        };
+        crate::execution_approvals::record_execution_decision(&path, &response).unwrap();
+
+        approved.arguments["model"] = json!("gpt-5");
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.arguments["model"] = json!("gpt-image-2");
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
     }
 
     #[test]

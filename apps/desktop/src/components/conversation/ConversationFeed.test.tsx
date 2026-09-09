@@ -15,6 +15,15 @@ const initial: NativeAgentState = { transcript: "", usage: null, running: true, 
 const props = { messages: [], agent, threadId: "thread-1", profileName: "Joshua", connectors: [], optimisticPrompt: "", workspaceId: "workspace-1" };
 
 describe("conversation turns", () => {
+  it("uses recorded project authors and hides synthetic handoff prompts", () => {
+    const view = render(<ConversationFeed {...props} requireAuthor suppressLivePrompt authors={{ "run-1": { ...agent, id: "leo", name: "Leo" } }} state={initial} />);
+    expect(screen.getByText("Leo")).toBeVisible();
+    expect(screen.queryByText("Chief of Staff")).toBeNull();
+    expect(screen.queryByText("Check the files")).toBeNull();
+    view.rerender(<ConversationFeed {...props} requireAuthor suppressLivePrompt authors={{}} state={initial} />);
+    expect(screen.getByText("Agent")).toBeVisible();
+    expect(screen.queryByText("Chief of Staff")).toBeNull();
+  });
   it("keeps one author and one action as a stream finishes; collapses routine work", () => {
     const view = render(<ConversationFeed {...props} state={initial} />);
     expect(screen.getAllByText("Chief of Staff")).toHaveLength(1);

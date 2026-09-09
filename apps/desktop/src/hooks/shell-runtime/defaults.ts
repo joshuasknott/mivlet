@@ -10,6 +10,7 @@ export const defaultShellState: PersistedShellState = {
   activeItem: "new-chat",
   composerValue: "",
   voiceEnabled: true,
+  voiceProvider: "browser",
   approvalAudit: [],
   dismissedApprovalIds: [],
   approvalRules: [],

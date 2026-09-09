@@ -322,6 +322,17 @@ pub struct ExecutionAttemptUsage {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionImageMetadata {
+    pub id: String,
+    pub name: String,
+    pub media_type: String,
+    pub size_bytes: usize,
+    pub width: u32,
+    pub height: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionExchange {
     pub role: String,
@@ -329,6 +340,8 @@ pub struct ExecutionExchange {
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
     pub ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<ExecutionImageMetadata>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -1091,6 +1104,8 @@ pub struct RuntimeSnapshot {
     pub active_item: String,
     pub composer_draft: String,
     pub voice_enabled: bool,
+    #[serde(default)]
+    pub voice_provider: Option<String>,
     pub approval_audit: Vec<ApprovalAuditEntry>,
     pub dismissed_approval_ids: Vec<String>,
     pub approval_rules: Vec<ApprovalGrant>,

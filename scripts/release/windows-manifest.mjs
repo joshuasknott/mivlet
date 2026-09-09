@@ -16,6 +16,40 @@ function assertText(value, label) {
   return value.trim();
 }
 
+function cargoPackageVersion(source) {
+  const packageSection = source.match(/(?:^|\r?\n)\[package\]\s*\r?\n([\s\S]*?)(?=\r?\n\[|$)/)?.[1];
+  const version = packageSection?.match(/^version\s*=\s*"([^"]+)"\s*$/m)?.[1];
+  if (!version) throw new Error("apps/desktop/src-tauri/Cargo.toml is missing package.version.");
+  return version;
+}
+
+export async function assertReleaseVersionAlignment({
+  rootPackagePath = "package.json",
+  desktopPackagePath = "apps/desktop/package.json",
+  tauriConfigPath = "apps/desktop/src-tauri/tauri.conf.json",
+  cargoManifestPath = "apps/desktop/src-tauri/Cargo.toml"
+} = {}) {
+  const [rootPackage, desktopPackage, tauriConfig, cargoManifest] = await Promise.all([
+    readFile(rootPackagePath, "utf8").then(JSON.parse),
+    readFile(desktopPackagePath, "utf8").then(JSON.parse),
+    readFile(tauriConfigPath, "utf8").then(JSON.parse),
+    readFile(cargoManifestPath, "utf8")
+  ]);
+  const versions = new Map([
+    ["package.json", rootPackage.version],
+    ["apps/desktop/package.json", desktopPackage.version],
+    ["apps/desktop/src-tauri/tauri.conf.json", tauriConfig.version],
+    ["apps/desktop/src-tauri/Cargo.toml", cargoPackageVersion(cargoManifest)]
+  ]);
+  for (const [source, version] of versions) assertText(version, `${source} version`);
+  if (new Set(versions.values()).size !== 1) {
+    throw new Error(
+      `Release versions are not aligned: ${[...versions].map(([source, version]) => `${source}=${version}`).join(", ")}`
+    );
+  }
+  return versions.values().next().value;
+}
+
 export function assertReleaseMetadata({ version, channel, commit, createdAt }) {
   if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(assertText(version, "version"))) {
     throw new Error("version must be a semantic version.");
@@ -127,9 +161,13 @@ async function main() {
   if (!directory || !output || !notes) {
     throw new Error("Usage: windows-manifest --artifacts <dir> --output <json> --notes <md> --commit <sha> --created-at <ISO> [--channel private]");
   }
-  const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+  const alignedVersion = await assertReleaseVersionAlignment({ desktopPackagePath: packageJsonPath });
+  const requestedVersion = args.get("--version");
+  if (requestedVersion && requestedVersion !== alignedVersion) {
+    throw new Error(`Requested release version ${requestedVersion} does not match repository version ${alignedVersion}.`);
+  }
   const manifest = buildManifest({
-    version: args.get("--version") ?? packageJson.version,
+    version: alignedVersion,
     channel: args.get("--channel") ?? "private",
     commit: args.get("--commit"),
     createdAt: args.get("--created-at"),

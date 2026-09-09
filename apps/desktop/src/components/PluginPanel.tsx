@@ -1,4 +1,6 @@
 import { useMemo, useRef, useState } from "react";
+import { BuiltinPlugins } from "./marketplace/BuiltinPlugins";
+import { builtinPluginEntries } from "../lib/builtin-plugins";
 import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
 import { remoteConnectorFor } from "./marketplace/remote-connectors";
 import { connectorConnectionsChanged } from "../lib/connector-connections";
@@ -42,6 +44,7 @@ export function PluginPanel({
   workspaceId,
   manifests,
   onUseConnector,
+  onUseBuiltinPlugin,
   onConnect,
   onDisconnect,
   onRefresh,
@@ -53,6 +56,7 @@ export function PluginPanel({
   workspaceId?: string;
   manifests: ConnectorManifest[];
   onUseConnector: (connector: ConnectorManifest) => void;
+  onUseBuiltinPlugin?: (id: "browser" | "computer") => void;
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
@@ -144,7 +148,7 @@ export function PluginPanel({
         );
       });
   }, [manifests, query]);
-  const hasDirectoryMatches = visibleSections.length > 0;
+  const hasDirectoryMatches = visibleSections.length > 0 || ["Browser Read websites and use tabs in your agent's browser.", "Computer Use Use desktop apps, terminal and files in your agent's computer."].some((entry) => entry.toLowerCase().includes(normalizedQuery));
 
   const openEntry = (entry: MarketplaceConnectorEntry) => {
     setSelectedEntryId(entry.id);
@@ -229,6 +233,7 @@ export function PluginPanel({
         </label>
       </header>
 
+
       <section
         className="marketplace-section marketplace-section--installed"
         aria-labelledby="installed-connections-title"
@@ -276,7 +281,7 @@ export function PluginPanel({
       </section>
 
       {[
-        ...(!normalizedQuery ? [{ id: "featured", title: "Featured", connectors: ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
+        ...(!normalizedQuery || builtinPluginEntries.some((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery)) ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
         ...visibleSections,
       ].map((section) => {
         const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
@@ -285,6 +290,7 @@ export function PluginPanel({
         const remaining = section.connectors.slice(limit);
         return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
           <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
+          {section.id === "featured" ? <BuiltinPlugins workspaceId={workspaceId} query={query} onUse={onUseBuiltinPlugin} /> : null}
           <div className="marketplace-connector-grid">{shown.map((entry) => renderConnectorRow(entry, section.id))}</div>
           {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
             {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}

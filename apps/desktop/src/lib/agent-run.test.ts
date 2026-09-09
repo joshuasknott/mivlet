@@ -3,6 +3,8 @@ import type { AccountWorkspaceStatus, KnowledgeSource, MemoryRecord } from "@fab
 import {
   buildAgentRequest,
   buildContinuationMessages,
+  continuationMessagesForModel,
+  buildInterruptedAttemptCheckpoint,
   buildContextPrefixForRun,
   DEFAULT_PERMISSION_LABEL,
   findApprovalJargon,
@@ -275,6 +277,28 @@ describe("buildAgentRequest", () => {
     });
   });
 
+  it("attaches transient images only to the current user message", () => {
+    const image = {
+      id: "image-1",
+      name: "diagram.png",
+      mediaType: "image/png" as const,
+      sizeBytes: 68,
+      width: 1,
+      height: 1,
+      dataUrl: "data:image/png;base64,transient-pixels"
+    };
+    const request = buildAgentRequest({
+      model: "codex-model",
+      prompt: "Describe this",
+      instructions: "Be concise.",
+      images: [image]
+    });
+    expect(request.messages).toEqual([
+      { role: "system", content: "Be concise." },
+      { role: "user", content: "Describe this", images: [image] }
+    ]);
+  });
+
   it("uses the selected model id rather than a hardcoded label", () => {
     const request = buildAgentRequest({
       model: "claude-sonnet-4",
@@ -286,6 +310,16 @@ describe("buildAgentRequest", () => {
 });
 
 describe("buildContinuationMessages", () => {
+  it("retains published image references for later edits without old authority fields", () => {
+    const receipt = { kind: "computer-artifact", version: 1, id: `artifact-${"a".repeat(64)}`, computerId: `local-${"b".repeat(24)}`, title: "Image", relativePath: "image.png", mimeType: "image/png", sizeBytes: 128, createdAt: "2026-09-07T12:00:00Z" };
+    const messages = continuationMessagesForModel([{ role: "user", content: "Make an image" }, { role: "tool", content: JSON.stringify({ ...receipt, permitId: "old-permit", generation: 4 }) }, { role: "assistant", content: "Image ready" }]);
+    expect(messages).toHaveLength(3);
+    expect(messages[1].content).toContain(receipt.id);
+    expect(messages[1].content).toContain("untrusted metadata");
+    expect(messages[1].content).not.toMatch(/permitId|old-permit|generation/);
+    expect(messages[2]).toEqual({ role: "assistant", content: "Image ready" });
+    expect(continuationMessagesForModel([{ role: "tool", content: JSON.stringify({ ...receipt, relativePath: "../secret.png" }) }])).toEqual([]);
+  });
   it("uses only terminal user, assistant, and completed tool-result records", () => {
     const messages = buildContinuationMessages([
       { message: { kind: "approval", sequence: 1, detail: { phase: "request", approvalRequestId: "approval-1" } }, currentRevision: { state: "terminal", content: "Permit this" } },
@@ -300,6 +334,93 @@ describe("buildContinuationMessages", () => {
       { role: "user", content: "Do the work" },
       { role: "tool", content: "written", toolCallId: "call-1", toolName: "write-file" }
     ]);
+  });
+});
+
+describe("buildInterruptedAttemptCheckpoint", () => {
+  it("keeps bounded successful progress and marks incomplete work uncertain", () => {
+    const checkpoint = buildInterruptedAttemptCheckpoint({
+      id: "attempt-1", providerId: "openai", model: "gpt-5", status: "interrupted",
+      transcript: "Drafted the report and was checking the export.",
+      exchanges: [
+        { role: "user", content: "Create and verify the report" },
+        { role: "tool", toolName: "write-file", toolCallId: "call-1", content: "report.docx written", ok: true },
+        { role: "tool", toolName: "run-shell", toolCallId: "call-2", content: "Command may still be running", ok: false },
+        { role: "tool", toolName: "local-browser-observe", toolCallId: "call-3", content: '{"observationId":"fresh-secret"}', ok: true }
+      ],
+      turn: 2, pendingApprovalIds: ["approval-secret"], recoverable: true, retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z", updatedAt: "2026-09-07T10:01:00Z"
+    });
+    expect(checkpoint).toContain("Committed task intent:\nCreate and verify the report");
+    expect(checkpoint).toContain("write-file: report.docx written");
+    expect(checkpoint).toContain("1 tool result was failed or lacked confirmed success");
+    expect(checkpoint).toContain("Do not treat it as completed or as justification to resubmit");
+    expect(checkpoint).not.toContain("approval-secret");
+    expect(checkpoint).not.toContain("observationId");
+    expect(checkpoint.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it("omits secret-shaped and authority-bearing lines instead of forwarding them", () => {
+    const checkpoint = buildInterruptedAttemptCheckpoint({
+      id: "attempt-2", providerId: "openai", model: "gpt-5", status: "failed",
+      transcript: "Safe progress\nAuthorization: Bearer private-value\napproval permit approval-1",
+      exchanges: [
+        { role: "user", content: "Finish the safe task\nCookie: private-cookie" },
+        { role: "tool", toolName: "read-file", content: "public result\naccess_token=private", ok: true }
+      ],
+      turn: 1, pendingApprovalIds: [], recoverable: true, retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z", updatedAt: "2026-09-07T10:01:00Z"
+    });
+    expect(checkpoint).toContain("Finish the safe task");
+    expect(checkpoint).toContain("read-file: public result");
+    expect(checkpoint).toContain("Safe progress");
+    expect(checkpoint).not.toMatch(/private-value|private-cookie|access_token|approval-1/);
+  });
+
+  it("recursively removes fresh authority fields while retaining useful artifact identity", () => {
+    const checkpoint = buildInterruptedAttemptCheckpoint({
+      id: "attempt-json", providerId: "openai", model: "gpt-5", status: "interrupted",
+      transcript: "Created the artifact.",
+      exchanges: [
+        { role: "user", content: "Create the report" },
+        {
+          role: "tool", toolName: "create-artifact", ok: true,
+          content: JSON.stringify({
+            artifactId: "artifact-report-1",
+            result: { title: "Quarterly report", generation: 14, requestId: "request-secret" },
+            approval: { permitId: "permit-secret" }
+          })
+        }
+      ],
+      turn: 1, pendingApprovalIds: [], recoverable: true, retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z", updatedAt: "2026-09-07T10:01:00Z"
+    });
+    expect(checkpoint).toContain('"artifactId":"artifact-report-1"');
+    expect(checkpoint).toContain('"title":"Quarterly report"');
+    expect(checkpoint).not.toMatch(/generation|request-secret|permit-secret|"approval"/);
+  });
+
+  it("keeps uncertainty ahead of bounded large successful results", () => {
+    const checkpoint = buildInterruptedAttemptCheckpoint({
+      id: "attempt-large", providerId: "openai", model: "gpt-5", status: "interrupted",
+      transcript: "x".repeat(20_000),
+      exchanges: [
+        { role: "user", content: "y".repeat(20_000) },
+        ...Array.from({ length: 20 }, (_, index) => ({
+          role: "tool" as const,
+          toolName: `read-${index}`,
+          content: "z".repeat(4_000),
+          ok: true
+        })),
+        { role: "tool", toolName: "write-file", content: "unknown", ok: false }
+      ],
+      turn: 1, pendingApprovalIds: [], recoverable: true, retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z", updatedAt: "2026-09-07T10:01:00Z"
+    });
+    expect(checkpoint).toContain("Remaining uncertainty:");
+    expect(checkpoint).toContain("1 tool result was failed or lacked confirmed success");
+    expect(checkpoint.indexOf("Remaining uncertainty:")).toBeLessThan(checkpoint.indexOf("Verified successful results"));
+    expect(checkpoint.length).toBeLessThanOrEqual(12_000);
   });
 });
 

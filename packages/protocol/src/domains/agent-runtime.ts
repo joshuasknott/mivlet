@@ -27,6 +27,25 @@ export interface ExecutionExchange {
   toolCallId?: string;
   toolName?: string;
   ok?: boolean;
+  /** Durable metadata only. User image pixels remain ephemeral and must be reattached. */
+  images?: ExecutionImageMetadata[];
+}
+
+export type NativeImageMediaType = "image/png" | "image/jpeg" | "image/webp";
+
+/** Non-secret metadata safe to retain in an execution checkpoint. */
+export interface ExecutionImageMetadata {
+  id: string;
+  name: string;
+  mediaType: NativeImageMediaType;
+  sizeBytes: number;
+  width: number;
+  height: number;
+}
+
+/** Transient user image supplied to one provider turn. Never persist `dataUrl`. */
+export interface NativeImageInput extends ExecutionImageMetadata {
+  dataUrl: string;
 }
 
 /** Stable, user-visible reason an item entered a turn's bounded context. */
@@ -487,6 +506,8 @@ export type NativeMessageRole = "system" | "user" | "assistant" | "tool";
 export interface NativeMessage {
   role: NativeMessageRole;
   content: string;
+  /** Only current user input may carry transient image pixels. */
+  images?: NativeImageInput[];
   /** Assistant tool calls, when role === "assistant" and the model requested tools. */
   toolCalls?: NativeToolCall[];
   /** Tool-result call id, when role === "tool". */
@@ -547,6 +568,15 @@ export interface ProviderRouteExecutionBinding {
 export type BackendAgentEvent =
   | { type: "text-delta"; text: string }
   | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
+  | {
+      /** Provider-owned read activity that never enters Fable's approval/execution gate. */
+      type: "provider-tool";
+      callId: string;
+      tool: string;
+      arguments: string;
+      status: "running" | "succeeded" | "failed";
+      output?: string;
+    }
   | {
       type: "tool-call";
       callId: string;

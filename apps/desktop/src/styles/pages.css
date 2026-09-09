@@ -111,6 +111,11 @@
   gap: 6px;
 }
 
+.memory-settings-editor { display: grid; gap: 14px; }
+.memory-records .button, .profile-clean-card .memory-settings-editor input { min-height: 44px; }
+.memory-settings-editor textarea { width: 100%; min-height: 100px; padding: 10px 12px; resize: vertical; color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: var(--radius-1); font: inherit; }
+.memory-settings-editor :is(input, textarea):focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+
 .settings-field span {
   color: var(--ink-muted);
   font-size: var(--text-12);
@@ -1431,3 +1436,16 @@
 
 .settings-input-note { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.6; }
 .settings-page .toggle-row.settings-preference-row { width: 100%; padding: 20px 0; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); }
+.local-schedules { gap: 18px; }
+.local-schedules .profile-section { display: grid; gap: 12px; min-width: 0; }
+.local-schedules__prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.local-schedules__editor label { display: grid; gap: 6px; }
+.local-schedules .local-schedules__editor .input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--surface-raised); color: var(--ink); font: inherit; }
+.local-schedules .local-schedules__editor textarea { min-height: 110px; resize: vertical; }
+.local-schedules .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.local-schedules .input, .local-schedules .button, .local-schedules summary { min-height: 44px; }
+.local-schedules small { overflow-wrap: anywhere; }
+.scheduled-work-notice { position: fixed; z-index: 80; top: 52px; right: 20px; width: min(380px, calc(100vw - 32px)); padding: 16px; color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 6px 24px #0002; }
+.scheduled-work-notice p { margin: 0 0 12px; overflow-wrap: anywhere; }
+.scheduled-work-notice > div { display: flex; gap: 8px; flex-wrap: wrap; }
+.scheduled-work-notice button { min-height: 44px; }

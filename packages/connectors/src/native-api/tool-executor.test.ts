@@ -188,6 +188,7 @@ function fakeRuntime(): ToolRuntime & {
   opened: string[];
   browserActions: string[];
   localBrowserActions: string[];
+  imageCalls: Array<{ kind: "generate" | "edit"; input: unknown }>;
 } {
   const files = new Map<string, string>([["x.txt", "hello world"]]);
   const writes: { path: string; content: string }[] = [];
@@ -196,6 +197,7 @@ function fakeRuntime(): ToolRuntime & {
   const opened: string[] = [];
   const browserActions: string[] = [];
   const localBrowserActions: string[] = [];
+  const imageCalls: Array<{ kind: "generate" | "edit"; input: unknown }> = [];
   return {
     files,
     writes,
@@ -204,6 +206,7 @@ function fakeRuntime(): ToolRuntime & {
     opened,
     browserActions,
     localBrowserActions,
+    imageCalls,
     async readFile(path) {
       return files.get(path) ?? null;
     },
@@ -231,6 +234,14 @@ function fakeRuntime(): ToolRuntime & {
     async actLocalBrowser(input) {
       localBrowserActions.push(`${input.action}:${input.controlRole}:${input.controlName}:${input.value ?? ""}`);
       return "local browser action complete";
+    },
+    async generateImage(input) {
+      imageCalls.push({ kind: "generate", input });
+      return '{"kind":"computer-artifact","mimeType":"image/png"}';
+    },
+    async editImage(input) {
+      imageCalls.push({ kind: "edit", input });
+      return '{"kind":"computer-artifact","mimeType":"image/png"}';
     }
   };
 }
@@ -384,6 +395,37 @@ describe("createToolExecutor — dispatch + grant gating", () => {
     expect(runtime.writes.length).toBe(0);
   });
 
+  it("dispatches only an exact explicitly-selected image request after approval", async () => {
+    const runtime = fakeRuntime();
+    const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    const input = { prompt: "A quiet workspace", model: "gpt-image-2", size: "1024x1024", quality: "medium", title: "Workspace" };
+    const approval = buildToolApproval("OpenAI direct API", "generate-image", JSON.stringify(input));
+
+    await expect(executor(approval, JSON.stringify(input))).resolves.toContain("image/png");
+    expect(runtime.imageCalls).toEqual([{ kind: "generate", input }]);
+
+    await expect(executor(approval, JSON.stringify({ ...input, model: "gpt-5" })))
+      .rejects.toThrow(/gpt-image-2/i);
+    await expect(executor(approval, JSON.stringify({ ...input, hidden: true })))
+      .rejects.toThrow(/extra arguments/i);
+    expect(runtime.imageCalls).toHaveLength(1);
+  });
+
+  it("does not upload an edit source until granted and requires an artifact receipt id", async () => {
+    const runtime = fakeRuntime();
+    const input = { sourceArtifactId: `artifact-${"a".repeat(64)}`, prompt: "Make it blue", model: "gpt-image-2", size: "1024x1024", quality: "low", title: "Blue edit" };
+    const approval = buildToolApproval("OpenAI direct API", "edit-image", JSON.stringify(input));
+    await expect(createToolExecutor({ runtime, gate: decisionGate("denied") })(approval, JSON.stringify(input)))
+      .rejects.toThrow(/denied/i);
+    expect(runtime.imageCalls).toHaveLength(0);
+
+    const granted = createToolExecutor({ runtime, gate: decisionGate("granted") });
+    await expect(granted(approval, JSON.stringify({ ...input, sourceArtifactId: "source.png" })))
+      .rejects.toThrow(/artifact id/i);
+    await expect(granted(approval, JSON.stringify(input))).resolves.toContain("image/png");
+    expect(runtime.imageCalls).toEqual([{ kind: "edit", input }]);
+  });
+
   it("refuses an unregistered/unknown tool name even after a grant (fail-closed)", async () => {
     const runtime = fakeRuntime();
     const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
@@ -432,6 +474,21 @@ describe("semantic Connection read tool", () => {
     expect(tool!.description).toContain("exact citationId");
     expect(tool!.description).toContain("external untrusted evidence");
     expect(tool!.description).toContain("Sources list");
+  });
+});
+
+describe("web source tool", () => {
+  it("advertises exact-URL reading with traceable citation guidance", () => {
+    const tool = registeredToolSpecs().find((candidate) => candidate.name === "web-fetch");
+    expect(tool).toBeDefined();
+    expect(JSON.parse(tool!.parameters)).toMatchObject({
+      required: ["url"],
+      properties: { url: { type: "string" } }
+    });
+    expect(tool!.description).toContain("exact citationId");
+    expect(tool!.description).toContain("final URI");
+    expect(tool!.description).toContain("external untrusted evidence");
+    expect(tool!.description).toContain("does not discover URLs or search the wider web");
   });
 });
 

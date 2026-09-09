@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, RefObject, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
 import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
@@ -14,6 +14,8 @@ import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { ModelPicker } from "./ModelPicker";
+import { RecordingReview } from "./RecordingReview";
+import type { SpeechRecordingReview } from "@fable/connectors/voice";
 
 export function Composer({
   composerRef,
@@ -25,11 +27,14 @@ export function Composer({
   voiceMessage,
   voiceCanStart,
   voiceDisclosure,
+  voiceReview,
+  onAuthorizeVoice,
   onStartVoice,
   onStopVoice,
   onCancelVoice,
   onDismissVoice,
   onAttach,
+  onImportRepository,
   addMenuOpen,
   onToggleAddMenu,
   onOpenTool,
@@ -48,6 +53,8 @@ export function Composer({
   connectedConnectors = [],
   attachments = [],
   onRemoveAttachment,
+  recipientControl,
+  modelControl,
   compactAgentSurface = false
 }: {
   composerRef: RefObject<ComposerInputHandle | null>;
@@ -59,11 +66,14 @@ export function Composer({
   voiceMessage: string;
   voiceCanStart: boolean;
   voiceDisclosure: string;
+  voiceReview?: SpeechRecordingReview | null;
+  onAuthorizeVoice?: () => void;
   onStartVoice: () => void;
   onStopVoice: () => void;
   onCancelVoice: () => void;
   onDismissVoice: () => void;
   onAttach: () => void;
+  onImportRepository?: () => void;
   addMenuOpen: boolean;
   onToggleAddMenu: () => void;
   onOpenTool: (tool: "Plugins") => void;
@@ -86,6 +96,8 @@ export function Composer({
   connectedConnectors?: { id: string; name: string; status: string }[];
   attachments?: ComposerAttachment[];
   onRemoveAttachment?: (attachmentId: string) => void;
+  recipientControl?: ReactNode;
+  modelControl?: ReactNode;
   compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
@@ -108,11 +120,12 @@ export function Composer({
   const voiceTransitioning =
     voiceStatus === "starting" ||
     voiceStatus === "stopping" ||
+    voiceStatus === "reviewing" ||
     voiceStatus === "processing";
   const voiceCancelable =
     voiceStatus === "starting" ||
     voiceStatus === "listening" ||
-    voiceStatus === "stopping";
+    voiceStatus === "stopping" || voiceStatus === "reviewing" || voiceStatus === "processing";
   const voiceUnavailable =
     voiceStatus === "disabled" || voiceStatus === "unsupported";
   const voiceTerminal =
@@ -213,7 +226,10 @@ export function Composer({
       <form
         ref={formRef}
         className={`composer-glow ${menuPlacementClass}${compactAgentSurface ? " composer-glow--compact-agent" : ""}`}
-        onSubmit={onSubmit}
+        onSubmit={(event) => {
+          if (voiceListening || voiceTransitioning) { event.preventDefault(); return; }
+          onSubmit(event);
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape" && voiceCancelable) {
             event.preventDefault();
@@ -277,6 +293,7 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-control-group">
+            {recipientControl}
             <div className="composer-control-anchor">
               <button
                 ref={addTrigger}
@@ -302,7 +319,10 @@ export function Composer({
                   <button type="button" role="menuitem" onClick={() => { onAttach(); closeExternalMenus(); }}>
                     <UploadSimple size={18} /><span>Upload files</span>
                   </button>
-                  {connectedConnectors.length > 0 && <span className="composer-menu__heading">Connected apps</span>}
+                  {onImportRepository && <button type="button" role="menuitem" onClick={() => { onImportRepository(); closeExternalMenus(); }}>
+                    <UploadSimple size={18} /><span>Import repository ZIP</span>
+                  </button>}
+                  {connectedConnectors.length > 0 && <span className="composer-menu__heading">Plugins</span>}
                   {connectedConnectors.map((connector) => <button key={connector.id} type="button" role="menuitem" onClick={() => {
                     const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + connector.id + " ";
                     onComposerChange(prompt); closeExternalMenus(); composerRef.current?.focus();
@@ -315,10 +335,10 @@ export function Composer({
             </div>
 
 
-            {!compactAgentSurface && <ModelPicker models={models} selectedId={selectedModelId}
+            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
               label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
               onSelectEffort={onSelectReasoningEffort} open={modelOpen}
-              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
@@ -376,6 +396,7 @@ export function Composer({
           </div>
         </div>
 
+        {voiceReview && onAuthorizeVoice ? <RecordingReview review={voiceReview} onConfirm={onAuthorizeVoice} onCancel={onCancelVoice} /> : null}
         {showVoiceFeedback ? (
           <div
             className="voice-feedback"

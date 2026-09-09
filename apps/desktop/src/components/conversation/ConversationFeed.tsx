@@ -14,6 +14,9 @@ import "./conversation.css";
 interface Props {
   messages: ConversationMessageView[];
   agent: FableAgentProfile;
+  authors?: Record<string, FableAgentProfile>;
+  requireAuthor?: boolean;
+  suppressLivePrompt?: boolean;
   state: NativeAgentState;
   threadId?: string;
   profileName: string;
@@ -23,7 +26,7 @@ interface Props {
   generation?: number;
   approval?: ReactNode;
   interruption?: ReactNode;
-  onPreviewArtifact?: (output: string) => void;
+  onPreviewArtifact?: (output: string, authorId?: string) => void;
   onOpenConnector?: (connectorId: string) => void;
 }
 
@@ -39,15 +42,21 @@ export function ConversationFeed(props: Props) {
     const canonicalReady = canonical && !state.running && (redacted ||
       canonical.parts.filter((part) => part.kind === "text").map((part) => part.content).join("") === state.transcript);
     const turn: ConversationTurn = {
-      id: state.currentAttemptId!, prompt: state.progressPrompt ?? props.optimisticPrompt,
+      id: state.currentAttemptId!, prompt: props.suppressLivePrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
       parts: canonicalReady ? canonical.parts : state.responseParts ?? (state.transcript ? [{ id: "text", kind: "text", content: state.transcript }] : []),
       startedAt: state.startedAt, endedAt: state.endedAt,
     };
     if (index < 0) presented.push(turn); else presented[index] = { ...turn, prompt: canonical.prompt ?? turn.prompt };
   }
   return <>
-    {presented.map((turn) => <Turn key={turn.id} turn={turn} {...props}
-      live={Boolean(live && turn.id === state.currentAttemptId)} />)}
+    {presented.map((turn) => {
+      const author = props.authors?.[turn.id];
+      return <Turn key={turn.id} turn={turn} {...props}
+        agent={author ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : props.agent)}
+        onPreviewArtifact={props.requireAuthor && !author ? undefined : props.onPreviewArtifact}
+        generation={props.requireAuthor && !author ? undefined : props.generation}
+        live={Boolean(live && turn.id === state.currentAttemptId)} />;
+    })}
     {props.optimisticPrompt && (!live || props.optimisticPrompt !== state.progressPrompt) ? <UserMessage content={props.optimisticPrompt} {...props} /> : null}
     {!live && (props.approval || props.interruption) ? <div className="conversation-attention">{props.approval}{props.interruption}</div> : null}
   </>;
@@ -110,7 +119,7 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
       {final?.kind === "text" ? <div className="turn-answer"><MessageMarkdown content={final.content} /></div> : null}
       {notices.map((part) => <Part key={`${part.kind}:${part.id}`} part={part} running={false} />)}
       {files.length ? <div className="turn-files" aria-label="Files from this response">{files.map((part) => <ComputerArtifacts key={part.id} output={part.content}
-        workspaceId={props.workspaceId} agentId={props.agent.id} expectedGeneration={props.generation} onPreview={props.onPreviewArtifact} />)}</div> : null}
+        workspaceId={props.workspaceId} agentId={props.agent.id} expectedGeneration={props.generation} onPreview={props.onPreviewArtifact ? (output) => props.onPreviewArtifact!(output, props.agent.id) : undefined} />)}</div> : null}
       {live ? <>{props.approval ? <div className="conversation-attention">{props.approval}</div> : null}{props.interruption}</> : null}
     </article>
   </section>;

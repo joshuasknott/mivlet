@@ -73,6 +73,7 @@ export interface DesktopToolExecutorOptions {
   };
   /** Current scope/authority, including during an in-flight approval. */
   localComputerCurrent?: () => DesktopToolExecutorOptions["localComputer"];
+  prepareLocalComputer?: (tool: string) => Promise<void>;
   shouldCancel?: () => boolean;
   onExecuting?: (approval: ApprovalRequest, tool: string) => void;
   hostedComputer?: {
@@ -144,6 +145,10 @@ export function createDesktopToolExecutor(
     }
     const hostedShellRequested = parsed.location === "hosted";
     const computerTool = isLocalComputerTool(toolName, args);
+    if (computerTool && !(options.localComputerCurrent?.() ?? options.localComputer)?.ready) {
+      if (options.shouldCancel?.()) throw new Error("This task was cancelled.");
+      await options.prepareLocalComputer?.(toolName);
+    }
     const admittedComputer = computerTool
       ? { ...(options.localComputerCurrent?.() ?? options.localComputer) }
       : undefined;
@@ -157,13 +162,13 @@ export function createDesktopToolExecutor(
         throw new Error("Computer control changed or is paused. Wait for the user to return control, then observe the current state before acting.");
       }
     };
-    if (toolName === "run-shell" && !options.localComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
+    if (toolName === "run-shell" && !admittedComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
       throw new Error("Set up this agent's isolated local computer before asking it to run terminal commands.");
     }
-    if ((toolName === "read-file" || toolName === "write-file") && !options.localComputer?.ready) {
+    if ((toolName === "read-file" || toolName === "write-file") && !admittedComputer?.ready) {
       throw new Error("Set up this agent's local computer before asking it to use files.");
     }
-    if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !options.localComputer?.ready) {
+    if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !admittedComputer?.ready) {
       throw new Error("Set up this agent's local computer before asking it to use its browser.");
     }
     checkComputerAuthority();

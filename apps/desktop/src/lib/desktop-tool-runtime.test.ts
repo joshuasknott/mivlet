@@ -8,6 +8,30 @@ describe("computer authority across approvals", () => {
   const args = '{"path":"report.txt","content":"draft"}';
   const approval = () => buildToolApproval("Fable", "write-file", args);
   const computer = () => ({ workspaceId: "workspace-a", agentId: "agent-a", ready: true, generation: 4, controller: "agent" as const });
+  it("prepares a new computer before binding the exact tool approval", async () => {
+    runtime.executeTool.mockResolvedValue({ ok: true, output: "Saved" });
+    const current = { ...computer(), ready: false };
+    const queueApproval = vi.fn();
+    const prepareLocalComputer = vi.fn(async () => { current.ready = true; current.generation = 5; });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, {
+      localComputer: { ...current }, localComputerCurrent: () => current, prepareLocalComputer, queueApproval,
+    });
+    await expect(execute(approval(), args)).resolves.toBe("Saved");
+    expect(prepareLocalComputer).toHaveBeenCalledWith("write-file");
+    expect(queueApproval).toHaveBeenCalledWith(expect.objectContaining({ dataUsed: expect.arrayContaining(["Computer generation: 5"]) }), "write-file", args);
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 5 }));
+  });
+  it("does not queue or execute an action when first-use preparation fails", async () => {
+    runtime.executeTool.mockClear();
+    const queueApproval = vi.fn();
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, {
+      localComputer: { ...computer(), ready: false }, queueApproval,
+      prepareLocalComputer: async () => { throw new Error("Enable Computer Use in Plugins."); },
+    });
+    await expect(execute(approval(), args)).rejects.toThrow("Enable Computer Use");
+    expect(queueApproval).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
   it("rejects approval granted after takeover and return without replaying the action", async () => {
     runtime.executeTool.mockClear();
     const current = computer();

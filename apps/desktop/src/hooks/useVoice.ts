@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SpeechToTextError,
   type SpeechToTextProvider,
-  type SpeechToTextSession
+  type SpeechToTextSession,
+  type SpeechRecordingReview
 } from "@fable/connectors/voice";
 import type { VoiceCapability, VoiceInputState } from "@fable/protocol";
 
@@ -87,6 +88,7 @@ export function useVoice(
   const [state, setState] = useState<VoiceState>(() =>
     stateForProvider(provider, disabled)
   );
+  const [review, setReview] = useState<SpeechRecordingReview | null>(null);
   const mountedRef = useRef(true);
   const generationRef = useRef(0);
   const busyRef = useRef(false);
@@ -118,6 +120,7 @@ export function useVoice(
       busyRef.current = false;
       abortRef.current = null;
       if (sessionRef.current === session) sessionRef.current = null;
+      setReview(null);
       setState(stateForError(error));
     },
     [isCurrent]
@@ -125,6 +128,17 @@ export function useVoice(
 
   const observeCompletion = useCallback(
     (generation: number, session: SpeechToTextSession) => {
+      if (session.review) {
+        void session.review.then((nextReview) => {
+          if (!isCurrent(generation) || sessionRef.current !== session) return;
+          setReview(nextReview);
+          setState({
+            status: "reviewing",
+            message: "Review this recording before uploading it to OpenAI.",
+            errorCode: null
+          });
+        }, (error) => handleFailure(generation, error, session));
+      }
       void session.completion.then(
         async (transcript) => {
           if (
@@ -164,6 +178,7 @@ export function useVoice(
           busyRef.current = false;
           abortRef.current = null;
           if (sessionRef.current === session) sessionRef.current = null;
+          setReview(null);
           session.dispose();
           onTranscriptRef.current(normalized);
           if (!isCurrent(generation)) return;
@@ -191,6 +206,7 @@ export function useVoice(
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     handledGenerationRef.current = null;
+    setReview(null);
     const controller = new AbortController();
     abortRef.current = controller;
     setState({
@@ -235,11 +251,24 @@ export function useVoice(
     session.stop();
   }, [state.status]);
 
+  const authorize = useCallback(() => {
+    const session = sessionRef.current;
+    if (!session?.authorize || state.status !== "reviewing") return;
+    setReview(null);
+    setState({
+      status: "processing",
+      message: "Uploading the reviewed recording to OpenAI for transcription.",
+      errorCode: null
+    });
+    session.authorize();
+  }, [state.status]);
+
   const cancel = useCallback(() => {
     const wasBusy = busyRef.current;
     generationRef.current += 1;
     busyRef.current = false;
     handledGenerationRef.current = null;
+    setReview(null);
     abortRef.current?.abort();
     abortRef.current = null;
     sessionRef.current?.cancel();
@@ -258,6 +287,7 @@ export function useVoice(
 
   const dismiss = useCallback(() => {
     if (busyRef.current) return;
+    setReview(null);
     setState(stateForProvider(provider, disabled));
     onCancelRef.current?.();
   }, [disabled, provider]);
@@ -266,6 +296,7 @@ export function useVoice(
     generationRef.current += 1;
     busyRef.current = false;
     handledGenerationRef.current = null;
+    setReview(null);
     abortRef.current?.abort();
     abortRef.current = null;
     sessionRef.current?.cancel();
@@ -278,6 +309,7 @@ export function useVoice(
       generationRef.current += 1;
       busyRef.current = false;
       handledGenerationRef.current = null;
+      setReview(null);
       abortRef.current?.abort();
       abortRef.current = null;
       sessionRef.current?.cancel();
@@ -306,6 +338,7 @@ export function useVoice(
     state.status === "starting" ||
     state.status === "listening" ||
     state.status === "stopping" ||
+    state.status === "reviewing" ||
     state.status === "processing";
   const canStart =
     !disabled &&
@@ -318,10 +351,12 @@ export function useVoice(
     capability: provider.capability,
     provider: provider.descriptor,
     processingDisclosure: provider.processingDisclosure,
+    review,
     isBusy,
     canStart,
     start,
     stop,
+    authorize,
     cancel,
     dismiss,
     reset

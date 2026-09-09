@@ -25,7 +25,12 @@ import { catalogueCapabilities } from "./model-catalogue";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
 import { streamOpenAiEvents } from "./openai-compat";
-import { CONNECTED_SOURCE_BRIEF_GUIDANCE, lookupTool, registeredToolSpecs } from "./tools";
+import {
+  CONNECTED_SOURCE_BRIEF_GUIDANCE,
+  WEB_SOURCE_BRIEF_GUIDANCE,
+  lookupTool,
+  registeredToolSpecs
+} from "./tools";
 import type { HttpTransport } from "./transport";
 import { classifyBackendError } from "../agent-runtime/utils/errors";
 import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
@@ -147,6 +152,9 @@ export async function* runAgentLoop(
     options.contextPrefix?.trim(),
     tools.some((tool) => tool.name === "connection-read")
       ? `Fable tool-use policy: ${CONNECTED_SOURCE_BRIEF_GUIDANCE}`
+      : undefined,
+    tools.some((tool) => tool.name === "web-fetch")
+      ? `Fable web-source policy: ${WEB_SOURCE_BRIEF_GUIDANCE}`
       : undefined
   ].filter((part): part is string => Boolean(part)).join("\n\n");
   const messages: NativeMessage[] = systemPrefix

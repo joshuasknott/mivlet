@@ -167,6 +167,13 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // optional hosted-account mirror row. Existing connections and
             // their observation children are copied exactly.
             38 => apply_v38_to_v39(conn)?,
+            // 39 -> 40: add empty member-private local schedule and occurrence
+            // stores. No retired orchestration data or execution authority is
+            // inferred by this migration.
+            39 => conn.execute_batch(crate::store::schema::SCHEMA_V39_TO_V40)?,
+            // 40 -> 41: add empty member-private shared project rooms and their
+            // run-author ledger. Legacy project rows are deliberately ignored.
+            40 => conn.execute_batch(crate::store::schema::SCHEMA_V40_TO_V41)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -1889,6 +1896,56 @@ mod tests {
         let conn = conn();
         let err = apply(&conn, CURRENT_SCHEMA_VERSION, CURRENT_SCHEMA_VERSION + 1).unwrap_err();
         assert!(matches!(err, super::super::StoreError::Invalid(_)));
+    }
+
+    #[test]
+    fn v39_to_v40_adds_empty_local_schedules_without_retired_orchestration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE workspace(id TEXT PRIMARY KEY);
+             CREATE TABLE run(id TEXT PRIMARY KEY,workspace_id TEXT NOT NULL);",
+        )
+        .unwrap();
+        apply(&conn, 39, 40).unwrap();
+        assert!(table_exists(&conn, "local_schedule").unwrap());
+        assert!(table_exists(&conn, "local_schedule_occurrence").unwrap());
+        assert!(!table_exists(&conn, "routine_record").unwrap());
+        assert!(!table_exists(&conn, "scheduled_job").unwrap());
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM local_schedule", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn v40_to_v41_adds_empty_local_projects_without_importing_legacy_rows() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE workspace(id TEXT PRIMARY KEY);
+             INSERT INTO workspace VALUES('default');
+             CREATE TABLE thread(id TEXT PRIMARY KEY);
+             CREATE TABLE run(id TEXT PRIMARY KEY);
+             CREATE TABLE project(id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL);
+             INSERT INTO project VALUES('legacy-project','default');",
+        )
+        .unwrap();
+        apply(&conn, 40, 41).unwrap();
+        assert!(table_exists(&conn, "local_project").unwrap());
+        assert!(table_exists(&conn, "local_project_run_author").unwrap());
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM local_project", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM project", [], |row| row
+                .get::<_, i64>(0))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

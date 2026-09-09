@@ -1,4 +1,5 @@
 import type {
+  BuiltinPlugins,
   LocalBrowserKeyRequest,
   LocalBrowserHistoryRequest,
   LocalBrowserNavigateRequest,
@@ -17,6 +18,24 @@ import type {
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";
+
+export async function importRuntimeRepository(
+  target: LocalComputerTarget,
+  expectedGeneration: number,
+): Promise<{
+  relativePath: string;
+  files: number;
+  skipped: number;
+  sizeBytes: number;
+} | null> {
+  const adapter = getRuntimeAdapter();
+  if (adapter.kind !== "native")
+    throw new Error("Repository import requires the desktop app.");
+  return adapter.invoke("local_computer_import_repository", {
+    ...target,
+    expectedGeneration,
+  });
+}
 
 export interface LocalComputerRuntimePort {
   load(target: LocalComputerTarget): Promise<LocalComputerSnapshot | null>;
@@ -147,6 +166,29 @@ async function nativeComputerCommand<T>(
     throw toRuntimeError(error);
   });
 }
+export const loadRuntimeBuiltinPlugins = (workspaceId: string) =>
+  nativeComputerCommand<BuiltinPlugins>("builtin_plugins_status", {
+    workspaceId,
+  });
+export const setRuntimeBuiltinPlugin = (
+  workspaceId: string,
+  plugin: "browser" | "computer",
+  enabled: boolean,
+) =>
+  nativeComputerCommand<BuiltinPlugins>("builtin_plugin_set", {
+    workspaceId,
+    plugin,
+    enabled,
+  });
+export const prepareRuntimeBuiltinComputer = (
+  target: LocalComputerTarget,
+  plugin: "browser" | "computer",
+  expectedGeneration: number,
+) =>
+  nativeComputerCommand<LocalComputerSnapshot>(
+    "builtin_plugin_prepare_computer",
+    { ...target, plugin, expectedGeneration },
+  );
 export const openRuntimeLocalComputerViewer = (
   request: LocalComputerEpochRequest,
 ) =>

@@ -188,11 +188,11 @@ describe("Connector Connection selection", () => {
     );
 
     await user.click(
-      screen.getAllByRole("button", { name: "Dropbox is planned" })[0],
+      screen.getAllByRole("button", { name: "Outlook is planned" })[0],
     );
 
-    expect(screen.getByRole("dialog", { name: "Dropbox" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Dropbox" })).toHaveTextContent("Planned");
+    expect(screen.getByRole("dialog", { name: "Outlook" })).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Planned");
     expect(
       screen.getByRole("button", { name: "Not available yet" }),
     ).toBeDisabled();

@@ -62,6 +62,12 @@ export function DictationPrivacySettings({
   onStatus: (message: string) => void;
 }) {
   const available = capability.status === "supported";
+  const openAiConnected = runtime.backendProviders.some(
+    (provider) =>
+      provider.id === "openai" &&
+      provider.backendType === "native-api" &&
+      provider.authState === "connected",
+  );
   return (
     <div className="settings-page__body">
       <button
@@ -89,10 +95,32 @@ export function DictationPrivacySettings({
       </p>
       <details className="settings-disclosure">
         <summary>Speech processing</summary>
+        <label className="settings-preference-row">
+          <span>Dictation provider</span>
+          <select
+            value={runtime.voiceProvider ?? "browser"}
+            onChange={(event) =>
+              runtime.setVoiceProvider(
+                event.target.value === "openai" ? "openai" : "browser",
+              )
+            }
+          >
+            <option value="browser">Browser speech service</option>
+            <option value="openai" disabled={!openAiConnected}>
+              OpenAI API · metered
+            </option>
+          </select>
+        </label>
         <p>
-          Your browser or operating system may process speech remotely. Fable
-          keeps the text you send.
+          {runtime.voiceProvider === "openai"
+            ? "Record locally, then approve each recording before Fable uploads it to OpenAI for transcription. This uses your separate OpenAI API connection and billing."
+            : "Your browser or operating system may process speech remotely. Fable keeps the text you send."}
         </p>
+        {!openAiConnected ? (
+          <p>
+            Connect OpenAI API in Providers to use its transcription service.
+          </p>
+        ) : null}
       </details>
     </div>
   );

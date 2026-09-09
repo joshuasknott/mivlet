@@ -19,10 +19,17 @@ describe("computer artifacts", () => {
 
   it("decodes persisted receipts and rejects unsafe output", () => {
     expect(parseComputerArtifact(props.output)).toEqual(artifact);
-    for (const overrides of [{ relativePath: "../private.docx" }, { relativePath: "report.html" }, { relativePath: "a\\report.docx" }, { relativePath: "report.pdf", mimeType: "application/pdf" }, { mimeType: "text/html" }, { id: "some-path" }, { sizeBytes: 30 * 1024 * 1024 }, { title: "bad\u202eexe" }]) {
+    for (const overrides of [{ relativePath: "../private.docx" }, { relativePath: "report.html" }, { relativePath: "a\\report.docx" }, { relativePath: "report.pdf", mimeType: "text/html" }, { mimeType: "text/html" }, { id: "some-path" }, { sizeBytes: 30 * 1024 * 1024 }, { title: "bad\u202eexe" }]) {
       expect(parseComputerArtifact(JSON.stringify({ ...artifact, ...overrides }))).toBeNull();
     }
     expect(parseComputerArtifact("ordinary tool output")).toBeNull();
+  });
+
+  it("offers PDF and presentation receipts while native validation remains authoritative", () => {
+    for (const [extension, mimeType] of [["pdf", "application/pdf"], ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"]]) {
+      const receipt = { ...artifact, relativePath: `report.${extension}`, mimeType };
+      expect(parseComputerArtifact(JSON.stringify(receipt))).toEqual(receipt);
+    }
   });
 
   it("opens only an opaque receipt with current scope and generation", async () => {

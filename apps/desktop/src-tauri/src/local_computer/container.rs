@@ -9,7 +9,7 @@ use std::{
     ffi::{OsStr, OsString},
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    path::Path,
+    path::{Component, Path, PathBuf},
     process::{Command, Output, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -22,12 +22,15 @@ use std::{
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use super::{ComputerScope, LocalComputerShellResult};
 
-pub(super) const IMAGE_TAG: &str = "fable-local-computer:0.1.0-v4";
+pub(super) const IMAGE_TAG: &str = "fable-local-computer:0.1.0-v5";
 const OWNER_LABEL: &str = "com.fable.local-computer";
+const IMAGE_OWNER_LABEL: &str = "com.fable.local-computer-image";
+const IMAGE_CONTEXT_LABEL: &str = "com.fable.build-context-sha256";
 const SCOPE_LABEL: &str = "com.fable.scope";
 const RUNTIME_CONFIG_LABEL: &str = "com.fable.runtime-config";
 const RUNTIME_CONFIG_VERSION: &str = "1";
@@ -36,6 +39,8 @@ const MAX_SHELL_OUTPUT_BYTES: usize = 64 * 1024;
 const MAX_SHELL_COMMAND_CHARACTERS: usize = 16 * 1024;
 const MAX_DESKTOP_FRAME_BYTES: usize = 4 * 1024 * 1024;
 const READY_TIMEOUT: Duration = Duration::from_secs(90);
+const MAX_IMAGE_CONTEXT_FILES: usize = 10_000;
+const MAX_IMAGE_CONTEXT_BYTES: u64 = 64 * 1024 * 1024;
 
 static IMAGE_BUILD_GATE: OnceLock<Mutex<()>> = OnceLock::new();
 static LIFECYCLE_GATE: OnceLock<Mutex<()>> = OnceLock::new();
@@ -64,11 +69,18 @@ struct ContainerInspection {
     running: bool,
     suspended: bool,
     healthy: bool,
-    image: String,
     image_id: String,
+    image_context: String,
     runtime_config: String,
     owner_label: String,
     scope_label: String,
+}
+
+#[derive(Debug)]
+struct ImageInspection {
+    id: String,
+    owner_label: String,
+    context_digest: String,
 }
 
 pub(super) fn status(scope: &ComputerScope) -> ContainerStatus {
@@ -83,7 +95,10 @@ pub(super) fn status(scope: &ComputerScope) -> ContainerStatus {
             healthy: false,
         };
     }
-    let image_available = image_exists();
+    let image_available = inspect_tagged_image()
+        .ok()
+        .flatten()
+        .is_some_and(|image| image.owner_label == "true" && valid_sha256(&image.context_digest));
     let inspection = inspect_container(scope).ok().flatten();
     ContainerStatus {
         engine_available,
@@ -109,8 +124,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
         );
     }
     ensure_start_capacity(scope)?;
-    ensure_image(image_context)?;
-    let image_id = installed_image_id()?;
+    let (image_id, image_context_digest) = ensure_image(image_context)?;
     ensure_volume(scope)?;
     ensure_agent_volume(scope)?;
 
@@ -129,9 +143,9 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
         if inspection.suspended {
             unpause(scope)?;
         }
-        if inspection.image != IMAGE_TAG
-            || inspection.image_id != image_id
+        if inspection.image_id != image_id
             || inspection.runtime_config != RUNTIME_CONFIG_VERSION
+            || inspection.image_context != image_context_digest
         {
             checked(
                 vec![
@@ -149,7 +163,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                 ],
                 "Fable could not replace the previous agent computer.",
             )?;
-            create_container(scope)?;
+            create_container(scope, &image_id, &image_context_digest)?;
         } else if !inspection.running {
             checked(
                 vec![
@@ -161,7 +175,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
             )?;
         }
     } else {
-        create_container(scope)?;
+        create_container(scope, &image_id, &image_context_digest)?;
     }
 
     wait_until_ready(scope)?;
@@ -686,56 +700,179 @@ fn gateway_request(
     Ok(response[body + 4..].to_vec())
 }
 
-fn ensure_image(image_context: &Path) -> Result<(), String> {
-    if image_exists() {
-        return Ok(());
+fn image_context_digest(image_context: &Path) -> Result<String, String> {
+    if !image_context.join("Dockerfile").is_file() {
+        return Err("Fable's local computer image is missing from this installation.".into());
+    }
+    let dockerignore = std::fs::read_to_string(image_context.join(".dockerignore"))
+        .map_err(|_| "Fable's local computer image exclusions are missing.".to_string())?;
+    let exclusions = dockerignore
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .collect::<Vec<_>>();
+    if exclusions != ["**/node_modules"] {
+        return Err("Fable's local computer image exclusions are unsupported.".into());
+    }
+
+    fn collect(
+        root: &Path,
+        directory: &Path,
+        files: &mut Vec<(String, PathBuf)>,
+    ) -> Result<(), String> {
+        for entry in std::fs::read_dir(directory)
+            .map_err(|_| "Fable could not read the local computer image.".to_string())?
+        {
+            let entry =
+                entry.map_err(|_| "Fable could not read the local computer image.".to_string())?;
+            let file_type = entry
+                .file_type()
+                .map_err(|_| "Fable could not inspect the local computer image.".to_string())?;
+            if file_type.is_symlink() {
+                return Err("Fable's local computer image cannot contain links.".into());
+            }
+            if file_type.is_dir() && entry.file_name() == "node_modules" {
+                continue;
+            }
+            let path = entry.path();
+            if file_type.is_dir() {
+                collect(root, &path, files)?;
+                continue;
+            }
+            if !file_type.is_file() {
+                return Err("Fable's local computer image contains an unsupported entry.".into());
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|_| "Fable could not identify a local computer image file.".to_string())?;
+            let mut parts = Vec::new();
+            for component in relative.components() {
+                let Component::Normal(component) = component else {
+                    return Err("Fable's local computer image contains an invalid path.".into());
+                };
+                parts.push(
+                    component
+                        .to_str()
+                        .ok_or_else(|| {
+                            "Fable's local computer image contains an unsupported path.".to_string()
+                        })?
+                        .to_string(),
+                );
+            }
+            files.push((parts.join("/"), path));
+            if files.len() > MAX_IMAGE_CONTEXT_FILES {
+                return Err("Fable's local computer image contains too many files.".into());
+            }
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    collect(image_context, image_context, &mut files)?;
+    files.sort_unstable_by(|left, right| left.0.cmp(&right.0));
+    let mut hasher = Sha256::new();
+    hasher.update(b"fable-local-computer-build-context-v1\0");
+    let mut total_bytes = 0_u64;
+    for (relative, path) in files {
+        let size = std::fs::metadata(&path)
+            .map_err(|_| "Fable could not inspect a local computer image file.".to_string())?
+            .len();
+        total_bytes = total_bytes.saturating_add(size);
+        if total_bytes > MAX_IMAGE_CONTEXT_BYTES {
+            return Err("Fable's local computer image is too large.".into());
+        }
+        hasher.update((relative.len() as u64).to_be_bytes());
+        hasher.update(relative.as_bytes());
+        hasher.update(size.to_be_bytes());
+        let mut file = std::fs::File::open(path)
+            .map_err(|_| "Fable could not read a local computer image file.".to_string())?;
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = file
+                .read(&mut buffer)
+                .map_err(|_| "Fable could not read a local computer image file.".to_string())?;
+            if read == 0 {
+                break;
+            }
+            hasher.update(&buffer[..read]);
+        }
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn inspect_tagged_image() -> Result<Option<ImageInspection>, String> {
+    let output = docker_output([
+        OsStr::new("image"),
+        OsStr::new("inspect"),
+        OsStr::new("--format"),
+        OsStr::new("{{.Id}}|{{ index .Config.Labels \"com.fable.local-computer-image\" }}|{{ index .Config.Labels \"com.fable.build-context-sha256\" }}"),
+        OsStr::new(IMAGE_TAG),
+    ])
+    .map_err(|_| "Fable could not inspect the computer system image.".to_string())?;
+    if !output.status.success() {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut fields = text.trim().split('|');
+    let id = fields.next().unwrap_or_default().to_string();
+    let owner_label = fields.next().unwrap_or_default().to_string();
+    let context_digest = fields.next().unwrap_or_default().to_string();
+    if fields.next().is_some() || !id.strip_prefix("sha256:").is_some_and(valid_sha256) {
+        return Err("The computer system image has invalid metadata.".into());
+    }
+    Ok(Some(ImageInspection {
+        id,
+        owner_label,
+        context_digest,
+    }))
+}
+
+fn matching_image(expected_context: &str) -> Result<Option<String>, String> {
+    Ok(inspect_tagged_image()?.and_then(|image| {
+        (image.owner_label == "true" && image.context_digest == expected_context)
+            .then_some(image.id)
+    }))
+}
+
+fn ensure_image(image_context: &Path) -> Result<(String, String), String> {
+    let context_digest = image_context_digest(image_context)?;
+    if let Some(id) = matching_image(&context_digest)? {
+        return Ok((id, context_digest));
     }
     let gate = IMAGE_BUILD_GATE.get_or_init(|| Mutex::new(()));
     let _guard = gate
         .lock()
         .map_err(|_| "The agent computer image build state is unavailable.".to_string())?;
-    if image_exists() {
-        return Ok(());
-    }
-    if !image_context.join("Dockerfile").is_file() {
-        return Err("Fable's local computer image is missing from this installation.".into());
+    if let Some(id) = matching_image(&context_digest)? {
+        return Ok((id, context_digest));
     }
     checked_quiet(
         vec![
             "build".into(),
             "--quiet".into(),
+            "--build-arg".into(),
+            format!("FABLE_BUILD_CONTEXT_SHA256={context_digest}").into(),
+            "--label".into(),
+            format!("{IMAGE_OWNER_LABEL}=true").into(),
+            "--label".into(),
+            format!("{IMAGE_CONTEXT_LABEL}={context_digest}").into(),
             "--tag".into(),
             IMAGE_TAG.into(),
             image_context.as_os_str().to_owned(),
         ],
         "Fable could not build the local computer image.",
     )?;
-    Ok(())
-}
-
-fn image_exists() -> bool {
-    docker_succeeds(["image", "inspect", IMAGE_TAG])
-}
-
-fn installed_image_id() -> Result<String, String> {
-    let output = checked_quiet(
-        vec![
-            "image".into(),
-            "inspect".into(),
-            "--format".into(),
-            "{{.Id}}".into(),
-            IMAGE_TAG.into(),
-        ],
-        "Fable could not verify the computer system image.",
-    )?;
-    let id = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    if !id
-        .strip_prefix("sha256:")
-        .is_some_and(|digest| digest.len() == 64 && digest.bytes().all(|c| c.is_ascii_hexdigit()))
-    {
-        return Err("The computer system image has an invalid identifier.".into());
+    if image_context_digest(image_context)? != context_digest {
+        return Err("Fable's local computer image changed while it was being built.".into());
     }
-    Ok(id)
+    let id = matching_image(&context_digest)?.ok_or_else(|| {
+        "Fable could not verify ownership of the rebuilt computer system image.".to_string()
+    })?;
+    Ok((id, context_digest))
 }
 
 fn ensure_volume(scope: &ComputerScope) -> Result<(), String> {
@@ -781,7 +918,11 @@ fn ensure_named_volume(scope: &ComputerScope, name: String) -> Result<(), String
     Ok(())
 }
 
-fn create_container(scope: &ComputerScope) -> Result<(), String> {
+fn create_container(
+    scope: &ComputerScope,
+    image_id: &str,
+    image_context_digest: &str,
+) -> Result<(), String> {
     let workspace = scope.directory.join("workspace");
     let source = docker_mount_source(&workspace)?;
     // Docker parses --mount as CSV even when the process receives one argument.
@@ -812,6 +953,8 @@ fn create_container(scope: &ComputerScope) -> Result<(), String> {
             format!("{RUNTIME_CONFIG_LABEL}={RUNTIME_CONFIG_VERSION}").into(),
             "--label".into(),
             format!("{OWNER_LABEL}=true").into(),
+            "--label".into(),
+            format!("{IMAGE_CONTEXT_LABEL}={image_context_digest}").into(),
             "--label".into(),
             format!("{SCOPE_LABEL}={}", scope.key).into(),
             "--label".into(),
@@ -879,7 +1022,7 @@ fn create_container(scope: &ComputerScope) -> Result<(), String> {
             "12".into(),
             "--health-start-period".into(),
             "30s".into(),
-            IMAGE_TAG.into(),
+            image_id.into(),
         ],
         "Fable could not create the agent computer.",
     )?;
@@ -917,7 +1060,7 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
         OsStr::new("container"),
         OsStr::new("inspect"),
         OsStr::new("--format"),
-        OsStr::new("{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{.Config.Image}}|{{ index .Config.Labels \"com.fable.local-computer\" }}|{{ index .Config.Labels \"com.fable.scope\" }}|{{.State.Paused}}|{{.Image}}|{{ index .Config.Labels \"com.fable.runtime-config\" }}"),
+        OsStr::new("{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{ index .Config.Labels \"com.fable.local-computer\" }}|{{ index .Config.Labels \"com.fable.scope\" }}|{{.State.Paused}}|{{.Image}}|{{ index .Config.Labels \"com.fable.runtime-config\" }}|{{ index .Config.Labels \"com.fable.build-context-sha256\" }}"),
         OsStr::new(&container_name(scope)),
     ])
     .map_err(|_| "Fable could not inspect the agent computer.".to_string())?;
@@ -928,12 +1071,12 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
     let mut fields = text.trim().split('|');
     let running = fields.next() == Some("true");
     let health = fields.next().unwrap_or("none");
-    let image = fields.next().unwrap_or_default().to_string();
     let owner_label = fields.next().unwrap_or_default().to_string();
     let scope_label = fields.next().unwrap_or_default().to_string();
     let suspended = fields.next() == Some("true");
     let image_id = fields.next().unwrap_or_default().to_string();
     let runtime_config = fields.next().unwrap_or_default().to_string();
+    let image_context = fields.next().unwrap_or_default().to_string();
     if fields.next().is_some() {
         return Err("The agent computer returned invalid lifecycle metadata.".into());
     }
@@ -941,8 +1084,8 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
         running,
         suspended,
         healthy: running && !suspended && health == "healthy",
-        image,
         image_id,
+        image_context,
         runtime_config,
         owner_label,
         scope_label,
@@ -1106,6 +1249,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
 
+    fn write_image_context(root: &Path, marker: &str) {
+        std::fs::write(root.join(".dockerignore"), "**/node_modules\n").unwrap();
+        std::fs::write(root.join("Dockerfile"), "FROM scratch\n").unwrap();
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::write(root.join("nested/marker.txt"), marker).unwrap();
+    }
+
     fn scope() -> ComputerScope {
         ComputerScope {
             key: "0123456789abcdef0123456789abcdef".into(),
@@ -1129,6 +1279,44 @@ mod tests {
         let value = vec![b'x'; MAX_DIAGNOSTIC_BYTES + 20];
         assert_eq!(bounded_diagnostic(&value).len(), MAX_DIAGNOSTIC_BYTES);
         assert_eq!(bounded_diagnostic(b"one\r\ntwo"), "one two");
+    }
+
+    #[test]
+    fn image_context_digest_is_stable_and_tracks_source_bytes() {
+        let first = tempfile::tempdir().unwrap();
+        write_image_context(first.path(), "one");
+        let initial = image_context_digest(first.path()).unwrap();
+        assert!(valid_sha256(&initial));
+        assert_eq!(image_context_digest(first.path()).unwrap(), initial);
+
+        std::fs::write(first.path().join("nested/marker.txt"), "two").unwrap();
+        assert_ne!(image_context_digest(first.path()).unwrap(), initial);
+
+        let second = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(second.path().join("nested")).unwrap();
+        std::fs::write(second.path().join("nested/marker.txt"), "one").unwrap();
+        std::fs::write(second.path().join("Dockerfile"), "FROM scratch\n").unwrap();
+        std::fs::write(second.path().join(".dockerignore"), "**/node_modules\n").unwrap();
+        assert_eq!(image_context_digest(second.path()).unwrap(), initial);
+    }
+
+    #[test]
+    fn image_context_digest_excludes_dependency_trees_and_rejects_unknown_rules() {
+        let context = tempfile::tempdir().unwrap();
+        write_image_context(context.path(), "one");
+        let initial = image_context_digest(context.path()).unwrap();
+        std::fs::create_dir_all(context.path().join("documents/node_modules/pkg")).unwrap();
+        std::fs::write(
+            context.path().join("documents/node_modules/pkg/index.js"),
+            "untrusted dependency bytes",
+        )
+        .unwrap();
+        assert_eq!(image_context_digest(context.path()).unwrap(), initial);
+
+        std::fs::write(context.path().join(".dockerignore"), "*.secret\n").unwrap();
+        assert!(image_context_digest(context.path())
+            .unwrap_err()
+            .contains("exclusions are unsupported"));
     }
 
     #[test]

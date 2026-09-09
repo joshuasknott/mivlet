@@ -1,14 +1,34 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   assertReleaseMetadata,
+  assertReleaseVersionAlignment,
   buildManifest,
   collectWindowsArtifacts,
   renderReleaseNotes
 } from "./windows-manifest.mjs";
+
+test("repository release versions are aligned", async () => {
+  assert.equal(await assertReleaseVersionAlignment(), "0.1.0");
+});
+
+test("rejects a mismatch across release version sources", async () => {
+  const root = await mkdtemp(join(tmpdir(), "fable-versions-"));
+  const paths = {
+    rootPackagePath: join(root, "package.json"),
+    desktopPackagePath: join(root, "desktop-package.json"),
+    tauriConfigPath: join(root, "tauri.json"),
+    cargoManifestPath: join(root, "Cargo.toml")
+  };
+  await writeFile(paths.rootPackagePath, JSON.stringify({ version: "0.1.0" }));
+  await writeFile(paths.desktopPackagePath, JSON.stringify({ version: "0.1.0" }));
+  await writeFile(paths.tauriConfigPath, JSON.stringify({ version: "0.2.0" }));
+  await writeFile(paths.cargoManifestPath, '[package]\nname = "fable"\nversion = "0.1.0"\n');
+  await assert.rejects(assertReleaseVersionAlignment(paths), /Release versions are not aligned/);
+});
 
 test("collects one MSI and one NSIS installer with stable hashes", async () => {
   const root = await mkdtemp(join(tmpdir(), "fable-release-"));

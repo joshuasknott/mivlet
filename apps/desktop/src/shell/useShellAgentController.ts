@@ -4,10 +4,18 @@ import type {
   HostedBrowserSnapshot,
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
-import { createBrowserSpeechProvider } from "@fable/connectors/voice";
+import {
+  createBrowserSpeechProvider,
+  createOpenAiRecordingProvider,
+} from "@fable/connectors/voice";
+import { createNativeSpeechPort } from "../lib/native-speech";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
 import { useNativeAgent } from "../hooks/useNativeAgent";
+import {
+  useLocalScheduleDispatcher,
+  useLocalScheduleDispatchStatus,
+} from "../hooks/useLocalScheduleDispatcher";
 import {
   createDesktopDurableRunWriter,
   loadDesktopConversation,
@@ -15,9 +23,13 @@ import {
 } from "../hooks/useDurableConversation";
 import { useShellRuntime } from "../hooks/useShellRuntime";
 import { useVoice } from "../hooks/useVoice";
-import { createDesktopToolExecutor, type DesktopToolExecutorOptions } from "../lib/desktop-tool-runtime";
+import {
+  createDesktopToolExecutor,
+  type DesktopToolExecutorOptions,
+} from "../lib/desktop-tool-runtime";
 import { chatConnectorIds, chatConnectorTools } from "../lib/connector-chat";
 import { isLocalComputerTool } from "../lib/computer-tools";
+import { modelsForProvider } from "../lib/provider-models";
 import {
   navigateRuntimeHostedBrowser,
   prepareRuntimeHostedBrowser,
@@ -29,11 +41,15 @@ export function useShellAgentController({
   onDictation,
   onVoiceCancel,
   threadId,
+  executionAgentId,
+  executionProviderId,
   thumbnailEnabled = true,
 }: {
   onDictation: (transcript: string) => void;
   onVoiceCancel: () => void;
   threadId?: string;
+  executionAgentId?: string;
+  executionProviderId?: string;
   thumbnailEnabled?: boolean;
 }) {
   const gateRef = useRef<ReturnType<typeof createApprovalGate> | null>(null);
@@ -41,8 +57,13 @@ export function useShellAgentController({
   const approvalGate = gateRef.current;
   const scopeResetRef = useRef<() => void>(() => {});
   const cancelledScopeAttemptRef = useRef<string | null>(null);
-  const executionActivityRef = useRef<(approvalId: string, tool: string) => void>(() => {});
-  const runtime = useShellRuntime({ approvalGate, onScopeReset: () => scopeResetRef.current() });
+  const executionActivityRef = useRef<
+    (approvalId: string, tool: string) => void
+  >(() => {});
+  const runtime = useShellRuntime({
+    approvalGate,
+    onScopeReset: () => scopeResetRef.current(),
+  });
   const cancelRequestedRef = useRef(false);
   const [hostedBrowserSnapshot, setHostedBrowserSnapshot] =
     useState<HostedBrowserSnapshot | null>(null);
@@ -63,14 +84,34 @@ export function useShellAgentController({
     runtime.accountWorkspaceStatus.activeWorkspace.source === "local"
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : undefined;
-  const activeAgentId = runtime.activeAgentId ?? runtime.agents[0]?.id;
-  const connectorAccessRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[] });
-  const turnConnectorsRef = useRef({ workspaceId: activeWorkspaceId, agentId: activeAgentId, ids: [] as string[], routes: {} as Record<string, string> });
+  const activeAgentId = executionAgentId ?? runtime.activeAgentId ?? runtime.agents[0]?.id;
+  const connectorAccessRef = useRef({
+    workspaceId: activeWorkspaceId,
+    agentId: activeAgentId,
+    ids: [] as string[],
+  });
+  const turnConnectorsRef = useRef({
+    workspaceId: activeWorkspaceId,
+    agentId: activeAgentId,
+    ids: [] as string[],
+    routes: {} as Record<string, string>,
+  });
   const turn = turnConnectorsRef.current;
-  connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId,
-    ids: turn.workspaceId === activeWorkspaceId && turn.agentId === activeAgentId
-      ? chatConnectorIds([], runtime.connectorManifests).filter((id) => turn.ids.includes(id)
-        && turn.routes[id] === (runtime.connectorManifests.find((manifest) => manifest.id === id)?.connectionRoute ?? "native")) : [] };
+  connectorAccessRef.current = {
+    workspaceId: activeWorkspaceId,
+    agentId: activeAgentId,
+    ids:
+      turn.workspaceId === activeWorkspaceId && turn.agentId === activeAgentId
+        ? chatConnectorIds([], runtime.connectorManifests).filter(
+            (id) =>
+              turn.ids.includes(id) &&
+              turn.routes[id] ===
+                (runtime.connectorManifests.find(
+                  (manifest) => manifest.id === id,
+                )?.connectionRoute ?? "native"),
+          )
+        : [],
+  };
   const hostedWorkspaceId =
     runtime.accountWorkspaceStatus.workspaces.find(
       (workspace) =>
@@ -87,13 +128,39 @@ export function useShellAgentController({
     agentId: activeAgentId ?? "agent-unavailable",
     thumbnailEnabled,
   });
-  const localComputerRef = useRef<DesktopToolExecutorOptions["localComputer"]>(undefined);
-  localComputerRef.current = activeWorkspaceId && activeAgentId ? {
-    workspaceId: activeWorkspaceId, agentId: activeAgentId,
-    ready: localComputer.node?.lifecycle === "ready",
-    generation: localComputer.node?.generation,
-    controller: localComputer.node?.controller,
-  } : undefined;
+  const localComputerRef =
+    useRef<DesktopToolExecutorOptions["localComputer"]>(undefined);
+  localComputerRef.current =
+    activeWorkspaceId && activeAgentId
+      ? {
+          workspaceId: activeWorkspaceId,
+          agentId: activeAgentId,
+          ready: localComputer.node?.lifecycle === "ready",
+          generation: localComputer.node?.generation,
+          controller: localComputer.node?.controller,
+        }
+      : undefined;
+  useLocalScheduleDispatcher({
+    workspaceId: activeWorkspaceId,
+    agents: runtime.agents,
+    providers: runtime.backendProviders,
+    runtimeReady: runtime.runtimeSnapshotReady && !runtime.runtimeSnapshotError,
+    onThreadCreated: (agentId, createdThreadId) => {
+      const profile = runtime.agents.find(
+        (candidate) => candidate.id === agentId,
+      );
+      if (!profile) return;
+      const threadIds = Array.from(
+        new Set([
+          ...(profile.threadIds ?? []),
+          ...(profile.threadId ? [profile.threadId] : []),
+          createdThreadId,
+        ]),
+      );
+      runtime.updateAgent(agentId, { threadIds });
+    },
+  });
+  const scheduleDispatch = useLocalScheduleDispatchStatus();
   const hostedComputer = useHostedComputer({
     workspaceId: hostedWorkspaceId,
     agentId: activeAgentId ?? "agent-unavailable",
@@ -109,7 +176,13 @@ export function useShellAgentController({
 
   const queueToolApproval = useCallback(
     (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => {
-      if (["connector-call", "connector-action"].includes(event.approval.action.split(/\s+/)[0]) || isLocalComputerTool(event.tool, event.arguments)) return;
+      if (
+        ["connector-call", "connector-action"].includes(
+          event.approval.action.split(/\s+/)[0],
+        ) ||
+        isLocalComputerTool(event.tool, event.arguments)
+      )
+        return;
       if (approvalGate.register(event.approval))
         runtime.recordBackendToolCall(event);
     },
@@ -223,12 +296,44 @@ export function useShellAgentController({
     () =>
       createDesktopToolExecutor(approvalGate, {
         connectorIds: connectorAccessRef.current.ids,
-        connectorAccessCurrent: (connectorId) => connectorAccessRef.current.workspaceId === activeWorkspaceId
-          && connectorAccessRef.current.agentId === activeAgentId && connectorAccessRef.current.ids.includes(connectorId),
+        connectorAccessCurrent: (connectorId) =>
+          connectorAccessRef.current.workspaceId === activeWorkspaceId &&
+          connectorAccessRef.current.agentId === activeAgentId &&
+          connectorAccessRef.current.ids.includes(connectorId),
         workspaceId: activeWorkspaceId,
         localComputerCurrent: () => localComputerRef.current,
+        prepareLocalComputer: async (tool) => {
+          const saved = localComputerRef.current;
+          if (
+            !saved ||
+            saved.workspaceId !== activeWorkspaceId ||
+            saved.agentId !== activeAgentId
+          )
+            throw new Error(
+              "The active agent changed before computer startup.",
+            );
+          const node = await localComputer.prepareForTool(tool);
+          const current = localComputerRef.current;
+          if (
+            !current ||
+            current.workspaceId !== node.workspaceId ||
+            current.agentId !== node.agentId ||
+            cancelRequestedRef.current
+          )
+            throw new Error(
+              "Computer startup was interrupted. Refresh before continuing.",
+            );
+          localComputerRef.current = {
+            workspaceId: node.workspaceId,
+            agentId: node.agentId,
+            ready: node.lifecycle === "ready",
+            generation: node.generation,
+            controller: node.controller,
+          };
+        },
         shouldCancel: () => cancelRequestedRef.current,
-        onExecuting: (approval, tool) => executionActivityRef.current(approval.id, tool),
+        onExecuting: (approval, tool) =>
+          executionActivityRef.current(approval.id, tool),
         ...(activeWorkspaceId && activeAgentId
           ? {
               localComputer: {
@@ -254,12 +359,13 @@ export function useShellAgentController({
           : {}),
         onHostedBrowserSnapshot: setHostedBrowserSnapshot,
         queueApproval: (approval, tool, argumentsJson) => {
-          if (approvalGate.register(approval)) runtime.recordBackendToolCall({
-            callId: approval.id,
-            tool,
-            arguments: argumentsJson,
-            approval,
-          });
+          if (approvalGate.register(approval))
+            runtime.recordBackendToolCall({
+              callId: approval.id,
+              tool,
+              arguments: argumentsJson,
+              approval,
+            });
         },
       }),
     [
@@ -285,10 +391,13 @@ export function useShellAgentController({
     threadId,
   });
   const agent = useNativeAgent({
-    computer: activeWorkspaceId && activeAgentId ? { workspaceId: activeWorkspaceId, agentId: activeAgentId } : undefined,
+    computer:
+      activeWorkspaceId && activeAgentId
+        ? { workspaceId: activeWorkspaceId, agentId: activeAgentId }
+        : undefined,
     providers: runtime.backendProviders,
-    activeProviderId: runtime.connectedAgentBackend?.id,
-    models: runtime.selectableModels,
+    activeProviderId: executionProviderId ?? runtime.connectedAgentBackend?.id,
+    models: executionProviderId ? modelsForProvider(runtime.modelOptions, executionProviderId) : runtime.selectableModels,
     threadId,
     createDurableRunWriter: createDesktopDurableRunWriter,
     loadConversation: loadDesktopConversation,
@@ -305,23 +414,48 @@ export function useShellAgentController({
     },
     onToolCall: queueToolApproval,
   });
-  const voiceProvider = useMemo(() => createBrowserSpeechProvider(), []);
+  const openAiSpeechConnected = runtime.backendProviders.some(
+    (provider) =>
+      provider.id === "openai" &&
+      provider.backendType === "native-api" &&
+      provider.authState === "connected",
+  );
+  const voiceProvider = useMemo(
+    () =>
+      runtime.voiceProvider === "openai"
+        ? createOpenAiRecordingProvider({
+            connected: openAiSpeechConnected,
+            workspaceId: activeWorkspaceId ?? null,
+            native: createNativeSpeechPort(),
+          })
+        : createBrowserSpeechProvider(),
+    [runtime.voiceProvider, openAiSpeechConnected, activeWorkspaceId],
+  );
   executionActivityRef.current = agent.markToolExecuting;
   scopeResetRef.current = () => {
     const attemptId = agent.state.currentAttemptId;
-    if (!agent.state.running || !attemptId || cancelledScopeAttemptRef.current === attemptId) return;
+    if (
+      !agent.state.running ||
+      !attemptId ||
+      cancelledScopeAttemptRef.current === attemptId
+    )
+      return;
     cancelledScopeAttemptRef.current = attemptId;
     cancelRequestedRef.current = true;
     void agent.cancel();
   };
   const voice = useVoice(voiceProvider, onDictation, {
-    disabled: false,
+    disabled: !runtime.voiceEnabled || !runtime.runtimeSnapshotReady,
     onCancel: onVoiceCancel,
   });
+  useEffect(() => {
+    voice.reset();
+  }, [activeWorkspaceId, activeAgentId, threadId, voiceProvider, voice.reset]);
 
   return {
     runtime,
     agent,
+    scheduleDispatch,
     durableConversation,
     voice,
     localComputer,
@@ -340,9 +474,16 @@ export function useShellAgentController({
       const computer = localComputerRef.current;
       // Native cancellation revokes admitted computer operations even while the
       // provider is stopping or waiting for a tool result.
-      const cancellation = computer?.ready && computer.generation !== undefined && computer.controller === "agent"
-        ? cancelRuntimeLocalComputer({ workspaceId: computer.workspaceId, agentId: computer.agentId, expectedGeneration: computer.generation })
-        : Promise.resolve(null);
+      const cancellation =
+        computer?.ready &&
+        computer.generation !== undefined &&
+        computer.controller === "agent"
+          ? cancelRuntimeLocalComputer({
+              workspaceId: computer.workspaceId,
+              agentId: computer.agentId,
+              expectedGeneration: computer.generation,
+            })
+          : Promise.resolve(null);
       const results = await Promise.allSettled([agent.cancel(), cancellation]);
       await localComputer.refresh().catch(() => undefined);
       const failed = results.find((result) => result.status === "rejected");
@@ -354,19 +495,44 @@ export function useShellAgentController({
     },
     beginConnectorTurn: async () => {
       const latest = await runtime.refreshConnectorStatuses();
-      if (connectorAccessRef.current.workspaceId !== activeWorkspaceId || connectorAccessRef.current.agentId !== activeAgentId) throw new Error("The active conversation changed. Send your message again.");
+      if (
+        connectorAccessRef.current.workspaceId !== activeWorkspaceId ||
+        connectorAccessRef.current.agentId !== activeAgentId
+      )
+        throw new Error(
+          "The active conversation changed. Send your message again.",
+        );
       const manifests = latest ?? [];
       const ids = chatConnectorIds([], manifests);
-      turnConnectorsRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids,
-        routes: Object.fromEntries(manifests.map((manifest) => [manifest.id, manifest.connectionRoute ?? "native"])) };
-      connectorAccessRef.current = { workspaceId: activeWorkspaceId, agentId: activeAgentId, ids };
+      turnConnectorsRef.current = {
+        workspaceId: activeWorkspaceId,
+        agentId: activeAgentId,
+        ids,
+        routes: Object.fromEntries(
+          manifests.map((manifest) => [
+            manifest.id,
+            manifest.connectionRoute ?? "native",
+          ]),
+        ),
+      };
+      connectorAccessRef.current = {
+        workspaceId: activeWorkspaceId,
+        agentId: activeAgentId,
+        ids,
+      };
       return { ids, tools: chatConnectorTools(ids, manifests) };
     },
     endConnectorTurn: () => {
-      if (turnConnectorsRef.current.workspaceId === activeWorkspaceId && turnConnectorsRef.current.agentId === activeAgentId) {
+      if (
+        turnConnectorsRef.current.workspaceId === activeWorkspaceId &&
+        turnConnectorsRef.current.agentId === activeAgentId
+      ) {
         turnConnectorsRef.current.ids = [];
       }
-      if (connectorAccessRef.current.workspaceId === activeWorkspaceId && connectorAccessRef.current.agentId === activeAgentId) {
+      if (
+        connectorAccessRef.current.workspaceId === activeWorkspaceId &&
+        connectorAccessRef.current.agentId === activeAgentId
+      ) {
         connectorAccessRef.current.ids = [];
       }
     },

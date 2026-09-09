@@ -30,6 +30,5 @@ export const ACCEPTED_COMPOSER_ATTACHMENTS = [
   ACCEPTED_LOCAL_KNOWLEDGE_FILES,
   "image/png",
   "image/jpeg",
-  "image/webp",
-  "image/gif"
+  "image/webp"
 ].join(",");

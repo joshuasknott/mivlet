@@ -86,6 +86,42 @@ describe("useVoice", () => {
     expect(fixture.session.dispose).toHaveBeenCalledOnce();
   });
 
+  it("holds a recorded draft for explicit review before transcription", async () => {
+    const transcript = deferred<string>();
+    const review = deferred<{
+      recordingId: string; durationMs: number; sizeBytes: number; mediaType: string;
+      providerLabel: string; model: "gpt-4o-mini-transcribe"; maxDurationMs: number;
+    }>();
+    const authorize = vi.fn();
+    const session: SpeechToTextSession = {
+      completion: transcript.promise,
+      review: review.promise,
+      authorize,
+      stop: vi.fn(), cancel: vi.fn(), dispose: vi.fn()
+    };
+    const onTranscript = vi.fn();
+    const provider = providerFixture(async () => session);
+    const { result } = renderHook(() => useVoice(provider, onTranscript));
+    await act(result.current.start);
+    act(result.current.stop);
+    await act(async () => review.resolve({
+      recordingId: "recording-1", durationMs: 2_000, sizeBytes: 512,
+      mediaType: "audio/webm", providerLabel: "OpenAI transcription",
+      model: "gpt-4o-mini-transcribe", maxDurationMs: 120_000
+    }));
+    expect(result.current.state.status).toBe("reviewing");
+    expect(result.current.review).toMatchObject({ recordingId: "recording-1", sizeBytes: 512 });
+    expect(onTranscript).not.toHaveBeenCalled();
+    expect(authorize).not.toHaveBeenCalled();
+
+    act(result.current.authorize);
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(result.current.state.status).toBe("processing");
+    await act(async () => transcript.resolve("reviewed transcript"));
+    await waitFor(() => expect(result.current.state.status).toBe("success"));
+    expect(onTranscript).toHaveBeenCalledWith("reviewed transcript");
+  });
+
   it("blocks double activation while startup is pending", async () => {
     const fixture = sessionFixture();
     const started = deferred<SpeechToTextSession>();

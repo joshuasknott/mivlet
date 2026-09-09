@@ -160,6 +160,14 @@ export type CodexAppServerEvent =
   | { type: "text-delta"; text: string }
   | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
   | {
+      type: "provider-tool";
+      callId: string;
+      tool: string;
+      arguments: string;
+      status: "running" | "succeeded" | "failed";
+      output?: string;
+    }
+  | {
       type: "approval-request";
       requestId: string;
       callId: string;

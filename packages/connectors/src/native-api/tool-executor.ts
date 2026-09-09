@@ -72,6 +72,18 @@ export interface ToolRuntime {
   }): Promise<string>;
   /** Execute an authenticated Google read without exposing credentials to JS. */
   googleRead?(tool: string, input: Record<string, unknown>): Promise<string>;
+  /** Run one approved direct-OpenAI image generation through the native boundary. */
+  generateImage?(input: ImageToolInput): Promise<string>;
+  /** Run one approved direct-OpenAI edit of an immutable image artifact. */
+  editImage?(input: ImageToolInput & { sourceArtifactId: string }): Promise<string>;
+}
+
+export interface ImageToolInput {
+  prompt: string;
+  model: "gpt-image-2";
+  size: "1024x1024" | "1536x1024" | "1024x1536";
+  quality: "low" | "medium" | "high";
+  title: string;
 }
 
 /**
@@ -452,10 +464,73 @@ async function dispatch(
       }
       return runtime.googleRead(toolName, parsed);
     }
+    case "generate-image": {
+      if (!runtime.generateImage) {
+        throw new Error("Image generation requires the native OpenAI media runtime.");
+      }
+      return runtime.generateImage(requireImageInput(parsed, false));
+    }
+    case "edit-image": {
+      if (!runtime.editImage) {
+        throw new Error("Image editing requires the native OpenAI media runtime.");
+      }
+      return runtime.editImage(requireImageInput(parsed, true));
+    }
     default:
       // A registered tool with no dispatcher is a programming error; fail closed.
       throw new Error(`Tool "${toolName}" has no executor implementation.`);
   }
+}
+
+function requireImageInput(
+  parsed: Record<string, unknown>,
+  editing: false
+): ImageToolInput;
+function requireImageInput(
+  parsed: Record<string, unknown>,
+  editing: true
+): ImageToolInput & { sourceArtifactId: string };
+function requireImageInput(
+  parsed: Record<string, unknown>,
+  editing: boolean
+): ImageToolInput & { sourceArtifactId?: string } {
+  const expected = editing
+    ? ["model", "prompt", "quality", "size", "sourceArtifactId", "title"]
+    : ["model", "prompt", "quality", "size", "title"];
+  if (Object.keys(parsed).sort().join("\0") !== expected.join("\0")) {
+    throw new Error(`Tool ${editing ? "edit-image" : "generate-image"} has missing or extra arguments.`);
+  }
+  const prompt = requireString(parsed, editing ? "edit-image" : "generate-image", "prompt");
+  const title = requireString(parsed, editing ? "edit-image" : "generate-image", "title");
+  const normalizedPrompt = prompt.trim().replace(/\s+/gu, " ");
+  if (normalizedPrompt.length === 0 || [...normalizedPrompt].length > 220) {
+    throw new Error("Image prompts must contain 1 to 220 visible characters.");
+  }
+  if (title.trim().length === 0 || [...title.trim()].length > 160) {
+    throw new Error("Image titles must contain 1 to 160 characters.");
+  }
+  if (parsed.model !== "gpt-image-2") {
+    throw new Error("Choose the documented gpt-image-2 image model explicitly.");
+  }
+  if (parsed.size !== "1024x1024" && parsed.size !== "1536x1024" && parsed.size !== "1024x1536") {
+    throw new Error("Choose a supported image size.");
+  }
+  if (parsed.quality !== "low" && parsed.quality !== "medium" && parsed.quality !== "high") {
+    throw new Error("Choose low, medium, or high image quality.");
+  }
+  const common: ImageToolInput = {
+    prompt: normalizedPrompt,
+    model: parsed.model,
+    size: parsed.size,
+    quality: parsed.quality,
+    title: title.trim()
+  };
+  if (!editing) return common;
+  const sourceArtifactId = requireString(parsed, "edit-image", "sourceArtifactId");
+  if (!/^artifact-[0-9a-f]{64}$/.test(sourceArtifactId)) {
+    throw new Error("Tool edit-image requires a verified Fable image artifact id.");
+  }
+  return { ...common, sourceArtifactId };
 }
 
 /** Parse a tool-call arguments JSON string into a record (empty on parse miss). */
