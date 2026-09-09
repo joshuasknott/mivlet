@@ -23,7 +23,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
   const [notice, setNotice] = useState("");
   const [failed, setFailed] = useState(false);
   const [discovery, setDiscovery] = useState<RuntimeMcpConnectionDetails | null>(null);
-  const [endpoint, setEndpoint] = useState(preset.endpoint);
+
   const mounted = useRef(false);
   const operation = useRef(false);
   const serverId = remoteConnectorServerId(entry.id);
@@ -74,15 +74,12 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
       <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : "Not connected"}</span>
     </div>
     <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
-    {!saved && preset.regions ? <label className="remote-connector-region">Account data region
-      <select disabled={disabled} value={endpoint} onChange={(event) => setEndpoint(event.target.value)}>{preset.regions.map((region) => <option key={region.endpoint} value={region.endpoint}>{region.name}</option>)}</select>
-    </label> : null}
     <div className="connector-detail__actions">
       {connected && onUseConnector ? <button type="button" disabled={disabled} onClick={() => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" })}>Use in chat</button> : null}
       {!connected ? <button type="button" disabled={disabled} onClick={() => void run(async () => {
         if (!workspaceId) return;
         setDiscovery(null);
-        const result = await connectRemoteConnector(workspaceId, preset, endpoint);
+        const result = await connectRemoteConnector(workspaceId, preset);
         if (mounted.current) { setSaved(true); setDiscovery(result); }
       })}>{busy ? "Connecting…" : saved ? "Reconnect" : "Connect"}</button> : null}
       {connected ? <button type="button" disabled={disabled} onClick={() => void run(async () => {

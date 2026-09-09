@@ -14,11 +14,11 @@ const once = (request: ApprovalRequest): ApprovalResolutionRequest => ({ request
 
 /** A single Connect action owns setup through readiness, even if its dialog is
  * closed. Every native step still resolves the exact account/workspace scope. */
-export function connectRemoteConnector(workspaceId: string, preset: RemoteConnector, endpoint = preset.endpoint) {
+export function connectRemoteConnector(workspaceId: string, preset: RemoteConnector) {
   const key = `${workspaceId}:${preset.id}`;
   const pending = connecting.get(key);
   if (pending) return pending;
-  const task = finishConnection(workspaceId, preset, endpoint).finally(() => {
+  const task = finishConnection(workspaceId, preset, preset.endpoint).finally(() => {
     connecting.delete(key);
     connectorConnectionsChanged(workspaceId);
   });

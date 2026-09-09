@@ -43,14 +43,6 @@ describe("official connector setup", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
   });
-  it("binds the selected region to the native configuration", async () => {
-    const preset = remoteConnectors.find((connector) => connector.id === "amplitude")!;
-    render(<RemoteConnectorDetails entry={findMarketplaceConnector("amplitude")!} preset={preset} workspaceId="workspace-1" titleId="amplitude" onSaved={vi.fn()} />);
-    await waitFor(() => expect(screen.getByLabelText("Account data region")).toBeEnabled());
-    fireEvent.change(screen.getByLabelText("Account data region"), { target: { value: "https://mcp.eu.amplitude.com/mcp" } });
-    await connect(); await screen.findByText("Connected");
-    expect(api.prepare).toHaveBeenCalledWith(expect.objectContaining({ endpoint: "https://mcp.eu.amplitude.com/mcp" }));
-  });
   it("restores existing access without sign-in or expanding permissions", async () => {
     api.list.mockResolvedValue([{ id: "marketplace-notion" }]);
     api.open.mockResolvedValue({ ...fixture(), discovery: { ...discovery, enabledTools: ["search"] } });
