@@ -1,6 +1,6 @@
 # Encrypted local storage
 
-Fable opens `fable-vault.db` in the Tauri app-data directory before registering
+Mivlet opens `fable-vault.db` in the Tauri app-data directory before registering
 commands. SQLite supplies transactions, foreign keys, write-ahead logging, and
 forward-only schema versions. Rust owns all database access; React never opens
 SQLite directly.

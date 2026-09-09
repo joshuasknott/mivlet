@@ -19,7 +19,7 @@ provider acceptance. Architecture lives in
 - [ ] Low-latency primary viewer, cached conversation thumbnail, practical input,
   accessible focused view, stale frame/input rejection and explicit resume.
 - [ ] Structured browser, scoped terminal/files and visual desktop tools through
-  supported Fable provider contracts; honest image/tool capability checks.
+  supported Mivlet provider contracts; honest image/tool capability checks.
 - [ ] Observe, act and verify; bounded recovery, cancellation and stuck detection.
 - [ ] Generated document/spreadsheet artifacts can be received and opened.
 - [ ] Native Tauri + real computer + supported provider acceptance journey.
@@ -45,7 +45,7 @@ steps complete. Never store credentials, browser profiles or private user data.
   woke it, stopped and restarted it, replaced its system container, and verified
   that generated Workspace and agent-home files retained their exact contents.
   The user's saved computer was not used. A subsequent Docker inventory found
-  zero Fable-labelled test containers and zero Fable-labelled test volumes.
+  zero Mivlet-labelled test containers and zero Mivlet-labelled test volumes.
 - Deterministic native authority tests cover idle suspension racing operation
   completion and viewer arrival; the startup-budget test rejects a third
   computer while allowing reuse of an existing slot. This does not measure a
@@ -113,11 +113,11 @@ to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
 
 ### Native acceptance follow-up — 6 September 2026
 
-- Docker became available. The saved agent computer started through Fable and
+- Docker became available. The saved agent computer started through Mivlet and
   reported healthy; the native viewer showed Chromium. Human takeover and
   explicit return switched the viewer between human control and watching.
 - A user-submitted public Python research and DOCX/XLSX task failed after Retry
-  with `Blocked by Fable's read-only permission mode`, although the composer
+  with `Blocked by Mivlet's read-only permission mode`, although the composer
   displayed Full access. The user confirmed using Retry. Its hook hardcoded
   read-only; the retry action now supplies the current permission mode. It
   starts a new attempt and retains fresh tool approvals rather than reusing
@@ -157,7 +157,7 @@ to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
   authorization, native failure, permission downgrade, workspace change and Retry.
   Desktop types, scoped production-source ESLint, production frontend build,
   performance budget and native debug build passed. The updated app was launched.
-- Screenshot-coordinate interaction worked after raising the Fable window;
+- Screenshot-coordinate interaction worked after raising the Mivlet window;
   accessibility-index clicks remain unreliable. The live acceptance task was
   submitted through the composer using the user's selected GPT-5.6-Luna High.
   Browser and short shell actions completed without interactive approval. File
@@ -191,7 +191,7 @@ to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
   `gpt-6-astra` route performed a fresh search with 18 structured results,
   then opened a returned page with one result and a linked citation. Shell,
   unified execution, memories, apps and MCP were disabled in that probe.
-  It did not use the packaged Fable conversation. Public URL fetching now
+  It did not use the packaged Mivlet conversation. Public URL fetching now
   returns readable content and bounded source metadata under existing SSRF,
   redirect and body limits. Other provider routes still lack dedicated search.
 - The document guest image generated DOCX, XLSX, PDF and PPTX, recalculated the

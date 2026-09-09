@@ -12,7 +12,7 @@ was stopped at the user's requested handoff; outstanding criteria are not closed
 Make Browser and Computer Use built-in plugins backed by the existing isolated
 computer. Both use the same agent browser session, filesystem, generation and
 human-control lease. Do not create competing browser profiles or another agent
-loop. Providers supply reasoning; Fable owns tool discovery, execution and policy.
+loop. Providers supply reasoning; Mivlet owns tool discovery, execution and policy.
 
 A plugin should package an identity/version, task instructions, tool references,
 runtime dependencies, supported input/output modalities, permissions and health
@@ -59,7 +59,7 @@ persisted permits are invalidated during crash recovery. Live crash/side-effect
 acceptance remains required.
 
 KasmVNC is already in the current Dockerfile and viewer. Evaluate Browser Use or
-Cua only against concrete failures in the present adapters, behind Fable-owned
+Cua only against concrete failures in the present adapters, behind Mivlet-owned
 contracts. The earlier research is not evidence that either library is integrated.
 A dependency swap alone does not establish better task success.
 
@@ -120,32 +120,32 @@ documents the action/observation loop; an API tool is not the complete desktop p
 
 Repository documentation inspected on 7 September 2026. These are candidate
 components and engineering references, not installed dependencies or verified
-Fable integrations. Pin and audit a concrete release before adoption; repository
-activity and upstream benchmarks do not establish task success in Fable.
+Mivlet integrations. Pin and audit a concrete release before adoption; repository
+activity and upstream benchmarks do not establish task success in Mivlet.
 
-| Area | Repository | Recommendation for Fable |
+| Area | Repository | Recommendation for Mivlet |
 | --- | --- | --- |
 | Browser execution and verification | [Playwright](https://github.com/microsoft/playwright) | Preferred library to evaluate for robust locators, actionability waits and browser tests. Run inside the isolated computer through the existing native gateway; do not expose unrestricted evaluation, cookies or a new public CDP port. |
-| Browser agent workflows | [Browser Use](https://github.com/browser-use/browser-use) | Evaluate observation/action and recovery quality against current structured tools. Its full agent loop and cloud/profile-sync features are not automatic dependencies. Keep Fable's model route and approvals authoritative. |
+| Browser agent workflows | [Browser Use](https://github.com/browser-use/browser-use) | Evaluate observation/action and recovery quality against current structured tools. Its full agent loop and cloud/profile-sync features are not automatic dependencies. Keep Mivlet's model route and approvals authoritative. |
 | Desktop drivers and evaluation | [Cua](https://github.com/trycua/cua) | Evaluate Linux driver and benchmark components if they improve measured desktop failures. Do not replace the computer or introduce a second authority model. Optional components have different licenses. |
 | Desktop viewing | [KasmVNC](https://github.com/kasmtech/KasmVNC) | Already used. Keep the native-authenticated viewer and control lease; this is the display layer, not reasoning or task recovery. |
 | Document ingestion | [MarkItDown](https://github.com/microsoft/markitdown) | Candidate for extracting Office/PDF content into model-readable text inside the guest. Extraction does not preserve full layout or supply editing/export. |
 | Slide output | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) | The guest pins MIT-licensed 4.0.1 with a build-time generation smoke test and LibreOffice Impress for editing/rendering. Native PPTX publication rejects macros, embedded programs, duplicate or invalid package paths, and external relationships. Rendered-slide QA remains required before claiming a presentation is correct. |
 | PDF preview | [PDF.js](https://github.com/mozilla/pdf.js) | Still a candidate for a bounded, isolated in-app viewer. Native PDF export now uses MIT-licensed lopdf 0.44.0 as a strict, resource-bounded structural validator and rejects active or ambiguous documents before host opening; this is rejection, not sanitization. |
 | Search | [SearXNG](https://github.com/searxng/searxng) | Optional self-hosted search service, with operational and upstream-engine reliability costs. A supported search API behind a native adapter is the alternative; public instances are not a dependable product backend. |
-| Research orchestration | [GPT Researcher](https://github.com/assafelovic/gpt-researcher) | Reference for research decomposition and reporting. Avoid adding a parallel credential store or duplicating Fable's conversation execution loop. |
-| Durable execution | [LangGraph.js](https://github.com/langchain-ai/langgraphjs) | Reference/evaluation candidate for checkpoints and interrupted workflows. First extend Fable's existing encrypted execution records; adopting another persistence layer must have a demonstrated benefit. It cannot execute while the PC is asleep. |
+| Research orchestration | [GPT Researcher](https://github.com/assafelovic/gpt-researcher) | Reference for research decomposition and reporting. Avoid adding a parallel credential store or duplicating Mivlet's conversation execution loop. |
+| Durable execution | [LangGraph.js](https://github.com/langchain-ai/langgraphjs) | Reference/evaluation candidate for checkpoints and interrupted workflows. First extend Mivlet's existing encrypted execution records; adopting another persistence layer must have a demonstrated benefit. It cannot execute while the PC is asleep. |
 | Voice | [Pipecat](https://github.com/pipecat-ai/pipecat) | Candidate for a provider-neutral voice pipeline with turn handling and interruptions. Requires microphone lifecycle, native credential mediation and a supported audio provider; it does not inherit consumer subscription entitlements. |
-| MCP interoperability | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | Use for compatibility tests or new adapter components where it improves the existing implementation. Main is a changing v2 line; choose the supported release deliberately. Keep Fable's native OAuth custody. |
-| Coding workflow | [OpenHands](https://github.com/OpenHands/OpenHands) | Reference for sandboxed development workflows, not a replacement UI/runtime. Fable still needs its own repo attachment, diff review, worktree and PR experience. |
-| Native coding runtime | [Codex](https://github.com/openai/codex) | User-selected reference for repository workflows, native tool delivery, checkpoints and context handling. Apache-2.0 licensed; inspect the relevant version and retain required notices for any reused code. Fable's provider adapters, isolated computer and approval authority remain the integration boundaries. |
+| MCP interoperability | [MCP TypeScript SDK](https://github.com/modelcontextprotocol/typescript-sdk) | Use for compatibility tests or new adapter components where it improves the existing implementation. Main is a changing v2 line; choose the supported release deliberately. Keep Mivlet's native OAuth custody. |
+| Coding workflow | [OpenHands](https://github.com/OpenHands/OpenHands) | Reference for sandboxed development workflows, not a replacement UI/runtime. Mivlet still needs its own repo attachment, diff review, worktree and PR experience. |
+| Native coding runtime | [Codex](https://github.com/openai/codex) | User-selected reference for repository workflows, native tool delivery, checkpoints and context handling. Apache-2.0 licensed; inspect the relevant version and retain required notices for any reused code. Mivlet's provider adapters, isolated computer and approval authority remain the integration boundaries. |
 | Capability evaluations | [promptfoo](https://github.com/promptfoo/promptfoo) | Candidate for repeatable prompt/tool/provider comparisons. Pair with actual native workflow tests; an evaluation configuration alone does not prove parity. |
 
 Retain the existing guest Python document/data libraries for DOCX and XLSX.
 Use supported provider APIs for image generation/editing and speech; an open-source
 wrapper cannot supply model weights, account access or free inference. Project
 organization, memory correctness, notifications, signing/updating and multi-device
-behavior need Fable product engineering even when libraries cover individual parts.
+behavior need Mivlet product engineering even when libraries cover individual parts.
 
 A gap closes only when its completion criterion is met, including relevant
 native/live evidence. The entries below distinguish implemented work from that
@@ -158,7 +158,7 @@ remaining acceptance work.
   The selected Codex route also enables its provider-owned live web search. A
   direct ephemeral app-server probe completed a fresh search, selected and opened
   one structured result, and returned a linked citation without an approval
-  request. This does not establish the packaged Fable conversation flow or add a
+  request. This does not establish the packaged Mivlet conversation flow or add a
   search backend to other provider routes.
 - New turns and retries share `conversationToolsForModel`. Retry resolves the
   original attempt's provider/model rather than the currently selected model's

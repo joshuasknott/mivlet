@@ -1,6 +1,6 @@
 # Threat model
 
-Fable is a pre-release local-first desktop application. This model covers the
+Mivlet is a pre-release local-first desktop application. This model covers the
 reachable local product plus the repository's optional broker, account/sync,
 and hosted-computer foundations. It does not assert that any remote environment
 has been deployed or independently reviewed.
@@ -77,7 +77,7 @@ stale permits, changed browser controls, unknown tools, and scope changes fail.
 ### Local teammate computer escape
 
 Each workspace/teammate gets one labelled Docker container, persistent home
-volume, and narrow Fable-owned workspace bind. Commands run as UID 1000 with
+volume, and narrow Mivlet-owned workspace bind. Commands run as UID 1000 with
 timeouts and bounded output. Chromium keeps its sandbox; the debug bridge is
 published only on host loopback. Container resources are capped and native code
 validates labels before lifecycle actions.
@@ -124,7 +124,7 @@ review. Generated output and credentials must stay out of commits.
   validated.
 - Remote sync is not claimed to be end-to-end encrypted.
 - A stolen unlocked device or compromised operating-system account can access
-  data available to that user; Fable is not a replacement for full-disk
+  data available to that user; Mivlet is not a replacement for full-disk
   encryption and OS account security.
 
 Security-sensitive changes require negative scope/replay tests, secret scans,

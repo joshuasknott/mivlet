@@ -1,6 +1,6 @@
 # Native agent runtime
 
-Fable owns the conversation and tool loop. TypeScript assembles bounded model
+Mivlet owns the conversation and tool loop. TypeScript assembles bounded model
 requests and interprets responses; Rust owns credentials, endpoint policy,
 network egress, streaming, timeout/retry behavior, cancellation, encrypted
 checkpoints, and final tool dispatch.
@@ -11,30 +11,30 @@ The native HTTP boundary implements OpenAI-compatible and Anthropic Messages
 wire formats. Provider-owned agent processes use separate adapters: Codex
 app-server for ChatGPT; Google's Antigravity, Cursor, and Grok agents over ACP;
 Claude's bidirectional Agent SDK protocol; and an authenticated OpenCode server
-owned by Fable for the duration of the turn. The catalogue keeps connection and
+owned by Mivlet for the duration of the turn. The catalogue keeps connection and
 execution routes explicit.
 
 Connection methods are explicit:
 
 - Codex app-server may start its official ChatGPT browser authorization and
-  keeps that session inside Codex. Fable does not collect browser cookies or
+  keeps that session inside Codex. Mivlet does not collect browser cookies or
   private session tokens and does not use a CLI login as the product flow.
 - Antigravity ACP uses its personal Google OAuth method. The single **Continue
   with Google** action installs a version-and-hash-pinned Google release when
-  required, then opens Google sign-in. Fable keeps its profile account-scoped,
+  required, then opens Google sign-in. Mivlet keeps its profile account-scoped,
   discovers models from the ACP session, and routes its permission requests
-  through Fable's approval queue before the agent may continue.
-- Cursor and Grok use their installed official command-line runtimes. Fable
+  through Mivlet's approval queue before the agent may continue.
+- Cursor and Grok use their installed official command-line runtimes. Mivlet
   starts provider-owned sign-in, speaks ACP over supervised standard I/O,
   discovers provider models, and mediates each permission request before the
   runtime may continue.
 - Claude uses its installed official CLI with the bidirectional streaming JSON
-  protocol and a Fable-account-scoped profile. Ambient settings and MCP servers
+  protocol and a Mivlet-account-scoped profile. Ambient settings and MCP servers
   are excluded. Built-in tool requests cross Claude's documented stdio
-  permission protocol and must receive a matching, single-use Fable approval
+  permission protocol and must receive a matching, single-use Mivlet approval
   before Claude may continue.
-- OpenCode runs as a Fable-owned, password-protected loopback server in pure
-  mode, inside its Fable-owned workspace, with sharing disabled. Fable creates
+- OpenCode runs as a Mivlet-owned, password-protected loopback server in pure
+  mode, inside its Mivlet-owned workspace, with sharing disabled. Mivlet creates
   a session with explicit ask rules, subscribes to its event stream, and sends
   only one-time allow or reject permission replies. It uses provider
   configuration already established through OpenCode.
@@ -57,7 +57,7 @@ subscription is treated as a general API credential.
 
 ## Request boundary
 
-Teammate instructions remain system context. Fable sends the exact new user
+Teammate instructions remain system context. Mivlet sends the exact new user
 message and loads completed user/assistant history from its canonical local
 conversation. It does not save that history again as another user turn or
 replay old tool calls and approvals. Retrying a failed run requires its original
@@ -65,14 +65,14 @@ conversation and excludes the failed attempt from replay.
 
 ChatGPT uses a new ephemeral Codex app-server thread for each turn, with
 instructions in `developerInstructions` and prior conversation in untrusted
-`additionalContext`. Fable refuses to send a model turn unless the runtime
+`additionalContext`. Mivlet refuses to send a model turn unless the runtime
 confirms the thread is ephemeral. A local app-server probe verified that such a
 thread is absent from the stored-thread listing; the actual ChatGPT Recents UI
 and billed model turns still need live account verification.
 
 The model menu shows reasoning levels advertised by the provider or explicitly
 supported by the adapter's model catalogue. Unsupported selections fail before
-transport. Fable preserves each teammate's model and effort preferences.
+transport. Mivlet preserves each teammate's model and effort preferences.
 
 The native HTTP formats support text completion, streaming, bounded multi-round
 tool calls, retries before a stream begins, and cancellation. Image and file
@@ -100,7 +100,7 @@ new attempt from the durable user request. It never replays a previous tool
 result, approval permit, or external effect. Completed, cancelled, failed, and
 interrupted are mutually exclusive terminal outcomes.
 
-Ordinary conversation does not continue after Fable closes. A local Docker
+Ordinary conversation does not continue after Mivlet closes. A local Docker
 container or optional hosted computer being alive does not change that claim.
 
 ## Tool safety

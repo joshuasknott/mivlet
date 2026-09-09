@@ -1,7 +1,7 @@
 # Product direction
 
-Fable is a calm, local-first workspace where a person works with named AI
-teammates through ordinary conversation. Fable supplies permitted context,
+Mivlet is a calm, local-first workspace where a person works with named AI
+teammates through ordinary conversation. Mivlet supplies permitted context,
 uses only connected providers and tools, pauses at consequential boundaries,
 and leaves an inspectable local record.
 
@@ -10,7 +10,7 @@ the concise source of truth for repository maturity.
 
 ## Default experience
 
-1. Sign in to Fable and connect a supported model provider.
+1. Sign in to Mivlet and connect a supported model provider.
 2. Create or choose a named teammate.
 3. Describe the work in conversation.
 4. Watch the current work, take over the teammate computer when needed, and
@@ -23,7 +23,7 @@ person administer execution machinery.
 
 ## Capability direction
 
-- Provider-neutral model selection through Fable-owned contracts.
+- Provider-neutral model selection through Mivlet-owned contracts.
 - Durable teammate identity, responsibilities, context, and conversation.
 - A genuine isolated local desktop for browser, terminal, file, and application
   work, with explicit human control.
@@ -47,7 +47,7 @@ person administer execution machinery.
 
 ## Product qualities
 
-Fable should feel direct, quiet, and capable. Prefer progressive disclosure,
+Mivlet should feel direct, quiet, and capable. Prefer progressive disclosure,
 plain language, strong defaults, compact accessible controls, and honest failure
 states. Infrastructure is successful when it makes conversation simpler.
 

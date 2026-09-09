@@ -37,14 +37,14 @@ The supported catalogue is intentionally small:
 | Custom API | API key, HTTPS base URL, and model | Native OpenAI-compatible adapter  |
 
 Codex owns its browser session. Antigravity owns its Google session in an
-account-scoped local profile and exposes model turns through ACP; Fable pins
+account-scoped local profile and exposes model turns through ACP; Mivlet pins
 and verifies the downloaded agent, strips ambient Google credentials, and
 mediates every ACP permission request. Cursor and Grok likewise own their
 sessions and expose turns through ACP, but their official runtimes must be
 installed separately. Claude and OpenCode run in deliberately restricted
 conversation modes: tools are disabled or denied until their native permission
-surfaces can be mediated by Fable. API credentials stay in the operating-system
-credential store and enter outbound requests only inside Rust. Fable does not
+surfaces can be mediated by Mivlet. API credentials stay in the operating-system
+credential store and enter outbound requests only inside Rust. Mivlet does not
 accept browser cookies or private session tokens. A consumer subscription is
 not treated as an API key.
 
@@ -101,7 +101,7 @@ registration requirements still apply. Each detail view links to its provider's
 setup guide. The endpoint registry is
 `apps/desktop/src/components/marketplace/remote-connectors.ts`.
 
-Choose Connect and complete the provider's browser sign-in. Fable discovers and
+Choose Connect and complete the provider's browser sign-in. Mivlet discovers and
 enables the returned tools automatically, then shows Connected only once usable
 tool access is saved. Native providers are health-checked automatically; Vercel
 additionally performs an authenticated account read because public discovery is
@@ -185,8 +185,8 @@ exact approval fail closed.
 ## Evidence boundary
 
 ChatGPT app connections belong to ChatGPT. Signing into the same model account
-does not supply those credentials or tools to Fable. Connect a native adapter or
-an official remote MCP route inside Fable. Setup requests all permissions that
+does not supply those credentials or tools to Mivlet. Connect a native adapter or
+an official remote MCP route inside Mivlet. Setup requests all permissions that
 the implemented adapter supports; provider consent and organization restrictions
 still determine access. Drive offers full read/write access as well as its
 limited selected-files scope. Existing grants need reconnection to expand them.

@@ -1,6 +1,6 @@
-# Fable
+# Mivlet
 
-Independent, provider-neutral, local-first AI agent workspace. Preserve the quiet conversation with named agents and keep account identity, workspace data, and provider credentials separate. First run requires a Fable account and a validated provider. Keep hosted and planned features distinct from implemented local behavior.
+Independent, provider-neutral, local-first AI agent workspace. Preserve the quiet conversation with named agents and keep account identity, workspace data, and provider credentials separate. First run requires a Mivlet account and a validated provider. Keep hosted and planned features distinct from implemented local behavior.
 
 ## Map and context
 

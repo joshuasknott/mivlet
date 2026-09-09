@@ -1,18 +1,25 @@
-# Fable
+# Mivlet
 
-Fable is an independent, provider-neutral AI agent workspace. Its default
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="apps/desktop/public/brand/mivlet-lockup-dark.png">
+  <img src="apps/desktop/public/brand/mivlet-lockup-light.png" alt="Mivlet" width="280">
+</picture>
+
+Mivlet is an independent, provider-neutral AI agent workspace. Its default
 experience is a quiet desktop conversation with named agents. Connections,
 files, approvals, and an agent's computer appear only when the work needs
 them.
 
-Fable is local-first: conversations, workspace data, provider credentials, and
-the agent computer remain on the device. First-run setup uses a lightweight
-Fable account, then validates a supported model provider and optionally connects
+Mivlet is local-first: conversations and workspace data are stored on the device,
+provider credentials stay in native secure storage, and the default agent computer
+runs locally. Connected providers and apps receive the context needed for their
+requests. First-run setup uses a lightweight
+Mivlet account, then validates a supported model provider and optionally connects
 the apps a person already uses.
 
 ## Maturity
 
-Fable is pre-release Windows desktop software. This repository contains a
+Mivlet is pre-release Windows desktop software. This repository contains a
 substantial local product and an optional hosted-computer foundation; it is not
 a deployed or production-validated service.
 
@@ -29,9 +36,9 @@ a deployed or production-validated service.
   Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
   connections. Codex and Antigravity have provider-owned agent adapters;
   Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
-  protocol; and OpenCode runs behind a Fable-owned authenticated loopback
+  protocol; and OpenCode runs behind a Mivlet-owned authenticated loopback
   server. All six provider-owned routes mediate consequential actions through
-  Fable's one-time approval boundary. Direct OpenAI-compatible and Anthropic
+  Mivlet's one-time approval boundary. Direct OpenAI-compatible and Anthropic
   wire adapters are also runnable. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.
@@ -43,7 +50,7 @@ a deployed or production-validated service.
   React state or conversation transcripts.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
-  Codex sessions while Fable keeps the durable conversation locally.
+  Codex sessions while Mivlet keeps the durable conversation locally.
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Published text and raster images can be previewed beside the
@@ -59,7 +66,7 @@ a deployed or production-validated service.
   Desktop's WSL 2 engine. It has a persistent home volume, Chromium, a file
   manager, a terminal, a small scoped workspace bridge, resource limits, and a
   five-minute watch/take-control lease. Local terminal commands execute only
-  inside that container; Fable never falls back to the host shell.
+  inside that container; Mivlet never falls back to the host shell.
 - Runtime-detected operating-system dictation. It fails closed when speech
   recognition is unavailable and does not retain raw audio.
 
@@ -78,7 +85,7 @@ a deployed or production-validated service.
   valid credentials, entitlement, installed components, and network access.
   Antigravity's managed installer is currently Windows x64 only. Claude,
   Cursor, Grok, and OpenCode require their official command-line runtime to be
-  installed separately before Fable can connect it.
+  installed separately before Mivlet can connect it.
 
 ### Not complete
 
@@ -174,7 +181,7 @@ Cloudflare environment.
 ## Working principles
 
 - Keep the default UI sparse, conversational, accessible, and agent-first.
-- Preserve provider choice behind Fable-owned contracts and adapters.
+- Preserve provider choice behind Mivlet-owned contracts and adapters.
 - Keep credentials behind native or deployment-secret boundaries.
 - Bind consequential actions to exact approvals and fail closed when authority
   or configuration is missing.
@@ -183,3 +190,12 @@ Cloudflare environment.
 
 Contributor guidance is in [AGENTS.md](AGENTS.md). Product direction is in
 [docs/product/vision.md](docs/product/vision.md).
+
+## Compatibility
+
+Mivlet keeps the existing `@fable/*` package names, `FABLE_*` configuration keys,
+native application identifier, database and credential namespaces, and computer
+paths. These are compatibility identifiers, not product branding; changing them
+without a migration could disconnect existing installations from their data.
+See the [Windows release guide](docs/operations/windows-private-release.md) for
+installer upgrade behavior and verification limits.

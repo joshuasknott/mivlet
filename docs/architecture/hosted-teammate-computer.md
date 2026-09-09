@@ -24,7 +24,7 @@ current protocol.
 
 ## Approval and authorization
 
-A model-originated process or browser effect needs Fable's normal exact tool
+A model-originated process or browser effect needs Mivlet's normal exact tool
 approval and the prepared hosted proposal. The native boundary consumes the
 single-use permit, obtains a scope-specific hosted capability, and sends it to
 the runner. The runner rechecks the computer, generation, scope, expiry, nonce,

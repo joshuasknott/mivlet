@@ -1,6 +1,6 @@
 # Local teammate computer
 
-> **Status: implemented local foundation.** Fable creates a separate Linux
+> **Status: implemented local foundation.** Mivlet creates a separate Linux
 > container desktop for each workspace/teammate pair. This is a genuine
 > operating-system userspace, but it is a Docker container inside Docker
 > Desktop's Linux environment, not a separate virtual machine per teammate.
@@ -8,7 +8,7 @@
 ## Experience
 
 The computer presents one compact desktop with Chromium, Files, and Terminal.
-Fable can show an ephemeral screen, launch those applications, and let the
+Mivlet can show an ephemeral screen, launch those applications, and let the
 person take control for a human-only step. An inactive human lease expires after
 five minutes into an explicit paused state. Closing or disconnecting the viewer
 never returns control to the agent. Native authority is persisted independently
@@ -36,10 +36,10 @@ Each opaque workspace/teammate scope owns:
   replacement;
 - a separate labelled volume at `/home/agent` for the unprivileged agent's
   terminal home and tool configuration;
-- one Fable-owned host directory mounted at `/home/fable/Workspace`, providing
+- one Mivlet-owned host directory mounted at `/home/fable/Workspace`, providing
   the narrow file bridge used by approved file tools and the trusted UI; and
 - one labelled container whose ownership and scope labels must match before
-  Fable reuses, starts, stops, or replaces it.
+  Mivlet reuses, starts, stops, or replaces it.
 
 The first setup builds the bundled `fable-local-computer` image. Setup fails
 closed if Docker Desktop's WSL 2 Linux engine is unavailable or the bundled
@@ -53,21 +53,21 @@ invalidates the browser connection before changing the container. Restart and
 update finish paused and require an explicit choice of who continues. Save open
 work first: saved files persist, but stopping applications can lose unsaved work.
 
-At most two Fable computers may run or sleep at once; sleeping computers still
+At most two Mivlet computers may run or sleep at once; sleeping computers still
 reserve their memory slot. Start admission is serialized across computers. The
 Docker restart policy is `no`, so an engine restart does not silently start all
 agent desktops. Existing containers receive the same policy when started.
 
-While Fable is running, a computer with no admitted operation and no active
+While Mivlet is running, a computer with no admitted operation and no active
 viewer sleeps after 30 minutes of inactivity. Idle checks and viewer/operation
 admission share the native authority lock. Sleep uses Docker pause to freeze
 CPU activity while preserving application memory; it keeps its RAM allocation.
 Starting the computer unpauses it with control remaining explicitly paused.
-The native monitor stops with Fable and does not promise work after app exit.
+The native monitor stops with Mivlet and does not promise work after app exit.
 These semantics follow Docker's [pause](https://docs.docker.com/reference/cli/docker/container/pause/)
 and [restart policy](https://docs.docker.com/engine/containers/start-containers-automatically/) contracts.
 
-Closing Fable's main window immediately removes viewer capabilities and blocks
+Closing Mivlet's main window immediately removes viewer capabilities and blocks
 new computer and provider work. Native shutdown revokes every known computer,
 drains admitted actions, cancels supervised commands and pending downloads, and
 stops retained provider processes before exiting. The Linux container and saved
@@ -102,7 +102,7 @@ Publication copies the bytes outside the guest mount. An opaque ID and
 credential-free metadata return in the tool result, which persists with the
 conversation. The existing encrypted private-workspace document store holds
 the authenticated scope and digest receipt; retired artifact tables are not
-reintroduced. The main Fable window can open the receipt only for its saved
+reintroduced. The main Mivlet window can open the receipt only for its saved
 agent and a current generation. Native code verifies the immutable published
 copy against its receipt, then opens a fresh copy through Windows' registered
 file application. Edits to that opened copy do not alter the published version.
@@ -137,7 +137,7 @@ Publication and open-copy folders each allow at most 256 files per computer.
   advertises image input. Native code binds pixels to the exact pending provider
   call, arguments, approved scope, generation, and response. JPEG bytes stay in
   native memory until a checked image response goes directly to the ephemeral
-  provider session. React and Fable's saved transcript receive metadata only.
+  provider session. React and Mivlet's saved transcript receive metadata only.
   Other providers retain structured browser, terminal, and file tools.
 - Every computer tool requires an exact, single-use persisted approval with
   workspace, agent, and generation binding. Agent observation, files, terminal,
@@ -146,7 +146,7 @@ Publication and open-copy folders each allow at most 256 files per computer.
   operations before enabling human input. Late results are discarded. A drain
   timeout leaves control paused with an explicit retry.
 
-Website sign-in happens inside the container browser. Fable does not scrape its
+Website sign-in happens inside the container browser. Mivlet does not scrape its
 cookies or translate that browser session into an application credential.
 Before model image capture, native checks inspect visible X11 window metadata
 and AT-SPI password/modal roles without reading text values. Unknown browser
@@ -159,7 +159,7 @@ and [X11 modal window properties](https://apol.pages.freedesktop.org/xdg-specs/w
 
 The container is limited to two CPUs, 2 GiB memory plus 1 GiB additional swap,
 512 processes, and bounded shared-memory and temporary filesystems. Docker
-publishes a native-authenticated gateway on a random loopback-only host port. Fable invokes
+publishes a native-authenticated gateway on a random loopback-only host port. Mivlet invokes
 Docker with argument arrays rather than a host shell, validates labelled
 resources before reuse, and keeps resource identifiers native.
 
@@ -180,7 +180,7 @@ Landlock rule and seccomp filter before application code runs. This blocks Open
 With shell commands, custom executables, direct dynamic-loader invocation, and
 memory-file execution. Writable home, Workspace, and temporary mounts are
 `noexec,nosuid,nodev`; the app sandbox denies TCP and scopes signals. The XFCE
-panel and desktop launchers are replaced by Fable's fixed application buttons.
+panel and desktop launchers are replaced by Mivlet's fixed application buttons.
 
 Terminal uses a root-created PTY: its closed-execution xterm display is UID 1002
 and its interactive shell is UID 1001. The narrowly allowed root launcher accepts
@@ -188,7 +188,7 @@ no arguments and acknowledges only after the display guard and shell privilege
 checks succeed. Its supervisor shares the shell operation lock, rejects queued
 concurrent commands, and kills UID 1001 descendants including detached sessions
 on completion or cancellation. The GUI applications retain unsaved documents
-through takeover; Fable drains their admitted native input and launch operations.
+through takeover; Mivlet drains their admitted native input and launch operations.
 
 Chromium uses anonymous debugging pipes. There is no TCP CDP listener; the
 native-only gateway translates its authenticated WebSocket to those pipes.
@@ -209,7 +209,7 @@ The container drops capabilities by default and adds the bounded capabilities
 needed by Chromium's SUID sandbox and root initialization/process cancellation.
 Chromium keeps its sandbox enabled and its built-in password manager disabled.
 LibreOffice macro execution and extension installation/removal are disabled by
-finalized system policy. Native admission prevents new Fable-issued input after
+finalized system policy. Native admission prevents new Mivlet-issued input after
 revocation; ordinary page scripts and existing trusted GUI behavior can continue.
 This is a layered desktop boundary, not a claim that third-party GUI applications
 or the shared X server are free from exploitable vulnerabilities.
@@ -224,7 +224,7 @@ or the shared X server are free from exploitable vulnerabilities.
   accounting.
 - The scoped workspace is an intentional host bind mount. A vulnerability in an
   approved container process could affect files inside that scope, though not
-  arbitrary host paths through Fable's interface.
+  arbitrary host paths through Mivlet's interface.
 - Package updates, image signing, vulnerability response, resource telemetry,
   container reset/export, and public installer validation remain incomplete.
 - Tools expose no arbitrary selector/script channel, host clipboard, or secure
@@ -243,20 +243,20 @@ fencing. Those tests prove the local machine under test only.
 
 ## Component selection and stream transport
 
-The September 2026 review compared the actual Fable container boundary with
+The September 2026 review compared the actual Mivlet container boundary with
 three maintained upstream projects:
 
 | Component | Verified upstream | Decision |
 | --- | --- | --- |
-| KasmVNC | [1.5.0 release](https://github.com/kasmtech/KasmVNC/releases/tag/v1.5.0), July 29, 2026; GPL-2.0 server and MPL-2.0 noVNC-derived client | Use its desktop streaming server and a small decoder bundle, behind Fable's authority boundary. |
-| Cua | [Current Rust driver source](https://github.com/trycua/cua/tree/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/cua-driver) and [Python server package](https://github.com/trycua/cua/blob/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/python/computer-server/pyproject.toml); MIT project, Rust driver 0.23.2 and Python computer-server 0.3.45 | Retain Fable's native tools. Cua's newer Rust driver provides a possible later accessibility integration, but importing its complete server adds another session, tool, and policy boundary. |
-| Browser Use | [0.13.10 release](https://github.com/browser-use/browser-use/releases/tag/0.13.10), September 4, 2026; MIT, Python 3.11+ | Keep Fable's native CDP implementation. Its [Actor API](https://github.com/browser-use/browser-use/blob/0.13.10/browser_use/actor/README.md) can attach without its Agent runtime, but importing the full package adds provider SDKs, telemetry configuration, and a Python dependency graph for capabilities already reachable through CDP. |
+| KasmVNC | [1.5.0 release](https://github.com/kasmtech/KasmVNC/releases/tag/v1.5.0), July 29, 2026; GPL-2.0 server and MPL-2.0 noVNC-derived client | Use its desktop streaming server and a small decoder bundle, behind Mivlet's authority boundary. |
+| Cua | [Current Rust driver source](https://github.com/trycua/cua/tree/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/cua-driver) and [Python server package](https://github.com/trycua/cua/blob/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/python/computer-server/pyproject.toml); MIT project, Rust driver 0.23.2 and Python computer-server 0.3.45 | Retain Mivlet's native tools. Cua's newer Rust driver provides a possible later accessibility integration, but importing its complete server adds another session, tool, and policy boundary. |
+| Browser Use | [0.13.10 release](https://github.com/browser-use/browser-use/releases/tag/0.13.10), September 4, 2026; MIT, Python 3.11+ | Keep Mivlet's native CDP implementation. Its [Actor API](https://github.com/browser-use/browser-use/blob/0.13.10/browser_use/actor/README.md) can attach without its Agent runtime, but importing the full package adds provider SDKs, telemetry configuration, and a Python dependency graph for capabilities already reachable through CDP. |
 
 Cua's Python server requires Python 3.12–3.13, while the Debian image uses 3.11.
 Its [Linux Python accessibility handler](https://github.com/trycua/cua/blob/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/python/computer-server/computer_server/handlers/linux.py)
 contains simulated accessibility data; the newer Rust driver has real
 AT-SPI/X11/Wayland support, so those are distinct integration candidates.
-Fable does not install a second autonomous agent loop from either project.
+Mivlet does not install a second autonomous agent loop from either project.
 
 KasmVNC 1.5 adds H.264/H.265/AV1 video support through browser WebCodecs. The
 actual encoding depends on browser/host capabilities; rectangle decoding remains
@@ -269,7 +269,7 @@ from an archive pinned to
 This is KasmVNC's client protocol, rather than an interchangeable stock noVNC
 package. The decoder adapter uses the source's six-argument RFB constructor,
 removes its own input listeners, disables automatic session resizing and WebRTC,
-and retains Fable's viewer UI. Upstream client source, build adapter, MPL license,
+and retains Mivlet's viewer UI. Upstream client source, build adapter, MPL license,
 and pako license are included in the image. The server remains GPL software;
 the separate MIT-licensed Cua integration named Kasm does not relicense it.
 

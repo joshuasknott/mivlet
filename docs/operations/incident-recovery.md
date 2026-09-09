@@ -6,7 +6,7 @@ owners, telemetry, backups, and access controls.
 
 ## First response
 
-1. Stop the affected Fable process or optional service when continued activity
+1. Stop the affected Mivlet process or optional service when continued activity
    could worsen the incident.
 2. Preserve the exact checkout, logs already produced, timestamps, versions,
    database/WAL set, installer hash, and affected workspace/teammate identity.
@@ -21,7 +21,7 @@ owners, telemetry, backups, and access controls.
 ## Provider or Connection credential exposure
 
 - Disconnect or revoke the exact provider/account credential at its source.
-- Clear the matching Fable secure-store reference through the supported UI or
+- Clear the matching Mivlet secure-store reference through the supported UI or
   native recovery path; do not delete unrelated credential-store entries.
 - Inspect redacted action history for the affected Connection and time window.
 - Reconnect only after the cause is fixed. A successful local fixture or model

@@ -1,6 +1,6 @@
 # Workspace data model
 
-The durable local ownership root is a workspace. Fable currently prepares a
+The durable local ownership root is a workspace. Mivlet currently prepares a
 stable local workspace during onboarding; future account or collaboration code
 must not replace that local authority implicitly.
 
