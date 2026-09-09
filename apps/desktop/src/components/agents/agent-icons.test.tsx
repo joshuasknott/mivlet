@@ -7,21 +7,26 @@ afterEach(() => vi.useRealTimers());
 describe("agent expressions", () => {
   it("maps a saturated shell to the selected colour without darkening neutral highlights", () => {
     const view = render(<AgentAvatar seed="robot-v3:1:saved" color="#FF994D" />);
-    const matrix = view.container.querySelector("feColorMatrix")!.getAttribute("values")!.split(" ").map(Number);
-    const apply = (rgb: number[]) => [0, 1, 2].map((row) => rgb.reduce((sum, value, column) => sum + value * matrix[row * 5 + column], 0));
-    const recoloured = apply([40 / 255, 121 / 255, 250 / 255]);
-    [1, 153 / 255, 77 / 255].forEach((value, index) => expect(recoloured[index]).toBeCloseTo(value));
-    apply([.04, .04, .04]).forEach((value) => expect(value).toBeCloseTo(.04));
-    apply([1, 1, 1]).forEach((value) => expect(value).toBeCloseTo(1));
+    const tables = [...view.container.querySelectorAll("feComponentTransfer > *")].map((node) => node.getAttribute("tableValues")!.split(" ").map(Number));
+    for (const table of tables) {
+      expect(table[0]).toBe(0);
+      expect(table[2]).toBe(.1);
+      expect(table[20]).toBe(1);
+      expect(table.every((value) => value >= 0 && value <= 1)).toBe(true);
+    }
+    // Blue's midtone maps close to the orange preset, not a muddy brown.
+    expect(tables[0][9]).toBeGreaterThan(.9);
+    expect(tables[1][9]).toBeGreaterThan(.5);
+    expect(tables[2][9]).toBeLessThan(.4);
   });
   it("keeps identity and colour across states while changing the face", () => {
     const view = render(<AgentAvatar seed="robot-v3:2:saved" color="#91ADD7" presence="idle" />);
     const source = view.container.querySelector("img")!.getAttribute("src");
-    const tint = view.container.querySelector("feColorMatrix")!.getAttribute("values");
+    const tint = view.container.querySelector("feComponentTransfer")!.innerHTML;
     const rest = view.container.querySelector(".agent-avatar__eyes")!.innerHTML;
     view.rerender(<AgentAvatar seed="robot-v3:2:saved" color="#91ADD7" presence="waiting" />);
     expect(view.container.querySelector("img")).toHaveAttribute("src", source);
-    expect(view.container.querySelector("feColorMatrix")).toHaveAttribute("values", tint);
+    expect(view.container.querySelector("feComponentTransfer")!.innerHTML).toBe(tint);
     expect(view.container.querySelector(".agent-avatar__eyes")!.innerHTML).not.toBe(rest);
   });
   it("leaves uploaded portraits unaltered, without synthetic eyes or colour filters", () => {
