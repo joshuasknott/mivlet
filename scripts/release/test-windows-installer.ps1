@@ -18,7 +18,7 @@ if ([IO.Path]::GetExtension($installer) -ne ".exe") {
 $previous = if ($PreviousInstallerPath) { (Resolve-Path -LiteralPath $PreviousInstallerPath).Path } else { $null }
 $dataDirectory = Join-Path $env:APPDATA "com.fable.workspace"
 if (Test-Path -LiteralPath $dataDirectory) {
-  throw "Fable data already exists on this machine. Use a clean disposable runner."
+  throw "Mivlet data already exists on this machine. Use a clean disposable runner."
 }
 
 function Invoke-Nsis([string]$Path) {
@@ -26,7 +26,7 @@ function Invoke-Nsis([string]$Path) {
   if ($process.ExitCode -ne 0) { throw "Installer exited with code $($process.ExitCode)." }
 }
 
-function Find-FableUninstall {
+function Find-MivletUninstall {
   $roots = @(
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -34,15 +34,15 @@ function Find-FableUninstall {
   )
   foreach ($attempt in 1..20) {
     $record = Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -eq "Fable" } |
+      Where-Object { $_.DisplayName -in @("Mivlet", "Fable") } |
       Select-Object -First 1
     if ($record) { return $record }
     Start-Sleep -Milliseconds 250
   }
-  throw "The Fable uninstall registration was not found."
+  throw "The Mivlet uninstall registration was not found."
 }
 
-function Assert-FableUnregistered {
+function Assert-MivletUnregistered {
   $roots = @(
     "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
     "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*",
@@ -50,16 +50,16 @@ function Assert-FableUnregistered {
   )
   foreach ($attempt in 1..20) {
     $record = Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -eq "Fable" } |
+      Where-Object { $_.DisplayName -in @("Mivlet", "Fable") } |
       Select-Object -First 1
     if (-not $record) { return }
     Start-Sleep -Milliseconds 250
   }
-  throw "Fable remained registered after uninstall."
+  throw "Mivlet remained registered after uninstall."
 }
 
 function Resolve-Uninstaller([string]$Command) {
-  if (-not $Command) { throw "The Fable uninstall command is missing." }
+  if (-not $Command) { throw "The Mivlet uninstall command is missing." }
   if ($Command -match '^"([^"]+)"') { return $Matches[1] }
   return ($Command -split "\s+")[0]
 }
@@ -68,10 +68,10 @@ try {
   if ($previous) { Invoke-Nsis $previous }
   else { Invoke-Nsis $installer }
 
-  $firstRegistration = Find-FableUninstall
+  $firstRegistration = Find-MivletUninstall
   $uninstaller = Resolve-Uninstaller $firstRegistration.UninstallString
   if (-not (Test-Path -LiteralPath $uninstaller -PathType Leaf)) {
-    throw "The registered Fable uninstaller does not exist."
+    throw "The registered Mivlet uninstaller does not exist."
   }
 
   New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
@@ -85,15 +85,16 @@ try {
     throw "The installer did not preserve the local data sentinel."
   }
 
-  $registration = Find-FableUninstall
+  $registration = Find-MivletUninstall
+  if ($registration.DisplayName -ne "Mivlet") { throw "The upgraded product name is not Mivlet." }
   $uninstaller = Resolve-Uninstaller $registration.UninstallString
   $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -PassThru -Wait
   if ($process.ExitCode -ne 0) { throw "Uninstaller exited with code $($process.ExitCode)." }
-  Assert-FableUnregistered
+  Assert-MivletUnregistered
   if ((Get-Content -LiteralPath $sentinel -Raw) -ne "preserve") {
-    throw "Uninstall removed or changed local Fable data."
+    throw "Uninstall removed or changed local Mivlet data."
   }
-  Write-Output "Fable installer lifecycle verification passed; local data was preserved."
+  Write-Output "Mivlet installer lifecycle verification passed; local data was preserved."
 }
 finally {
   if (Test-Path -LiteralPath $dataDirectory) {

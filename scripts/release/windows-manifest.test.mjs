@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,6 +13,23 @@ import {
 
 test("repository release versions are aligned", async () => {
   assert.equal(await assertReleaseVersionAlignment(), "0.1.0");
+});
+
+test("Mivlet installers retain the existing Windows upgrade and data identities", async () => {
+  const desktop = new URL("../../apps/desktop/src-tauri/", import.meta.url);
+  const config = JSON.parse(await readFile(new URL("tauri.conf.json", desktop), "utf8"));
+  assert.equal(config.productName, "Mivlet");
+  assert.equal(config.identifier, "com.fable.workspace");
+  assert.equal(config.bundle.windows.wix.upgradeCode, "7382634b-7737-5837-ba8c-f1e6cc711f8c");
+  const template = await readFile(new URL(config.bundle.windows.nsis.template, desktop), "utf8");
+  assert.match(template, /!define LEGACYPRODUCTNAME "Fable"/);
+  assert.match(template, /!define UNINSTKEY "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\\$\{LEGACYPRODUCTNAME\}"/);
+  assert.match(template, /!define MANUKEY "Software\\fable"/);
+  assert.match(template, /!define MANUPRODUCTKEY "\$\{MANUKEY\}\\\$\{LEGACYPRODUCTNAME\}"/);
+  assert.match(template, /WriteRegStr SHCTX "\$\{UNINSTKEY\}" "DisplayName" "\$\{PRODUCTNAME\}"/);
+  const migration = template.split("!macro MigrateLegacyShortcut DIRECTORY")[1].split("!macroend")[0];
+  assert.ok(migration.indexOf("IsShortcutTarget") < migration.indexOf("Rename"));
+  assert.match(migration, /\$INSTDIR\\\$\{MAINBINARYNAME\}\.exe/);
 });
 
 test("rejects a mismatch across release version sources", async () => {

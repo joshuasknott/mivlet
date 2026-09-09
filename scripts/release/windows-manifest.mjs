@@ -109,7 +109,7 @@ export function buildManifest({ version, channel, commit, createdAt, artifacts }
   }
   return {
     schemaVersion: 1,
-    product: "Fable",
+    product: "Mivlet",
     version,
     channel,
     commit,
@@ -124,7 +124,7 @@ export function buildManifest({ version, channel, commit, createdAt, artifacts }
 }
 
 export function renderReleaseNotes(manifest) {
-  return `# Fable ${manifest.version} (${manifest.channel})
+  return `# Mivlet ${manifest.version} (${manifest.channel})
 
 Commit: \`${manifest.commit}\`
 

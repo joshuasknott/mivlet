@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Fable",
+  "productName": "Mivlet",
   "version": "0.1.0",
   "identifier": "com.fable.workspace",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Fable",
+        "title": "Mivlet",
         "label": "main",
         "decorations": false,
         "width": 1440,
@@ -37,9 +37,20 @@
     "active": true,
     "targets": "all",
     "category": "Productivity",
-    "resources": ["resources/local-computer/**/*"],
+    "windows": {
+      "wix": {
+        "upgradeCode": "7382634b-7737-5837-ba8c-f1e6cc711f8c"
+      },
+      "nsis": {
+        "template": "windows/installer.nsi"
+      }
+    },
+    "resources": [
+      "resources/local-computer/**/*"
+    ],
     "icon": [
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Mivlet"
   }
 }
