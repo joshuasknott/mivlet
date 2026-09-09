@@ -65,7 +65,7 @@ bounded responses. Remote custom-provider HTTP is rejected; loopback is the
 only plaintext exception. Connector OAuth uses system-browser authorization,
 PKCE where applicable, exact callback state, and isolated credential custody.
 The broker handles only confidential connector authorization and stores no
-waitlist, conversation, or provider secrets.
+conversation or provider secrets.
 
 ### Prompt injection and unsafe effects
 

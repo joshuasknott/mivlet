@@ -3,7 +3,6 @@ import madge from "madge";
 const roots = [
   "apps/broker/src",
   "apps/desktop/src",
-  "apps/waitlist/src",
   "packages/connectors/src",
   "packages/knowledge/src",
   "packages/protocol/src",

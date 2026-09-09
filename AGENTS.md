@@ -1,13 +1,12 @@
 # Fable
 
-Independent, provider-neutral, local-first AI teammate workspace. Preserve the quiet conversation with named teammates and keep account identity, workspace data, and provider credentials separate. First run requires a Fable account and a validated provider. Keep hosted and planned features distinct from implemented local behavior.
+Independent, provider-neutral, local-first AI agent workspace. Preserve the quiet conversation with named agents and keep account identity, workspace data, and provider credentials separate. First run requires a Fable account and a validated provider. Keep hosted and planned features distinct from implemented local behavior.
 
 ## Map and context
 
 - apps/desktop: React, Convex, and the Tauri/Rust boundary; src-tauri/resources/local-computer contains the Linux desktop image.
 - apps/hosted-runner: deployment-gated Cloudflare computer/browser worker.
-- apps/broker: confidential connector OAuth broker, separate from account and waitlist data.
-- apps/marketing and apps/waitlist: public site and isolated signup Worker.
+- apps/broker: confidential connector OAuth broker, separate from account data.
 - packages: shared protocol, providers, connectors, tools, voice, and knowledge.
 
 Read README.md and the architecture or ADR relevant to the change. Use Node 22+, pnpm 10, and stable Rust. Inspect the current diff before editing; trace production reachability before deleting a surface. Preserve unrelated work and do not hand-edit generated Convex or Tauri schemas.

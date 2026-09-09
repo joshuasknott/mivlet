@@ -1,5 +1,0 @@
-User-agent: *
-Allow: /
-
-Disallow: /api/
-# noindex on confirmed per spec handled by meta

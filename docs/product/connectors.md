@@ -158,7 +158,7 @@ Provider account identifiers are display metadata, never authorization.
 The broker has one job: complete confidential connector OAuth without exposing
 client secrets to the desktop. Its public surface is limited to health plus
 authorize, callback, single-use handoff, refresh, and revoke routes. It contains
-no waitlist, account, model-provider, sync, or product-data endpoints.
+no account, model-provider, sync, or product-data endpoints.
 
 Pending authorization state, handoff tickets, and rate limits may use memory in
 local development and tests. Staging or production must use the encrypted

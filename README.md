@@ -100,8 +100,6 @@ their separate trust boundaries.
 apps/desktop        React UI, Convex functions, and the Tauri Rust boundary
 apps/hosted-runner  deployment-gated Cloudflare computer/browser worker
 apps/broker         narrow confidential connector OAuth broker
-apps/marketing      Astro marketing site
-apps/waitlist       isolated waitlist Worker
 packages/protocol   shared product and authority contracts
 packages/connectors provider, connector, tool, voice, and MCP adapters
 packages/knowledge  local ingestion and retrieval engine

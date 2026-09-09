@@ -38,5 +38,5 @@ A live release still requires provider-console callback registration, deployed
 secrets and bindings, concurrent callback/replay testing, log inspection, and
 revocation testing against configured provider applications.
 
-The broker remains separate from the waitlist, Fable accounts, model-provider
+The broker remains separate from Fable accounts, model-provider
 credentials, workspace data, and optional sync services.

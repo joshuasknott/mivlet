@@ -6,7 +6,6 @@ export default tseslint.config(
       "**/dist/**",
       "**/target/**",
       "**/node_modules/**",
-      "**/.astro/**",
       "**/_generated/**",
       "**/worker-configuration.d.ts",
       "**/*.test.{ts,tsx}",

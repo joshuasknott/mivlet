@@ -25,7 +25,3 @@ coverage/
 .wrangler/
 *.sqlite
 *.sqlite-*
-
-
-.astro/
-

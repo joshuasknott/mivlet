@@ -291,11 +291,13 @@ export async function retrieve(
   // longer dominate each other, and matches the documented hybrid contract.
   const RRF_K = 60;
   const byLexical = [...raw].sort((a, b) => b.lexicalScore - a.lexicalScore);
-  const bySemantic = [...raw].sort((a, b) => b.semanticScore - a.semanticScore);
   const lexicalRank = new Map<SourceChunk, number>();
   const semanticRank = new Map<SourceChunk, number>();
   byLexical.forEach((entry, rank) => lexicalRank.set(entry.chunk, rank));
-  bySemantic.forEach((entry, rank) => semanticRank.set(entry.chunk, rank));
+  if (useSemantic) {
+    const bySemantic = [...raw].sort((a, b) => b.semanticScore - a.semanticScore);
+    bySemantic.forEach((entry, rank) => semanticRank.set(entry.chunk, rank));
+  }
 
   const scored: ScoredChunk[] = raw.map((entry) => {
     let relevanceRaw: number;
@@ -349,10 +351,9 @@ export async function retrieve(
 
   // Deduplicate overlapping chunks from the same source: keep the top chunk per
   // source unless chunks are clearly distinct (different headings).
-  const deduped = deduplicateOverlapping(scored);
+  const limited = deduplicateOverlapping(scored, limit);
 
-  // Apply the limit, then the character budget across snippets.
-  const limited = deduped.slice(0, limit);
+  // Apply the character budget across the requested unique results.
   const citations: AuthorityScopedKnowledgeCitation[] = [];
   let used = 0;
   for (const scored0 of limited) {
@@ -379,7 +380,7 @@ export async function retrieve(
  * Groups kept chunks by source id in a Map for O(1) same-source lookup instead
  * of re-scanning the whole kept list per candidate.
  */
-function deduplicateOverlapping(scored: ScoredChunk[]): ScoredChunk[] {
+function deduplicateOverlapping(scored: ScoredChunk[], limit: number): ScoredChunk[] {
   const kept: ScoredChunk[] = [];
   const keptBySource = new Map<string, ScoredChunk[]>();
   for (const candidate of scored) {
@@ -400,6 +401,7 @@ function deduplicateOverlapping(scored: ScoredChunk[]): ScoredChunk[] {
     });
     if (!redundant) {
       kept.push(candidate);
+      if (kept.length === limit) break;
       const list = keptBySource.get(candidate.source.id);
       if (list) list.push(candidate);
       else keptBySource.set(candidate.source.id, [candidate]);

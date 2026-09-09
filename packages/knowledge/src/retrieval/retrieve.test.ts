@@ -66,6 +66,28 @@ const privateUserAuthority = {
 };
 
 describe("retrieve — ranking", () => {
+  it.each([false, true])("limits unique results after deduplication (semantic: %s)", async (semantic) => {
+    const sources = Array.from({ length: 12 }, (_, index) => {
+      const id = `source-${index}`;
+      const embedding = semantic ? [1, 0] : undefined;
+      return src(makeSource({ id, title: `Launch ${String(index).padStart(2, "0")}` }), [
+        makeChunk(id, 0, "Launch plan milestone", { contentHash: "same", embedding }),
+        makeChunk(id, 1, "Launch plan milestone", { contentHash: "same", embedding }),
+        makeChunk(id, 2, "Launch plan delivery", { heading: "Delivery", embedding })
+      ]);
+    });
+    const options = {
+      query: "launch plan",
+      budgetChars: 100_000,
+      embeddingProvider: semantic ? { id: "fixture", embedTexts: async () => [[1, 0]] } : undefined
+    };
+    const full = await retrieve(sources, { ...options, limit: 100 });
+    const limited = await retrieve(sources, { ...options, limit: 8 });
+    expect(full.mode).toBe(semantic ? "hybrid" : "lexical-fallback");
+    expect(full.citations).toHaveLength(24);
+    expect(limited.citations).toEqual(full.citations.slice(0, 8));
+  });
+
   it("ranks a title-matching chunk above incidental content matches", async () => {
     const sources = [
       src(

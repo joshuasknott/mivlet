@@ -2,8 +2,12 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
     "apps/broker": {
+      "ignoreDependencies": ["cloudflare"],
       "entry": ["src/worker.ts", "src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
+    },
+    "apps/hosted-runner": {
+      "ignoreDependencies": ["cloudflare"]
     },
     "apps/desktop": {
       "entry": [
@@ -16,18 +20,6 @@
         "!convex/_generated/**"
       ],
       "project": ["src/**/*.{ts,tsx}", "convex/**/*.ts", "vite.config.ts"]
-    },
-    "apps/marketing": {
-      "entry": ["src/pages/**/*.astro", "src/**/*.test.ts", "astro.config.mjs"],
-      "project": [
-        "src/**/*.{astro,ts,tsx}",
-        "scripts/**/*.mjs",
-        "astro.config.mjs"
-      ]
-    },
-    "apps/waitlist": {
-      "entry": ["src/worker.ts", "src/**/*.test.ts", "vite.config.ts"],
-      "project": ["src/**/*.ts", "vite.config.ts"]
     },
     "packages/connectors": {
       "entry": ["src/index.ts", "src/**/*.test.ts"],
@@ -56,5 +48,5 @@
     "**/_generated/**",
     "**/worker-configuration.d.ts"
   ],
-  "ignoreDependencies": ["@fontsource/inter", "cloudflare"]
+  "ignoreDependencies": ["@fontsource/inter"]
 }

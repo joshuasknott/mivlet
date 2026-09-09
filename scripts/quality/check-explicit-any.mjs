@@ -3,7 +3,6 @@ import path from "node:path";
 
 const roots = ["apps", "packages"];
 const excludedDirectories = new Set([
-  ".astro",
   "_generated",
   "dist",
   "node_modules",
@@ -13,7 +12,7 @@ const sourcePattern = /\.(?:ts|tsx)$/u;
 const excludedFilePattern = /\.(?:test|spec)\.(?:ts|tsx)$/u;
 const explicitAnyPattern =
   /(?:\bas\s+any\b|:\s*any\b|<\s*any\s*>|\bany\s*\[\s*\])/gu;
-const maximum = 238;
+const maximum = 128;
 
 async function collect(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

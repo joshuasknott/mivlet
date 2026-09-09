@@ -2,6 +2,19 @@
 
 Choose checks by the final diff. Documentation-only edits need link/command validation and `git diff --check`; they do not require compiling every application. Implementation changes need the relevant package tests, types, build, and any affected security or quality gates. Run the broad gate for cross-package work and release readiness, or when explicitly requested.
 
+Keep each pull request focused on one behavior or cleanup, with its reason and
+actual validation results. Use a separate branch and worktree per concurrent
+change; agree ownership before editing shared protocol, runtime, or lockfiles.
+Open draft pull requests early to expose overlap, and merge prerequisite changes
+before dependent ones. Update affected documentation in the same pull request;
+delete superseded instructions and obsolete tests with the behavior they describe.
+Retain tests for observable behavior, authorization, persistence, and regressions.
+
+CI runs on pull requests to `main` and pushes to `main`. New revisions cancel
+older runs of the same pull request. Local feature-branch pushes need a pull
+request for CI; run focused checks locally before pushing. Require the CI check
+before merging and rerun affected checks after resolving conflicts.
+
 | Scope | Commands |
 | --- | --- |
 | Repository types and tests | `pnpm typecheck`, `pnpm test` |
@@ -41,10 +54,3 @@ text streaming and question marks must never stand in for them.
 Conversation regressions cover ordered durable segments, call/result pairing,
 redaction, scroll following, safe Markdown and preview scope changes. Native
 tests cover bounded previews, public-summary persistence and external link schemes.
-
-The September 2026 conversation pass replaces the initial 157 KB Markdown stack
-with the 43 KB Marked lexer and renders its tokens as React elements. The measured
-desktop bundle is about 1.014 MiB raw / 291 KiB gzip. The total gzip allowance adds
-20 KiB for the lexer, conversation UI and verified artifact preview; all raw,
-entry, CSS and existing route ceilings remain unchanged. Keep these additions
-accountable to the existing budget checks rather than silently widening every gate.
