@@ -12,7 +12,6 @@ mod container;
 pub(crate) mod desktop_tools;
 pub(crate) mod lifecycle;
 pub(crate) mod plugins;
-pub(crate) mod project_files;
 pub(crate) mod repositories;
 pub(crate) mod viewer;
 

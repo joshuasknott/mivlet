@@ -206,11 +206,10 @@ Evidence actually obtained:
 
 Still incomplete or blocked:
 
-- Binary artifact handoff between agents is **unavailable**. The internal draft
-  `src-tauri/src/local_computer/project_files.rs` compiles but has no registered
-  commands, advertised tool, protocol/runtime wiring, UI integration, or regression
-  tests. Native dispatch must bind the current attempt/target/generation to the
-  exact approval before this boundary can be exposed.
+- Binary artifact handoff between agents is **unavailable**. The unreachable draft
+  was removed during consolidation; it remains in commit 8a15da1. Native
+  approval/run binding, integration, and regression tests are still required
+  before exposing this capability.
 - Project reference-file preview, historical author lookup beyond the recent
   500-entry UI list, automatic delegation, and full multi-agent interruption/restart
   acceptance remain unfinished. Unknown historical authors display a neutral label

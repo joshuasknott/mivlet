@@ -53,16 +53,6 @@ pub(crate) struct VerifiedImageArtifact {
     pub(crate) mime_type: String,
 }
 
-pub(crate) struct VerifiedProjectArtifact {
-    pub(crate) bytes: Vec<u8>,
-    pub(crate) artifact_id: String,
-    pub(crate) agent_id: String,
-    pub(crate) export_name: String,
-    pub(crate) title: String,
-    pub(crate) mime_type: String,
-    pub(crate) sha256: String,
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenArtifactRequest {
@@ -881,51 +871,6 @@ fn verified_artifact(
         request.expected_generation,
     )?;
     Ok((receipt, bytes))
-}
-
-/// Re-open an immutable published artifact for a project share. Project
-/// authority is checked by the caller; this helper deliberately does not
-/// require a viewer generation because the immutable copy is outside the
-/// guest workspace and is validated again by receipt, size, digest and type.
-pub(crate) fn verified_artifact_for_project(
-    computers: &LocalComputerState,
-    workspace_id: &str,
-    agent_id: &str,
-    artifact_id: &str,
-) -> Result<VerifiedProjectArtifact, String> {
-    computers.validate_target(workspace_id, agent_id)?;
-    if !valid_id(artifact_id) {
-        return Err("This artifact identifier is invalid.".into());
-    }
-    let authorization = command_scope(Some(workspace_id.into()), None, ScopeAccess::Read)?;
-    let scope = computers.scope(workspace_id, agent_id)?;
-    let request = OpenArtifactRequest {
-        workspace_id: workspace_id.into(),
-        agent_id: agent_id.into(),
-        artifact_id: artifact_id.into(),
-        expected_generation: 0,
-    };
-    let receipt: ArtifactReceipt = crate::store::read_private_workspace_document(
-        &scope.directory.join(format!("computer-{artifact_id}.json")),
-        &authorization.private,
-    )?
-    .ok_or("This artifact is no longer available on this installation.")?;
-    validate_receipt(&receipt, &request, &scope.computer_id)?;
-    let root = scope.directory.join("artifacts");
-    let bytes = read_bounded(&root, &root.join(artifact_id).join(&receipt.export_name))?;
-    if bytes.len() as u64 != receipt.artifact.size_bytes || digest(&bytes) != receipt.sha256 {
-        return Err("The published artifact has changed and cannot be shared.".into());
-    }
-    check_content(&bytes, allowed_path(&receipt.artifact.relative_path)?)?;
-    Ok(VerifiedProjectArtifact {
-        bytes,
-        artifact_id: receipt.artifact.id,
-        agent_id: receipt.agent_id,
-        export_name: receipt.export_name,
-        title: receipt.artifact.title,
-        mime_type: receipt.artifact.mime_type,
-        sha256: receipt.sha256,
-    })
 }
 
 /// Load an immutable, scoped raster artifact for an approved provider edit.
