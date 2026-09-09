@@ -20,7 +20,7 @@ import {
  * SECURITY NOTE: no helper here may imply that a saved rule, session grant, or
  * typed confirmation makes an action safe or bypasses execution-boundary
  * checks. The execution boundary still rechecks each consequential action
- * (fingerprinted one-time permit); the UI copy only describes what Fable asks
+ * (fingerprinted one-time permit); the UI copy only describes what Mivlet asks
  * before an action runs.
  */
 
@@ -42,18 +42,18 @@ export function decisionLabel(decision: ApprovalDecision): string {
 export function decisionDescription(decision: ApprovalDecision): string {
   switch (decision) {
     case "once":
-      return "Let Fable do this one time. It will ask again the next time.";
+      return "Let Mivlet do this one time. It will ask again the next time.";
     case "session":
-      return "Let Fable do this for the rest of this session without asking again.";
+      return "Let Mivlet do this for the rest of this session without asking again.";
     case "rule":
       return (
-        "Remember this so Fable can do it again without asking. Each consequential " +
+        "Remember this so Mivlet can do it again without asking. Each consequential " +
         "action is still checked before it runs."
       );
     case "modify":
-      return "Narrow what Fable can do before you approve it.";
+      return "Narrow what Mivlet can do before you approve it.";
     case "deny":
-      return "Stop. Fable won't run this action.";
+      return "Stop. Mivlet won't run this action.";
     default:
       return "";
   }
@@ -116,17 +116,17 @@ export function actionSummary(approval: ApprovalRequest): string {
 
 /**
  * Plain explanation of why approval is needed. Escalates for high-risk or
- * hard-to-undo actions; otherwise states Fable asks before running.
+ * hard-to-undo actions; otherwise states Mivlet asks before running.
  */
 export function whyApprovalIsNeeded(approval: ApprovalRequest): string {
   const high = isHighRisk(approval.mode, approval.riskLevel);
   if (approval.riskLevel === "critical") {
-    return "This is a consequential action that can't be undone, so Fable asks you first.";
+    return "This is a consequential action that can't be undone, so Mivlet asks you first.";
   }
   if (high) {
-    return "This action is hard to undo, so Fable checks with you before it runs.";
+    return "This action is hard to undo, so Mivlet checks with you before it runs.";
   }
-  return "Fable asks before taking an action that touches your data or a service.";
+  return "Mivlet asks before taking an action that touches your data or a service.";
 }
 
 /** A modify draft shape, mirrored from the panel's local edit state. */
@@ -190,10 +190,10 @@ export function highRiskExplanation(
 ): HighRiskExplanation {
   const phrase = approval.confirmationPhrase ?? "";
   const label = decisionLabel(decision).toLowerCase();
-  const whatItUnlocks = `Confirming runs the action as "${label}" after Fable's final check.`;
+  const whatItUnlocks = `Confirming runs the action as "${label}" after Mivlet's final check.`;
   const note =
     "This action is high-risk, so type the exact phrase below. " +
-    "Fable still runs its final check before the action runs.";
+    "Mivlet still runs its final check before the action runs.";
   return {
     requiredPhrase: phrase,
     whatItUnlocks,
@@ -205,9 +205,9 @@ export function highRiskExplanation(
 export const APPROVAL_PROFILES = PERMISSION_PROFILES;
 
 export const CUSTOM_APPROVAL_SECTION = {
-  heading: "Choose what Fable can help with",
-  intro: "Turn on only the kinds of work you want Fable to prepare.",
-  reassurance: "Fable still asks before risky actions and before any change is applied."
+  heading: "Choose what Mivlet can help with",
+  intro: "Turn on only the kinds of work you want Mivlet to prepare.",
+  reassurance: "Mivlet still asks before risky actions and before any change is applied."
 } as const;
 
 export const CUSTOM_APPROVAL_TOGGLES: Record<
@@ -215,11 +215,11 @@ export const CUSTOM_APPROVAL_TOGGLES: Record<
   { label: string; helper: string }
 > = {
   allowSmallLocalEdits: {
-    label: "Let Fable prepare small local edits",
+    label: "Let Mivlet prepare small local edits",
     helper: "You still approve each change before it is applied."
   },
   allowPowerfulCommands: {
-    label: "Let Fable use powerful commands",
+    label: "Let Mivlet use powerful commands",
     helper: "Risky or hard-to-undo actions always ask first."
   }
 };

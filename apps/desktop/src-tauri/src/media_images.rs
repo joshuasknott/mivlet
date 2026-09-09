@@ -1,4 +1,4 @@
-//! Bounded OpenAI image generation and editing behind Fable's native secret,
+//! Bounded OpenAI image generation and editing behind Mivlet's native secret,
 //! approval, computer-generation, and immutable artifact boundaries.
 
 use base64::Engine as _;
@@ -44,7 +44,7 @@ pub struct MediaImageStatus {
 #[tauri::command]
 pub fn media_image_status(window: tauri::WebviewWindow) -> Result<MediaImageStatus, String> {
     if window.label() != "main" {
-        return Err("Image status is only available from the main Fable window.".into());
+        return Err("Image status is only available from the main Mivlet window.".into());
     }
     let configured = matches!(crate::backends::read_credential(PROVIDER_ID), Ok(Some(_)));
     Ok(MediaImageStatus {
@@ -231,7 +231,7 @@ fn client() -> Result<reqwest::Client, String> {
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(IMAGE_TIMEOUT_SECONDS))
         .build()
-        .map_err(|_| "Fable could not prepare the OpenAI image connection.".into())
+        .map_err(|_| "Mivlet could not prepare the OpenAI image connection.".into())
 }
 
 fn provider_error(status: reqwest::StatusCode) -> String {
@@ -303,7 +303,7 @@ async fn send_generation(
         }))
         .send()
         .await
-        .map_err(|_| "Fable could not reach OpenAI's image service.".to_string())?;
+        .map_err(|_| "Mivlet could not reach OpenAI's image service.".to_string())?;
     if !response.status().is_success() {
         return Err(provider_error(response.status()));
     }
@@ -333,7 +333,7 @@ async fn send_edit(
         .multipart(form)
         .send()
         .await
-        .map_err(|_| "Fable could not reach OpenAI's image service.".to_string())?;
+        .map_err(|_| "Mivlet could not reach OpenAI's image service.".to_string())?;
     if !response.status().is_success() {
         return Err(provider_error(response.status()));
     }

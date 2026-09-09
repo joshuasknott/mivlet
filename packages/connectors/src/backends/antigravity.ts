@@ -23,6 +23,6 @@ export function resolveAntigravityProvider(
       description: "Sign in through Google's official Antigravity browser flow.",
       recommended: true
     },
-    installHint: "Fable installs Google's pinned Antigravity ACP runtime locally."
+    installHint: "Mivlet installs Google's pinned Antigravity ACP runtime locally."
   };
 }

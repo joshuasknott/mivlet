@@ -155,7 +155,7 @@ pub async fn local_computer_import_repository(
     expected_generation: u64,
 ) -> Result<Option<RepositoryImport>, String> {
     if window.label() != "main" {
-        return Err("Repository import belongs to the main Fable window.".into());
+        return Err("Repository import belongs to the main Mivlet window.".into());
     }
     state.validate_target(&workspace_id, &agent_id)?;
     state

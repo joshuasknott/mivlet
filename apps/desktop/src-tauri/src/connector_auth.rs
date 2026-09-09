@@ -119,7 +119,7 @@ struct NativeConnectorSecretStore;
 impl NativeConnectorSecretStore {
     fn entry(key: &str) -> Result<keyring::Entry, String> {
         keyring::Entry::new(KEYRING_SERVICE, key)
-            .map_err(|_| "Fable could not open the OS secure store.".to_string())
+            .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
     }
 }
 
@@ -128,20 +128,20 @@ impl ConnectorSecretStore for NativeConnectorSecretStore {
         match Self::entry(key)?.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err("Fable could not read connector credentials.".to_string()),
+            Err(_) => Err("Mivlet could not read connector credentials.".to_string()),
         }
     }
 
     fn set(&self, key: &str, secret: &str) -> Result<(), String> {
         Self::entry(key)?
             .set_password(secret)
-            .map_err(|_| "Fable could not store connector credentials.".to_string())
+            .map_err(|_| "Mivlet could not store connector credentials.".to_string())
     }
 
     fn remove(&self, key: &str) -> Result<(), String> {
         match Self::entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("Fable could not remove connector credentials.".to_string()),
+            Err(_) => Err("Mivlet could not remove connector credentials.".to_string()),
         }
     }
 }
@@ -167,7 +167,7 @@ fn random_urlsafe(bytes: usize) -> Result<String, ConnectorCommandError> {
         command_error(
             "unknown",
             "oauth",
-            "Fable could not initialize a secure OAuth transaction.",
+            "Mivlet could not initialize a secure OAuth transaction.",
             false,
         )
     })?;
@@ -235,7 +235,7 @@ pub(crate) fn resolve_broker_endpoints(
         command_error(
             "configuration-required",
             connector_id,
-            "This provider requires the configured Fable auth broker.",
+            "This provider requires the configured Mivlet auth broker.",
             false,
         )
     })?;
@@ -243,7 +243,7 @@ pub(crate) fn resolve_broker_endpoints(
         command_error(
             "configuration-required",
             connector_id,
-            "The Fable auth broker URL is invalid.",
+            "The Mivlet auth broker URL is invalid.",
             false,
         )
     })?;
@@ -255,7 +255,7 @@ pub(crate) fn resolve_broker_endpoints(
         return Err(command_error(
             "configuration-required",
             connector_id,
-            "The Fable auth broker must use HTTPS.",
+            "The Mivlet auth broker must use HTTPS.",
             false,
         ));
     }
@@ -462,7 +462,7 @@ fn google_secret_with_store(
         command_error(
             "credential-store-unavailable",
             connector_id,
-            "Fable could not access Google sign-in configuration in secure storage.",
+            "Mivlet could not access Google sign-in configuration in secure storage.",
             true,
         )
     };
@@ -569,7 +569,7 @@ fn start_with_store_bound(
         command_error(
             "unknown",
             connector_id,
-            "Fable could not encode OAuth state.",
+            "Mivlet could not encode OAuth state.",
             false,
         )
     })?;
@@ -747,7 +747,7 @@ fn broker_error(
     status: u16,
     retry_after: Option<String>,
 ) -> ConnectorCommandError {
-    let default_message = format!("The Fable auth broker {operation} was unsuccessful.");
+    let default_message = format!("The Mivlet auth broker {operation} was unsuccessful.");
     let human = message.unwrap_or_else(|| default_message.clone());
     let retry_after = if retry_after
         .as_deref()
@@ -840,7 +840,7 @@ async fn redeem_handoff(
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "The Fable auth broker could not be reached.",
+                "The Mivlet auth broker could not be reached.",
                 true,
             )
         })?;
@@ -851,7 +851,7 @@ async fn redeem_handoff(
         command_error(
             "provider-unavailable",
             connector_id,
-            "The Fable auth broker handoff response was invalid.",
+            "The Mivlet auth broker handoff response was invalid.",
             true,
         )
     })?;
@@ -1014,7 +1014,7 @@ async fn prepare_with_store(
             command_error(
                 "configuration-required",
                 connector_id,
-                "This provider requires the configured Fable auth broker.",
+                "This provider requires the configured Mivlet auth broker.",
                 false,
             )
         })?;
@@ -1147,7 +1147,7 @@ async fn prepare_with_store(
         command_error(
             "unknown",
             connector_id,
-            "Fable could not encode connector tokens.",
+            "Mivlet could not encode connector tokens.",
             false,
         )
     })?;
@@ -1210,7 +1210,7 @@ fn finish_metadata_commit(
         return match rollback_credential(store, rollback) {
             Ok(()) => Err(error),
             Err(_) => Err(
-                "Fable could not save connector state or restore the prior credential; reconnect this provider."
+                "Mivlet could not save connector state or restore the prior credential; reconnect this provider."
                     .into(),
             ),
         };
@@ -1309,12 +1309,12 @@ pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
         return Ok(Vec::new());
     }
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read connector state.".to_string())?;
+        .map_err(|_| "Mivlet could not read connector state.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
     let mut connections: Vec<ConnectorConnection> = serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse connector state.".to_string())?;
+        .map_err(|_| "Mivlet could not parse connector state.".to_string())?;
     normalize_active_accounts(&mut connections);
     Ok(connections)
 }
@@ -1356,11 +1356,11 @@ pub(crate) fn write_connections(
         return Ok(());
     }
     let encoded = serde_json::to_vec_pretty(connections)
-        .map_err(|_| "Fable could not encode connector state.".to_string())?;
+        .map_err(|_| "Mivlet could not encode connector state.".to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, encoded)
-        .map_err(|_| "Fable could not save connector state.".to_string())?;
-    fs::rename(&temporary, path).map_err(|_| "Fable could not commit connector state.".to_string())
+        .map_err(|_| "Mivlet could not save connector state.".to_string())?;
+    fs::rename(&temporary, path).map_err(|_| "Mivlet could not commit connector state.".to_string())
 }
 
 /// Resolve the *active* connection for a connector. With multi-account
@@ -1547,7 +1547,7 @@ fn commit_prepared_auth(
         command_error(
             "unknown",
             connector_id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -1697,7 +1697,7 @@ fn commit_prepared_auth_state<G>(
             Err(command_error(
                 "unknown",
                 connector_id,
-                "Fable could not finish or fully restore connector authorization; reconnect this provider.",
+                "Mivlet could not finish or fully restore connector authorization; reconnect this provider.",
                 false,
             ))
         };
@@ -1808,7 +1808,7 @@ pub(crate) fn safe_account_projection(
     }
 }
 
-/// Derive the stable Fable identity used by both the compatibility runtime and
+/// Derive the stable Mivlet identity used by both the compatibility runtime and
 /// the durable Connection migration. Keeping this in one native boundary
 /// prevents a storage backfill from minting identities the selector cannot
 /// later resolve.
@@ -1826,7 +1826,7 @@ pub(crate) fn derive_native_connection_id(
     format!("connection_{}", URL_SAFE_NO_PAD.encode(digest.finalize()))
 }
 
-/// Select the workspace-bound Fable Connection for `connector_id`. Provider
+/// Select the workspace-bound Mivlet Connection for `connector_id`. Provider
 /// account ids are compatibility metadata and are never accepted as authority.
 pub(crate) fn switch_active_connection(
     path: &Path,
@@ -1885,7 +1885,7 @@ pub(crate) async fn disconnect(
         command_error(
             "unknown",
             connector_id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -2069,7 +2069,7 @@ fn commit_prepared_disconnect<G>(
             Err(command_error(
                 "unknown",
                 connector_id,
-                "Fable could not finish or fully restore connector disconnect; reconnect this provider.",
+                "Mivlet could not finish or fully restore connector disconnect; reconnect this provider.",
                 false,
             ))
         };
@@ -2156,7 +2156,7 @@ fn refresh_authorization_context(
         command_error(
             "unknown",
             connector_id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -2347,7 +2347,7 @@ fn commit_refresh_success<G>(
             Err(command_error(
                 "unknown",
                 connector_id,
-                "Fable could not finish or fully restore connector refresh; reconnect this provider.",
+                "Mivlet could not finish or fully restore connector refresh; reconnect this provider.",
                 false,
             ))
         };
@@ -2425,7 +2425,7 @@ fn commit_refresh_rejection<G>(
             Err(command_error(
                 "unknown",
                 connector_id,
-                "Fable could not finish or fully restore rejected connector refresh; reconnect this provider.",
+                "Mivlet could not finish or fully restore rejected connector refresh; reconnect this provider.",
                 false,
             ))
         };
@@ -2564,7 +2564,7 @@ async fn refresh_connection_for_connection(
             command_error(
                 "configuration-required",
                 connector_id,
-                "This provider requires the configured Fable auth broker.",
+                "This provider requires the configured Mivlet auth broker.",
                 false,
             )
         })?;
@@ -2582,7 +2582,7 @@ async fn refresh_connection_for_connection(
                 command_error(
                     "provider-unavailable",
                     connector_id,
-                    "The Fable auth broker could not be reached.",
+                    "The Mivlet auth broker could not be reached.",
                     true,
                 )
             })?;
@@ -2614,7 +2614,7 @@ async fn refresh_connection_for_connection(
             command_error(
                 "provider-unavailable",
                 connector_id,
-                "The Fable auth broker refresh response was invalid.",
+                "The Mivlet auth broker refresh response was invalid.",
                 true,
             )
         })?;
@@ -2697,7 +2697,7 @@ async fn refresh_connection_for_connection(
         command_error(
             "unknown",
             connector_id,
-            "Fable could not encode refreshed tokens.",
+            "Mivlet could not encode refreshed tokens.",
             false,
         )
     })?;

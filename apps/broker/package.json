@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Fable confidential-OAuth auth broker. Deployable, not deployed.",
+  "description": "Mivlet confidential-OAuth auth broker. Deployable, not deployed.",
   "main": "./dist/server.js",
   "bin": {
     "fable-broker": "./dist/server.js"

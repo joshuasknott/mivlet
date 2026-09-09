@@ -62,7 +62,7 @@ describe("conversation shell runtime", () => {
     act(() => result.current.dismissOnboarding());
     expect(result.current.onboardingRequired).toBe(true);
     expect(result.current.backendStatus).toBe(
-      "Connect and verify a model provider before entering Fable.",
+      "Connect and verify a model provider before entering Mivlet.",
     );
   });
 

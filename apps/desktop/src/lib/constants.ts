@@ -8,7 +8,7 @@ import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors/local-files";
 export const STORAGE_KEY = "fable.shell.v1";
 /**
  * Read-only compatibility keys. Do not rename or remove: existing installs
- * used these exact localStorage namespaces before the Fable rebrand.
+ * used these exact localStorage namespaces before the Mivlet rebrand.
  */
 export const LEGACY_STORAGE_KEYS = ["arden.shell.v1", "praxis.shell.v1"] as const;
 /**

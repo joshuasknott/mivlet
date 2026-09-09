@@ -2,7 +2,7 @@
   "name": "fable",
   "version": "0.1.0",
   "private": true,
-  "description": "Fable is a local-first AI agent workspace.",
+  "description": "Mivlet is a local-first AI agent workspace.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
     "dev": "pnpm --filter @fable/desktop dev",

@@ -107,7 +107,7 @@ export function describeBackendError(
   }
   if (code === "offline") {
     return {
-      message: `Fable is offline or can't reach the provider. Check your connection and retry. (${message})`,
+      message: `Mivlet is offline or can't reach the provider. Check your connection and retry. (${message})`,
       tone: "caution",
       retryable: true
     };
@@ -135,14 +135,14 @@ export function describeBackendError(
   }
   if (code === "transport") {
     return {
-      message: `Fable couldn't reach the provider. Check your connection and retry. (${message})`,
+      message: `Mivlet couldn't reach the provider. Check your connection and retry. (${message})`,
       tone: "caution",
       retryable: true
     };
   }
   if (code === "response-too-large") {
     return {
-      message: `The provider's response exceeded Fable's size limit. (${message})`,
+      message: `The provider's response exceeded Mivlet's size limit. (${message})`,
       tone: "caution",
       retryable: false
     };

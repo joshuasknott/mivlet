@@ -44,7 +44,7 @@ const CODEX_API_KEY_CAPS: CapabilitySet = [
 ];
 
 /**
- * Native-API providers declare the full capability set when connected: Fable owns
+ * Native-API providers declare the full capability set when connected: Mivlet owns
  * the loop, so it honors streaming, tool-requests + approvals, file-changes,
  * usage-cost (metered against the API key), model-availability, and cancellation.
  */

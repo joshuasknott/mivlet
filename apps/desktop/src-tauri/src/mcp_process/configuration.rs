@@ -56,7 +56,7 @@ pub fn commit_mcp_server_configuration(
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let now = resolution.audit_entry.decided_at;
     store
         .transaction(|tx| {
@@ -109,7 +109,7 @@ pub fn list_mcp_server_configurations(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| crate::store::repos::mcp_local_server::list(tx, store, &scope))
         .map_err(|error| error.to_string())
@@ -125,7 +125,7 @@ pub fn list_remote_mcp_connections(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::list(tx, store, &scope)?
@@ -151,7 +151,7 @@ pub fn open_remote_mcp_session(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let configuration = store
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::get_launch(
@@ -190,7 +190,7 @@ pub fn open_remote_mcp_session(
         .map_err(|error| error.to_string())?;
     remote_sessions()
         .lock()
-        .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?
         .insert(
             session_id.clone(),
             McpRemoteSession {
@@ -228,7 +228,7 @@ pub async fn inspect_remote_mcp_authorization(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let configuration = store
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::get_launch(
@@ -286,7 +286,7 @@ pub async fn begin_remote_mcp_authorization(
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let configuration = store
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::get_launch(
@@ -415,7 +415,7 @@ pub async fn disconnect_remote_mcp_authorization(
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let connection = store
         .with_conn(|tx| {
             crate::store::repos::connection_record::mcp_details_for_remote(
@@ -486,7 +486,7 @@ pub async fn send_remote_mcp_frame(
     let snapshot = {
         let mut sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?;
         let session = sessions
             .get_mut(&request.session_id)
             .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
@@ -575,7 +575,7 @@ pub async fn poll_remote_mcp_messages(
     let snapshot = {
         let mut sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?;
         let session = sessions
             .get_mut(&request.session_id)
             .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
@@ -627,7 +627,7 @@ pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result
     let session = {
         let mut sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?;
         let session = sessions
             .get(&request.session_id)
             .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
@@ -659,7 +659,7 @@ pub fn record_mcp_server_discovery(
     )?;
     let local = process_map()
         .lock()
-        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?
         .get(&request.session_id)
         .map(|process| {
             require_session_owner(process, &scope)?;
@@ -674,7 +674,7 @@ pub fn record_mcp_server_discovery(
     } else {
         let sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?;
         let session = sessions
             .get(&request.session_id)
             .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
@@ -685,7 +685,7 @@ pub fn record_mcp_server_discovery(
     let proof_tools = request.tools.clone();
     let proof_resources = request.resources.clone();
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let recorded = store
         .transaction(|tx| {
             crate::store::repos::connection_record::record_mcp_discovery(
@@ -721,7 +721,7 @@ pub fn set_mcp_server_enablement(
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
             if let Some(requested) = request.capability_bindings.first() {
@@ -776,7 +776,7 @@ pub fn resolve_mcp_capability_route(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| {
             let mut routes = Vec::new();
@@ -878,7 +878,7 @@ pub fn authorize_mcp_tool_call(
     };
     let mut permits = tool_permits()
         .lock()
-        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?;
+        .map_err(|_| "Mivlet could not access MCP execution permits.".to_string())?;
     permits.retain(|_, value| value.issued_at.elapsed() <= Duration::from_secs(60));
     permits.insert(permit_id.clone(), permit);
     Ok(AuthorizedMcpToolCall {
@@ -897,7 +897,7 @@ pub async fn execute_approved_mcp_tool_call(
     }
     let permit = tool_permits()
         .lock()
-        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP execution permits.".to_string())?
         .remove(&request.permit_id)
         .ok_or_else(|| "The MCP execution permit is unavailable or already used.".to_string())?;
     if permit.issued_at.elapsed() > Duration::from_secs(60) {
@@ -933,7 +933,7 @@ pub async fn execute_approved_mcp_tool_call(
     let audit_key = pending_audit_key(&request.proposal.session_id, &request.request_id);
     pending_audits()
         .lock()
-        .map_err(|_| "Fable could not access MCP audit state.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP audit state.".to_string())?
         .insert(
             audit_key.clone(),
             PendingMcpAudit {
@@ -946,7 +946,7 @@ pub async fn execute_approved_mcp_tool_call(
         let sender = (|| -> Result<mpsc::Sender<String>, String> {
             let map = process_map()
                 .lock()
-                .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+                .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
             let process = map
                 .get(&request.proposal.session_id)
                 .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
@@ -979,7 +979,7 @@ pub async fn execute_approved_mcp_tool_call(
     let snapshot = (|| -> Result<McpRemoteSession, String> {
         let mut sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?;
         let session = sessions
             .get_mut(&request.proposal.session_id)
             .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
@@ -1048,7 +1048,7 @@ pub async fn spawn_mcp_process(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let launch = store
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::get_launch(
@@ -1080,19 +1080,19 @@ pub async fn spawn_mcp_process(
     let executable = validate_executable(&launch.command)?;
     let workspace_root = crate::tools::resolve_workspace_root(&app)?;
     let mut child = spawn_mcp_child(&executable, &launch.args, &workspace_root)
-        .map_err(|_| "Fable could not start this local MCP server.".to_string())?;
+        .map_err(|_| "Mivlet could not start this local MCP server.".to_string())?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "Fable could not open the MCP stdout pipe.".to_string())?;
+        .ok_or_else(|| "Mivlet could not open the MCP stdout pipe.".to_string())?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "Fable could not open the MCP stderr pipe.".to_string())?;
+        .ok_or_else(|| "Mivlet could not open the MCP stderr pipe.".to_string())?;
     let stdin = child
         .stdin
         .take()
-        .ok_or_else(|| "Fable could not open the MCP stdin pipe.".to_string())?;
+        .ok_or_else(|| "Mivlet could not open the MCP stdin pipe.".to_string())?;
 
     let session_id = random_session_id()?;
     let channel = format!("{MCP_EVENT_CHANNEL_PREFIX}{session_id}");
@@ -1149,7 +1149,7 @@ pub async fn spawn_mcp_process(
 
     process_map()
         .lock()
-        .map_err(|_| "Fable could not access local MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?
         .insert(
             session_id.clone(),
             McpChild {
@@ -1185,7 +1185,7 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
     let (sender, initialized) = {
         let map = process_map()
             .lock()
-            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
         let process = map
             .get(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
@@ -1219,7 +1219,7 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
     let mut process = {
         let mut map = process_map()
             .lock()
-            .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
         let process = map
             .get(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;

@@ -66,7 +66,7 @@ export function prepareGitHubDraftPullRequest(payload: {
     "github.draft-pull-request",
     { ...payload, targetId: payload.repository },
     "medium",
-    "Creates a draft pull request after Fable approval."
+    "Creates a draft pull request after Mivlet approval."
   );
 }
 
@@ -81,7 +81,7 @@ export function prepareGitHubComment(payload: {
     "github.comment",
     payload,
     "medium",
-    "Publishes a comment to the selected GitHub item after Fable approval."
+    "Publishes a comment to the selected GitHub item after Mivlet approval."
   );
 }
 

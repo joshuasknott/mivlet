@@ -54,7 +54,7 @@ describe("Connector Connection selection", () => {
   it("describes granted Drive access without promising ungranted writes", () => {
     const scope = (name: string, granted: boolean) => ({ id: `https://www.googleapis.com/auth/${name}`, label: name, access: "read" as const, required: false, granted });
     expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", false), scope("drive", false)] })).toBe("Read your Drive files.");
-    expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", true)] })).toContain("Updates are limited to files shared with Fable");
+    expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", true)] })).toContain("Updates are limited to files shared with Mivlet");
   });
   it("reports syncing only for an active sync and keeps unhealthy connections actionable", async () => {
     const unchecked = { ...gmail, health: { ...gmail.health!, state: "unknown" as const } };
@@ -68,7 +68,7 @@ describe("Connector Connection selection", () => {
     expect(screen.queryByRole("button", { name: "Use in chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
   });
-  it("labels and selects the opaque Fable Connection instead of provider account authority", async () => {
+  it("labels and selects the opaque Mivlet Connection instead of provider account authority", async () => {
     const user = userEvent.setup();
     const onSwitch = vi.fn();
     const rendered = render(

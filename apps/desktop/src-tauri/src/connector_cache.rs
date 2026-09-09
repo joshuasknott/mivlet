@@ -316,7 +316,7 @@ fn now_iso() -> String {
 }
 
 fn unavailable() -> String {
-    "Fable's encrypted store is not initialized.".to_string()
+    "Mivlet's encrypted store is not initialized.".to_string()
 }
 
 fn required_workspace(workspace_id: &str) -> Result<&str, String> {

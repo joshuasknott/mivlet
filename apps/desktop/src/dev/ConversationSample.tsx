@@ -10,7 +10,7 @@ const parts: NonNullable<NativeAgentState["responseParts"]> = [
   { id: "text-2", kind: "text", content: "Three projects have recent changes. I’m checking their features before choosing what to highlight." },
   { id: "tool-3", kind: "tool", tool: "read-file", state: "succeeded", content: "Read the three project summaries." },
   { id: "tool-4", kind: "tool", tool: "computer-artifact", state: "succeeded", content: artifact },
-  { id: "text-5", kind: "text", content: "Here are the three projects worth highlighting.\n\n| Project | What stands out |\n| --- | --- |\n| Fable | A quiet workspace for working with AI teammates |\n| Memvella | A place to keep knowledge connected |\n| Surrey Societies | A shared home for society events and membership |\n\n**Fable is the strongest lead.** Its conversation and separate computer make the value easy to demonstrate.\n\nThe comparison is attached below. These descriptions are based on repository documentation; I haven’t tested the live products." },
+  { id: "text-5", kind: "text", content: "Here are the three projects worth highlighting.\n\n| Project | What stands out |\n| --- | --- |\n| Mivlet | A quiet workspace for working with AI teammates |\n| Memvella | A place to keep knowledge connected |\n| Surrey Societies | A shared home for society events and membership |\n\n**Mivlet is the strongest lead.** Its conversation and separate computer make the value easy to demonstrate.\n\nThe comparison is attached below. These descriptions are based on repository documentation; I haven’t tested the live products." },
 ];
 
 /** Explicit sample data; never invokes a provider or executes a tool. */

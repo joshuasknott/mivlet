@@ -265,7 +265,7 @@ pub fn local_diagnostics(
     workspace_id: String,
 ) -> std::result::Result<LocalDiagnosticsSnapshot, String> {
     let store = store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let app_data = crate::paths::app_data_dir(&app)?;
     let database_bytes = std::fs::metadata(app_data.join(store::DB_FILENAME))
         .map(|metadata| metadata.len())

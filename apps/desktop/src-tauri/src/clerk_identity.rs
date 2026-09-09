@@ -1,10 +1,10 @@
-//! Clerk identity and session boundary for Fable accounts.
+//! Clerk identity and session boundary for Mivlet accounts.
 //!
 //! This module is deliberately separate from connector OAuth and the
 //! confidential auth broker. It owns the system-browser Authorization Code +
-//! PKCE flow, token refresh, JWT validation, and OS-keyring storage for Fable's
+//! PKCE flow, token refresh, JWT validation, and OS-keyring storage for Mivlet's
 //! app identity. React receives only secret-free external authentication facts
-//! and verified display attributes. Fable tenancy and authorization are
+//! and verified display attributes. Mivlet tenancy and authorization are
 //! resolved outside this provider boundary.
 
 use std::collections::BTreeMap;
@@ -134,7 +134,7 @@ fn keyring_manifest(value: &str) -> Option<KeyringChunkManifest> {
 impl NativeIdentitySecretStore {
     fn entry(key: &str) -> Result<keyring::Entry, String> {
         keyring::Entry::new(KEYRING_SERVICE, key)
-            .map_err(|_| "Fable could not open the OS secure store.".to_string())
+            .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
     }
 
     fn chunk_key(key: &str, generation: &str, index: usize) -> String {
@@ -145,20 +145,20 @@ impl NativeIdentitySecretStore {
         match Self::entry(key)?.get_password() {
             Ok(value) => Ok(Some(value)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err("Fable could not read cloud identity credentials.".to_string()),
+            Err(_) => Err("Mivlet could not read cloud identity credentials.".to_string()),
         }
     }
 
     fn write_entry(key: &str, secret: &str) -> Result<(), String> {
         Self::entry(key)?
             .set_password(secret)
-            .map_err(|_| "Fable could not store cloud identity credentials.".to_string())
+            .map_err(|_| "Mivlet could not store cloud identity credentials.".to_string())
     }
 
     fn remove_entry(key: &str) -> Result<(), String> {
         match Self::entry(key)?.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("Fable could not remove cloud identity credentials.".to_string()),
+            Err(_) => Err("Mivlet could not remove cloud identity credentials.".to_string()),
         }
     }
 
@@ -181,12 +181,12 @@ impl IdentitySecretStore for NativeIdentitySecretStore {
         let mut secret = String::new();
         for index in 0..manifest.chunks {
             let chunk = Self::read_entry(&Self::chunk_key(key, &manifest.generation, index))?
-                .ok_or_else(|| "Fable cloud identity credentials were incomplete.".to_string())?;
+                .ok_or_else(|| "Mivlet cloud identity credentials were incomplete.".to_string())?;
             secret.push_str(&chunk);
         }
         let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(secret.as_bytes()));
         if digest != manifest.digest {
-            return Err("Fable cloud identity credentials failed integrity checking.".to_string());
+            return Err("Mivlet cloud identity credentials failed integrity checking.".to_string());
         }
         Ok(Some(secret))
     }
@@ -198,7 +198,9 @@ impl IdentitySecretStore for NativeIdentitySecretStore {
             Self::write_entry(key, &chunks[0])?;
         } else {
             if chunks.len() > KEYRING_MAX_CHUNKS {
-                return Err("Fable cloud identity credentials were unexpectedly large.".to_string());
+                return Err(
+                    "Mivlet cloud identity credentials were unexpectedly large.".to_string()
+                );
             }
             let generation = random_urlsafe(12).map_err(|error| error.message)?;
             let manifest = KeyringChunkManifest {
@@ -218,7 +220,7 @@ impl IdentitySecretStore for NativeIdentitySecretStore {
                 }
             }
             let encoded = serde_json::to_string(&manifest)
-                .map_err(|_| "Fable could not encode cloud identity storage.".to_string())?;
+                .map_err(|_| "Mivlet could not encode cloud identity storage.".to_string())?;
             if let Err(error) =
                 Self::write_entry(key, &format!("{KEYRING_CHUNK_MANIFEST_PREFIX}{encoded}"))
             {
@@ -481,7 +483,7 @@ fn random_urlsafe(bytes: usize) -> Result<String, IdentityError> {
     getrandom::fill(&mut value).map_err(|_| {
         identity_error(
             "unknown",
-            "Fable could not initialize a secure identity transaction.",
+            "Mivlet could not initialize a secure identity transaction.",
             false,
         )
     })?;
@@ -562,7 +564,7 @@ fn load_config_from(
             return Err(identity_error(
                 "configuration-required",
                 format!(
-                    "{legacy_key} is obsolete; Clerk Organizations cannot configure Fable tenancy."
+                    "{legacy_key} is obsolete; Clerk Organizations cannot configure Mivlet tenancy."
                 ),
                 false,
             ));
@@ -575,7 +577,7 @@ fn load_config_from(
         .ok_or_else(|| {
             identity_error(
                 "configuration-required",
-                "Clerk issuer is required to enable Fable cloud identity.",
+                "Clerk issuer is required to enable Mivlet cloud identity.",
                 false,
             )
         })?;
@@ -586,7 +588,7 @@ fn load_config_from(
         .ok_or_else(|| {
             identity_error(
                 "configuration-required",
-                "Clerk OAuth client id is required to enable Fable cloud identity.",
+                "Clerk OAuth client id is required to enable Mivlet cloud identity.",
                 false,
             )
         })?;
@@ -683,14 +685,14 @@ fn load_convex_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
         .ok_or_else(|| {
             identity_error(
                 "configuration-required",
-                "Fable Convex URL is required for authenticated hosted calls.",
+                "Mivlet Convex URL is required for authenticated hosted calls.",
                 false,
             )
         })?;
     let mut url = Url::parse(&raw).map_err(|_| {
         identity_error(
             "configuration-required",
-            "Fable Convex URL is invalid.",
+            "Mivlet Convex URL is invalid.",
             false,
         )
     })?;
@@ -704,7 +706,7 @@ fn load_convex_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
     {
         return Err(identity_error(
             "configuration-required",
-            "Fable Convex URL must be an HTTPS deployment origin without credentials, path, query, or fragment.",
+            "Mivlet Convex URL must be an HTTPS deployment origin without credentials, path, query, or fragment.",
             false,
         ));
     }
@@ -721,7 +723,7 @@ fn disabled_status() -> IdentityStatus {
     IdentityStatus {
         enabled: false,
         state: "disabled".to_string(),
-        message: "Fable account setup is not configured.".to_string(),
+        message: "Mivlet account setup is not configured.".to_string(),
         issuer: None,
         audience: None,
         scopes: Vec::new(),
@@ -733,7 +735,7 @@ fn signed_out_status(config: &ClerkIdentityConfig) -> IdentityStatus {
     IdentityStatus {
         enabled: true,
         state: "signed-out".to_string(),
-        message: "Fable account is signed out; sign in to continue.".to_string(),
+        message: "Mivlet account is signed out; sign in to continue.".to_string(),
         issuer: Some(config.issuer.clone()),
         audience: Some(config.audience.clone()),
         scopes: config.scopes.clone(),
@@ -785,7 +787,7 @@ fn read_session(store: &dyn IdentitySecretStore) -> Result<Option<StoredSession>
     serde_json::from_str(&encoded).map(Some).map_err(|_| {
         identity_error(
             "revoked",
-            "Stored Fable cloud identity is invalid; sign in again.",
+            "Stored Mivlet cloud identity is invalid; sign in again.",
             false,
         )
     })
@@ -798,13 +800,13 @@ fn write_session(
     let encoded = serde_json::to_string(session).map_err(|_| {
         identity_error(
             "unknown",
-            "Fable could not encode cloud identity credentials.",
+            "Mivlet could not encode cloud identity credentials.",
             false,
         )
     })?;
     let mut generation = IDENTITY_GENERATION
         .lock()
-        .map_err(|_| identity_error("unknown", "Fable account state is unavailable.", false))?;
+        .map_err(|_| identity_error("unknown", "Mivlet account state is unavailable.", false))?;
     store
         .set(SESSION_KEY, &encoded)
         .map_err(|message| identity_error("unknown", message, false))?;
@@ -815,7 +817,7 @@ fn write_session(
 fn clear_session(store: &dyn IdentitySecretStore) -> Result<(), IdentityError> {
     let mut generation = IDENTITY_GENERATION
         .lock()
-        .map_err(|_| identity_error("unknown", "Fable account state is unavailable.", false))?;
+        .map_err(|_| identity_error("unknown", "Mivlet account state is unavailable.", false))?;
     store
         .remove(SESSION_KEY)
         .map_err(|message| identity_error("unknown", message, false))?;
@@ -882,7 +884,7 @@ async fn discover_metadata(
         .map_err(|_| {
             identity_error(
                 "unknown",
-                "Fable could not initialize Clerk discovery.",
+                "Mivlet could not initialize Clerk discovery.",
                 false,
             )
         })?
@@ -892,7 +894,7 @@ async fn discover_metadata(
         .map_err(|_| {
             identity_error(
                 "offline",
-                "Fable could not reach Clerk identity metadata.",
+                "Mivlet could not reach Clerk identity metadata.",
                 true,
             )
         })?;
@@ -935,7 +937,7 @@ async fn fetch_jwks(jwks_uri: &str) -> Result<Jwks, IdentityError> {
         .map_err(|_| {
             identity_error(
                 "unknown",
-                "Fable could not initialize Clerk JWKS fetch.",
+                "Mivlet could not initialize Clerk JWKS fetch.",
                 false,
             )
         })?
@@ -943,7 +945,11 @@ async fn fetch_jwks(jwks_uri: &str) -> Result<Jwks, IdentityError> {
         .send()
         .await
         .map_err(|_| {
-            identity_error("offline", "Fable could not reach Clerk signing keys.", true)
+            identity_error(
+                "offline",
+                "Mivlet could not reach Clerk signing keys.",
+                true,
+            )
         })?;
     if !response.status().is_success() {
         return Err(identity_error(
@@ -1028,7 +1034,7 @@ fn validate_claims_for_use(
     if claims.exp <= now.saturating_sub(CLOCK_SKEW_SECONDS) {
         return Err(identity_error(
             "expired",
-            "Fable cloud identity expired; sign in again.",
+            "Mivlet cloud identity expired; sign in again.",
             false,
         ));
     }
@@ -1340,7 +1346,7 @@ fn open_browser(authorization_url: &str) -> Result<(), IdentityError> {
     } else {
         Err(identity_error(
             "unknown",
-            "Fable could not open the system browser for cloud sign-in.",
+            "Mivlet could not open the system browser for cloud sign-in.",
             true,
         ))
     }
@@ -1352,7 +1358,7 @@ fn bound_redirect(listener: &TcpListener) -> Result<String, IdentityError> {
         .map_err(|_| {
             identity_error(
                 "unknown",
-                "Fable could not bind a loopback identity listener.",
+                "Mivlet could not bind a loopback identity listener.",
                 false,
             )
         })?
@@ -1532,10 +1538,10 @@ async fn read_callback_target(stream: &mut TcpStream) -> Result<String, Identity
 
 fn callback_page(status: &str, message: &str) -> String {
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fable</title>\
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Mivlet</title>\
          <style>body{{font-family:system-ui;padding:2rem;max-width:32rem;margin:auto}}</style>\
          </head><body><h1>{status}</h1><p>{message}</p>\
-         <p>You can close this tab and return to Fable.</p></body></html>"
+         <p>You can close this tab and return to Mivlet.</p></body></html>"
     )
 }
 
@@ -1558,7 +1564,7 @@ async fn exchange_code(
         .map_err(|_| {
             identity_error(
                 "offline",
-                "Fable could not reach Clerk to finish sign-in.",
+                "Mivlet could not reach Clerk to finish sign-in.",
                 true,
             )
         })?;
@@ -1592,7 +1598,7 @@ async fn refresh_tokens(
         .map_err(|_| {
             identity_error(
                 "offline",
-                "Fable could not reach Clerk to refresh cloud identity.",
+                "Mivlet could not reach Clerk to refresh cloud identity.",
                 true,
             )
         })?;
@@ -1628,14 +1634,14 @@ fn refresh_rejection(status: reqwest::StatusCode) -> IdentityError {
     ) {
         return identity_error(
             "revoked",
-            "Fable account session was revoked; sign in again.",
+            "Mivlet account session was revoked; sign in again.",
             false,
         );
     }
     identity_error(
         "provider-error",
         format!(
-            "Clerk could not refresh the Fable account session (HTTP {}).",
+            "Clerk could not refresh the Mivlet account session (HTTP {}).",
             status.as_u16()
         ),
         status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS,
@@ -1775,7 +1781,7 @@ async fn status_with_store(
             &config,
             &identity_error(
                 "configuration-required",
-                "Stored Fable identity does not match the active Clerk configuration; sign in again.",
+                "Stored Mivlet identity does not match the active Clerk configuration; sign in again.",
                 false,
             ),
         ));
@@ -1785,7 +1791,7 @@ async fn status_with_store(
         Err(error) if error.code == "offline" => {
             return Ok(session_status(
                 "offline",
-                "Fable could not refresh the account session while offline.",
+                "Mivlet could not refresh the account session while offline.",
                 &session,
             ))
         }
@@ -1797,7 +1803,7 @@ async fn status_with_store(
             Err(error) if error.code == "offline" => {
                 return Ok(session_status(
                     "offline",
-                    "Fable could not verify the account session while offline.",
+                    "Mivlet could not verify the account session while offline.",
                     &session,
                 ))
             }
@@ -1840,7 +1846,7 @@ async fn status_with_store(
                 }
                 return Ok(session_status(
                     "signed-in",
-                    "Fable cloud identity is connected.",
+                    "Mivlet cloud identity is connected.",
                     &session,
                 ));
             }
@@ -1858,7 +1864,7 @@ async fn status_with_store(
             &config,
             &identity_error(
                 "expired",
-                "Fable cloud identity expired; sign in again.",
+                "Mivlet cloud identity expired; sign in again.",
                 false,
             ),
         ));
@@ -1868,7 +1874,7 @@ async fn status_with_store(
         Err(error) if error.code == "offline" => {
             return Ok(session_status(
                 "offline",
-                "Fable could not refresh the account session while offline.",
+                "Mivlet could not refresh the account session while offline.",
                 &session,
             ))
         }
@@ -1890,7 +1896,7 @@ async fn status_with_store(
     write_session(store, &refreshed)?;
     Ok(session_status(
         "signed-in",
-        "Fable cloud identity refreshed.",
+        "Mivlet cloud identity refreshed.",
         &refreshed,
     ))
 }
@@ -1908,7 +1914,7 @@ async fn begin_sign_in_with_store(
             return Ok(IdentityStatus {
                 enabled: true,
                 state: "offline".to_string(),
-                message: "Fable could not reach Clerk to start sign-in.".to_string(),
+                message: "Mivlet could not reach Clerk to start sign-in.".to_string(),
                 issuer: Some(config.issuer),
                 audience: Some(config.audience),
                 scopes: config.scopes,
@@ -1921,7 +1927,7 @@ async fn begin_sign_in_with_store(
     let listener = TcpListener::bind("127.0.0.1:0").await.map_err(|_| {
         identity_error(
             "unknown",
-            "Fable could not bind a loopback identity listener.",
+            "Mivlet could not bind a loopback identity listener.",
             false,
         )
     })?;
@@ -1964,7 +1970,7 @@ async fn begin_sign_in_with_store(
     let encoded = serde_json::to_string(&pending).map_err(|_| {
         identity_error(
             "unknown",
-            "Fable could not encode identity OAuth state.",
+            "Mivlet could not encode identity OAuth state.",
             false,
         )
     })?;
@@ -1983,7 +1989,7 @@ async fn begin_sign_in_with_store(
             let _ = store.remove(&pending_key(&state));
             return Err(identity_error(
                 "unknown",
-                "Fable could not accept the identity callback.",
+                "Mivlet could not accept the identity callback.",
                 true,
             ));
         }
@@ -2017,7 +2023,7 @@ async fn begin_sign_in_with_store(
         .write_all(
             format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
-                callback_page(page_status, "Finishing in Fable.")
+                callback_page(page_status, "Finishing in Mivlet.")
             )
             .as_bytes(),
         )
@@ -2146,7 +2152,7 @@ async fn complete_callback_with_store(
     write_session(store, &session)?;
     Ok(session_status(
         "signed-in",
-        "Fable cloud identity is connected.",
+        "Mivlet cloud identity is connected.",
         &session,
     ))
 }
@@ -2196,14 +2202,14 @@ async fn authenticated_session_with_store(
     let session = read_session(store)?.ok_or_else(|| {
         identity_error(
             "expired",
-            "Fable account session is unavailable; sign in again.",
+            "Mivlet account session is unavailable; sign in again.",
             false,
         )
     })?;
     if session.expires_at <= now_epoch() {
         return Err(identity_error(
             "expired",
-            "Fable account session expired; sign in again.",
+            "Mivlet account session expired; sign in again.",
             false,
         ));
     }
@@ -2218,7 +2224,7 @@ async fn read_limited_json(response: reqwest::Response) -> Result<Value, Identit
     {
         return Err(identity_error(
             "invalid-response",
-            "Convex response exceeded Fable's size limit.",
+            "Convex response exceeded Mivlet's size limit.",
             false,
         ));
     }
@@ -2228,14 +2234,14 @@ async fn read_limited_json(response: reqwest::Response) -> Result<Value, Identit
         let chunk = chunk.map_err(|_| {
             identity_error(
                 "offline",
-                "Fable lost the Convex response connection.",
+                "Mivlet lost the Convex response connection.",
                 true,
             )
         })?;
         if bytes.len().saturating_add(chunk.len()) > MAX_CONVEX_RESPONSE_BYTES {
             return Err(identity_error(
                 "invalid-response",
-                "Convex response exceeded Fable's size limit.",
+                "Convex response exceeded Mivlet's size limit.",
                 false,
             ));
         }
@@ -2274,7 +2280,7 @@ async fn call_convex_with_store(
         .map_err(|_| {
             identity_error(
                 "unknown",
-                "Fable could not initialize the authenticated Convex request.",
+                "Mivlet could not initialize the authenticated Convex request.",
                 false,
             )
         })?
@@ -2290,7 +2296,7 @@ async fn call_convex_with_store(
         .map_err(|_| {
             identity_error(
                 "offline",
-                "Fable could not reach the hosted workspace service.",
+                "Mivlet could not reach the hosted workspace service.",
                 true,
             )
         })?;
@@ -2298,7 +2304,7 @@ async fn call_convex_with_store(
         clear_session(store)?;
         return Err(identity_error(
             "revoked",
-            "The hosted service rejected the Fable account session; sign in again.",
+            "The hosted service rejected the Mivlet account session; sign in again.",
             false,
         ));
     }
@@ -2349,12 +2355,12 @@ pub(crate) fn native_identity_generation_snapshot(
 ) -> Result<NativeIdentityGenerationSnapshot, String> {
     let generation = IDENTITY_GENERATION
         .lock()
-        .map_err(|_| "Fable account state is unavailable.".to_string())?;
+        .map_err(|_| "Mivlet account state is unavailable.".to_string())?;
     let session = read_session(&NativeIdentitySecretStore)
         .map_err(command_message)?
-        .ok_or_else(|| "Fable account session is unavailable; sign in again.".to_string())?;
+        .ok_or_else(|| "Mivlet account session is unavailable; sign in again.".to_string())?;
     let authentication = session.authentication.ok_or_else(|| {
-        "Fable account identity facts are unavailable; sign in again.".to_string()
+        "Mivlet account identity facts are unavailable; sign in again.".to_string()
     })?;
     Ok(NativeIdentityGenerationSnapshot {
         account_binding: account_binding_for_authentication(&authentication),
@@ -2367,16 +2373,16 @@ pub(crate) fn lock_native_identity_generation(
 ) -> Result<NativeIdentityGenerationGuard, String> {
     let guard = IDENTITY_GENERATION
         .lock()
-        .map_err(|_| "Fable account state is unavailable.".to_string())?;
+        .map_err(|_| "Mivlet account state is unavailable.".to_string())?;
     if *guard != expected.generation {
-        return Err("Fable account changed during the request. Please try again.".into());
+        return Err("Mivlet account changed during the request. Please try again.".into());
     }
     let session = read_session(&NativeIdentitySecretStore).map_err(command_message)?;
     let current_binding = session
         .and_then(|session| session.authentication)
         .map(|authentication| account_binding_for_authentication(&authentication));
     if current_binding.as_deref() != Some(expected.account_binding.as_str()) {
-        return Err("Fable account changed during the request. Please try again.".into());
+        return Err("Mivlet account changed during the request. Please try again.".into());
     }
     Ok(NativeIdentityGenerationGuard { _guard: guard })
 }
@@ -2574,7 +2580,7 @@ mod tests {
             load_config_from(false, |key| partial.get(key).cloned())
                 .unwrap_err()
                 .message,
-            "Clerk issuer is required to enable Fable cloud identity."
+            "Clerk issuer is required to enable Mivlet cloud identity."
         );
 
         let obsolete = config_values(&[
@@ -2585,7 +2591,7 @@ mod tests {
         assert!(load_config_from(false, |key| obsolete.get(key).cloned())
             .unwrap_err()
             .message
-            .contains("Clerk Organizations cannot configure Fable tenancy"));
+            .contains("Clerk Organizations cannot configure Mivlet tenancy"));
     }
 
     #[test]

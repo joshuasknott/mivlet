@@ -1,9 +1,9 @@
-//! Fable-owned tool execution boundary (Rust side).
+//! Mivlet-owned tool execution boundary (Rust side).
 //!
 //! The TypeScript executor (see `@fable/connectors` `tool-executor.ts`) runs only
 //! after the shell's permission gate allows it. This module is the defense-in-depth Rust
 //! layer each tool call must still cross: it re-validates the approval, confines
-//! file paths to the teammate's Fable-owned workspace, and performs the actual
+//! file paths to the teammate's Mivlet-owned workspace, and performs the actual
 //! side effects (read/write file, web-fetch). The shell NEVER spawns a process or writes files
 //! from JavaScript — every consequential tool routes through these commands.
 //!
@@ -41,7 +41,7 @@ use crate::paths::{
 /// no app_data fallback). Pure harden fn is unit-testable with explicit input.
 pub fn resolve_workspace_root(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let cwd = std::env::current_dir().map_err(|_| {
-        "Fable could not determine current working directory for workspace root.".to_string()
+        "Mivlet could not determine current working directory for workspace root.".to_string()
     })?;
     harden_workspace_root(&cwd).map_err(|e| format!("Workspace root selection failed: {}", e))
 }
@@ -187,7 +187,7 @@ pub(crate) fn execute_tool_outcome(
         Ok(resolution) => resolution,
         Err(err) => {
             return ToolOutcome::Done(Err(format!(
-                "Tool {tool} was not approved by Fable's approval layer: {err}"
+                "Tool {tool} was not approved by Mivlet's approval layer: {err}"
             )));
         }
     };
@@ -253,7 +253,7 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
     if SUPPORTED_TOOLS.contains(&tool) {
         Ok(())
     } else {
-        Err(format!("Tool {tool} is not in Fable's tool registry."))
+        Err(format!("Tool {tool} is not in Mivlet's tool registry."))
     }
 }
 
@@ -974,7 +974,7 @@ fn format_web_page_source(
         content,
     };
     serde_json::to_string(&result)
-        .unwrap_or_else(|_| "{\"trust\":\"untrusted\",\"instructionAuthority\":\"none\",\"content\":\"Fable could not encode the fetched page.\"}".to_string())
+        .unwrap_or_else(|_| "{\"trust\":\"untrusted\",\"instructionAuthority\":\"none\",\"content\":\"Mivlet could not encode the fetched page.\"}".to_string())
 }
 
 /// The outcome shape the pure web-fetch layer returns to the async command.
@@ -1385,7 +1385,7 @@ pub async fn execute_tool_call(
             })?;
         let ok = result.exit_code == 0;
         let output = serde_json::to_string(&result)
-            .map_err(|_| "Fable could not encode the isolated terminal result.".to_string())?;
+            .map_err(|_| "Mivlet could not encode the isolated terminal result.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1430,7 +1430,7 @@ pub async fn execute_tool_call(
                 );
             })?;
         let output = serde_json::to_string(&result)
-            .map_err(|_| "Fable could not encode the local browser result.".to_string())?;
+            .map_err(|_| "Mivlet could not encode the local browser result.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1474,7 +1474,7 @@ pub async fn execute_tool_call(
                 );
             })?;
         let output = serde_json::to_string(&result)
-            .map_err(|_| "Fable could not encode the local browser observation.".to_string())?;
+            .map_err(|_| "Mivlet could not encode the local browser observation.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1550,7 +1550,7 @@ pub async fn execute_tool_call(
                 );
             })?;
         let output = serde_json::to_string(&result)
-            .map_err(|_| "Fable could not encode the local browser action result.".to_string())?;
+            .map_err(|_| "Mivlet could not encode the local browser action result.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1613,7 +1613,7 @@ pub async fn execute_tool_call(
             error.message
         })?;
         let output = serde_json::to_string(&result)
-            .map_err(|_| "Fable could not encode connector results.".to_string())?;
+            .map_err(|_| "Mivlet could not encode connector results.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1661,7 +1661,7 @@ pub async fn execute_tool_call(
                 .map_err(|error| error.message)?;
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
-                .map_err(|_| "Fable could not encode the connector result.".to_string())
+                .map_err(|_| "Mivlet could not encode the connector result.".to_string())
         }
         ToolOutcome::NeedsSemanticRead {
             workspace_id,
@@ -1694,7 +1694,7 @@ pub async fn execute_tool_call(
             };
             output
                 .map(|output| ToolResult { ok: true, output })
-                .map_err(|_| "Fable could not encode the capability result.".to_string())
+                .map_err(|_| "Mivlet could not encode the capability result.".to_string())
         }
         ToolOutcome::NeedsGoogleRead { tool, arguments } => {
             crate::google::execute_read_tool(&app, &tool, &arguments)
@@ -2019,7 +2019,7 @@ mod connector_authority_tests {
         serde_json::from_value(json!({
             "tool": tool, "arguments": {"query": "test"}, "approval": {
                 "decision": "once", "decidedAt": "2026-09-05T20:00:00Z", "request": {
-                    "id": "connector-test", "service": "Fable", "action": tool,
+                    "id": "connector-test", "service": "Mivlet", "action": tool,
                     "mode": mode, "riskLevel": risk, "dataUsed": ["query: test"],
                     "consequence": "Read data", "requestedAt": "2026-09-05T20:00:00Z", "decisions": ["once", "deny"]
                 }
@@ -2031,7 +2031,7 @@ mod connector_authority_tests {
     fn fetched_html_becomes_readable_traceable_untrusted_evidence() {
         let url = Url::parse("https://example.com/article?edition=uk#section").unwrap();
         let paragraph =
-            "Fable keeps the useful article text and removes navigation noise. ".repeat(8);
+            "Mivlet keeps the useful article text and removes navigation noise. ".repeat(8);
         let html = format!(
             "<html><head><title>A useful page</title><meta name=\"author\" content=\"Ada Example\"></head><body><nav>Menu noise</nav><main><article><h1>A useful page</h1><p>{paragraph}</p></article></main><script>ignore_me()</script></body></html>"
         );

@@ -1506,7 +1506,7 @@ export async function clearRuntimeBackend(providerId: string) {
 /**
  * Record a backend-originated consequential event as an approval audit entry.
  * Backends that already approved something internally are recorded as `once`
- * audit; they never bypass Fable's approval layer for future actions.
+ * audit; they never bypass Mivlet's approval layer for future actions.
  */
 export async function recordRuntimeBackendEvent(
   event: BackendConsequentialEvent,
@@ -1756,7 +1756,7 @@ export async function getRuntimeCodexStatus() {
     return {
       installed: false,
       authenticated: false,
-      message: "Fable could not inspect the Codex CLI.",
+      message: "Mivlet could not inspect the Codex CLI.",
     };
   }
 }
@@ -1861,7 +1861,7 @@ export async function getRuntimeAntigravityStatus() {
   return invoke<RuntimeAntigravityStatus>("antigravity_status").catch(() => ({
     installed: false,
     authenticated: false,
-    message: "Fable could not inspect the Antigravity runtime.",
+    message: "Mivlet could not inspect the Antigravity runtime.",
   }));
 }
 
@@ -1999,7 +1999,7 @@ export async function getRuntimeManagedStatus(
       providerId,
       installed: false,
       authenticated: false,
-      message: `Fable could not inspect the ${providerId} runtime.`,
+      message: `Mivlet could not inspect the ${providerId} runtime.`,
     };
   }
 }
@@ -2595,7 +2595,7 @@ export async function listenRuntimeMcpFrames(
 }
 
 // ---------------------------------------------------------------------------
-// Fable-owned tool execution boundary.
+// Mivlet-owned tool execution boundary.
 //
 // Each approved tool call crosses back into Rust, which re-validates the
 // approval and performs the side effect (read/write file, run-shell, web-fetch).

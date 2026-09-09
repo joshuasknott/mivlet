@@ -33,7 +33,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult }: { workspaceI
     finally { setPending(false); }
   };
   return <div className="settings-page__body local-schedules">
-    <div className="settings-section-heading"><p>Run web research with a named agent at a set time. Keep Fable open and this computer awake.</p></div>
+    <div className="settings-section-heading"><p>Run web research with a named agent at a set time. Keep Mivlet open and this computer awake.</p></div>
     <p>Scheduled runs use the saved Codex provider and model. They cannot use your apps or computer tools. Anything requiring permission stops for your attention.</p>
     <button type="button" className="button button--primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}

@@ -477,7 +477,7 @@ function contextualConnectedSourceError(error: unknown): Error {
     : reconnectCodes.has(code)
       ? "The selected Connection needs attention. Reconnect it in Settings > Providers, confirm the requested read scope, then retry."
       : code === "connection-unhealthy" || candidate?.retryable === true
-        ? "The selected Connection is temporarily unavailable. Retry later or choose another eligible Connection; Fable did not silently use a different source."
+        ? "The selected Connection is temporarily unavailable. Retry later or choose another eligible Connection; Mivlet did not silently use a different source."
         : detail;
   return Object.assign(
     new Error(`[connected-source:${code}] ${guidance} No connected source was searched. (${detail})`),
@@ -599,7 +599,7 @@ function parseMcpContinuation(value: string): McpSemanticContinuation {
     typeof parsed.degraded !== "boolean" ||
     !Array.isArray(parsed.degradationReasons)
   ) {
-    throw new Error("Fable returned an invalid MCP semantic continuation.");
+    throw new Error("Mivlet returned an invalid MCP semantic continuation.");
   }
   return parsed as McpSemanticContinuation;
 }

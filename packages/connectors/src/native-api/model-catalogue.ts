@@ -1,4 +1,4 @@
-/** Honest capability fallback for the direct providers Fable currently ships. */
+/** Honest capability fallback for the direct providers Mivlet currently ships. */
 
 import type { BackendModel, ModelCapabilities } from "@fable/protocol";
 

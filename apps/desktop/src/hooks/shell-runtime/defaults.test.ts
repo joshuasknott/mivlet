@@ -22,7 +22,7 @@ describe("shell runtime defaults", () => {
     expect(DEFAULT_IDENTITY_STATUS).toEqual({
       enabled: false,
       state: "disabled",
-      message: "Fable account setup is not configured.",
+      message: "Mivlet account setup is not configured.",
       scopes: []
     });
     expect(PREVIEW_ACCOUNT_WORKSPACE_STATUS).toMatchObject({

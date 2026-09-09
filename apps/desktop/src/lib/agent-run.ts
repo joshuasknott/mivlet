@@ -44,12 +44,12 @@ export interface PermissionProfile {
 export const PERMISSION_PROFILES: readonly PermissionProfile[] = [
   {
     label: "Read Only",
-    description: "Fable can look, summarize, search, and review, but cannot change anything.",
+    description: "Mivlet can look, summarize, search, and review, but cannot change anything.",
     mode: "read-only"
   },
   {
     label: "Ask Me",
-    description: "Fable asks before making changes or taking external actions.",
+    description: "Mivlet asks before making changes or taking external actions.",
     mode: "trusted-scope"
   },
   {
@@ -129,7 +129,7 @@ export interface KnowledgeRunContext {
 }
 
 const PRIVATE_CONTEXT_MEMBER_ERROR =
-  "Fable could not confirm this installation's private context owner.";
+  "Mivlet could not confirm this installation's private context owner.";
 
 /**
  * Resolve the native-confirmed owner of installation-local private context.

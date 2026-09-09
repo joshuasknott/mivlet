@@ -92,7 +92,7 @@ describe("SettingsPage", () => {
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Joshua's workspace")).toBeInTheDocument();
     expect(screen.getByText(/saved on this computer/i)).toBeInTheDocument();
-    expect(screen.queryByText("Fable account")).not.toBeInTheDocument();
+    expect(screen.queryByText("Mivlet account")).not.toBeInTheDocument();
     expect(view.container.textContent).not.toMatch(/member|invitation|run history/i);
   });
 
@@ -124,7 +124,7 @@ describe("SettingsPage", () => {
       })
     );
 
-    expect(screen.getByText("Fable account")).toBeInTheDocument();
+    expect(screen.getByText("Mivlet account")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => expect(signIn).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Sign-in opened in your browser.")).toBeInTheDocument();

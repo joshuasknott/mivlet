@@ -1,8 +1,9 @@
-/* Fable design tokens and global layout. */
+/* Mivlet design tokens and global layout. */
 
 :root {
-  color: #202124;
-  background: #fdfdfc;
+  color-scheme: light;
+  color: #272623;
+  background: #faf9f6;
   font-family: "Inter", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 13px;
   font-weight: 400;
@@ -11,18 +12,18 @@
   -webkit-font-smoothing: antialiased;
 
   /* Color */
-  --ink: #20201e;
-  --ink-muted: #686868;
-  --ink-soft: #6d6d6d;
-  --surface: #fdfdfc;
+  --ink: #272623;
+  --ink-muted: #68645e;
+  --ink-soft: #6c675f;
+  --surface: #faf9f6;
   --surface-raised: #ffffff;
-  --surface-hover: #f1f1ee;
+  --surface-hover: #eeece6;
   --surface-overlay: #ffffff;
-  --sidebar-surface: #f8f8f6;
+  --sidebar-surface: #f3f1eb;
   --provider-monochrome: #111111;
-  --line: #e9e9e5;
-  --line-strong: #dcdcd6;
-  --accent: #202124;
+  --line: #e5e2da;
+  --line-strong: #d5d0c6;
+  --accent: #272623;
   --accent-subtle: #ededed;
   --accent-line: #cfcfcf;
   --accent-strong: #111111;
@@ -88,20 +89,20 @@
 :root[data-theme="dark"],
 .desktop-frame[data-theme="dark"] {
   color-scheme: dark;
-  --ink: #e8e8e8;
-  --ink-muted: #a2a2a2;
-  --ink-soft: #929292;
-  --surface: #141414;
-  --surface-raised: #1f1f1f;
-  --surface-hover: #292929;
-  --surface-overlay: #202020;
-  --sidebar-surface: #181818;
+  --ink: #f1eee6;
+  --ink-muted: #b1ada3;
+  --ink-soft: #a39e94;
+  --surface: #242320;
+  --surface-raised: #2c2b27;
+  --surface-hover: #35342f;
+  --surface-overlay: #2d2c28;
+  --sidebar-surface: #201f1c;
   --provider-monochrome: #f2f2f2;
-  --line: #2a2a2a;
-  --line-strong: #3a3a3a;
-  --accent: #f0f0f0;
-  --accent-subtle: #292929;
-  --accent-line: #454545;
+  --line: #393832;
+  --line-strong: #4c4941;
+  --accent: #f1eee6;
+  --accent-subtle: #35342f;
+  --accent-line: #5b574e;
   --accent-strong: #ffffff;
   --brand-copper: #a9a9a9;
   --brand-copper-strong: #d0d0d0;

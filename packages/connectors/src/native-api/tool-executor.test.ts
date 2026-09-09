@@ -734,7 +734,7 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
 describe("runAgentLoop + createToolExecutor — multi-turn tool-result", () => {
   it("feeds the approved read-file result back to the model as a tool message", async () => {
     const runtime = fakeRuntime();
-    runtime.files.set("README.md", "Fable rocks");
+    runtime.files.set("README.md", "Mivlet rocks");
     const gate = createApprovalGate();
     const executor = createToolExecutor({ runtime, gate });
 
@@ -783,11 +783,11 @@ describe("runAgentLoop + createToolExecutor — multi-turn tool-result", () => {
     const toolResults = events.filter((e) => e.type === "tool-result");
     expect(toolResults).toHaveLength(1);
     expect(toolResults[0].ok).toBe(true);
-    expect(toolResults[0].output).toBe("Fable rocks");
+    expect(toolResults[0].output).toBe("Mivlet rocks");
 
     // Turn 2's request carried the tool-role message with the file content.
     const toolMessages = seenMessages.filter((m) => m.role === "tool");
-    expect(toolMessages.some((m) => m.content === "Fable rocks")).toBe(true);
+    expect(toolMessages.some((m) => m.content === "Mivlet rocks")).toBe(true);
 
     // The loop continued past the tool turn to a done event.
     expect(events.some((e) => e.type === "done")).toBe(true);

@@ -290,7 +290,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
       );
       if (!saved) throw new Error("Local tool access requires the desktop app.");
       setDiscoveries((current) => ({ ...current, [server.id]: saved }));
-      onStatus(`Access saved for ${server.displayName}. Tool calls still require Fable permission.`);
+      onStatus(`Access saved for ${server.displayName}. Tool calls still require Mivlet permission.`);
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Local tool access couldn’t be saved.");
     } finally {
@@ -350,7 +350,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
                       {discovery && draft ? (
                         <div className="mcp-settings__access" aria-label={`${server.displayName} access`}>
                           <strong>Available access</strong>
-                          <small>Select only what Fable may consider using. Every tool call still passes Fable permissions and approval.</small>
+                          <small>Select only what Mivlet may consider using. Every tool call still passes Mivlet permissions and approval.</small>
                           {[...discovery.discoveredTools.map((value) => ({ kind: "tools" as const, value })), ...discovery.discoveredResources.map((value) => ({ kind: "resources" as const, value }))].map((item) => (
                             <label key={`${item.kind}:${item.value}`}>
                               <input
@@ -384,7 +384,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
                                 <option key={toolName} value={toolName}>{toolName}</option>
                               ))}
                             </select>
-                            <small>The tool must return Fable's cited-search contract. Results stay untrusted.</small>
+                            <small>The tool must return Mivlet's cited-search contract. Results stay untrusted.</small>
                           </label>
                           <button type="button" className="button button--secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
                         </div>

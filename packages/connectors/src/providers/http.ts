@@ -382,7 +382,7 @@ async function brokerError(
 ): Promise<ConnectorError> {
   const body = await optionalJson(response);
   const brokerCode = stringValue(body, "error");
-  const message = stringValue(body, "message") ?? `The Fable auth broker ${operation} was unsuccessful.`;
+  const message = stringValue(body, "message") ?? `The Mivlet auth broker ${operation} was unsuccessful.`;
   const retryable = isObject(body) && typeof body.retryable === "boolean" ? body.retryable : undefined;
   const retryAfter = response.headers.get("retry-after") ?? undefined;
   if (brokerCode === "configuration-required") {

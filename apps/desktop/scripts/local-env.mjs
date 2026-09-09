@@ -5,7 +5,7 @@ import { parseEnv } from "node:util";
  * Apply the desktop's ignored local environment deterministically.
  *
  * Node's process.loadEnvFile() preserves inherited values. That is surprising
- * for a development-only .env.local file and can leave Fable using stale OAuth
+ * for a development-only .env.local file and can leave Mivlet using stale OAuth
  * configuration from the parent process. Explicit assignment makes the local
  * file authoritative without logging or otherwise exposing any values.
  */

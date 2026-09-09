@@ -209,7 +209,11 @@ function DesignPreview() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(
     schedulePreview ? "schedules" : "general",
   );
-  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [theme, setTheme] = useState<"light" | "dark">(
+    new URLSearchParams(window.location.search).get("theme") === "dark"
+      ? "dark"
+      : "light",
+  );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
@@ -631,7 +635,7 @@ function DesignPreview() {
                 <h1 id="settings-modal-title">Schedules</h1>
                 <div className="settings-page__body local-schedules">
                   <p>
-                    Preview sample. Keep Fable open and your computer awake.
+                    Preview sample. Keep Mivlet open and your computer awake.
                   </p>
                   <ScheduleEditor
                     runtime={{
@@ -684,7 +688,9 @@ createRoot(document.getElementById("root")!).render(
   <QueryClientProvider client={previewQueryClient}>
     {previewView === "onboarding" ? (
       <OnboardingPreview />
-    ) : previewView === "avatars" ? (<AgentAvatarPreview />) : previewView === "projects" ? (
+    ) : previewView === "avatars" ? (
+      <AgentAvatarPreview />
+    ) : previewView === "projects" ? (
       <ProjectPreview />
     ) : (
       <DesignPreview />

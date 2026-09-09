@@ -108,7 +108,7 @@ fn approval_for(
             limit,
             expiry,
         ],
-        consequence: "Allows Fable to search this Connection in the named scope. Every search still requires its own exact-action approval.".into(),
+        consequence: "Allows Mivlet to search this Connection in the named scope. Every search still requires its own exact-action approval.".into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
         confirmation_phrase: Some(CONFIRMATION_PHRASE.into()),
@@ -118,7 +118,7 @@ fn approval_for(
 fn random_id(prefix: &str) -> Result<String, String> {
     let mut bytes = [0_u8; 18];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not create a secure capability grant id.".to_string())?;
+        .map_err(|_| "Mivlet could not create a secure capability grant id.".to_string())?;
     Ok(format!(
         "{prefix}-{}",
         bytes
@@ -135,7 +135,7 @@ pub fn prepare_capability_grant(
 ) -> Result<PreparedCapabilityGrant, String> {
     let context = validate_proposal_with_app(&app, &proposal)?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let now = Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true);
     let current = store
         .with_conn(|tx| {
@@ -258,7 +258,7 @@ pub fn commit_capability_grant(
         return Err("The capability grant target changed during confirmation.".into());
     }
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let grant_id = random_id("capability-grant")?;
     store
         .transaction(|tx| {
@@ -291,7 +291,7 @@ pub fn list_capability_grants(
         crate::authorized_scope::ScopeAccess::Read,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| crate::store::repos::capability_grant::list(tx, store, &scope))
         .map_err(|error| error.to_string())
@@ -307,7 +307,7 @@ pub fn revoke_capability_grant(
         crate::authorized_scope::ScopeAccess::Write,
     )?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
             crate::store::repos::capability_grant::revoke(

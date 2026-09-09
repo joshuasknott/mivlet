@@ -180,7 +180,7 @@ export function connectionMethodsForProvider(
       id: `${provider.id}:api-key`,
       kind: "api-key",
       label: `${provider.label} API key`,
-      description: "Use a key stored by Fable's local credential boundary.",
+      description: "Use a key stored by Mivlet's local credential boundary.",
       provider,
     },
   ];
@@ -265,7 +265,7 @@ function familyState(
   if (connectedProviders.length > 0) {
     // A stored direct-provider credential is configured, but key presence alone
     // is not proof that the provider accepted it. Keep this conservative until
-    // Fable has persisted live verification state.
+    // Mivlet has persisted live verification state.
     return { label: "Configured", tone: "info" };
   }
   const statePriority: BackendAuthState[] = [
@@ -907,13 +907,13 @@ function ProviderConnectionModal({
                   </strong>
                   <p>
                     {selectedMethod.kind === "oauth-browser"
-                      ? "Fable opens the official provider page and waits for the provider-owned flow to finish."
-                      : "Fable uses the provider's official local runtime and reads only its connection state."}{" "}
-                    Credentials never enter the Fable interface.
+                      ? "Mivlet opens the official provider page and waits for the provider-owned flow to finish."
+                      : "Mivlet uses the provider's official local runtime and reads only its connection state."}{" "}
+                    Credentials never enter the Mivlet interface.
                   </p>
                   <p>
                     {selectedMethod.provider.installHint ??
-                      "Fable reads the provider runtime's connection state; it never collects subscription tokens."}
+                      "Mivlet reads the provider runtime's connection state; it never collects subscription tokens."}
                   </p>
                 </div>
               </div>
@@ -1036,7 +1036,7 @@ function ProviderConnectionModal({
                       type="button"
                       onClick={() => setConfirmingRemoval(true)}
                     >
-                      Remove from Fable
+                      Remove from Mivlet
                     </button>
                   ) : null}
                 </div>
@@ -1047,17 +1047,17 @@ function ProviderConnectionModal({
               <div
                 className="provider-method-detail__removal"
                 role="alertdialog"
-                aria-label={`Remove ${selectedMethod.provider.label} from Fable`}
+                aria-label={`Remove ${selectedMethod.provider.label} from Mivlet`}
               >
                 <strong>
                   {selectedMethod.provider.backendType === "native-api"
-                    ? "Remove this key from Fable?"
+                    ? "Remove this key from Mivlet?"
                     : "Disconnect this provider?"}
                 </strong>
                 <p>
                   {selectedMethod.provider.backendType === "native-api"
-                    ? "Fable will delete its local credential. This does not revoke the key at the provider; revoke it there too if it may be compromised."
-                    : "Fable will remove the local Antigravity profile and its Google session from this account."}
+                    ? "Mivlet will delete its local credential. This does not revoke the key at the provider; revoke it there too if it may be compromised."
+                    : "Mivlet will remove the local Antigravity profile and its Google session from this account."}
                 </p>
                 <div>
                   <button
@@ -1081,7 +1081,7 @@ function ProviderConnectionModal({
                           setReplacingCredential(false);
                           setConfirmingRemoval(false);
                           const message =
-                            "Removed from Fable. Revoke the key at the provider too if needed.";
+                            "Removed from Mivlet. Revoke the key at the provider too if needed.";
                           setFeedback({ message, tone: "neutral" });
                           onStatus?.(message);
                         })

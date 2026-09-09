@@ -1,5 +1,5 @@
 /**
- * Cost accounting fails closed until Fable has an exact model-specific,
+ * Cost accounting fails closed until Mivlet has an exact model-specific,
  * source-attributed price observation. Provider-wide rates are unsafe because
  * hosted providers expose models with materially different prices.
  */

@@ -45,7 +45,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("error", (error) => {
-  console.error(`Fable could not start the Tauri development process: ${error.message}`);
+  console.error(`Mivlet could not start the Tauri development process: ${error.message}`);
   process.exitCode = 1;
 });
 

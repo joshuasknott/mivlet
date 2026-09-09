@@ -140,9 +140,9 @@ fn read_states(path: &Path) -> Result<Vec<ConnectorSyncState>, String> {
         return Ok(Vec::new());
     }
     let contents =
-        fs::read_to_string(path).map_err(|_| "Fable could not read connector sync state.")?;
+        fs::read_to_string(path).map_err(|_| "Mivlet could not read connector sync state.")?;
     serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse connector sync state.".into())
+        .map_err(|_| "Mivlet could not parse connector sync state.".into())
 }
 
 fn write_states(path: &Path, states: &[ConnectorSyncState]) -> Result<(), String> {
@@ -150,8 +150,8 @@ fn write_states(path: &Path, states: &[ConnectorSyncState]) -> Result<(), String
         return Ok(());
     }
     let encoded = serde_json::to_string_pretty(states)
-        .map_err(|_| "Fable could not encode connector sync state.")?;
-    fs::write(path, encoded).map_err(|_| "Fable could not save connector sync state.".into())
+        .map_err(|_| "Mivlet could not encode connector sync state.")?;
+    fs::write(path, encoded).map_err(|_| "Mivlet could not save connector sync state.".into())
 }
 
 fn replace_state(states: &mut Vec<ConnectorSyncState>, state: ConnectorSyncState) {

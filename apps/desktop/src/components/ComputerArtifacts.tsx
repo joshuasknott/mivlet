@@ -45,7 +45,7 @@ export function ComputerArtifacts({ output, workspaceId, agentId, expectedGenera
     <div className="computer-artifact">
       <button type="button" onClick={() => { if (onPreview) onPreview(output); else void open(); }} disabled={!onPreview && (!available || pending)}
         aria-label={`${onPreview ? "Preview" : "Open"} ${artifact.title}`} aria-busy={pending} aria-disabled={!onPreview && (pending || !available)}
-        title={onPreview ? "Preview this file" : available ? "Open in your default app" : "Open the computer in Fable to access this file"}
+        title={onPreview ? "Preview this file" : available ? "Open in your default app" : "Open the computer in Mivlet to access this file"}
         className="computer-artifact__open">
         <FileText size={22} aria-hidden className="computer-artifact__icon" />
         <span className="computer-artifact__copy">

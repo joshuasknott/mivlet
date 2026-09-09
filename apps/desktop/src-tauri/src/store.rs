@@ -66,12 +66,12 @@ impl std::fmt::Display for StoreError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StoreError::Sqlite(msg) => {
-                write!(f, "Fable's local database reported an error: {msg}.")
+                write!(f, "Mivlet's local database reported an error: {msg}.")
             }
             StoreError::Vault => {
                 write!(
                     f,
-                    "Fable could not decrypt local data: the encryption key may be missing, \
+                    "Mivlet could not decrypt local data: the encryption key may be missing, \
                      wrong, or the data is corrupted."
                 )
             }
@@ -176,7 +176,7 @@ impl Store {
             Ok(())
         } else {
             Err(StoreError::Corrupt(format!(
-                "Fable's local database failed its integrity check: {ok}."
+                "Mivlet's local database failed its integrity check: {ok}."
             )))
         }
     }
@@ -233,7 +233,7 @@ impl Store {
                 .optional()?;
             if violation.is_some() {
                 return Err(StoreError::Corrupt(
-                    "Fable's local database schema could not preserve referential integrity."
+                    "Mivlet's local database schema could not preserve referential integrity."
                         .to_string(),
                 ));
             }
@@ -271,7 +271,7 @@ impl Store {
                 // A newer schema than this binary understands. Fail closed rather
                 // than downgrade-silently.
                 return Err(StoreError::Invalid(format!(
-                    "The local database schema (v{current}) is newer than this version of Fable supports (v{CURRENT_SCHEMA_VERSION})."
+                    "The local database schema (v{current}) is newer than this version of Mivlet supports (v{CURRENT_SCHEMA_VERSION})."
                 )));
             }
             migrations::apply(&tx, current, CURRENT_SCHEMA_VERSION)?;
@@ -283,7 +283,7 @@ impl Store {
                 .optional()?;
             if violation.is_some() {
                 return Err(StoreError::Corrupt(
-                    "Fable's local database migration could not preserve referential integrity."
+                    "Mivlet's local database migration could not preserve referential integrity."
                         .to_string(),
                 ));
             }
@@ -350,7 +350,7 @@ impl Store {
 /// fails closed with recovery guidance.
 pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     std::fs::create_dir_all(app_data_dir)
-        .map_err(|_| "Fable could not prepare the local data folder.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the local data folder.".to_string())?;
     let db_path = app_data_dir.join(DB_FILENAME);
     let key_store = keys::NativeKeyStore::new()?;
     let pending_restore = app_data_dir.join(RESTORE_PENDING_FILENAME);
@@ -361,7 +361,7 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
         keys::KeyResolution::Existing(key) | keys::KeyResolution::FreshlyCreated(key) => key,
     };
     let recovery = apply_pending_restore(app_data_dir, &key)?;
-    let vault = Vault::new(&key).map_err(|_| "Fable could not initialize local encryption.")?;
+    let vault = Vault::new(&key).map_err(|_| "Mivlet could not initialize local encryption.")?;
     let store = match Store::open(&db_path, vault) {
         Ok(store) => store,
         Err(error) => {
@@ -378,7 +378,7 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     };
     GLOBAL_STORE
         .set(store)
-        .map_err(|_| "Fable's encrypted store was initialized twice.".to_string())
+        .map_err(|_| "Mivlet's encrypted store was initialized twice.".to_string())
 }
 
 fn backup_manifest() -> serde_json::Value {
@@ -412,7 +412,7 @@ fn validate_backup_candidate(path: &Path, vault: &Vault) -> Result<serde_json::V
     let version = read_schema_version(&conn)?;
     if version > CURRENT_SCHEMA_VERSION {
         return Err(StoreError::Invalid(
-            "This backup was created by a newer version of Fable.".into(),
+            "This backup was created by a newer version of Mivlet.".into(),
         ));
     }
     let sealed = conn
@@ -424,7 +424,7 @@ fn validate_backup_candidate(path: &Path, vault: &Vault) -> Result<serde_json::V
         )
         .optional()?
         .ok_or_else(|| {
-            StoreError::Invalid("This database is not a verified Fable recovery backup.".into())
+            StoreError::Invalid("This database is not a verified Mivlet recovery backup.".into())
         })?;
     let opened = vault.open(
         &sealed,
@@ -478,11 +478,11 @@ fn rollback_applied_restore(
     let failed = unique_restore_path(app_data_dir, "failed-restore");
     let _ = std::fs::rename(database, &failed);
     if std::fs::rename(recovery, database).is_err() {
-        return "The restored database could not open, and Fable could not put the prior database back. Both recovery files were preserved."
+        return "The restored database could not open, and Mivlet could not put the prior database back. Both recovery files were preserved."
             .into();
     }
     format!(
-        "The restored database could not open and the prior database was put back. Restart Fable to continue with the prior data. {error}"
+        "The restored database could not open and the prior database was put back. Restart Mivlet to continue with the prior data. {error}"
     )
 }
 
@@ -495,12 +495,12 @@ fn apply_pending_restore(
         return Ok(None);
     }
     let validation_vault =
-        Vault::new(key).map_err(|_| "Fable could not validate the pending restore.")?;
+        Vault::new(key).map_err(|_| "Mivlet could not validate the pending restore.")?;
     validate_backup_candidate(&pending, &validation_vault).map_err(|error| error.to_string())?;
     let current = app_data_dir.join(DB_FILENAME);
     let recovery = if current.exists() {
         let checkpoint_vault =
-            Vault::new(key).map_err(|_| "Fable could not prepare restore recovery.")?;
+            Vault::new(key).map_err(|_| "Mivlet could not prepare restore recovery.")?;
         let current_store =
             Store::open(&current, checkpoint_vault).map_err(|error| error.to_string())?;
         current_store
@@ -512,7 +512,7 @@ fn apply_pending_restore(
         drop(current_store);
         let recovery = unique_restore_path(app_data_dir, "pre-restore");
         std::fs::rename(&current, &recovery)
-            .map_err(|_| "Fable could not preserve the current database before restore.")?;
+            .map_err(|_| "Mivlet could not preserve the current database before restore.")?;
         Some(recovery)
     } else {
         None
@@ -522,7 +522,7 @@ fn apply_pending_restore(
             let _ = std::fs::rename(recovery, &current);
         }
         return Err(
-            "Fable could not activate the pending restore; the prior data was retained.".into(),
+            "Mivlet could not activate the pending restore; the prior data was retained.".into(),
         );
     }
     Ok(recovery)
@@ -533,7 +533,7 @@ fn document_key(path: &Path) -> std::result::Result<String, String> {
         .and_then(|name| name.to_str())
         .filter(|name| !name.is_empty())
         .map(|name| format!("document:{name}"))
-        .ok_or_else(|| "Fable could not identify the local document.".to_string())
+        .ok_or_else(|| "Mivlet could not identify the local document.".to_string())
 }
 
 fn scoped_document_location(
@@ -632,7 +632,7 @@ pub fn read_workspace_document<T: serde::de::DeserializeOwned>(
     value
         .map(serde_json::from_value)
         .transpose()
-        .map_err(|_| "Fable could not decode an encrypted local document.".to_string())
+        .map_err(|_| "Mivlet could not decode an encrypted local document.".to_string())
 }
 
 pub fn read_private_workspace_document<T: serde::de::DeserializeOwned>(
@@ -649,7 +649,7 @@ pub fn read_private_workspace_document<T: serde::de::DeserializeOwned>(
     value
         .map(serde_json::from_value)
         .transpose()
-        .map_err(|_| "Fable could not decode an encrypted private document.".to_string())
+        .map_err(|_| "Mivlet could not decode an encrypted private document.".to_string())
 }
 
 /// Write a production document to encrypted SQLite. Returns `false` only when
@@ -677,7 +677,7 @@ pub fn write_workspace_document<T: serde::Serialize>(
     };
     let (storage_scope, key) = scoped_document_location(path, scope)?;
     let value = serde_json::to_value(value)
-        .map_err(|_| "Fable could not encode an encrypted local document.".to_string())?;
+        .map_err(|_| "Mivlet could not encode an encrypted local document.".to_string())?;
     store
         .transaction(|tx| {
             repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
@@ -696,7 +696,7 @@ pub fn write_private_workspace_document<T: serde::Serialize>(
     };
     let (storage_scope, key) = private_document_location(path, scope)?;
     let value = serde_json::to_value(value)
-        .map_err(|_| "Fable could not encode an encrypted private document.".to_string())?;
+        .map_err(|_| "Mivlet could not encode an encrypted private document.".to_string())?;
     store
         .transaction(|tx| {
             repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
@@ -715,7 +715,7 @@ where
 {
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (storage_scope, key) = private_document_location(path, scope)?;
     store
         .transaction(|tx| {
@@ -724,14 +724,14 @@ where
                 .transpose()
                 .map_err(|_| {
                     StoreError::Invalid(
-                        "Fable could not decode an encrypted private document.".into(),
+                        "Mivlet could not decode an encrypted private document.".into(),
                     )
                 })?;
             let (replacement, result) = update(current).map_err(StoreError::Invalid)?;
             if let Some(replacement) = replacement {
                 let value = serde_json::to_value(replacement).map_err(|_| {
                     StoreError::Invalid(
-                        "Fable could not encode an encrypted private document.".into(),
+                        "Mivlet could not encode an encrypted private document.".into(),
                     )
                 })?;
                 repos::preferences::upsert_scoped(
@@ -760,7 +760,7 @@ pub struct EncryptedStoreStatus {
 pub fn encrypted_store_status() -> std::result::Result<EncryptedStoreStatus, String> {
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let version = store
         .with_conn(read_schema_version)
         .map_err(|error| error.to_string())?;
@@ -777,7 +777,7 @@ pub fn encrypted_store_status() -> std::result::Result<EncryptedStoreStatus, Str
 pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<String, String> {
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = crate::authorized_scope::command_scope(
         workspace_id,
         None,
@@ -795,7 +795,7 @@ pub fn export_local_data(workspace_id: Option<String>) -> std::result::Result<St
         "credentialsIncluded": false,
         "documents": documents,
     }))
-    .map_err(|_| "Fable could not encode the local-data export.".to_string())
+    .map_err(|_| "Mivlet could not encode the local-data export.".to_string())
 }
 
 #[derive(serde::Serialize)]
@@ -824,7 +824,7 @@ pub struct LocalRestorePreparation {
 pub fn backup_local_data(destination: String) -> std::result::Result<LocalBackupReceipt, String> {
     let target = PathBuf::from(destination);
     if target.exists() {
-        return Err("Fable will not overwrite an existing backup.".to_string());
+        return Err("Mivlet will not overwrite an existing backup.".to_string());
     }
     let parent = target
         .parent()
@@ -835,7 +835,7 @@ pub fn backup_local_data(destination: String) -> std::result::Result<LocalBackup
     }
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let manifest = write_backup_marker(store).map_err(|error| error.to_string())?;
     let backup = store
         .with_conn(|conn| {
@@ -888,22 +888,22 @@ pub fn prepare_local_data_restore(
         .ok()
         .is_some_and(|path| path == canonical)
     {
-        return Err("Choose a backup file, not Fable's active database.".into());
+        return Err("Choose a backup file, not Mivlet's active database.".into());
     }
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let manifest =
         validate_backup_candidate(&canonical, &store.vault).map_err(|error| error.to_string())?;
     let pending = app_data_dir.join(RESTORE_PENDING_FILENAME);
     if pending.exists() {
         return Err(
-            "A verified restore is already waiting for restart. Restart Fable before choosing another backup."
+            "A verified restore is already waiting for restart. Restart Mivlet before choosing another backup."
                 .into(),
         );
     }
     std::fs::copy(&canonical, &pending)
-        .map_err(|_| "Fable could not stage the selected backup.".to_string())?;
+        .map_err(|_| "Mivlet could not stage the selected backup.".to_string())?;
     let staged = validate_backup_candidate(&pending, &store.vault);
     if let Err(error) = staged {
         let _ = std::fs::remove_file(&pending);
@@ -915,7 +915,7 @@ pub fn prepare_local_data_restore(
         .and_then(|file| file.sync_all());
     if finalized.is_err() {
         let _ = std::fs::remove_file(&pending);
-        return Err("Fable could not finalize the staged restore.".into());
+        return Err("Mivlet could not finalize the staged restore.".into());
     }
     Ok(LocalRestorePreparation {
         restart_required: true,
@@ -996,11 +996,11 @@ fn delete_local_compatibility_files(app_data: &Path) -> std::result::Result<(), 
     .collect::<Vec<_>>();
 
     let entries = std::fs::read_dir(app_data).map_err(|_| {
-        "Local database content was cleared, but Fable could not inspect legacy and recovery files. Restart Fable, then retry local deletion.".to_string()
+        "Local database content was cleared, but Mivlet could not inspect legacy and recovery files. Restart Mivlet, then retry local deletion.".to_string()
     })?;
     for entry in entries {
         let entry = entry.map_err(|_| {
-            "Local database content was cleared, but Fable could not inspect every legacy and recovery file. Restart Fable, then retry local deletion.".to_string()
+            "Local database content was cleared, but Mivlet could not inspect every legacy and recovery file. Restart Mivlet, then retry local deletion.".to_string()
         })?;
         let name = entry.file_name();
         let Some(name) = name.to_str() else {
@@ -1023,7 +1023,7 @@ fn delete_local_compatibility_files(app_data: &Path) -> std::result::Result<(), 
     }
     if failures > 0 {
         return Err(format!(
-            "Local database content was cleared, but Fable could not remove {failures} legacy or recovery file(s). Restart Fable, then retry local deletion."
+            "Local database content was cleared, but Mivlet could not remove {failures} legacy or recovery file(s). Restart Mivlet, then retry local deletion."
         ));
     }
     Ok(())
@@ -1042,7 +1042,7 @@ pub fn delete_local_data(
     }
     let store = GLOBAL_STORE
         .get()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     delete_local_store_content(store).map_err(|error| error.to_string())?;
     // Use hardened (portable-aware) resolution; do not bypass via direct tauri path().
     let app_data = crate::paths::app_data_dir(&app)?;

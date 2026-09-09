@@ -29,7 +29,7 @@ describe("quiet agent surface", () => {
         onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />
     );
     const { rerender } = render(sidebar("idle"));
-    expect(screen.getByText("Fable")).toBeVisible();
+    expect(screen.getByRole("img", { name: "Mivlet" })).toBeVisible();
     expect(screen.queryByRole("status")).toBeNull();
     rerender(sidebar("working"));
     expect(screen.getByRole("status", { name: "Working" })).toHaveClass("agent-status--working");

@@ -86,7 +86,7 @@ fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
 
 fn request_fingerprint(request: &ApprovalRequest) -> Result<String, String> {
     let encoded = serde_json::to_vec(request)
-        .map_err(|_| "Fable could not fingerprint the approval request.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint the approval request.".to_string())?;
     let digest = Sha256::digest(encoded);
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
@@ -99,12 +99,12 @@ fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
         return Ok(Vec::new());
     }
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read execution approvals.".to_string())?;
+        .map_err(|_| "Mivlet could not read execution approvals.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
     serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse execution approvals.".to_string())
+        .map_err(|_| "Mivlet could not parse execution approvals.".to_string())
 }
 
 fn write_records(path: &Path, records: &[ExecutionApproval]) -> Result<(), String> {
@@ -112,12 +112,12 @@ fn write_records(path: &Path, records: &[ExecutionApproval]) -> Result<(), Strin
         return Ok(());
     }
     let encoded = serde_json::to_vec_pretty(records)
-        .map_err(|_| "Fable could not encode execution approvals.".to_string())?;
+        .map_err(|_| "Mivlet could not encode execution approvals.".to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, encoded)
-        .map_err(|_| "Fable could not save execution approvals.".to_string())?;
+        .map_err(|_| "Mivlet could not save execution approvals.".to_string())?;
     fs::rename(&temporary, path)
-        .map_err(|_| "Fable could not commit execution approvals.".to_string())
+        .map_err(|_| "Mivlet could not commit execution approvals.".to_string())
 }
 
 pub(crate) fn record_execution_decision(
@@ -224,7 +224,7 @@ mod tests {
     fn request() -> ApprovalRequest {
         ApprovalRequest {
             id: "approval-1".to_string(),
-            service: "Fable tools".to_string(),
+            service: "Mivlet tools".to_string(),
             action: "write-file a.txt".to_string(),
             mode: "full-access".to_string(),
             risk_level: "high".to_string(),

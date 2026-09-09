@@ -247,7 +247,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "read repositories, issues, and pull requests",
         ],
         scopes: GITHUB_SCOPES,
-        setup_message: "Register a GitHub OAuth App and configure the Fable auth broker.",
+        setup_message: "Register a GitHub OAuth App and configure the Mivlet auth broker.",
         actions: &[],
     },
     ConnectorCatalogEntry {
@@ -281,7 +281,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare approval-gated file changes",
         ],
         scopes: DRIVE_SCOPES,
-        setup_message: "Enable the Drive API, create a desktop OAuth client, and set its client id and secret in Fable's local environment.",
+        setup_message: "Enable the Drive API, create a desktop OAuth client, and set its client id and secret in Mivlet's local environment.",
         actions: &[
             "google-drive.create-file",
             "google-drive.update-file",
@@ -321,7 +321,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         ],
         scopes: GMAIL_SCOPES,
         setup_message:
-            "Enable the Gmail API, create a desktop OAuth client, set its client id and secret in Fable's local environment, and complete required Google verification.",
+            "Enable the Gmail API, create a desktop OAuth client, set its client id and secret in Mivlet's local environment, and complete required Google verification.",
         actions: &["gmail.create-draft", "gmail.send"],
     },
     ConnectorCatalogEntry {
@@ -353,7 +353,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare event create or update requests",
         ],
         scopes: CALENDAR_SCOPES,
-        setup_message: "Enable the Calendar API, create a desktop OAuth client, and set its client id and secret in Fable's local environment.",
+        setup_message: "Enable the Calendar API, create a desktop OAuth client, and set its client id and secret in Mivlet's local environment.",
         actions: &[
             "google-calendar.create-draft",
             "google-calendar.update-draft",
@@ -370,7 +370,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "create and update issues and comments after approval",
         ],
         scopes: LINEAR_SCOPES,
-        setup_message: "Create a Linear OAuth application and configure the Fable auth broker.",
+        setup_message: "Create a Linear OAuth application and configure the Mivlet auth broker.",
         actions: &[
             "linear.create-issue",
             "linear.update-issue",
@@ -395,14 +395,14 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             label: "Draft Pull Request",
             mode: "trusted-scope",
             risk_level: "medium",
-            consequence: "Creates a draft pull request after Fable approval.",
+            consequence: "Creates a draft pull request after Mivlet approval.",
             confirmation_phrase: None,
         },
         "github.comment" => ConnectorActionPolicy {
             label: "Comment",
             mode: "trusted-scope",
             risk_level: "medium",
-            consequence: "Publishes a comment to the selected GitHub item after Fable approval.",
+            consequence: "Publishes a comment to the selected GitHub item after Mivlet approval.",
             confirmation_phrase: None,
         },
         "vercel.promote" => ConnectorActionPolicy {
@@ -630,14 +630,14 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             label: "Create Draft",
             mode: "trusted-scope",
             risk_level: "medium",
-            consequence: "Creates a calendar event after Fable approval.",
+            consequence: "Creates a calendar event after Mivlet approval.",
             confirmation_phrase: None,
         },
         "google-calendar.update-draft" => ConnectorActionPolicy {
             label: "Update Draft",
             mode: "trusted-scope",
             risk_level: "medium",
-            consequence: "Updates the selected calendar event after Fable approval.",
+            consequence: "Updates the selected calendar event after Mivlet approval.",
             confirmation_phrase: None,
         },
         "google-calendar.delete-event" => ConnectorActionPolicy {
@@ -1056,7 +1056,7 @@ fn list_unconfigured_workspace_connector_statuses() -> Vec<ConnectorManifest> {
     let mut manifests = list_connector_statuses_with(&UnavailableCredentialBoundary);
     for manifest in &mut manifests {
         let message =
-            "Connector credentials are not configured for this Fable workspace.".to_string();
+            "Connector credentials are not configured for this Mivlet workspace.".to_string();
         manifest.status = "unconfigured".to_string();
         manifest.health.state = "unknown".to_string();
         manifest.health.summary = message.clone();
@@ -1396,7 +1396,7 @@ pub fn list_connector_accounts(
         command_error(
             "unknown",
             entry.id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -1633,10 +1633,10 @@ fn normalize_connector_knowledge_source(
         return Err("Connector knowledge metadata is invalid.".to_string());
     }
     let value = serde_json::to_value(source)
-        .map_err(|_| "Fable could not encode connector knowledge.".to_string())?;
+        .map_err(|_| "Mivlet could not encode connector knowledge.".to_string())?;
     let safe = crate::store::repos::connector_cache::redact_value(&value);
     let mut source: ConnectorKnowledgeSource = serde_json::from_value(safe)
-        .map_err(|_| "Fable could not normalize connector knowledge.".to_string())?;
+        .map_err(|_| "Mivlet could not normalize connector knowledge.".to_string())?;
     source.workspace_id = Some(scope.workspace_id().to_string());
     source.authority_scope = Some(crate::models::ContextRecordAuthorityScope {
         authority: "local".to_string(),
@@ -1847,7 +1847,7 @@ fn reconcile_canonical_connector_accounts(
         .map_err(|error| command_error("unknown", connector_id, &error.to_string(), false))
 }
 
-/// Make the workspace-bound Fable Connection active for a connector. Other
+/// Make the workspace-bound Mivlet Connection active for a connector. Other
 /// accounts are deactivated but their credentials remain available, so the
 /// user can switch back. Provider account ids are never selection authority.
 #[tauri::command]
@@ -1864,7 +1864,7 @@ pub fn switch_connector_account(
         command_error(
             "unknown",
             entry.id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -1907,7 +1907,7 @@ pub fn switch_connector_account(
             command_error(
                 "unknown",
                 entry.id,
-                "Fable could not save or fully restore the active Connection.",
+                "Mivlet could not save or fully restore the active Connection.",
                 false,
             )
         });
@@ -1962,7 +1962,7 @@ pub async fn refresh_connector_health(
             command_error(
                 "unknown",
                 entry.id,
-                "Fable's encrypted store is not initialized.",
+                "Mivlet's encrypted store is not initialized.",
                 false,
             )
         })?;
@@ -1999,7 +1999,7 @@ pub async fn search_connector(
         command_error(
             "unknown",
             entry.id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -2125,7 +2125,7 @@ pub async fn import_connector_item(
         command_error(
             "unknown",
             entry.id,
-            "Fable's encrypted store is not initialized.",
+            "Mivlet's encrypted store is not initialized.",
             false,
         )
     })?;
@@ -2586,7 +2586,7 @@ mod workspace_scope_tests {
             .all(|manifest| manifest.status == "unconfigured"));
         assert!(manifests.iter().all(|manifest| {
             manifest.setup_message.as_deref()
-                == Some("Connector credentials are not configured for this Fable workspace.")
+                == Some("Connector credentials are not configured for this Mivlet workspace.")
                 && manifest.account.is_none()
                 && !manifest.supports_search
                 && !manifest.supports_import

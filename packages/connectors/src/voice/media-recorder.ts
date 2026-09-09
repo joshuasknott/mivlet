@@ -99,7 +99,7 @@ export function createOpenAiRecordingProvider({
     capability: connected && workspaceId && environment
       ? { status: "supported", provider: descriptor }
       : { status: "unavailable", provider: descriptor, reason: unavailable },
-    processingDisclosure: "After you stop, review the recording before a one-time metered upload to OpenAI using gpt-4o-mini-transcribe. Fable does not save raw audio.",
+    processingDisclosure: "After you stop, review the recording before a one-time metered upload to OpenAI using gpt-4o-mini-transcribe. Mivlet does not save raw audio.",
     availability() {
       return connected && workspaceId && environment
         ? { status: "available" }

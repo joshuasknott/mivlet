@@ -3,7 +3,7 @@
  *
  * This is one adapter among equals — it implements the provider-neutral
  * {@link AgentBackend} contract for direct model APIs (OpenAI, Anthropic,
- * Gemini, xAI, OpenRouter, and the wider OpenAI-compatible catalogue). Fable owns the full agent loop here (request
+ * Gemini, xAI, OpenRouter, and the wider OpenAI-compatible catalogue). Mivlet owns the full agent loop here (request
  * shaping, streaming, tool-call/approval routing), delegating only the HTTP/SSE
  * egress to the injected {@link HttpTransport} (the Rust boundary in production,
  * a `FixtureTransport` in tests). The provider-id wire-family dispatch stays

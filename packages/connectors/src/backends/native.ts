@@ -1,5 +1,5 @@
 /**
- * Native model API adapter. Fable owns the full agent loop here — tool
+ * Native model API adapter. Mivlet owns the full agent loop here — tool
  * dispatch, streaming, approval routing, memory, usage/cost, and cancellation —
  * unlike Codex browser sign-in, which uses provider-owned app-server state.
  *
@@ -57,7 +57,7 @@ export function resolveNativeProvider(
       label: provider.authLabel,
       description: providerId === "custom"
         ? "Use one explicit OpenAI-compatible endpoint."
-        : "Use a metered API key stored by Fable's local credential boundary.",
+        : "Use a metered API key stored by Mivlet's local credential boundary.",
       recommended: false
     },
     installHint: undefined

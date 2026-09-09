@@ -6,7 +6,7 @@ import { buildToolApproval } from "@fable/connectors/native-api/approvals";
 
 describe("computer authority across approvals", () => {
   const args = '{"path":"report.txt","content":"draft"}';
-  const approval = () => buildToolApproval("Fable", "write-file", args);
+  const approval = () => buildToolApproval("Mivlet", "write-file", args);
   const computer = () => ({ workspaceId: "workspace-a", agentId: "agent-a", ready: true, generation: 4, controller: "agent" as const });
   it("prepares a new computer before binding the exact tool approval", async () => {
     runtime.executeTool.mockResolvedValue({ ok: true, output: "Saved" });
@@ -202,7 +202,7 @@ describe("hosted computer shell execution", () => {
     };
     const cloudApproval: ApprovalRequest = {
       id: "approval-hosted-process-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Run sh on this agent's cloud computer",
       mode: "full-access",
       riskLevel: "critical",
@@ -411,7 +411,7 @@ describe("hosted cloud browser execution", () => {
     };
     const browserApproval: ApprovalRequest = {
       id: "approval-hosted-browser-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Open https://example.com/ in this agent's cloud browser",
       mode: "full-access",
       riskLevel: "critical",
@@ -526,7 +526,7 @@ describe("hosted cloud browser execution", () => {
     };
     const actionApproval: ApprovalRequest = {
       id: "approval-hosted-browser-action-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Click control control-1234567890abcdef-1",
       mode: "full-access",
       riskLevel: "critical",
@@ -622,7 +622,7 @@ describe("hosted cloud browser execution", () => {
     };
     const actionApproval: ApprovalRequest = {
       id: "approval-hosted-browser-scroll-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Scroll the page page-down",
       mode: "full-access",
       riskLevel: "critical",
@@ -707,7 +707,7 @@ const grantApproval: ApprovalRequest = {
     "expiry: until revoked"
   ],
   consequence:
-    "Allows Fable to search this Connection in the named scope. Every search still requires its own exact-action approval.",
+    "Allows Mivlet to search this Connection in the named scope. Every search still requires its own exact-action approval.",
   requestedAt: new Date(0).toISOString(),
   decisions: ["once", "deny"],
   confirmationPhrase: "allow connected source search"

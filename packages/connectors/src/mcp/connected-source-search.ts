@@ -84,7 +84,7 @@ export function normalizeMcpConnectedSourceSearch(
   if (!decoded) throw new Error("MCP cited search returned an invalid structured result.");
   const allowed = new Set(["contractVersion", "query", "citations", "nextCursor"]);
   if (Object.keys(decoded).some((key) => !allowed.has(key))) {
-    throw new Error("MCP cited search attempted to supply Fable-owned authority metadata.");
+    throw new Error("MCP cited search attempted to supply Mivlet-owned authority metadata.");
   }
   if (decoded.contractVersion !== CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION) {
     throw new Error("MCP cited search returned an unsupported contract version.");

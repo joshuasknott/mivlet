@@ -90,7 +90,7 @@ const MANAGED_AGENT_CAPS: &[&str] = &[
     "cancellation",
 ];
 
-/// Native-API providers declare the full capability set when connected: Fable
+/// Native-API providers declare the full capability set when connected: Mivlet
 /// owns the loop, so it honors streaming, tool-requests + approvals, file
 /// changes, usage-cost (metered against the API key), model availability, and
 /// cancellation.
@@ -125,7 +125,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         setup_description: "Sign in through the official browser flow managed by Codex.",
         recommended: true,
     },
-    // Native-API providers: Fable owns the entire agent loop (tool dispatch,
+    // Native-API providers: Mivlet owns the entire agent loop (tool dispatch,
     // streaming, approval routing, memory, usage/cost, cancellation). All are
     // Direct API credentials, plus explicit local/custom exceptions; compliance
     // copy names only the implemented connection path.
@@ -134,7 +134,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         driver_kind: "native-api",
         backend_type: "native-api",
         label: "OpenAI",
-        description: "Reach GPT models directly with an OpenAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
+        description: "Reach GPT models directly with an OpenAI API key. Mivlet owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[
             ("gpt-5.2", "GPT-5.2"),
@@ -144,7 +144,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         capabilities: NATIVE_API_CAPS,
         setup_kind: "api-key",
         setup_label: "OpenAI API key",
-        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
         recommended: false,
     },
     BackendCatalogEntry {
@@ -158,7 +158,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         capabilities: MANAGED_AGENT_CAPS,
         setup_kind: "provider-cli",
         setup_label: "Claude account",
-        setup_description: "Sign in with the official Claude runtime; Fable never handles the session token.",
+        setup_description: "Sign in with the official Claude runtime; Mivlet never handles the session token.",
         recommended: true,
     },
     BackendCatalogEntry {
@@ -166,7 +166,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         driver_kind: "native-api",
         backend_type: "native-api",
         label: "Anthropic",
-        description: "Reach Claude via an Anthropic API key. Fable owns the agent loop.",
+        description: "Reach Claude via an Anthropic API key. Mivlet owns the agent loop.",
         install_hint: "",
         models: &[
             ("claude-sonnet-4-6", "Claude Sonnet 4.6"),
@@ -175,7 +175,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         capabilities: NATIVE_API_CAPS,
         setup_kind: "api-key",
         setup_label: "Anthropic API key",
-        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
         recommended: false,
     },
     BackendCatalogEntry {
@@ -184,7 +184,7 @@ const CATALOG: &[BackendCatalogEntry] = &[
         backend_type: "antigravity-acp",
         label: "Google Antigravity",
         description: "Use Gemini models through Google's official Antigravity ACP agent and personal Google sign-in.",
-        install_hint: "Fable installs Google's pinned Antigravity ACP runtime locally.",
+        install_hint: "Mivlet installs Google's pinned Antigravity ACP runtime locally.",
         models: &[],
         capabilities: ANTIGRAVITY_CAPS,
         setup_kind: "browser",
@@ -211,13 +211,13 @@ const CATALOG: &[BackendCatalogEntry] = &[
         driver_kind: "native-api",
         backend_type: "native-api",
         label: "xAI",
-        description: "Reach Grok models directly with an xAI API key. Fable owns the agent loop, tool dispatch, and approvals.",
+        description: "Reach Grok models directly with an xAI API key. Mivlet owns the agent loop, tool dispatch, and approvals.",
         install_hint: "",
         models: &[("grok-4", "Grok 4")],
         capabilities: NATIVE_API_CAPS,
         setup_kind: "api-key",
         setup_label: "xAI API key",
-        setup_description: "Use a metered API key stored by Fable's local credential boundary.",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
         recommended: false,
     },
     BackendCatalogEntry {
@@ -312,7 +312,7 @@ pub(crate) struct KeyringStore;
 impl KeyringStore {
     fn entry(provider_id: &str) -> Result<keyring::Entry, String> {
         keyring::Entry::new(KEYRING_SERVICE, provider_id)
-            .map_err(|_| "Fable could not open the OS secure store.".to_string())
+            .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
     }
 }
 
@@ -322,7 +322,9 @@ impl BackendCredentialStore for KeyringStore {
         match entry.get_password() {
             Ok(secret) => Ok(Some(secret)),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(other) => Err(format!("Fable could not read the OS secure store: {other}")),
+            Err(other) => Err(format!(
+                "Mivlet could not read the OS secure store: {other}"
+            )),
         }
     }
 
@@ -330,7 +332,7 @@ impl BackendCredentialStore for KeyringStore {
         let entry = Self::entry(provider_id)?;
         entry
             .set_password(secret)
-            .map_err(|_| "Fable could not save to the OS secure store.".to_string())
+            .map_err(|_| "Mivlet could not save to the OS secure store.".to_string())
     }
 
     fn remove(&mut self, provider_id: &str) -> Result<(), String> {
@@ -339,7 +341,7 @@ impl BackendCredentialStore for KeyringStore {
             Ok(()) => Ok(()),
             // Nothing to remove is a normal miss, not an unavailable store.
             Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("Fable could not clear the OS secure store.".to_string()),
+            Err(_) => Err("Mivlet could not clear the OS secure store.".to_string()),
         }
     }
 }
@@ -379,7 +381,7 @@ pub(crate) fn read_credential(provider_id: &str) -> Result<Option<String>, Strin
 
 pub(crate) fn connected_providers_for(internal_user_id: &str) -> Result<Vec<String>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| crate::store::repos::backend_connection::list(tx, internal_user_id))
         .map_err(|error| error.to_string())
@@ -390,7 +392,7 @@ pub(crate) fn record_connected_provider(
     provider_id: &str,
 ) -> Result<(), String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let now = chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     store
         .transaction(|tx| {
@@ -404,7 +406,7 @@ pub(crate) fn remove_connected_provider(
     provider_id: &str,
 ) -> Result<(), String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
             crate::store::repos::backend_connection::delete(tx, internal_user_id, provider_id)
@@ -441,7 +443,7 @@ impl BackendCredentialStore for CredentialStores {
         }
         let store = credential_store()
             .lock()
-            .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
+            .map_err(|_| "Mivlet could not acquire the credential store.".to_string())?;
         Ok(store.get(&scoped_key).cloned())
     }
 
@@ -461,7 +463,7 @@ impl BackendCredentialStore for CredentialStores {
         KeyringStore.remove(&scoped_key)?;
         let mut store = credential_store()
             .lock()
-            .map_err(|_| "Fable could not acquire the credential store.".to_string())?;
+            .map_err(|_| "Mivlet could not acquire the credential store.".to_string())?;
         BackendCredentialStore::remove(&mut *store, &scoped_key)?;
         Ok(())
     }
@@ -767,7 +769,7 @@ pub(crate) fn validate_current_native_provider_route(
 ) -> Result<String, String> {
     let internal_user_id = require_current_internal_user()?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (expected, observation) = store
         .with_conn(|tx| {
             if binding.workspace_id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID {
@@ -843,7 +845,7 @@ pub(crate) fn record_native_provider_route_observation(
     let digest = Sha256::digest(format!("{internal_user_id}:{request_id}").as_bytes());
     let observation_id = format!("route-observation:v1:{digest:x}");
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
             crate::store::repos::provider_route_observation::record(
@@ -1077,7 +1079,7 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
     let (_, member_id) = crate::account_workspace::local_install_principals();
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (rows, observations, quality) = store
         .with_conn(|tx| {
             let rows =
@@ -1357,14 +1359,14 @@ pub(crate) fn read_connected_backends(path: &Path) -> Result<ConnectedBackends, 
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read connected backends.".to_string())?;
+        .map_err(|_| "Mivlet could not read connected backends.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(ConnectedBackends::default());
     }
 
     let parsed: BTreeSet<String> = serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse connected backends.".to_string())?;
+        .map_err(|_| "Mivlet could not parse connected backends.".to_string())?;
 
     let ids: Vec<String> = parsed
         .into_iter()
@@ -1381,8 +1383,8 @@ fn write_connected_backends(path: &Path, connected: &ConnectedBackends) -> Resul
         return Ok(());
     }
     let encoded = serde_json::to_string_pretty(&set)
-        .map_err(|_| "Fable could not encode connected backends.".to_string())?;
-    fs::write(path, encoded).map_err(|_| "Fable could not save connected backends.".to_string())
+        .map_err(|_| "Mivlet could not encode connected backends.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Mivlet could not save connected backends.".to_string())
 }
 
 /// Validate the secret length and write it to the given store. The secret is
@@ -1465,7 +1467,7 @@ pub(crate) fn list_providers_from<S: BackendCredentialStore>(
 /// Normalize a backend consequential event and produce the audit entry that
 /// records it. Used when a backend reports an action it wants to take (or has
 /// already taken internally). The audit entry feeds the existing approval
-/// audit log — Fable never lets a backend bypass its approval layer.
+/// audit log — Mivlet never lets a backend bypass its approval layer.
 pub(crate) fn normalize_backend_event(
     event: BackendConsequentialEvent,
     decided_at: &str,
@@ -1490,7 +1492,7 @@ pub(crate) fn normalize_backend_event(
     }
 
     // A backend that already approved something internally is recorded as a
-    // `once` audit entry naming the backend — it does not bypass Fable's layer
+    // `once` audit entry naming the backend — it does not bypass Mivlet's layer
     // for future actions.
     let decision = if event.backend_preapproved.unwrap_or(false) {
         "once"

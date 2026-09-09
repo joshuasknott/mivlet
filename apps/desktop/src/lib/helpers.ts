@@ -20,7 +20,7 @@ export function prependAuditEntry(current: ApprovalAuditEntry[], entry: Approval
 }
 
 export function normalizeActiveItem(activeItem: string) {
-  // These persisted ids predate the Fable rename. Keep both fallbacks so an
+  // These persisted ids predate the Mivlet rename. Keep both fallbacks so an
   // existing workspace reopens the same thread instead of dropping context.
   if (activeItem === "arden-initial-build" || activeItem === "praxis-initial-build") {
     return "fable-initial-build";
@@ -71,7 +71,7 @@ export function readFileAsText(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Fable could not read that file."));
+    reader.onerror = () => reject(new Error("Mivlet could not read that file."));
     reader.readAsText(file);
   });
 }
@@ -80,7 +80,7 @@ export function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result ?? ""));
-    reader.onerror = () => reject(new Error("Fable could not preview that file."));
+    reader.onerror = () => reject(new Error("Mivlet could not preview that file."));
     reader.readAsDataURL(file);
   });
 }

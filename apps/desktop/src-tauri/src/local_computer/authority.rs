@@ -87,7 +87,7 @@ impl ComputerAuthority {
         plugins: Arc<AtomicU8>,
     ) -> Result<Arc<Self>, String> {
         std::fs::create_dir_all(directory)
-            .map_err(|_| "Fable could not prepare computer authority storage.".to_string())?;
+            .map_err(|_| "Mivlet could not prepare computer authority storage.".to_string())?;
         crate::paths::strict_canonicalize(directory)
             .map_err(|_| "Computer authority storage failed its security check.".to_string())?;
         let path = directory.join("control.json");
@@ -95,7 +95,7 @@ impl ComputerAuthority {
             crate::paths::strict_canonicalize(&path)
                 .map_err(|_| "Computer authority storage failed its security check.".to_string())?;
             let bytes = std::fs::read(&path)
-                .map_err(|_| "Fable could not read computer control state.".to_string())?;
+                .map_err(|_| "Mivlet could not read computer control state.".to_string())?;
             if bytes.len() > 4096 {
                 return Err("Computer control state is invalid. Recovery is required.".into());
             }
@@ -563,17 +563,17 @@ fn projection(inner: &Inner) -> AuthoritySnapshot {
 fn persist(path: &Path, state: &DurableAuthority) -> Result<(), String> {
     let parent = path.parent().ok_or_else(unavailable)?;
     let mut pending = tempfile::NamedTempFile::new_in(parent).map_err(|_| {
-        "Fable could not save computer control state. Control remains paused.".to_string()
+        "Mivlet could not save computer control state. Control remains paused.".to_string()
     })?;
     serde_json::to_writer(&mut pending, state).map_err(|_| unavailable())?;
     pending
         .flush()
         .and_then(|()| pending.as_file().sync_all())
         .map_err(|_| {
-            "Fable could not save computer control state. Control remains paused.".to_string()
+            "Mivlet could not save computer control state. Control remains paused.".to_string()
         })?;
     pending.persist(path).map_err(|_| {
-        "Fable could not save computer control state. Control remains paused.".to_string()
+        "Mivlet could not save computer control state. Control remains paused.".to_string()
     })?;
     Ok(())
 }

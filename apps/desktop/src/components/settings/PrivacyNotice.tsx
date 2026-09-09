@@ -14,7 +14,7 @@ export function PrivacySummary() {
         </dd>
       </div>
       <div>
-        <dt>Your Fable account</dt>
+        <dt>Your Mivlet account</dt>
         <dd>
           Clerk handles account sign-in. Signing in does not upload your local
           conversations.
@@ -31,7 +31,7 @@ export function PrivacySummary() {
       <div>
         <dt>Connected apps</dt>
         <dd>
-          Fable requests the permissions shown during connection. You can review
+          Mivlet requests the permissions shown during connection. You can review
           and disconnect each app in Plugins.
         </dd>
       </div>
@@ -61,7 +61,7 @@ export function PrivacyNotice({ onClose }: { onClose: () => void }) {
           <X size={18} />
         </button>
         <h2 id="privacy-notice-title">Privacy &amp; data</h2>
-        <p>How Fable handles your information.</p>
+        <p>How Mivlet handles your information.</p>
         <PrivacySummary />
       </section>
     </div>

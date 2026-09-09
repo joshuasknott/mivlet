@@ -42,7 +42,7 @@ export function parseComputerArtifact(output: string): LocalComputerArtifact | n
 export function canOpenComputerArtifact(): boolean { return hasNativeRuntimeAdapter(); }
 
 export async function openComputerArtifact(request: LocalComputerOpenArtifactRequest): Promise<void> {
-  if (!hasNativeRuntimeAdapter()) throw new Error("Open this artifact in the Fable desktop app.");
+  if (!hasNativeRuntimeAdapter()) throw new Error("Open this artifact in the Mivlet desktop app.");
   if (!Number.isSafeInteger(request.expectedGeneration) || request.expectedGeneration < 0) throw new Error("Refresh the computer before opening this artifact.");
   await getRuntimeAdapter().invoke<void>("local_computer_open_artifact", { request });
 }
@@ -54,7 +54,7 @@ export function artifactSize(bytes: number): string {
 }
 
 export async function previewComputerArtifact(request: LocalComputerOpenArtifactRequest): Promise<LocalComputerArtifactPreview> {
-  if (!hasNativeRuntimeAdapter()) throw new Error("Preview this file in the Fable desktop app.");
+  if (!hasNativeRuntimeAdapter()) throw new Error("Preview this file in the Mivlet desktop app.");
   if (!Number.isSafeInteger(request.expectedGeneration) || request.expectedGeneration < 0) throw new Error("Refresh the computer before previewing this file.");
   return getRuntimeAdapter().invoke<LocalComputerArtifactPreview>("local_computer_preview_artifact", { request });
 }

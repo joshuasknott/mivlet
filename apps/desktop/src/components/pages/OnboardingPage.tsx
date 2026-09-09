@@ -1,3 +1,4 @@
+import { Brand } from "../Brand";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { GoogleLogo } from "@phosphor-icons/react/dist/csr/GoogleLogo";
@@ -140,7 +141,7 @@ export function OnboardingPage({
   };
 
   return (
-    <main className="og-frame" aria-label="Fable onboarding">
+    <main className="og-frame" aria-label="Mivlet onboarding">
       {stage !== "account" ? (
         <button
           type="button"
@@ -153,6 +154,7 @@ export function OnboardingPage({
         </button>
       ) : null}
       <div className="og-center">
+        <Brand className="og-brand" />
 
 
         {stage === "account" ? (
@@ -162,7 +164,7 @@ export function OnboardingPage({
           >
             <div className="og-heading">
               <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
-                Welcome to Fable
+                Welcome to Mivlet
               </h1>
               <p>Sign in or create an account to get started.</p>
             </div>
@@ -299,7 +301,7 @@ export function OnboardingPage({
                 className="og-primary-button"
                 onClick={onComplete}
               >
-                Enter Fable
+                Enter Mivlet
               </button>
               <button
                 type="button"

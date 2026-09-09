@@ -1,1 +1,1 @@
-{"default":{"identifier":"default","description":"Default permissions for the Fable desktop window","local":true,"windows":["main"],"permissions":["core:default","notification:default"]}}
+{"default":{"identifier":"default","description":"Default permissions for the Mivlet desktop window","local":true,"windows":["main"],"permissions":["core:default","notification:default"]}}

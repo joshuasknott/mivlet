@@ -2,7 +2,7 @@
 //!
 //! Cursor and Grok speak ACP over newline-delimited JSON-RPC. Claude uses its
 //! bidirectional Agent SDK stdio protocol. OpenCode exposes an authenticated
-//! local HTTP/SSE server. Fable supervises those processes, normalizes their
+//! local HTTP/SSE server. Mivlet supervises those processes, normalizes their
 //! output, and keeps provider-owned credentials outside JavaScript. Missing
 //! executables and unverified login state fail closed.
 
@@ -128,7 +128,7 @@ fn validate_provider_id(provider_id: &str) -> Result<&str, String> {
     MANAGED_PROVIDER_IDS
         .contains(&provider_id)
         .then_some(provider_id)
-        .ok_or_else(|| "Fable does not recognize that managed provider runtime.".to_string())
+        .ok_or_else(|| "Mivlet does not recognize that managed provider runtime.".to_string())
 }
 
 fn provider_label(provider_id: &str) -> &'static str {
@@ -242,7 +242,7 @@ fn workspace_dir(app: &AppHandle, user_id: &str, provider_id: &str) -> Result<Pa
         .join(provider_id);
     fs::create_dir_all(&path).map_err(|_| {
         format!(
-            "Fable could not prepare the {} workspace.",
+            "Mivlet could not prepare the {} workspace.",
             provider_label(provider_id)
         )
     })?;
@@ -255,7 +255,7 @@ fn claude_profile_dir(app: &AppHandle, user_id: &str) -> Result<PathBuf, String>
         .join(account_hash(user_id))
         .join("claude");
     fs::create_dir_all(&path)
-        .map_err(|_| "Fable could not prepare the private Claude profile.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the private Claude profile.".to_string())?;
     Ok(path)
 }
 
@@ -278,11 +278,12 @@ fn cache_models(
     let path = models_path(app, user_id, provider_id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|_| "Fable could not prepare the managed model cache.".to_string())?;
+            .map_err(|_| "Mivlet could not prepare the managed model cache.".to_string())?;
     }
     let bytes = serde_json::to_vec(models)
-        .map_err(|_| "Fable could not encode managed provider models.".to_string())?;
-    fs::write(path, bytes).map_err(|_| "Fable could not cache managed provider models.".to_string())
+        .map_err(|_| "Mivlet could not encode managed provider models.".to_string())?;
+    fs::write(path, bytes)
+        .map_err(|_| "Mivlet could not cache managed provider models.".to_string())
 }
 
 pub(crate) fn cached_models(
@@ -348,7 +349,7 @@ fn run_command(mut command: Command, timeout: Duration) -> Result<CommandOutput,
         .stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .map_err(|_| "Fable could not start the provider runtime.".to_string())?;
+        .map_err(|_| "Mivlet could not start the provider runtime.".to_string())?;
     let stdout = child
         .stdout
         .take()
@@ -363,7 +364,7 @@ fn run_command(mut command: Command, timeout: Duration) -> Result<CommandOutput,
     let status = loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|_| "Fable could not inspect the provider process.".to_string())?
+            .map_err(|_| "Mivlet could not inspect the provider process.".to_string())?
         {
             break status;
         }
@@ -540,7 +541,7 @@ fn probe_status(
             authenticated: false,
             version: None,
             message: Some(format!(
-                "Install the official {} runtime, then reopen Fable.",
+                "Install the official {} runtime, then reopen Mivlet.",
                 provider_label(provider_id)
             )),
         });
@@ -651,7 +652,7 @@ pub(crate) fn status_for(provider_id: &str, previously_connected: bool) -> Manag
         version: None,
         message: Some(if !installed {
             format!(
-                "Install the official {} runtime, then reopen Fable.",
+                "Install the official {} runtime, then reopen Mivlet.",
                 provider_label(provider_id)
             )
         } else if previously_connected {
@@ -660,7 +661,7 @@ pub(crate) fn status_for(provider_id: &str, previously_connected: bool) -> Manag
                 provider_label(provider_id)
             )
         } else if provider_id == "opencode" {
-            "Configure a provider with `opencode auth login`, then check the connection in Fable."
+            "Configure a provider with `opencode auth login`, then check the connection in Mivlet."
                 .to_string()
         } else {
             format!(
@@ -720,7 +721,7 @@ pub async fn start_managed_runtime_login(
 ) -> Result<ManagedLoginResult, String> {
     validate_provider_id(&provider_id)?;
     if provider_id == "opencode" {
-        return Err("OpenCode has no single account login. Run `opencode auth login` for the provider you want, then check the connection in Fable.".into());
+        return Err("OpenCode has no single account login. Run `opencode auth login` for the provider you want, then check the connection in Mivlet.".into());
     }
     let user_id = crate::backends::require_current_internal_user()?;
     let path = find_executable(&provider_id).ok_or_else(|| {
@@ -785,13 +786,13 @@ fn write_json(
         .lock()
         .map_err(|_| format!("{} stdin is unavailable.", provider_label(provider_id)))?;
     serde_json::to_writer(&mut *input, value)
-        .map_err(|_| "Fable could not encode an ACP request.".to_string())?;
+        .map_err(|_| "Mivlet could not encode an ACP request.".to_string())?;
     input
         .write_all(b"\n")
         .and_then(|_| input.flush())
         .map_err(|_| {
             format!(
-                "Fable could not write to {} ACP.",
+                "Mivlet could not write to {} ACP.",
                 provider_label(provider_id)
             )
         })
@@ -805,7 +806,7 @@ fn initialize_request(id: u64) -> Value {
         "params":{
             "protocolVersion":1,
             "clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
-            "clientInfo":{"name":"Fable","title":"Fable","version":env!("CARGO_PKG_VERSION")}
+            "clientInfo":{"name":"Fable","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}
         }
     })
 }
@@ -1079,7 +1080,7 @@ fn respond_to_unsupported_extension(
         let _ = write_json(
             stdin,
             provider_id,
-            &json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Fable does not expose that provider extension."}}),
+            &json!({"jsonrpc":"2.0","id":id,"error":{"code":-32601,"message":"Mivlet does not expose that provider extension."}}),
         );
     }
 }
@@ -1153,7 +1154,7 @@ fn start_acp_turn(
         .spawn()
         .map_err(|_| {
             format!(
-                "Fable could not start {} ACP.",
+                "Mivlet could not start {} ACP.",
                 provider_label(&provider_id)
             )
         })?;
@@ -1169,7 +1170,7 @@ fn start_acp_turn(
     let permissions = Arc::new(Mutex::new(HashMap::new()));
     active_runs()
         .lock()
-        .map_err(|_| "Fable could not register the managed ACP turn.".to_string())?
+        .map_err(|_| "Mivlet could not register the managed ACP turn.".to_string())?
         .insert(
             request.request_id.clone(),
             ActiveRun {
@@ -1364,7 +1365,7 @@ fn respond_to_unsupported_claude_control(stdin: &Arc<Mutex<ChildStdin>>, value: 
             "response":{
                 "subtype":"error",
                 "request_id":request_id,
-                "error":"Fable does not expose this Claude control surface."
+                "error":"Mivlet does not expose this Claude control surface."
             }
         }),
     );
@@ -1497,7 +1498,7 @@ fn start_claude_turn(
         .stderr(Stdio::piped());
     let mut child = command
         .spawn()
-        .map_err(|_| "Fable could not start Claude.".to_string())?;
+        .map_err(|_| "Mivlet could not start Claude.".to_string())?;
     let stdin = Arc::new(Mutex::new(
         child
             .stdin
@@ -1516,7 +1517,7 @@ fn start_claude_turn(
     let permissions = Arc::new(Mutex::new(HashMap::new()));
     active_runs()
         .lock()
-        .map_err(|_| "Fable could not register the Claude turn.".to_string())?
+        .map_err(|_| "Mivlet could not register the Claude turn.".to_string())?
         .insert(
             request.request_id.clone(),
             ActiveRun {
@@ -1558,7 +1559,7 @@ fn start_claude_turn(
                 if value.pointer("/response/subtype").and_then(Value::as_str) != Some("success") {
                     let _ = app.emit(
                         &channel,
-                        json!({"type":"error","message":"Claude rejected Fable's SDK initialization."}),
+                        json!({"type":"error","message":"Claude rejected Mivlet's SDK initialization."}),
                     );
                     break;
                 }
@@ -1612,11 +1613,11 @@ fn start_claude_turn(
 
 fn open_code_endpoint(base_url: &str, segments: &[&str]) -> Result<String, String> {
     let mut url = url::Url::parse(base_url)
-        .map_err(|_| "Fable could not construct the OpenCode server URL.".to_string())?;
+        .map_err(|_| "Mivlet could not construct the OpenCode server URL.".to_string())?;
     {
         let mut path = url
             .path_segments_mut()
-            .map_err(|_| "Fable could not construct the OpenCode server URL.".to_string())?;
+            .map_err(|_| "Mivlet could not construct the OpenCode server URL.".to_string())?;
         path.pop_if_empty();
         for segment in segments {
             path.push(segment);
@@ -1628,7 +1629,7 @@ fn open_code_endpoint(base_url: &str, segments: &[&str]) -> Result<String, Strin
 fn open_code_password() -> Result<String, String> {
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not secure the local OpenCode server.".to_string())?;
+        .map_err(|_| "Mivlet could not secure the local OpenCode server.".to_string())?;
     Ok(hex::encode(bytes))
 }
 
@@ -1947,10 +1948,10 @@ fn start_opencode_turn(
         .ok_or_else(|| "Install the official OpenCode runtime first.".to_string())?;
     let workspace = workspace_dir(&app, &user_id, "opencode")?;
     let listener = TcpListener::bind(("127.0.0.1", 0))
-        .map_err(|_| "Fable could not reserve a local OpenCode port.".to_string())?;
+        .map_err(|_| "Mivlet could not reserve a local OpenCode port.".to_string())?;
     let port = listener
         .local_addr()
-        .map_err(|_| "Fable could not reserve a local OpenCode port.".to_string())?
+        .map_err(|_| "Mivlet could not reserve a local OpenCode port.".to_string())?
         .port();
     drop(listener);
     let password = open_code_password()?;
@@ -1976,7 +1977,7 @@ fn start_opencode_turn(
         .stderr(Stdio::piped());
     let mut process = command
         .spawn()
-        .map_err(|_| "Fable could not start OpenCode's local server.".to_string())?;
+        .map_err(|_| "Mivlet could not start OpenCode's local server.".to_string())?;
     let stdout = process.stdout.take();
     let stderr = process.stderr.take();
     let child = Arc::new(Mutex::new(process));
@@ -1984,7 +1985,7 @@ fn start_opencode_turn(
     let permissions = Arc::new(Mutex::new(HashMap::new()));
     active_runs()
         .lock()
-        .map_err(|_| "Fable could not register the OpenCode turn.".to_string())?
+        .map_err(|_| "Mivlet could not register the OpenCode turn.".to_string())?
         .insert(
             request.request_id.clone(),
             ActiveRun {
@@ -2007,7 +2008,7 @@ fn start_opencode_turn(
             let client = reqwest::Client::builder()
                 .connect_timeout(Duration::from_secs(3))
                 .build()
-                .map_err(|_| "Fable could not prepare the OpenCode client.".to_string())?;
+                .map_err(|_| "Mivlet could not prepare the OpenCode client.".to_string())?;
             wait_for_open_code(&client, &control).await?;
             let event_url = open_code_endpoint(&control.base_url, &["event"])?;
             let events = client
@@ -2016,7 +2017,7 @@ fn start_opencode_turn(
                 .query(&[("directory", control.directory.as_str())])
                 .send()
                 .await
-                .map_err(|_| "Fable could not subscribe to OpenCode events.".to_string())?;
+                .map_err(|_| "Mivlet could not subscribe to OpenCode events.".to_string())?;
             if !events.status().is_success() {
                 return Err(
                     open_code_error(events, "OpenCode rejected its event subscription.").await,
@@ -2027,10 +2028,10 @@ fn start_opencode_turn(
                 .post(session_url)
                 .header("Authorization", &control.authorization)
                 .query(&[("directory", control.directory.as_str())])
-                .json(&json!({"title":"Fable conversation","permission":open_code_rules()}))
+                .json(&json!({"title":"Mivlet conversation","permission":open_code_rules()}))
                 .send()
                 .await
-                .map_err(|_| "Fable could not create an OpenCode session.".to_string())?;
+                .map_err(|_| "Mivlet could not create an OpenCode session.".to_string())?;
             if !created.status().is_success() {
                 return Err(open_code_error(created, "OpenCode rejected session creation.").await);
             }
@@ -2063,7 +2064,7 @@ fn start_opencode_turn(
                 .json(&body)
                 .send()
                 .await
-                .map_err(|_| "Fable could not submit the OpenCode prompt.".to_string())?;
+                .map_err(|_| "Mivlet could not submit the OpenCode prompt.".to_string())?;
             if !accepted.status().is_success() {
                 return Err(open_code_error(accepted, "OpenCode rejected the prompt.").await);
             }
@@ -2198,7 +2199,7 @@ pub async fn respond_managed_runtime_approval(
             let response = if request.approved {
                 json!({"behavior":"allow","updatedInput":input,"toolUseID":tool_use_id})
             } else {
-                json!({"behavior":"deny","message":"Denied in Fable.","interrupt":false,"toolUseID":tool_use_id})
+                json!({"behavior":"deny","message":"Denied in Mivlet.","interrupt":false,"toolUseID":tool_use_id})
             };
             write_json(
                 stdin,
@@ -2229,7 +2230,7 @@ pub async fn respond_managed_runtime_approval(
                 .send()
                 .await
                 .map_err(|_| {
-                    "Fable could not deliver the OpenCode permission decision.".to_string()
+                    "Mivlet could not deliver the OpenCode permission decision.".to_string()
                 })?;
             if response.status().is_success() {
                 Ok(())
@@ -2269,7 +2270,7 @@ pub async fn interrupt_managed_runtime_turn(request_id: String) -> Result<(), St
                 .query(&[("directory", control.directory.as_str())])
                 .send()
                 .await
-                .map_err(|_| "Fable could not interrupt OpenCode.".to_string())?;
+                .map_err(|_| "Mivlet could not interrupt OpenCode.".to_string())?;
             if !response.status().is_success() {
                 return Err(open_code_error(response, "OpenCode rejected interruption.").await);
             }

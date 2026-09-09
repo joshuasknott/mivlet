@@ -20,13 +20,13 @@ use url::Url;
 use crate::clerk_identity::{self, ConvexFunctionType, ConvexIdentityCallRequest};
 use crate::models::{ApprovalRequest, ApprovalResolutionRequest};
 
-const ACCOUNT_CHANGED_ERROR: &str = "Fable account changed during the request. Please try again.";
+const ACCOUNT_CHANGED_ERROR: &str = "Mivlet account changed during the request. Please try again.";
 const MAX_RUNNER_RESPONSE_BYTES: usize = 600 * 1024;
 const MAX_PROCESS_ARGUMENTS: usize = 20;
 const MAX_PROCESS_ARGUMENT_CHARACTERS: usize = 200;
 const MIN_PROCESS_TIMEOUT_MS: u64 = 1_000;
 const MAX_PROCESS_TIMEOUT_MS: u64 = 15 * 60_000;
-const HOSTED_COMPUTER_SERVICE: &str = "Fable cloud computer";
+const HOSTED_COMPUTER_SERVICE: &str = "Mivlet cloud computer";
 const HOSTED_PROCESS_CONFIRMATION: &str = "run on cloud computer";
 const HOSTED_BROWSER_CONFIRMATION: &str = "open cloud browser";
 const HOSTED_BROWSER_ACTION_CONFIRMATION: &str = "act in cloud browser";
@@ -307,7 +307,7 @@ fn valid_id(value: &str) -> bool {
 fn opaque_key(prefix: &str) -> Result<String, String> {
     let mut bytes = [0_u8; 24];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not create a hosted computer request.".to_string())?;
+        .map_err(|_| "Mivlet could not create a hosted computer request.".to_string())?;
     Ok(format!("{prefix}-{}", URL_SAFE_NO_PAD.encode(bytes)))
 }
 
@@ -487,7 +487,7 @@ fn browser_proposal_fingerprint(
     proposal: &HostedBrowserNavigateProposal,
 ) -> Result<String, String> {
     let encoded = serde_json::to_vec(proposal)
-        .map_err(|_| "Fable could not fingerprint the cloud browser request.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint the cloud browser request.".to_string())?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
@@ -621,7 +621,7 @@ fn validate_browser_action_proposal(
 
 fn browser_action_fingerprint(proposal: &HostedBrowserActionProposal) -> Result<String, String> {
     let encoded = serde_json::to_vec(proposal)
-        .map_err(|_| "Fable could not fingerprint the cloud browser action.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint the cloud browser action.".to_string())?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
@@ -654,7 +654,7 @@ fn validate_proposal(
 
 fn proposal_fingerprint(proposal: &HostedProcessLaunchProposal) -> Result<String, String> {
     let encoded = serde_json::to_vec(proposal)
-        .map_err(|_| "Fable could not fingerprint the hosted process request.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint the hosted process request.".to_string())?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
@@ -863,7 +863,7 @@ async fn runner_json(
         .timeout(Duration::from_secs(45))
         .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|_| "Fable could not initialize the hosted runner connection.".to_string())?;
+        .map_err(|_| "Mivlet could not initialize the hosted runner connection.".to_string())?;
     let mut request = client
         .request(method, url)
         .header(header::AUTHORIZATION, format!("FableCapability {token}"))

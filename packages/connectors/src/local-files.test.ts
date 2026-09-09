@@ -69,7 +69,7 @@ describe("local files connector", () => {
         content: "notes",
         sizeBytes: 4
       })
-    ).toThrow("changed while Fable was reading it");
+    ).toThrow("changed while Mivlet was reading it");
   });
 });
 

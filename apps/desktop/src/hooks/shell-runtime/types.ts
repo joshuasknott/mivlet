@@ -170,7 +170,7 @@ export interface ShellRuntime {
    * outside the Tauri runtime (preview/fixture mode).
    */
   refreshModels: (providerId: string) => Promise<void>;
-  /** All connected backends Fable can actually run, in provider registry order. */
+  /** All connected backends Mivlet can actually run, in provider registry order. */
   connectedAgentBackends: BackendProvider[];
   /** The backend owning the selected model and therefore the next interactive run. */
   connectedAgentBackend: BackendProvider | undefined;
@@ -202,7 +202,7 @@ export interface ShellRuntime {
   /**
    * Queue a backend-originated tool call for the shared approval UI. Model tool
    * calls never auto-execute — they surface here so the existing approval UI
-   * calls are audited only after the user decides, before Fable dispatches the tool.
+   * calls are audited only after the user decides, before Mivlet dispatches the tool.
    */
   recordBackendToolCall: (event: {
     callId: string;

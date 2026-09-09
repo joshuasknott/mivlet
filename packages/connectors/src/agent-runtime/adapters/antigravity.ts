@@ -50,7 +50,7 @@ export function createAntigravityBackend(
                   : false;
             if (blockedByMode) {
               await liveHandle.respondApproval(event.requestId, false);
-              yield { type: "tool-result", callId: event.callId, ok: false, output: `Blocked by Fable's ${options.permissionMode} permission mode.` };
+              yield { type: "tool-result", callId: event.callId, ok: false, output: `Blocked by Mivlet's ${options.permissionMode} permission mode.` };
               continue;
             }
             yield { type: "tool-call", callId: event.callId, tool: event.tool, arguments: event.arguments, approval: event.approval };

@@ -100,7 +100,7 @@ fn bound_redirect(listener: &TcpListener) -> Result<String, ConnectorCommandErro
             command_error(
                 "unknown",
                 "oauth",
-                "Fable could not bind a loopback OAuth listener.",
+                "Mivlet could not bind a loopback OAuth listener.",
                 false,
             )
         })?
@@ -787,11 +787,11 @@ fn callback_page(status: &str, message: &str) -> String {
     // Minimal static HTML; no reflection of provider-supplied content beyond a
     // status word. Keep it inert so a hostile callback cannot inject markup.
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Fable</title>\
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Mivlet</title>\
          <link rel=\"icon\" href=\"data:,\">\
          <style>body{{font-family:system-ui;padding:2rem;max-width:32rem;margin:auto}}</style>\
          </head><body><h1>{status}</h1><p>{message}</p>\
-         <p>You can close this tab and return to Fable.</p></body></html>"
+         <p>You can close this tab and return to Mivlet.</p></body></html>"
     )
 }
 
@@ -835,7 +835,7 @@ async fn accept_valid_callback(
                 return Err(command_error(
                     "unknown",
                     "oauth",
-                    "Fable could not accept the OAuth callback.",
+                    "Mivlet could not accept the OAuth callback.",
                     true,
                 ));
             }
@@ -851,7 +851,7 @@ async fn accept_valid_callback(
                     acknowledge_callback(
                         &mut stream,
                         "Authorization incomplete",
-                        "Fable rejected the local callback. Return to Fable for details.",
+                        "Mivlet rejected the local callback. Return to Mivlet for details.",
                     )
                     .await;
                     return Err(error);
@@ -861,7 +861,7 @@ async fn accept_valid_callback(
                 acknowledge_callback(
                     &mut stream,
                     "Authorization incomplete",
-                    "Fable rejected the local callback. Return to Fable for details.",
+                    "Mivlet rejected the local callback. Return to Mivlet for details.",
                 )
                 .await;
                 return Err(read_error.error);
@@ -874,7 +874,7 @@ async fn accept_valid_callback(
     Err(command_error(
         "invalid-request",
         "oauth",
-        "Fable did not receive a valid OAuth callback.",
+        "Mivlet did not receive a valid OAuth callback.",
         false,
     ))
 }
@@ -884,7 +884,7 @@ async fn accept_valid_callback(
 pub(crate) async fn bind_loopback_callback() -> Result<(TcpListener, String), String> {
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|_| "Fable could not bind a loopback OAuth listener.".to_string())?;
+        .map_err(|_| "Mivlet could not bind a loopback OAuth listener.".to_string())?;
     let redirect_uri = bound_redirect(&listener).map_err(|error| error.message)?;
     Ok((listener, redirect_uri))
 }
@@ -910,7 +910,7 @@ pub(crate) async fn accept_loopback_callback(
     } else {
         (
             "Authorization received",
-            "Finishing the connection in Fable...",
+            "Finishing the connection in Mivlet...",
         )
     };
     acknowledge_callback(&mut stream, page_status, page_message).await;
@@ -955,7 +955,7 @@ pub(crate) async fn run_loopback_oauth(
         command_error(
             "unknown",
             connector_id,
-            "Fable could not retain the pending OAuth state.",
+            "Mivlet could not retain the pending OAuth state.",
             false,
         )
     })?;
@@ -985,7 +985,7 @@ pub(crate) async fn run_loopback_oauth(
         ),
         false => (
             "Authorization received",
-            "Finishing the connection in Fable…",
+            "Finishing the connection in Mivlet…",
         ),
     };
     acknowledge_callback(&mut stream, page_status, page_message).await;

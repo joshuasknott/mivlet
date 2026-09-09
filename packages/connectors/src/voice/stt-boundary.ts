@@ -160,7 +160,7 @@ export function createBrowserSpeechProvider(
     descriptor: BROWSER_SPEECH_DESCRIPTOR,
     capability,
     processingDisclosure:
-      "Speech processing is provided by the operating system or browser and may use a remote service. Fable does not retain raw audio or persist a separate dictation transcript.",
+      "Speech processing is provided by the operating system or browser and may use a remote service. Mivlet does not retain raw audio or persist a separate dictation transcript.",
     availability() {
       return constructorFor(environment)
         ? { status: "available" }

@@ -251,7 +251,7 @@ describe("Slack production adapter", () => {
       const path = new URL(String(url)).pathname;
       const body = JSON.parse(String(init?.body));
       expect(body.provider).toBe("slack");
-      if (path.endsWith("/handoff")) return json({ contractVersion: 1, tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: [] }, account: { id: "U1", displayName: "Slack User", workspace: "Fable" } });
+      if (path.endsWith("/handoff")) return json({ contractVersion: 1, tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: [] }, account: { id: "U1", displayName: "Slack User", workspace: "Mivlet" } });
       if (path.endsWith("/refresh")) return json({ contractVersion: 1, tokens: { accessToken: "synthetic-access-2", tokenType: "Bearer", scopes: [] } });
       if (path.endsWith("/revoke")) return json({ contractVersion: 1, revoked: true });
       return json({ error: "invalid route" }, 404);

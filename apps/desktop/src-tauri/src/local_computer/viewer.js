@@ -77,7 +77,7 @@ async function refresh() {
     controller = next.controller;
     updateControls();
     if (changed) { queue = Promise.resolve(); pointerDown = false; connecting = false; await connect(); }
-  } catch { controller = "paused"; updateControls(); status.textContent = "The computer is unavailable. Reopen it from Fable."; }
+  } catch { controller = "paused"; updateControls(); status.textContent = "The computer is unavailable. Reopen it from Mivlet."; }
 }
 
 async function changeControl(next) {

@@ -379,7 +379,7 @@ fn resolve_native_read(
         error(
             "capability-unknown",
             capability_id,
-            "Fable does not know this semantic capability.",
+            "Mivlet does not know this semantic capability.",
             false,
         )
     })?;
@@ -421,7 +421,7 @@ fn resolve_native_read(
         error(
             "implementation-unverified",
             capability_id,
-            "Fable's encrypted Connection store is unavailable.",
+            "Mivlet's encrypted Connection store is unavailable.",
             false,
         )
     })?;
@@ -555,7 +555,7 @@ pub(crate) fn mcp_grant_target(
         error(
             "implementation-unverified",
             capability_id,
-            "Fable's encrypted Connection store is unavailable.",
+            "Mivlet's encrypted Connection store is unavailable.",
             false,
         )
     })?;
@@ -664,7 +664,7 @@ pub(crate) async fn read_with_exact_grant(
         error(
             "implementation-unverified",
             &capability_id,
-            "Fable's encrypted capability-grant store is unavailable.",
+            "Mivlet's encrypted capability-grant store is unavailable.",
             false,
         )
     })?;
@@ -725,7 +725,7 @@ pub(crate) async fn read_with_exact_grant(
                 error(
                     "implementation-unverified",
                     &capability_id,
-                    "Fable could not encode the capability result.",
+                    "Mivlet could not encode the capability result.",
                     false,
                 )
             })?
@@ -829,7 +829,7 @@ pub(crate) async fn read_with_exact_grant(
                 error(
                     "implementation-unverified",
                     &capability_id,
-                    "Fable could not encode the capability result.",
+                    "Mivlet could not encode the capability result.",
                     false,
                 )
             })?

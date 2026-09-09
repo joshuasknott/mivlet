@@ -223,7 +223,7 @@ describe("ApprovalPanel — high-risk confirmation", () => {
     ).toBeInTheDocument();
     // The copy explains it is high-risk and requires the exact typed phrase.
     expect(screen.getByText(/type the exact phrase/i)).toBeInTheDocument();
-    // The copy explains what confirming unlocks and that Fable still runs a
+    // The copy explains what confirming unlocks and that Mivlet still runs a
     // final check before the action runs.
     expect(screen.getAllByText(/final check/i).length).toBeGreaterThan(0);
   });
@@ -267,7 +267,7 @@ describe("ApprovalPanel — modify flow", () => {
       modificationDraft: editingDraft
     });
 
-    const dataField = screen.getByLabelText(/information fable can use for/i) as HTMLTextAreaElement;
+    const dataField = screen.getByLabelText(/information mivlet can use for/i) as HTMLTextAreaElement;
     // The component is controlled: each change reports the next draft to the
     // parent handler (here a stub), so assert the handler is called with the
     // narrowed data value.
@@ -329,7 +329,7 @@ describe("ApprovalPanel — active grants + saved rules inspection", () => {
 });
 
 describe("ApprovalPanel — empty state", () => {
-  it("explains that Fable asks before consequential actions", () => {
+  it("explains that Mivlet asks before consequential actions", () => {
     renderPanel({ approvals: [] });
     const empty = screen.getByText(/asks before/i);
     expect(empty).toBeInTheDocument();

@@ -127,22 +127,22 @@ fn mcp_oauth_credential_key(
 
 fn mcp_oauth_entry(key: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, key)
-        .map_err(|_| "Fable could not access MCP OAuth credentials.".to_string())
+        .map_err(|_| "Mivlet could not access MCP OAuth credentials.".to_string())
 }
 
 fn store_mcp_oauth_tokens(key: &str, tokens: &RemoteMcpOAuthTokens) -> Result<(), String> {
     let encoded = serde_json::to_string(tokens)
-        .map_err(|_| "Fable could not encode MCP OAuth credentials.".to_string())?;
+        .map_err(|_| "Mivlet could not encode MCP OAuth credentials.".to_string())?;
     mcp_oauth_entry(key)?
         .set_password(&encoded)
-        .map_err(|_| "Fable could not store MCP OAuth credentials.".to_string())
+        .map_err(|_| "Mivlet could not store MCP OAuth credentials.".to_string())
 }
 
 fn load_mcp_oauth_tokens(key: &str) -> Result<Option<RemoteMcpOAuthTokens>, String> {
     let encoded = match mcp_oauth_entry(key)?.get_password() {
         Ok(value) => value,
         Err(keyring::Error::NoEntry) => return Ok(None),
-        Err(_) => return Err("Fable could not read MCP OAuth credentials.".into()),
+        Err(_) => return Err("Mivlet could not read MCP OAuth credentials.".into()),
     };
     serde_json::from_str(&encoded)
         .map(Some)
@@ -152,7 +152,7 @@ fn load_mcp_oauth_tokens(key: &str) -> Result<Option<RemoteMcpOAuthTokens>, Stri
 fn remove_mcp_oauth_tokens(key: &str) -> Result<(), String> {
     match mcp_oauth_entry(key)?.delete_credential() {
         Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-        Err(_) => Err("Fable could not remove MCP OAuth credentials.".into()),
+        Err(_) => Err("Mivlet could not remove MCP OAuth credentials.".into()),
     }
 }
 

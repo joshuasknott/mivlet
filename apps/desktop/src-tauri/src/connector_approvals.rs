@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 fn action_fingerprint(action: &ConnectorActionRequest) -> Result<String, String> {
     let encoded = serde_json::to_vec(action)
-        .map_err(|_| "Fable could not fingerprint the connector action.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint the connector action.".to_string())?;
     Ok(Sha256::digest(encoded)
         .iter()
         .map(|byte| format!("{byte:02x}"))
@@ -27,12 +27,12 @@ fn read_records(path: &Path) -> Result<Vec<ConnectorApprovalRecord>, String> {
         return Ok(Vec::new());
     }
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read connector approval records.".to_string())?;
+        .map_err(|_| "Mivlet could not read connector approval records.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
     serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse connector approval records.".to_string())
+        .map_err(|_| "Mivlet could not parse connector approval records.".to_string())
 }
 
 fn write_records(path: &Path, records: &[ConnectorApprovalRecord]) -> Result<(), String> {
@@ -40,12 +40,12 @@ fn write_records(path: &Path, records: &[ConnectorApprovalRecord]) -> Result<(),
         return Ok(());
     }
     let encoded = serde_json::to_vec_pretty(records)
-        .map_err(|_| "Fable could not encode connector approval records.".to_string())?;
+        .map_err(|_| "Mivlet could not encode connector approval records.".to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, encoded)
-        .map_err(|_| "Fable could not save connector approval records.".to_string())?;
+        .map_err(|_| "Mivlet could not save connector approval records.".to_string())?;
     fs::rename(&temporary, path)
-        .map_err(|_| "Fable could not commit connector approval records.".to_string())
+        .map_err(|_| "Mivlet could not commit connector approval records.".to_string())
 }
 
 fn is_sensitive_payload_key(key: &str) -> bool {
@@ -312,7 +312,7 @@ pub(crate) fn verify_prepared_connector_action(
     let record = records
         .into_iter()
         .find(|record| record.request_id == action.approval.id)
-        .ok_or_else(|| "Connector action was not prepared by Fable.".to_string())?;
+        .ok_or_else(|| "Connector action was not prepared by Mivlet.".to_string())?;
     if record.connector_id != action.connector_id
         || record.proposed_action != action.action
         || record.risk_level != action.approval.risk_level

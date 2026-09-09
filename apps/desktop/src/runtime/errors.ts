@@ -23,6 +23,6 @@ export function toRuntimeError(error: unknown) {
   }
 
   return new Error(
-    typeof error === "string" ? error : "Fable runtime request failed.",
+    typeof error === "string" ? error : "Mivlet runtime request failed.",
   );
 }

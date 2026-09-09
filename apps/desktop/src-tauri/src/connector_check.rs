@@ -265,7 +265,7 @@ async fn check(app: &tauri::AppHandle) -> Value {
                 let request = serde_json::from_value(json!({
                     "tool": tool, "arguments": arguments, "workspaceId": scope.data.workspace_id(),
                     "approval": {"decision": "once", "decidedAt": now, "request": {
-                        "id": format!("connector-check-{}-{}", std::process::id(), connector.id), "service": "Fable",
+                        "id": format!("connector-check-{}-{}", std::process::id(), connector.id), "service": "Mivlet",
                         "action": tool, "mode": "read-only", "riskLevel": crate::tools::tool_policy(tool).unwrap().1, "dataUsed": data,
                         "consequence": "Read connected source", "requestedAt": now, "decisions": ["once", "deny"]
                     }}

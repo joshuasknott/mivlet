@@ -74,7 +74,7 @@ describe("managed provider runtime backend", () => {
     expect(setup.runtime.shutdown).toHaveBeenCalledOnce();
   });
 
-  it("routes ACP permission requests through Fable and rejects them when authorization fails", async () => {
+  it("routes ACP permission requests through Mivlet and rejects them when authorization fails", async () => {
     const setup = fixture([
       {
         type: "approval-request",

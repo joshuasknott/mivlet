@@ -1,6 +1,6 @@
 //! Read-only desktop streaming. The guest gateway credential stays native.
 //! A short-lived loopback capability serves only the decoder and its video;
-//! keyboard/pointer input continues through Fable's native authority commands.
+//! keyboard/pointer input continues through Mivlet's native authority commands.
 
 use super::{container, LocalComputerState};
 use axum::{
@@ -116,7 +116,7 @@ pub async fn local_computer_open_viewer(
     computers: tauri::State<'_, Arc<LocalComputerState>>,
 ) -> Result<ViewerProjection, String> {
     if window.label() != "main" {
-        return Err("Open the computer from Fable.".into());
+        return Err("Open the computer from Mivlet.".into());
     }
     let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
     let label = format!("computer-{}", scope.key);
@@ -126,10 +126,10 @@ pub async fn local_computer_open_viewer(
     if let Some(existing) = window.app_handle().get_webview_window(&label) {
         existing
             .navigate(url)
-            .map_err(|_| "Fable could not reconnect the viewer.".to_string())?;
+            .map_err(|_| "Mivlet could not reconnect the viewer.".to_string())?;
         existing
             .set_focus()
-            .map_err(|_| "Fable could not focus the viewer.".to_string())?;
+            .map_err(|_| "Mivlet could not focus the viewer.".to_string())?;
     } else {
         let navigation_scope = scope.key.clone();
         let viewer_window = tauri::WebviewWindowBuilder::new(
@@ -137,7 +137,7 @@ pub async fn local_computer_open_viewer(
             label,
             tauri::WebviewUrl::External(url),
         )
-        .title("Fable computer")
+        .title("Mivlet computer")
         .inner_size(1280.0, 860.0)
         .min_inner_size(640.0, 480.0)
         .on_navigation(move |target| {
@@ -153,7 +153,7 @@ pub async fn local_computer_open_viewer(
                 })
         })
         .build()
-        .map_err(|_| "Fable could not open its computer viewer.".to_string())?;
+        .map_err(|_| "Mivlet could not open its computer viewer.".to_string())?;
         let scope_key = scope.key;
         viewer_window.on_window_event(move |event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -188,7 +188,7 @@ async fn open_viewer(
         .map_err(|_| "The computer stream could not start.".to_string())??;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
-        .map_err(|_| "Fable could not open its local viewer.".to_string())?;
+        .map_err(|_| "Mivlet could not open its local viewer.".to_string())?;
     let origin = format!(
         "http://127.0.0.1:{}",
         listener
@@ -268,7 +268,7 @@ pub fn local_computer_close_viewer(
     session_id: String,
 ) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Close the computer from Fable.".into());
+        return Err("Close the computer from Mivlet.".into());
     }
     let views = VIEWERS
         .get_or_init(Default::default)

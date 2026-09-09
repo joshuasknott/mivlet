@@ -57,7 +57,7 @@ pub async fn local_computer_lifecycle(
     state: tauri::State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerSnapshot, String> {
     if window.label() != "main" {
-        return Err("Use Computer options in Fable to manage this computer.".into());
+        return Err("Use Computer options in Mivlet to manage this computer.".into());
     }
     state.validate_target(&request.workspace_id, &request.agent_id)?;
     let state = state.inner().clone();

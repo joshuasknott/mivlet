@@ -38,7 +38,7 @@ export function normalizeNotionItem(payload: NotionPayload): ConnectorSearchItem
     connectorId: "notion",
     title: payload.title,
     kind: payload.object,
-    summary: `${payload.object} shared with the Fable connection`,
+    summary: `${payload.object} shared with the Mivlet connection`,
     provenance: `Notion · ${payload.workspace}`,
     freshness: payload.lastEditedTime ?? "Provider freshness unavailable",
     trust: "untrusted",

@@ -126,7 +126,7 @@ function safeOptionalString(value: unknown, max: number): string | undefined {
 }
 
 /**
- * Converts an untrusted MCP CallToolResult into a bounded Fable-owned contract.
+ * Converts an untrusted MCP CallToolResult into a bounded Mivlet-owned contract.
  * External text and structured JSON never acquire instruction authority, and
  * binary media payloads never cross into model context through this helper.
  */
@@ -211,7 +211,7 @@ export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
 /**
  * Stateful MCP client core shared by local STDIO and later remote transports.
  * Discovery is untrusted data, and tool calls cannot cross this layer without
- * an injected Fable authorization decision over an immutable input snapshot.
+ * an injected Mivlet authorization decision over an immutable input snapshot.
  */
 export class McpClient {
   private nextId = 1;
@@ -234,7 +234,7 @@ export class McpClient {
     const result = await this.request("initialize", {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
-      clientInfo: { name: "Fable", version: "0.1.0" }
+      clientInfo: { name: "Mivlet", version: "0.1.0" }
     });
     const parsed = this.parseInitializeResult(result);
     if (parsed.protocolVersion !== MCP_PROTOCOL_VERSION) {
@@ -302,7 +302,7 @@ export class McpClient {
     if (isMcpRequest(frame)) {
       // Server-initiated sampling, roots, and elicitation are not advertised by
       // this client. A transport adapter must reject them; they never become
-      // implicit Fable authority here.
+      // implicit Mivlet authority here.
       return;
     }
     if (isMcpNotification(frame)) return;
@@ -332,7 +332,7 @@ export class McpClient {
         void this.transport.send({
           jsonrpc: "2.0",
           method: "notifications/cancelled",
-          params: { requestId: id, reason: "Fable request timeout" }
+          params: { requestId: id, reason: "Mivlet request timeout" }
         }).catch(() => undefined);
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });

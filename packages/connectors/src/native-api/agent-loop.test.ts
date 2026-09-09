@@ -28,7 +28,7 @@ async function collect(iter: AsyncIterable<BackendAgentEvent>): Promise<BackendA
 }
 
 describe("runAgentLoop", () => {
-  it("does not advertise Fable tools to a model that explicitly lacks tool support", async () => {
+  it("does not advertise Mivlet tools to a model that explicitly lacks tool support", async () => {
     const captured: NativeCompletionRequest[] = [];
     const transport: HttpTransport = {
       async *stream(request) {

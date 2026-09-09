@@ -69,7 +69,7 @@ pub(crate) fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryReco
         title,
         value,
         source: if source.is_empty() {
-            "Fable memory".to_string()
+            "Mivlet memory".to_string()
         } else {
             source
         },
@@ -126,9 +126,9 @@ pub(crate) fn write_memory_state(
         return Ok(normalized);
     }
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Fable could not encode memory state.".to_string())?;
+        .map_err(|_| "Mivlet could not encode memory state.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Fable could not save memory state.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Mivlet could not save memory state.".to_string())?;
 
     Ok(normalized)
 }
@@ -154,9 +154,9 @@ fn encode_memory_export_scoped(
         records: normalized.records,
     };
     let value = serde_json::to_value(envelope)
-        .map_err(|_| "Fable could not encode memory export.".to_string())?;
+        .map_err(|_| "Mivlet could not encode memory export.".to_string())?;
     serde_json::to_string_pretty(&redact_export_value(&value))
-        .map_err(|_| "Fable could not encode memory export.".to_string())
+        .map_err(|_| "Mivlet could not encode memory export.".to_string())
 }
 
 fn redact_export_value(value: &serde_json::Value) -> serde_json::Value {
@@ -340,7 +340,7 @@ fn promote_project_knowledge_source(
         .iter()
         .find(|record| record.id == response.record.id)
         .cloned()
-        .ok_or_else(|| "Fable could not retain promoted memory.".to_string())?;
+        .ok_or_else(|| "Mivlet could not retain promoted memory.".to_string())?;
     Ok(response)
 }
 
@@ -450,7 +450,7 @@ pub(crate) fn promote_knowledge_source(
         request_id: format!("memory-promotion-{source_id}"),
         decision,
         decided_at,
-        note: format!("Fable Memory Approve {provenance} into durable memory"),
+        note: format!("Mivlet Memory Approve {provenance} into durable memory"),
     })?;
 
     Ok(MemoryPromotionResponse {
@@ -593,7 +593,7 @@ pub fn change_memory_record_state(
 ) -> Result<MemoryControlState, String> {
     use tauri::Manager;
     if window.label() != "main" {
-        return Err("Memory controls belong to the main Fable window.".into());
+        return Err("Memory controls belong to the main Mivlet window.".into());
     }
     let path = memory_state_path(window.app_handle())?;
     let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;
@@ -646,7 +646,7 @@ pub fn correct_memory_record(
 ) -> Result<MemoryControlState, String> {
     use tauri::Manager;
     if window.label() != "main" {
-        return Err("Memory corrections belong to the main Fable window.".into());
+        return Err("Memory corrections belong to the main Mivlet window.".into());
     }
     let path = memory_state_path(window.app_handle())?;
     let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;

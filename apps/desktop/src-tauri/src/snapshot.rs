@@ -157,14 +157,14 @@ pub(crate) fn read_imported_knowledge_sources(path: &Path) -> Result<Vec<LocalFi
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read imported knowledge sources.".to_string())?;
+        .map_err(|_| "Mivlet could not read imported knowledge sources.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<LocalFileImport>>(&contents)
-        .map_err(|_| "Fable could not parse imported knowledge sources.".to_string())
+        .map_err(|_| "Mivlet could not parse imported knowledge sources.".to_string())
 }
 
 pub(crate) fn read_imported_knowledge_sources_private(
@@ -259,7 +259,7 @@ fn apply_local_knowledge_refresh(
     let actual_size = request.file.content.len();
     if actual_size != request.file.size_bytes {
         return Err(
-            "The selected file changed while Fable was reading it. Choose it again.".to_string(),
+            "The selected file changed while Mivlet was reading it. Choose it again.".to_string(),
         );
     }
     if request.file.content.contains('\0')
@@ -350,10 +350,10 @@ fn write_imported_knowledge_sources(
         return Ok(());
     }
     let encoded = serde_json::to_string_pretty(sources)
-        .map_err(|_| "Fable could not encode imported knowledge sources.".to_string())?;
+        .map_err(|_| "Mivlet could not encode imported knowledge sources.".to_string())?;
 
     fs::write(path, encoded)
-        .map_err(|_| "Fable could not save imported knowledge sources.".to_string())
+        .map_err(|_| "Mivlet could not save imported knowledge sources.".to_string())
 }
 
 #[tauri::command]
@@ -680,9 +680,9 @@ pub(crate) fn write_runtime_snapshot(
         return Ok(normalized);
     }
     let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Fable could not encode runtime snapshot.".to_string())?;
+        .map_err(|_| "Mivlet could not encode runtime snapshot.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Fable could not save runtime snapshot.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Mivlet could not save runtime snapshot.".to_string())?;
 
     Ok(normalized)
 }

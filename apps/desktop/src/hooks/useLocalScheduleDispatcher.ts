@@ -79,7 +79,7 @@ function firstDue(schedules: LocalSchedule[], now = Date.now()) {
 /**
  * Mount once with the shell runtime. The dispatcher is independent of the
  * selected conversation and uses a Rust-owned serial capacity slot. Its route
- * is deliberately limited to Codex provider-owned web research with no Fable
+ * is deliberately limited to Codex provider-owned web research with no Mivlet
  * tools, Computer access, connector access, or standing approvals.
  */
 export function useLocalScheduleDispatcher(

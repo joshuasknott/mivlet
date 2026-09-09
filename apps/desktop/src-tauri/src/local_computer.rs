@@ -323,7 +323,7 @@ impl LocalComputerState {
         let app_data = crate::paths::app_data_dir(app)?;
         let root = app_data.join("local-computers");
         std::fs::create_dir_all(&root)
-            .map_err(|_| "Fable could not initialize local computer storage.".to_string())?;
+            .map_err(|_| "Mivlet could not initialize local computer storage.".to_string())?;
         let source_context = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("resources")
             .join("local-computer");
@@ -463,7 +463,7 @@ impl LocalComputerState {
 
     fn ensure_open(&self) -> Result<(), String> {
         if self.closing.load(Ordering::Acquire) {
-            Err("Fable is closing. Computer actions are paused.".into())
+            Err("Mivlet is closing. Computer actions are paused.".into())
         } else {
             Ok(())
         }
@@ -822,7 +822,7 @@ fn observe_agent_controls(
     let observation_id = format!("observation-{}", &token[..24]);
     let control_prefix = format!("control-{}", &token[24..48]);
     let prefix_json = serde_json::to_string(&control_prefix)
-        .map_err(|_| "Fable could not prepare browser observation refs.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare browser observation refs.".to_string())?;
     let expression = format!(
         r#"(() => {{
           const prefix = {prefix_json};
@@ -881,7 +881,7 @@ fn observe_agent_controls(
     let remote = session
         .tab
         .evaluate(&expression, false)
-        .map_err(|_| "Fable could not inspect visible browser controls.".to_string())?;
+        .map_err(|_| "Mivlet could not inspect visible browser controls.".to_string())?;
     let encoded = remote
         .value
         .and_then(|value| value.as_str().map(str::to_string))
@@ -1062,7 +1062,7 @@ fn perform_agent_control_action(
         "value": value,
     });
     let input_json = serde_json::to_string(&input)
-        .map_err(|_| "Fable could not prepare the browser action.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the browser action.".to_string())?;
     let expression = format!(
         r#"(() => {{
           const input = {input_json};
@@ -1297,17 +1297,17 @@ async fn ensure_browser_session(
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| "Fable could not start the local browser.".to_string())?
+    .map_err(|_| "Mivlet could not start the local browser.".to_string())?
 }
 
 fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     std::fs::create_dir_all(&scope.directory)
-        .map_err(|_| "Fable could not create the agent computer workspace.".to_string())?;
+        .map_err(|_| "Mivlet could not create the agent computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&scope.directory)
         .map_err(|_| "The agent computer directory failed its security check.".to_string())?;
     let workspace = scope.directory.join("workspace");
     std::fs::create_dir_all(&workspace)
-        .map_err(|_| "Fable could not create the agent computer workspace.".to_string())?;
+        .map_err(|_| "Mivlet could not create the agent computer workspace.".to_string())?;
     crate::paths::strict_canonicalize(&workspace)
         .map_err(|_| "A agent computer directory failed its security check.".to_string())?;
     Ok(())
@@ -1329,7 +1329,7 @@ fn launch_browser(
     let debugger_url = container::debugger_websocket_url(scope)?;
     let browser = Browser::connect_with_timeout(debugger_url, Duration::from_secs(24 * 60 * 60))
         .map_err(|_| {
-            "Fable could not connect to Chromium inside the agent computer.".to_string()
+            "Mivlet could not connect to Chromium inside the agent computer.".to_string()
         })?;
     browser.set_default_timeout(Duration::from_secs(15));
     let tabs = browser.get_tabs();
@@ -1339,7 +1339,7 @@ fn launch_browser(
         .and_then(|tabs| tabs.first().cloned())
         .map(Ok)
         .unwrap_or_else(|| browser.new_tab())
-        .map_err(|_| "Fable could not open the browser inside the agent computer.".to_string())?;
+        .map_err(|_| "Mivlet could not open the browser inside the agent computer.".to_string())?;
     tab.set_default_timeout(Duration::from_secs(15));
     Ok(LocalBrowserSession {
         _browser: browser,
@@ -1405,7 +1405,7 @@ fn browser_history_availability(session: &LocalBrowserSession) -> Result<(bool, 
     let history = session
         .tab
         .call_method(GetNavigationHistory(None))
-        .map_err(|_| "Fable could not inspect the local browser history.".to_string())?;
+        .map_err(|_| "Mivlet could not inspect the local browser history.".to_string())?;
     Ok(history_availability(
         history.current_index,
         history.entries.len(),
@@ -1532,9 +1532,9 @@ fn workspace_files_snapshot(scope: &ComputerScope) -> Result<LocalComputerFilesS
             return Err("A agent folder escaped its private workspace.".into());
         }
         let mut children = std::fs::read_dir(&canonical_directory)
-            .map_err(|_| "Fable could not list this agent's files.".to_string())?
+            .map_err(|_| "Mivlet could not list this agent's files.".to_string())?
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "Fable could not list this agent's files.".to_string())?;
+            .map_err(|_| "Mivlet could not list this agent's files.".to_string())?;
         children.sort_by_key(|entry| entry.file_name().to_string_lossy().to_lowercase());
 
         for child in children {
@@ -1644,7 +1644,7 @@ fn workspace_file_preview(
         return Err("That file is outside this agent's private workspace.".into());
     }
     let metadata = std::fs::metadata(&canonical_file)
-        .map_err(|_| "Fable could not inspect that private file.".to_string())?;
+        .map_err(|_| "Mivlet could not inspect that private file.".to_string())?;
     if !metadata.is_file() {
         return Err("Choose a regular text file to preview.".into());
     }
@@ -1661,13 +1661,13 @@ fn workspace_file_preview(
         })
         .ok_or_else(|| "That private file name cannot be displayed safely.".to_string())?;
     let mut file = std::fs::File::open(&canonical_file)
-        .map_err(|_| "Fable could not open that private file.".to_string())?;
+        .map_err(|_| "Mivlet could not open that private file.".to_string())?;
     let mut bytes = Vec::with_capacity(MAX_FILE_PREVIEW_BYTES + 1);
     std::io::Read::read_to_end(
         &mut std::io::Read::take(&mut file, (MAX_FILE_PREVIEW_BYTES + 1) as u64),
         &mut bytes,
     )
-    .map_err(|_| "Fable could not read that private file.".to_string())?;
+    .map_err(|_| "Mivlet could not read that private file.".to_string())?;
     let truncated = bytes.len() > MAX_FILE_PREVIEW_BYTES;
     bytes.truncate(MAX_FILE_PREVIEW_BYTES);
     let content = match std::str::from_utf8(&bytes) {
@@ -2087,7 +2087,7 @@ pub async fn local_browser_history(
         let history = session
             .tab
             .call_method(GetNavigationHistory(None))
-            .map_err(|_| "Fable could not inspect the local browser history.".to_string())?;
+            .map_err(|_| "Mivlet could not inspect the local browser history.".to_string())?;
         let current_index = usize::try_from(history.current_index)
             .map_err(|_| "The local browser returned invalid history.".to_string())?;
         let target_index = match request.direction.as_str() {
@@ -2468,7 +2468,7 @@ mod tests {
                 let mut stream = stream.unwrap();
                 let mut request = [0_u8; 2_048];
                 let _ = stream.read(&mut request);
-                let body = r#"<!doctype html><html><head><title>Fable local computer</title></head><body><label>Name <input id="name"></label><button id="save">Save</button></body></html>"#;
+                let body = r#"<!doctype html><html><head><title>Mivlet local computer</title></head><body><label>Name <input id="name"></label><button id="save">Save</button></body></html>"#;
                 let response = format!(
                     "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                     body.len(),
@@ -2500,16 +2500,16 @@ mod tests {
             .wait_until_navigated()
             .unwrap();
         session.tab.find_element("#name").unwrap().click().unwrap();
-        session.tab.send_character("Fable").unwrap();
+        session.tab.send_character("Mivlet").unwrap();
         let typed = session
             .tab
             .evaluate("document.querySelector('#name').value", false)
             .unwrap()
             .value
             .unwrap();
-        assert_eq!(typed, serde_json::json!("Fable"));
+        assert_eq!(typed, serde_json::json!("Mivlet"));
         let snapshot = snapshot_from_session(&scope, &mut session).unwrap();
-        assert_eq!(snapshot.title, "Fable local computer");
+        assert_eq!(snapshot.title, "Mivlet local computer");
         assert!(snapshot
             .current_url
             .starts_with("http://host.docker.internal:"));
@@ -2763,7 +2763,7 @@ mod tests {
             &query.role,
             &query.name,
             "fill",
-            Some("Fable"),
+            Some("Mivlet"),
             None,
         )
         .unwrap();
@@ -2773,7 +2773,7 @@ mod tests {
             .unwrap()
             .value
             .unwrap();
-        assert_eq!(value, serde_json::json!("Fable"));
+        assert_eq!(value, serde_json::json!("Mivlet"));
         let region = observation
             .controls
             .iter()

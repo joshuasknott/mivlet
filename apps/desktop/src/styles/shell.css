@@ -170,3 +170,12 @@
     transform: translateY(0);
   }
 }
+
+/* Full lockups are reserved for product entry points, never agent messages. */
+.mivlet-brand { display: inline-flex; width: 112px; flex: 0 0 auto; align-items: center; }
+.mivlet-brand img { display: block; width: 100%; height: auto; }
+.mivlet-brand .mivlet-brand__dark { display: none; }
+:root[data-theme="dark"] .mivlet-brand__light { display: none; }
+:root[data-theme="dark"] .mivlet-brand__dark { display: block; }
+.mivlet-brand--compact { width: 40px; }
+.og-brand { width: 180px; margin-bottom: 36px; }

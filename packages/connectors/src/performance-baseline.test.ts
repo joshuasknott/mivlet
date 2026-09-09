@@ -109,7 +109,7 @@ describe("performance baseline guardrails", () => {
       'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read-file","arguments":"{\\"path\\":\\"README.md\\"}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}';
     const doneTurn =
       'data: {"choices":[{"delta":{"content":"done"}}]}\ndata: {"choices":[{"finish_reason":"stop"}]}';
-    const execute: ToolExecutor = async () => "Fable README fixture content";
+    const execute: ToolExecutor = async () => "Mivlet README fixture content";
 
     const start = performance.now();
     const events = await collect(

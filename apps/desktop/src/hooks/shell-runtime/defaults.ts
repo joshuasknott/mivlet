@@ -35,7 +35,7 @@ export const defaultShellState: PersistedShellState = {
   connectedBackendIds: [],
   onboardingComplete: false,
   onboardingVersion: 0,
-  // "" lets Fable pick the first available model. Ask Me is the default
+  // "" lets Mivlet pick the first available model. Ask Me is the default
   // approval preset.
   selectedModelId: "",
   permissionMode: "trusted-scope",
@@ -49,7 +49,7 @@ export const ALLOW_PREVIEW_FALLBACKS =
 export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   enabled: false,
   state: "disabled",
-  message: "Fable account setup is not configured.",
+  message: "Mivlet account setup is not configured.",
   scopes: []
 };
 
@@ -57,7 +57,7 @@ export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
 export const DEFAULT_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
   configured: false,
   state: "ready",
-  message: "Local workspace ready. A Fable account is optional.",
+  message: "Local workspace ready. A Mivlet account is optional.",
   accountBound: true,
   workspaces: [],
   activeWorkspace: {

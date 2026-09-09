@@ -137,7 +137,7 @@ fn fill_random(out: &mut [u8]) -> Result<(), VaultError> {
 /// surfaces encrypt/decrypt as unit errors; kept for future completeness.)
 #[allow(dead_code)]
 pub fn os_error_message() -> &'static str {
-    "Fable could not use the encryption primitive."
+    "Mivlet could not use the encryption primitive."
 }
 
 #[cfg(test)]

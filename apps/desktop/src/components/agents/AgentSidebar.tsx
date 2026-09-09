@@ -1,3 +1,4 @@
+import { Brand } from "../Brand";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
@@ -103,7 +104,7 @@ export function AgentSidebar({
   return (
     <aside className="agent-sidebar" aria-label="Agents" hidden={hidden}>
       <div className="agent-sidebar__topline">
-        <span className="agent-sidebar__title">Fable</span>
+        <Brand className="agent-sidebar__brand" />
       </div>
 
       <label className="agent-search">

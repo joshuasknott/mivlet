@@ -462,12 +462,12 @@ pub(crate) fn read_execution_attempts(path: &Path) -> Result<Vec<ExecutionAttemp
         return Ok(Vec::new());
     }
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read execution attempt state.".to_string())?;
+        .map_err(|_| "Mivlet could not read execution attempt state.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
     let attempts: Vec<ExecutionAttempt> = serde_json::from_str(&contents)
-        .map_err(|_| "Fable could not parse execution attempt state.".to_string())?;
+        .map_err(|_| "Mivlet could not parse execution attempt state.".to_string())?;
     attempts
         .into_iter()
         .map(normalize_execution_attempt)
@@ -480,12 +480,12 @@ fn write_execution_attempts(path: &Path, attempts: &[ExecutionAttempt]) -> Resul
         return Ok(());
     }
     let encoded = serde_json::to_vec_pretty(attempts)
-        .map_err(|_| "Fable could not encode execution attempt state.".to_string())?;
+        .map_err(|_| "Mivlet could not encode execution attempt state.".to_string())?;
     let temporary = path.with_extension("json.tmp");
     fs::write(&temporary, encoded)
-        .map_err(|_| "Fable could not save execution attempt state.".to_string())?;
+        .map_err(|_| "Mivlet could not save execution attempt state.".to_string())?;
     fs::rename(&temporary, path)
-        .map_err(|_| "Fable could not commit execution attempt state.".to_string())
+        .map_err(|_| "Mivlet could not commit execution attempt state.".to_string())
 }
 
 #[cfg(test)]
@@ -651,7 +651,7 @@ pub fn save_execution_attempt(
 ) -> Result<ExecutionAttempt, String> {
     let attempt = normalize_execution_attempt(attempt)?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     if let Some(receipt) = attempt.context_receipt.as_ref() {
         validate_context_receipt_authority(receipt)?;
@@ -709,7 +709,7 @@ pub fn save_execution_attempt(
 #[tauri::command]
 pub fn list_execution_attempts(_app: tauri::AppHandle) -> Result<Vec<ExecutionAttempt>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     store
         .with_conn(|tx| {
@@ -745,7 +745,7 @@ pub fn recover_interrupted_execution_attempts(
     recovered_at: String,
 ) -> Result<Vec<ExecutionAttempt>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = runtime_scope()?;
     let recovered_at = normalize_spaces(&recovered_at);
     if recovered_at.is_empty() {

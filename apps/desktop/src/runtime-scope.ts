@@ -1,5 +1,5 @@
 /**
- * The selected Fable workspace is the only implicit scope allowed at the
+ * The selected Mivlet workspace is the only implicit scope allowed at the
  * renderer/native boundary. Native callers must set it from the verified
  * account-workspace directory before any workspace-owned command is invoked.
  */

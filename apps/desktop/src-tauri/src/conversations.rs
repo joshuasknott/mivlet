@@ -84,10 +84,10 @@ pub fn conversation_create_thread(
         return Err("The selected workspace changed before the conversation was created.".into());
     }
     if input.project_id.is_some() {
-        return Err("Project-scoped conversations are no longer part of Fable.".into());
+        return Err("Project-scoped conversations are no longer part of Mivlet.".into());
     }
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
             let (_, member_id) = crate::account_workspace::local_install_principals();
@@ -119,7 +119,7 @@ pub fn conversation_create_thread(
 #[tauri::command]
 pub fn conversation_list_threads() -> Result<Vec<thread::ThreadRow>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .with_conn(|tx| thread::list(tx, store, &scope))
@@ -128,7 +128,7 @@ pub fn conversation_list_threads() -> Result<Vec<thread::ThreadRow>, String> {
 #[tauri::command]
 pub fn conversation_get_thread(thread_id: String) -> Result<Option<thread::ThreadRow>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .with_conn(|tx| thread::get(tx, store, &scope, &thread_id))
@@ -137,7 +137,7 @@ pub fn conversation_get_thread(thread_id: String) -> Result<Option<thread::Threa
 #[tauri::command]
 pub fn conversation_update_thread(input: UpdateThread) -> Result<thread::ThreadRow, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .transaction(|tx| {
@@ -157,7 +157,7 @@ pub fn conversation_update_thread(input: UpdateThread) -> Result<thread::ThreadR
 #[tauri::command]
 pub fn conversation_list_messages(thread_id: String) -> Result<Vec<message::MessageRow>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .with_conn(|tx| message::list(tx, store, &scope, &thread_id))
@@ -170,10 +170,10 @@ pub fn conversation_delete_thread(
     thread_id: String,
 ) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Delete conversations from the Fable window.".into());
+        return Err("Delete conversations from the Mivlet window.".into());
     }
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .transaction(|tx| thread::delete(tx, &scope, &thread_id, &now()))
@@ -182,7 +182,7 @@ pub fn conversation_delete_thread(
 #[tauri::command]
 pub fn conversation_append_message(input: AppendMessage) -> Result<message::MessageRow, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     let at = input.checkpointed_at.unwrap_or_else(now);
     store
@@ -212,7 +212,7 @@ pub fn conversation_append_message(input: AppendMessage) -> Result<message::Mess
 #[tauri::command]
 pub fn conversation_revise_message(input: ReviseMessage) -> Result<message::MessageRow, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     let at = input.checkpointed_at.unwrap_or_else(now);
     store
@@ -242,7 +242,7 @@ pub fn conversation_load_draft(
     id: String,
 ) -> Result<Option<Value>, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .with_conn(|tx| {
@@ -253,7 +253,7 @@ pub fn conversation_load_draft(
 #[tauri::command]
 pub fn conversation_save_draft(input: DraftInput) -> Result<(), String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .transaction(|tx| {
@@ -272,7 +272,7 @@ pub fn conversation_save_draft(input: DraftInput) -> Result<(), String> {
 #[tauri::command]
 pub fn conversation_delete_draft(thread_id: Option<String>, id: String) -> Result<(), String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
     store
         .transaction(|tx| {

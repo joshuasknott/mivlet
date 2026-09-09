@@ -25,7 +25,7 @@ function isRunnable(provider: BackendProvider): boolean {
 /**
  * True when a backend family has a *live* adapter the factory can resolve today.
  *
- * This is the provider-neutral "can Fable actually drive a run on this backend
+ * This is the provider-neutral "can Mivlet actually drive a run on this backend
  * right now?" predicate. The shell uses this to decide whether the composer
  * drives the agent loop or the knowledge-search fallback.
  *

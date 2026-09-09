@@ -84,14 +84,14 @@ pub(crate) fn read_approval_audit_entries(path: &Path) -> Result<Vec<ApprovalAud
     }
 
     let contents = fs::read_to_string(path)
-        .map_err(|_| "Fable could not read the approval audit log.".to_string())?;
+        .map_err(|_| "Mivlet could not read the approval audit log.".to_string())?;
 
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     serde_json::from_str::<Vec<ApprovalAuditEntry>>(&contents)
-        .map_err(|_| "Fable could not parse the approval audit log.".to_string())
+        .map_err(|_| "Mivlet could not parse the approval audit log.".to_string())
 }
 
 fn append_approval_audit_entry(
@@ -109,9 +109,10 @@ fn write_approval_audit_entries(path: &Path, entries: &[ApprovalAuditEntry]) -> 
         return Ok(());
     }
     let encoded = serde_json::to_string_pretty(entries)
-        .map_err(|_| "Fable could not encode the approval audit log.".to_string())?;
+        .map_err(|_| "Mivlet could not encode the approval audit log.".to_string())?;
 
-    fs::write(path, encoded).map_err(|_| "Fable could not save the approval audit log.".to_string())
+    fs::write(path, encoded)
+        .map_err(|_| "Mivlet could not save the approval audit log.".to_string())
 }
 
 pub(crate) fn persist_approval_audit_entry(
@@ -143,7 +144,7 @@ pub(crate) fn persist_approval_audit_entry_scoped(
         crate::store::read_workspace_document(path, scope)?.unwrap_or_default();
     let entries = append_approval_audit_entry(entries, entry.clone());
     if !crate::store::write_workspace_document(path, scope, &entries)? {
-        return Err("Fable's encrypted store is not initialized.".to_string());
+        return Err("Mivlet's encrypted store is not initialized.".to_string());
     }
     Ok(ApprovalAuditRecordResponse {
         persisted: true,
@@ -275,14 +276,14 @@ pub(crate) fn read_approval_rules(path: &Path) -> Result<Vec<ApprovalGrant>, Str
         return Ok(Vec::new());
     }
 
-    let contents =
-        fs::read_to_string(path).map_err(|_| "Fable could not read approval rules.".to_string())?;
+    let contents = fs::read_to_string(path)
+        .map_err(|_| "Mivlet could not read approval rules.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
     }
 
     let parsed = serde_json::from_str::<Vec<ApprovalGrant>>(&contents)
-        .map_err(|_| "Fable could not parse approval rules.".to_string())?;
+        .map_err(|_| "Mivlet could not parse approval rules.".to_string())?;
     parsed
         .into_iter()
         .map(normalize_approval_grant)
@@ -294,8 +295,8 @@ fn write_approval_rules(path: &Path, rules: &[ApprovalGrant]) -> Result<(), Stri
         return Ok(());
     }
     let encoded = serde_json::to_string_pretty(rules)
-        .map_err(|_| "Fable could not encode approval rules.".to_string())?;
-    fs::write(path, encoded).map_err(|_| "Fable could not save approval rules.".to_string())
+        .map_err(|_| "Mivlet could not encode approval rules.".to_string())?;
+    fs::write(path, encoded).map_err(|_| "Mivlet could not save approval rules.".to_string())
 }
 
 pub(crate) fn persist_approval_rule(

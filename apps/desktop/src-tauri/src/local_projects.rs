@@ -232,12 +232,12 @@ pub fn local_project_run_author_bind(
     require_main_window(&window)?;
     let snapshot =
         crate::snapshot::load_runtime_snapshot(app, Some(request.workspace_id.clone()), None)?
-            .ok_or_else(|| "Fable's persisted agent profiles are not available.".to_string())?;
+            .ok_or_else(|| "Mivlet's persisted agent profiles are not available.".to_string())?;
     let agent = snapshot
         .agents
         .iter()
         .find(|agent| agent.id == request.agent_id)
-        .ok_or_else(|| "The selected agent is not in Fable's persisted profiles.".to_string())?;
+        .ok_or_else(|| "The selected agent is not in Mivlet's persisted profiles.".to_string())?;
     let agent_name = agent.name.clone();
     let now = timestamp();
     let store = global_store()?;
@@ -698,13 +698,13 @@ fn require_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() == "main" {
         Ok(())
     } else {
-        Err("Manage local projects from the Fable window.".into())
+        Err("Manage local projects from the Mivlet window.".into())
     }
 }
 
 fn global_store() -> Result<&'static Store, String> {
     crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())
 }
 
 fn timestamp() -> String {

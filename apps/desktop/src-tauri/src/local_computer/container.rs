@@ -2,7 +2,7 @@
 //!
 //! Docker is invoked directly with argument arrays; no host shell participates.
 //! Every container and volume is deterministically named and label-bound to one
-//! opaque Fable scope before it may be reused or replaced.
+//! opaque Mivlet scope before it may be reused or replaced.
 
 use std::{
     collections::HashMap,
@@ -138,7 +138,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                 "--restart=no".into(),
                 container_name(scope).into(),
             ],
-            "Fable could not apply on-demand computer startup.",
+            "Mivlet could not apply on-demand computer startup.",
         )?;
         if inspection.suspended {
             unpause(scope)?;
@@ -153,7 +153,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "stop".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not stop the previous agent computer.",
+                "Mivlet could not stop the previous agent computer.",
             )?;
             checked(
                 vec![
@@ -161,7 +161,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "rm".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not replace the previous agent computer.",
+                "Mivlet could not replace the previous agent computer.",
             )?;
             create_container(scope, &image_id, &image_context_digest)?;
         } else if !inspection.running {
@@ -171,7 +171,7 @@ pub(super) fn ensure_running(scope: &ComputerScope, image_context: &Path) -> Res
                     "start".into(),
                     container_name(scope).into(),
                 ],
-                "Fable could not start the agent computer.",
+                "Mivlet could not start the agent computer.",
             )?;
         }
     } else {
@@ -224,7 +224,7 @@ fn ensure_start_capacity(scope: &ComputerScope) -> Result<(), String> {
             "--format".into(),
             "{{.Label \"com.fable.scope\"}}".into(),
         ],
-        "Fable could not check the computer resource budget.",
+        "Mivlet could not check the computer resource budget.",
     )?;
     let active: Vec<String> = String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -254,7 +254,7 @@ fn unpause(scope: &ComputerScope) -> Result<(), String> {
             "unpause".into(),
             container_name(scope).into(),
         ],
-        "Fable could not wake the sleeping computer.",
+        "Mivlet could not wake the sleeping computer.",
     )?;
     invalidate_gateway(scope);
     Ok(())
@@ -286,7 +286,7 @@ pub(super) fn stop_owned(scope: &ComputerScope, replace_system: bool) -> Result<
                 "15".into(),
                 container_name(scope).into(),
             ],
-            "Fable could not stop the computer. Its files have been kept.",
+            "Mivlet could not stop the computer. Its files have been kept.",
         )?;
     }
     if replace_system {
@@ -296,7 +296,7 @@ pub(super) fn stop_owned(scope: &ComputerScope, replace_system: bool) -> Result<
                 "rm".into(),
                 container_name(scope).into(),
             ],
-            "Fable could not replace the computer system. Its files have been kept.",
+            "Mivlet could not replace the computer system. Its files have been kept.",
         )?;
     }
     invalidate_gateway(scope);
@@ -320,7 +320,7 @@ pub(super) fn suspend_owned(scope: &ComputerScope) -> Result<(), String> {
                 "pause".into(),
                 container_name(scope).into(),
             ],
-            "Fable could not put the idle computer to sleep.",
+            "Mivlet could not put the idle computer to sleep.",
         )?;
     }
     invalidate_gateway(scope);
@@ -358,7 +358,7 @@ pub(super) fn gateway_endpoint(scope: &ComputerScope) -> Result<GatewayEndpoint,
             "cat".into(),
             "/run/fable-private/gateway-token".into(),
         ],
-        "Fable could not authenticate the local computer gateway.",
+        "Mivlet could not authenticate the local computer gateway.",
     )?;
     let token = String::from_utf8(output.stdout)
         .map_err(|_| "The local computer gateway credential is invalid.")?;
@@ -391,7 +391,7 @@ pub(super) fn capture_desktop(scope: &ComputerScope) -> Result<Vec<u8>, String> 
             container_name(scope).into(),
             "/usr/local/bin/fable-screenshot".into(),
         ],
-        "Fable could not capture the agent computer.",
+        "Mivlet could not capture the agent computer.",
     )?;
     if output.stdout.is_empty() || output.stdout.len() > MAX_DESKTOP_FRAME_BYTES {
         return Err("The agent computer returned an invalid desktop frame.".into());
@@ -477,21 +477,21 @@ pub(super) fn run_shell_cancellable(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|_| "Fable could not start the isolated terminal command.".to_string())?;
+        .map_err(|_| "Mivlet could not start the isolated terminal command.".to_string())?;
     child
         .stdin
         .take()
-        .ok_or("Fable could not send the isolated command.")?
+        .ok_or("Mivlet could not send the isolated command.")?
         .write_all(command.as_bytes())
-        .map_err(|_| "Fable could not send the isolated command.")?;
+        .map_err(|_| "Mivlet could not send the isolated command.")?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| "Fable could not capture isolated terminal output.".to_string())?;
+        .ok_or_else(|| "Mivlet could not capture isolated terminal output.".to_string())?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| "Fable could not capture isolated terminal errors.".to_string())?;
+        .ok_or_else(|| "Mivlet could not capture isolated terminal errors.".to_string())?;
     let stdout_thread = thread::spawn(move || drain(stdout, MAX_SHELL_OUTPUT_BYTES + 1));
     let stderr_thread = thread::spawn(move || drain(stderr, MAX_SHELL_OUTPUT_BYTES + 1));
     let started = Instant::now();
@@ -500,7 +500,7 @@ pub(super) fn run_shell_cancellable(
     let status = loop {
         if let Some(status) = child
             .try_wait()
-            .map_err(|_| "Fable could not finish the isolated terminal command.")?
+            .map_err(|_| "Mivlet could not finish the isolated terminal command.")?
         {
             break status;
         }
@@ -520,12 +520,12 @@ pub(super) fn run_shell_cancellable(
     };
     let mut stdout = stdout_thread
         .join()
-        .map_err(|_| "Fable could not collect isolated terminal output.".to_string())?
-        .map_err(|_| "Fable could not read isolated terminal output.".to_string())?;
+        .map_err(|_| "Mivlet could not collect isolated terminal output.".to_string())?
+        .map_err(|_| "Mivlet could not read isolated terminal output.".to_string())?;
     let mut stderr = stderr_thread
         .join()
-        .map_err(|_| "Fable could not collect isolated terminal errors.".to_string())?
-        .map_err(|_| "Fable could not read isolated terminal errors.".to_string())?;
+        .map_err(|_| "Mivlet could not collect isolated terminal errors.".to_string())?
+        .map_err(|_| "Mivlet could not read isolated terminal errors.".to_string())?;
     let truncated = stdout.len() > MAX_SHELL_OUTPUT_BYTES || stderr.len() > MAX_SHELL_OUTPUT_BYTES;
     stdout.truncate(MAX_SHELL_OUTPUT_BYTES);
     stderr.truncate(MAX_SHELL_OUTPUT_BYTES);
@@ -557,7 +557,7 @@ pub(super) fn cancel_agent_processes(scope: &ComputerScope) -> Result<(), String
             "/usr/local/bin/fable-agent-shell".into(),
             "cancel".into(),
         ],
-        "Fable could not stop the agent processes. Keep the computer paused and restart it.",
+        "Mivlet could not stop the agent processes. Keep the computer paused and restart it.",
     )?;
     Ok(())
 }
@@ -594,13 +594,13 @@ pub(super) fn stage_browser_upload(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|_| "Fable could not stage the browser upload.")?;
+        .map_err(|_| "Mivlet could not stage the browser upload.")?;
     child
         .stdin
         .take()
         .ok_or("The upload transport is unavailable.")?
         .write_all(bytes)
-        .map_err(|_| "Fable could not copy the browser upload.")?;
+        .map_err(|_| "Mivlet could not copy the browser upload.")?;
     let output = child
         .wait_with_output()
         .map_err(|_| "The browser upload did not finish.")?;
@@ -628,7 +628,7 @@ pub(super) fn stage_browser_upload(
     Ok(path.to_owned())
 }
 
-/// The caller holds Fable's current operation/lease ticket. The gateway is only
+/// The caller holds Mivlet's current operation/lease ticket. The gateway is only
 /// a bounded transport; it never decides who may act.
 pub(super) fn desktop_input(
     scope: &ComputerScope,
@@ -643,7 +643,7 @@ pub(super) fn desktop_input(
 
 pub(super) fn cancel_browser_downloads(scope: &ComputerScope) -> Result<(), String> {
     gateway_post(scope, "cancel-downloads", &[]).map_err(|_| {
-        "Fable could not stop the computer downloads. Reconnect before continuing.".into()
+        "Mivlet could not stop the computer downloads. Reconnect before continuing.".into()
     })
 }
 
@@ -653,7 +653,7 @@ fn gateway_post(scope: &ComputerScope, route: &str, payload: &[u8]) -> Result<()
 
 pub(super) fn download_status(scope: &ComputerScope) -> Result<serde_json::Value, String> {
     let body = gateway_request(scope, "GET", "downloads", &[])
-        .map_err(|_| "Fable could not read the computer download status.")?;
+        .map_err(|_| "Mivlet could not read the computer download status.")?;
     serde_json::from_slice(&body).map_err(|_| "The computer download status is unavailable.".into())
 }
 
@@ -702,17 +702,17 @@ fn gateway_request(
 
 fn image_context_digest(image_context: &Path) -> Result<String, String> {
     if !image_context.join("Dockerfile").is_file() {
-        return Err("Fable's local computer image is missing from this installation.".into());
+        return Err("Mivlet's local computer image is missing from this installation.".into());
     }
     let dockerignore = std::fs::read_to_string(image_context.join(".dockerignore"))
-        .map_err(|_| "Fable's local computer image exclusions are missing.".to_string())?;
+        .map_err(|_| "Mivlet's local computer image exclusions are missing.".to_string())?;
     let exclusions = dockerignore
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .collect::<Vec<_>>();
     if exclusions != ["**/node_modules"] {
-        return Err("Fable's local computer image exclusions are unsupported.".into());
+        return Err("Mivlet's local computer image exclusions are unsupported.".into());
     }
 
     fn collect(
@@ -721,15 +721,15 @@ fn image_context_digest(image_context: &Path) -> Result<String, String> {
         files: &mut Vec<(String, PathBuf)>,
     ) -> Result<(), String> {
         for entry in std::fs::read_dir(directory)
-            .map_err(|_| "Fable could not read the local computer image.".to_string())?
+            .map_err(|_| "Mivlet could not read the local computer image.".to_string())?
         {
             let entry =
-                entry.map_err(|_| "Fable could not read the local computer image.".to_string())?;
+                entry.map_err(|_| "Mivlet could not read the local computer image.".to_string())?;
             let file_type = entry
                 .file_type()
-                .map_err(|_| "Fable could not inspect the local computer image.".to_string())?;
+                .map_err(|_| "Mivlet could not inspect the local computer image.".to_string())?;
             if file_type.is_symlink() {
-                return Err("Fable's local computer image cannot contain links.".into());
+                return Err("Mivlet's local computer image cannot contain links.".into());
             }
             if file_type.is_dir() && entry.file_name() == "node_modules" {
                 continue;
@@ -740,28 +740,29 @@ fn image_context_digest(image_context: &Path) -> Result<String, String> {
                 continue;
             }
             if !file_type.is_file() {
-                return Err("Fable's local computer image contains an unsupported entry.".into());
+                return Err("Mivlet's local computer image contains an unsupported entry.".into());
             }
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|_| "Fable could not identify a local computer image file.".to_string())?;
+            let relative = path.strip_prefix(root).map_err(|_| {
+                "Mivlet could not identify a local computer image file.".to_string()
+            })?;
             let mut parts = Vec::new();
             for component in relative.components() {
                 let Component::Normal(component) = component else {
-                    return Err("Fable's local computer image contains an invalid path.".into());
+                    return Err("Mivlet's local computer image contains an invalid path.".into());
                 };
                 parts.push(
                     component
                         .to_str()
                         .ok_or_else(|| {
-                            "Fable's local computer image contains an unsupported path.".to_string()
+                            "Mivlet's local computer image contains an unsupported path."
+                                .to_string()
                         })?
                         .to_string(),
                 );
             }
             files.push((parts.join("/"), path));
             if files.len() > MAX_IMAGE_CONTEXT_FILES {
-                return Err("Fable's local computer image contains too many files.".into());
+                return Err("Mivlet's local computer image contains too many files.".into());
             }
         }
         Ok(())
@@ -775,22 +776,22 @@ fn image_context_digest(image_context: &Path) -> Result<String, String> {
     let mut total_bytes = 0_u64;
     for (relative, path) in files {
         let size = std::fs::metadata(&path)
-            .map_err(|_| "Fable could not inspect a local computer image file.".to_string())?
+            .map_err(|_| "Mivlet could not inspect a local computer image file.".to_string())?
             .len();
         total_bytes = total_bytes.saturating_add(size);
         if total_bytes > MAX_IMAGE_CONTEXT_BYTES {
-            return Err("Fable's local computer image is too large.".into());
+            return Err("Mivlet's local computer image is too large.".into());
         }
         hasher.update((relative.len() as u64).to_be_bytes());
         hasher.update(relative.as_bytes());
         hasher.update(size.to_be_bytes());
         let mut file = std::fs::File::open(path)
-            .map_err(|_| "Fable could not read a local computer image file.".to_string())?;
+            .map_err(|_| "Mivlet could not read a local computer image file.".to_string())?;
         let mut buffer = [0_u8; 64 * 1024];
         loop {
             let read = file
                 .read(&mut buffer)
-                .map_err(|_| "Fable could not read a local computer image file.".to_string())?;
+                .map_err(|_| "Mivlet could not read a local computer image file.".to_string())?;
             if read == 0 {
                 break;
             }
@@ -812,7 +813,7 @@ fn inspect_tagged_image() -> Result<Option<ImageInspection>, String> {
         OsStr::new("{{.Id}}|{{ index .Config.Labels \"com.fable.local-computer-image\" }}|{{ index .Config.Labels \"com.fable.build-context-sha256\" }}"),
         OsStr::new(IMAGE_TAG),
     ])
-    .map_err(|_| "Fable could not inspect the computer system image.".to_string())?;
+    .map_err(|_| "Mivlet could not inspect the computer system image.".to_string())?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -864,13 +865,13 @@ fn ensure_image(image_context: &Path) -> Result<(String, String), String> {
             IMAGE_TAG.into(),
             image_context.as_os_str().to_owned(),
         ],
-        "Fable could not build the local computer image.",
+        "Mivlet could not build the local computer image.",
     )?;
     if image_context_digest(image_context)? != context_digest {
-        return Err("Fable's local computer image changed while it was being built.".into());
+        return Err("Mivlet's local computer image changed while it was being built.".into());
     }
     let id = matching_image(&context_digest)?.ok_or_else(|| {
-        "Fable could not verify ownership of the rebuilt computer system image.".to_string()
+        "Mivlet could not verify ownership of the rebuilt computer system image.".to_string()
     })?;
     Ok((id, context_digest))
 }
@@ -891,7 +892,7 @@ fn ensure_named_volume(scope: &ComputerScope, name: String) -> Result<(), String
         OsStr::new("{{ index .Labels \"com.fable.local-computer\" }}|{{ index .Labels \"com.fable.scope\" }}"),
         OsStr::new(&name),
     ])
-    .map_err(|_| "Fable could not inspect local computer storage.".to_string())?;
+    .map_err(|_| "Mivlet could not inspect local computer storage.".to_string())?;
     if inspection.status.success() {
         let labels = String::from_utf8_lossy(&inspection.stdout);
         if labels.trim() != format!("true|{}", scope.key) {
@@ -913,7 +914,7 @@ fn ensure_named_volume(scope: &ComputerScope, name: String) -> Result<(), String
             format!("com.fable.test-resource={}", cfg!(test)).into(),
             name.into(),
         ],
-        "Fable could not create persistent storage for the agent computer.",
+        "Mivlet could not create persistent storage for the agent computer.",
     )?;
     Ok(())
 }
@@ -1024,7 +1025,7 @@ fn create_container(
             "30s".into(),
             image_id.into(),
         ],
-        "Fable could not create the agent computer.",
+        "Mivlet could not create the agent computer.",
     )?;
     Ok(())
 }
@@ -1063,7 +1064,7 @@ fn inspect_container(scope: &ComputerScope) -> Result<Option<ContainerInspection
         OsStr::new("{{.State.Running}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|{{ index .Config.Labels \"com.fable.local-computer\" }}|{{ index .Config.Labels \"com.fable.scope\" }}|{{.State.Paused}}|{{.Image}}|{{ index .Config.Labels \"com.fable.runtime-config\" }}|{{ index .Config.Labels \"com.fable.build-context-sha256\" }}"),
         OsStr::new(&container_name(scope)),
     ])
-    .map_err(|_| "Fable could not inspect the agent computer.".to_string())?;
+    .map_err(|_| "Mivlet could not inspect the agent computer.".to_string())?;
     if !output.status.success() {
         return Ok(None);
     }
@@ -1109,7 +1110,7 @@ fn published_debug_port(scope: &ComputerScope) -> Result<u16, String> {
             container_name(scope).into(),
             "9223/tcp".into(),
         ],
-        "Fable could not resolve the agent browser port.",
+        "Mivlet could not resolve the agent browser port.",
     )?;
     let text = String::from_utf8_lossy(&output.stdout);
     let port = text
@@ -1363,8 +1364,8 @@ sock = socket.socket(); sock.settimeout(1)
 assert sock.connect_ex(('127.0.0.1', 9222)) != 0
 sock.close()
 Path('/home/agent/persistence.txt').write_text('persistent agent home')
-book = Workbook(); book.active['A1'] = 'Fable'; book.save('sample.xlsx')
-document = Document(); document.add_paragraph('Fable'); document.save('sample.docx')
+book = Workbook(); book.active['A1'] = 'Mivlet'; book.save('sample.xlsx')
+document = Document(); document.add_paragraph('Mivlet'); document.save('sample.docx')
 print('isolation and documents passed')
 PY
 node --version

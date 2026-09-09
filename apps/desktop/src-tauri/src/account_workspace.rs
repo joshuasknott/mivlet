@@ -19,7 +19,7 @@ use crate::store::repos::workspace_directory as directory;
 
 const DEVICE_KEYRING_SERVICE: &str = "com.fable.workspace.account-device";
 const DEVICE_KEYRING_ENTRY: &str = "install-device-id";
-const ACCOUNT_CHANGED_ERROR: &str = "Fable account changed during the request. Please try again.";
+const ACCOUNT_CHANGED_ERROR: &str = "Mivlet account changed during the request. Please try again.";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,7 +166,7 @@ fn now() -> String {
 fn opaque_id(prefix: &str) -> Result<String, String> {
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not create a secure installation identity.".to_string())?;
+        .map_err(|_| "Mivlet could not create a secure installation identity.".to_string())?;
     Ok(format!("{prefix}_{}", URL_SAFE_NO_PAD.encode(bytes)))
 }
 
@@ -466,7 +466,7 @@ async fn reconcile_hosted() -> Result<(), String> {
     let transport = NativeHostedAccountTransport;
     let identity = transport.identity_snapshot()?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     reconcile_hosted_with_transport(&transport, &identity, store).await
 }
 
@@ -474,7 +474,7 @@ fn local_status(
     identity: &clerk_identity::IdentityStatus,
 ) -> Result<AccountWorkspaceStatus, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (internal_user_id, member_id) = local_install_principals();
     let signed_in = matches!(identity.state.as_str(), "signed-in" | "offline");
     let (workspaces, devices) = if signed_in {
@@ -504,7 +504,7 @@ fn local_status(
         }
         "error" => "Local workspace ready. The optional account is unavailable.",
         "disabled" => "Local workspace ready. Optional account sign-in is not configured.",
-        _ => "Local workspace ready. A Fable account is optional.",
+        _ => "Local workspace ready. A Mivlet account is optional.",
     };
     Ok(AccountWorkspaceStatus {
         configured: identity.enabled,
@@ -544,7 +544,7 @@ pub async fn account_workspace_reconcile() -> Result<AccountWorkspaceStatus, Str
 #[tauri::command]
 pub async fn account_workspace_clear_session() -> Result<AccountWorkspaceStatus, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|conn| directory::clear_current_internal_user(conn))
         .map_err(|error| error.to_string())?;

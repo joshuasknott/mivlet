@@ -1,7 +1,7 @@
 //! Authenticated canonical Connection records.
 //!
 //! Provider account ids are transient derivation input only. Durable identity is
-//! the opaque workspace-bound Fable Connection id, human-facing metadata stays
+//! the opaque workspace-bound Mivlet Connection id, human-facing metadata stays
 //! encrypted, and safe projections never return the secure-store reference.
 
 use rusqlite::{Connection, OptionalExtension};

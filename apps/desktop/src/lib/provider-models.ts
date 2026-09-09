@@ -36,7 +36,7 @@ export function providerModelOptions(entries: ProviderModels[]): ProviderModelOp
 
 /**
  * Resolve the persisted picker key, including legacy snapshots that stored only
- * a provider model id before Fable supported multiple active providers.
+ * a provider model id before Mivlet supported multiple active providers.
  */
 export function resolveProviderModelOption(
   options: ProviderModelOption[],

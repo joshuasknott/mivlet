@@ -9,7 +9,7 @@
  * The contract is deliberately minimal and shaped to match the seams the
  * native-API loop already proved out:
  *   - `run()` yields the same `BackendAgentEvent` stream (text deltas, tool
- *     calls routed through Fable's approval queue, tool results, usage,
+ *     calls routed through Mivlet's approval queue, tool results, usage,
  *     done/error/cancelled).
  *   - `cancel()` best-effort drops the in-flight run.
  *   - `listModels()` exposes the selectable model set (optional — a backend may
@@ -51,7 +51,7 @@ export interface AgentBackend {
   /**
    * Stream a prompt turn. Yields the same normalized `BackendAgentEvent`
    * stream every backend family speaks. Model tool calls arrive as `tool-call`
-   * carrying a pre-shaped `ApprovalRequest` so they route through Fable's
+   * carrying a pre-shaped `ApprovalRequest` so they route through Mivlet's
    * approval queue before the adapter executes them.
    *
    * Returns `null` when the backend cannot construct an egress path for this

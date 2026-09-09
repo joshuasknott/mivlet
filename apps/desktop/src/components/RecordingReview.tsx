@@ -26,7 +26,7 @@ export function RecordingReview({
         <strong id="recording-review-title">Upload this recording?</strong>
         <span>{durationLabel(review.durationMs)} · {sizeLabel(review.sizeBytes)}</span>
         <small>
-          One-time metered upload to {review.providerLabel} using {review.model}. Fable does not save the audio.
+          One-time metered upload to {review.providerLabel} using {review.model}. Mivlet does not save the audio.
         </small>
       </div>
       <div className="recording-review__actions">

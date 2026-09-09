@@ -390,7 +390,7 @@ function PlannedConnectorDetails({
         <div>
           <span>Availability</span>
           <p>
-            Fable does not have a native adapter or authorization path for this
+            Mivlet does not have a native adapter or authorization path for this
             connector yet. It cannot be installed, connected, or used by a
             agent.
           </p>
@@ -474,8 +474,8 @@ export function connectorAccessSummary(connector: ConnectorManifest): string {
   const granted = new Set(connector.scopes?.filter((scope) => scope.granted).map((scope) => scope.id));
   if (connector.id === "google-drive") {
     if (granted.has("https://www.googleapis.com/auth/drive")) return "Read and update your Drive files.";
-    if (granted.has("https://www.googleapis.com/auth/drive.readonly")) return granted.has("https://www.googleapis.com/auth/drive.file") ? "Read your Drive files. Updates are limited to files shared with Fable." : "Read your Drive files.";
-    return "Access files shared with Fable.";
+    if (granted.has("https://www.googleapis.com/auth/drive.readonly")) return granted.has("https://www.googleapis.com/auth/drive.file") ? "Read your Drive files. Updates are limited to files shared with Mivlet." : "Read your Drive files.";
+    return "Access files shared with Mivlet.";
   }
   if (connector.id === "gmail") return granted.has("https://www.googleapis.com/auth/gmail.send") ? "Read email and prepare or send messages." : "Read your email.";
   if (connector.id === "google-calendar") return granted.has("https://www.googleapis.com/auth/calendar.events") ? "Read calendars and manage events." : "Read calendars and events.";
@@ -576,7 +576,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
       connector.authMode === "oauth-pkce"
         ? (setupMessage ??
           `${connector.name} requires a desktop OAuth client configuration.`)
-        : `${connector.name} is not configured on the Fable auth broker.`;
+        : `${connector.name} is not configured on the Mivlet auth broker.`;
     return {
       label: "Setup needed",
       className: "configuration-required",

@@ -88,7 +88,7 @@ describe("hosted computer runtime boundary", () => {
     const proposal = { ...draft, requestKey: "process-a" };
     const approval = {
       id: "approval-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Run node on this agent's cloud computer",
       mode: "full-access" as const,
       riskLevel: "critical" as const,
@@ -132,7 +132,7 @@ describe("hosted computer runtime boundary", () => {
     const proposal = { ...draft, requestKey: "browser-request-a" };
     const approval = {
       id: "approval-browser-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Open this page in the agent's cloud browser",
       mode: "full-access" as const,
       riskLevel: "critical" as const,
@@ -188,7 +188,7 @@ describe("hosted computer runtime boundary", () => {
     const proposal = { ...draft, requestKey: "browser-action-a" };
     const approval = {
       id: "approval-browser-action-a",
-      service: "Fable cloud computer",
+      service: "Mivlet cloud computer",
       action: "Click control control-1234567890abcdef-1",
       mode: "full-access" as const,
       riskLevel: "critical" as const,

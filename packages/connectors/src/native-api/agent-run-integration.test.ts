@@ -67,7 +67,7 @@ describe("runAgentLoop context + model integration", () => {
     expect(sent.messages[1]).toEqual({ role: "user", content: "Who am I?" });
   });
 
-  it("prepends only Fable tool-use policy when memory context is empty", async () => {
+  it("prepends only Mivlet tool-use policy when memory context is empty", async () => {
     const transport = new CapturingTransport([
       'data: {"choices":[{"delta":{"content":"ok"}}]}',
       'data: {"choices":[{"finish_reason":"stop"}]}'
@@ -92,7 +92,7 @@ describe("runAgentLoop context + model integration", () => {
     expect(sent.messages[1]).toEqual({ role: "user", content: "hi" });
   });
 
-  it("advertises Fable tools for a curated model with explicit tool support", async () => {
+  it("advertises Mivlet tools for a curated model with explicit tool support", async () => {
     const transport = new CapturingTransport([
       'data: {"choices":[{"finish_reason":"stop"}]}'
     ]);

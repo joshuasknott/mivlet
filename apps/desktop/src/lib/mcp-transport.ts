@@ -172,7 +172,7 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
           JSON.stringify({
             jsonrpc: "2.0",
             method: "notifications/cancelled",
-            params: { requestId, reason: "Fable request timeout" }
+            params: { requestId, reason: "Mivlet request timeout" }
           })
         ).catch(() => undefined);
       }, 30_000);
@@ -233,7 +233,7 @@ export async function createDesktopMcpTransport(
   });
   if (!unlisten) {
     await closeRuntimeMcpProcess(workspaceId, spawned.sessionId).catch(() => undefined);
-    throw new Error("Fable could not listen to the local MCP server.");
+    throw new Error("Mivlet could not listen to the local MCP server.");
   }
   transport = new DesktopMcpTransport(workspaceId, spawned.sessionId, unlisten);
   for (const line of buffered) transport.handleLine(line);

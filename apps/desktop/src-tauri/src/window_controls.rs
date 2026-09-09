@@ -1,7 +1,7 @@
 #[tauri::command]
 pub fn control_main_window(window: tauri::WebviewWindow, action: String) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Window controls are only available in Fable.".into());
+        return Err("Window controls are only available in Mivlet.".into());
     }
     let result = match action.as_str() {
         "minimize" => window.minimize(),

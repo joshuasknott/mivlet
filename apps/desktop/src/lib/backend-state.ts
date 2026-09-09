@@ -28,7 +28,7 @@ export type BackendAuthKind = "api-key" | "provider-login" | "install-gated";
 
 /**
  * Derive the auth kind from backend type. This is structural, not stored:
- *   - native-api → `api-key` (Fable owns the loop; the user supplies a key)
+ *   - native-api → `api-key` (Mivlet owns the loop; the user supplies a key)
  *   - codex-app-server → `provider-login`
  *
  * `install-gated` is reserved for providers whose runtime is missing
@@ -110,7 +110,7 @@ export function stateViewFor(state: BackendAuthState): BackendStateView {
       return {
         label: "Not supported here",
         tone: "danger",
-        hint: "This provider can't be used from this build of Fable.",
+        hint: "This provider can't be used from this build of Mivlet.",
       };
     case "failed":
       return {
@@ -281,7 +281,7 @@ export function connectResultCopy(
       };
     case "configured":
       return {
-        message: `Configured. Fable will check this endpoint when you send a message.${detail}`,
+        message: `Configured. Mivlet will check this endpoint when you send a message.${detail}`,
         tone: "ready",
         retryable: false,
       };
@@ -307,7 +307,7 @@ export function connectResultCopy(
       };
     case "unsupported":
       return {
-        message: `This provider can't be verified from this build of Fable.${detail}`,
+        message: `This provider can't be verified from this build of Mivlet.${detail}`,
         tone: "danger",
         retryable: false,
       };

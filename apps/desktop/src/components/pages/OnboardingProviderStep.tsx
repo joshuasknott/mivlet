@@ -149,7 +149,7 @@ export function OnboardingProviderStep({
       const result = await connect();
       if (attemptRef.current !== attempt) return;
       if (!result || result.providerId !== method.provider.id) {
-        throw new Error("Fable could not verify this connection. Try again.");
+        throw new Error("Mivlet could not verify this connection. Try again.");
       }
       const copy = connectResultCopy(result.outcome, {
         detail: result.message,

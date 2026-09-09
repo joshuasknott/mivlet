@@ -209,7 +209,7 @@ fn configured_custom_provider_result(credential: &str) -> Result<BackendVerifyRe
         provider_id: "custom".to_string(),
         outcome: "configured".to_string(),
         message: Some(
-            "Custom endpoint configuration saved. Fable will check it when you send a message."
+            "Custom endpoint configuration saved. Mivlet will check it when you send a message."
                 .to_string(),
         ),
     })
@@ -240,7 +240,7 @@ fn resolve_provider_connection(
         return Ok(ResolvedProviderConnection {
             chat_endpoint: format!("{}/chat/completions", custom.base_url),
             // A chat-compatible endpoint is not required to expose GET /models.
-            // Fable uses the explicit, user-configured model ID instead.
+            // Mivlet uses the explicit, user-configured model ID instead.
             models_endpoint: None,
             auth_header: custom
                 .api_key
@@ -1005,11 +1005,11 @@ pub async fn stream_backend_completion(
         .read_timeout(Duration::from_secs(90))
         .tcp_keepalive(Duration::from_secs(30))
         .build()
-        .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
+        .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
     let (tx, mut rx) = tokio::sync::watch::channel(false);
     cancel_map()
         .lock()
-        .map_err(|_| "Fable could not access the cancel map.".to_string())?
+        .map_err(|_| "Mivlet could not access the cancel map.".to_string())?
         .insert(request.request_id.clone(), tx);
 
     use futures_util::StreamExt;
@@ -1155,7 +1155,7 @@ pub async fn stream_backend_completion(
                                 emit_control(&app, &channel, TransportControlEvent {
                                     kind: "error",
                                     code: "response-too-large",
-                                    message: "Provider stream exceeded Fable's response-size limit.".to_string(),
+                                    message: "Provider stream exceeded Mivlet's response-size limit.".to_string(),
                                     retryable: false,
                                     attempt: attempt + 1,
                                     retry_after_ms: None,
@@ -1295,7 +1295,7 @@ pub async fn stream_backend_completion(
 pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {
     let removed = cancel_map()
         .lock()
-        .map_err(|_| "Fable could not access the cancel map.".to_string())?
+        .map_err(|_| "Mivlet could not access the cancel map.".to_string())?
         .remove(&request_id);
     if let Some(sender) = removed {
         let _ = sender.send(true);
@@ -1511,7 +1511,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
         .build()
-        .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
+        .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
     let mut cursor: Option<String> = None;
     let mut total_bytes = 0usize;
     let mut models = Vec::new();
@@ -1558,7 +1558,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
         while let Some(chunk) = response
             .chunk()
             .await
-            .map_err(|_| "Fable could not read the provider model list.".to_string())?
+            .map_err(|_| "Mivlet could not read the provider model list.".to_string())?
         {
             total_bytes = total_bytes.saturating_add(chunk.len());
             if total_bytes > MAX_DISCOVERY_RESPONSE_BYTES {
@@ -1576,7 +1576,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
                 return Ok(ModelDiscoveryResult {
                     outcome: "failed",
                     models: Vec::new(),
-                    message: Some("Fable could not parse the provider model list.".to_string()),
+                    message: Some("Mivlet could not parse the provider model list.".to_string()),
                 })
             }
         };
@@ -1626,7 +1626,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
 #[tauri::command]
 pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVerifyResult, String> {
     if !NATIVE_PROVIDER_IDS.contains(&provider_id.as_str()) {
-        // Codex app-server owns its browser sign-in. Fable cannot verify it
+        // Codex app-server owns its browser sign-in. Mivlet cannot verify it
         // through the API-key boundary.
         return Ok(BackendVerifyResult {
             provider_id: provider_id.clone(),
@@ -1673,7 +1673,7 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|_| "Fable could not initialize the provider client.".to_string())?;
+        .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
 
     let mut request = client.get(&url);
     if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {

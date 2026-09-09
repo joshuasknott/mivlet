@@ -475,7 +475,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           const message =
             error instanceof Error
               ? error.message
-              : "Fable could not select an authorized provider route.";
+              : "Mivlet could not select an authorized provider route.";
           setState((current) => ({
             ...current,
             lastError: message,

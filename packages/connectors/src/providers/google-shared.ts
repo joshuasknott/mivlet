@@ -78,7 +78,7 @@ const GOOGLE_PROFILES: Record<GoogleConnectorId, GoogleConnectorProfile> = {
         label: "Selected Drive files",
         access: "read",
         required: true,
-        description: "See, create, and edit only Google Drive files the user opens or creates with Fable."
+        description: "See, create, and edit only Google Drive files the user opens or creates with Mivlet."
       }
     ]
   },
@@ -93,14 +93,14 @@ const GOOGLE_PROFILES: Record<GoogleConnectorId, GoogleConnectorProfile> = {
         label: "Read mail",
         access: "read",
         required: true,
-        description: "Search and read Gmail messages the user asks Fable to inspect."
+        description: "Search and read Gmail messages the user asks Mivlet to inspect."
       },
       {
         id: "https://www.googleapis.com/auth/gmail.compose",
         label: "Create drafts",
         access: "write",
         required: false,
-        description: "Create and update Gmail drafts after Fable approval."
+        description: "Create and update Gmail drafts after Mivlet approval."
       },
       {
         id: "https://www.googleapis.com/auth/gmail.send",
@@ -136,7 +136,7 @@ const GOOGLE_PROFILES: Record<GoogleConnectorId, GoogleConnectorProfile> = {
         label: "Create or update events",
         access: "write",
         required: false,
-        description: "Create, update, cancel, or delete calendar events after Fable approval."
+        description: "Create, update, cancel, or delete calendar events after Mivlet approval."
       }
     ]
   }

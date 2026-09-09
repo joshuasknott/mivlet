@@ -86,7 +86,7 @@ fn is_official_read(endpoint: &Url, configuration: &str, tool: &str) -> bool {
 fn routine_official_read(proposal: &McpToolProposal) -> Result<bool, String> {
     let sessions = remote_sessions()
         .lock()
-        .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+        .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?;
     Ok(sessions.get(&proposal.session_id).is_some_and(|session| {
         session.oauth_credential_key.is_some()
             && is_official_read(
@@ -172,7 +172,7 @@ pub(crate) fn prepare_semantic_capability_call(
     )?;
     let session = process_map()
         .lock()
-        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?
         .get(&session_id)
         .map(|process| {
             require_session_owner(process, &scope)?;
@@ -188,7 +188,7 @@ pub(crate) fn prepare_semantic_capability_call(
     } else {
         let sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?;
         let session = sessions
             .get(&session_id)
             .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
@@ -200,7 +200,7 @@ pub(crate) fn prepare_semantic_capability_call(
         (session.connection_id.clone(), session.connection_revision)
     };
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (binding, connection) = store
         .with_conn(|tx| {
             let binding = crate::store::repos::connection_record::require_mcp_capability_binding(
@@ -278,7 +278,7 @@ pub(crate) fn prepare_semantic_capability_call(
     let permit_id = random_session_id()?.replacen("mcp-", "mcp-semantic-permit-", 1);
     tool_permits()
         .lock()
-        .map_err(|_| "Fable could not access MCP execution permits.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP execution permits.".to_string())?
         .insert(
             permit_id.clone(),
             McpToolPermit {
@@ -320,7 +320,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
     )?;
     let local = process_map()
         .lock()
-        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?
         .get(&proposal.session_id)
         .map(|process| {
             require_session_owner(process, &scope)?;
@@ -337,7 +337,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
     } else {
         let sessions = remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access MCP sessions.".to_string())?;
+            .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?;
         let session = sessions
             .get(&proposal.session_id)
             .ok_or_else(|| "This MCP session is unavailable.".to_string())?;
@@ -353,7 +353,7 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         )
     };
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| {
             crate::store::repos::connection_record::require_enabled_mcp_tool(
@@ -439,7 +439,7 @@ fn register_discovery_request(
             .ok_or_else(|| "MCP initialization requires a request id.".to_string())?;
         let mut proofs = discovery_proofs()
             .lock()
-            .map_err(|_| "Fable could not verify MCP initialization.".to_string())?;
+            .map_err(|_| "Mivlet could not verify MCP initialization.".to_string())?;
         let proof = proofs.entry(session_id.to_string()).or_default();
         if proof.initializing.is_some() {
             return Err("MCP initialization is already pending.".into());
@@ -479,7 +479,7 @@ fn register_discovery_request(
     };
     let mut proofs = discovery_proofs()
         .lock()
-        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+        .map_err(|_| "Mivlet could not verify MCP discovery.".to_string())?;
     let proof = proofs.entry(session_id.to_string()).or_default();
     if proof.pending.values().any(|pending| *pending == kind) {
         return Err("MCP discovery already has a pending page.".into());
@@ -684,7 +684,7 @@ fn observe_discovery_change(session_id: &str, method: &str) -> Result<usize, Str
     };
     let local = process_map()
         .lock()
-        .map_err(|_| "Fable could not access MCP sessions.".to_string())?
+        .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?
         .get(session_id)
         .map(|process| {
             (
@@ -699,7 +699,7 @@ fn observe_discovery_change(session_id: &str, method: &str) -> Result<usize, Str
     } else {
         remote_sessions()
             .lock()
-            .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?
+            .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?
             .get(session_id)
             .map(|session| {
                 (
@@ -743,7 +743,7 @@ fn verify_discovery_proof(
     let resources = normalize_discovery_proof_values(resources.iter().cloned(), 2_048)?;
     let proofs = discovery_proofs()
         .lock()
-        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+        .map_err(|_| "Mivlet could not verify MCP discovery.".to_string())?;
     if !discovery_proof_matches(proofs.get(session_id), &tools, &resources) {
         return Err("MCP discovery does not match the live server response.".into());
     }
@@ -784,13 +784,13 @@ fn commit_session_discovery_authority(
     // being overwritten by a late discovery transaction.
     let mut remote = remote_sessions()
         .lock()
-        .map_err(|_| "Fable could not access remote MCP sessions.".to_string())?;
+        .map_err(|_| "Mivlet could not access remote MCP sessions.".to_string())?;
     let mut local = process_map()
         .lock()
-        .map_err(|_| "Fable could not access local MCP sessions.".to_string())?;
+        .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
     let proofs = discovery_proofs()
         .lock()
-        .map_err(|_| "Fable could not verify MCP discovery.".to_string())?;
+        .map_err(|_| "Mivlet could not verify MCP discovery.".to_string())?;
     if !discovery_proof_matches(proofs.get(session_id), &tools, &resources) {
         return Err("MCP discovery changed before it could be committed.".into());
     }

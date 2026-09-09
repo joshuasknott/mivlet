@@ -50,7 +50,7 @@ const approval = {
   mode: "full-access" as const,
   riskLevel: "critical" as const,
   dataUsed: ["server: Local files", "configuration fingerprint: abc"],
-  consequence: "Starts a user-managed local program that can expose tools and resources to Fable.",
+  consequence: "Starts a user-managed local program that can expose tools and resources to Mivlet.",
   requestedAt: "2026-07-11T18:00:00Z",
   decisions: ["once" as const, "deny" as const],
   confirmationPhrase: "configure local-files"

@@ -23,7 +23,7 @@ function propsFor(
       !["starting", "listening", "stopping", "processing"].includes(
         voiceStatus
       ),
-    voiceDisclosure: "Fable does not retain raw audio.",
+    voiceDisclosure: "Mivlet does not retain raw audio.",
     onStartVoice: vi.fn(),
     onStopVoice: vi.fn(),
     onCancelVoice: vi.fn(),

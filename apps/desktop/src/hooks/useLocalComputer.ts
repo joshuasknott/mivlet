@@ -248,7 +248,7 @@ export function useLocalComputer({ workspaceId, agentId, viewing = false, thumbn
       if (!current() || !scope.target || !scope.node?.browserActive) throw new Error("Start this computer before opening its screen.");
       const epoch = scope.epoch;
       const result = await openRuntimeLocalComputerViewer({ ...scope.target, expectedGeneration: scope.generation });
-      if (!result) throw new Error("The computer viewer requires the native Fable app.");
+      if (!result) throw new Error("The computer viewer requires the native Mivlet app.");
       if (!current(epoch)) { await closeRuntimeLocalComputerViewer(result.sessionId); return null; }
       return result;
     },

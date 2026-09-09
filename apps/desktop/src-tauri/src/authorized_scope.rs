@@ -1,6 +1,6 @@
 //! Single installation-local authority boundary for local product data.
 //!
-//! Renderer workspace fields are assertions only. Optional Fable account state
+//! Renderer workspace fields are assertions only. Optional Mivlet account state
 //! never changes the owner, encryption audience, or workspace of conversations,
 //! memory, provider connections, approvals, or execution attempts.
 
@@ -32,12 +32,12 @@ pub fn resolve(
     let requested = requested_workspace_id.unwrap_or(DEFAULT_WORKSPACE_ID);
     if requested != DEFAULT_WORKSPACE_ID {
         return Err(StoreError::Invalid(
-            "Local Fable data belongs to this installation workspace.".into(),
+            "Local Mivlet data belongs to this installation workspace.".into(),
         ));
     }
     if project_id.is_some() {
         return Err(StoreError::Invalid(
-            "Project-scoped data is no longer part of the Fable product.".into(),
+            "Project-scoped data is no longer part of the Mivlet product.".into(),
         ));
     }
 
@@ -63,7 +63,7 @@ pub fn command_scope(
     access: ScopeAccess,
 ) -> Result<AuthorizedCommandScope, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|conn| resolve(conn, workspace_id.as_deref(), project_id.as_deref(), access))
         .map_err(|error| error.to_string())

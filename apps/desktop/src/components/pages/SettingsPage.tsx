@@ -179,14 +179,14 @@ function ConfiguredAccountSettings({
                 <UserCircle size={19} />
               </span>
               <span>
-                <strong id="fable-account-title">Fable account</strong>
+                <strong id="fable-account-title">Mivlet account</strong>
                 <small>{runtime.identityStatus.message}</small>
               </span>
             </div>
             <p>
               {authentication
                 ? display?.email ?? display?.displayName ?? "Signed in"
-                : "Sign in to use Fable on this device."}
+                : "Sign in to use Mivlet on this device."}
             </p>
             <div className="profile-action-row">
               {!authentication && !needsRecovery ? (
@@ -225,7 +225,7 @@ function ConfiguredAccountSettings({
                   type="button"
                   className="button button--secondary"
                   disabled={busy}
-                  onClick={() => void act(runtime.signOutIdentity, "Signed out of Fable.")}
+                  onClick={() => void act(runtime.signOutIdentity, "Signed out of Mivlet.")}
                 >
                   Sign out
                 </button>
@@ -282,7 +282,7 @@ function ProviderSettings({
         <div>
           <strong>Connected securely</strong>
           <p>
-            Your provider handles model access and billing. Fable keeps connection credentials in your device&apos;s secure storage.
+            Your provider handles model access and billing. Mivlet keeps connection credentials in your device&apos;s secure storage.
           </p>
         </div>
       </div>
@@ -324,7 +324,7 @@ function PrivacyAndDataSettings({
   return (
     <>
       <details className="settings-disclosure">
-        <summary>How Fable uses your data</summary>
+        <summary>How Mivlet uses your data</summary>
         <PrivacySummary />
       </details>
       <MemorySettings runtime={runtime} onStatus={onStatus} />
@@ -357,7 +357,7 @@ function MemorySettings({
       await runtime.exportMemory();
       onStatus("Local memory exported.");
     } catch (error) {
-      onStatus(error instanceof Error ? error.message : "Fable could not export memory.");
+      onStatus(error instanceof Error ? error.message : "Mivlet could not export memory.");
     } finally {
       setExporting(false);
     }
@@ -452,7 +452,7 @@ function LocalDataSettings({
       );
       if (receipt) {
         setRestoreConfirmation("");
-        onStatus("Backup verified. Restart Fable to apply it.");
+        onStatus("Backup verified. Restart Mivlet to apply it.");
       } else {
         onStatus("Restore is available in the installed desktop app.");
       }
@@ -475,7 +475,7 @@ function LocalDataSettings({
       if (receipt) {
         setDeleteConfirmation("");
         onStatus(
-          "Local workspace data deleted. Restart Fable. Provider credentials and hosted data were not removed."
+          "Local workspace data deleted. Restart Mivlet. Provider credentials and hosted data were not removed."
         );
       } else {
         onStatus("Local data deletion is available in the installed desktop app.");

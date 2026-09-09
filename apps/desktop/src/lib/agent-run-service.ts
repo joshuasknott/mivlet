@@ -99,7 +99,7 @@ function ensureCurrent(input: ScheduledResearchRunInput) {
 /**
  * Narrow non-React execution service for one scheduled Codex research run.
  * It shares the production backend adapter and durable conversation writer with
- * interactive chat while intentionally exposing no Fable tools or approval gate.
+ * interactive chat while intentionally exposing no Mivlet tools or approval gate.
  */
 export class AgentRunService {
   async runScheduledResearch(

@@ -65,7 +65,7 @@ export function normalizeGoogleDriveItem(payload: GoogleDrivePayload): Connector
     title: payload.name,
     kind: "file",
     summary: payload.selected
-      ? "File explicitly selected for Fable"
+      ? "File explicitly selected for Mivlet"
       : "File metadata; import is unavailable until selected",
     provenance: "Google Drive · selected file",
     freshness: payload.modifiedTime ?? "Provider freshness unavailable",

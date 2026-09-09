@@ -201,7 +201,7 @@ describe("desktop MCP transport", () => {
       jsonrpc: "2.0",
       id: "initialize-1",
       method: "initialize",
-      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Fable", version: "0.1.0" } }
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "Mivlet", version: "0.1.0" } }
     });
     await vi.waitFor(() => expect(runtime.pollRemote).toHaveBeenCalledWith(
       "workspace-a", "mcp-fedcba0987654321fedcba0987654321"

@@ -50,7 +50,7 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 6 -> 7: add local cloud-team sync cache/outbox tables.
             6 => apply_v6_to_v7(conn)?,
             // 7 -> 8: replace the Clerk-organization-shaped local sync cache
-            // with Fable-owned identity, membership, workspace, and device
+            // with Mivlet-owned identity, membership, workspace, and device
             // mirrors. The SQL rebuild is data-preserving and runs inside the
             // Store migration transaction.
             7 => apply_v7_to_v8(conn)?,
@@ -1544,7 +1544,7 @@ fn apply_v9_to_v10(conn: &Connection) -> super::Result<()> {
     Ok(())
 }
 
-/// The v8 rebuild derives the Fable workspace and attribution for every sync
+/// The v8 rebuild derives the Mivlet workspace and attribution for every sync
 /// envelope from its v7 workspace link. Refuse the migration when an orphaned
 /// cursor, outbox row, shadow, or conflict would otherwise be dropped by the
 /// INNER JOINs in `SCHEMA_V7_TO_V8`.

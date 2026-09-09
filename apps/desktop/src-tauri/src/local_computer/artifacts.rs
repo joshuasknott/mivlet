@@ -74,7 +74,7 @@ fn valid_id(id: &str) -> bool {
 fn random_id() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not create a private artifact identifier.")?;
+        .map_err(|_| "Mivlet could not create a private artifact identifier.")?;
     Ok(format!("artifact-{}", hex::encode(bytes)))
 }
 
@@ -615,7 +615,7 @@ fn title_for(title: Option<&str>, relative: &str) -> Result<String, String> {
 }
 
 fn write_copy(directory: &Path, id: &str, name: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    fs::create_dir_all(directory).map_err(|_| "Fable could not create its artifact folder.")?;
+    fs::create_dir_all(directory).map_err(|_| "Mivlet could not create its artifact folder.")?;
     let directory = canonical(directory)?;
     if fs::read_dir(&directory)
         .map_err(|_| "The artifact folder is unavailable.")?
@@ -626,17 +626,17 @@ fn write_copy(directory: &Path, id: &str, name: &str, bytes: &[u8]) -> Result<Pa
         return Err("This computer's artifact folder is full. Remove old local artifacts before publishing more.".into());
     }
     let target = directory.join(id);
-    fs::create_dir(&target).map_err(|_| "Fable could not reserve an artifact file.")?;
+    fs::create_dir(&target).map_err(|_| "Mivlet could not reserve an artifact file.")?;
     let file_path = target.join(name);
     let result = (|| {
         let mut file = OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&file_path)
-            .map_err(|_| "Fable could not create the artifact copy.")?;
+            .map_err(|_| "Mivlet could not create the artifact copy.")?;
         file.write_all(bytes)
             .and_then(|_| file.sync_all())
-            .map_err(|_| "Fable could not save the artifact copy.")?;
+            .map_err(|_| "Mivlet could not save the artifact copy.")?;
         Ok(file_path.clone())
     })();
     if result.is_err() {
@@ -699,7 +699,7 @@ pub(crate) fn publish_artifact(
             if let Some(parent) = copy.parent() {
                 let _ = fs::remove_dir(parent);
             }
-            return Err("Fable could not save the encrypted artifact receipt.".into());
+            return Err("Mivlet could not save the encrypted artifact receipt.".into());
         }
         Ok(artifact)
     })
@@ -722,14 +722,14 @@ pub(crate) fn publish_generated_png(
     let title = title_for(Some(title), "generated.png")?;
     check_content(bytes, "png")?;
     if bytes.len() as u64 > MAX_BYTES {
-        return Err("The generated image exceeds Fable's 25 MB artifact limit.".into());
+        return Err("The generated image exceeds Mivlet's 25 MB artifact limit.".into());
     }
     computers.with_artifact_files(workspace_id, agent_id, expected_generation, |workspace| {
         let id = random_id()?;
         let workspace_directory_name = format!("generated-{id}");
         let workspace_directory = workspace.join(&workspace_directory_name);
         fs::create_dir(&workspace_directory)
-            .map_err(|_| "Fable could not reserve a generated-image workspace folder.")?;
+            .map_err(|_| "Mivlet could not reserve a generated-image workspace folder.")?;
         let canonical_workspace = canonical(workspace)?;
         let canonical_workspace_directory = canonical(&workspace_directory)?;
         if !canonical_workspace_directory.starts_with(&canonical_workspace) {
@@ -749,7 +749,7 @@ pub(crate) fn publish_generated_png(
         }
         let mut file = options
             .open(&workspace_file)
-            .map_err(|_| "Fable could not create the generated image in its workspace.")?;
+            .map_err(|_| "Mivlet could not create the generated image in its workspace.")?;
         if !opened_path(&file)?.starts_with(&canonical_workspace) {
             let _ = fs::remove_file(&workspace_file);
             let _ = fs::remove_dir(&workspace_directory);
@@ -758,7 +758,7 @@ pub(crate) fn publish_generated_png(
         if file.write_all(bytes).and_then(|_| file.sync_all()).is_err() {
             let _ = fs::remove_file(&workspace_file);
             let _ = fs::remove_dir(&workspace_directory);
-            return Err("Fable could not save the generated image in its workspace.".into());
+            return Err("Mivlet could not save the generated image in its workspace.".into());
         }
         drop(file);
         let relative_path = format!("{workspace_directory_name}/{export_name}");
@@ -800,7 +800,7 @@ pub(crate) fn publish_generated_png(
             }
             let _ = fs::remove_file(&workspace_file);
             let _ = fs::remove_dir(&workspace_directory);
-            return Err("Fable could not save the encrypted image receipt.".into());
+            return Err("Mivlet could not save the encrypted image receipt.".into());
         }
         Ok(artifact)
     })
@@ -961,7 +961,7 @@ pub async fn local_computer_preview_artifact(
     computers: tauri::State<'_, Arc<LocalComputerState>>,
 ) -> Result<ArtifactPreview, String> {
     if window.label() != "main" {
-        return Err("Preview the artifact from its Fable conversation.".into());
+        return Err("Preview the artifact from its Mivlet conversation.".into());
     }
     let computers = computers.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -975,7 +975,7 @@ pub async fn local_computer_preview_artifact(
         Ok(preview)
     })
     .await
-    .map_err(|_| "Fable could not preview the artifact.".to_string())?
+    .map_err(|_| "Mivlet could not preview the artifact.".to_string())?
 }
 
 #[cfg(windows)]
@@ -1020,7 +1020,7 @@ pub async fn local_computer_open_artifact(
     computers: tauri::State<'_, Arc<LocalComputerState>>,
 ) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Open the artifact from its Fable conversation.".into());
+        return Err("Open the artifact from its Mivlet conversation.".into());
     }
     let computers = computers.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -1033,7 +1033,7 @@ pub async fn local_computer_open_artifact(
         open_with_system(&path)
     })
     .await
-    .map_err(|_| "Fable could not open the artifact.".to_string())?
+    .map_err(|_| "Mivlet could not open the artifact.".to_string())?
 }
 
 #[cfg(test)]

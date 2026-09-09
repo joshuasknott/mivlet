@@ -46,7 +46,7 @@ pub struct NativeKeyStore {
 impl NativeKeyStore {
     pub fn new() -> Result<Self, String> {
         let entry = Entry::new(VAULT_KEYRING_SERVICE, VAULT_KEYRING_ENTRY)
-            .map_err(|_| "Fable could not reach the OS credential store.".to_string())?;
+            .map_err(|_| "Mivlet could not reach the OS credential store.".to_string())?;
         Ok(Self { entry })
     }
 }
@@ -56,7 +56,7 @@ impl KeyStore for NativeKeyStore {
         match self.entry.get_password() {
             Ok(hex) => decode_hex_key(&hex).map(Some),
             Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err("Fable could not read the vault key from the credential store.".into()),
+            Err(_) => Err("Mivlet could not read the vault key from the credential store.".into()),
         }
     }
 
@@ -64,7 +64,7 @@ impl KeyStore for NativeKeyStore {
         let hex = encode_hex_key(key);
         self.entry
             .set_password(&hex)
-            .map_err(|_| "Fable could not store the vault key in the credential store.".into())
+            .map_err(|_| "Mivlet could not store the vault key in the credential store.".into())
     }
 }
 
@@ -94,7 +94,7 @@ pub fn resolve_or_create(store: &dyn KeyStore) -> Result<KeyResolution, String> 
         }
         None => {
             let key = MasterKey::generate().map_err(|_| {
-                "Fable could not generate an encryption key from the OS random source.".to_string()
+                "Mivlet could not generate an encryption key from the OS random source.".to_string()
             })?;
             store.set(&key.to_raw_bytes())?;
             Ok(KeyResolution::FreshlyCreated(key))
@@ -110,7 +110,7 @@ pub fn resolve_for_database(
 ) -> Result<KeyResolution, String> {
     if database_exists && store.get()?.is_none() {
         return Err(
-            "Fable's encrypted database exists but its OS-secure key is missing. Restore the key or a matched backup; the database was not overwritten."
+            "Mivlet's encrypted database exists but its OS-secure key is missing. Restore the key or a matched backup; the database was not overwritten."
                 .to_string(),
         );
     }

@@ -235,7 +235,7 @@ async function resolveUsableBackendProviders(
       models: provider.models.map((model) => ({ ...model, available: false })),
       installHint:
         verification?.message ??
-        "Fable could not verify this saved provider. Check the connection and try again.",
+        "Mivlet could not verify this saved provider. Check the connection and try again.",
     };
   });
 }
@@ -453,7 +453,7 @@ export function useShellRuntime(
     [connectorImportedSources, importedKnowledgeSources],
   );
   // Every runnable connection participates in the model picker. Selection owns
-  // routing: Fable no longer silently sends all prompts to the first connection.
+  // routing: Mivlet no longer silently sends all prompts to the first connection.
   const connectedAgentBackends = useMemo(
     () =>
       backendProviders.filter(
@@ -637,7 +637,7 @@ export function useShellRuntime(
         setLastAction(
           error instanceof Error
             ? error.message
-            : "Fable could not save runtime snapshot.",
+            : "Mivlet could not save runtime snapshot.",
         );
       });
     }, 300);
@@ -780,7 +780,7 @@ export function useShellRuntime(
           hydratedWorkspaceRef.current = null;
           snapshotLoadFailedRef.current = true;
           setRuntimeSnapshotReady(false);
-          const message = error instanceof Error ? error.message : "Fable could not load the saved workspace.";
+          const message = error instanceof Error ? error.message : "Mivlet could not load the saved workspace.";
           setRuntimeSnapshotError(message);
           setLastAction(message);
         }
@@ -872,7 +872,7 @@ export function useShellRuntime(
         const message =
           error instanceof Error
             ? error.message
-            : "Fable could not load account workspaces.";
+            : "Mivlet could not load account workspaces.";
         let localFallback = accountWorkspaceFallback;
         if (hasTauriRuntime()) {
           try {
@@ -934,7 +934,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable cloud sign-in is unavailable.";
+          : "Mivlet cloud sign-in is unavailable.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
@@ -960,7 +960,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable account recovery is unavailable.";
+          : "Mivlet account recovery is unavailable.";
       setLastAction(message);
     } finally {
       setIdentityPending(false);
@@ -982,7 +982,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable cloud identity could not refresh.";
+          : "Mivlet cloud identity could not refresh.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
@@ -999,12 +999,12 @@ export function useShellRuntime(
     setIdentityPending(true);
     try {
       const status = await signOutRuntimeIdentity();
-      if (!status && hasTauriRuntime()) throw new Error("Fable could not confirm sign out. Try again.");
+      if (!status && hasTauriRuntime()) throw new Error("Mivlet could not confirm sign out. Try again.");
       await clearRuntimeAccountWorkspaceSession();
       applyAccountWorkspaceStatus({
         ...DEFAULT_ACCOUNT_WORKSPACE_STATUS,
         message:
-          "Signed out of Fable. Your workspace is saved on this device.",
+          "Signed out of Mivlet. Your workspace is saved on this device.",
       });
       const next =
         status ??
@@ -1015,7 +1015,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable could not sign out.";
+          : "Mivlet could not sign out.";
       setIdentityStatus((current) => ({
         ...current,
         state: current.enabled ? "error" : "disabled",
@@ -1086,7 +1086,7 @@ export function useShellRuntime(
           setImportStatus(
             error instanceof Error
               ? error.message
-              : "Fable could not load connector knowledge.",
+              : "Mivlet could not load connector knowledge.",
           );
         }
       });
@@ -1355,7 +1355,7 @@ export function useShellRuntime(
       const message =
         error instanceof Error
           ? error.message
-          : "Fable could not import that file.";
+          : "Mivlet could not import that file.";
       // Import failure must not leave a phantom source or stale optimistic
       // state: nothing was added, so we surface the failure and clear indexing.
       setImportStatus(message);
@@ -1598,7 +1598,7 @@ export function useShellRuntime(
         setMemoryStatus(
           error instanceof Error
             ? error.message
-            : "Fable could not save memory state.",
+            : "Mivlet could not save memory state.",
         );
       });
   };
@@ -1677,7 +1677,7 @@ export function useShellRuntime(
       setMemoryStatus(
         error instanceof Error
           ? error.message
-          : "Fable could not export memory.",
+          : "Mivlet could not export memory.",
       );
     }
   };
@@ -1936,7 +1936,7 @@ export function useShellRuntime(
   ): Promise<BackendVerifyResult> => {
     if (!isFableProviderEnabled(providerId)) {
       const message =
-        "This provider is not available in the current Fable release.";
+        "This provider is not available in the current Mivlet release.";
       setBackendStatus(message);
       return { providerId, outcome: "unsupported", message };
     }
@@ -1970,7 +1970,7 @@ export function useShellRuntime(
         await refreshBackendProviders();
         markProviderState(providerId, "needs-auth");
         const message =
-          "Fable could not verify this provider in the desktop runtime. Update Fable and try again.";
+          "Mivlet could not verify this provider in the desktop runtime. Update Mivlet and try again.";
         setBackendStatus(message);
         setLastAction(message);
         return { providerId, outcome: "failed", message };
@@ -2017,7 +2017,7 @@ export function useShellRuntime(
       markProviderState(providerId, "unavailable");
       const status =
         message ??
-        `${providerId} could not be verified. Retry before entering Fable.`;
+        `${providerId} could not be verified. Retry before entering Mivlet.`;
       setBackendStatus(status);
       setLastAction(status);
       return { providerId, outcome, message };
@@ -2049,7 +2049,7 @@ export function useShellRuntime(
       return {
         providerId,
         outcome: "failed",
-        message: "This provider is not in Fable's runtime catalogue.",
+        message: "This provider is not in Mivlet's runtime catalogue.",
       };
     }
 
@@ -2183,7 +2183,7 @@ export function useShellRuntime(
         providerId,
         outcome: "unsupported",
         message:
-          "This provider does not expose a supported browser sign-in through Fable.",
+          "This provider does not expose a supported browser sign-in through Mivlet.",
       };
     }
     markProviderState(providerId, "connecting");
@@ -2212,7 +2212,7 @@ export function useShellRuntime(
         return {
           providerId,
           outcome: "unsupported",
-          message: "Browser sign-in is available in the Fable desktop app.",
+          message: "Browser sign-in is available in the Mivlet desktop app.",
         };
       }
       // Antigravity's native sign-in already authenticates and creates a real
@@ -2314,21 +2314,21 @@ export function useShellRuntime(
       (identityStatus.state === "offline" &&
         Boolean(identityStatus.authentication));
     if (!accountReady) {
-      const message = "Sign in to Fable before finishing setup.";
+      const message = "Sign in to Mivlet before finishing setup.";
       setIdentityStatus((current) => ({ ...current, message }));
       setLastAction(message);
       return;
     }
     if (!activeWorkspaceScope || connectedBackendIds.length === 0) {
       const message =
-        "Connect and verify a model provider before entering Fable.";
+        "Connect and verify a model provider before entering Mivlet.";
       setBackendStatus(message);
       setLastAction(message);
       return;
     }
     setOnboardingDismissed(true);
     setOnboardingVersion(CURRENT_ONBOARDING_VERSION);
-    setLastAction("Fable setup complete");
+    setLastAction("Mivlet setup complete");
   };
 
   // Full access makes the decision automatically, through the same persisted
@@ -2546,7 +2546,7 @@ export function useShellRuntime(
       setLastAction(
         error instanceof Error
           ? error.message
-          : "Fable could not resolve that approval.",
+          : "Mivlet could not resolve that approval.",
       );
     }
   };

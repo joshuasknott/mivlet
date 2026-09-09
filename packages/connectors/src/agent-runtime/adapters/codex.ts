@@ -78,7 +78,7 @@ async function* mapCodexEvents(
       };
     } else if (event.type === "approval-request") {
       if (++toolCalls > maxToolCalls) {
-        await handle.respondApproval(event.requestId, { callId: event.callId, ok: false, output: "Fable stopped this turn at its tool-call limit. Report current progress to the user." });
+        await handle.respondApproval(event.requestId, { callId: event.callId, ok: false, output: "Mivlet stopped this turn at its tool-call limit. Report current progress to the user." });
         await handle.cancel(threadId);
         yield { type: "error", message: "Computer work reached this turn's action limit. Review the current state before continuing." };
         yield { type: "done", finishReason: "error" };
@@ -93,12 +93,12 @@ async function* mapCodexEvents(
       }
       try {
         if (!dynamicTool) {
-          throw new Error("Use only the Fable tools supplied for this turn. Host commands, files, and inherited provider tools are unavailable.");
+          throw new Error("Use only the Mivlet tools supplied for this turn. Host commands, files, and inherited provider tools are unavailable.");
         }
         if (dynamicTool) {
           const effect = effectForTool(event.tool);
           if (!effect || !evaluatePermissionPolicy({ mode: options.permissionMode ?? "read-only", effect, riskLevel: approval.riskLevel }).allowed) {
-            throw new Error(`Blocked by Fable's ${options.permissionMode ?? "read-only"} permission mode.`);
+            throw new Error(`Blocked by Mivlet's ${options.permissionMode ?? "read-only"} permission mode.`);
           }
         }
         yield { type: "tool-call", callId: event.callId, tool: event.tool, arguments: event.arguments, approval };

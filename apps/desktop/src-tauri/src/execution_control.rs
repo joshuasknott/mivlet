@@ -88,7 +88,7 @@ pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
         #[cfg(test)]
         return Ok(());
         #[cfg(not(test))]
-        return Err("Fable's encrypted store is not initialized.".to_string());
+        return Err("Mivlet's encrypted store is not initialized.".to_string());
     };
     let paused = store
         .with_conn(|conn| {
@@ -111,7 +111,7 @@ pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
 pub fn execution_control_get(workspace_id: String) -> Result<ExecutionControlState, String> {
     let scope = authorized_scope::command_scope(Some(workspace_id), None, ScopeAccess::Read)?;
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|conn| read_state(conn, store, scope.data.workspace_id()))
         .map_err(|error| error.to_string())
@@ -146,7 +146,7 @@ fn update(
     paused: bool,
 ) -> Result<ExecutionControlState, String> {
     let store = crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())?;
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let next = store
         .transaction(|tx| {
             let scope =

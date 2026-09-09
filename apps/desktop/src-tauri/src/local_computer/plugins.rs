@@ -20,7 +20,7 @@ pub async fn builtin_plugin_prepare_computer(
     expected_generation: u64,
 ) -> Result<super::LocalComputerSnapshot, String> {
     if window.label() != "main" {
-        return Err("Plugin startup belongs to the main Fable window.".into());
+        return Err("Plugin startup belongs to the main Mivlet window.".into());
     }
     state.validate_target(&workspace_id, &agent_id)?;
     let browser = match plugin.as_str() {
@@ -111,7 +111,7 @@ pub fn builtin_plugins_status(
     workspace_id: String,
 ) -> Result<BuiltinPlugins, String> {
     if window.label() != "main" {
-        return Err("Plugin settings belong to the main Fable window.".into());
+        return Err("Plugin settings belong to the main Mivlet window.".into());
     }
     crate::authorized_scope::command_scope(
         Some(workspace_id),
@@ -131,7 +131,7 @@ pub async fn builtin_plugin_set(
     enabled: bool,
 ) -> Result<BuiltinPlugins, String> {
     if window.label() != "main" {
-        return Err("Plugin settings belong to the main Fable window.".into());
+        return Err("Plugin settings belong to the main Mivlet window.".into());
     }
     let scope = crate::authorized_scope::command_scope(
         Some(workspace_id),

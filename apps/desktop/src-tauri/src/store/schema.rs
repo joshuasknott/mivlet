@@ -697,7 +697,7 @@ CREATE INDEX IF NOT EXISTS idx_cloud_conflict_workspace
 "#;
 
 /// Forward schema step `v7 -> v8`: makes the local shared-workspace cache a
-/// Fable-owned control-plane mirror. Convex remains canonical: this database
+/// Mivlet-owned control-plane mirror. Convex remains canonical: this database
 /// caches only explicit attribution, authorization display state, and sync
 /// envelopes. Clerk organization ids are copied to a quarantined compatibility
 /// table and never participate in link lookup or authorization after upgrade.
@@ -1556,7 +1556,7 @@ CREATE TABLE IF NOT EXISTS connector_cache_settings (
   PRIMARY KEY (workspace_id, connector_id)
 );
 
--- Local Fable control-plane mirror. Convex remains canonical; these records
+-- Local Mivlet control-plane mirror. Convex remains canonical; these records
 -- only support display, offline authorization facts, and replay-safe sync.
 CREATE TABLE IF NOT EXISTS fable_internal_user_mirror (
   internal_user_id TEXT PRIMARY KEY, status TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 0,

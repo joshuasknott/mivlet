@@ -78,7 +78,7 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("repo", "Repositories, issues, and pull requests", "read", true),
       permission("read:org", "Organization membership", "read", false)
     ],
-    setupMessage: "Register a GitHub OAuth App and configure the Fable auth broker."
+    setupMessage: "Register a GitHub OAuth App and configure the Mivlet auth broker."
   }),
   disconnectedConnector({
     id: "vercel",
@@ -118,7 +118,7 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("insert_content", "Create content", "write", false),
       permission("update_content", "Update content", "write", false)
     ],
-    setupMessage: "Create a Notion public integration and configure the Fable auth broker."
+    setupMessage: "Create a Notion public integration and configure the Mivlet auth broker."
   }),
   disconnectedConnector({
     id: "gmail",
@@ -144,7 +144,7 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("users:read", "Workspace users", "read", true),
       permission("chat:write", "Post approved messages", "write", false)
     ],
-    setupMessage: "Create a Slack app and configure the Fable auth broker."
+    setupMessage: "Create a Slack app and configure the Mivlet auth broker."
   }),
   disconnectedConnector({
     id: "google-calendar",
@@ -172,7 +172,7 @@ export const connectorCatalog: ConnectorManifest[] = [
       )
     ],
     setupMessage:
-      "Enable the Calendar API and create a desktop OAuth client for Fable."
+      "Enable the Calendar API and create a desktop OAuth client for Mivlet."
   }),
   disconnectedConnector({
     id: "linear",
@@ -184,7 +184,7 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("write", "Issue changes", "write", false),
       permission("comments:create", "Create comments", "write", false)
     ],
-    setupMessage: "Create a Linear OAuth application and configure the Fable auth broker."
+    setupMessage: "Create a Linear OAuth application and configure the Mivlet auth broker."
   })
 ];
 

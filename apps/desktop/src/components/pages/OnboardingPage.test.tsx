@@ -120,7 +120,7 @@ describe("OnboardingPage", () => {
   it("starts with classic Google-first account entry and quiet secondary actions", () => {
     renderOnboarding();
 
-    expect(screen.getByRole("heading", { name: "Welcome to Fable" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Welcome to Mivlet" })).toBeInTheDocument();
     expect(screen.getByText("Sign in or create an account to get started.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue with Google" })).toHaveClass("og-primary-button");
     expect(screen.getByRole("button", { name: "Continue with email" })).toHaveClass("og-text-button");
@@ -146,7 +146,7 @@ describe("OnboardingPage", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue with Google" }));
     expect(onSignIn).toHaveBeenCalledWith("google");
-    expect(screen.getByRole("heading", { name: "Welcome to Fable" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Welcome to Mivlet" })).toBeInTheDocument();
 
     view.rerender(
       <OnboardingPage
@@ -211,7 +211,7 @@ describe("OnboardingPage", () => {
     expect(await screen.findByRole("heading", { name: "Choose your provider" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Back" }));
 
-    expect(screen.getByRole("heading", { name: "Welcome to Fable" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Welcome to Mivlet" })).toBeInTheDocument();
   });
 
   it("shows API key setup directly when a provider has no subscription path", async () => {
@@ -295,7 +295,7 @@ describe("OnboardingPage", () => {
     expect(screen.getByRole("button", { name: "Claude" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Back" }));
     await act(async () => finish({ providerId: "codex", outcome: "ready" }));
-    expect(screen.getByRole("heading", { name: "Welcome to Fable" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Welcome to Mivlet" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Connect the apps you use" })).not.toBeInTheDocument();
   });
 

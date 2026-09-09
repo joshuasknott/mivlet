@@ -242,7 +242,7 @@ fn notion_item(value: &Value) -> Option<ConnectorSearchItem> {
         connection_id: None,
         title,
         kind: object.clone(),
-        summary: format!("{object} explicitly shared with the Fable integration"),
+        summary: format!("{object} explicitly shared with the Mivlet integration"),
         provenance: "Notion · shared integration content".into(),
         freshness,
         trust: "untrusted".into(),

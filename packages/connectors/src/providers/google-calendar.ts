@@ -98,7 +98,7 @@ export function prepareGoogleCalendarCreate(payload: {
     "google-calendar.create-draft",
     { ...payload, targetId: payload.calendarId },
     "medium",
-    "Creates a calendar event after Fable approval."
+    "Creates a calendar event after Mivlet approval."
   );
 }
 
@@ -119,7 +119,7 @@ export function prepareGoogleCalendarUpdate(payload: {
     "google-calendar.update-draft",
     { ...payload, targetId: payload.eventId },
     "medium",
-    "Updates the selected calendar event after Fable approval."
+    "Updates the selected calendar event after Mivlet approval."
   );
 }
 

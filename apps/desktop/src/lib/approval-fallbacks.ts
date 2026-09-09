@@ -69,7 +69,7 @@ export function promoteKnowledgeSourceFallback(request: MemoryPromotionRequest) 
       requestId: `memory-promotion-${source.id}`,
       decision: request.decision,
       decidedAt: request.decidedAt,
-      note: `Fable Memory Approve ${source.provenance} into durable memory`
+      note: `Mivlet Memory Approve ${source.provenance} into durable memory`
     }
   };
 }

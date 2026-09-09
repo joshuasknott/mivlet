@@ -427,7 +427,7 @@ pub fn local_schedule_occurrence_list(
 
 fn require_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Scheduled work can only run from the main Fable window.".into());
+        return Err("Scheduled work can only run from the main Mivlet window.".into());
     }
     Ok(())
 }
@@ -670,7 +670,7 @@ fn resolve_private_scope(
 
 fn global_store() -> Result<&'static Store, String> {
     crate::store::try_global()
-        .ok_or_else(|| "Fable's encrypted store is not initialized.".to_string())
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())
 }
 
 fn record_schedule_change(schedule: &LocalSchedule, action: &str) {
@@ -1397,7 +1397,7 @@ fn fingerprint(value: &str) -> String {
 fn random_token(prefix: &str) -> crate::store::Result<String> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes)
-        .map_err(|_| StoreError::Invalid("Fable could not create schedule identity.".into()))?;
+        .map_err(|_| StoreError::Invalid("Mivlet could not create schedule identity.".into()))?;
     Ok(format!("{prefix}-{}", hex::encode(bytes)))
 }
 

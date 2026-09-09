@@ -1,5 +1,5 @@
 /**
- * Real tool execution behind Fable's approval layer.
+ * Real tool execution behind Mivlet's approval layer.
  *
  * The executor is the concrete implementation of the four registered tools
  * (read-file, write-file, run-shell, web-fetch, local-browser, cloud-browser). It is pure over an injectable
@@ -359,7 +359,7 @@ async function dispatch(
     );
   }
   if (!tool) {
-    throw new Error(`Unknown tool "${toolName}" — not in Fable's tool registry.`);
+    throw new Error(`Unknown tool "${toolName}" — not in Mivlet's tool registry.`);
   }
   const parsed = safeParseArgs(args);
 
@@ -528,7 +528,7 @@ function requireImageInput(
   if (!editing) return common;
   const sourceArtifactId = requireString(parsed, "edit-image", "sourceArtifactId");
   if (!/^artifact-[0-9a-f]{64}$/.test(sourceArtifactId)) {
-    throw new Error("Tool edit-image requires a verified Fable image artifact id.");
+    throw new Error("Tool edit-image requires a verified Mivlet image artifact id.");
   }
   return { ...common, sourceArtifactId };
 }

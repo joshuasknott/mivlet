@@ -100,7 +100,7 @@ async fn remote_http_client(endpoint: &Url) -> Result<reqwest::Client, String> {
     }
     builder
         .build()
-        .map_err(|_| "Fable could not initialize the remote MCP transport.".into())
+        .map_err(|_| "Mivlet could not initialize the remote MCP transport.".into())
 }
 
 fn valid_server_session_id(value: &str) -> bool {
@@ -925,26 +925,26 @@ fn select_client_registration_from_availability(
         ClientRegistrationDecision {
             strategy: "pre-registered",
             status: "selected",
-            reason: "Use the issuer-specific client registration already configured for Fable.",
+            reason: "Use the issuer-specific client registration already configured for Mivlet.",
         }
     } else if client_metadata_document {
         ClientRegistrationDecision {
             strategy: "client-id-metadata-document",
             status: "selected",
-            reason: "Use Fable's configured public HTTPS Client ID Metadata Document.",
+            reason: "Use Mivlet's configured public HTTPS Client ID Metadata Document.",
         }
     } else if dynamic_registration {
         ClientRegistrationDecision {
             strategy: "dynamic-client-registration",
             status: "selected",
             reason:
-                "Register Fable's public PKCE client dynamically with this authorization server.",
+                "Register Mivlet's public PKCE client dynamically with this authorization server.",
         }
     } else {
         ClientRegistrationDecision {
             strategy: "manual-client-information",
             status: "configuration-required",
-            reason: "This server requires explicit client information before Fable can connect an account.",
+            reason: "This server requires explicit client information before Mivlet can connect an account.",
         }
     }
 }
@@ -1055,7 +1055,7 @@ async fn register_dynamic_public_client(
         .header(reqwest::header::ACCEPT, "application/json")
         .header(reqwest::header::ACCEPT_ENCODING, "identity")
         .json(&serde_json::json!({
-            "client_name": "Fable Desktop",
+            "client_name": "Mivlet Desktop",
             "application_type": "native",
             "redirect_uris": [redirect_uri],
             "grant_types": ["authorization_code", "refresh_token"],
@@ -1133,7 +1133,7 @@ fn validate_client_metadata_document(
         });
     if !redirect_allowed {
         return Err(
-            "MCP OAuth Client ID Metadata Document does not allow Fable's loopback redirect."
+            "MCP OAuth Client ID Metadata Document does not allow Mivlet's loopback redirect."
                 .into(),
         );
     }
@@ -1171,7 +1171,7 @@ async fn resolve_public_oauth_client(
 fn random_oauth_value(bytes: usize) -> Result<String, String> {
     let mut value = vec![0_u8; bytes];
     getrandom::fill(&mut value)
-        .map_err(|_| "Fable could not create secure MCP OAuth state.".to_string())?;
+        .map_err(|_| "Mivlet could not create secure MCP OAuth state.".to_string())?;
     Ok(URL_SAFE_NO_PAD.encode(value))
 }
 
@@ -1450,7 +1450,7 @@ fn validate_configuration_for_approval(
 
 fn configuration_fingerprint(configuration: &McpServerConfiguration) -> Result<String, String> {
     let encoded = serde_json::to_vec(configuration)
-        .map_err(|_| "Fable could not fingerprint this MCP configuration.".to_string())?;
+        .map_err(|_| "Mivlet could not fingerprint this MCP configuration.".to_string())?;
     Ok(format!("{:x}", Sha256::digest(encoded)))
 }
 
@@ -1471,10 +1471,10 @@ fn approval_for_configuration(
             format!("configuration fingerprint: {fingerprint}"),
         ],
         consequence: if configuration.transport == "stdio" {
-            "Starts a user-managed local program that can expose tools and resources to Fable."
+            "Starts a user-managed local program that can expose tools and resources to Mivlet."
                 .to_string()
         } else {
-            "Connects to a user-managed remote service that can expose tools and resources to Fable."
+            "Connects to a user-managed remote service that can expose tools and resources to Mivlet."
                 .to_string()
         },
         requested_at,
@@ -1548,7 +1548,7 @@ fn spawn_mcp_child(executable: &Path, args: &[String], cwd: &Path) -> std::io::R
 fn random_session_id() -> Result<String, String> {
     let mut bytes = [0_u8; 16];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not create a local MCP session id.".to_string())?;
+        .map_err(|_| "Mivlet could not create a local MCP session id.".to_string())?;
     Ok(format!("mcp-{}", hex::encode(bytes)))
 }
 

@@ -200,7 +200,7 @@ describe("createCodexBackend", () => {
     expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
   });
 
-  it("surfaces provider-owned web search without invoking Fable's executor", async () => {
+  it("surfaces provider-owned web search without invoking Mivlet's executor", async () => {
     const result = JSON.stringify({
       untrusted: true,
       query: "current release",
@@ -494,7 +494,7 @@ describe("createNativeApiBackend", () => {
     ["explicitly tool-capable", true, true],
     ["explicitly not tool-capable", false, false]
   ])(
-    "honors %s model metadata when advertising Fable tools",
+    "honors %s model metadata when advertising Mivlet tools",
     async (_label, tools, expectTools) => {
       let sentToolCount = -1;
       const backend = createNativeApiBackend(

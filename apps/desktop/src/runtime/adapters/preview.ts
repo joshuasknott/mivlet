@@ -9,7 +9,7 @@ export const previewRuntimeAdapter: RuntimeAdapter = {
   kind: "preview",
   async invoke(command: string) {
     throw new Error(
-      `Native command "${command}" is unavailable in Fable's development preview.`,
+      `Native command "${command}" is unavailable in Mivlet's development preview.`,
     );
   },
   async listen() {

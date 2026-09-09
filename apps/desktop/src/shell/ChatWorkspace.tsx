@@ -1,3 +1,4 @@
+import { Brand } from "../components/Brand";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
@@ -103,7 +104,7 @@ function compactTime(value?: string) {
     : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-/** The Fable desktop product: named teammates, one durable conversation, and bounded tools. */
+/** The Mivlet desktop product: named teammates, one durable conversation, and bounded tools. */
 export function ChatWorkspace() {
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
@@ -406,7 +407,7 @@ export function ChatWorkspace() {
         const message =
           error instanceof Error
             ? error.message
-            : "Fable could not complete that response.";
+            : "Mivlet could not complete that response.";
         agent.reportError(message);
         setSubmissionError(message);
         if (!currentRepositoryDraft.current.trim()) runtime.setComposerValue(batch?.prompt ?? prompt);
@@ -496,6 +497,7 @@ export function ChatWorkspace() {
     return (
       <main className="og-frame">
         <section className="empty-state" role={runtime.runtimeSnapshotError ? "alert" : "status"} aria-busy={!runtime.runtimeSnapshotError}>
+          <Brand compact />
           <p>{runtime.runtimeSnapshotError ?? "Loading your workspace…"}</p>
           {runtime.runtimeSnapshotError && <button type="button" disabled={runtime.accountWorkspacePending} onClick={() => void runtime.reconcileAccountWorkspace()}>Retry</button>}
         </section>
@@ -506,7 +508,7 @@ export function ChatWorkspace() {
   if (!activeAgent) {
     return (
       <main className="og-frame">
-        <p role="alert">Fable could not load a agent.</p>
+        <p role="alert">Mivlet could not load a agent.</p>
       </main>
     );
   }
@@ -1082,7 +1084,7 @@ export function ChatWorkspace() {
                   activeTab={settingsTab}
                   workspaceName={
                     runtime.accountWorkspaceStatus.activeWorkspace.name ||
-                    "Fable workspace"
+                    "Mivlet workspace"
                   }
                   dictationCapability={voice.capability}
                   onOpenScheduleResult={async (agentId, threadId) => {

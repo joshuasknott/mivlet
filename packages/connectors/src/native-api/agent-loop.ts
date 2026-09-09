@@ -1,5 +1,5 @@
 /**
- * The Fable-owned agent loop for native-API providers.
+ * The Mivlet-owned agent loop for native-API providers.
  *
  * Pure over an injectable HttpTransport + ToolExecutor. One turn = stream a
  * completion; if it finishes with `tool-calls`, the shell must approve + execute
@@ -37,7 +37,7 @@ import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
 
-/** Executes an approved tool. Production wires this to Fable runtime functions;
+/** Executes an approved tool. Production wires this to Mivlet runtime functions;
  *  tests inject a fake. Throws if the approval was not granted (fail-closed). */
 export type ToolExecutor = (approval: ApprovalRequest, args: string) => Promise<string>;
 
@@ -137,7 +137,7 @@ export async function* runAgentLoop(
   request: NativeCompletionRequest,
   options: RunAgentLoopOptions
 ): AsyncIterable<BackendAgentEvent> {
-  // The native loop owns Fable's tool catalogue, but it must only advertise it
+  // The native loop owns Mivlet's tool catalogue, but it must only advertise it
   // when tool support is known. A newly discovered model with no capability
   // metadata stays runnable for plain chat without being assumed tool-capable.
   const modelSupportsTools =
@@ -151,10 +151,10 @@ export async function* runAgentLoop(
   const systemPrefix = [
     options.contextPrefix?.trim(),
     tools.some((tool) => tool.name === "connection-read")
-      ? `Fable tool-use policy: ${CONNECTED_SOURCE_BRIEF_GUIDANCE}`
+      ? `Mivlet tool-use policy: ${CONNECTED_SOURCE_BRIEF_GUIDANCE}`
       : undefined,
     tools.some((tool) => tool.name === "web-fetch")
-      ? `Fable web-source policy: ${WEB_SOURCE_BRIEF_GUIDANCE}`
+      ? `Mivlet web-source policy: ${WEB_SOURCE_BRIEF_GUIDANCE}`
       : undefined
   ].filter((part): part is string => Boolean(part)).join("\n\n");
   const messages: NativeMessage[] = systemPrefix
@@ -176,7 +176,7 @@ export async function* runAgentLoop(
     const limit = options.maxToolOutputCharacters ?? MAX_TOOL_OUTPUT_CHARACTERS;
     return output.length <= limit
       ? output
-      : `${output.slice(0, limit)}\n[Tool output truncated by Fable at ${limit} characters.]`;
+      : `${output.slice(0, limit)}\n[Tool output truncated by Mivlet at ${limit} characters.]`;
   };
 
   for (let turn = 0; turn < maxTurns; turn += 1) {

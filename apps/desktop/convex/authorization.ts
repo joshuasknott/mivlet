@@ -4,11 +4,11 @@ export async function requireFableUser(ctx: any) {
   const account = await requireConvexAccountIdentity(ctx);
   const external = account.external;
   const links = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", external.provider).eq("normalizedIssuer", external.normalizedIssuer).eq("subject", external.subject)).collect();
-  if (links.length > 1) throw new Error("Fable identity link is ambiguous.");
+  if (links.length > 1) throw new Error("Mivlet identity link is ambiguous.");
   const link = links[0];
-  if (!link || link.status !== "active") throw new Error("Fable identity link is unavailable.");
+  if (!link || link.status !== "active") throw new Error("Mivlet identity link is unavailable.");
   const users = await ctx.db.query("internal_users").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", link.internalUserId)).collect();
-  if (users.length !== 1 || users[0].status !== "active") throw new Error("Fable account is unavailable.");
+  if (users.length !== 1 || users[0].status !== "active") throw new Error("Mivlet account is unavailable.");
   const user = users[0];
   return { external, link, user };
 }
@@ -19,7 +19,7 @@ export async function requireActiveMembership(ctx: any, workspaceId: string) {
   if (workspaces.length !== 1 || workspaces[0].status !== "active") throw new Error("The requested workspace is unavailable.");
   const workspace = workspaces[0];
   const memberships = await ctx.db.query("workspace_memberships").withIndex("by_workspace_user", (q: any) => q.eq("workspaceId", workspaceId).eq("internalUserId", principal.user.internalUserId)).collect();
-  if (memberships.length !== 1 || memberships[0].status !== "active") throw new Error("Active Fable workspace membership is required.");
+  if (memberships.length !== 1 || memberships[0].status !== "active") throw new Error("Active Mivlet workspace membership is required.");
   const membership = memberships[0];
   return { ...principal, workspace, membership };
 }
@@ -28,11 +28,11 @@ export async function requireActiveDevice(ctx: any, workspaceId: string, deviceI
   const authz = await requireActiveMembership(ctx, workspaceId);
   const devices = await ctx.db.query("account_devices").withIndex("by_device", (q: any) => q.eq("deviceId", deviceId)).collect();
   const links = await ctx.db.query("workspace_device_links").withIndex("by_workspace_device", (q: any) => q.eq("workspaceId", workspaceId).eq("deviceId", deviceId)).collect();
-  if (devices.length !== 1 || links.length !== 1) throw new Error("An active Fable device link is required.");
+  if (devices.length !== 1 || links.length !== 1) throw new Error("An active Mivlet device link is required.");
   const device = devices[0];
   const link = links[0];
-  if (device.internalUserId !== authz.user.internalUserId || device.status !== "active" || link.internalUserId !== authz.user.internalUserId || link.memberId !== authz.membership.memberId || link.status !== "active") throw new Error("An active Fable device link is required.");
+  if (device.internalUserId !== authz.user.internalUserId || device.status !== "active" || link.internalUserId !== authz.user.internalUserId || link.memberId !== authz.membership.memberId || link.status !== "active") throw new Error("An active Mivlet device link is required.");
   return { ...authz, device, link };
 }
 
-export function requireRole(role: string, allowed: readonly string[]) { if (!allowed.includes(role)) throw new Error("This Fable role is not permitted for the requested operation."); }
+export function requireRole(role: string, allowed: readonly string[]) { if (!allowed.includes(role)) throw new Error("This Mivlet role is not permitted for the requested operation."); }

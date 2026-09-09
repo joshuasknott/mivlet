@@ -90,7 +90,7 @@ export function DictationPrivacySettings({
         </span>
       </button>
       <p className="settings-input-note">
-        {!available ? capability.reason + " " : ""}Fable does not save raw
+        {!available ? capability.reason + " " : ""}Mivlet does not save raw
         audio.
       </p>
       <details className="settings-disclosure">
@@ -113,8 +113,8 @@ export function DictationPrivacySettings({
         </label>
         <p>
           {runtime.voiceProvider === "openai"
-            ? "Record locally, then approve each recording before Fable uploads it to OpenAI for transcription. This uses your separate OpenAI API connection and billing."
-            : "Your browser or operating system may process speech remotely. Fable keeps the text you send."}
+            ? "Record locally, then approve each recording before Mivlet uploads it to OpenAI for transcription. This uses your separate OpenAI API connection and billing."
+            : "Your browser or operating system may process speech remotely. Mivlet keeps the text you send."}
         </p>
         {!openAiConnected ? (
           <p>
@@ -139,7 +139,7 @@ export function AppearanceSettingsView({
     <div className="settings-preference-row">
       <span>
         <strong>Appearance</strong>
-        <small>Choose how Fable looks.</small>
+        <small>Choose how Mivlet looks.</small>
       </span>
       <div
         className="theme-toggle theme-toggle--settings"

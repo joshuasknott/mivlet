@@ -18,7 +18,7 @@ fn validate_link(value: &str) -> Result<url::Url, String> {
 #[tauri::command]
 pub fn open_conversation_link(window: tauri::WebviewWindow, url: String) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Open the link from the Fable conversation.".into());
+        return Err("Open the link from the Mivlet conversation.".into());
     }
     let url = validate_link(&url)?;
     #[cfg(windows)]

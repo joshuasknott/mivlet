@@ -1,7 +1,7 @@
 //! Google Antigravity ACP boundary.
 //!
-//! Fable installs and supervises Google's published Antigravity ACP agent. The
-//! agent owns Google authentication inside an account-scoped profile; Fable
+//! Mivlet installs and supervises Google's published Antigravity ACP agent. The
+//! agent owns Google authentication inside an account-scoped profile; Mivlet
 //! only observes connection state, model metadata, streamed text, and explicit
 //! permission requests. OAuth material never crosses the Tauri boundary.
 
@@ -140,7 +140,7 @@ impl WindowsProcessJob {
         unsafe {
             let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if handle.is_null() {
-                return Err("Fable could not supervise the Antigravity process tree.".into());
+                return Err("Mivlet could not supervise the Antigravity process tree.".into());
             }
             let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
             limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -152,11 +152,13 @@ impl WindowsProcessJob {
             ) == 0
             {
                 CloseHandle(handle);
-                return Err("Fable could not supervise the Antigravity process tree.".into());
+                return Err("Mivlet could not supervise the Antigravity process tree.".into());
             }
             if AssignProcessToJobObject(handle, child.as_raw_handle() as HANDLE) == 0 {
                 CloseHandle(handle);
-                return Err("Fable could not attach Antigravity to its process supervisor.".into());
+                return Err(
+                    "Mivlet could not attach Antigravity to its process supervisor.".into(),
+                );
             }
             Ok(Self(handle as usize))
         }
@@ -186,7 +188,7 @@ impl SupervisedChild {
     fn spawn(mut command: Command) -> Result<Self, String> {
         let mut child = command
             .spawn()
-            .map_err(|_| "Fable could not start Antigravity ACP.".to_string())?;
+            .map_err(|_| "Mivlet could not start Antigravity ACP.".to_string())?;
         #[cfg(windows)]
         let job = match WindowsProcessJob::assign(&child) {
             Ok(job) => Some(job),
@@ -281,7 +283,7 @@ pub(crate) fn status_for(app: &AppHandle, authenticated: bool) -> AntigravitySta
         authenticated: installed && authenticated,
         version: installed.then(|| VERSION.to_string()),
         message: (!installed).then(|| {
-            "Install Google's official Antigravity ACP runtime from Fable, then continue with Google.".to_string()
+            "Install Google's official Antigravity ACP runtime from Mivlet, then continue with Google.".to_string()
         }),
     }
 }
@@ -318,13 +320,13 @@ pub async fn install_antigravity_runtime(
     }
     let base = root(&app)?;
     fs::create_dir_all(&base)
-        .map_err(|_| "Fable could not prepare the Antigravity runtime directory.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the Antigravity runtime directory.".to_string())?;
     let archive_path = base.join(format!("antigravity-{VERSION}.download"));
     let mut response = reqwest::Client::new()
         .get(ARCHIVE_URL)
         .send()
         .await
-        .map_err(|_| "Fable could not download the Antigravity runtime.".to_string())?;
+        .map_err(|_| "Mivlet could not download the Antigravity runtime.".to_string())?;
     if !response.status().is_success() {
         return Err(format!(
             "Google returned HTTP {} for the Antigravity runtime.",
@@ -338,7 +340,7 @@ pub async fn install_antigravity_runtime(
         return Err("The Antigravity download size did not match the pinned release.".into());
     }
     let mut archive = fs::File::create(&archive_path)
-        .map_err(|_| "Fable could not create the Antigravity download file.".to_string())?;
+        .map_err(|_| "Mivlet could not create the Antigravity download file.".to_string())?;
     let mut hash = Sha256::new();
     let mut total = 0_u64;
     while let Some(chunk) = response
@@ -354,11 +356,11 @@ pub async fn install_antigravity_runtime(
         hash.update(&chunk);
         archive
             .write_all(&chunk)
-            .map_err(|_| "Fable could not save the Antigravity download.".to_string())?;
+            .map_err(|_| "Mivlet could not save the Antigravity download.".to_string())?;
     }
     archive
         .flush()
-        .map_err(|_| "Fable could not finish the Antigravity download.".to_string())?;
+        .map_err(|_| "Mivlet could not finish the Antigravity download.".to_string())?;
     drop(archive);
     let digest = hex::encode(hash.finalize());
     if total != ARCHIVE_BYTES || digest != ARCHIVE_SHA256 {
@@ -369,13 +371,13 @@ pub async fn install_antigravity_runtime(
     let staging = base.join(format!("runtime-{VERSION}-staging"));
     if staging.exists() {
         fs::remove_dir_all(&staging).map_err(|_| {
-            "Fable could not replace an incomplete Antigravity install.".to_string()
+            "Mivlet could not replace an incomplete Antigravity install.".to_string()
         })?;
     }
     fs::create_dir_all(&staging)
-        .map_err(|_| "Fable could not prepare the Antigravity install.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the Antigravity install.".to_string())?;
     let file = fs::File::open(&archive_path)
-        .map_err(|_| "Fable could not reopen the Antigravity download.".to_string())?;
+        .map_err(|_| "Mivlet could not reopen the Antigravity download.".to_string())?;
     let mut zip = zip::ZipArchive::new(file)
         .map_err(|_| "Google's Antigravity archive was not a valid ZIP file.".to_string())?;
     for (name, expected) in [
@@ -389,21 +391,21 @@ pub async fn install_antigravity_runtime(
             return Err(format!("{name} did not match the pinned release."));
         }
         let mut output = fs::File::create(staging.join(name))
-            .map_err(|_| format!("Fable could not install {name}."))?;
+            .map_err(|_| format!("Mivlet could not install {name}."))?;
         std::io::copy(&mut entry, &mut output)
-            .map_err(|_| format!("Fable could not extract {name}."))?;
+            .map_err(|_| format!("Mivlet could not extract {name}."))?;
     }
     let final_dir = runtime_dir(&app)?;
     if let Some(parent) = final_dir.parent() {
         fs::create_dir_all(parent)
-            .map_err(|_| "Fable could not prepare the runtime folder.".to_string())?;
+            .map_err(|_| "Mivlet could not prepare the runtime folder.".to_string())?;
     }
     if final_dir.exists() {
         fs::remove_dir_all(&final_dir)
-            .map_err(|_| "Fable could not replace the Antigravity runtime.".to_string())?;
+            .map_err(|_| "Mivlet could not replace the Antigravity runtime.".to_string())?;
     }
     fs::rename(&staging, &final_dir)
-        .map_err(|_| "Fable could not finish installing Antigravity.".to_string())?;
+        .map_err(|_| "Mivlet could not finish installing Antigravity.".to_string())?;
     let _ = fs::remove_file(&archive_path);
     Ok(AntigravityInstallResult {
         provider_id: PROVIDER_ID,
@@ -417,18 +419,18 @@ fn prepare_profile(app: &AppHandle, user_id: &str) -> Result<(PathBuf, PathBuf),
     let workspace = workspace_dir(app, user_id)?;
     fs::create_dir_all(profile.join("antigravity-acp"))
         .and_then(|_| fs::create_dir_all(&workspace))
-        .map_err(|_| "Fable could not prepare the private Antigravity profile.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare the private Antigravity profile.".to_string())?;
     fs::write(
         profile.join("antigravity-acp").join("settings.json"),
         b"{\"auth\":{\"type\":\"oauth-personal\"}}",
     )
-    .map_err(|_| "Fable could not configure Antigravity personal Google sign-in.".to_string())?;
+    .map_err(|_| "Mivlet could not configure Antigravity personal Google sign-in.".to_string())?;
     Ok((profile, workspace))
 }
 
 fn browser_helper_command(behavior: BrowserBehavior) -> Result<String, String> {
     let current_exe = std::env::current_exe()
-        .map_err(|_| "Fable could not locate its browser helper.".to_string())?;
+        .map_err(|_| "Mivlet could not locate its browser helper.".to_string())?;
     // Python's browser helper parser uses POSIX-style command splitting even
     // on Windows. Forward slashes keep an absolute Windows path intact.
     let helper = current_exe.to_string_lossy().replace('\\', "/");
@@ -438,7 +440,7 @@ fn browser_helper_command(behavior: BrowserBehavior) -> Result<String, String> {
         ':'
     };
     if helper.contains(['"', '\r', '\n', '\0', path_separator]) || helper.contains("%s") {
-        return Err("Fable's runtime path cannot safely launch Google sign-in.".into());
+        return Err("Mivlet's runtime path cannot safely launch Google sign-in.".into());
     }
     let mode = match behavior {
         BrowserBehavior::OpenValidated => "--antigravity-browser-open",
@@ -496,15 +498,15 @@ fn write_json(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<(), Strin
         .lock()
         .map_err(|_| "Antigravity stdin is unavailable.".to_string())?;
     serde_json::to_writer(&mut *input, value)
-        .map_err(|_| "Fable could not encode an ACP request.".to_string())?;
+        .map_err(|_| "Mivlet could not encode an ACP request.".to_string())?;
     input
         .write_all(b"\n")
         .and_then(|_| input.flush())
-        .map_err(|_| "Fable could not write to Antigravity ACP.".to_string())
+        .map_err(|_| "Mivlet could not write to Antigravity ACP.".to_string())
 }
 
 fn initialize_request(id: u64) -> Value {
-    json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},"clientInfo":{"name":"Fable","title":"Fable","version":env!("CARGO_PKG_VERSION")}}})
+    json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},"clientInfo":{"name":"Fable","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}}})
 }
 
 fn validate_initialize(value: &Value) -> Result<(), String> {
@@ -656,11 +658,11 @@ fn cache_models(app: &AppHandle, user_id: &str, models: &[BackendModel]) -> Resu
     let path = models_path(app, user_id)?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
-            .map_err(|_| "Fable could not prepare the Antigravity model cache.".to_string())?;
+            .map_err(|_| "Mivlet could not prepare the Antigravity model cache.".to_string())?;
     }
     let bytes = serde_json::to_vec(models)
-        .map_err(|_| "Fable could not encode Antigravity models.".to_string())?;
-    fs::write(path, bytes).map_err(|_| "Fable could not cache Antigravity models.".to_string())
+        .map_err(|_| "Mivlet could not encode Antigravity models.".to_string())?;
+    fs::write(path, bytes).map_err(|_| "Mivlet could not cache Antigravity models.".to_string())
 }
 
 pub(crate) fn cached_models(app: &AppHandle, user_id: &str) -> Vec<BackendModel> {
@@ -1019,7 +1021,7 @@ pub fn start_antigravity_acp_turn(
     let permissions = Arc::new(Mutex::new(HashMap::new()));
     active_runs()
         .lock()
-        .map_err(|_| "Fable could not register the Antigravity turn.".to_string())?
+        .map_err(|_| "Mivlet could not register the Antigravity turn.".to_string())?
         .insert(
             request.request_id.clone(),
             ActiveRun {
@@ -1208,7 +1210,7 @@ pub fn logout_antigravity(app: AppHandle) -> Result<(), String> {
     let profile = profile_dir(&app, &user_id)?;
     if profile.exists() {
         fs::remove_dir_all(profile)
-            .map_err(|_| "Fable could not clear the private Antigravity profile.".to_string())?;
+            .map_err(|_| "Mivlet could not clear the private Antigravity profile.".to_string())?;
     }
     Ok(())
 }
@@ -1331,7 +1333,7 @@ mod tests {
         thread::sleep(Duration::from_secs(2));
         assert!(
             !survived.exists(),
-            "a provider descendant survived after its Fable job closed"
+            "a provider descendant survived after its Mivlet job closed"
         );
     }
 

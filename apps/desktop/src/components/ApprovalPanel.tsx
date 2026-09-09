@@ -38,7 +38,7 @@ import {
  * SECURITY: copy here never implies a saved rule, session grant, or typed
  * confirmation makes an action safe or bypasses execution-boundary checks. The
  * Rust side-effect boundary still rechecks each consequential action via its
- * fingerprinted one-time permit; the UI only describes what Fable asks before an
+ * fingerprinted one-time permit; the UI only describes what Mivlet asks before an
  * action runs.
  */
 
@@ -92,7 +92,7 @@ export function ApprovalPanel({
         {approvals.length === 0 ? (
           <div className="empty-state">
             <ShieldCheck size={22} />
-            <span>Fable asks before taking a consequential action, so nothing is waiting.</span>
+            <span>Mivlet asks before taking a consequential action, so nothing is waiting.</span>
           </div>
         ) : (
           approvals.map((approval) => {
@@ -131,7 +131,7 @@ export function ApprovalPanel({
                     <dd>{approval.action}</dd>
                   </div>
                   <div>
-                    <dt>Fable can</dt>
+                    <dt>Mivlet can</dt>
                     <dd>
                       <span className="approval-profile">{profileLabel(approval.mode)}</span>
                       <small>{profileDescription(approval.mode)}</small>
@@ -251,7 +251,7 @@ function ApprovalModifyForm({
 }) {
   return (
     <div className="approval-edit">
-      <span className="approval-edit__label">Narrow what Fable can do</span>
+      <span className="approval-edit__label">Narrow what Mivlet can do</span>
       {/* Live preview of the modified scope the user will save. */}
       <p className="approval-modify-preview" aria-label={`Modified summary for ${approval.action}`}>
         {modifiedSummary({
@@ -261,10 +261,10 @@ function ApprovalModifyForm({
         })}
       </p>
       <label>
-        <span>How Fable should work</span>
+        <span>How Mivlet should work</span>
         <div
           className="permission-segments"
-          aria-label={`How Fable should work for ${approval.action}`}
+          aria-label={`How Mivlet should work for ${approval.action}`}
           role="group"
         >
           {(["read-only", "trusted-scope", "full-access"] as const).map((mode) => (
@@ -280,9 +280,9 @@ function ApprovalModifyForm({
         </div>
       </label>
       <label>
-        <span>Information Fable can use</span>
+        <span>Information Mivlet can use</span>
         <textarea
-          aria-label={`Information Fable can use for ${approval.action}`}
+          aria-label={`Information Mivlet can use for ${approval.action}`}
           value={draft.dataUsed}
           onChange={(event) =>
             onUpdateModification({ ...draft, dataUsed: event.target.value })

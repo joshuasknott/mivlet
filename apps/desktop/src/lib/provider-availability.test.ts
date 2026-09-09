@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { isFableProviderEnabled } from "./provider-availability";
 
-describe("Fable provider availability", () => {
+describe("Mivlet provider availability", () => {
   it("keeps the hosted xAI API connection available", () => {
     expect(isFableProviderEnabled("xai")).toBe(true);
   });

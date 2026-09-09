@@ -55,7 +55,7 @@ export const managedProviderCatalog: ManagedProviderCatalogEntry[] = [
       "Use Claude through Anthropic's official Claude Agent runtime.",
     setupLabel: "Claude account",
     setupDescription:
-      "Sign in with the official Claude runtime; Fable never handles the session token.",
+      "Sign in with the official Claude runtime; Mivlet never handles the session token.",
     installHint:
       "Install the official Claude runtime to continue with a Claude account.",
     models: [

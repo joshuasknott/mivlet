@@ -17,12 +17,12 @@ async function refreshDisplayProfile(ctx: any, user: any, profile: ValidatedDisp
 }
 
 function normalizedWorkspaceName(name: string | undefined) {
-  const value = name?.trim() || "Fable workspace";
+  const value = name?.trim() || "Mivlet workspace";
   if (value.length > 160) throw new Error("A workspace name must be 160 characters or fewer.");
   return value;
 }
 
-/** Idempotently establishes the Fable account and exactly one initial owner workspace. */
+/** Idempotently establishes the Mivlet account and exactly one initial owner workspace. */
 export const bootstrapAccount = mutationGeneric({
   args: { idempotencyKey: v.string(), initialWorkspaceName: v.optional(v.string()), device: v.optional(device) },
   handler: async (ctx, args) => {
@@ -115,7 +115,7 @@ export const bootstrapAccount = mutationGeneric({
   }
 });
 
-/** Returns only active, unambiguous Fable workspaces available to this account. */
+/** Returns only active, unambiguous Mivlet workspaces available to this account. */
 export const listMine = queryGeneric({
   args: {},
   handler: async (ctx) => {

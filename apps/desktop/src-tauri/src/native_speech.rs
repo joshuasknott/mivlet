@@ -1,7 +1,7 @@
 //! One-use native boundary for reviewed OpenAI file transcription.
 //!
 //! Raw recordings exist only in renderer memory, this process-scoped staging
-//! map, or the in-flight HTTPS body. They never enter Fable storage or logs.
+//! map, or the in-flight HTTPS body. They never enter Mivlet storage or logs.
 
 use std::{
     collections::HashMap,
@@ -158,7 +158,7 @@ fn magic_matches(media_type: &str, bytes: &[u8]) -> bool {
 fn random_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes)
-        .map_err(|_| "Fable could not authorize this recording.".to_string())?;
+        .map_err(|_| "Mivlet could not authorize this recording.".to_string())?;
     Ok(hex::encode(bytes))
 }
 
@@ -346,7 +346,7 @@ pub fn native_speech_prepare_recording(
     }
     let mut guard = state()
         .lock()
-        .map_err(|_| "Fable could not stage the recording.".to_string())?;
+        .map_err(|_| "Mivlet could not stage the recording.".to_string())?;
     let receipt = prepare_into(&mut guard, request, Utc::now(), &scope.internal_user_id)?;
     ensure_expiry_sweeper();
     Ok(receipt)
@@ -361,7 +361,7 @@ pub fn native_speech_cancel_recording(
     let scope = crate::authorized_scope::active_command_scope(ScopeAccess::Write)?;
     let mut guard = state()
         .lock()
-        .map_err(|_| "Fable could not cancel the recording.".to_string())?;
+        .map_err(|_| "Mivlet could not cancel the recording.".to_string())?;
     cancel_into(&mut guard, &request, &scope.internal_user_id);
     Ok(())
 }
@@ -401,7 +401,7 @@ pub async fn native_speech_transcribe_recording(
     let mut recording = {
         let mut guard = state()
             .lock()
-            .map_err(|_| "Fable could not access the staged recording.".to_string())?;
+            .map_err(|_| "Mivlet could not access the staged recording.".to_string())?;
         take_exact(&mut guard, &request, Utc::now(), &scope.internal_user_id)?
     };
     let (_, extension) = normalized_media_type(&recording.receipt.media_type)
@@ -411,7 +411,7 @@ pub async fn native_speech_transcribe_recording(
     {
         let mut guard = state()
             .lock()
-            .map_err(|_| "Fable could not start transcription.".to_string())?;
+            .map_err(|_| "Mivlet could not start transcription.".to_string())?;
         insert_inflight(
             &mut guard,
             key.clone(),
@@ -439,7 +439,7 @@ pub async fn native_speech_transcribe_recording(
         .connect_timeout(Duration::from_secs(10))
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECONDS))
         .build()
-        .map_err(|_| "Fable could not prepare OpenAI transcription.".to_string())?;
+        .map_err(|_| "Mivlet could not prepare OpenAI transcription.".to_string())?;
     let raw_audio = std::mem::take(&mut recording.bytes);
     let part = Part::bytes(raw_audio)
         .file_name(format!("recording.{extension}"))
@@ -526,7 +526,7 @@ pub async fn native_speech_transcribe_recording(
 
 fn require_main_window(window: &tauri::WebviewWindow) -> Result<(), String> {
     if window.label() != "main" {
-        return Err("Speech commands are only available from the main Fable window.".into());
+        return Err("Speech commands are only available from the main Mivlet window.".into());
     }
     Ok(())
 }

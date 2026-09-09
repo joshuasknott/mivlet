@@ -572,7 +572,7 @@ pub fn select_active_workspace_for_current_user(
 ) -> Result<ActiveWorkspaceSelection> {
     let internal_user_id = current_internal_user_id(conn)?.ok_or_else(|| {
         StoreError::Invalid(
-            "A hosted Fable account is required to select a hosted workspace.".into(),
+            "A hosted Mivlet account is required to select a hosted workspace.".into(),
         )
     })?;
     select_active_workspace(conn, &internal_user_id, fable_workspace_id, selected_at)

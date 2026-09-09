@@ -33,17 +33,17 @@ async function sentBody(fetcher: Mock<ProviderFetch>) {
 
 describe("Linear production adapter — read capabilities", () => {
   it("reads workspace identity (viewer)", async () => {
-    const fetcher = graphqlFetch({ viewer: { id: "u1", name: "Ada", email: "ada@example.invalid", organization: { id: "org1", name: "Fable", urlKey: "fable" } } });
+    const fetcher = graphqlFetch({ viewer: { id: "u1", name: "Ada", email: "ada@example.invalid", organization: { id: "org1", name: "Mivlet", urlKey: "fable" } } });
     const result = await createLinearAdapter({ ...common, fetch: fetcher }).read({ capability: "identity.read", input: {} }, tokens);
     const body = await sentBody(fetcher);
     expect(body.query).toContain("viewer");
     expect(body.variables).toEqual({});
-    expect(result.items[0]).toMatchObject({ id: "u1", name: "Ada", organization: { name: "Fable" } });
+    expect(result.items[0]).toMatchObject({ id: "u1", name: "Ada", organization: { name: "Mivlet" } });
     expect(result.nextCursor).toBeUndefined();
   });
 
   it("reads teams with cursor pagination", async () => {
-    const fetcher = graphqlFetch({ teams: { nodes: [{ id: "t1", key: "FBL", name: "Fable" }], pageInfo: { hasNextPage: true, endCursor: "next" } } });
+    const fetcher = graphqlFetch({ teams: { nodes: [{ id: "t1", key: "FBL", name: "Mivlet" }], pageInfo: { hasNextPage: true, endCursor: "next" } } });
     const result = await createLinearAdapter({ ...common, fetch: fetcher }).read({ capability: "teams.read", input: { limit: 5 }, cursor: "cur" }, tokens);
     const body = await sentBody(fetcher);
     expect(body.variables).toMatchObject({ first: 5, after: "cur" });
@@ -75,7 +75,7 @@ describe("Linear production adapter — read capabilities", () => {
   });
 
   it("reads a single issue by issueId (non-connection root)", async () => {
-    const fetcher = graphqlFetch({ issue: { id: "i9", identifier: "FBL-9", title: "Detail", state: { id: "s1", name: "In Progress", type: "started" }, team: { id: "t1", key: "FBL", name: "Fable" } } });
+    const fetcher = graphqlFetch({ issue: { id: "i9", identifier: "FBL-9", title: "Detail", state: { id: "s1", name: "In Progress", type: "started" }, team: { id: "t1", key: "FBL", name: "Mivlet" } } });
     const result = await createLinearAdapter({ ...common, fetch: fetcher }).read({ capability: "issues.read", input: { issueId: "uuid-9" } }, tokens);
     const body = await sentBody(fetcher);
     expect(body.variables).toEqual({ id: "uuid-9" });
@@ -318,25 +318,25 @@ describe("Linear production adapter — writes are approval-gated", () => {
 
 describe("Linear user-safe result shapes", () => {
   it("normalizes a Linear issue into a ConnectorSearchItem", () => {
-    const item = normalizeLinearItem({ id: "uuid-12", kind: "issue", identifier: "FBL-12", title: "Ship connectors", workspace: "Fable", team: "FBL", state: "In Progress", url: "https://linear.app/issue/FBL-12", description: "Implement adapters", updatedAt: "2026-06-27T10:00:00Z" });
+    const item = normalizeLinearItem({ id: "uuid-12", kind: "issue", identifier: "FBL-12", title: "Ship connectors", workspace: "Mivlet", team: "FBL", state: "In Progress", url: "https://linear.app/issue/FBL-12", description: "Implement adapters", updatedAt: "2026-06-27T10:00:00Z" });
     expect(item).toMatchObject({
       id: "uuid-12", connectorId: "linear", kind: "issue",
       title: "FBL-12 · Ship connectors",
-      provenance: "Linear · Fable",
+      provenance: "Linear · Mivlet",
       freshness: "2026-06-27T10:00:00Z",
       trust: "untrusted",
       url: "https://linear.app/issue/FBL-12",
       contentPreview: "Implement adapters"
     });
-    expect(item.providerMetadata).toMatchObject({ workspace: "Fable", team: "FBL", state: "In Progress" });
+    expect(item.providerMetadata).toMatchObject({ workspace: "Mivlet", team: "FBL", state: "In Progress" });
   });
 
   it("normalizes a Linear project without optional fields", () => {
-    const item = normalizeLinearItem({ id: "p1", kind: "project", identifier: "", title: "Roadmap", workspace: "Fable" });
+    const item = normalizeLinearItem({ id: "p1", kind: "project", identifier: "", title: "Roadmap", workspace: "Mivlet" });
     expect(item.title).toBe("Roadmap");
-    expect(item.summary).toBe("project in Fable");
+    expect(item.summary).toBe("project in Mivlet");
     expect(item.freshness).toBe("Provider freshness unavailable");
-    expect(item.providerMetadata).toEqual({ workspace: "Fable" });
+    expect(item.providerMetadata).toEqual({ workspace: "Mivlet" });
   });
 
   it("shapes a search request with a normalized limit", () => {

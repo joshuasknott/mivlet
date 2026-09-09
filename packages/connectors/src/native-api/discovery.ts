@@ -5,7 +5,7 @@
  *   - A generation model returned by the provider is `available: true`. Its
  *     optional capability detail comes from the catalogue where known. A new
  *     model remains runnable with conservative request defaults rather than
- *     waiting for a Fable release; unknown capabilities are never fabricated.
+ *     waiting for a Mivlet release; unknown capabilities are never fabricated.
  *   - When discovery ran successfully (even if it returned nothing extra), a
  *     catalogue-only id the provider did NOT list is `available: false` — we do
  *     not advertise an executable model the provider did not surface.

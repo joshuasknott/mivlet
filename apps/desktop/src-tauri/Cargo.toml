@@ -1,8 +1,8 @@
 [package]
 name = "fable-desktop"
 version = "0.1.0"
-description = "Fable desktop runtime"
-authors = ["Fable"]
+description = "Mivlet desktop runtime"
+authors = ["Mivlet"]
 edition = "2021"
 
 [lib]

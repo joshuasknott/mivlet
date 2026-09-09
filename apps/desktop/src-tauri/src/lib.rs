@@ -1,4 +1,4 @@
-//! Fable desktop runtime entrypoint.
+//! Mivlet desktop runtime entrypoint.
 //!
 //! The native shell owns local encrypted storage, provider and connector
 //! boundaries, approvals, conversations, and optional local or hosted
@@ -322,5 +322,5 @@ pub fn run() {
             execution_control::execution_control_resume
         ])
         .run(tauri::generate_context!())
-        .expect("failed to run Fable desktop runtime");
+        .expect("failed to run Mivlet desktop runtime");
 }

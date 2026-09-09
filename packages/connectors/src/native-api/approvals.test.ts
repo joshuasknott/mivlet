@@ -69,7 +69,7 @@ describe("buildToolApproval", () => {
       elementRef: "control-1234567890abcdef-0",
       controlRole: "textbox",
       controlName: "Search",
-      value: "Fable"
+      value: "Mivlet"
     }));
     expect(action).toMatchObject({
       mode: "full-access",
@@ -82,7 +82,7 @@ describe("buildToolApproval", () => {
       "controlRole: textbox",
       "elementRef: control-1234567890abcdef-0",
       "observationId: observation-1234567890abcdef",
-      "value: Fable"
+      "value: Mivlet"
     ]);
 
     const selection = buildToolApproval("openai", "local-browser-action", JSON.stringify({

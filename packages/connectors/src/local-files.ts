@@ -88,7 +88,7 @@ export function validateLocalFileCandidate(candidate: LocalTextFileCandidate): L
     return {
       ok: false,
       reason: "unsupported-type",
-      message: "Fable supports text, Markdown, JSON, CSV, and YAML files."
+      message: "Mivlet supports text, Markdown, JSON, CSV, and YAML files."
     };
   }
 
@@ -97,7 +97,7 @@ export function validateLocalFileCandidate(candidate: LocalTextFileCandidate): L
     return {
       ok: false,
       reason: "unsupported-type",
-      message: "The selected file changed while Fable was reading it. Choose it again."
+      message: "The selected file changed while Mivlet was reading it. Choose it again."
     };
   }
   if (actualSizeBytes === 0) {

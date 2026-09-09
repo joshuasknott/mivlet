@@ -127,7 +127,7 @@ describe("approval-copy — card copy", () => {
     const write = whyApprovalIsNeeded(
       approval({ riskLevel: "medium", mode: "trusted-scope" })
     );
-    // A trusted-scope external action: the explanation should still say Fable
+    // A trusted-scope external action: the explanation should still say Mivlet
     // asks before it runs.
     expect(write.toLowerCase()).toMatch(/ask|check/);
   });

@@ -19,7 +19,7 @@ const PROVIDER_OWNED_DRIVERS = new Set([
   "opencode",
 ]);
 
-/** Normalize a provider-owned process into Fable's one agent event stream. */
+/** Normalize a provider-owned process into Mivlet's one agent event stream. */
 export function createManagedRuntimeBackend(
   provider: BackendProvider,
   deps: BackendDeps,
@@ -86,7 +86,7 @@ export function createManagedRuntimeBackend(
                 type: "tool-result",
                 callId: event.callId,
                 ok: false,
-                output: `Blocked by Fable's ${options.permissionMode} permission mode.`,
+                output: `Blocked by Mivlet's ${options.permissionMode} permission mode.`,
               };
               continue;
             }

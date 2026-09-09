@@ -199,7 +199,7 @@ fn should_retry(method: &Method) -> bool {
 /// duplicated.
 type CancelSender = tokio::sync::watch::Sender<bool>;
 
-/// Registry of in-flight Google requests keyed by a Fable-assigned call id, so
+/// Registry of in-flight Google requests keyed by a Mivlet-assigned call id, so
 /// the UI can request cancellation of a specific read/action. Mirrors the
 /// streaming-backend cancel map in `native_api.rs`. Entries are removed by
 /// `scoped_cancel` on completion (success, error, or panic path via drop).
@@ -381,7 +381,7 @@ async fn read_bounded_response(
         return Err(error(
             connector_id,
             "response-too-large",
-            "Google response exceeds Fable's safe import limit.",
+            "Google response exceeds Mivlet's safe import limit.",
             false,
         ));
     }
@@ -408,7 +408,7 @@ async fn read_bounded_response(
             return Err(error(
                 connector_id,
                 "response-too-large",
-                "Google response exceeds Fable's safe import limit.",
+                "Google response exceeds Mivlet's safe import limit.",
                 false,
             ));
         }

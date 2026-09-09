@@ -1405,7 +1405,7 @@ describe("useNativeAgent", () => {
     expect(result.current.state.running).toBe(false);
   });
 
-  it("renders and persists provider-owned tool activity without invoking Fable's tool callback", async () => {
+  it("renders and persists provider-owned tool activity without invoking Mivlet's tool callback", async () => {
     installDesktopRuntime();
     const output = JSON.stringify({
       untrusted: true,
@@ -1816,7 +1816,7 @@ describe("useNativeAgent", () => {
       'data: {"choices":[{"finish_reason":"stop"}]}',
     ];
     // Script the mocked Rust boundary to return the file body.
-    mocks.toolResult = { ok: true, output: "Fable rocks" };
+    mocks.toolResult = { ok: true, output: "Mivlet rocks" };
 
     // Real gate + real desktop executor (awaits the gate, then calls the Rust
     // boundary — which is mocked here). This is exactly what App.tsx wires.

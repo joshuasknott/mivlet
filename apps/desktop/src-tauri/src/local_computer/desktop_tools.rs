@@ -1,5 +1,5 @@
 //! Native visual observations. Pixels stay in a pending native provider call;
-//! the renderer and Fable transcript receive only bounded observation metadata.
+//! the renderer and Mivlet transcript receive only bounded observation metadata.
 
 use super::{
     authority::OperationTicket, browser_tools, container, ensure_browser_session,

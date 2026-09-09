@@ -9,7 +9,7 @@ pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let tauri_cand = app.path().app_data_dir().ok();
     let exe_cand = std::env::current_exe().ok();
     resolve_data_directory(exe_cand.as_deref(), tauri_cand)
-        .map_err(|e| format!("Fable could not resolve data directory: {}", e))
+        .map_err(|e| format!("Mivlet could not resolve data directory: {}", e))
 }
 
 /// Resolve `<app_data_dir>/<file_name>`, creating the directory if needed.

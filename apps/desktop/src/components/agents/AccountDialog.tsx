@@ -29,7 +29,7 @@ export function AccountDialog({ kind, name, records, onClose, onSignOut }: {
     <div className="settings-modal-backdrop">
       <section ref={ref} className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title" tabIndex={-1}>
         <button className="settings-modal__close" type="button" aria-label="Close account dialog" disabled={busy} onClick={onClose}><X size={18} /></button>
-        <h2 id="account-dialog-title">{kind === "usage" ? "Usage" : "Sign out of Fable?"}</h2>
+        <h2 id="account-dialog-title">{kind === "usage" ? "Usage" : "Sign out of Mivlet?"}</h2>
         {kind === "usage" ? <>
           <p>Activity recorded in this workspace.</p>
           {records.length ? <dl className="account-usage">

@@ -1,4 +1,4 @@
-//! Shared constants and wire-format models for the Fable runtime.
+//! Shared constants and wire-format models for the Mivlet runtime.
 //!
 //! Every feature module (approvals, knowledge, memory, snapshot) reads from
 //! this module so the validation caps and serde shapes stay in one place.
@@ -213,7 +213,7 @@ pub struct ConnectorHealth {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorAccountSummary {
-    /// Renderer-facing connector DTOs carry the opaque Fable Connection id
+    /// Renderer-facing connector DTOs carry the opaque Mivlet Connection id
     /// here for compatibility. Raw provider account ids remain native-only.
     pub id: String,
     pub display_name: String,
@@ -226,7 +226,7 @@ pub struct ConnectorAccountSummary {
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorAccountOption {
-    /// Stable, workspace-bound Fable reference. Provider account ids are never
+    /// Stable, workspace-bound Mivlet reference. Provider account ids are never
     /// accepted back as selection authority.
     pub connection_id: String,
     pub account: ConnectorAccountSummary,
@@ -763,7 +763,7 @@ pub struct BackendVerifyResult {
     pub message: Option<String>,
 }
 
-/// A consequential action a backend wants to perform. Fable records it as an
+/// A consequential action a backend wants to perform. Mivlet records it as an
 /// approval audit entry rather than letting the backend execute it directly.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

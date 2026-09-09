@@ -213,7 +213,7 @@ describe("ProviderCatalogue", () => {
     ).toBeInTheDocument();
   });
 
-  it("starts managed ChatGPT sign-in through Fable without showing a terminal command", async () => {
+  it("starts managed ChatGPT sign-in through Mivlet without showing a terminal command", async () => {
     const user = userEvent.setup();
     const { onStartBrowserLogin } = renderCatalogue();
     await user.click(
@@ -241,7 +241,7 @@ describe("ProviderCatalogue", () => {
     const missingCodex = {
       ...provider("codex", "Codex", "codex-app-server", "install-required"),
       installHint:
-        "Install the Codex desktop app components, then reopen Fable.",
+        "Install the Codex desktop app components, then reopen Mivlet.",
     };
     const { onCheckConnection, onStartBrowserLogin } = renderCatalogue([
       missingCodex,
@@ -576,7 +576,7 @@ describe("ProviderCatalogue", () => {
       within(dialog).getByRole("button", { name: /OpenAI API key/ }),
     );
     await user.click(
-      within(dialog).getByRole("button", { name: "Remove from Fable" }),
+      within(dialog).getByRole("button", { name: "Remove from Mivlet" }),
     );
     expect(
       within(dialog).getByText(/does not revoke the key at the provider/i),
@@ -588,7 +588,7 @@ describe("ProviderCatalogue", () => {
     );
     expect(onDisconnect).toHaveBeenCalledWith("openai");
     expect(
-      await within(dialog).findByText(/Removed from Fable/i),
+      await within(dialog).findByText(/Removed from Mivlet/i),
     ).toBeInTheDocument();
   });
 

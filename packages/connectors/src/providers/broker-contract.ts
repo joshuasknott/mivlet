@@ -1,5 +1,5 @@
 /**
- * Typed, versioned contract between the Fable auth broker and the desktop.
+ * Typed, versioned contract between the Mivlet auth broker and the desktop.
  *
  * The broker is the ONLY place provider client secrets live. The desktop and the
  * broker exchange these exact shapes across the OAuth surface. Both sides import

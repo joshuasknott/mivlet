@@ -124,7 +124,7 @@ describe("computer task execution bounds", () => {
     let writes = 0;
     const execute = vi.fn(async (request: ApprovalRequest) => {
       if (request.action.startsWith("write-file") && writes++ === 0) {
-        throw new Error("Fable could not confirm whether the file was written; outcome is uncertain.");
+        throw new Error("Mivlet could not confirm whether the file was written; outcome is uncertain.");
       }
       return request.action.startsWith("read-file") ? "saved contents" : "written";
     });

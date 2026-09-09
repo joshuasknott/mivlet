@@ -107,7 +107,7 @@ export function planConversationContext(
       ok: false,
       code: "conversation-context-too-large",
       message:
-        "This conversation is too long for the selected model. Start a new conversation to continue; Fable did not omit or summarize any earlier messages.",
+        "This conversation is too long for the selected model. Start a new conversation to continue; Mivlet did not omit or summarize any earlier messages.",
       estimatedInputTokens,
       historyUtf8Bytes,
       contextWindowTokens,

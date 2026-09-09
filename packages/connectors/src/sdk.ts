@@ -164,7 +164,7 @@ export class ConnectorRuntime {
     };
 
     // All writes marked consequential by the adapter require a fresh record.
-    // Fable's core registry should mark every external side effect consequential.
+    // Mivlet's core registry should mark every external side effect consequential.
     if (!capability.consequential) {
       throw new Error(`External write capability "${capability.id}" must be consequential.`);
     }

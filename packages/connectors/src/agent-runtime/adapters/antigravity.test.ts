@@ -45,7 +45,7 @@ function handle(events: AntigravityAcpEvent[]) {
 }
 
 describe("Antigravity ACP backend", () => {
-  it("uses Fable's approval-only gate and lets the provider execute exactly once", async () => {
+  it("uses Mivlet's approval-only gate and lets the provider execute exactly once", async () => {
     const fixture = handle([
       { type: "text-delta", text: "Working" },
       { type: "approval-request", requestId: "7", callId: "call-1", tool: "antigravity:edit", arguments: "{}", approval },
