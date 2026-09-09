@@ -93,14 +93,13 @@ available while work runs. Skills are specific to a teammate and live in that te
 outside Plugins. See the [plugin and daily-driver assessment](daily-driver.md)
 for the proposed Browser and Computer Use plugins and remaining capability gaps.
 Official remote connection routes are also available for Notion, Linear,
-Vercel, Canva, Figma, Jira, Sentry, Stripe, Miro, Cloudflare,
-Granola, Airtable, Amplitude, Mixpanel, Vanta, and Ramp. These use the existing native MCP OAuth
-boundary and provider-hosted endpoints; no broker client secret is required
-when the provider supports public client registration. Figma client approval,
-Ramp redirect allowlisting, organization policies, provider plans, data regions, and OAuth registration
-requirements still apply. Each detail view links to its provider's setup guide.
-Amplitude, Mixpanel, and Vanta offer region selection before saving a connection.
-The endpoint registry is `apps/desktop/src/components/marketplace/remote-connectors.ts`.
+Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, and Granola. These use the
+existing native MCP OAuth boundary and provider-hosted endpoints; no broker
+client secret is required when the provider supports public client registration.
+Figma client approval, organization policies, provider plans, and OAuth
+registration requirements still apply. Each detail view links to its provider's
+setup guide. The endpoint registry is
+`apps/desktop/src/components/marketplace/remote-connectors.ts`.
 
 Choose Connect and complete the provider's browser sign-in. Fable discovers and
 enables the returned tools automatically, then shows Connected only once usable
@@ -143,11 +142,7 @@ are labelled, and results that remain too large return a request-for-smaller-pag
 error. Provider MCP `isError` results propagate as failures with safe details.
 
 Entries without a native adapter or official remote route remain Planned and
-cannot begin authorization or appear installed. Box and HubSpot, for example,
-need separate application credentials or administrator setup; their public
-MCP endpoint alone does not establish a compatible authorization flow. Intercom
-remains planned because its endpoint did not publish the protected-resource
-metadata required by Fable during the compatibility check.
+cannot begin authorization or appear installed.
 
 OAuth uses the provider-advertised resource exactly, including a same-origin
 root audience when published for a path-based endpoint. Stored credentials

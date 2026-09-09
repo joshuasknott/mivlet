@@ -14,15 +14,10 @@ describe("connector marketplace catalogue", () => {
       "Communication & meetings",
       "Product & design",
       "Engineering & delivery",
-      "Data & analytics",
-      "Sales & CRM",
       "Marketing & social",
       "Commerce & support",
-      "Finance & accounting",
       "Legal & compliance",
       "People & recruiting",
-      "Operations, security & automation",
-      "Research & learning",
     ]);
     expect(
       new Set(marketplaceConnectorEntries.map((entry) => entry.id)).size,
