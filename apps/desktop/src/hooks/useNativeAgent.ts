@@ -103,7 +103,10 @@ export interface NativeAgentState {
   } | null;
   running: boolean;
   lastError: string | null;
-  contextFailure?: ConversationContextFailure & { requestPrompt: string };
+  contextFailure?: ConversationContextFailure & {
+    requestPrompt: string;
+    scope: { workspaceId?: string; agentId?: string; threadId?: string };
+  };
   status: ExecutionAttempt["status"] | "idle";
   recoverableAttempts: ExecutionAttempt[];
   /** Immutable context evidence keyed by canonical attempt id, including recovered completed attempts. */
@@ -221,12 +224,26 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   onCancelRef.current = options.onCancel;
   const threadIdRef = useRef(options.threadId);
   threadIdRef.current = options.threadId;
+  const contextScope = {
+    workspaceId: options.computer?.workspaceId,
+    agentId: options.computer?.agentId,
+    threadId: options.threadId,
+  };
+  const contextScopeKey = JSON.stringify(contextScope);
+  const contextScopeRef = useRef(contextScope);
+  contextScopeRef.current = contextScope;
   const loadConversationRef = useRef(options.loadConversation);
   loadConversationRef.current = options.loadConversation;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
   createDurableRunWriterRef.current = options.createDurableRunWriter;
+
+  useEffect(() => {
+    setState((current) => current.contextFailure && JSON.stringify(current.contextFailure.scope) !== contextScopeKey
+      ? { ...current, lastError: null, contextFailure: undefined }
+      : current);
+  }, [contextScopeKey]);
 
   useEffect(() => {
     void (async () => {
@@ -400,6 +417,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // cannot both acquire provider authority before either durable write.
       activeAttemptIdRef.current = attemptId;
       const requestThreadId = threadIdRef.current;
+      const requestContextScope = contextScopeRef.current;
+      const requestContextScopeKey = JSON.stringify(requestContextScope);
       let history: AgentTurnRequest["messages"] = [];
       if (requestThreadId && loadConversationRef.current) {
         try {
@@ -408,7 +427,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (
             !conversation ||
             conversation.thread.id !== requestThreadId ||
-            threadIdRef.current !== requestThreadId
+            threadIdRef.current !== requestThreadId ||
+            JSON.stringify(contextScopeRef.current) !== requestContextScopeKey
           ) {
             throw new Error(
               "The conversation changed before the message could be sent. Try again.",
@@ -426,6 +446,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           );
         } catch (error) {
           activeAttemptIdRef.current = null;
+          if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) return;
           setState((current) => ({
             ...current,
             lastError:
@@ -453,6 +474,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         contextWindowTokens: selectedModel?.capabilities?.contextWindow,
         backendType: provider?.backendType ?? backend.backend.backendType,
       });
+      if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) {
+        if (activeAttemptIdRef.current === attemptId) activeAttemptIdRef.current = null;
+        return;
+      }
       if (!contextPlan.ok) {
         activeAttemptIdRef.current = null;
         setState((current) => ({
@@ -461,6 +486,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           contextFailure: {
             ...contextPlan,
             requestPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content ?? "",
+            scope: requestContextScope,
           },
           status: "failed",
           currentAttemptId: null,
@@ -495,6 +521,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       if (
         activeAttemptIdRef.current !== attemptId ||
         threadIdRef.current !== requestThreadId ||
+        JSON.stringify(contextScopeRef.current) !== requestContextScopeKey ||
         shouldCancelRef.current?.()
       ) {
         if (activeAttemptIdRef.current === attemptId)

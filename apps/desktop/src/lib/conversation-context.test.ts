@@ -88,4 +88,23 @@ describe("planConversationContext", () => {
       nativeHistoryMaxUtf8Bytes: CODEX_HISTORY_MAX_UTF8_BYTES,
     });
   });
+
+  it("includes a retry checkpoint from the assembled request in the native envelope", async () => {
+    const retry = {
+      ...request,
+      messages: [
+        { role: "system" as const, content: "Retry safely." },
+        { role: "assistant" as const, content: "checkpoint".repeat(7_000) },
+        { role: "user" as const, content: "Try again." },
+      ],
+    };
+    const plan = await planConversationContext({
+      history: [],
+      request: retry,
+      contextWindowTokens: 1_000_000,
+      backendType: "codex-app-server",
+    });
+    expect(plan).toMatchObject({ ok: false, reason: "native-history-envelope" });
+    expect(plan.historyUtf8Bytes).toBe(codexHistoryUtf8Bytes(retry.messages));
+  });
 });

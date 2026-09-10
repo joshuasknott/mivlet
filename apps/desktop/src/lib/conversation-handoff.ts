@@ -6,13 +6,13 @@ export function buildConversationHandoff(input: {
   messages: readonly ConversationMessageView[];
   failedPrompt: string;
 }): string {
-  const dialogue: { role: string; excerpt: string }[] = [];
+  const dialogue: { role: string; text: string }[] = [];
   const outcomes: Record<string, number> = {};
   for (const view of [...input.messages].sort((a, b) => a.message.sequence - b.message.sequence)) {
     if (view.currentRevision.state !== "terminal") continue;
     if (view.message.kind === "user" || view.message.kind === "assistant") {
       const text = view.currentRevision.content?.trim().replace(/\s+/g, " ");
-      if (text) dialogue.push({ role: view.message.kind, excerpt: text.length > 500 ? `${text.slice(0, 499)}…` : text });
+      if (text) dialogue.push({ role: view.message.kind, text });
     } else if (view.message.kind === "tool" && view.message.detail.phase === "result") {
       const key = `tool:${view.message.detail.toolName}:${view.message.detail.outcome}`;
       outcomes[key] = (outcomes[key] ?? 0) + 1;
@@ -21,7 +21,8 @@ export function buildConversationHandoff(input: {
       outcomes[key] = (outcomes[key] ?? 0) + 1;
     }
   }
-  const unique = [...new Map(dialogue.map((item) => [`${item.role}:${item.excerpt}`, item])).values()];
+  const unique = [...new Map(dialogue.map((item) => [`${item.role}:${item.text}`, item])).values()]
+    .map(({ role, text }) => ({ role, excerpt: text.slice(0, 500), truncated: text.length > 500 }));
   const users = unique.filter((item) => item.role === "user");
   const assistants = unique.filter((item) => item.role === "assistant");
   const record = {

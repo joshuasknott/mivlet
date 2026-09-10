@@ -391,6 +391,7 @@ describe("useNativeAgent", () => {
       useNativeAgent({
         providers: [connectedCodexProvider()],
         activeProviderId: "codex",
+        computer: { workspaceId: "workspace-1", agentId: "agent-1" },
         threadId: "thread-1",
         loadConversation: async () =>
           ({
@@ -421,6 +422,7 @@ describe("useNativeAgent", () => {
       requestPrompt: "summarize the conversation",
       capacitySource: "unavailable",
       nativeHistoryMaxUtf8Bytes: 64 * 1024,
+      scope: { workspaceId: "workspace-1", agentId: "agent-1", threadId: "thread-1" },
     });
     expect(result.current.state.lastError).toContain("Codex history envelope");
     expect(record).not.toHaveBeenCalled();
@@ -430,6 +432,60 @@ describe("useNativeAgent", () => {
     act(() => result.current.clearContextFailure());
     expect(result.current.state.contextFailure).toBeUndefined();
     expect(result.current.state.lastError).toBeNull();
+  });
+
+  it("clears a context failure when its workspace, agent, or thread scope changes", async () => {
+    installDesktopRuntime();
+    const { result, rerender } = renderHook(
+      ({ workspaceId, threadId, agentId }) => useNativeAgent({
+        providers: [connectedCodexProvider()],
+        activeProviderId: "codex",
+        computer: { workspaceId, agentId },
+        threadId,
+        loadConversation: async (id) => ({
+          thread: { id },
+          messages: [{
+            message: { kind: "user", sequence: 1 },
+            currentRevision: { state: "terminal", content: "x".repeat(70 * 1024) },
+          }],
+        }) as never,
+      }),
+      { initialProps: { workspaceId: "workspace-1", threadId: "thread-1", agentId: "agent-1" } },
+    );
+    await act(async () => { await result.current.run(baseRequest); });
+    expect(result.current.state.contextFailure?.scope.threadId).toBe("thread-1");
+
+    rerender({ workspaceId: "workspace-2", threadId: "thread-2", agentId: "agent-2" });
+    await waitFor(() => expect(result.current.state.contextFailure).toBeUndefined());
+    expect(result.current.state.lastError).toBeNull();
+  });
+
+  it("does not publish a late context result after the request scope changes", async () => {
+    installDesktopRuntime();
+    let release: ((value: never) => void) | undefined;
+    const loadConversation = vi.fn(() => new Promise<never>((resolve) => { release = resolve; }));
+    const { result, rerender } = renderHook(
+      ({ threadId }) => useNativeAgent({
+        providers: [connectedCodexProvider()],
+        activeProviderId: "codex",
+        computer: { workspaceId: "workspace-1", agentId: "agent-1" },
+        threadId,
+        loadConversation,
+      }),
+      { initialProps: { threadId: "thread-1" } },
+    );
+    let pending!: Promise<ExecutionAttempt | undefined>;
+    act(() => { pending = result.current.run(baseRequest); });
+    await waitFor(() => expect(loadConversation).toHaveBeenCalledWith("thread-1"));
+    rerender({ threadId: "thread-2" });
+    await act(async () => {
+      release?.(({ thread: { id: "thread-1" }, messages: [] }) as never);
+      await pending;
+    });
+    expect(result.current.state.contextFailure).toBeUndefined();
+    expect(result.current.state.lastError).toBeNull();
+    expect(mocks.savedRuns).toHaveLength(0);
+    expect(mocks.codexListener).toBeNull();
   });
 
   it("surfaces noTransport and an error when no desktop runtime is present", async () => {

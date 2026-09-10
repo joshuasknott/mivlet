@@ -80,8 +80,10 @@ export function estimateConversationInputTokens(
 
 /** Match the exact history shape sent through the native Codex envelope. */
 export function codexHistoryUtf8Bytes(messages: readonly NativeMessage[]): number {
+  let lastUser = -1;
+  messages.forEach((message, index) => { if (message.role === "user") lastUser = index; });
   const history = messages
-    .filter((message) => message.role === "user" || message.role === "assistant")
+    .filter((message, index) => index !== lastUser && (message.role === "user" || message.role === "assistant"))
     .map((message) => ({ role: message.role, content: message.content }));
   return utf8Bytes(JSON.stringify(history));
 }
@@ -91,7 +93,7 @@ export function planConversationContext(input: PlanConversationContextInput): Co
   const system = input.request.messages.filter((message) => message.role === "system");
   const current = input.request.messages.filter((message) => message.role !== "system");
   const messages = [...system, ...input.history, ...current];
-  const historyUtf8Bytes = codexHistoryUtf8Bytes(input.history);
+  const historyUtf8Bytes = codexHistoryUtf8Bytes(messages);
   const contextWindowTokens = Number.isFinite(input.contextWindowTokens) && (input.contextWindowTokens ?? 0) > 0
     ? Math.floor(input.contextWindowTokens!)
     : undefined;

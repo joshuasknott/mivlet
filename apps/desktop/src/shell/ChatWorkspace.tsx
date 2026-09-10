@@ -754,6 +754,13 @@ export function ChatWorkspace() {
   const profileName =
     verifiedDisplay?.displayName ?? verifiedDisplay?.email ?? "Local workspace";
   const conversation = durableConversation.state.conversation?.thread.id === selectedThreadId ? durableConversation.state.conversation : null;
+  const contextFailure = agent.state.contextFailure;
+  const activeContextFailure = contextFailure
+    && contextFailure.scope.workspaceId === workspaceId
+    && contextFailure.scope.agentId === activeAgent.id
+    && contextFailure.scope.threadId === selectedThreadId
+    ? contextFailure
+    : undefined;
   const scheduleNoticeKey = scheduleDispatch ? `${scheduleDispatch.scheduleId ?? ""}:${scheduleDispatch.occurrenceId ?? ""}:${scheduleDispatch.phase}:${scheduleDispatch.message ?? ""}` : "";
   const scheduleNotice = scheduleDispatch?.phase === "needs-user" || scheduleDispatch?.phase === "failed"
     ? scheduleDispatch.message ?? "Scheduled work needs your attention."
@@ -1121,13 +1128,13 @@ export function ChatWorkspace() {
                   }
                 }}
                 interruption={<>
-                  {agent.state.contextFailure && conversation ? <ContextRecoveryPanel
-                    failure={agent.state.contextFailure}
+                  {activeContextFailure && conversation ? <ContextRecoveryPanel
+                    failure={activeContextFailure}
                     disabled={agent.state.running || Boolean(projectBatch) || Boolean(selectedProjectId)}
                     onPrepareHandoff={() => startNewConversation(buildConversationHandoff({
                       thread: conversation.thread,
                       messages,
-                      failedPrompt: agent.state.contextFailure?.requestPrompt ?? "",
+                      failedPrompt: activeContextFailure.requestPrompt,
                     }))}
                   /> : null}
                   {(submissionError || agent.state.lastError) && !agent.state.contextFailure ? <div className="conversation-attention" role="alert">

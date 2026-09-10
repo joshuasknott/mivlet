@@ -40,4 +40,20 @@ describe("buildConversationHandoff", () => {
     expect(handoff).toContain("Distinct requirement 1");
     expect(handoff).toContain("Distinct requirement 20");
   });
+
+  it("deduplicates complete messages before excerpting shared long prefixes", () => {
+    const prefix = "same prefix ".repeat(60);
+    const handoff = buildConversationHandoff({
+      thread,
+      failedPrompt: "Continue",
+      messages: [
+        view(1, "user", `${prefix}KEEP BLUE`),
+        view(2, "user", `${prefix}KEEP GREEN`),
+        view(3, "user", `${prefix}KEEP BLUE`),
+      ],
+    });
+    expect(handoff).toContain('"collapsedRepeatedMessages": 1');
+    expect(handoff).toContain('"truncated": true');
+    expect(handoff.match(/"role": "user"/g)).toHaveLength(2);
+  });
 });
