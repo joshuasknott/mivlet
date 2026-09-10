@@ -44,6 +44,43 @@ verified installation and account-scoped profile lifecycle.
 
 ## Credential boundary
 
+### Embedded direct API execution (2026-09-10)
+
+Direct OpenAI, Anthropic, xAI and custom OpenAI-compatible text/tool turns use
+`packages/agent-host`, pinned to OpenCode V2 SDK/plugin `0.0.0-dev-19449`.
+This is the embedded SDK, separate from the retained OpenCode account/CLI route.
+OpenCode alone owns the model/tool loop for these turns. Its native provider
+modules send key-free requests over a private authenticated loopback bridge;
+the Rust parent validates the current account/provider/workspace route and owns
+provider egress. Native screenshots are hydrated only at that Rust boundary.
+
+The adapter translates SDK events into existing Mivlet conversation events and
+routes tools through the existing permission/approval executor. It removes all
+SDK built-in tools and other agents, disables project configuration, plugins,
+MCP servers, skills, shell creation, auto-compaction, sharing and background model
+fetches. Mivlet supplies context budgets and canonical history. Each attempt has
+an in-memory SDK database and an isolated temporary configuration directory.
+Cancellation fences callbacks and terminates the child; startup requires the
+bundled Windows host and its verified manifest.
+
+User-image turns and remaining wire families retain the existing visual/direct
+adapter. This preserves capabilities whose SDK admission contract is not yet
+verified. Runtime selection happens once per turn; there is no second loop around
+OpenCode and no silent fallback after an embedded failure. Provider-owned Codex,
+Claude, ACP and OpenCode account routes continue to serve their distinct supported
+authentication and execution contracts.
+
+OpenCode's native provider modules cover the adopted routes. The custom Vercel
+AI SDK package-hook reproducer failed before model execution, so Mivlet does not
+add a second Vercel agent loop or claim its approval/middleware controls are active.
+Vercel compatibility packages remain SDK implementation dependencies where used.
+The official MCP TypeScript SDK `1.30.0` replaces the custom client negotiation,
+request correlation and timeout plumbing inside the bundled native host. The
+renderer only forwards discovery frames through the existing transport; SDK
+tool execution is not exposed. Native transport ownership, OAuth,
+exact tool authorization, result bounds and unsupported server-request rejection
+remain Mivlet responsibilities.
+
 Provider-owned account runtimes retain their own authentication state. Direct
 API credentials remain in Fable's account-scoped OS secure-store boundary.
 Neither path puts provider credentials in React state, persisted snapshots,

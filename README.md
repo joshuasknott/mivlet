@@ -39,15 +39,18 @@ a deployed or production-validated service.
   Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
   protocol; and OpenCode runs behind a Mivlet-owned authenticated loopback
   server. All six provider-owned routes mediate consequential actions through
-  Mivlet's one-time approval boundary. Direct OpenAI-compatible and Anthropic
-  wire adapters are also runnable. Every route remains unavailable until its
+  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI and custom
+  API turns use the bundled OpenCode V2 embedded host, with native credential
+  custody and Mivlet tool approvals. User-image turns retain the audited visual
+  wire route; other provider-specific wire adapters remain separate. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
 - Provider and plugin-style Connections, including connector and MCP
-  boundaries. Credentials stay in native or service-secret custody rather than
+  boundaries. The official MCP SDK owns negotiation and discovery in the bundled
+  native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
@@ -87,6 +90,10 @@ a deployed or production-validated service.
   with short-lived generation-fenced capabilities. Local tests and packaging
   checks do not prove that Containers, Browser Rendering, Durable Objects,
   Convex, Clerk, or production secrets have been deployed.
+- A separate OpenCode Workerd and Cloudflare Agents fixture verifies a scheduled
+  task, exact approval, cancellation and durable receipt across restart. It accepts
+  fixed synthetic data only; real hosted task/provider delegation is unavailable.
+  See the [SDK architecture](docs/architecture/hosted-opencode-prototype.md).
 - Account sign-in gates first-run setup. Convex sync and remote workspace code
   remain optional foundation for future shared or multi-device work and are not
   current production collaboration claims.
@@ -120,6 +127,7 @@ apps/hosted-runner  deployment-gated Cloudflare computer/browser worker
 apps/broker         narrow confidential connector OAuth broker
 packages/protocol   shared product and authority contracts
 packages/connectors provider, connector, tool, voice, and MCP adapters
+packages/agent-host native-only embedded OpenCode execution and fixture tests
 packages/knowledge  local ingestion and retrieval engine
 docs                maintained architecture, security, and operations notes
 ```

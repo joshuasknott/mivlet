@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { openConnectorTools } from "./connector-mcp";
 const mocks = vi.hoisted(() => ({ create: vi.fn(), initialize: vi.fn(), tools: vi.fn(), resources: vi.fn(), close: vi.fn() }));
 vi.mock("./mcp-transport", () => ({ createDesktopRemoteMcpTransport: mocks.create }));
-vi.mock("@fable/connectors/mcp/client", () => ({ McpClient: class {
+vi.mock("./native-mcp-client", () => ({ McpClient: class {
   initialize = mocks.initialize; listTools = mocks.tools; listResources = mocks.resources; close = mocks.close;
 } }));
 beforeEach(() => { vi.resetAllMocks(); mocks.initialize.mockResolvedValue({ capabilities: { tools: true } }); mocks.tools.mockResolvedValue([{ name: "list_teams" }]); mocks.close.mockResolvedValue(undefined); });

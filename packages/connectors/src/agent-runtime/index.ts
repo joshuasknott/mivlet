@@ -10,6 +10,8 @@
 
 export type {
   AgentBackend,
+  EmbeddedRuntimeHandle,
+  EmbeddedRuntimeEvent,
   AntigravityAcpEvent,
   AntigravityAcpHandle,
   AntigravityAcpHandlers,

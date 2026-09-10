@@ -30,6 +30,7 @@ import { computerVisionUnavailableReason, supportsNativeComputerVision } from ".
 import { validateReasoningEffort } from "../../native-api/reasoning";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
+import { createEmbeddedBackend } from "./embedded";
 
 /** One bound native request, keyed by the runtime execution id. */
 interface ActiveRun {
@@ -50,6 +51,7 @@ export function createNativeApiBackend(
   deps: BackendDeps
 ): AgentBackend | null {
   const capabilities: readonly BackendCapability[] = provider.capabilities;
+  const embedded = deps.createEmbeddedRuntime ? createEmbeddedBackend(provider, deps) : undefined;
 
   // Each conversation attempt owns one cancellation handle.
   const active = new Map<string, ActiveRun>();
@@ -61,6 +63,12 @@ export function createNativeApiBackend(
   ): AsyncIterable<BackendAgentEvent> | null {
     if (!capabilities.includes("streaming")) {
       return null;
+    }
+    // Keep the audited transient user-image wire route until its SDK admission
+    // contract is verified. Ordinary turns and native computer tools use OpenCode.
+    if (embedded && ["openai", "anthropic", "xai", "custom"].includes(provider.id)
+      && !request.messages.some(message => message.images?.length)) {
+      return embedded.run(request, options);
     }
     if (
       request.tools.length > 0 &&
@@ -161,6 +169,7 @@ export function createNativeApiBackend(
   }
 
   async function cancel(runId: string): Promise<void> {
+    await embedded?.cancel(runId);
     if (!capabilities.includes("cancellation")) {
       return;
     }

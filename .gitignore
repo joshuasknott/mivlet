@@ -21,6 +21,10 @@ coverage/
 .superpowers/
 .worktrees/
 apps/desktop/src-tauri/resources/cua-driver/cua-driver.exe
+apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe
+apps/desktop/src-tauri/resources/agent-host/runtime.json
+apps/desktop/src-tauri/resources/agent-host/THIRD_PARTY_NOTICES.txt
+packages/agent-host/*.bun-build
 
 # local wrangler/d1 state
 .wrangler/

@@ -86,6 +86,8 @@ export interface AgentBackend {
  * the adapter can wire `cancel()` to the requestId held by the Rust cancel map.
  */
 export interface BackendDeps {
+  /** Native embedded SDK host. Missing executable fails at this boundary, never by falling back. */
+  createEmbeddedRuntime?: (provider: BackendProvider) => EmbeddedRuntimeHandle | null;
   /**
    * Build the HTTP/SSE transport for a connected native-API backend, or null
    * when there is no egress path (browser preview, tests). The callbacks let
@@ -117,6 +119,20 @@ export interface BackendDeps {
   ) => ManagedRuntimeHandle | null;
   /** Optional model discovery wired to the Rust `list_backend_models` command. */
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
+}
+
+export type EmbeddedRuntimeEvent = BackendAgentEvent | {
+  type: "tool-request";
+  callId: string;
+  tool: string;
+  arguments: string;
+  approvalId?: string;
+};
+
+export interface EmbeddedRuntimeHandle {
+  run(request: AgentTurnRequest, options: Omit<AgentTurnOptions, "execute" | "authorize" | "shouldCancel" | "onRetry">): AsyncIterable<EmbeddedRuntimeEvent>;
+  reply(callId: string, ok: boolean, output: string): Promise<void>;
+  cancel(): Promise<void>;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { McpClient, normalizeMcpToolResult, type McpToolCallProposal, type McpTransport } from "./client";
+import { McpClient } from "./sdk-client";
+import { normalizeMcpToolResult, type McpTransport } from "./client";
 import type { McpFrame, McpNotification, McpRequest } from "./protocol";
 
 class FakeTransport implements McpTransport {
@@ -27,6 +28,8 @@ class FakeTransport implements McpTransport {
   }
 
   exit(): void { this.closeHandler?.(); }
+
+  receive(frame: McpFrame): void { this.handler?.(frame); }
 
   async close(): Promise<void> { this.closed = true; }
 }
@@ -57,46 +60,17 @@ function responseFor(frame: McpRequest | McpNotification): McpFrame | void {
   if (frame.method === "resources/list") {
     return { jsonrpc: "2.0", id: frame.id, result: { resources: [{ uri: "file:///safe", name: "Safe" }] } };
   }
-  if (frame.method === "tools/call") {
-    return { jsonrpc: "2.0", id: frame.id, result: { content: [{ type: "text", text: "done" }] } };
-  }
 }
 
 describe("McpClient", () => {
   it("initializes before paginated tool and resource discovery", async () => {
     const transport = new FakeTransport(responseFor);
-    const client = new McpClient(transport, { authorizeToolCall: async () => false });
+    const client = new McpClient(transport);
     const initialized = await client.initialize();
     expect(initialized.serverInfo.name).toBe("fixture");
     expect(transport.sent[1]).toEqual({ jsonrpc: "2.0", method: "notifications/initialized" });
     expect((await client.listTools()).map((tool) => tool.name)).toEqual(["first", "second"]);
     expect((await client.listResources()).map((resource) => resource.uri)).toEqual(["file:///safe"]);
-  });
-
-  it("binds execution to an authorized immutable argument snapshot", async () => {
-    let release!: (approved: boolean) => void;
-    const approval = new Promise<boolean>((resolve) => { release = resolve; });
-    const authorize = vi.fn(async (_proposal: McpToolCallProposal) => approval);
-    const transport = new FakeTransport(responseFor);
-    const client = new McpClient(transport, { authorizeToolCall: authorize });
-    await client.initialize();
-    const args = { issue: { title: "original" } };
-    const pending = client.callTool("create_issue", args);
-    (args.issue as { title: string }).title = "substituted";
-    release(true);
-    await pending;
-    const call = transport.sent.find((frame) => "method" in frame && frame.method === "tools/call") as McpRequest;
-    expect(call.params).toEqual({ name: "create_issue", arguments: { issue: { title: "original" } } });
-    expect(Object.isFrozen(authorize.mock.calls[0]?.[0].arguments)).toBe(true);
-    expect(Object.isFrozen(authorize.mock.calls[0]?.[0].arguments.issue)).toBe(true);
-  });
-
-  it("never sends a denied tool call", async () => {
-    const transport = new FakeTransport(responseFor);
-    const client = new McpClient(transport, { authorizeToolCall: async () => false });
-    await client.initialize();
-    await expect(client.callTool("delete_everything", {})).rejects.toThrow("not authorized");
-    expect(transport.sent.some((frame) => "method" in frame && frame.method === "tools/call")).toBe(false);
   });
 
   it("normalizes tool output as bounded untrusted content without instruction authority", async () => {
@@ -129,7 +103,7 @@ describe("McpClient", () => {
   it("times out, sends cancellation, and closes pending work", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport((frame) => frame.method === "initialize" ? responseFor(frame) : undefined);
-    const client = new McpClient(transport, { requestTimeoutMs: 25, authorizeToolCall: async () => false });
+    const client = new McpClient(transport, { requestTimeoutMs: 25 });
     await client.initialize();
     const pending = client.listTools();
     const rejected = expect(pending).rejects.toThrow("timed out");
@@ -143,7 +117,7 @@ describe("McpClient", () => {
 
   it("rejects pending work immediately when the process exits", async () => {
     const transport = new FakeTransport((frame) => frame.method === "initialize" ? responseFor(frame) : undefined);
-    const client = new McpClient(transport, { requestTimeoutMs: 60_000, authorizeToolCall: async () => false });
+    const client = new McpClient(transport, { requestTimeoutMs: 60_000 });
     await client.initialize();
     const pending = client.listTools();
     const rejected = expect(pending).rejects.toThrow("transport closed");
@@ -151,20 +125,45 @@ describe("McpClient", () => {
     await rejected;
   });
 
-  it("rejects unsupported protocol versions and malformed discovery", async () => {
-    const wrongVersion = new FakeTransport((frame) => "id" in frame ? {
+  it("accepts supported protocol revisions and rejects unsupported versions", async () => {
+    const supportedRevision = new FakeTransport((frame) => "id" in frame ? {
       jsonrpc: "2.0", id: frame.id, result: {
-        protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "old", version: "1" }
+        protocolVersion: "2025-06-18", capabilities: {}, serverInfo: { name: "older", version: "1" }
       }
     } : undefined);
-    await expect(new McpClient(wrongVersion, { authorizeToolCall: async () => false }).initialize())
-      .rejects.toThrow("unsupported protocol");
+    const supportedClient = new McpClient(supportedRevision);
+    await expect(supportedClient.initialize()).resolves.toMatchObject({ protocolVersion: "2025-06-18" });
+    await supportedClient.close();
 
+    const unsupportedVersion = new FakeTransport((frame) => "id" in frame ? {
+      jsonrpc: "2.0", id: frame.id, result: {
+        protocolVersion: "2025-12-01", capabilities: {}, serverInfo: { name: "future", version: "1" }
+      }
+    } : undefined);
+    await expect(new McpClient(unsupportedVersion).initialize())
+      .rejects.toThrow("protocol version is not supported");
+  });
+
+  it("drops unsolicited server requests before SDK handlers can answer", async () => {
+    const transport = new FakeTransport(responseFor);
+    const client = new McpClient(transport);
+    await client.initialize();
+    transport.receive({
+      jsonrpc: "2.0",
+      id: "server-request",
+      method: "sampling/createMessage",
+      params: {}
+    });
+    expect(transport.sent.some((frame) => "id" in frame && frame.id === "server-request")).toBe(false);
+    await client.close();
+  });
+
+  it("rejects malformed discovery", async () => {
     const malformed = new FakeTransport((frame) => {
       if (frame.method === "initialize") return responseFor(frame);
       if ("id" in frame) return { jsonrpc: "2.0", id: frame.id, result: { tools: [{ name: "unsafe" }] } };
     });
-    const client = new McpClient(malformed, { authorizeToolCall: async () => false });
+    const client = new McpClient(malformed);
     await client.initialize();
     await expect(client.listTools()).rejects.toThrow("invalid tool definition");
   });

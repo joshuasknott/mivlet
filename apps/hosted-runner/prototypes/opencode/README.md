@@ -1,21 +1,13 @@
-# OpenCode Workerd compatibility probe
+# OpenCode Workerd and Agents fixture
 
-**2026-09-10: blocked before model/tool execution.** This is an isolated,
-reproducible compatibility investigation, not a working hosted-agent feature.
-See the [evaluation and implementation design](../../../../docs/architecture/hosted-opencode-prototype.md).
+The native provider completes two model requests and one bounded tool proposal
+in Workerd. Cloudflare Agents schedules the attempt, waits for exact approval,
+and atomically stores a fixed artifact and receipt. OpenCode and Agents use
+separate databases. This package admits no real conversation or credentials.
+See the [architecture](../../../../docs/architecture/hosted-opencode-prototype.md).
 
-It uses a synthetic model plugin and one `write_summary` tool. The tool would
-return an approval-required pause without writing anything. No real model,
-credentials, conversation, account or desktop is connected. The current pin
-runs plugin setup but fails model resolution before calling the model hook.
-
-This nested package has its own frozen lockfile and is deliberately outside the
-root `apps/*` workspace glob. It does not change the existing runner's entrypoint,
-bindings, dependencies, deployment configuration or native Windows runtime.
-Root Knip analysis excludes this independently installed package; its entrypoints
-are checked by the typecheck and packaging commands below. Root ESLint still
-checks its source, while excluding generated `.wrangler` files everywhere.
-
+This independently installed package has its own frozen lockfile and is outside
+the root workspace glob. The production runner's configuration is unchanged.
 From the repository root, using pnpm 10:
 
 ```powershell
@@ -31,28 +23,24 @@ In another terminal:
 
 ```powershell
 pnpm --dir apps/hosted-runner/prototypes/opencode --ignore-workspace check:local
+pnpm --dir apps/hosted-runner/prototypes/opencode --ignore-workspace check:task
 ```
 
-The compatibility gate currently **exits 1**, with an HTTP 422 from `/run`,
-`outcome: failed`, `pluginSetups: 1`, `modelCalls: 0`, `toolCalls: 0`, and
-`SessionRunnerModel.UnsupportedPackageError: aisdk:mivlet-synthetic`.
-The script separately checks rejected input, browser-origin rejection, repeated
-request deduplication within a boot and the cancel endpoint. Passing those checks
-does not make the model/tool gate pass. It saves ignored synthetic evidence in
-`evidence.local.json`.
+The first check proves model/tool execution, input rejection, duplicate admission
+and interruption. The task check verifies scheduling, artifact bytes/hash,
+changed/replayed/cross-workspace/cross-agent approvals and cancellation.
+It leaves one approval pending and stores ignored fixture evidence.
 
-Stop the dev process with Ctrl+C, restart the same command without removing
-`.wrangler`, then run:
+Stop and restart the dev process using the same `.wrangler` storage, then run:
 
 ```powershell
-pnpm --dir apps/hosted-runner/prototypes/opencode --ignore-workspace check:local --after-restart
+pnpm --dir apps/hosted-runner/prototypes/opencode --ignore-workspace check:task --after-restart
 ```
 
-This checks a new object boot, the same saved session ID, successful SDK retrieval
-of that session, and zero new model/tool calls. It does not test continuation of
-an interrupted active model turn. Stop the dev process after verification.
+This verifies the pending approval and completed receipt, reads the saved SDK
+session without new model/tool calls, and resumes the exact approval once.
+Stop the dev process after verification.
 
-The API accepts only loopback CLI requests with empty bodies; there is one fixed
-synthetic task. Hostname checks are a local guard, **not production authentication**.
-There is no deployment script. `package:check` is a Wrangler dry-run only. Do not
-deploy this reproducer, add secrets or point it at a real provider.
+Only loopback CLI requests are accepted; browser requests and arbitrary bodies
+are rejected. This local guard is not production authentication. `package:check`
+is a dry-run. No deployment or real provider-secret configuration is supplied.

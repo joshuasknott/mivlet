@@ -26,8 +26,8 @@ import type {
   HostedBrowserSnapshot
 } from "@fable/protocol";
 import { assertConnectorToolSucceeded } from "./connector-errors";
+import { McpClient } from "./native-mcp-client";
 import {
-  McpClient,
   normalizeMcpConnectedSourceSearch,
   type ApprovalGate,
   type McpUntrustedToolResult,
@@ -614,7 +614,7 @@ async function runMcpSemanticRead(
       ? await createDesktopMcpTransport(options.workspaceId, route.configurationReference)
       : await createDesktopRemoteMcpTransport(options.workspaceId, route.configurationReference);
     if (!transport) throw new Error("MCP semantic search requires the desktop runtime.");
-    const client = new McpClient(transport, { authorizeToolCall: async () => false });
+    const client = new McpClient(transport);
     const initialized = await client.initialize();
     const tools = initialized.capabilities.tools ? await client.listTools() : [];
     const resources = initialized.capabilities.resources ? await client.listResources() : [];

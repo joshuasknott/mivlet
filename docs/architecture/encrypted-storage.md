@@ -50,6 +50,20 @@ foreign-key violations, or carries a schema newer than the binary understands.
 
 ## Scope and deletion
 
+The embedded OpenCode host does not create a second conversation store. Each
+native-managed attempt uses `database.path = ":memory:"`, disables persisted SDK
+events and discards SDK log output. Its environment and temporary configuration
+directory are isolated from user/project configuration; Bun's dotenv and bunfig
+autoload are disabled in the compiled host. No provider credential enters the
+child. Rust retains transient computer screenshots and injects them only into
+authorized provider egress. The renderer receives opaque native approval IDs.
+
+Canonical messages, tool outcomes and interruption receipts continue through
+the existing encrypted repositories. Restart starts a fresh SDK attempt from
+Mivlet's canonical context and authority checks; it never replays a saved SDK
+session. No schema or user-data migration is required. Compiled-host fixtures
+scan the temporary directory for prompt/tool-output canaries after completion.
+
 Repositories require an explicit workspace scope and, where supported, an
 optional project. Ownership checks prevent a record ID from being claimed or
 read through another workspace. Tombstones prevent a deleted knowledge source

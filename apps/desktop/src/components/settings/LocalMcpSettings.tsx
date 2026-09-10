@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { McpClient } from "@fable/connectors/mcp/client";
+import { McpClient } from "../../lib/native-mcp-client";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
 import {
   beginRuntimeRemoteMcpAuthorization,
@@ -169,7 +169,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
         ? await createDesktopRemoteMcpTransport(workspaceId, server.id)
         : await createDesktopMcpTransport(workspaceId, server.id);
       if (!mcpTransport) throw new Error("Tool servers require the desktop app.");
-      client = new McpClient(mcpTransport, { authorizeToolCall: async () => false });
+      client = new McpClient(mcpTransport);
       const initialized = await client.initialize();
       const tools = initialized.capabilities.tools ? await client.listTools() : [];
       const resources = initialized.capabilities.resources ? await client.listResources() : [];
