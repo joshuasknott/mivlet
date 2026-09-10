@@ -251,7 +251,7 @@ function normalizeAgentProfiles(agents: FableAgentProfile[] | undefined): FableA
       reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
       icon: "agent",
       iconColor,
-      avatarSeed: typeof agent.avatarSeed === "string" && agent.avatarSeed.startsWith("blob-v1:") && agent.avatarSeed.length <= 160
+      avatarSeed: typeof agent.avatarSeed === "string" && /^(?:blob-v1:|(?:robot-v3|rounded-v2|organic-v1):[0-7]:)/.test(agent.avatarSeed) && agent.avatarSeed.length <= 160
         ? agent.avatarSeed : `blob-v1:${agent.id}`,
       iconImageDataUrl,
       threadIds: [...new Set([
