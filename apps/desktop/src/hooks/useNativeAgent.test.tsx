@@ -443,7 +443,7 @@ describe("useNativeAgent", () => {
     expect(mocks.savedRuns).toHaveLength(0);
     expect(mocks.codexListener).toBeNull();
 
-    act(() => result.current.clearContextFailure());
+    act(() => result.current.clearError());
     expect(result.current.state.contextFailure).toBeUndefined();
     expect(result.current.state.lastError).toBeNull();
   });

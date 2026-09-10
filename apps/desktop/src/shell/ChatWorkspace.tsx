@@ -49,7 +49,7 @@ import { useShellAgentController } from "./useShellAgentController";
 import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerImageInputs } from "../lib/composer-images";
 import { prepareComposerImage } from "../lib/composer-images";
-import { getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
+import { createRuntimeConversationThread, getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { useLocalProjects } from "../hooks/useLocalProjects";
 import { createLocalProject, updateLocalProject, archiveLocalProject, bindLocalProjectRunAuthor } from "../runtime/domains/local-projects";
@@ -762,20 +762,42 @@ export function ChatWorkspace() {
     setEditingAgentId(profile.id);
     setAgentEditorOpen(true);
   };
-  const startNewConversation = async () => {
+  const startNewConversation = async (draft = "") => {
     if (navigationPending.current || agent.state.running || projectBatch || selectedProjectId) return;
+    navigationPending.current = true;
+    const originKey = composerNavigationScope.current.conversationKey;
+    const originScope = composerNavigationScope.current;
     try {
       await composer.flush();
-    } catch {
-      setSubmissionError("Your draft could not be saved. Try again before starting a new conversation.");
-      return;
+      if (composerNavigationScope.current.conversationKey !== originKey) return;
+      let threadId: string | undefined;
+      if (draft) {
+        const thread = await createRuntimeConversationThread({
+          authorityScope: {
+            authority: "local",
+            visibility: "member-private",
+            ownerMemberId: (contextOwner?.memberId ?? originScope.workspaceId) as never,
+          },
+          title: "Reviewed continuation",
+        }, originScope.workspaceId);
+        if (composerNavigationScope.current.conversationKey !== originKey) return;
+        await composer.saveNewThreadDraft(thread.id, draft);
+        if (composerNavigationScope.current.conversationKey !== originKey) return;
+        threadId = thread.id;
+      }
+      runtime.updateAgent(originScope.agentId, { threadId });
+      setSelectedThreadId(threadId);
+      agent.clearError();
+      setSubmissionError("");
+      setOptimisticUserMessage("");
+      window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+    } catch (error) {
+      if (composerNavigationScope.current.conversationKey === originKey) {
+        setSubmissionError(error instanceof Error ? error.message : "Your draft could not be saved. Try again before starting a new conversation.");
+      }
+    } finally {
+      navigationPending.current = false;
     }
-    runtime.updateAgent(activeAgent.id, { threadId: undefined });
-    setSelectedThreadId(undefined);
-    agent.clearError();
-    setSubmissionError("");
-    setOptimisticUserMessage("");
-    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
   };
 
   const threadById = new Map(
