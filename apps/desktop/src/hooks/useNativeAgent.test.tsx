@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => ({
   savedRuns: [] as unknown[],
   persistenceEvents: [] as string[],
   saveError: null as Error | null,
+  failSaveStatus: null as ExecutionAttempt["status"] | null,
   recoveredRuns: [] as ExecutionAttempt[],
   listedRuns: null as ExecutionAttempt[] | null,
   codexEvents: [] as unknown[],
@@ -128,6 +129,11 @@ vi.mock("../runtime", () => ({
   }),
   saveRuntimeExecutionAttempt: vi.fn(async (run: unknown) => {
     if (mocks.saveError) throw mocks.saveError;
+    if (
+      mocks.failSaveStatus &&
+      (run as ExecutionAttempt).status === mocks.failSaveStatus
+    )
+      throw new Error("final persistence unavailable");
     mocks.savedRuns.push(run);
     mocks.persistenceEvents.push("save");
     return run;
@@ -260,6 +266,7 @@ function resetLineState() {
   mocks.savedRuns = [];
   mocks.persistenceEvents = [];
   mocks.saveError = null;
+  mocks.failSaveStatus = null;
   mocks.recoveredRuns = [];
   mocks.listedRuns = null;
   mocks.codexEvents = [];
@@ -838,11 +845,26 @@ describe("useNativeAgent", () => {
     installDesktopRuntime();
     mocks.codexEvents = [{ type: "done", finishReason: "stop" }];
     const providers = [connectedCodexProvider()];
-    const { result, rerender } = renderHook(({agentId}) => useNativeAgent({providers, computer: {workspaceId:"workspace-1", agentId}}), {initialProps:{agentId:"initial-placeholder"}});
-    rerender({agentId:"saved-agent"});
-    await act(async () => { await result.current.run(baseRequest); });
+    const { result, rerender } = renderHook(
+      ({ agentId }) =>
+        useNativeAgent({
+          providers,
+          computer: { workspaceId: "workspace-1", agentId },
+        }),
+      { initialProps: { agentId: "initial-placeholder" } },
+    );
+    rerender({ agentId: "saved-agent" });
+    await act(async () => {
+      await result.current.run(baseRequest);
+    });
     const { startRuntimeCodexTurn } = await import("../runtime");
-    expect(startRuntimeCodexTurn).toHaveBeenCalledWith(expect.objectContaining({options:expect.objectContaining({computer:{workspaceId:"workspace-1",agentId:"saved-agent"}})}));
+    expect(startRuntimeCodexTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          computer: { workspaceId: "workspace-1", agentId: "saved-agent" },
+        }),
+      }),
+    );
   });
 
   it("persists image metadata without transient pixels", async () => {
@@ -1549,8 +1571,14 @@ describe("useNativeAgent", () => {
     mocks.lines = [openAiChunk("partial")];
     mocks.emitDone = false;
 
+    const checkpointAssistant = vi.fn(async () => {});
+    const record = vi.fn(async () => {});
     const { result } = renderHook(() =>
-      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        createDurableRunWriter: () => ({ checkpointAssistant, record }),
+      }),
     );
 
     let runPromise!: Promise<ExecutionAttempt | undefined>;
@@ -1575,12 +1603,160 @@ describe("useNativeAgent", () => {
     expect((mocks.savedRuns.at(-1) as ExecutionAttempt).status).toBe(
       "cancelled",
     );
+    expect(mocks.savedRuns.at(-1)).toMatchObject({
+      transcript: "partial",
+      exchanges: expect.arrayContaining([
+        expect.objectContaining({ role: "assistant", content: "partial" }),
+      ]),
+    });
+    expect(checkpointAssistant).toHaveBeenLastCalledWith("partial", true);
+    expect(record).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kind: "interruption" }),
+    );
 
     // Unblock the held-open run so it can settle without rejecting the suite.
     mocks.onLine?.("[DONE]");
     await act(async () => {
       await runPromise.catch(() => {});
     });
+  });
+
+  it("keeps a final Stop persistence failure visible", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("visible output")];
+    mocks.emitDone = false;
+    mocks.failSaveStatus = "cancelled";
+    const { result } = renderHook(() =>
+      useNativeAgent({ providers: [connectedOpenAiProvider()] }),
+    );
+    let running!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      running = result.current.run(baseRequest);
+    });
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("visible output"),
+    );
+
+    await act(async () => {
+      await result.current.cancel();
+    });
+
+    expect(result.current.state.status).toBe("cancelled");
+    expect(result.current.state.lastError).toContain(
+      "latest output could not be saved",
+    );
+    mocks.onLine?.("[DONE]");
+    await act(async () => {
+      await running;
+    });
+  });
+
+  it("reloads the stopped checkpoint for Continue and fences late provider events", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("preserved partial")];
+    mocks.turnTwoLines = [];
+    mocks.emitDone = false;
+    let durableAssistant = "";
+    const loadConversation = vi.fn(
+      async () =>
+        ({
+          thread: { id: "thread-1" },
+          messages: durableAssistant
+            ? [
+                {
+                  message: { kind: "user", sequence: 1 },
+                  currentRevision: {
+                    state: "terminal",
+                    content: "Start the long response.",
+                  },
+                },
+                {
+                  message: { kind: "assistant", sequence: 2 },
+                  currentRevision: {
+                    state: "terminal",
+                    content: durableAssistant,
+                  },
+                },
+                {
+                  message: { kind: "interruption", sequence: 3 },
+                  currentRevision: {
+                    state: "terminal",
+                    content: "The response was stopped.",
+                  },
+                },
+              ]
+            : [],
+        }) as never,
+    );
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedOpenAiProvider()],
+        threadId: "thread-1",
+        loadConversation,
+        createDurableRunWriter: () => ({
+          record: vi.fn(async () => {}),
+          checkpointAssistant: vi.fn(async (content, terminal) => {
+            if (terminal) durableAssistant = content;
+          }),
+        }),
+      }),
+    );
+    let firstRun!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      firstRun = result.current.run({
+        ...baseRequest,
+        messages: [{ role: "user", content: "Start the long response." }],
+      });
+    });
+    await waitFor(() =>
+      expect(result.current.state.transcript).toBe("preserved partial"),
+    );
+    const stoppedProvider = mocks.onLine!;
+    await act(async () => {
+      await result.current.cancel();
+    });
+    expect(durableAssistant).toBe("preserved partial");
+
+    let continuedRun!: Promise<ExecutionAttempt | undefined>;
+    act(() => {
+      continuedRun = result.current.run({
+        ...baseRequest,
+        messages: [
+          { role: "user", content: "Continue from where you stopped." },
+        ],
+      });
+    });
+    await waitFor(() => expect(mocks.streamRequests).toHaveLength(2));
+    const continuedMessages = (
+      mocks.streamRequests[1].body as {
+        messages: Array<{ role: string; content: string }>;
+      }
+    ).messages;
+    expect(continuedMessages).toEqual(
+      expect.arrayContaining([
+        { role: "assistant", content: "preserved partial" },
+        { role: "user", content: "Continue from where you stopped." },
+      ]),
+    );
+    const continuedProvider = mocks.onLine!;
+    act(() => {
+      continuedProvider(openAiChunk("continued safely"));
+      continuedProvider(finishStop);
+      continuedProvider("[DONE]");
+    });
+    await act(async () => {
+      await continuedRun;
+    });
+
+    act(() => {
+      stoppedProvider(openAiChunk(" late stale text"));
+      stoppedProvider("[DONE]");
+    });
+    await act(async () => {
+      await firstRun;
+    });
+    expect(result.current.state.transcript).toBe("continued safely");
+    expect(result.current.state.status).toBe("completed");
   });
 
   it("fails closed when initial durable-run persistence fails", async () => {
