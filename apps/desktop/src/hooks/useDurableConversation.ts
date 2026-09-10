@@ -141,11 +141,12 @@ export function useDurableConversation(options: UseDurableConversationOptions) {
 
   const createThread = useCallback(
     async (input: ConversationThreadCreate) => {
-      const thread = await runtime.createThread(input);
+      if (!options.workspaceId) throw new Error("Choose a workspace before starting a conversation.");
+      const thread = await createRuntimeConversationThread(input, options.workspaceId);
       await refresh();
       return thread;
     },
-    [refresh],
+    [options.workspaceId, refresh],
   );
 
   const deleteThread = useCallback(async (threadId: string) => {

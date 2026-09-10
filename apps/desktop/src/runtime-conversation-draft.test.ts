@@ -34,4 +34,16 @@ describe("native conversation drafts", () => {
     mocks.invoke.mockResolvedValue(null);
     await expect(loadRuntimeConversationDraft("new-thread")).resolves.toBeNull();
   });
+
+  it("binds native draft reads to the expected workspace and exact thread", async () => {
+    mocks.invoke.mockResolvedValue({ ...draft, draftKey: "composer-scoped", threadId: "thread-a" });
+    await expect(loadRuntimeConversationDraft("composer-scoped", "workspace-a", "thread-a")).resolves.toMatchObject({ threadId: "thread-a" });
+    expect(mocks.invoke).toHaveBeenCalledWith("conversation_load_draft", {
+      id: "composer-scoped",
+      threadId: "thread-a",
+      expectedWorkspaceId: "workspace-a",
+    });
+    mocks.invoke.mockResolvedValueOnce({ ...draft, draftKey: "composer-scoped", threadId: "thread-b" });
+    await expect(loadRuntimeConversationDraft("composer-scoped", "workspace-a", "thread-a")).rejects.toThrow("cross-conversation");
+  });
 });

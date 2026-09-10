@@ -8,10 +8,11 @@ const mocks = vi.hoisted(() => ({
   listMessages: vi.fn(),
   loadDraft: vi.fn(),
   deleteThread: vi.fn(),
+  createThread: vi.fn(),
 }));
 
 vi.mock("../runtime", () => ({
-  createRuntimeConversationThread: vi.fn(),
+  createRuntimeConversationThread: mocks.createThread,
   listRuntimeConversationThreads: mocks.listThreads,
   getRuntimeConversationThread: mocks.getThread,
   updateRuntimeConversationThread: vi.fn(),
@@ -40,6 +41,7 @@ describe("useDurableConversation", () => {
     mocks.listMessages.mockResolvedValue([]);
     mocks.loadDraft.mockResolvedValue(null);
     mocks.deleteThread.mockReset().mockResolvedValue(undefined);
+    mocks.createThread.mockReset().mockResolvedValue(thread("created"));
   });
 
   it("removes a deleted thread and its open transcript only after storage succeeds", async () => {
@@ -110,5 +112,13 @@ describe("useDurableConversation", () => {
     await act(async () => {});
     expect(result.current.draftKey).toBe("new-thread");
     expect(mocks.loadDraft).toHaveBeenCalledWith("new-thread");
+  });
+
+  it("binds new thread creation to the workspace captured by the hook", async () => {
+    const { result } = renderHook(() => useDurableConversation({ workspaceId: "workspace-a" }));
+    await act(async () => {});
+    const input = { authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "member" }, title: "Scoped" } as never;
+    await act(async () => { await result.current.createThread(input); });
+    expect(mocks.createThread).toHaveBeenCalledWith(input, "workspace-a");
   });
 });

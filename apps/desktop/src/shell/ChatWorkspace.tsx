@@ -14,6 +14,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
 } from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
@@ -46,6 +47,7 @@ import { composerModelsFor } from "./composer-models";
 import { useShellAgentController } from "./useShellAgentController";
 import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerImageInputs } from "../lib/composer-images";
+import { prepareComposerImage } from "../lib/composer-images";
 import { getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { useLocalProjects } from "../hooks/useLocalProjects";
@@ -56,6 +58,9 @@ import type { ExecutionAttempt, LocalProject } from "@fable/protocol";
 import type { ProjectDraft } from "../components/projects/ProjectWorkspace";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
+import type { ComposerAttachment } from "../lib/types";
+import { useScopedComposer } from "../hooks/useScopedComposer";
+import { startScopedConversation, type ConversationStartScope } from "../lib/scoped-conversation-start";
 import "./project-room.css";
 
 const ProjectEditor = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectEditor })));
@@ -119,7 +124,7 @@ export function ChatWorkspace() {
   const projectSavingRef = useRef(false);
   const [projectError, setProjectError] = useState("");
   const projectFileInput = useRef<HTMLInputElement>(null);
-  const [projectBatch, setProjectBatch] = useState<{ id: string; workspaceId: string; project: LocalProject; prompt: string; contributions: ProjectContribution[]; index: number; retryAttempt?: ExecutionAttempt; suppressHuman?: boolean }>();
+  const [projectBatch, setProjectBatch] = useState<{ id: string; workspaceId: string; project: LocalProject; prompt: string; attachments: ComposerAttachment[]; contributions: ProjectContribution[]; index: number; retryAttempt?: ExecutionAttempt; suppressHuman?: boolean }>();
   const projectBatchRef = useRef(projectBatch);
   projectBatchRef.current = projectBatch;
   const [suppressProjectPrompt, setSuppressProjectPrompt] = useState(false);
@@ -146,6 +151,7 @@ export function ChatWorkspace() {
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState<QueuedPrompt | null>(null);
+  const [pendingComposerText, setPendingComposerText] = useState<{ agentId: string; text: string }>();
   const [optimisticUserMessage, setOptimisticUserMessage] = useState("");
   const [submissionError, setSubmissionError] = useState("");
   const [dismissedScheduleNotice, setDismissedScheduleNotice] = useState("");
@@ -187,12 +193,66 @@ export function ChatWorkspace() {
     runtime.agents.find(
       (candidate) => candidate.id === (selectedProjectId ? projectExecutor?.agentId ?? runtime.activeAgentId : runtime.activeAgentId),
     ) ?? runtime.agents[0];
+  const contextOwner = runtime.accountWorkspaceStatus.activeContextOwner;
+  const composerAccountId = contextOwner ? `${contextOwner.internalUserId}:${contextOwner.memberId ?? ""}` : "";
+  const composer = useScopedComposer(activeAgent && workspaceId && contextOwner ? {
+    workspaceId,
+    accountId: composerAccountId,
+    agentId: activeAgent.id,
+    projectId: selectedProjectId,
+    threadId: selectedThreadId,
+  } : undefined);
+  const composerValue = composer.text;
+  const setComposerValue = composer.setText;
+  const composerAttachments = composer.attachments;
+  const composerNavigationScope = useRef<ConversationStartScope>({
+    workspaceId,
+    accountId: composerAccountId,
+    agentId: activeAgent?.id ?? "",
+    projectId: selectedProjectId,
+    conversationKey: composer.key,
+  });
+  composerNavigationScope.current = {
+    workspaceId,
+    accountId: composerAccountId,
+    agentId: activeAgent?.id ?? "",
+    projectId: selectedProjectId,
+    conversationKey: composer.key,
+  };
+  useEffect(() => {
+    if (!pendingComposerText || !composer.ready || activeAgent?.id !== pendingComposerText.agentId) return;
+    setComposerValue(pendingComposerText.text);
+    setPendingComposerText(undefined);
+    focusComposer();
+  }, [activeAgent?.id, composer.key, composer.ready, pendingComposerText]);
+
+  const handleComposerAttachmentChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.currentTarget.files ?? []).slice(0, 12);
+    event.currentTarget.value = "";
+    const target = composer;
+    for (const file of files) {
+      const id = `attachment-${crypto.randomUUID()}`;
+      const attachment: ComposerAttachment = {
+        id,
+        name: file.name,
+        type: file.type,
+        sizeBytes: file.size,
+        status: file.type.startsWith("image/") ? "Previewing" : "Indexing",
+      };
+      target.setAttachments((current) => [attachment, ...current].slice(0, 12));
+      void (file.type.startsWith("image/")
+        ? prepareComposerImage(file, id).then((imageInput) => ({ imageInput, previewUrl: imageInput.dataUrl, status: "Attached" }))
+        : runtime.importKnowledgeFile(file).then((sourceId) => sourceId ? { sourceId, status: "Attached" } : { status: "Could not read file" })
+      ).then((patch) => target.setAttachments((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)))
+        .catch((error: unknown) => target.setAttachments((current) => current.map((item) => item.id === id ? { ...item, status: error instanceof Error ? error.message : "Could not attach file" } : item)));
+    }
+  };
   const repositoryImportPending = useRef(false);
   const repositoryScope = `${runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}:${activeAgent?.id}`;
   const currentRepositoryScope = useRef(repositoryScope);
   currentRepositoryScope.current = repositoryScope;
-  const currentRepositoryDraft = useRef(runtime.composerValue);
-  currentRepositoryDraft.current = runtime.composerValue;
+  const currentRepositoryDraft = useRef(composerValue);
+  currentRepositoryDraft.current = composerValue;
   const importRepository = async () => {
     if (repositoryImportPending.current || agent.state.running || !activeAgent) return;
     repositoryImportPending.current = true;
@@ -205,7 +265,7 @@ export function ChatWorkspace() {
       const receipt = await importRuntimeRepository(target, node.generation);
       if (!receipt || currentRepositoryScope.current !== scope) return;
       const draft = currentRepositoryDraft.current;
-      runtime.setComposerValue(`${draft}${draft ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. Work only in this private snapshot. You can read and make explicit text-file edits here, but this import is not connected to an execution runtime: do not claim to initialize Git, run builds or tests, or produce a verified diff. Those steps require a separately configured cloud computer plus an approved repository transfer, which is not available for this imported snapshot. Ask before publishing any changes.`);
+      setComposerValue(`${draft}${draft ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. Work only in this private snapshot. You can read and make explicit text-file edits here, but this import is not connected to an execution runtime: do not claim to initialize Git, run builds or tests, or produce a verified diff. Those steps require a separately configured cloud computer plus an approved repository transfer, which is not available for this imported snapshot. Ask before publishing any changes.`);
       void localComputer.refreshFiles();
     } catch (error) {
       if (currentRepositoryScope.current === scope) setSubmissionError(error instanceof Error ? error.message : "Repository import failed.");
@@ -230,30 +290,6 @@ export function ChatWorkspace() {
     setOptimisticUserMessage("");
     setSubmissionError("");
   }, [activeAgent?.id, selectedProjectId]);
-
-
-  useEffect(() => {
-    const draft = durableConversation.state.draft;
-    if (!draft || draft.draftKey !== durableConversation.draftKey) return;
-    if (!runtime.composerValue) runtime.setComposerValue(draft.content);
-  }, [durableConversation.draftKey, durableConversation.state.draft?.draftKey]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const current = runtime.composerValue;
-      const saved = durableConversation.state.draft?.content ?? "";
-      if (current === saved) return;
-      if (current) void durableConversation.saveDraft(current);
-      else void durableConversation.deleteDraft();
-    }, 400);
-    return () => window.clearTimeout(timer);
-  }, [
-    durableConversation.deleteDraft,
-    durableConversation.saveDraft,
-    durableConversation.state.draft?.content,
-    runtime.composerValue,
-  ]);
-
   useEffect(() => {
     if (wasRunningRef.current && !agent.state.running) {
       void durableConversation.refresh();
@@ -344,7 +380,8 @@ export function ChatWorkspace() {
         setSubmissionError(message);
         return;
       }
-      const imageInputs = composerImageInputs(runtime.composerAttachments);
+      const turnAttachments = batch?.attachments ?? composerAttachments;
+      const imageInputs = composerImageInputs(turnAttachments);
       const selectedModel = composerModels.find((model) => model.id === runModelOptionId);
       if (!imageInputs.ok || (imageInputs.images.length > 0 && (connected.backendType !== "codex-app-server" || connected.authState !== "connected" || selectedModel?.capabilities?.vision !== true))) {
         setSubmissionError(imageInputs.ok ? "Image understanding currently requires a connected Codex model that supports images. Choose a compatible model or remove the images." : imageInputs.error);
@@ -354,8 +391,7 @@ export function ChatWorkspace() {
       setSubmissionError("");
       setOptimisticUserMessage(batch && (batch.index > 0 || batch.suppressHuman) ? "" : prompt);
       setSuppressProjectPrompt(Boolean(batch && (batch.index > 0 || batch.suppressHuman)));
-      if (!batch || batch.index === 0) runtime.setComposerValue("");
-      await durableConversation.deleteDraft().catch(() => undefined);
+      if (!batch || batch.index === 0) await composer.consume();
       resetCancellation();
       try {
         if (!projectIsCurrent()) return;
@@ -368,7 +404,10 @@ export function ChatWorkspace() {
         const preparedContext = await runtime.assembleConversationContext(prompt, {
           threadId: selectedThreadId,
           allowedConnectorIds: connectorIds,
-          allowedKnowledgeSourceIds: [...new Set([...(batch?.project.knowledgeSourceIds ?? []), ...runtime.composerAttachments.flatMap((attachment) => attachment.sourceId ? [attachment.sourceId] : [])])],
+          // Projects receive only project files plus attachments captured from
+          // this exact project composer submission. Workspace-pinned sources
+          // never become implicit project input.
+          allowedKnowledgeSourceIds: [...new Set([...(batch?.project.knowledgeSourceIds ?? []), ...turnAttachments.flatMap((attachment) => attachment.sourceId ? [attachment.sourceId] : [])])],
         });
         if (!projectIsCurrent()) return;
         const request = buildAgentRequest({
@@ -396,10 +435,10 @@ export function ChatWorkspace() {
             },
           } : undefined,
         );
-        if (outcome?.status === "completed" && (!batch || batch.index === batch.contributions.length - 1)) {
-          for (const image of imageInputs.images) runtime.removeComposerAttachment(image.id);
-        } else if ((!outcome || outcome.status === "failed") && !currentRepositoryDraft.current.trim()) {
-          runtime.setComposerValue(batch?.prompt ?? prompt);
+        // The consumed attachment set is bound to this submitted turn and
+        // cannot appear in a later scope.
+        if ((!outcome || outcome.status === "failed") && !currentRepositoryDraft.current.trim()) {
+          setComposerValue(batch?.prompt ?? prompt);
         }
         return outcome?.status;
       } catch (error) {
@@ -409,7 +448,7 @@ export function ChatWorkspace() {
             : "Mivlet could not complete that response.";
         agent.reportError(message);
         setSubmissionError(message);
-        if (!currentRepositoryDraft.current.trim()) runtime.setComposerValue(batch?.prompt ?? prompt);
+        if (!currentRepositoryDraft.current.trim()) setComposerValue(batch?.prompt ?? prompt);
       } finally {
         submissionPending.current = false;
         endConnectorTurn();
@@ -422,7 +461,6 @@ export function ChatWorkspace() {
       agent.reportError,
       agent.run,
       agent.state.running,
-      durableConversation.deleteDraft,
       durableConversation.refresh,
       durableConversation.state.conversation,
       resetCancellation,
@@ -438,9 +476,9 @@ export function ChatWorkspace() {
       runtime.selectableModels,
       runtime.runtimeSnapshotError,
       runtime.runtimeSnapshotReady,
-      runtime.setComposerValue,
-      runtime.composerAttachments,
-      runtime.removeComposerAttachment,
+      composerAttachments,
+      composer.consume,
+      setComposerValue,
       selectedModelId,
       selectedModelOptionId,
       composerModels,
@@ -540,13 +578,13 @@ export function ChatWorkspace() {
   }
 
   const submitComposer = async () => {
-    const prompt = runtime.composerValue.trim();
-    if (!prompt || agent.state.running || projectBatch || projectSavingRef.current || queuedPrompt || deletingConversation || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
+    const prompt = composerValue.trim();
+    if (!composer.ready || !prompt || navigationPending.current || agent.state.running || projectBatch || projectSavingRef.current || queuedPrompt || deletingConversation || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
     if (selectedProjectId) {
       if (!selectedProject || !workspaceId) { setSubmissionError("Reload the project before sending a message."); return; }
       try {
         const contributions = projectContributions(runtime.agents, projectRecipient, composerModels);
-        const batch = { id: crypto.randomUUID(), workspaceId, project: selectedProject, prompt, contributions, index: 0 };
+        const batch = { id: crypto.randomUUID(), workspaceId, project: selectedProject, prompt, attachments: composerAttachments, contributions, index: 0 };
         projectBatchRef.current = batch;
         setProjectExecutor(contributions[0]);
         setProjectBatch(batch);
@@ -556,17 +594,33 @@ export function ChatWorkspace() {
       return;
     }
     if (!selectedThreadId) {
-      const thread = await durableConversation.createThread({
-        authorityScope: {
-          authority: "local",
-          visibility: "member-private",
-          ownerMemberId: "current-member" as never,
-        },
-        title: prompt.slice(0, 72),
-      });
-      runtime.updateAgent(activeAgent.id, { threadId: thread.id });
-      setSelectedThreadId(thread.id);
-      setQueuedPrompt({ threadId: thread.id, prompt });
+      const capturedScope = composerNavigationScope.current;
+      navigationPending.current = true;
+      try {
+        const thread = await startScopedConversation({
+          scope: capturedScope,
+          currentScope: () => composerNavigationScope.current,
+          createThread: () => durableConversation.createThread({
+            authorityScope: {
+              authority: "local",
+              visibility: "member-private",
+              ownerMemberId: "current-member" as never,
+            },
+            title: prompt.slice(0, 72),
+          }),
+          moveDraft: composer.moveToThread,
+        });
+        if (!thread) return;
+        runtime.updateAgent(capturedScope.agentId, { threadId: thread.id });
+        setSelectedThreadId(thread.id);
+        setQueuedPrompt({ threadId: thread.id, prompt });
+      } catch (error) {
+        if (composerNavigationScope.current.conversationKey === capturedScope.conversationKey) {
+          setSubmissionError(error instanceof Error ? error.message : "Could not start this conversation.");
+        }
+      } finally {
+        navigationPending.current = false;
+      }
       return;
     }
     await executePrompt(prompt);
@@ -581,7 +635,7 @@ export function ChatWorkspace() {
     if (!project) return;
     navigationPending.current = true;
     try {
-      await durableConversation.saveDraft(runtime.composerValue);
+      await composer.flush();
       if (projectScope.current.workspaceId !== project.workspaceId) return;
       setSelectedProjectId(project.id);
       setSelectedThreadId(project.threadId);
@@ -594,7 +648,7 @@ export function ChatWorkspace() {
       setMobileConversation(true);
       setProjectError("");
       setSubmissionError("");
-      runtime.setComposerValue("");
+      agent.clearError();
       focusConversationBack();
     } catch (error) { setSubmissionError(error instanceof Error ? error.message : "Could not save the current draft."); }
     finally { navigationPending.current = false; }
@@ -604,7 +658,7 @@ export function ChatWorkspace() {
     if (!workspaceId || projectSavingRef.current || agent.state.running || projectBatch || submissionPending.current) return;
     projectSavingRef.current = true; setProjectSaving(true); setProjectError("");
     try {
-      if (!project) await durableConversation.saveDraft(runtime.composerValue);
+      if (!project) await composer.flush();
       if (projectScope.current.workspaceId !== workspaceId) return;
       const saved = project ? await updateLocalProject({ workspaceId, id: project.id, expectedRevision: project.revision, name: draft.name, instructions: draft.instructions, knowledgeSourceIds: project.knowledgeSourceIds })
         : await createLocalProject({ workspaceId, id: `project-${crypto.randomUUID()}`, threadId: `thread-${crypto.randomUUID()}`, ...draft, knowledgeSourceIds: [] });
@@ -613,7 +667,8 @@ export function ChatWorkspace() {
       setProjectEditorOpen(false);
       if (!project) {
         setSelectedProjectId(saved.id); setSelectedThreadId(saved.threadId); setProjectExecutor(undefined); setProjectRecipient("all");
-        setProjectTab("conversation"); setMobileConversation(true); setMarketplaceTab(null); setWorkPanelOpen(false); runtime.setComposerValue("");
+        setProjectTab("conversation"); setMobileConversation(true); setMarketplaceTab(null); setWorkPanelOpen(false);
+        agent.clearError();
       }
     } catch (error) { if (projectScope.current.workspaceId === workspaceId) setProjectError(error instanceof Error ? error.message : "Could not save this project."); }
     finally { projectSavingRef.current = false; setProjectSaving(false); }
@@ -678,7 +733,7 @@ export function ChatWorkspace() {
     navigationPending.current = true;
     try {
       // Flush before changing scope: a quick navigation must not discard the debounce's draft.
-      await durableConversation.saveDraft(runtime.composerValue);
+      await composer.flush();
     } catch {
       runtime.setLastAction("Your draft could not be saved. Try again before switching agents.");
       return false;
@@ -692,8 +747,8 @@ export function ChatWorkspace() {
     focusConversationBack();
     setMarketplaceTab(null);
     setSelectedThreadId(profile.threadId);
-    runtime.setComposerValue("");
     setSubmissionError("");
+    agent.clearError();
     return true;
   };
   const createTeammate = () => {
@@ -705,11 +760,17 @@ export function ChatWorkspace() {
     setEditingAgentId(profile.id);
     setAgentEditorOpen(true);
   };
-  const startNewConversation = () => {
-    if (agent.state.running || projectBatch || selectedProjectId) return;
+  const startNewConversation = async () => {
+    if (navigationPending.current || agent.state.running || projectBatch || selectedProjectId) return;
+    try {
+      await composer.flush();
+    } catch {
+      setSubmissionError("Your draft could not be saved. Try again before starting a new conversation.");
+      return;
+    }
     runtime.updateAgent(activeAgent.id, { threadId: undefined });
     setSelectedThreadId(undefined);
-    runtime.setComposerValue("");
+    agent.clearError();
     setSubmissionError("");
     setOptimisticUserMessage("");
     window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
@@ -847,12 +908,13 @@ export function ChatWorkspace() {
             accounts={runtime.connectorAccounts}
             connectorStatus={runtime.connectorStatus}
             onUseConnector={(connector, prompt) => {
-              runtime.useConnector(connector);
-              if (prompt) runtime.setComposerValue(`${runtime.composerValue}${runtime.composerValue && !/\s$/.test(runtime.composerValue) ? " " : ""}@${connector.id} ${prompt}`);
+              const mention = `${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${connector.id} `;
+              setComposerValue(prompt ? `${mention}${prompt}` : mention);
+              runtime.setLastAction(`${connector.name} is ready in the composer`);
               setMarketplaceTab(null);
             }}
             onUseBuiltinPlugin={(id) => {
-              runtime.setComposerValue(`${runtime.composerValue}${runtime.composerValue && !/\s$/.test(runtime.composerValue) ? " " : ""}@${id} `);
+              setComposerValue(`${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${id} `);
               setMarketplaceTab(null);
               window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
             }}
@@ -930,16 +992,17 @@ export function ChatWorkspace() {
               await durableConversation.deleteThread(id);
               const threadIds = (activeAgent.threadIds ?? [activeAgent.threadId]).filter((threadId): threadId is string => Boolean(threadId) && threadId !== id);
               runtime.updateAgent(activeAgent.id, { threadIds, ...(activeAgent.threadId === id ? { threadId: undefined } : {}) });
-              if (selectedThreadId === id) { setSelectedThreadId(undefined); runtime.setComposerValue(""); setOptimisticUserMessage(""); }
+              if (selectedThreadId === id) { setSelectedThreadId(undefined); setOptimisticUserMessage(""); agent.clearError(); }
               setSubmissionError("");
             } catch (error) { setSubmissionError(error instanceof Error ? error.message : "Could not delete this conversation."); }
             finally { setDeletingConversation(false); }
           }}
           onNewConversation={startNewConversation}
-          onSelectConversation={(id) => {
-            if (agent.state.running || queuedPrompt) return;
+          onSelectConversation={async (id) => {
+            if (navigationPending.current || agent.state.running || queuedPrompt) return;
+            try { await composer.flush(); } catch { setSubmissionError("Your draft could not be saved. Try again before switching conversations."); return; }
             runtime.updateAgent(activeAgent.id, { threadId: id });
-            setSelectedThreadId(id); runtime.setComposerValue(""); setOptimisticUserMessage(""); setSubmissionError("");
+            setSelectedThreadId(id); setOptimisticUserMessage(""); setSubmissionError(""); agent.clearError();
           }}
           agentName={activeAgent.name}
           localComputer={localComputer}
@@ -979,7 +1042,7 @@ export function ChatWorkspace() {
           void archiveLocalProject({ workspaceId, id, expectedRevision: project.revision }).then(() => {
             if (projectScope.current.workspaceId !== workspaceId) return;
             projects.setProjects((current) => current.filter((item) => item.id !== id));
-            if (selectedProjectId === id) { setSelectedProjectId(undefined); setProjectExecutor(undefined); runtime.setComposerValue(""); }
+            if (selectedProjectId === id) { setSelectedProjectId(undefined); setProjectExecutor(undefined); agent.clearError(); }
             setProjectEditorOpen(false); void durableConversation.refresh();
           }).catch((error) => setProjectError(error instanceof Error ? error.message : "Could not archive this project.")).finally(() => { projectSavingRef.current = false; setProjectSaving(false); });
         }} /></Suspense> : null}
@@ -989,8 +1052,7 @@ export function ChatWorkspace() {
         onUseSkill={async (task) => {
           const profile = runtime.agents.find((candidate) => candidate.id === editingAgentId);
           if (profile && !await selectAgent(profile)) return;
-          runtime.setComposerValue(task.instruction);
-          focusComposer();
+          if (profile) setPendingComposerText({ agentId: profile.id, text: task.instruction });
         }}
         existingAvatarSeeds={runtime.agents.map((profile) => profile.avatarSeed ?? `blob-v1:${profile.id}`)}
         open={agentEditorOpen}
@@ -1007,15 +1069,17 @@ export function ChatWorkspace() {
           setAgentEditorOpen(false);
           setEditingAgentId(null);
         }}
-        onSave={(draft) => {
+        onSave={async (draft) => {
           if (editingAgentId) {
             runtime.updateAgent(editingAgentId, draft);
           } else {
+            await composer.flush();
             const created = runtime.createAgent(draft);
             runtime.selectAgent(created.id);
             setSelectedThreadId(undefined);
             setMobileConversation(true);
             setWorkPanelOpen(false);
+            agent.clearError();
           }
           setAgentEditorOpen(false);
           setEditingAgentId(null);
@@ -1037,16 +1101,16 @@ export function ChatWorkspace() {
                     const profile = runtime.agents.find((candidate) => candidate.id === agentId);
                     if (!profile) throw new Error("This schedule's agent is no longer available.");
                     if (agent.state.running || queuedPrompt || deletingConversation) throw new Error("Stop the current response before opening scheduled work.");
-                    await durableConversation.saveDraft(runtime.composerValue);
+                    await composer.flush();
                     const targetThread = await getRuntimeConversationThread(threadId);
                     if (!targetThread) throw new Error("This scheduled conversation is no longer available.");
                     if (currentRepositoryScope.current !== expectedScope) throw new Error("The active workspace or agent changed. Open the result again.");
                     if (!await selectAgent(profile)) throw new Error("The current conversation could not be saved.");
                     runtime.updateAgent(agentId, { threadId, threadIds: [...new Set([...(profile.threadIds ?? []), ...(profile.threadId ? [profile.threadId] : []), threadId])] });
                     setSelectedThreadId(threadId);
-                    runtime.setComposerValue("");
                     setOptimisticUserMessage("");
                     setSubmissionError("");
+                    agent.clearError();
                     setSchedulesOpen(false);
                     focusComposer();
                   }}
@@ -1089,7 +1153,7 @@ export function ChatWorkspace() {
               selectedProject ? <div className="project-room-empty"><h1>{selectedProject.name}</h1><p>Give your agents a shared task. Their conversation, references, and results stay together here.</p></div> : <AgentWelcome
                 agent={activeAgent}
                 onChoose={(prompt) => {
-                  runtime.setComposerValue(prompt);
+                  setComposerValue(prompt);
                   runtime.focusComposer(prompt);
                 }}
               />
@@ -1126,7 +1190,7 @@ export function ChatWorkspace() {
                     <p>Stopped. Your completed work is still here.</p>
                     <button type="button" onClick={() => {
                       const prompt = "Continue from where you stopped. Check the completed work before taking further actions; do not repeat actions that already succeeded.";
-                      if (selectedProjectId) { runtime.setComposerValue(prompt); focusComposer(); }
+                      if (selectedProjectId) { setComposerValue(prompt); focusComposer(); }
                       else void executePrompt(prompt);
                     }}>Continue</button>
                   </div> : null}
@@ -1141,7 +1205,7 @@ export function ChatWorkspace() {
                         if (!profile || !model) { setSubmissionError("This response's original agent and connected model must be available before retrying."); return; }
                         if (attempt.exchanges?.some((exchange) => exchange.images?.length)) { setSubmissionError("Reattach the original images and send a new project message; image pixels are not stored."); return; }
                         const contribution = { agentId: profile.id, providerId: model.providerId, modelId: model.modelId, modelOptionId: model.id };
-                        const batch = { id: crypto.randomUUID(), workspaceId, project: selectedProject, prompt: retryPrompt, contributions: [contribution], index: 0, retryAttempt: attempt,
+                        const batch = { id: crypto.randomUUID(), workspaceId, project: selectedProject, prompt: retryPrompt, attachments: [], contributions: [contribution], index: 0, retryAttempt: attempt,
                           suppressHuman: messages.some((view) => view.message.runId === attempt.id && view.message.kind === "user") || retryPrompt.startsWith("Contribute to the user's project request below.") };
                         projectBatchRef.current = batch; setProjectBatch(batch); setProjectExecutor(contribution); setProjectTab("conversation");
                         return;
@@ -1173,8 +1237,8 @@ export function ChatWorkspace() {
               modelControl={selectedProjectId && projectRecipient === "all" ? <span className="project-room-models">Each agent’s model</span> : undefined}
               composerRef={runtime.composerRef}
               fileInputRef={runtime.fileInputRef}
-              composerValue={runtime.composerValue}
-              onComposerChange={runtime.setComposerValue}
+              composerValue={composerValue}
+              onComposerChange={setComposerValue}
               onSubmit={(event) => {
                 event.preventDefault();
                 void submitComposer();
@@ -1201,9 +1265,9 @@ export function ChatWorkspace() {
                 setWorkPanelOpen(false);
                 setAddMenuOpen(false);
               }}
-              onRunCommand={(command) => runtime.setComposerValue(command)}
-              onFileChange={runtime.handleComposerAttachmentChange}
-              importStatus={runtime.importStatus}
+              onRunCommand={setComposerValue}
+              onFileChange={handleComposerAttachmentChange}
+              importStatus={composer.error || undefined}
               models={composerModels}
               selectedModelId={selectedModelOptionId}
               selectedModelLabel={selectedModelLabel}
@@ -1221,8 +1285,8 @@ export function ChatWorkspace() {
               isWorking={agent.state.running || Boolean(projectBatch)}
               onStop={() => { projectBatchRef.current = undefined; setProjectBatch(undefined); void stopCurrentWork(); }}
               connectedConnectors={connectedConnectors}
-              attachments={runtime.composerAttachments}
-              onRemoveAttachment={runtime.removeComposerAttachment}
+              attachments={composerAttachments}
+              onRemoveAttachment={(id) => composer.setAttachments((current) => current.filter((item) => item.id !== id))}
             />
             {selectedProjectId ? <p className="project-room-disclosure">Project messages are visible to all agents.</p> : null}
           </div>
@@ -1241,12 +1305,12 @@ export function ChatWorkspace() {
   function addDictationToComposer(transcript: string) {
     const composer = runtime.composerRef.current;
     const insertion = insertDictation(
-      runtime.composerValue,
+      composerValue,
       transcript,
-      composer?.selectionStart ?? runtime.composerValue.length,
-      composer?.selectionEnd ?? runtime.composerValue.length,
+      composer?.selectionStart ?? composerValue.length,
+      composer?.selectionEnd ?? composerValue.length,
     );
-    runtime.setComposerValue(insertion.value);
+    setComposerValue(insertion.value);
     window.requestAnimationFrame(() => {
       runtime.composerRef.current?.focus();
       runtime.composerRef.current?.setSelectionRange(

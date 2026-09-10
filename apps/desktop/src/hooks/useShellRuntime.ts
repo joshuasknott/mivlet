@@ -260,9 +260,10 @@ export function useShellRuntime(
     [],
   );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
-  const [composerValue, setComposerValue] = useState(
-    initialState.composerValue,
-  );
+  // Composer drafts are persisted by their full account/workspace/agent-or-
+  // project/conversation scope in ChatWorkspace. The shell snapshot is not a
+  // safe owner for unsent content.
+  const [composerValue, setComposerValue] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
   const [voiceProvider, setVoiceProvider] = useState<"browser" | "openai">(initialState.voiceProvider === "openai" ? "openai" : "browser");
   const [toolPickerOpen, setToolPickerOpen] = useState(false);
@@ -529,7 +530,7 @@ export function useShellRuntime(
   const shellState = useMemo<PersistedShellState>(
     () => ({
       activeItem,
-      composerValue,
+      composerValue: "",
       voiceEnabled,
       voiceProvider,
       approvalAudit,
@@ -730,7 +731,7 @@ export function useShellRuntime(
           defaultShellState,
         );
         setActiveItem(recovered.activeItem);
-        setComposerValue(recovered.composerValue);
+        setComposerValue("");
         setVoiceEnabled(recovered.voiceEnabled);
         setVoiceProvider(recovered.voiceProvider === "openai" ? "openai" : "browser");
         setApprovalAudit(recovered.approvalAudit);

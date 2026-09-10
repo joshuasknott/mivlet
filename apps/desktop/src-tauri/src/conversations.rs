@@ -13,6 +13,16 @@ fn scope() -> Result<DataScope, String> {
     DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
         .map_err(|error| error.to_string())
 }
+fn validate_workspace(expected_workspace_id: Option<&str>, action: &str) -> Result<(), String> {
+    if expected_workspace_id
+        .is_some_and(|id| id != crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
+    {
+        return Err(format!(
+            "The selected workspace changed before the draft was {action}."
+        ));
+    }
+    Ok(())
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateThread {
@@ -240,7 +250,9 @@ pub fn conversation_revise_message(input: ReviseMessage) -> Result<message::Mess
 pub fn conversation_load_draft(
     thread_id: Option<String>,
     id: String,
+    expected_workspace_id: Option<String>,
 ) -> Result<Option<Value>, String> {
+    validate_workspace(expected_workspace_id.as_deref(), "loaded")?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
@@ -251,7 +263,11 @@ pub fn conversation_load_draft(
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub fn conversation_save_draft(input: DraftInput) -> Result<(), String> {
+pub fn conversation_save_draft(
+    input: DraftInput,
+    expected_workspace_id: Option<String>,
+) -> Result<(), String> {
+    validate_workspace(expected_workspace_id.as_deref(), "saved")?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let scope = scope()?;
