@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { conversationTurns, appendResponseText, resolveResponseTool } from "./conversation-presentation";
+import { conversationTurns, appendResponseText, resolveResponseTool, toolActivity } from "./conversation-presentation";
 import type { ConversationMessageView } from "./conversation-runtime";
 
 function view(runId: string, kind: string, sequence: number, content: string, detail?: unknown): ConversationMessageView {
   return { message: { id: `${runId}-${sequence}`, runId, kind, sequence, detail, createdAt: "2026-09-06T10:00:00Z" }, currentRevision: { state: "terminal", content, checkpointedAt: "2026-09-06T10:00:01Z" } } as ConversationMessageView;
 }
 describe("conversation presentation", () => {
+  it("names native application and exact URL activity without exposing arguments", () => {
+    expect(toolActivity("local-app-list", "running")).toBe("Listing open applications");
+    expect(toolActivity("local-app-select", "succeeded")).toBe("Selected an application window");
+    expect(toolActivity("local-app-action", "succeeded")).toBe("Input sent; awaiting observation");
+    expect(toolActivity("web-fetch", "succeeded")).toBe("Read an exact web page");
+  });
   it("pairs calls within their own turn even when the provider reuses ids", () => {
     const turns = conversationTurns([
       view("one", "user", 1, "First"), view("one", "tool", 2, "Call", { phase: "call", toolCallId: "same", toolName: "read-file" }),

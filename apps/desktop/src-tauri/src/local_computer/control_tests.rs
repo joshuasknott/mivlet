@@ -86,7 +86,7 @@ fn action(state: &LocalComputerState, generation: u64, value: Value) {
         "native-test",
         "agent-a",
         generation,
-        serde_json::from_value(value).unwrap(),
+        desktop_tools::parse_action(value, true).unwrap(),
     )
     .unwrap();
 }
@@ -259,7 +259,7 @@ fn live_background_actions_stop_and_refusals() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"], "action":"type", "elementRef":reference(&observed,"Note"), "text":"Background acceptance 731"}),
+        json!({"observationId":observed["observationId"], "input":{"action":"type", "elementRef":reference(&observed,"Note"), "text":"Background acceptance 731"}}),
     );
     assert_eq!(
         windows::foreground(),
@@ -271,7 +271,7 @@ fn live_background_actions_stop_and_refusals() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"], "action":"click", "elementRef":reference(&observed,"Confirm note")}),
+        json!({"observationId":observed["observationId"], "input":{"action":"click", "elementRef":reference(&observed,"Confirm note")}}),
     );
     let observed = read(&state, generation);
     assert!(observed
@@ -285,7 +285,7 @@ fn live_background_actions_stop_and_refusals() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"], "action":"scroll", "elementRef":reference(&observed,"Scrollable sample"), "deltaY":600}),
+        json!({"observationId":observed["observationId"], "input":{"action":"scroll", "elementRef":reference(&observed,"Scrollable sample"), "deltaY":600}}),
     );
     assert_eq!(
         windows::foreground(),
@@ -306,20 +306,20 @@ fn live_background_actions_stop_and_refusals() {
     );
     assert!(state.native.active());
     for value in [
-        json!({"action":"key", "key":"Enter"}),
+        json!({"action":"key", "key":"Enter", "modifiers":[]}),
         json!({"action":"click", "x":10, "y":10}),
     ] {
         let observed = read(&state, generation);
         let sent = grant.driver.dispatched();
         let mut value = value;
-        value["observationId"] = observed["observationId"].clone();
+        value = json!({"observationId":observed["observationId"], "input":value});
         let refusal: Value = serde_json::from_str(
             &desktop_tools::act(
                 &state,
                 "native-test",
                 "agent-a",
                 generation,
-                serde_json::from_value(value).unwrap(),
+                desktop_tools::parse_action(value, true).unwrap(),
             )
             .unwrap(),
         )
@@ -361,7 +361,7 @@ fn live_background_actions_stop_and_refusals() {
     let next = state.clone();
     let acting = std::thread::spawn(move || {
         desktop_tools::act(&next, "native-test", "agent-a", generation,
-        serde_json::from_value(json!({"observationId":observed["observationId"], "action":"type", "elementRef":reference(&observed,"Note"), "text":" SLOW_NATIVE_STOP"})).unwrap())
+        desktop_tools::parse_action(json!({"observationId":observed["observationId"], "input":{"action":"type", "elementRef":reference(&observed,"Note"), "text":" SLOW_NATIVE_STOP"}}), true).unwrap())
     });
     let deadline = Instant::now() + Duration::from_secs(10);
     while !std::fs::read_to_string(evidence.join("fixture-events.txt"))
@@ -481,7 +481,7 @@ fn live_actions_stop_queue_and_reconnect() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"click","elementRef":note}),
+        json!({"observationId":observed["observationId"],"input":{"action":"click","elementRef":note}}),
     );
     for (key, modifiers) in [
         ("Home", json!([])),
@@ -492,7 +492,7 @@ fn live_actions_stop_queue_and_reconnect() {
         action(
             &state,
             generation,
-            json!({"observationId":observed["observationId"],"action":"key","key":key,"modifiers":modifiers}),
+            json!({"observationId":observed["observationId"],"input":{"action":"key","key":key,"modifiers":modifiers}}),
         );
     }
     let observed = read(&state, generation);
@@ -500,7 +500,7 @@ fn live_actions_stop_queue_and_reconnect() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"type","elementRef":note,"text":"Native Mivlet acceptance 731"}),
+        json!({"observationId":observed["observationId"],"input":{"action":"type","elementRef":note,"text":"Native Mivlet acceptance 731"}}),
     );
     let observed = read(&state, generation);
     assert!(observed
@@ -509,20 +509,20 @@ fn live_actions_stop_queue_and_reconnect() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"key","key":"End"}),
+        json!({"observationId":observed["observationId"],"input":{"action":"key","key":"End","modifiers":[]}}),
     );
     let observed = read(&state, generation);
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"key","key":"Backspace"}),
+        json!({"observationId":observed["observationId"],"input":{"action":"key","key":"Backspace","modifiers":[]}}),
     );
     let observed = read(&state, generation);
     assert!(observed.to_string().contains("Native Mivlet acceptance 73"));
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"click","elementRef":reference(&observed,"Confirm note")}),
+        json!({"observationId":observed["observationId"],"input":{"action":"click","elementRef":reference(&observed,"Confirm note")}}),
     );
     let observed = read(&state, generation);
     assert!(observed
@@ -539,7 +539,7 @@ fn live_actions_stop_queue_and_reconnect() {
     action(
         &state,
         generation,
-        json!({"observationId":observed["observationId"],"action":"scroll","elementRef":reference(&observed,"Scrollable sample"),"deltaY":600}),
+        json!({"observationId":observed["observationId"],"input":{"action":"scroll","elementRef":reference(&observed,"Scrollable sample"),"deltaY":600}}),
     );
     assert!(
         desktop_tools::delivery_ticket(&state, &screenshot).is_err(),
@@ -556,8 +556,7 @@ fn live_actions_stop_queue_and_reconnect() {
         "native-test",
         "agent-a",
         generation,
-        serde_json::from_value(json!({"observationId":"expired","action":"key","key":"Enter"}))
-            .unwrap()
+        desktop_tools::parse_action(json!({"observationId":"expired","input":{"action":"key","key":"Enter","modifiers":[]}}), true).unwrap()
     )
     .is_err());
     assert!(!state.native.active());
@@ -644,7 +643,7 @@ fn live_actions_stop_queue_and_reconnect() {
     let generation = selected(&state, "agent-a", pid).generation.unwrap();
     let observed = read(&state, generation);
     let opened = desktop_tools::act(&state, "native-test", "agent-a", generation,
-        serde_json::from_value(json!({"observationId":observed["observationId"],"action":"click","elementRef":reference(&observed,"Open dialog")})).unwrap());
+        desktop_tools::parse_action(json!({"observationId":observed["observationId"],"input":{"action":"click","elementRef":reference(&observed,"Open dialog")}}), true).unwrap());
     state.native.monitor();
     assert!(
         !state.native.active(),
@@ -660,7 +659,7 @@ fn live_actions_stop_queue_and_reconnect() {
         .unwrap();
     let observed = read(&state, generation);
     let closed = desktop_tools::act(&state, "native-test", "agent-a", generation,
-        serde_json::from_value(json!({"observationId":observed["observationId"],"action":"click","elementRef":reference(&observed,"Close dialog")})).unwrap());
+        desktop_tools::parse_action(json!({"observationId":observed["observationId"],"input":{"action":"click","elementRef":reference(&observed,"Close dialog")}}), true).unwrap());
     state.native.monitor();
     assert!(!state.native.active(), "target closure must revoke control");
     assert!(closed.is_err());
