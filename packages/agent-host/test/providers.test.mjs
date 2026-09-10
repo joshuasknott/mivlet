@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
+import { chunk, fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
 
 function anthropic(id, parts, stop = "end_turn") {
   return [
@@ -51,4 +51,47 @@ test("native provider failure is forwarded without another model request", async
     assert.equal(host.events.filter(event => event.type === "model-request").length, 1);
     assert.equal(host.events.some(event => event.type === "done"), false);
   });
+});
+
+test("native provider retry is forwarded and the same model request can continue", async () => {
+  await withHost(async host => {
+    host.write({ type: "start", input: fixtureInput() });
+    const request = await host.nextType("model-request");
+    sendChunks(host, request.id, [
+      JSON.stringify({ __fableTransport: { kind: "retrying", code: "rate-limited", message: "Retrying.", retryable: true } }),
+      chunk({ content: "Recovered." }),
+      chunk({}, "stop"),
+      "[DONE]",
+    ]);
+    assert.equal((await host.nextType("retrying")).type, "retrying");
+    assert.equal((await host.nextType("done")).finishReason, "stop");
+    assert.equal((await host.waitForExit()).code, 0);
+    assert.equal(host.events.filter(event => event.type === "model-request").length, 1);
+  });
+});
+
+test("OpenAI and compatible providers retain their established token-limit fields", async () => {
+  const cases = [
+    { providerId: "openai", model: "gpt-5-mini", field: "max_completion_tokens" },
+    { providerId: "openai", model: "gpt-4.1-mini", field: "max_tokens" },
+    { providerId: "xai", model: "grok-4", field: "max_tokens" },
+    { providerId: "custom", model: "custom-model", field: "max_tokens" },
+  ];
+  for (const entry of cases) {
+    await withHost(async host => {
+      const base = fixtureInput();
+      host.write({ type: "start", input: {
+        ...base,
+        providerId: entry.providerId,
+        request: { ...base.request, model: entry.model, tools: [] },
+      } });
+      const request = await host.nextType("model-request");
+      assert.equal(request.body[entry.field], 256);
+      const other = entry.field === "max_tokens" ? "max_completion_tokens" : "max_tokens";
+      assert.equal(other in request.body, false);
+      sendChunks(host, request.id, [chunk({ content: "Done." }), chunk({}, "stop"), "[DONE]"]);
+      assert.equal((await host.nextType("done")).finishReason, "stop");
+      assert.equal((await host.waitForExit()).code, 0);
+    });
+  }
 });

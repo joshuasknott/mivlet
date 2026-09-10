@@ -37,6 +37,10 @@ export function createEmbeddedBackend(provider: BackendProvider, deps: BackendDe
           if (shouldStop()) { yield { type: "cancelled" }; return; }
           for await (const event of host.run({ ...request, tools }, { ...options, contextPrefix })) {
             if (shouldStop()) { yield { type: "cancelled" }; return; }
+            if (event.type === "retrying") {
+              options.onRetry?.();
+              continue;
+            }
             if (event.type !== "tool-request") {
               yield event;
               if (event.type === "done" || event.type === "cancelled" || event.type === "error") return;
@@ -61,8 +65,16 @@ export function createEmbeddedBackend(provider: BackendProvider, deps: BackendDe
               output = await options.execute(approval, event.arguments); ok = true;
             } catch (error) { output = error instanceof Error ? error.message : "Tool execution failed."; }
             if (shouldStop()) { yield { type: "cancelled" }; return; }
-            const limit = Math.min(64_000, options.maxToolOutputCharacters ?? 64_000);
-            if (output.length > limit) output = output.slice(0, limit - 64) + "\n[Tool output truncated by Mivlet.]";
+            const configuredLimit = options.maxToolOutputCharacters ?? 64_000;
+            const limit = Number.isFinite(configuredLimit)
+              ? Math.max(0, Math.min(64_000, Math.floor(configuredLimit)))
+              : 0;
+            if (output.length > limit) {
+              const marker = "[Tool output truncated by Mivlet.]";
+              output = limit <= marker.length
+                ? marker.slice(0, limit)
+                : output.slice(0, limit - marker.length - 1) + `\n${marker}`;
+            }
             yield { type: "tool-result", callId: event.callId, ok, output };
             await host.reply(event.callId, ok, output);
           }

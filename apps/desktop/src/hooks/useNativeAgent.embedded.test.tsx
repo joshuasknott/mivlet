@@ -109,6 +109,25 @@ it("joins the hook, embedded bridge and exact approval executor while preserving
   expect(gate.pendingCount()).toBe(0);
 });
 
+it("persists retries reported by the embedded provider boundary", async () => {
+  const { result } = fixture();
+  let running!: Promise<ExecutionAttempt | undefined>;
+  act(() => { running = result.current.run(request); });
+  await waitFor(() => expect(native.start).toHaveBeenCalledOnce());
+
+  act(() => { native.receive!({ type: "retrying" }); });
+  await waitFor(() => expect(native.saved).toContainEqual(expect.objectContaining({
+    status: "retrying",
+    retryCount: 1,
+  })));
+
+  await act(async () => {
+    native.receive!({ type: "done", finishReason: "stop" });
+    await running;
+  });
+  expect(native.saved.at(-1)).toMatchObject({ status: "completed", retryCount: 1 });
+});
+
 it("Stop cancels a pending embedded approval and rejects delayed native events", async () => {
   const { result, gate, approval } = fixture();
   let running!: Promise<ExecutionAttempt | undefined>;

@@ -162,6 +162,21 @@ export function chunk(delta, finishReason = null) {
   });
 }
 
+export function usageChunk(inputTokens, outputTokens) {
+  return JSON.stringify({
+    id: "fixture-completion",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "fixture-model",
+    choices: [],
+    usage: {
+      prompt_tokens: inputTokens,
+      completion_tokens: outputTokens,
+      total_tokens: inputTokens + outputTokens,
+    },
+  });
+}
+
 export function sendChunks(host, id, lines) {
   lines.forEach((line, sequence) => host.write({ type: "model-chunk", id, sequence, line }));
 }

@@ -21,6 +21,29 @@ export interface HostBoundary {
   event(event: BackendAgentEvent): void;
 }
 
+function providerRequestBody(
+  body: unknown,
+  providerId: string,
+  model: string,
+  maxTokens: number,
+): unknown {
+  if (providerId === "anthropic") return body;
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new Error("Invalid provider request body.");
+  }
+  const shaped = { ...body } as Record<string, unknown>;
+  const usesCompletionTokens = providerId === "openai"
+    && (model.startsWith("gpt-5") || model.startsWith("o"));
+  if (usesCompletionTokens) {
+    shaped.max_completion_tokens = maxTokens;
+    delete shaped.max_tokens;
+  } else {
+    shaped.max_tokens = maxTokens;
+    delete shaped.max_completion_tokens;
+  }
+  return shaped;
+}
+
 /** One ephemeral SDK session per Mivlet attempt. Mivlet keeps all durable state. */
 export async function runHost(input: HostInput, boundary: HostBoundary): Promise<void> {
   const { request } = input;
@@ -30,6 +53,8 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
   let toolCalls = 0;
   let sessionId = "";
   let finish: "stop" | "length" = "stop";
+  let inputTokens = 0;
+  let outputTokens = 0;
   const seen = new Set<string>();
   const observed = new Set<string>();
   const barriers = new Map<string, () => void>();
@@ -47,7 +72,12 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
         const raw = await http.text();
         if (raw.length > 2 * 1024 * 1024) throw new Error("Model request too large.");
         const body: unknown = JSON.parse(raw);
-        return await boundary.model(body);
+        return await boundary.model(providerRequestBody(
+          body,
+          input.providerId,
+          request.model,
+          request.maxTokens,
+        ));
       } catch {
         return Response.json({ error: { message: "Mivlet provider boundary refused this request." } }, { status: 502 });
       }
@@ -138,8 +168,12 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
         }
         if (event.type === "session.step.ended") {
           if (data.finish === "length") finish = "length";
-          const tokens = data.tokens as { input: number; output: number };
-          boundary.event({ type: "usage", inputTokens: tokens.input, outputTokens: tokens.output, costUsd: 0, costUnknown: true });
+          const tokens = data.tokens && typeof data.tokens === "object"
+            ? data.tokens as { input?: unknown; output?: unknown }
+            : {};
+          inputTokens += typeof tokens.input === "number" && Number.isFinite(tokens.input) ? Math.max(0, tokens.input) : 0;
+          outputTokens += typeof tokens.output === "number" && Number.isFinite(tokens.output) ? Math.max(0, tokens.output) : 0;
+          boundary.event({ type: "usage", inputTokens, outputTokens, costUsd: 0, costUnknown: true });
         }
         if (event.type === "session.execution.succeeded") return;
         if (event.type === "session.execution.failed") throw new Error("OpenCode could not complete this provider turn.");

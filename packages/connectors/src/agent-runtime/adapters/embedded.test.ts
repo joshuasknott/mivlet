@@ -95,6 +95,38 @@ describe("embedded SDK agent backend", () => {
     expect(fixture.cancelled).toHaveBeenCalled();
   });
 
+  it("forwards embedded transport retries to the persisted-run callback", async () => {
+    const fixture = runtimeFor([
+      { type: "retrying" },
+      { type: "retrying" },
+      { type: "done", finishReason: "stop" },
+    ]);
+    const onRetry = vi.fn();
+    const backend = createEmbeddedBackend(provider, fixture.deps);
+
+    expect(await collect(backend.run(request, {
+      execute: async () => "",
+      onRetry,
+    }))).toEqual([{ type: "done", finishReason: "stop" }]);
+    expect(onRetry).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([0, 1, 16, 35, 36, 64])("keeps tool output within a %i-character limit", async (limit) => {
+    const fixture = runtimeFor([
+      { type: "tool-request", callId: `bounded-${limit}`, tool: "read-file", arguments: '{"path":"large.txt"}' },
+      { type: "done", finishReason: "stop" },
+    ]);
+    const backend = createEmbeddedBackend(provider, fixture.deps);
+    const events = await collect(backend.run(request, {
+      execute: async () => "x".repeat(256),
+      maxToolOutputCharacters: limit,
+    }));
+    const result = events.find((event) => event.type === "tool-result");
+
+    expect(result?.output.length).toBeLessThanOrEqual(limit);
+    expect(fixture.reply.mock.calls[0]?.[2].length).toBeLessThanOrEqual(limit);
+  });
+
   it.each([
     {
       name: "a tool that was not advertised",

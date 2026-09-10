@@ -127,7 +127,7 @@ export type EmbeddedRuntimeEvent = BackendAgentEvent | {
   tool: string;
   arguments: string;
   approvalId?: string;
-};
+} | { type: "retrying" };
 
 export interface EmbeddedRuntimeHandle {
   run(request: AgentTurnRequest, options: Omit<AgentTurnOptions, "execute" | "authorize" | "shouldCancel" | "onRetry">): AsyncIterable<EmbeddedRuntimeEvent>;

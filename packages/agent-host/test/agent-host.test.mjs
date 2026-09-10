@@ -7,6 +7,7 @@ import {
   executable,
   fixtureInput,
   sendChunks,
+  usageChunk,
   withHost,
 } from "./support/host-process.mjs";
 
@@ -26,7 +27,8 @@ test("runs a tool turn through two model requests and preserves text before tool
     assert.equal(first.id, 1);
     assert.equal(first.body.model, "fixture-model");
     assert.equal(first.body.stream, true);
-    assert.equal(first.body.max_completion_tokens, 256);
+    assert.equal(first.body.max_tokens, 256);
+    assert.equal("max_completion_tokens" in first.body, false);
     assert.ok(Array.isArray(first.body.tools));
     assert.equal(first.body.tools[0].type, "function");
     assert.equal(first.body.tools[0].function.name, "write_summary");
@@ -37,6 +39,7 @@ test("runs a tool turn through two model requests and preserves text before tool
       chunk({ content: "Before the tool." }),
       chunk({ tool_calls: [{ index: 0, id: "summary-call", function: { name: "write_summary", arguments: '{"query":"fixture"}' } }] }),
       chunk({}, "tool_calls"),
+      usageChunk(100, 10),
       "[DONE]",
     ]);
     const tool = await host.nextType("tool-request");
@@ -52,6 +55,7 @@ test("runs a tool turn through two model requests and preserves text before tool
     sendChunks(host, second.id, [
       chunk({ content: "Final answer." }),
       chunk({}, "stop"),
+      usageChunk(120, 5),
       "[DONE]",
     ]);
 
@@ -64,9 +68,26 @@ test("runs a tool turn through two model requests and preserves text before tool
     assert.ok(types.indexOf("text-delta") < types.indexOf("tool-request"));
     assert.equal(modelRequests.length, 2);
     assert.ok(types.indexOf("tool-request") < modelRequests[1]);
+    assert.deepEqual(host.events.filter((event) => event.type === "usage"), [
+      { type: "usage", inputTokens: 100, outputTokens: 10, costUsd: 0, costUnknown: true },
+      { type: "usage", inputTokens: 220, outputTokens: 15, costUsd: 0, costUnknown: true },
+    ]);
     assert.ok(host.frames.some((frame) => frame.type === "tool-result" && frame.callId === "summary-call" && frame.output === resultCanary));
     assert.equal(host.containsBytes(promptCanary), false);
     assert.equal(host.containsBytes(resultCanary), false);
+  });
+});
+
+test("treats maxTurns as a model-step budget and disables tools on the final step", async () => {
+  await withHost(async (host) => {
+    host.write({ type: "start", input: fixtureInput({ maxTurns: 1 }) });
+    const request = await host.nextType("model-request");
+    assert.equal(request.body.tool_choice, "none");
+    sendChunks(host, request.id, [chunk({ content: "Budgeted answer." }), chunk({}, "stop"), "[DONE]"]);
+    assert.equal((await host.nextType("done")).finishReason, "stop");
+    assert.equal((await host.waitForExit()).code, 0);
+    assert.equal(host.events.filter((event) => event.type === "model-request").length, 1);
+    assert.equal(host.events.some((event) => event.type === "tool-request"), false);
   });
 });
 

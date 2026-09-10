@@ -2,17 +2,15 @@
  * Native-API `AgentBackend` adapter.
  *
  * This is one adapter among equals — it implements the provider-neutral
- * {@link AgentBackend} contract for direct model APIs (OpenAI, Anthropic,
- * Gemini, xAI, OpenRouter, and the wider OpenAI-compatible catalogue). Mivlet owns the full agent loop here (request
- * shaping, streaming, tool-call/approval routing), delegating only the HTTP/SSE
- * egress to the injected {@link HttpTransport} (the Rust boundary in production,
- * a `FixtureTransport` in tests). The provider-id wire-family dispatch stays
- * inside the existing `runAgentLoop`/`streamFor`/`shapeBodyFor` helpers — it is
- * native-API-specific by nature and does not leak into the contract.
+ * {@link AgentBackend} contract for direct model APIs. Ordinary OpenAI,
+ * Anthropic, xAI, and custom turns use the embedded SDK host when available;
+ * Gemini, OpenRouter, image turns, and browser fixtures retain Mivlet's local
+ * loop. Both paths keep HTTP egress and credentials behind the injected native
+ * boundary.
  *
  * SECRET INVARIANT: the adapter holds no key. The transport it receives owns
  * egress; in production Rust adds the Authorization/x-api-key/x-goog-api-key
- * header from the keychain. The adapter only shapes the key-free request body.
+ * header from the keychain. The adapter only handles key-free requests.
  */
 
 import type {

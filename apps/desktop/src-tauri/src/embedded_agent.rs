@@ -431,7 +431,7 @@ pub async fn start_embedded_agent(app: AppHandle, input: StartRequest) -> Result
                     }
                     let _ = app.emit(&channel, &event);
                 }
-                Some("text-delta" | "usage") => {
+                Some("text-delta" | "usage" | "retrying") => {
                     let _ = app.emit(&channel, &event);
                 }
                 Some("error" | "done" | "cancelled") => {

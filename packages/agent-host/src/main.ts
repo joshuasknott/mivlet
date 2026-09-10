@@ -79,7 +79,9 @@ function frame(raw: string) {
     if (value.line === "[DONE]") { pending.controller.close(); models.delete(value.id); return; }
     const data = JSON.parse(value.line);
     if (data.__fableTransport) {
-      if (data.__fableTransport.kind === "error") {
+      if (data.__fableTransport.kind === "retrying") {
+        emit({ type: "retrying" });
+      } else if (data.__fableTransport.kind === "error") {
         emit({ type: "error", message: data.__fableTransport.message, code: data.__fableTransport.code, retryable: data.__fableTransport.retryable });
         pending.controller.error(new Error("Provider failed")); models.delete(value.id);
       }
