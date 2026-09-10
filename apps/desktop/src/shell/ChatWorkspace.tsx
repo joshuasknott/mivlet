@@ -18,7 +18,7 @@ import {
 } from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
-import type { FableAgentProfile, Spine } from "@fable/protocol";
+import type { FableAgentProfile, LocalComputerSnapshot, Spine } from "@fable/protocol";
 import { SettingsModal } from "../components/settings/SettingsModal";
 import {
   AgentSidebar,
@@ -62,6 +62,7 @@ import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
 import type { ComposerAttachment } from "../lib/types";
 import { useScopedComposer } from "../hooks/useScopedComposer";
 import { startScopedConversation, type ConversationStartScope } from "../lib/scoped-conversation-start";
+import { prepareReadableComposerAttachment } from "../lib/composer-attachments";
 import "./project-room.css";
 
 const ProjectEditor = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectEditor })));
@@ -188,6 +189,8 @@ export function ChatWorkspace() {
   const [pendingComposerText, setPendingComposerText] = useState<{ agentId: string; text: string }>();
   const [optimisticUserMessage, setOptimisticUserMessage] = useState("");
   const [optimisticAttachments, setOptimisticAttachments] = useState<Spine.Conversations.ConversationAttachmentMetadata[]>([]);
+  const [submissionBusy, setSubmissionBusy] = useState(false);
+  const [submissionStatus, setSubmissionStatus] = useState("");
   const [submissionError, setSubmissionError] = useState("");
   const [dismissedScheduleNotice, setDismissedScheduleNotice] = useState("");
   const [deletingConversation, setDeletingConversation] = useState(false);
@@ -196,6 +199,8 @@ export function ChatWorkspace() {
   const artifactTrigger = useRef<HTMLElement | null>(null);
 
   const wasRunningRef = useRef(false);
+  const submissionEpochRef = useRef(0);
+  const stagingNodeRef = useRef<LocalComputerSnapshot | null>(null);
 
   const controller = useShellAgentController({
     threadId: selectedThreadId,
@@ -278,9 +283,7 @@ export function ChatWorkspace() {
       target.setAttachments((current) => [attachment, ...current].slice(0, 12));
       void (file.type.startsWith("image/")
         ? prepareComposerImage(file, id).then((imageInput) => ({ imageInput, previewUrl: imageInput.dataUrl, status: "Image input · transient" }))
-        : Promise.all([runtime.importKnowledgeFile(file), file.arrayBuffer()]).then(([sourceId, buffer]) => sourceId
-          ? { sourceId, transientBytes: new Uint8Array(buffer), status: "Knowledge context · workspace file when sent" }
-          : { status: "Could not read file" })
+        : prepareReadableComposerAttachment(file, runtime.importKnowledgeFile)
       ).then((patch) => target.setAttachments((current) => current.map((item) => item.id === id ? { ...item, ...patch } : item)))
         .catch((error: unknown) => target.setAttachments((current) => current.map((item) => item.id === id ? { ...item, status: error instanceof Error ? error.message : "Could not attach file" } : item)));
     }
@@ -289,43 +292,61 @@ export function ChatWorkspace() {
   const stageAttachmentsForRun = async (
     attachments: readonly ComposerAttachment[],
     agentId: string,
-  ): Promise<ComposerAttachment[]> => {
-    if (!attachments.some((attachment) => attachment.transientBytes && !attachment.type.startsWith("image/"))) return [...attachments];
+    isCurrent: () => boolean,
+  ): Promise<{ attachments: ComposerAttachment[]; node: LocalComputerSnapshot | null }> => {
+    const stageable = attachments.filter((attachment) => attachment.transientBytes && !attachment.type.startsWith("image/"));
+    if (!stageable.length) return { attachments: [...attachments], node: localComputer.node };
+    setSubmissionStatus(`Preparing ${stageable.length} readable attachment${stageable.length === 1 ? "" : "s"}…`);
     let node;
     try {
       node = await localComputer.prepareForTool("read-file");
     } catch {
-      return [...attachments];
+      return { attachments: [...attachments], node: null };
     }
-    if (node.workspaceId !== workspaceId || node.agentId !== agentId) return [...attachments];
-    const staged: ComposerAttachment[] = [];
-    let wroteFile = false;
-    for (const attachment of attachments) {
-      if (!attachment.transientBytes || attachment.type.startsWith("image/")) {
-        staged.push(attachment);
-        continue;
-      }
-      try {
-        const receipt = await stageRuntimeLocalComputerAttachment({
-          workspaceId,
-          agentId,
-          expectedGeneration: node.generation,
+    stagingNodeRef.current = node;
+    if (!isCurrent()) return { attachments: [...attachments], node };
+    if (node.workspaceId !== workspaceId || node.agentId !== agentId) {
+      return { attachments: [...attachments], node: null };
+    }
+    try {
+      const encoded = [];
+      for (const attachment of stageable) {
+        if (!isCurrent()) return { attachments: [...attachments], node };
+        encoded.push({
           attachmentId: attachment.id,
           name: attachment.name,
           mimeType: attachment.type,
-          contentBase64: encodeAttachmentBytes(attachment.transientBytes),
+          contentBase64: encodeAttachmentBytes(attachment.transientBytes!),
         });
-        if (!receipt || receipt.attachmentId !== attachment.id || receipt.computerId !== node.computerId || receipt.sizeBytes !== attachment.transientBytes.byteLength) {
-          throw new Error("The staged attachment receipt did not match this upload.");
-        }
-        staged.push({ ...attachment, workspaceFile: receipt, status: `Workspace/${receipt.relativePath}` });
-        wroteFile = true;
-      } catch {
-        staged.push({ ...attachment, workspaceFile: undefined, status: "Knowledge context only" });
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
+      if (!isCurrent()) return { attachments: [...attachments], node };
+      const receipts = await stageRuntimeLocalComputerAttachment({
+          workspaceId,
+          agentId,
+          expectedGeneration: node.generation,
+          attachments: encoded,
+      });
+      if (!isCurrent()) return { attachments: [...attachments], node };
+      const byId = new Map(receipts?.map((receipt) => [receipt.attachmentId, receipt]));
+      if (!receipts || receipts.length !== stageable.length || byId.size !== stageable.length) throw new Error("The staged attachment receipt did not match this upload.");
+      const staged = attachments.map((attachment) => {
+        if (!attachment.transientBytes || attachment.type.startsWith("image/")) return attachment;
+        const receipt = byId.get(attachment.id);
+        if (!receipt || receipt.computerId !== node.computerId || receipt.sizeBytes !== attachment.transientBytes.byteLength) throw new Error("The staged attachment receipt did not match this upload.");
+        return { ...attachment, workspaceFile: receipt, status: `Workspace/${receipt.relativePath}` };
+      });
+      void localComputer.refreshFiles();
+      return { attachments: staged, node };
+    } catch {
+      if (!isCurrent()) return { attachments: [...attachments], node };
+      return {
+        attachments: attachments.map((attachment) => attachment.transientBytes && !attachment.type.startsWith("image/")
+          ? { ...attachment, workspaceFile: undefined, status: "Knowledge context only" }
+          : attachment),
+        node,
+      };
     }
-    if (wroteFile) void localComputer.refreshFiles();
-    return staged;
   };
   const repositoryImportPending = useRef(false);
   const repositoryScope = `${runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId}:${activeAgent?.id}`;
@@ -468,23 +489,29 @@ export function ChatWorkspace() {
         return;
       }
       submissionPending.current = true;
+      const submissionEpoch = ++submissionEpochRef.current;
+      const submissionIsCurrent = () => submissionEpochRef.current === submissionEpoch && projectIsCurrent();
+      setSubmissionBusy(true);
+      setSubmissionStatus("");
       setSubmissionError("");
       setOptimisticUserMessage(batch && (batch.index > 0 || batch.suppressHuman) ? "" : prompt);
       setSuppressProjectPrompt(Boolean(batch && (batch.index > 0 || batch.suppressHuman)));
       if (!batch || batch.index === 0) await composer.consume();
       resetCancellation();
       try {
-        if (!projectIsCurrent()) return;
-        const runAttachments = await stageAttachmentsForRun(turnAttachments, activeAgent.id);
-        if (!projectIsCurrent()) return;
+        if (!submissionIsCurrent()) return;
+        const attachmentStage = await stageAttachmentsForRun(turnAttachments, activeAgent.id, submissionIsCurrent);
+        if (!submissionIsCurrent()) return;
+        const runAttachments = attachmentStage.attachments;
+        const computerNode = attachmentStage.node;
         if (!batch || (batch.index === 0 && !batch.suppressHuman)) {
           setOptimisticAttachments(attachmentMessageMetadata(runAttachments, Boolean(batch)));
         }
         const { ids: connectorIds, tools: connectorTools } = await beginConnectorTurn();
-        if (!projectIsCurrent()) return;
+        if (!submissionIsCurrent()) return;
         const projectInstructions = batch ? `Shared project: ${batch.project.name}\nYou are ${activeAgent.name}. This conversation is shared with the user's agents. Read the recorded conversation before acting and identify your own contribution. Files available as context are the project sources explicitly supplied to this response. Other agents' computers and private files are not accessible through your computer tools.\n\nProject instructions:\n${batch.project.instructions}` : "";
-        const tools = conversationToolsForModel(connectorTools, computerToolsReady(localComputer.node), connected, selectedModel, localComputer.node?.plugins, imageApiConnected, localComputer.node?.runtimeAvailable === true);
-        const pluginInstructions = builtinPluginInstructions(prompt, localComputer.node?.plugins, tools.map((tool) => tool.name));
+        const tools = conversationToolsForModel(connectorTools, computerToolsReady(computerNode), connected, selectedModel, computerNode?.plugins, imageApiConnected, computerNode?.runtimeAvailable === true);
+        const pluginInstructions = builtinPluginInstructions(prompt, computerNode?.plugins, tools.map((tool) => tool.name));
         const instructions = [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS, pluginInstructions, projectInstructions, attachmentRunInstructions(runAttachments)].filter(Boolean).join("\n\n");
         const preparedContext = await runtime.assembleConversationContext(prompt, {
           threadId: selectedThreadId,
@@ -494,7 +521,7 @@ export function ChatWorkspace() {
           // never become implicit project input.
           allowedKnowledgeSourceIds: [...new Set([...(batch?.project.knowledgeSourceIds ?? []), ...turnAttachments.flatMap((attachment) => attachment.sourceId ? [attachment.sourceId] : [])])],
         });
-        if (!projectIsCurrent()) return;
+        if (!submissionIsCurrent()) return;
         const request = buildAgentRequest({
             model: runModelId,
             reasoningEffort: contribution?.reasoningEffort ?? selectedReasoningEffort,
@@ -538,6 +565,9 @@ export function ChatWorkspace() {
         setSubmissionError(message);
         if (!currentRepositoryDraft.current.trim()) setComposerValue(batch?.prompt ?? prompt);
       } finally {
+        stagingNodeRef.current = null;
+        setSubmissionBusy(false);
+        setSubmissionStatus("");
         submissionPending.current = false;
         endConnectorTurn();
         await Promise.allSettled([runtime.refreshConnectorStatuses(), durableConversation.refresh()]);
@@ -1361,7 +1391,7 @@ export function ChatWorkspace() {
               }}
               onRunCommand={setComposerValue}
               onFileChange={handleComposerAttachmentChange}
-              importStatus={composer.error || undefined}
+              importStatus={submissionStatus || composer.error || undefined}
               models={composerModels}
               selectedModelId={selectedModelOptionId}
               selectedModelLabel={selectedModelLabel}
@@ -1376,8 +1406,14 @@ export function ChatWorkspace() {
 
 
               inThread={Boolean(selectedThreadId)}
-              isWorking={agent.state.running || Boolean(projectBatch)}
-              onStop={() => { projectBatchRef.current = undefined; setProjectBatch(undefined); void stopCurrentWork(); }}
+              isWorking={agent.state.running || submissionBusy || Boolean(projectBatch)}
+              onStop={() => {
+                const pendingSubmission = submissionBusy;
+                if (pendingSubmission) submissionEpochRef.current++;
+                projectBatchRef.current = undefined;
+                setProjectBatch(undefined);
+                void stopCurrentWork(pendingSubmission, stagingNodeRef.current ?? undefined);
+              }}
               connectedConnectors={connectedConnectors}
               attachments={composerAttachments}
               onRemoveAttachment={(id) => composer.setAttachments((current) => current.filter((item) => item.id !== id))}

@@ -333,6 +333,18 @@ pub struct ExecutionImageMetadata {
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExecutionAttachmentMetadata {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: usize,
+    pub availability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionExchange {
     pub role: String,
@@ -342,6 +354,8 @@ pub struct ExecutionExchange {
     pub ok: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ExecutionImageMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ExecutionAttachmentMetadata>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]

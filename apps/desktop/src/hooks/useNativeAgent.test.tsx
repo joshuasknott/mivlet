@@ -690,6 +690,9 @@ describe("useNativeAgent", () => {
       kind: "user",
       attachments: [expect.objectContaining({ relativePath: "Attachments/totals-a1.csv" })],
     }));
+    expect((mocks.savedRuns[0] as ExecutionAttempt).exchanges?.[0].attachments).toEqual([
+      expect.objectContaining({ relativePath: "Attachments/totals-a1.csv" }),
+    ]);
   });
 
   it("reloads canonical project history for each sequential contribution", async () => {
@@ -1266,6 +1269,50 @@ describe("useNativeAgent", () => {
     expect(result.current.state.lastError).toContain(
       "Reattach the original images",
     );
+    expect(mocks.streamCalls).toBe(0);
+    expect(mocks.savedRuns).toEqual([]);
+  });
+
+  it("requires file reattachment instead of silently retrying without attachment access", async () => {
+    installDesktopRuntime();
+    const previous: ExecutionAttempt = {
+      id: "retry-file",
+      providerId: "openai",
+      model: "gpt-5",
+      status: "interrupted",
+      transcript: "",
+      threadId: "thread-1",
+      exchanges: [{
+        role: "user",
+        content: "Summarize the totals",
+        attachments: [{
+          id: "attachment-1",
+          name: "totals.csv",
+          mimeType: "text/csv",
+          sizeBytes: 24,
+          availability: "workspace-file",
+          relativePath: "Attachments/upload-a/totals.csv",
+        }],
+      }],
+      turn: 0,
+      pendingApprovalIds: [],
+      recoverable: true,
+      retryCount: 0,
+      createdAt: "2026-09-07T10:00:00Z",
+      updatedAt: "2026-09-07T10:00:01Z",
+    };
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()],
+      threadId: "thread-1",
+      models: [{
+        id: "gpt-5",
+        label: "GPT-5",
+        available: true,
+        capabilities: { contextWindow: 128_000, maxOutputTokens: 8_192, streaming: true, tools: true, vision: false, reasoning: true, structuredOutput: true },
+      }],
+    }));
+    await act(async () => { await result.current.retry(previous); });
+    expect(result.current.state.lastError).toContain("Reattach the original files");
     expect(mocks.streamCalls).toBe(0);
     expect(mocks.savedRuns).toEqual([]);
   });

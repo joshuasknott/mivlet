@@ -10,6 +10,7 @@ import type {
   WorkspaceId,
 } from "../spine/primitives.js";
 import type { ProviderRouteSelection } from "./provider-routing.js";
+import type { ConversationAttachmentMetadata } from "../spine/conversations.js";
 
 export type ExecutionAttemptStatus =
   | "queued"
@@ -29,6 +30,8 @@ export interface ExecutionExchange {
   ok?: boolean;
   /** Durable metadata only. User image pixels remain ephemeral and must be reattached. */
   images?: ExecutionImageMetadata[];
+  /** Durable non-image attachment metadata. Retry requires an explicit reattachment. */
+  attachments?: ConversationAttachmentMetadata[];
 }
 
 export type NativeImageMediaType = "image/png" | "image/jpeg" | "image/webp";

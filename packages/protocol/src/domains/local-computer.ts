@@ -67,13 +67,18 @@ export interface LocalComputerFileRequest extends LocalComputerTarget {
   path: string;
 }
 
-/** User-authorized upload copied into one exact agent workspace. */
-export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget {
-  expectedGeneration: number;
+/** One bounded user-authorized upload copied into an exact agent workspace. */
+export interface LocalComputerAttachmentStageInput {
   attachmentId: string;
   name: string;
   mimeType: string;
   contentBase64: string;
+}
+
+/** One cancellable batch captured for a single agent run. */
+export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget {
+  expectedGeneration: number;
+  attachments: readonly LocalComputerAttachmentStageInput[];
 }
 
 /** Credential-free proof of the exact bytes and relative path staged. */

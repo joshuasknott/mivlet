@@ -58,7 +58,7 @@ export const previewRuntimeLocalComputerFile = (
 export const stageRuntimeLocalComputerAttachment = (
   request: LocalComputerAttachmentStageRequest,
 ) =>
-  nativeComputerCommand<LocalComputerAttachmentReceipt>(
+  nativeComputerCommand<LocalComputerAttachmentReceipt[]>(
     "local_computer_stage_attachment",
     { request },
   );

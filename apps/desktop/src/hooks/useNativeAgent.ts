@@ -559,6 +559,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               }
             : {}),
         }));
+      const durableAttachments = control?.attachments?.filter(
+        (attachment) => attachment.availability !== "image-input",
+      );
+      const lastUserExchange = initialExchanges
+        .filter((exchange) => exchange.role === "user")
+        .at(-1);
+      if (lastUserExchange && durableAttachments?.length) {
+        lastUserExchange.attachments = [...durableAttachments];
+      }
       persisted = {
         id: attemptId,
         providerId,
@@ -1320,6 +1329,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           ...current,
           lastError:
             "Reattach the original images before retrying; image pixels are not stored.",
+        }));
+        return;
+      }
+      if (userExchange.attachments?.length) {
+        setState((current) => ({
+          ...current,
+          lastError:
+            "Reattach the original files and send a new message; retry does not reuse attachment access.",
         }));
         return;
       }

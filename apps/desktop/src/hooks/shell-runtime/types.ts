@@ -112,7 +112,7 @@ export interface ShellRuntime {
   clearApprovalInteraction: () => void;
   // knowledge + memory
   workspaceKnowledgeSources: KnowledgeSource[];
-  importKnowledgeFile: (file: File) => Promise<string | null>;
+  importKnowledgeFile: (file: File, decodedContent?: string) => Promise<string | null>;
   pinnedSourceIds: string[];
   managedMemoryRecords: MemoryRecord[];
   memoryDisabled: boolean;
