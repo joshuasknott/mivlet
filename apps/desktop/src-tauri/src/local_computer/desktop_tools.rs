@@ -179,10 +179,15 @@ fn bounded(value: &Value, max: usize) -> String {
         .collect()
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct DesktopAction {
     observation_id: String,
+    input: DesktopInput,
+}
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DesktopInput {
     action: String,
     element_ref: Option<String>,
     x: Option<u32>,
@@ -192,18 +197,74 @@ pub(crate) struct DesktopAction {
     key: Option<String>,
     modifiers: Option<Vec<String>>,
 }
+pub(crate) fn parse_action(value: Value, allow_pixels: bool) -> Result<DesktopAction, String> {
+    let action: DesktopAction = serde_json::from_value(value).map_err(|error| {
+        format!("Invalid application input fields: {error}. Use observationId and one action-specific input object only.")
+    })?;
+    if action.observation_id.is_empty() {
+        return Err("Invalid application input: observationId must be the fresh non-empty ID returned by Observe.".into());
+    }
+    let input = &action.input;
+    let pointer = input.x.is_some() || input.y.is_some();
+    let element = input.element_ref.is_some();
+    let correction = match input.action.as_str() {
+        "click" if element && !pointer && input.delta_y.is_none() && input.text.is_none()
+            && input.key.is_none() && input.modifiers.is_none() => None,
+        "click" if allow_pixels && pointer && !element && input.x.is_some() && input.y.is_some()
+            && input.delta_y.is_none() && input.text.is_none() && input.key.is_none()
+            && input.modifiers.is_none() => None,
+        "click" => Some("click requires exactly elementRef, or exactly x and y for local-desktop-action"),
+        "type" if element && !pointer && input.text.is_some() && input.delta_y.is_none()
+            && input.key.is_none() && input.modifiers.is_none() => None,
+        "type" => Some("type requires exactly elementRef and text"),
+        "scroll" if element && !pointer && input.delta_y.is_some() && input.text.is_none()
+            && input.key.is_none() && input.modifiers.is_none() => None,
+        "scroll" if allow_pixels && pointer && !element && input.x.is_some() && input.y.is_some()
+            && input.delta_y.is_some() && input.text.is_none() && input.key.is_none()
+            && input.modifiers.is_none() => None,
+        "scroll" => Some("scroll requires exactly elementRef and nonzero deltaY, or exactly x, y and nonzero deltaY for local-desktop-action"),
+        "key" if !element && !pointer && input.key.is_some() && input.modifiers.is_some()
+            && input.delta_y.is_none() && input.text.is_none() => None,
+        "key" => Some("key requires exactly key and modifiers; use an empty modifiers array when Shift is not needed"),
+        _ => Some("action must be click, type, scroll, or key"),
+    };
+    if let Some(correction) = correction {
+        return Err(format!("Invalid application input for '{}': {correction}. No input was dispatched; correct this call using the same fresh observationId.", input.action));
+    }
+    if let Some(text) = input.text.as_deref() {
+        if text.is_empty()
+            || text.len() > 1500
+            || text.chars().count() > 512
+            || text.contains('\0')
+            || credential_shaped(text)
+        {
+            return Err("Invalid application input for 'type': text must contain 1-512 non-secret characters, at most 1500 UTF-8 bytes, and no NUL. No input was dispatched; correct this call using the same fresh observationId.".into());
+        }
+    }
+    if let Some(delta) = input.delta_y {
+        if delta == 0 || !(-1200..=1200).contains(&delta) {
+            return Err("Invalid application input for 'scroll': deltaY must be a nonzero integer from -1200 through 1200. No input was dispatched; correct this call using the same fresh observationId.".into());
+        }
+    }
+    if let Some(modifiers) = input.modifiers.as_deref() {
+        if modifiers.len() > 1 || modifiers.iter().any(|modifier| modifier != "Shift") {
+            return Err("Invalid application input for 'key': modifiers must be [] or [\"Shift\"]. No input was dispatched; correct this call using the same fresh observationId.".into());
+        }
+    }
+    Ok(action)
+}
 fn arguments(
     action: &DesktopAction,
     observation: &Observation,
     pid: u32,
     hwnd: u64,
 ) -> Result<(&'static str, Value), String> {
-    let invalid = "Application input does not match a supported action and its exact fields.";
+    let input = &action.input;
     let mut args = json!({"pid":pid,"window_id":hwnd});
-    let pointer = action.x.is_some() || action.y.is_some();
-    if let Some(reference) = &action.element_ref {
+    let pointer = input.x.is_some() || input.y.is_some();
+    if let Some(reference) = &input.element_ref {
         if pointer {
-            return Err(invalid.into());
+            unreachable!("action target was prevalidated");
         }
         args["element_token"] = json!(observation
             .elements
@@ -211,7 +272,7 @@ fn arguments(
             .ok_or("The control reference is stale. Observe again.")?);
         args["snapshot_id"] = json!(observation.snapshot);
     } else if pointer {
-        match (action.x, action.y) {
+        match (input.x, input.y) {
             (Some(x), Some(y)) if x < observation.width && y < observation.height => {
                 args["x"] = json!(x);
                 args["y"] = json!(y);
@@ -219,55 +280,25 @@ fn arguments(
             _ => return Err("Coordinates are outside the latest screenshot.".into()),
         }
     }
-    let target = pointer || action.element_ref.is_some();
-    match action.action.as_str() {
-        "click"
-            if target
-                && action.text.is_none()
-                && action.key.is_none()
-                && action.modifiers.is_none()
-                && action.delta_y.is_none() =>
-        {
-            Ok(("click", args))
-        }
-        "type"
-            if action.element_ref.is_some()
-                && !pointer
-                && action.key.is_none()
-                && action.modifiers.is_none()
-                && action.delta_y.is_none() =>
-        {
-            let text = action
+    match input.action.as_str() {
+        "click" => Ok(("click", args)),
+        "type" => {
+            let text = input
                 .text
                 .as_deref()
-                .filter(|s| {
-                    !s.is_empty()
-                        && s.len() <= 1500
-                        && s.chars().count() <= 512
-                        && !s.contains('\0')
-                        && !credential_shaped(s)
-                })
-                .ok_or("Enter up to 512 non-secret characters in an observed text control.")?;
+                .expect("type payload was prevalidated");
             args["text"] = json!(text);
             Ok(("type_text", args))
         }
-        "scroll"
-            if target
-                && action.text.is_none()
-                && action.key.is_none()
-                && action.modifiers.is_none() =>
-        {
-            let delta = action
-                .delta_y
-                .filter(|d| *d != 0 && (-1200..=1200).contains(d))
-                .ok_or(invalid)?;
+        "scroll" => {
+            let delta = input.delta_y.expect("scroll payload was prevalidated");
             args["direction"] = json!(if delta < 0 { "up" } else { "down" });
             args["amount"] = json!((delta.unsigned_abs() / 100).max(1));
             args["by"] = json!("line");
             Ok(("scroll", args))
         }
-        "key" if !target && action.text.is_none() && action.delta_y.is_none() => {
-            let key = action.key.as_deref().ok_or(invalid)?;
+        "key" => {
+            let key = input.key.as_deref().expect("key payload was prevalidated");
             let normalized = match key {
                 "Enter" => "RETURN",
                 "Backspace" => "BACKSPACE",
@@ -282,17 +313,17 @@ fn arguments(
                 "Delete" => "DELETE",
                 "Home" => "HOME",
                 "End" => "END",
-                _ => return Err(invalid.into()),
+                _ => return Err(format!("Unsupported key '{key}'. No input was dispatched; correct this call using the same fresh observationId.")),
             };
-            let mods = action.modifiers.as_deref().unwrap_or_default();
-            if mods.len() > 1 || mods.iter().any(|m| m != "Shift") {
-                return Err("Only Shift with navigation keys is supported. Use observed app controls for other commands.".into());
-            }
+            let mods = input
+                .modifiers
+                .as_deref()
+                .expect("key payload was prevalidated");
             args["key"] = json!(normalized);
             args["modifiers"] = json!(mods.iter().map(|_| "SHIFT").collect::<Vec<_>>());
             Ok(("press_key", args))
         }
-        _ => Err(invalid.into()),
+        _ => unreachable!("action payload was prevalidated"),
     }
 }
 pub(crate) fn act(
@@ -315,7 +346,7 @@ pub(crate) fn act(
             if mode == DeliveryMode::Background && window.background_requires_foreground() {
                 return Ok(PreparedCall::ForegroundRequired("This app framework can activate itself during background input. Request foreground selection before using it."));
             }
-            if mode == DeliveryMode::Background && (action.action == "key" || action.x.is_some() || action.y.is_some()) {
+            if mode == DeliveryMode::Background && (action.input.action == "key" || action.input.x.is_some() || action.input.y.is_some()) {
                 return Ok(PreparedCall::ForegroundRequired("Keyboard and pixel actions require foreground selection. Background control uses fresh element refs for clicking, appending text and scrolling."));
             }
             let (name, args) = arguments(
@@ -390,21 +421,22 @@ mod tests {
         }
     }
     fn input(value: Value) -> Result<(&'static str, Value), String> {
-        arguments(
-            &serde_json::from_value(value).map_err(|_| "invalid")?,
-            &observed(),
-            12,
-            34,
-        )
+        let action = parse_action(value, true)?;
+        arguments(&action, &observed(), 12, 34)
     }
     #[test]
     fn only_observed_elements_or_bounded_pixels_are_accepted() {
+        assert!(input(
+            json!({"observationId":"fresh","input":{"action":"click","elementRef":"e1"}})
+        )
+        .is_err());
         assert!(
-            input(json!({"observationId":"fresh","action":"click","elementRef":"e1"})).is_err()
+            input(json!({"observationId":"fresh","input":{"action":"click","x":600,"y":1}}))
+                .is_err()
         );
-        assert!(input(json!({"observationId":"fresh","action":"click","x":600,"y":1})).is_err());
         let (_, args) =
-            input(json!({"observationId":"fresh","action":"click","elementRef":"e0"})).unwrap();
+            input(json!({"observationId":"fresh","input":{"action":"click","elementRef":"e0"}}))
+                .unwrap();
         assert_eq!(args["element_token"], "s1:0");
         assert_eq!(args["window_id"], 34);
         assert_eq!(args["snapshot_id"], "s1");
@@ -412,20 +444,54 @@ mod tests {
     #[test]
     fn rejects_shell_launch_arbitrary_fields_and_global_shortcuts() {
         for value in [
-            json!({"observationId":"fresh","action":"launch","application":"terminal"}),
-            json!({"observationId":"fresh","action":"key","key":"R","modifiers":["Meta"]}),
-            json!({"observationId":"fresh","action":"click","x":1,"y":1,"pid":99}),
+            json!({"observationId":"fresh","input":{"action":"launch","application":"terminal"}}),
+            json!({"observationId":"fresh","input":{"action":"key","key":"R","modifiers":["Meta"]}}),
+            json!({"observationId":"fresh","input":{"action":"click","x":1,"y":1,"pid":99}}),
         ] {
             assert!(input(value).is_err());
         }
     }
     #[test]
     fn text_requires_observed_control_and_blocks_secrets() {
-        assert!(input(json!({"observationId":"fresh","action":"type","text":"hello"})).is_err());
-        assert!(input(json!({"observationId":"fresh","action":"type","elementRef":"e0","text":"password=hidden"})).is_err());
+        assert!(
+            input(json!({"observationId":"fresh","input":{"action":"type","text":"hello"}}))
+                .is_err()
+        );
+        assert!(input(json!({"observationId":"fresh","input":{"action":"type","elementRef":"e0","text":"password=hidden"}})).is_err());
         assert!(input(
-            json!({"observationId":"fresh","action":"type","elementRef":"e0","text":"hello"})
+            json!({"observationId":"fresh","input":{"action":"type","elementRef":"e0","text":"hello"}})
         )
         .is_ok());
+    }
+
+    #[test]
+    fn malformed_action_payloads_have_safe_field_level_corrections() {
+        let extra = parse_action(
+            json!({"observationId":"fresh","input":{
+                "action":"click","elementRef":"e0","text":"irrelevant"
+            }}),
+            false,
+        )
+        .unwrap_err();
+        assert!(extra.contains("click requires exactly elementRef"));
+        assert!(extra.contains("No input was dispatched"));
+
+        let missing = parse_action(
+            json!({"observationId":"fresh","input":{
+                "action":"type","text":"hello"
+            }}),
+            false,
+        )
+        .unwrap_err();
+        assert!(missing.contains("type requires exactly elementRef and text"));
+
+        let pixel = parse_action(
+            json!({"observationId":"fresh","input":{
+                "action":"click","x":1,"y":1
+            }}),
+            false,
+        )
+        .unwrap_err();
+        assert!(pixel.contains("local-desktop-action"));
     }
 }

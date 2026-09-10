@@ -1294,12 +1294,13 @@ mod tests {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
 
         let directory = tempfile::tempdir().unwrap();
-        let started = directory.path().join("started.txt");
+        let descendant_started = directory.path().join("descendant-started.txt");
         let survived = directory.path().join("survived.txt");
         let quote = |path: &std::path::Path| path.to_string_lossy().replace('\'', "''");
         let child_script = format!(
-            "Start-Sleep -Milliseconds 1500; Set-Content -LiteralPath '{}' -Value survived",
-            quote(&survived)
+            "Set-Content -LiteralPath '{}' -Value started; Start-Sleep -Milliseconds 1500; Set-Content -LiteralPath '{}' -Value survived",
+            quote(&descendant_started),
+            quote(&survived),
         );
         let encoded = STANDARD.encode(
             child_script
@@ -1308,8 +1309,7 @@ mod tests {
                 .collect::<Vec<_>>(),
         );
         let parent_script = format!(
-            "$null = Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','{encoded}'); Set-Content -LiteralPath '{}' -Value started; Start-Sleep -Seconds 30",
-            quote(&started)
+            "$null = Start-Process -WindowStyle Hidden -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand','{encoded}'); Start-Sleep -Seconds 30",
         );
         let mut command = Command::new("powershell.exe");
         command
@@ -1319,15 +1319,19 @@ mod tests {
             .stderr(Stdio::null());
         let mut child = SupervisedChild::spawn(command).unwrap();
 
-        for _ in 0..50 {
-            if started.exists() {
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            if descendant_started.exists() {
                 break;
             }
-            thread::sleep(Duration::from_millis(100));
+            if let Some(status) = child.child.try_wait().unwrap() {
+                panic!("the provider launcher exited before its descendant was ready: {status}");
+            }
+            thread::sleep(Duration::from_millis(50));
         }
         assert!(
-            started.exists(),
-            "the provider child was not started in time"
+            descendant_started.exists(),
+            "the provider descendant did not signal readiness within 20 seconds"
         );
         child.terminate();
         thread::sleep(Duration::from_secs(2));
