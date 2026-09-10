@@ -127,7 +127,7 @@ describe("approval queue workspace hydration", () => {
     expect(mocks.loadSnapshot).toHaveBeenCalledTimes(initialLoads + 1);
   });
 
-  it("does not overwrite a saved workspace after a failed read and retries the same identity", async () => {
+  it("does not restore a legacy global draft after a failed read and retries the same identity", async () => {
     mocks.loadSnapshot.mockRejectedValueOnce(new Error("Saved workspace temporarily unavailable."));
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.runtimeSnapshotError).toContain("temporarily unavailable"));
@@ -136,10 +136,10 @@ describe("approval queue workspace hydration", () => {
     expect(mocks.saveSnapshot).not.toHaveBeenCalled();
     mocks.loadSnapshot.mockResolvedValue({ ...shellStateToRuntimeSnapshot(defaultShellState), composerDraft: "recovered draft" });
     await act(async () => { await result.current.reconcileAccountWorkspace(); });
-    await waitFor(() => expect(result.current.composerValue).toBe("recovered draft"));
+    await waitFor(() => expect(result.current.composerValue).toBe(""));
     expect(result.current.runtimeSnapshotError).toBeNull();
     await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalled());
-    expect(mocks.saveSnapshot.mock.calls[0]).toMatchObject([{ composerDraft: "recovered draft" }, "local-default"]);
+    expect(mocks.saveSnapshot.mock.calls[0]).toMatchObject([{ composerDraft: "" }, "local-default"]);
   });
 
   it.each(["workspace", "owner"] as const)("drops an old pending snapshot before switching %s", async (change) => {

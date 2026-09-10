@@ -1508,6 +1508,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     }));
   }, []);
 
+  const clearError = useCallback(() => {
+    setState((current) => current.lastError === null ? current : {
+      ...current,
+      lastError: null,
+      status: current.status === "failed" ? "idle" : current.status,
+    });
+  }, []);
+
   return {
     state,
     run,
@@ -1515,6 +1523,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     cancel,
     markToolExecuting,
     reportError,
+    clearError,
     backend,
     resolveBackend,
   };

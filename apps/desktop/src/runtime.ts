@@ -835,15 +835,17 @@ export async function reviseRuntimeConversationMessage(
   return fromNativeMessage(result, scope.workspaceId);
 }
 
-export async function loadRuntimeConversationDraft(draftKey: string) {
+export async function loadRuntimeConversationDraft(draftKey: string, expectedWorkspaceId?: string, threadId = draftThreadId(draftKey)) {
   const scope = conversationScopeOrThrow();
+  if (expectedWorkspaceId && scope.workspaceId !== expectedWorkspaceId) throw new Error("The selected workspace changed before the draft was loaded.");
   if (!hasTauriRuntime())
     return (
       previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null
     );
   const response = await invoke<unknown>("conversation_load_draft", {
     id: draftKey,
-    threadId: draftThreadId(draftKey),
+    threadId,
+    expectedWorkspaceId,
   });
   if (response === null) return null;
   // Tauri serializes an absent optional threadId as null in saved payloads.
@@ -852,13 +854,16 @@ export async function loadRuntimeConversationDraft(draftKey: string) {
       ? { ...response, threadId: undefined }
       : response;
   assertDraft(result, scope.workspaceId);
+  if (result.draftKey !== draftKey || result.threadId !== threadId) throw new Error("Malformed or cross-conversation draft response.");
   return result;
 }
 
 export async function saveRuntimeConversationDraft(
   draft: RuntimeConversationDraft,
+  expectedWorkspaceId?: string,
 ) {
   const scope = conversationScopeOrThrow();
+  if (expectedWorkspaceId && scope.workspaceId !== expectedWorkspaceId) throw new Error("The selected workspace changed before the draft was saved.");
   if (!hasTauriRuntime()) {
     previewConversationStore(scope.workspaceId).drafts.set(draft.draftKey, {
       ...draft,
@@ -867,6 +872,7 @@ export async function saveRuntimeConversationDraft(
   }
   await invoke<void>("conversation_save_draft", {
     input: { id: draft.draftKey, threadId: draft.threadId, payload: draft },
+    expectedWorkspaceId,
   });
   return draft;
 }
