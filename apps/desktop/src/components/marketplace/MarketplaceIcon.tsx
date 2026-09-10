@@ -39,29 +39,28 @@ export function MarketplaceIcon({
 
   if (connectorLogos[id]) return <img src={connectorLogos[id]} width={size} height={size} loading="lazy" decoding="async" alt="" aria-hidden="true" />;
 
-  const iconProps = { size, weight: "regular" as const, "aria-hidden": true };
   switch (icon) {
     case "canva":
-      return <Palette {...iconProps} />;
+      return <Palette size={size} weight="regular" aria-hidden="true" />;
     case "communication":
-      return <ChatsCircle {...iconProps} />;
+      return <ChatsCircle size={size} weight="regular" aria-hidden="true" />;
     case "docusign":
-      return <Signature {...iconProps} />;
+      return <Signature size={size} weight="regular" aria-hidden="true" />;
     case "finance":
-      return <CreditCard {...iconProps} />;
+      return <CreditCard size={size} weight="regular" aria-hidden="true" />;
     case "linkedin":
-      return <LinkedinLogo {...iconProps} />;
+      return <LinkedinLogo size={size} weight="regular" aria-hidden="true" />;
     case "meta":
-      return <MetaLogo {...iconProps} />;
+      return <MetaLogo size={size} weight="regular" aria-hidden="true" />;
     case "microsoft-outlook":
-      return <MicrosoftOutlookLogo {...iconProps} />;
+      return <MicrosoftOutlookLogo size={size} weight="regular" aria-hidden="true" />;
     case "microsoft-teams":
-      return <MicrosoftTeamsLogo {...iconProps} />;
+      return <MicrosoftTeamsLogo size={size} weight="regular" aria-hidden="true" />;
     case "people":
-      return <UserCircleGear {...iconProps} />;
+      return <UserCircleGear size={size} weight="regular" aria-hidden="true" />;
     case "product":
-      return <Kanban {...iconProps} />;
+      return <Kanban size={size} weight="regular" aria-hidden="true" />;
     default:
-      return <ShoppingBag {...iconProps} />;
+      return <ShoppingBag size={size} weight="regular" aria-hidden="true" />;
   }
 }
