@@ -47,6 +47,7 @@ The development-only `design-preview.html` exercises the production conversation
 components with labelled sample data: streaming, completion, reasoning disclosure,
 failure and stop/continue. Select a fixture with `?conversation=stream`,
 `?conversation=stopped` or `?conversation=failure`; the default is completed.
+`?conversation=context` shows the context-budget diagnostics and continuation action.
 Fixture controls stay out of the conversation. It does not call a provider or establish live acceptance.
 
 `?view=avatars` shows the eight production robot shells at 112, 32 and 18 px,

@@ -2,6 +2,7 @@ import { SchedulesDialog } from "../components/agents/SchedulesDialog";
 import { WorkspaceMenu } from "../components/agents/WorkspaceMenu";
 import { Brand } from "../components/Brand";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
+import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -56,6 +57,7 @@ import type { ExecutionAttempt, LocalProject } from "@fable/protocol";
 import type { ProjectDraft } from "../components/projects/ProjectWorkspace";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
+import { buildConversationHandoff } from "../lib/conversation-handoff";
 import "./project-room.css";
 
 const ProjectEditor = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectEditor })));
@@ -705,11 +707,12 @@ export function ChatWorkspace() {
     setEditingAgentId(profile.id);
     setAgentEditorOpen(true);
   };
-  const startNewConversation = () => {
+  const startNewConversation = (draft = "") => {
     if (agent.state.running || projectBatch || selectedProjectId) return;
     runtime.updateAgent(activeAgent.id, { threadId: undefined });
     setSelectedThreadId(undefined);
-    runtime.setComposerValue("");
+    runtime.setComposerValue(draft);
+    agent.clearContextFailure();
     setSubmissionError("");
     setOptimisticUserMessage("");
     window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
@@ -1118,7 +1121,16 @@ export function ChatWorkspace() {
                   }
                 }}
                 interruption={<>
-                  {submissionError || agent.state.lastError ? <div className="conversation-attention" role="alert">
+                  {agent.state.contextFailure && conversation ? <ContextRecoveryPanel
+                    failure={agent.state.contextFailure}
+                    disabled={agent.state.running || Boolean(projectBatch) || Boolean(selectedProjectId)}
+                    onPrepareHandoff={() => startNewConversation(buildConversationHandoff({
+                      thread: conversation.thread,
+                      messages,
+                      failedPrompt: agent.state.contextFailure?.requestPrompt ?? "",
+                    }))}
+                  /> : null}
+                  {(submissionError || agent.state.lastError) && !agent.state.contextFailure ? <div className="conversation-attention" role="alert">
                     <p>{submissionError || agent.state.lastError}</p>
                     {/sign.in|authenticat|credential|provider.*connect|api.key/i.test(submissionError || agent.state.lastError || "") ? <button type="button" onClick={() => { setSettingsTab("providers"); setSettingsOpen(true); }}>Check provider connection</button> : null}
                   </div> : null}

@@ -60,7 +60,7 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
-import { planConversationContext } from "../lib/conversation-context";
+import { planConversationContext, type ConversationContextFailure } from "../lib/conversation-context";
 import {
   appendResponseText,
   CONVERSATION_STYLE_INSTRUCTIONS,
@@ -103,6 +103,7 @@ export interface NativeAgentState {
   } | null;
   running: boolean;
   lastError: string | null;
+  contextFailure?: ConversationContextFailure & { requestPrompt: string };
   status: ExecutionAttempt["status"] | "idle";
   recoverableAttempts: ExecutionAttempt[];
   /** Immutable context evidence keyed by canonical attempt id, including recovered completed attempts. */
@@ -345,6 +346,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
+      setState((current) => ({ ...current, lastError: null, contextFailure: undefined }));
       if (!backend) {
         setState((current) => ({
           ...current,
@@ -444,7 +446,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const selectedModel =
         modelsRef.current.find((model) => model.id === request.model) ??
         backend.backend.models.find((model) => model.id === request.model);
-      const contextPlan = planConversationContext({
+      const contextPlan = await planConversationContext({
         history,
         request,
         contextPrefix: prepared.systemPrefix,
@@ -456,6 +458,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         setState((current) => ({
           ...current,
           lastError: contextPlan.message,
+          contextFailure: {
+            ...contextPlan,
+            requestPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content ?? "",
+          },
           status: "failed",
           currentAttemptId: null,
         }));
@@ -510,6 +516,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         usage: null,
         running: true,
         lastError: null,
+        contextFailure: undefined,
         status: "queued",
         recoverableAttempts: parentAttemptId
           ? current.recoverableAttempts.filter(
@@ -1470,12 +1477,21 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       ...current,
       running: false,
       lastError: message,
+      contextFailure: undefined,
       transcript: "",
       reasoningSummaries: {},
       activity: "",
       usage: null,
       status: "failed",
       currentAttemptId: null,
+    }));
+  }, []);
+
+  const clearContextFailure = useCallback(() => {
+    setState((current) => ({
+      ...current,
+      lastError: current.contextFailure ? null : current.lastError,
+      contextFailure: undefined,
     }));
   }, []);
 
@@ -1486,6 +1502,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     cancel,
     markToolExecuting,
     reportError,
+    clearContextFailure,
     backend,
     resolveBackend,
   };

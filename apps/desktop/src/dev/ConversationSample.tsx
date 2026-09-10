@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { FableAgentProfile } from "@fable/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
+import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 
 const artifact = JSON.stringify({ kind: "computer-artifact", version: 1, id: `artifact-${"a".repeat(64)}`, computerId: `local-${"b".repeat(24)}`, title: "Project comparison", relativePath: "project-comparison.md", mimeType: "text/markdown", sizeBytes: 2048, createdAt: "2026-09-06T12:00:00Z" });
 const parts: NonNullable<NativeAgentState["responseParts"]> = [
@@ -34,6 +35,6 @@ export function ConversationSample({ agent, onPreviewArtifact }: { agent: FableA
   };
   return <>
     <ConversationFeed showAuthor={false} messages={[]} agent={agent} state={state} threadId="sample-thread" profileName="Joshua" connectors={[]} optimisticPrompt="" workspaceId="sample-workspace"
-      onPreviewArtifact={onPreviewArtifact} interruption={mode === "stopped" ? <div className="conversation-attention"><p>Stopped. Your completed work is still here.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Continue</button></div> : mode === "failure" ? <div className="conversation-attention"><p>Your GitHub connection has expired. Reconnect to continue.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Reconnect (sample)</button></div> : null} />
+      onPreviewArtifact={onPreviewArtifact} interruption={mode === "stopped" ? <div className="conversation-attention"><p>Stopped. Your completed work is still here.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Continue</button></div> : mode === "failure" ? <div className="conversation-attention"><p>Your GitHub connection has expired. Reconnect to continue.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Reconnect (sample)</button></div> : mode === "context" ? <ContextRecoveryPanel failure={{ ok: false, code: "conversation-context-too-large", reason: "native-history-envelope", message: "This conversation uses 71,284 of the 65,536 byte Codex history envelope. Review a continuation handoff to keep working in a new conversation. The original history stays here.", estimatedInputTokens: 18_640, tokenizer: "local-utf8-estimate", outputReserveTokens: 4_096, capacitySource: "unavailable", historyUtf8Bytes: 71_284, nativeHistoryMaxUtf8Bytes: 65_536 }} onPrepareHandoff={() => setMode("complete")} /> : null} />
   </>;
 }

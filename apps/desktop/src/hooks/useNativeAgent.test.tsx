@@ -416,10 +416,20 @@ describe("useNativeAgent", () => {
       await result.current.run({ ...baseRequest, model: "gpt-5" });
     });
 
-    expect(result.current.state.lastError).toContain("too long");
+    expect(result.current.state.contextFailure).toMatchObject({
+      reason: "native-history-envelope",
+      requestPrompt: "summarize the conversation",
+      capacitySource: "unavailable",
+      nativeHistoryMaxUtf8Bytes: 64 * 1024,
+    });
+    expect(result.current.state.lastError).toContain("Codex history envelope");
     expect(record).not.toHaveBeenCalled();
     expect(mocks.savedRuns).toHaveLength(0);
     expect(mocks.codexListener).toBeNull();
+
+    act(() => result.current.clearContextFailure());
+    expect(result.current.state.contextFailure).toBeUndefined();
+    expect(result.current.state.lastError).toBeNull();
   });
 
   it("surfaces noTransport and an error when no desktop runtime is present", async () => {
