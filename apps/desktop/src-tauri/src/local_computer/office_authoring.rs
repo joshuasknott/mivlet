@@ -80,11 +80,20 @@ enum DocumentBlock {
     Table { rows: Vec<Vec<String>> },
 }
 
-pub(crate) fn author(
+pub(crate) struct PreparedOffice {
+    destination: PathBuf,
+    path: String,
+    staging: tempfile::NamedTempFile,
+    byte_len: usize,
+    formula_cells: usize,
+    format: &'static str,
+}
+
+pub(crate) fn prepare(
     tool: &str,
     arguments: &Value,
     workspace_root: &Path,
-) -> Result<ToolResult, String> {
+) -> Result<PreparedOffice, String> {
     let (path, bytes, formula_cells, format) = match tool {
         "create-spreadsheet" => {
             let request: SpreadsheetRequest = serde_json::from_value(arguments.clone())
@@ -110,20 +119,69 @@ pub(crate) fn author(
     if !crate::local_computer::artifacts::check_office(&bytes, format)? {
         return Err("Mivlet rejected the generated Office package before publication.".into());
     }
-    write_atomic_new(&destination, &bytes)?;
-    let output = json!({
-        "path": path,
-        "format": format,
-        "bytes": bytes.len(),
-        "formulaCells": formula_cells,
-        "validated": true,
-        "publication": "Call computer-artifact with this exact path to publish the validated file."
-    });
-    Ok(ToolResult {
-        ok: true,
-        output: serde_json::to_string(&output)
-            .map_err(|_| "The Office authoring receipt is invalid.")?,
+    let staging_root = workspace_root
+        .parent()
+        .ok_or("The Office staging path is invalid.")?;
+    let mut staging = tempfile::Builder::new()
+        .prefix("office-author-")
+        .tempfile_in(staging_root)
+        .map_err(|_| "Mivlet could not prepare the Office output.")?;
+    staging
+        .write_all(&bytes)
+        .map_err(|_| "Mivlet could not stage the Office output.")?;
+    staging
+        .as_file()
+        .sync_all()
+        .map_err(|_| "Mivlet could not stage the Office output.")?;
+    Ok(PreparedOffice {
+        destination,
+        path,
+        staging,
+        byte_len: bytes.len(),
+        formula_cells,
+        format,
     })
+}
+
+impl PreparedOffice {
+    /// The caller must run this small final placement inside an authority-fenced
+    /// commit. Generation and validation intentionally happen before that lock.
+    pub(crate) fn commit(self) -> Result<ToolResult, String> {
+        let Self {
+            destination,
+            path,
+            staging,
+            byte_len,
+            formula_cells,
+            format,
+        } = self;
+        let parent = destination
+            .parent()
+            .ok_or("The Office output path is invalid.")?;
+        fs::create_dir_all(parent)
+            .map_err(|_| "Mivlet could not prepare the Office output folder.")?;
+        staging.persist_noclobber(&destination).map_err(|error| {
+            if error.error.kind() == std::io::ErrorKind::AlreadyExists {
+                "Choose a new workspace path; Office authoring does not overwrite an existing file."
+                    .to_string()
+            } else {
+                "Mivlet could not finish the Office output.".to_string()
+            }
+        })?;
+        let output = json!({
+            "path": path,
+            "format": format,
+            "bytes": byte_len,
+            "formulaCells": formula_cells,
+            "validated": true,
+            "publication": "Call computer-artifact with this exact path to publish the validated file."
+        });
+        Ok(ToolResult {
+            ok: true,
+            output: serde_json::to_string(&output)
+                .map_err(|_| "The Office authoring receipt is invalid.")?,
+        })
+    }
 }
 
 fn destination(path: &str, extension: &str, root: &Path) -> Result<PathBuf, String> {
@@ -142,28 +200,6 @@ fn destination(path: &str, extension: &str, root: &Path) -> Result<PathBuf, Stri
         ));
     }
     confine_path(path, root)
-}
-
-fn write_atomic_new(destination: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = destination
-        .parent()
-        .ok_or("The Office output path is invalid.")?;
-    fs::create_dir_all(parent).map_err(|_| "Mivlet could not prepare the Office output folder.")?;
-    let mut nonce = [0u8; 8];
-    getrandom::fill(&mut nonce).map_err(|_| "Mivlet could not prepare the Office output.")?;
-    let temporary = parent.join(format!(".office-{}.tmp", hex::encode(nonce)));
-    fs::write(&temporary, bytes).map_err(|_| "Mivlet could not write the Office output.")?;
-    if destination.exists() {
-        let _ = fs::remove_file(&temporary);
-        return Err(
-            "Choose a new workspace path; Office authoring does not overwrite an existing file."
-                .into(),
-        );
-    }
-    fs::rename(&temporary, destination).map_err(|_| {
-        let _ = fs::remove_file(&temporary);
-        "Mivlet could not finish the Office output.".to_string()
-    })
 }
 
 fn create_xlsx(request: &SpreadsheetRequest) -> Result<(Vec<u8>, usize), String> {
@@ -239,7 +275,7 @@ fn worksheet_xml(sheet: &Sheet) -> Result<(String, usize), String> {
             let reference = cell_reference(row_index, column_index);
             match cell {
                 Cell::Text(text) => {
-                    if text.len() > 2_000 || has_forbidden_control(text) {
+                    if text.chars().count() > 2_000 || has_forbidden_control(text) {
                         return Err(
                             "Spreadsheet text cells must be at most 2000 safe characters.".into(),
                         );
@@ -410,7 +446,7 @@ fn validate_number(value: f64) -> Result<(), String> {
 
 fn create_docx(request: &DocumentRequest) -> Result<Vec<u8>, String> {
     if request.title.trim().is_empty()
-        || request.title.len() > 160
+        || request.title.chars().count() > 160
         || request.blocks.is_empty()
         || request.blocks.len() > 500
         || has_forbidden_control(&request.title)
@@ -499,7 +535,7 @@ fn ensure_document_size(total_text: usize) -> Result<(), String> {
 }
 
 fn validate_document_text(text: &str, max: usize) -> Result<(), String> {
-    if text.trim().is_empty() || text.len() > max || has_forbidden_control(text) {
+    if text.trim().is_empty() || text.chars().count() > max || has_forbidden_control(text) {
         return Err(
             "Document text is empty, too long, or contains unsupported control characters.".into(),
         );
@@ -672,7 +708,9 @@ mod tests {
 
     #[test]
     fn authoring_validates_then_places_a_new_publishable_file() {
-        let workspace = tempfile::tempdir().unwrap();
+        let workspace_container = tempfile::tempdir().unwrap();
+        let workspace = workspace_container.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
         let arguments = json!({
             "path": "reports/totals.xlsx",
             "sheets": [{ "name": "Summary", "rows": [
@@ -680,11 +718,81 @@ mod tests {
                 ["Total", { "formula": "sum", "range": "B2:B3" }]
             ] }]
         });
-        let result = author("create-spreadsheet", &arguments, workspace.path()).unwrap();
+        let result = prepare("create-spreadsheet", &arguments, &workspace)
+            .unwrap()
+            .commit()
+            .unwrap();
         assert!(result.output.contains("\"validated\":true"));
-        assert!(workspace.path().join("reports/totals.xlsx").is_file());
-        assert!(author("create-spreadsheet", &arguments, workspace.path())
-            .unwrap_err()
+        assert!(workspace.join("reports/totals.xlsx").is_file());
+        assert!(prepare("create-spreadsheet", &arguments, &workspace)
+            .err()
+            .unwrap()
             .contains("does not overwrite"));
+    }
+
+    #[test]
+    fn revoked_generation_cannot_commit_and_a_fresh_retry_works() {
+        let authority_root = tempfile::tempdir().unwrap();
+        let workspace_container = tempfile::tempdir().unwrap();
+        let workspace = workspace_container.path().join("workspace");
+        fs::create_dir(&workspace).unwrap();
+        let authority =
+            crate::local_computer::authority::ComputerAuthority::load(authority_root.path())
+                .unwrap();
+        let generation = authority.snapshot().unwrap().generation;
+        let arguments = json!({
+            "path": "reports/cancelled.xlsx",
+            "sheets": [{ "name": "Summary", "rows": [["Item", "Value"], ["Total", 26]] }]
+        });
+
+        let ticket = authority.begin_agent(generation).unwrap();
+        let prepared = prepare("create-spreadsheet", &arguments, &workspace).unwrap();
+        let next_generation = authority.revoke(generation).unwrap();
+        assert!(ticket.commit(|| prepared.commit()).is_err());
+        assert!(!workspace.join("reports/cancelled.xlsx").exists());
+        assert!(!workspace.join("reports").exists());
+        assert!(workspace_container
+            .path()
+            .read_dir()
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with("office-author-")));
+
+        authority
+            .drain(next_generation, std::time::Duration::from_secs(1))
+            .unwrap();
+        let retry = authority.begin_agent(next_generation).unwrap();
+        let prepared = prepare("create-spreadsheet", &arguments, &workspace).unwrap();
+        retry.commit(|| prepared.commit()).unwrap();
+        assert!(workspace.join("reports/cancelled.xlsx").is_file());
+    }
+
+    #[test]
+    fn unicode_limits_count_characters_while_the_aggregate_budget_counts_bytes() {
+        let document: DocumentRequest = serde_json::from_value(json!({
+            "path": "unicode.docx",
+            "title": "🦊".repeat(100),
+            "blocks": [{ "type": "paragraph", "text": "🦊".repeat(1_000) }]
+        }))
+        .unwrap();
+        assert!(create_docx(&document).is_ok());
+
+        let spreadsheet: SpreadsheetRequest = serde_json::from_value(json!({
+            "path": "unicode.xlsx",
+            "sheets": [{ "name": "Unicode", "rows": [["🦊".repeat(1_000)]] }]
+        }))
+        .unwrap();
+        assert!(create_xlsx(&spreadsheet).is_ok());
+
+        let too_long: DocumentRequest = serde_json::from_value(json!({
+            "path": "too-long.docx",
+            "title": "🦊".repeat(161),
+            "blocks": [{ "type": "paragraph", "text": "Ready." }]
+        }))
+        .unwrap();
+        assert!(create_docx(&too_long).is_err());
     }
 }

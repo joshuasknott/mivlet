@@ -36,6 +36,8 @@ use crate::paths::{
     execution_approvals_path, harden_workspace_root, normalize_spaces, truncate_characters,
 };
 
+const ARGUMENT_DIGEST_PREFIX: &str = "Arguments SHA-256: ";
+
 /// The workspace root tools operate within. The command layer resolves it from
 /// the app handle (for API compat); hardened selection uses only cwd (fail-closed,
 /// no app_data fallback). Pure harden fn is unit-testable with explicit input.
@@ -401,10 +403,42 @@ pub(crate) fn validate_tool_approval_binding(
             "Tool {tool} approval is bound to a different action."
         ));
     }
+    let expected = approval_argument_previews(tool, arguments)?;
+    let mut approved = approval
+        .data_used
+        .iter()
+        .map(|value| truncate_characters(&normalize_spaces(value), 240))
+        .collect::<std::collections::BTreeSet<_>>();
+    if matches!(tool, "create-spreadsheet" | "create-document") {
+        let digest_entries = approved
+            .iter()
+            .filter(|value| value.starts_with(ARGUMENT_DIGEST_PREFIX))
+            .cloned()
+            .collect::<Vec<_>>();
+        let expected_digest = argument_digest(arguments)?;
+        if digest_entries.as_slice() != [expected_digest] {
+            return Err(format!(
+                "Tool {tool} arguments changed after the approval preview."
+            ));
+        }
+        approved.remove(&digest_entries[0]);
+    }
+    if expected != approved {
+        return Err(format!(
+            "Tool {tool} arguments changed after the approval preview."
+        ));
+    }
+    Ok(())
+}
+
+fn approval_argument_previews(
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> Result<std::collections::BTreeSet<String>, String> {
     let object = arguments.as_object().ok_or_else(|| {
         format!("Tool {tool} arguments must be an object at the execution boundary.")
     })?;
-    let expected = object
+    Ok(object
         .iter()
         .take(16)
         .map(|(key, value)| {
@@ -423,18 +457,46 @@ pub(crate) fn validate_tool_approval_binding(
             };
             truncate_characters(&normalize_spaces(&format!("{key}: {rendered}")), 240)
         })
-        .collect::<std::collections::BTreeSet<_>>();
-    let approved = approval
-        .data_used
-        .iter()
-        .map(|value| truncate_characters(&normalize_spaces(value), 240))
-        .collect::<std::collections::BTreeSet<_>>();
-    if expected != approved {
-        return Err(format!(
-            "Tool {tool} arguments changed after the approval preview."
-        ));
+        .collect::<std::collections::BTreeSet<_>>())
+}
+
+fn argument_digest(arguments: &serde_json::Value) -> Result<String, String> {
+    Ok(format!(
+        "{ARGUMENT_DIGEST_PREFIX}{}",
+        hex::encode(Sha256::digest(canonical_json(arguments)?.as_bytes()))
+    ))
+}
+
+fn canonical_json(value: &serde_json::Value) -> Result<String, String> {
+    match value {
+        serde_json::Value::Object(object) => {
+            let mut keys = object.keys().collect::<Vec<_>>();
+            keys.sort_unstable();
+            let mut output = String::from("{");
+            for (index, key) in keys.into_iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                output.push_str(
+                    &serde_json::to_string(key)
+                        .map_err(|_| "Tool arguments could not be canonicalized.".to_string())?,
+                );
+                output.push(':');
+                output.push_str(&canonical_json(&object[key])?);
+            }
+            output.push('}');
+            Ok(output)
+        }
+        serde_json::Value::Array(values) => {
+            let values = values
+                .iter()
+                .map(canonical_json)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(format!("[{}]", values.join(",")))
+        }
+        _ => serde_json::to_string(value)
+            .map_err(|_| "Tool arguments could not be canonicalized.".to_string()),
     }
-    Ok(())
 }
 
 /// Confine a relative path under the workspace root. Rejects `..` escapes and
@@ -1475,9 +1537,15 @@ pub async fn execute_tool_call(
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            computers.with_agent_files(&workspace_id, &agent_id, computer_generation, |root| {
-                crate::local_computer::office_authoring::author(&operation_tool, &arguments, root)
-            })
+            let ticket =
+                computers.begin_agent_operation(&workspace_id, &agent_id, computer_generation)?;
+            let root = computers.tool_workspace_root(&workspace_id, &agent_id)?;
+            let prepared = crate::local_computer::office_authoring::prepare(
+                &operation_tool,
+                &arguments,
+                &root,
+            )?;
+            ticket.commit(|| prepared.commit())
         })
         .await
         .map_err(|_| "The Office authoring task stopped unexpectedly.".to_string())?;
@@ -2028,6 +2096,77 @@ mod connector_authority_tests {
         assert!(is_computer_tool("create-document"));
         assert!(is_computer_tool("generate-image"));
         assert!(is_computer_tool("edit-image"));
+    }
+
+    #[test]
+    fn office_approval_binds_full_canonical_payload_beyond_the_bounded_preview() {
+        let mut approved = request("create-document");
+        let long_text = format!("{}original tail", "x".repeat(300));
+        approved.arguments = json!({
+            "path": "reports/summary.docx",
+            "title": "Summary",
+            "blocks": [{ "type": "paragraph", "text": long_text }]
+        });
+        let mut data_used = approval_argument_previews("create-document", &approved.arguments)
+            .unwrap()
+            .into_iter()
+            .collect::<Vec<_>>();
+        data_used.push(argument_digest(&approved.arguments).unwrap());
+        approved.approval.request.data_used = data_used;
+
+        validate_tool_approval_binding(
+            "create-document",
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .unwrap();
+
+        let original_previews =
+            approval_argument_previews("create-document", &approved.arguments).unwrap();
+        approved.arguments["blocks"][0]["text"] =
+            json!(format!("{}substituted tail", "x".repeat(300)));
+        assert_eq!(
+            original_previews,
+            approval_argument_previews("create-document", &approved.arguments).unwrap()
+        );
+        assert!(validate_tool_approval_binding(
+            "create-document",
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .is_err());
+
+        approved.arguments["blocks"][0]["text"] = json!("alpha beta");
+        assert_eq!(
+            argument_digest(&approved.arguments).unwrap(),
+            "Arguments SHA-256: e579a996abaf540431f607ca6f2c8ed746867ec36cc698f58ba4fd728c6c44a4"
+        );
+        let whitespace_previews =
+            approval_argument_previews("create-document", &approved.arguments).unwrap();
+        approved.approval.request.data_used = whitespace_previews
+            .iter()
+            .cloned()
+            .chain(std::iter::once(
+                argument_digest(&approved.arguments).unwrap(),
+            ))
+            .collect();
+        validate_tool_approval_binding(
+            "create-document",
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .unwrap();
+        approved.arguments["blocks"][0]["text"] = json!("alpha  beta");
+        assert_eq!(
+            whitespace_previews,
+            approval_argument_previews("create-document", &approved.arguments).unwrap()
+        );
+        assert!(validate_tool_approval_binding(
+            "create-document",
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .is_err());
     }
 
     #[test]

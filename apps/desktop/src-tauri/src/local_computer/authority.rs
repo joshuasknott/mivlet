@@ -213,6 +213,27 @@ impl OperationTicket {
         self.check()?;
         result
     }
+    /// Linearize a small final side effect against Stop/generation revocation.
+    /// Expensive preparation must happen before this call. If revocation wins
+    /// the authority lock, the closure is never run; if this commit wins, its
+    /// result is returned truthfully before the ticket is released.
+    pub(crate) fn commit<T>(
+        self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        {
+            let inner = self.authority.inner.lock().map_err(|_| STALE)?;
+            if self.cancellation.load(Ordering::Acquire)
+                || inner.durable.generation != self.generation
+                || inner.draining
+                || !inner.operations.contains_key(&self.id)
+            {
+                Err(STALE.into())
+            } else {
+                operation()
+            }
+        }
+    }
 }
 impl Drop for OperationTicket {
     fn drop(&mut self) {
