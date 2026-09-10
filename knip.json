@@ -46,7 +46,8 @@
     "**/dist/**",
     "**/target/**",
     "**/_generated/**",
-    "**/worker-configuration.d.ts"
+    "**/worker-configuration.d.ts",
+    "apps/hosted-runner/prototypes/opencode/**"
   ],
   "ignoreDependencies": ["@fontsource/inter"]
 }

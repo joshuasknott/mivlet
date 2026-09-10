@@ -12,6 +12,9 @@ runs plugin setup but fails model resolution before calling the model hook.
 This nested package has its own frozen lockfile and is deliberately outside the
 root `apps/*` workspace glob. It does not change the existing runner's entrypoint,
 bindings, dependencies, deployment configuration or native Windows runtime.
+Root Knip analysis excludes this independently installed package; its entrypoints
+are checked by the typecheck and packaging commands below. Root ESLint still
+checks its source, while excluding generated `.wrangler` files everywhere.
 
 From the repository root, using pnpm 10:
 
