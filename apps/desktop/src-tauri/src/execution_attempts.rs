@@ -46,6 +46,8 @@ const MAX_CONTEXT_PATH: usize = 512;
 const MAX_ATTEMPT_IMAGES: usize = 4;
 const MAX_ATTEMPT_IMAGE_BYTES: usize = 1024 * 1024;
 const MAX_ATTEMPT_IMAGE_DIMENSION: u32 = 8192;
+const MAX_ATTEMPT_ATTACHMENTS: usize = 12;
+const MAX_ATTEMPT_ATTACHMENT_BYTES: usize = 2 * 1024 * 1024;
 
 fn bounded_id(value: &str, max: usize, label: &str) -> Result<String, String> {
     let normalized = normalize_spaces(value);
@@ -347,6 +349,53 @@ pub(crate) fn normalize_execution_attempt(
             image_bytes = image_bytes
                 .checked_add(image.size_bytes)
                 .ok_or("Execution attempt image metadata has an invalid total size.".to_string())?;
+        }
+        if !exchange.attachments.is_empty() && !exchange.role.trim().eq_ignore_ascii_case("user") {
+            return Err("Only user exchanges can retain attachment metadata.".to_string());
+        }
+        if exchange.attachments.len() > MAX_ATTEMPT_ATTACHMENTS {
+            return Err(
+                "Execution attempt attachment metadata exceeds its item limit.".to_string(),
+            );
+        }
+        for attachment in &mut exchange.attachments {
+            attachment.id = truncate_characters(&normalize_spaces(&attachment.id), 160);
+            attachment.name = truncate_characters(attachment.name.trim(), 256);
+            attachment.mime_type = normalize_spaces(&attachment.mime_type).to_ascii_lowercase();
+            attachment.availability =
+                normalize_spaces(&attachment.availability).to_ascii_lowercase();
+            attachment.relative_path = attachment
+                .relative_path
+                .take()
+                .map(|path| path.trim().to_string());
+            let path_is_safe = attachment.relative_path.as_ref().is_some_and(|path| {
+                path.chars().count() <= 512
+                    && path.starts_with("Attachments/")
+                    && !path.contains('\\')
+                    && path
+                        .split('/')
+                        .all(|part| !part.is_empty() && part != "." && part != "..")
+                    && !path.chars().any(char::is_control)
+            });
+            let availability_is_valid = matches!(
+                attachment.availability.as_str(),
+                "knowledge-context" | "workspace-file" | "project-file"
+            );
+            if attachment.id.is_empty()
+                || attachment.name.is_empty()
+                || attachment.name.contains(['/', '\\'])
+                || attachment.name.chars().any(char::is_control)
+                || attachment.mime_type.is_empty()
+                || attachment.mime_type.chars().count() > 120
+                || attachment.size_bytes == 0
+                || attachment.size_bytes > MAX_ATTEMPT_ATTACHMENT_BYTES
+                || !availability_is_valid
+                || (attachment.availability == "workspace-file") != path_is_safe
+                || (attachment.availability != "workspace-file"
+                    && attachment.relative_path.is_some())
+            {
+                return Err("Execution attempt attachment metadata is invalid.".to_string());
+            }
         }
     }
     if image_count > MAX_ATTEMPT_IMAGES {
@@ -889,6 +938,7 @@ mod tests {
                 tool_name: None,
                 ok: None,
                 images: Vec::new(),
+                attachments: Vec::new(),
             }],
             parent_attempt_id: None,
             context_receipt: None,
@@ -987,6 +1037,7 @@ mod tests {
             tool_name: None,
             ok: None,
             images: vec![metadata("two", 600_000)],
+            attachments: Vec::new(),
         });
         assert!(normalize_execution_attempt(attempt)
             .unwrap_err()
@@ -999,6 +1050,35 @@ mod tests {
             "dataUrl": "data:image/png;base64,private-pixels"
         }]);
         assert!(serde_json::from_value::<ExecutionAttempt>(encoded).is_err());
+    }
+
+    #[test]
+    fn attachment_checkpoints_require_bounded_user_metadata_and_safe_paths() {
+        let metadata = crate::models::ExecutionAttachmentMetadata {
+            id: "attachment-1".into(),
+            name: "totals.csv".into(),
+            mime_type: "text/csv".into(),
+            size_bytes: 24,
+            availability: "workspace-file".into(),
+            relative_path: Some("Attachments/upload-123/totals-456.csv".into()),
+        };
+        let mut attempt = fixture("streaming");
+        attempt.exchanges[0].attachments = vec![metadata.clone()];
+        assert_eq!(
+            normalize_execution_attempt(attempt).unwrap().exchanges[0].attachments,
+            vec![metadata]
+        );
+
+        let mut escaped = fixture("streaming");
+        escaped.exchanges[0].attachments = vec![crate::models::ExecutionAttachmentMetadata {
+            id: "attachment-1".into(),
+            name: "totals.csv".into(),
+            mime_type: "text/csv".into(),
+            size_bytes: 24,
+            availability: "workspace-file".into(),
+            relative_path: Some("Attachments/../private.txt".into()),
+        }];
+        assert!(normalize_execution_attempt(escaped).is_err());
     }
 
     fn receipt() -> ExecutionContextReceipt {

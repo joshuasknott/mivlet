@@ -55,6 +55,8 @@ describe("permission profile policy", () => {
   it("maps registered tools to effects", () => {
     expect(effectForTool("read-file")).toBe("local-read");
     expect(effectForTool("write-file")).toBe("local-write");
+    expect(effectForTool("create-spreadsheet")).toBe("local-write");
+    expect(effectForTool("create-document")).toBe("local-write");
     expect(effectForTool("run-shell")).toBe("shell-execution");
     expect(effectForTool("local-browser")).toBeNull();
     expect(effectForTool("local-app-observe")).toBe("browser-read");

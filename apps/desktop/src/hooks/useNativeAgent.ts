@@ -29,6 +29,7 @@ import type {
   PreparedExecutionContext,
   ProviderRouteExecutionBinding,
   ExecutionContextReceipt,
+  Spine,
 } from "@fable/protocol";
 import {
   resolveAgentBackend,
@@ -64,7 +65,7 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
-import { planConversationContext } from "../lib/conversation-context";
+import { planConversationContext, type ConversationContextFailure } from "../lib/conversation-context";
 import {
   appendResponseText,
   CONVERSATION_STYLE_INSTRUCTIONS,
@@ -107,6 +108,16 @@ export interface NativeAgentState {
   } | null;
   running: boolean;
   lastError: string | null;
+  contextFailure?: ConversationContextFailure & {
+    requestPrompt: string;
+    scope: {
+      workspaceId?: string;
+      agentId?: string;
+      threadId?: string;
+      ownerInternalUserId?: string;
+      ownerMemberId?: string;
+    };
+  };
   status: ExecutionAttempt["status"] | "idle";
   recoverableAttempts: ExecutionAttempt[];
   /** Immutable context evidence keyed by canonical attempt id, including recovered completed attempts. */
@@ -123,6 +134,7 @@ export interface NativeAgentState {
 
 export interface UseNativeAgentOptions {
   computer?: { workspaceId: string; agentId: string };
+  contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
   /** Provider selected by the combined model picker. */
   activeProviderId?: string;
@@ -185,6 +197,8 @@ export interface NativeAgentRunControl {
   }) => void | Promise<void>;
   /** Suppress only the canonical user record for an internal contribution. */
   canonicalUserMessage?: "persist" | "suppress";
+  /** Safe metadata for the exact attachments captured by this submitted turn. */
+  attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
 }
 
 export function useNativeAgent(options: UseNativeAgentOptions) {
@@ -223,12 +237,28 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   onCancelRef.current = options.onCancel;
   const threadIdRef = useRef(options.threadId);
   threadIdRef.current = options.threadId;
+  const contextScope = {
+    workspaceId: options.computer?.workspaceId,
+    agentId: options.computer?.agentId,
+    threadId: options.threadId,
+    ownerInternalUserId: options.contextOwner?.internalUserId,
+    ownerMemberId: options.contextOwner?.memberId,
+  };
+  const contextScopeKey = JSON.stringify(contextScope);
+  const contextScopeRef = useRef(contextScope);
+  contextScopeRef.current = contextScope;
   const loadConversationRef = useRef(options.loadConversation);
   loadConversationRef.current = options.loadConversation;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
   createDurableRunWriterRef.current = options.createDurableRunWriter;
+
+  useEffect(() => {
+    setState((current) => current.contextFailure && JSON.stringify(current.contextFailure.scope) !== contextScopeKey
+      ? { ...current, lastError: null, contextFailure: undefined }
+      : current);
+  }, [contextScopeKey]);
 
   useEffect(() => {
     void (async () => {
@@ -349,6 +379,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
+      setState((current) => ({ ...current, lastError: null, contextFailure: undefined }));
       if (!backend) {
         setState((current) => ({
           ...current,
@@ -402,6 +433,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // cannot both acquire provider authority before either durable write.
       activeAttemptIdRef.current = attemptId;
       const requestThreadId = threadIdRef.current;
+      const requestContextScope = contextScopeRef.current;
+      const requestContextScopeKey = JSON.stringify(requestContextScope);
       let history: AgentTurnRequest["messages"] = [];
       if (requestThreadId && loadConversationRef.current) {
         try {
@@ -410,7 +443,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (
             !conversation ||
             conversation.thread.id !== requestThreadId ||
-            threadIdRef.current !== requestThreadId
+            threadIdRef.current !== requestThreadId ||
+            JSON.stringify(contextScopeRef.current) !== requestContextScopeKey
           ) {
             throw new Error(
               "The conversation changed before the message could be sent. Try again.",
@@ -428,6 +462,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           );
         } catch (error) {
           activeAttemptIdRef.current = null;
+          if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) return;
           setState((current) => ({
             ...current,
             lastError:
@@ -448,18 +483,27 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const selectedModel =
         modelsRef.current.find((model) => model.id === request.model) ??
         backend.backend.models.find((model) => model.id === request.model);
-      const contextPlan = planConversationContext({
+      const contextPlan = await planConversationContext({
         history,
         request,
         contextPrefix: prepared.systemPrefix,
         contextWindowTokens: selectedModel?.capabilities?.contextWindow,
         backendType: provider?.backendType ?? backend.backend.backendType,
       });
+      if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) {
+        if (activeAttemptIdRef.current === attemptId) activeAttemptIdRef.current = null;
+        return;
+      }
       if (!contextPlan.ok) {
         activeAttemptIdRef.current = null;
         setState((current) => ({
           ...current,
           lastError: contextPlan.message,
+          contextFailure: {
+            ...contextPlan,
+            requestPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content ?? "",
+            scope: requestContextScope,
+          },
           status: "failed",
           currentAttemptId: null,
         }));
@@ -493,6 +537,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       if (
         activeAttemptIdRef.current !== attemptId ||
         threadIdRef.current !== requestThreadId ||
+        JSON.stringify(contextScopeRef.current) !== requestContextScopeKey ||
         shouldCancelRef.current?.()
       ) {
         if (activeAttemptIdRef.current === attemptId)
@@ -514,6 +559,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         usage: null,
         running: true,
         lastError: null,
+        contextFailure: undefined,
         status: "queued",
         recoverableAttempts: parentAttemptId
           ? current.recoverableAttempts.filter(
@@ -560,6 +606,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               }
             : {}),
         }));
+      const durableAttachments = control?.attachments?.filter(
+        (attachment) => attachment.availability !== "image-input",
+      );
+      const lastUserExchange = initialExchanges
+        .filter((exchange) => exchange.role === "user")
+        .at(-1);
+      if (lastUserExchange && durableAttachments?.length) {
+        lastUserExchange.attachments = [...durableAttachments];
+      }
       persisted = {
         id: attemptId,
         providerId,
@@ -725,12 +780,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         // represented by its queued execution exchange. Do not misattribute it
         // as a human-authored canonical message when suppression is explicit.
         if (durableWriter && control?.canonicalUserMessage !== "suppress") {
-          for (const exchange of initialExchanges.filter(
+          const userExchanges = initialExchanges.filter(
             (entry) => entry.role === "user",
-          )) {
+          );
+          for (const [index, exchange] of userExchanges.entries()) {
             await persistence.record({
               kind: "user",
               content: exchange.content,
+              ...(index === userExchanges.length - 1 && control?.attachments?.length
+                ? { attachments: control.attachments }
+                : {}),
             });
           }
         }
@@ -1350,6 +1409,14 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
+      if (userExchange.attachments?.length) {
+        setState((current) => ({
+          ...current,
+          lastError:
+            "Reattach the original files and send a new message; retry does not reuse attachment access.",
+        }));
+        return;
+      }
       if (attemptToRetry.threadId !== threadIdRef.current) {
         setState((current) => ({
           ...current,
@@ -1477,7 +1544,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       activePersistenceRef.current = null;
     }
     await nativeCancellation;
+    if (activeAttemptIdRef.current === attemptToCancel) activeAttemptIdRef.current = null;
   }, []);
+
+  const getActiveAttemptId = useCallback(() => activeAttemptIdRef.current, []);
 
   useEffect(
     () => () => {
@@ -1499,6 +1569,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       ...current,
       running: false,
       lastError: message,
+      contextFailure: undefined,
       transcript: "",
       reasoningSummaries: {},
       activity: "",
@@ -1509,9 +1580,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, []);
 
   const clearError = useCallback(() => {
-    setState((current) => current.lastError === null ? current : {
+    setState((current) => current.lastError === null && !current.contextFailure ? current : {
       ...current,
       lastError: null,
+      contextFailure: undefined,
       status: current.status === "failed" ? "idle" : current.status,
     });
   }, []);
@@ -1523,6 +1595,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     cancel,
     markToolExecuting,
     reportError,
+    getActiveAttemptId,
     clearError,
     backend,
     resolveBackend,

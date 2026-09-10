@@ -5,15 +5,17 @@ pub(crate) mod authority;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
+pub(crate) mod office_authoring;
 pub(crate) mod plugins;
 pub(crate) mod repositories;
 mod windows;
-use authority::ComputerAuthority;
+use authority::{ComputerAuthority, OperationTicket};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,6 +28,7 @@ const MAX_URL_CHARACTERS: usize = 2048;
 const MAX_FILE_ENTRIES: usize = 200;
 const MAX_FILE_DEPTH: usize = 8;
 const MAX_FILE_PREVIEW_BYTES: usize = 256 * 1024;
+const MAX_ATTACHMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
@@ -94,6 +97,47 @@ pub struct LocalComputerFilePreview {
     size_bytes: u64,
     truncated: bool,
     updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerAttachmentStageInput {
+    attachment_id: String,
+    name: String,
+    mime_type: String,
+    content_base64: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerAttachmentStageRequest {
+    workspace_id: String,
+    agent_id: String,
+    expected_generation: u64,
+    attachments: Vec<LocalComputerAttachmentStageInput>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalComputerAttachmentReceipt {
+    computer_id: String,
+    batch_id: String,
+    attachment_id: String,
+    original_name: String,
+    mime_type: String,
+    relative_path: String,
+    size_bytes: u64,
+    sha256: String,
+    staged_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerAttachmentDiscardRequest {
+    workspace_id: String,
+    agent_id: String,
+    computer_id: String,
+    batch_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -470,6 +514,232 @@ fn contains_unsafe_display_characters(value: &str) -> bool {
     })
 }
 
+fn attachment_type(name: &str) -> Result<(String, &'static str), String> {
+    if name.is_empty()
+        || name.chars().count() > 180
+        || name.contains('/')
+        || name.contains('\\')
+        || contains_unsafe_display_characters(name)
+    {
+        return Err("Choose an attachment with a safe file name.".into());
+    }
+    let extension = name
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_ascii_lowercase())
+        .ok_or_else(|| "Choose a supported text attachment.".to_string())?;
+    let mime_type = match extension.as_str() {
+        "txt" => "text/plain",
+        "md" | "markdown" => "text/markdown",
+        "json" => "application/json",
+        "csv" => "text/csv",
+        "yaml" | "yml" => "application/yaml",
+        _ => {
+            return Err("Mivlet can stage text, Markdown, JSON, CSV, and YAML attachments.".into())
+        }
+    };
+    Ok((extension, mime_type))
+}
+
+fn attachment_stem(name: &str) -> String {
+    let raw = name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(name);
+    let mut slug = String::new();
+    let mut separator = false;
+    for character in raw.chars() {
+        if character.is_ascii_alphanumeric() {
+            slug.push(character.to_ascii_lowercase());
+            separator = false;
+        } else if !separator && !slug.is_empty() {
+            slug.push('-');
+            separator = true;
+        }
+        if slug.len() >= 48 {
+            break;
+        }
+    }
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+    if slug.is_empty() {
+        "attachment".into()
+    } else {
+        slug
+    }
+}
+
+fn write_staged_attachment(
+    directory: &Path,
+    batch_id: &str,
+    relative_directory: &str,
+    computer_id: &str,
+    request: &LocalComputerAttachmentStageInput,
+) -> Result<LocalComputerAttachmentReceipt, String> {
+    validate_scope_id(&request.attachment_id)?;
+    let (extension, mime_type) = attachment_type(&request.name)?;
+    if request.mime_type.chars().count() > 120
+        || contains_unsafe_display_characters(&request.mime_type)
+    {
+        return Err("The attachment media type is invalid.".into());
+    }
+    let max_encoded = MAX_ATTACHMENT_BYTES.div_ceil(3) * 4;
+    if request.content_base64.is_empty() || request.content_base64.len() > max_encoded {
+        return Err("Choose a non-empty text attachment smaller than 2 MB.".into());
+    }
+    let bytes = STANDARD
+        .decode(&request.content_base64)
+        .map_err(|_| "The attachment bytes are malformed.".to_string())?;
+    if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
+        return Err("Choose a non-empty text attachment smaller than 2 MB.".into());
+    }
+    std::str::from_utf8(&bytes)
+        .map_err(|_| "The attachment must contain valid UTF-8 text.".to_string())?;
+    let opaque = desktop_tools::opaque_id()?;
+    let file_name = format!(
+        "{}-{}.{}",
+        attachment_stem(&request.name),
+        &opaque[..12],
+        extension
+    );
+    let path = directory.join(&file_name);
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|_| "Mivlet could not create a collision-safe attachment file.".to_string())?;
+    if std::io::Write::write_all(&mut file, &bytes)
+        .and_then(|_| file.sync_all())
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&path);
+        return Err("Mivlet could not finish staging the attachment.".into());
+    }
+    let mut digest = Sha256::new();
+    digest.update(&bytes);
+    Ok(LocalComputerAttachmentReceipt {
+        computer_id: computer_id.into(),
+        batch_id: batch_id.into(),
+        attachment_id: request.attachment_id.clone(),
+        original_name: request.name.clone(),
+        mime_type: mime_type.into(),
+        relative_path: format!("{relative_directory}/{file_name}"),
+        size_bytes: bytes.len() as u64,
+        sha256: hex::encode(digest.finalize()),
+        staged_at: Utc::now().to_rfc3339(),
+    })
+}
+
+fn write_staged_attachments(
+    workspace: &Path,
+    computer_id: &str,
+    attachments: &[LocalComputerAttachmentStageInput],
+    ticket: &OperationTicket,
+) -> Result<(PathBuf, Vec<LocalComputerAttachmentReceipt>), String> {
+    if attachments.is_empty() || attachments.len() > 12 {
+        return Err("Choose between 1 and 12 readable attachments.".into());
+    }
+    let mut attachment_ids = HashSet::with_capacity(attachments.len());
+    for attachment in attachments {
+        validate_scope_id(&attachment.attachment_id)?;
+        if !attachment_ids.insert(&attachment.attachment_id) {
+            return Err("Each readable attachment must have a unique identity.".into());
+        }
+    }
+    let attachments_directory = workspace.join("Attachments");
+    std::fs::create_dir_all(&attachments_directory)
+        .map_err(|_| "Mivlet could not prepare attachment storage.".to_string())?;
+    let canonical_workspace = crate::paths::strict_canonicalize(workspace)
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
+    let canonical_attachments = crate::paths::strict_canonicalize(&attachments_directory)
+        .map_err(|_| "Attachment storage failed its security check.".to_string())?;
+    if !canonical_attachments.starts_with(&canonical_workspace) {
+        return Err("Attachment storage escaped this agent's workspace.".into());
+    }
+    let opaque = desktop_tools::opaque_id()?;
+    let batch_id = &opaque[..12];
+    let batch_name = format!("upload-{batch_id}");
+    let batch_directory = canonical_attachments.join(&batch_name);
+    std::fs::create_dir(&batch_directory)
+        .map_err(|_| "Mivlet could not reserve collision-safe attachment storage.".to_string())?;
+    let canonical_batch = crate::paths::strict_canonicalize(&batch_directory)
+        .map_err(|_| "Attachment storage failed its security check.".to_string())?;
+    if !canonical_batch.starts_with(&canonical_attachments) {
+        let _ = std::fs::remove_dir_all(&batch_directory);
+        return Err("Attachment storage escaped this agent's workspace.".into());
+    }
+    let relative_directory = format!("Attachments/{batch_name}");
+    let result = (|| {
+        let mut receipts = Vec::with_capacity(attachments.len());
+        for attachment in attachments {
+            ticket.check()?;
+            receipts.push(write_staged_attachment(
+                &canonical_batch,
+                batch_id,
+                &relative_directory,
+                computer_id,
+                attachment,
+            )?);
+        }
+        ticket.check()?;
+        Ok(receipts)
+    })();
+    match result {
+        Ok(receipts) => Ok((canonical_batch, receipts)),
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(&canonical_batch);
+            Err(error)
+        }
+    }
+}
+
+fn discard_attachment_batch(
+    computers: &LocalComputerState,
+    request: &LocalComputerAttachmentDiscardRequest,
+) -> Result<(), String> {
+    computers.validate_target(&request.workspace_id, &request.agent_id)?;
+    validate_scope_id(&request.computer_id)?;
+    validate_scope_id(&request.batch_id)?;
+    let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
+    discard_scoped_attachment_batch(&scope, request)
+}
+
+fn discard_scoped_attachment_batch(
+    scope: &ComputerScope,
+    request: &LocalComputerAttachmentDiscardRequest,
+) -> Result<(), String> {
+    if scope.computer_id != request.computer_id {
+        return Err("The attachment batch belongs to a different agent computer.".into());
+    }
+    let workspace = crate::paths::strict_canonicalize(&scope.directory.join("workspace"))
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
+    let attachments = workspace.join("Attachments");
+    let batch = attachments.join(format!("upload-{}", request.batch_id));
+    if !batch.exists() {
+        return Ok(());
+    }
+    let canonical_workspace = crate::paths::strict_canonicalize(&workspace)
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
+    let canonical_batch = crate::paths::strict_canonicalize(&batch)
+        .map_err(|_| "The attachment batch failed its security check.".to_string())?;
+    if !canonical_batch.starts_with(canonical_workspace.join("Attachments")) {
+        return Err("The attachment batch escaped this agent's workspace.".into());
+    }
+    std::fs::remove_dir_all(canonical_batch)
+        .map_err(|_| "Mivlet could not discard the unused attachment batch.".to_string())
+}
+
+fn finish_staged_attachments(
+    ticket: OperationTicket,
+    batch_directory: PathBuf,
+    receipts: Vec<LocalComputerAttachmentReceipt>,
+) -> Result<Vec<LocalComputerAttachmentReceipt>, String> {
+    match ticket.finish(Ok(receipts)) {
+        Ok(receipts) => Ok(receipts),
+        Err(error) => {
+            let _ = std::fs::remove_dir_all(batch_directory);
+            Err(error)
+        }
+    }
+}
+
 fn workspace_file_preview(
     scope: &ComputerScope,
     requested_path: &str,
@@ -599,6 +869,47 @@ pub async fn local_computer_file_preview(
     tauri::async_runtime::spawn_blocking(move || workspace_file_preview(&scope, &request.path))
         .await
         .map_err(|_| "The local file-preview task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+pub async fn local_computer_stage_attachment(
+    request: LocalComputerAttachmentStageRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<Vec<LocalComputerAttachmentReceipt>, String> {
+    state.validate_target(&request.workspace_id, &request.agent_id)?;
+    let computers = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let computer_id = computers
+            .scope(&request.workspace_id, &request.agent_id)?
+            .computer_id;
+        let ticket = computers.begin_agent_operation(
+            &request.workspace_id,
+            &request.agent_id,
+            request.expected_generation,
+        )?;
+        ticket.check()?;
+        let workspace = computers.tool_workspace_root(&request.workspace_id, &request.agent_id)?;
+        let (batch_directory, receipts) =
+            match write_staged_attachments(&workspace, &computer_id, &request.attachments, &ticket)
+            {
+                Ok(value) => value,
+                Err(error) => return ticket.finish(Err(error)),
+            };
+        finish_staged_attachments(ticket, batch_directory, receipts)
+    })
+    .await
+    .map_err(|_| "The attachment staging task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+pub async fn local_computer_discard_attachment_batch(
+    request: LocalComputerAttachmentDiscardRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<(), String> {
+    let computers = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || discard_attachment_batch(&computers, &request))
+        .await
+        .map_err(|_| "The attachment cleanup task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -780,5 +1091,130 @@ mod tests {
         assert!(workspace_file_preview(&scope, "binary.bin").is_err());
         assert!(workspace_file_preview(&scope, "folder").is_err());
         assert!(workspace_file_preview(&scope, "spoof-\u{202e}txt.md").is_err());
+    }
+
+    fn attachment_request(name: &str, bytes: &[u8]) -> LocalComputerAttachmentStageInput {
+        LocalComputerAttachmentStageInput {
+            attachment_id: "attachment-123".into(),
+            name: name.into(),
+            mime_type: "text/plain".into(),
+            content_base64: STANDARD.encode(bytes),
+        }
+    }
+
+    #[test]
+    fn staged_attachments_preserve_exact_bytes_and_never_overwrite() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let batch = workspace.join("Attachments").join("upload-test");
+        std::fs::create_dir_all(&batch).unwrap();
+        let request = attachment_request("Quarterly totals.csv", b"name,value\r\nalpha,6\r\n");
+        let first = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &request,
+        )
+        .unwrap();
+        let second = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &request,
+        )
+        .unwrap();
+        assert_ne!(first.relative_path, second.relative_path);
+        assert!(first
+            .relative_path
+            .starts_with("Attachments/upload-test/quarterly-totals-"));
+        assert_eq!(first.mime_type, "text/csv");
+        assert_eq!(first.size_bytes, 21);
+        assert_eq!(
+            std::fs::read(workspace.join(first.relative_path.replace('/', "\\"))).unwrap(),
+            b"name,value\r\nalpha,6\r\n"
+        );
+    }
+
+    #[test]
+    fn staged_attachments_reject_unsafe_names_types_and_bytes() {
+        let temp = tempfile::tempdir().unwrap();
+        let batch = temp.path().join("upload-test");
+        std::fs::create_dir(&batch).unwrap();
+        for mut request in [
+            attachment_request("../private.txt", b"safe"),
+            attachment_request("payload.exe", b"safe"),
+            attachment_request("invalid.txt", &[0xff, 0xfe]),
+            attachment_request("empty.txt", b""),
+        ] {
+            request.attachment_id = "attachment-safe".into();
+            assert!(write_staged_attachment(
+                &batch,
+                "test-batch",
+                "Attachments/upload-test",
+                "computer-one",
+                &request,
+            )
+            .is_err());
+        }
+        assert!(std::fs::read_dir(&batch).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn cancelled_attachment_batch_removes_every_staged_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-files", "agent-files").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let authority = state
+            .authority_for("workspace-files", "agent-files")
+            .unwrap();
+        let ticket = authority.begin_agent(1).unwrap();
+        let workspace = scope.directory.join("workspace");
+        let mut second = attachment_request("two.md", b"two");
+        second.attachment_id = "attachment-456".into();
+        let (batch, receipts) = write_staged_attachments(
+            &workspace,
+            &scope.computer_id,
+            &[attachment_request("one.txt", b"one"), second],
+            &ticket,
+        )
+        .unwrap();
+        assert!(batch.is_dir());
+        authority.revoke(1).unwrap();
+        assert!(finish_staged_attachments(ticket, batch.clone(), receipts).is_err());
+        assert!(!batch.exists());
+    }
+
+    #[test]
+    fn unadopted_attachment_batch_can_be_discarded_after_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-files", "agent-files").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let authority = state
+            .authority_for("workspace-files", "agent-files")
+            .unwrap();
+        let ticket = authority.begin_agent(1).unwrap();
+        let (batch, receipts) = write_staged_attachments(
+            &scope.directory.join("workspace"),
+            &scope.computer_id,
+            &[attachment_request("one.txt", b"one")],
+            &ticket,
+        )
+        .unwrap();
+        let receipts = finish_staged_attachments(ticket, batch.clone(), receipts).unwrap();
+        discard_scoped_attachment_batch(
+            &scope,
+            &LocalComputerAttachmentDiscardRequest {
+                workspace_id: "workspace-files".into(),
+                agent_id: "agent-files".into(),
+                computer_id: scope.computer_id.clone(),
+                batch_id: receipts[0].batch_id.clone(),
+            },
+        )
+        .unwrap();
+        assert!(!batch.exists());
     }
 }

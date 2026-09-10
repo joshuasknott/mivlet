@@ -76,6 +76,15 @@ describe("conversation turns", () => {
     const view = render(<ProfileAgentAvatar agent={{ ...agent, iconImageDataUrl: "data:image/png;base64,a" }} thinking />);
     expect(view.container.querySelector("img")?.style.filter).toBe("");
   });
+  it("shows a submitted attachment's durable name and readable workspace handle", () => {
+    const messages = [{
+      message: { id: "message-1", threadId: "thread-1", runId: "run-file", kind: "user", sequence: 1, createdAt: "2026-09-10T12:00:00Z", detail: { attachments: [{ id: "attachment-1", name: "totals.csv", mimeType: "text/csv", sizeBytes: 24, availability: "workspace-file", relativePath: "Attachments/totals-a1.csv" }] } },
+      currentRevision: { state: "terminal", content: "Calculate totals", checkpointedAt: "2026-09-10T12:00:01Z" },
+    }] as never;
+    render(<ConversationFeed {...props} messages={messages} state={{ ...initial, running: false, status: "completed", currentAttemptId: null }} />);
+    expect(screen.getByText("totals.csv")).toBeVisible();
+    expect(screen.getByText("Attachments/totals-a1.csv")).toBeVisible();
+  });
 });
 
 describe("assistant Markdown", () => {

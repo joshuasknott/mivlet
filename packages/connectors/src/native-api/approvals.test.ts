@@ -25,6 +25,32 @@ describe("buildToolApproval", () => {
     expect(approval.confirmationPhrase).toBe("approve write-file");
   });
 
+  it("keeps Office previews bounded while binding the complete canonical payload", () => {
+    const approvalFor = (text: string) => buildToolApproval("openai", "create-document", JSON.stringify({
+      path: "reports/summary.docx",
+      title: "Summary",
+      blocks: [{ type: "paragraph", text }],
+    }));
+    const original = approvalFor(`${"x".repeat(300)}original tail`);
+    const afterPreview = approvalFor(`${"x".repeat(300)}substituted tail`);
+    const whitespaceA = approvalFor("alpha beta");
+    const whitespaceB = approvalFor("alpha  beta");
+    const previews = (approval: ReturnType<typeof approvalFor>) =>
+      approval.dataUsed.filter(value => !value.startsWith("Arguments SHA-256: "));
+    const digest = (approval: ReturnType<typeof approvalFor>) =>
+      approval.dataUsed.find(value => value.startsWith("Arguments SHA-256: "));
+
+    expect(original.dataUsed.every(value => Array.from(value).length <= 240)).toBe(true);
+    expect(previews(original)).toEqual(previews(afterPreview));
+    expect(digest(original)).toMatch(/^Arguments SHA-256: [a-f0-9]{64}$/);
+    expect(digest(original)).not.toBe(digest(afterPreview));
+    expect(previews(whitespaceA)).toEqual(previews(whitespaceB));
+    expect(digest(whitespaceA)).not.toBe(digest(whitespaceB));
+    expect(digest(whitespaceA)).toBe(
+      "Arguments SHA-256: e579a996abaf540431f607ca6f2c8ed746867ec36cc698f58ba4fd728c6c44a4",
+    );
+  });
+
   it("shapes a shell tool into full-access, critical risk", () => {
     const approval = buildToolApproval("xai", "run-shell", '{"command":"ls"}');
     expect(approval.riskLevel).toBe("critical");

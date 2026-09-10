@@ -67,6 +67,39 @@ export interface LocalComputerFileRequest extends LocalComputerTarget {
   path: string;
 }
 
+/** One bounded user-authorized upload copied into an exact agent workspace. */
+export interface LocalComputerAttachmentStageInput {
+  attachmentId: string;
+  name: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
+/** One cancellable batch captured for a single agent run. */
+export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget {
+  expectedGeneration: number;
+  attachments: readonly LocalComputerAttachmentStageInput[];
+}
+
+/** Credential-free proof of the exact bytes and relative path staged. */
+export interface LocalComputerAttachmentReceipt {
+  computerId: string;
+  batchId: string;
+  attachmentId: string;
+  originalName: string;
+  mimeType: string;
+  relativePath: string;
+  sizeBytes: number;
+  sha256: string;
+  stagedAt: string;
+}
+
+/** Exact native batch capability used only to discard an unadopted upload. */
+export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarget {
+  computerId: string;
+  batchId: string;
+}
+
 /**
  * An ephemeral, explicitly selected text-file preview for the trusted Fable UI.
  * The content must not enter model context, logs, or persisted runtime state.

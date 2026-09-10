@@ -40,6 +40,8 @@ export interface ToolRuntime {
   readFile(path: string): Promise<string | null>;
   /** Write/overwrite a workspace file. Returns the number of bytes written. */
   writeFile(path: string, content: string): Promise<number>;
+  /** Author one passive Office package through a bounded runtime implementation. */
+  authorOffice?(tool: "create-spreadsheet" | "create-document", input: Record<string, unknown>): Promise<string>;
   /** Run a command only when an isolated hosted runtime is explicitly supplied. */
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
@@ -368,6 +370,13 @@ async function dispatch(
       const content = requireString(parsed, toolName, "content");
       const written = await runtime.writeFile(path, content);
       return `Wrote ${written} byte${written === 1 ? "" : "s"} to ${path}.`;
+    }
+    case "create-spreadsheet":
+    case "create-document": {
+      if (!runtime.authorOffice) {
+        throw new Error("Bounded Office authoring is unavailable in this runtime.");
+      }
+      return runtime.authorOffice(toolName, parsed);
     }
     case "run-shell": {
       if (parsed.location !== "hosted") throw new Error("Shell execution requires an explicitly configured hosted computer.");

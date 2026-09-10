@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ApprovalResolutionRequest,
   HostedBrowserSnapshot,
+  LocalComputerSnapshot,
 } from "@fable/protocol";
 import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
 import {
@@ -397,6 +398,7 @@ export function useShellAgentController({
       activeWorkspaceId && activeAgentId
         ? { workspaceId: activeWorkspaceId, agentId: activeAgentId }
         : undefined,
+    contextOwner: runtime.accountWorkspaceStatus.activeContextOwner,
     providers: runtime.backendProviders,
     activeProviderId: executionProviderId ?? runtime.connectedAgentBackend?.id,
     models: executionProviderId ? modelsForProvider(runtime.modelOptions, executionProviderId) : runtime.selectableModels,
@@ -435,9 +437,8 @@ export function useShellAgentController({
   );
   executionActivityRef.current = agent.markToolExecuting;
   scopeResetRef.current = () => {
-    const attemptId = agent.state.currentAttemptId;
+    const attemptId = agent.getActiveAttemptId();
     if (
-      !agent.state.running ||
       !attemptId ||
       cancelledScopeAttemptRef.current === attemptId
     )
@@ -470,10 +471,21 @@ export function useShellAgentController({
       open: openHostedBrowser,
       refresh: refreshHostedBrowser,
     },
-    stopCurrentWork: async () => {
-      if (!agent.state.running) return false;
+    stopCurrentWork: async (
+      includePendingSubmission = false,
+      computerOverride?: LocalComputerSnapshot,
+    ) => {
+      if (!agent.state.running && !includePendingSubmission) return false;
       cancelRequestedRef.current = true;
-      const computer = localComputerRef.current;
+      const computer = computerOverride
+        ? {
+            workspaceId: computerOverride.workspaceId,
+            agentId: computerOverride.agentId,
+            ready: computerOverride.lifecycle === "ready",
+            generation: computerOverride.generation,
+            controller: computerOverride.controller,
+          }
+        : localComputerRef.current;
       // Native cancellation revokes admitted computer operations even while the
       // provider is stopping or waiting for a tool result.
       const cancellation =
@@ -486,11 +498,14 @@ export function useShellAgentController({
               expectedGeneration: computer.generation,
             })
           : Promise.resolve(null);
-      const results = await Promise.allSettled([agent.cancel(), cancellation]);
+      const results = await Promise.allSettled([
+        agent.state.running ? agent.cancel() : Promise.resolve(),
+        cancellation,
+      ]);
       await localComputer.refresh().catch(() => undefined);
       const failed = results.find((result) => result.status === "rejected");
       if (failed?.status === "rejected") throw failed.reason;
-      return true;
+      return agent.state.running || includePendingSubmission;
     },
     resetCancellation: () => {
       cancelRequestedRef.current = false;

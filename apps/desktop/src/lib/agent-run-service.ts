@@ -142,7 +142,7 @@ export class AgentRunService {
       tools: [],
       maxTokens: 2_048,
     };
-    const plan = planConversationContext({
+    const plan = await planConversationContext({
       history: [],
       request,
       contextPrefix,

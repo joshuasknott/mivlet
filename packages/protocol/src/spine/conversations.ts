@@ -138,8 +138,18 @@ export type MessageExecutionLink =
   | { runId: RunId }
   | { runId?: never };
 
+export interface ConversationAttachmentMetadata {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  availability: "image-input" | "knowledge-context" | "workspace-file" | "project-file";
+  /** Relative to the executing agent's private workspace; never a host path. */
+  relativePath?: string;
+}
+
 export type MessageKindDetail =
-  | { kind: "user"; detail?: never }
+  | { kind: "user"; detail?: { attachments: readonly ConversationAttachmentMetadata[] } }
   | { kind: "assistant"; detail?: never }
   | {
       kind: "tool";

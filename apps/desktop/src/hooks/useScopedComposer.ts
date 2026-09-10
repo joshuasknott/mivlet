@@ -36,10 +36,10 @@ function serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
   return next;
 }
 function durableContent(content: ComposerContent): ComposerContent {
-  return { ...content, attachments: content.attachments.map(({ imageInput: _image, previewUrl: _preview, ...attachment }) => ({
+  return { ...content, attachments: content.attachments.map(({ imageInput: _image, previewUrl: _preview, transientBytes: _bytes, ...attachment }) => ({
     ...attachment,
     // Image bytes are deliberately transient, never stored in draft payloads.
-    status: attachment.type.startsWith("image/") ? "Reattach image before sending" : attachment.sourceId ? "Attached" : "Reattach file before sending",
+    status: attachment.type.startsWith("image/") ? "Reattach image before sending" : attachment.sourceId ? "Knowledge context · reattach for workspace file" : "Reattach file before sending",
   })) };
 }
 function decode(content: string): ComposerContent {
@@ -139,6 +139,21 @@ export function useScopedComposer(scope?: ComposerScope) {
     setText: (text: string) => mutate((content) => ({ ...content, text })),
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
+    saveNewThreadDraft: async (threadId: string, text: string) => {
+      if (!entry?.ready || !allowed(entry)) throw new Error("Wait for this draft to load before continuing.");
+      const destinationScope = { ...entry.scope, threadId };
+      const destinationKey = composerScopeKey(destinationScope);
+      if (entries.current.has(destinationKey)) throw new Error("Choose a new conversation for this handoff.");
+      const destination: Entry = {
+        scope: destinationScope,
+        content: { text, attachments: [] },
+        ready: true,
+        revision: 1,
+        error: "",
+      };
+      entries.current.set(destinationKey, destination);
+      await persist(destination);
+    },
     consume: async () => {
       const attachments = entry?.content.attachments ?? [];
       mutate(() => empty());

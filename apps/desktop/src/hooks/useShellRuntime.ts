@@ -1305,12 +1305,13 @@ export function useShellRuntime(
     file: File,
     sourceName = file.name,
     onImported?: (sourceId: string) => void,
+    decodedContent?: string,
   ) => {
     const importScope = connectorScopeRef.current;
     setImportStatus(`Reading ${sourceName}...`);
 
     try {
-      const content = await readFileAsText(file);
+      const content = decodedContent ?? await readFileAsText(file);
       if (connectorScopeRef.current !== importScope) return null;
       const candidate: LocalTextFileCandidate = {
         name: sourceName,
@@ -2748,7 +2749,7 @@ export function useShellRuntime(
     confirmApprovalDecision,
     clearApprovalInteraction,
     workspaceKnowledgeSources,
-    importKnowledgeFile: (file: File) => importLocalKnowledgeFile(file),
+    importKnowledgeFile: (file: File, decodedContent?: string) => importLocalKnowledgeFile(file, file.name, undefined, decodedContent),
     pinnedSourceIds,
     managedMemoryRecords,
     memoryDisabled,

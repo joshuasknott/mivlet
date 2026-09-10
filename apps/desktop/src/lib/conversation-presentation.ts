@@ -2,6 +2,7 @@ import type { ConversationMessageView } from "./conversation-runtime";
 import { connectorErrorMessage } from "./connector-errors";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 import { findMarketplaceConnector } from "../components/marketplace/marketplace-catalog";
+import type { Spine } from "@fable/protocol";
 
 export type ResponsePart =
   | { id: string; kind: "text"; content: string }
@@ -11,6 +12,7 @@ export type ResponsePart =
 export interface ConversationTurn {
   id: string;
   prompt?: string;
+  attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
   parts: ResponsePart[];
   startedAt?: string;
   endedAt?: string;
@@ -31,6 +33,8 @@ const toolLabels: Record<string, [string, string]> = {
   "write-file": ["Writing a file", "Wrote a file"],
   "list-files": ["Looking through files", "Listed files"],
   "run-shell": ["Running a command", "Ran a command"],
+  "create-spreadsheet": ["Creating a spreadsheet", "Created a spreadsheet"],
+  "create-document": ["Creating a document", "Created a document"],
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-app-select": ["Selecting an application window", "Selected an application window"],
@@ -100,7 +104,16 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
       turns.push(turn);
     }
     turn.endedAt = revision.checkpointedAt;
-    if (message.kind === "user") turn.prompt = content;
+    if (message.kind === "user") {
+      turn.prompt = content;
+      const attachments = message.detail?.attachments;
+      if (Array.isArray(attachments) && attachments.length <= 12 && attachments.every((item) =>
+        item && typeof item.id === "string" && typeof item.name === "string"
+        && typeof item.mimeType === "string" && typeof item.sizeBytes === "number"
+        && ["image-input", "knowledge-context", "workspace-file", "project-file"].includes(item.availability)
+        && (item.relativePath === undefined || typeof item.relativePath === "string")
+      )) turn.attachments = attachments;
+    }
     else if (revision.state === "redacted" || message.kind === "assistant") turn.parts.push({ id: message.id, kind: "text", content });
     else if (message.kind === "tool") {
       if (message.detail.phase === "call") turn.parts.push({ id: message.detail.toolCallId, kind: "tool", tool: message.detail.toolName, ...(toolConnectorId(message.detail.toolName, content) ? { connectorId: toolConnectorId(message.detail.toolName, content) } : {}), content: "", state: "running" });
