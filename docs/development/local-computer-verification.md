@@ -1,227 +1,214 @@
-# Local computer completion and verification
+# Native computer verification
 
-This is the implementation and acceptance checklist for the local computer.
-Unchecked items are incomplete; portable tests do not establish native or live
-provider acceptance. Architecture lives in
-[local teammate computer](../architecture/local-teammate-computer.md).
+This records the Windows Cua replacement acceptance on 9 September 2026.
+[Architecture and boundaries](../architecture/local-teammate-computer.md) describe
+the pinned runtime, global approvals, target identity and saved-file handling.
+These checks do not establish cloud hosting or unattended background operation.
 
-## Completion checklist
+## Evidence
 
-- [x] Review and publish existing legitimate project work before implementation.
-  Baseline `c11ea41` on `main`: types, package tests, quality, Rust format and
-  Rust tests passed (420 passed, four live tests ignored).
-- [x] Review current Cua, KasmVNC and Browser Use documentation and source.
-- [ ] Durable control authority; explicit paused expiry/reconnect; cancel or
-  drain running operations before human control; fence files and observations.
-- [ ] Versioned, persistent Linux image with coding, data and document tools;
-  authenticated desktop/browser endpoints and isolated agent processes.
-- [ ] Start, stop, restart, reconnect, update, resource limits and idle handling.
-- [ ] Low-latency primary viewer, cached conversation thumbnail, practical input,
-  accessible focused view, stale frame/input rejection and explicit resume.
-- [ ] Structured browser, scoped terminal/files and visual desktop tools through
-  supported Mivlet provider contracts; honest image/tool capability checks.
-- [ ] Observe, act and verify; bounded recovery, cancellation and stuck detection.
-- [ ] Generated document/spreadsheet artifacts can be received and opened.
-- [ ] Native Tauri + real computer + supported provider acceptance journey.
-- [ ] Persistence, agent isolation, disconnect, stale input and recovery evidence.
-- [ ] Startup/resource/stream/reconnect/task/model usage measurements reviewed.
-- [ ] Affected final gates pass; intended source committed and pushed; local HEAD
-  verified against the remote branch.
+| Class | Observed result |
+| --- | --- |
+| Upstream/source | Official Cua Driver 0.25.0 Windows x64 executable, commit `45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f`; stdio MCP `mcp --direct --no-overlay`, bounded capability manifest, no fork. Archive/executable SHA-256 and publisher signature checked. MIT and transitive notices plus MPL source archives included. |
+| Standalone driver | Disposable Windows application was observed, clicked, typed into and scrolled; actual effects inspected. This check preceded removal of the Docker implementation. |
+| Live Mivlet/provider | Normal `pnpm tauri:dev`, existing saved account and agent, Codex app-server with GPT-5.6 Luna at High. Under the existing Full Access setting, the model discovered and selected the disposable app without a separate grant prompt, read its screenshot-only gold/yellow triangle and 731, appended text, clicked Confirm, scrolled to later lines, wrote and published `acceptance.txt`. Both fixture effects and Mivlet's artifact preview were inspected. |
+| Native boundary | Opt-in live regression passed against the disposable WinForms fixture: exact agent/one-use selection, contention, structured observation, PNG, text/click/keys/scroll, stale rejection, queued Stop, Stop during real driver capture, zero subsequent dispatch, terminated runtime, fresh generation on reconnect, dialog focus loss, target closure, runtime exit and invalidated identity marker. Revocation calls were asserted below 500 ms. |
+| Mocked/unit | Authority expiry/revocation, provider tool/image gating, exact global approvals and Full Access persistence, file/artifact scopes, legacy references, pending status after Stop and saved-agent hydration are covered. These tests are not live evidence for other providers. |
+| Packaged app | `pnpm tauri:build` produced MSI and NSIS. MSI administrative extraction succeeded; all 14 bundled runtime/license/source files matched source hashes. The extracted application launched with a Windows-only PATH and used its own packaged driver. An ordinary request through the saved Codex provider selected the fixture, observed a screenshot, entered and confirmed `Packaged Mivlet check`, and scrolled the sample; visible effects and the completed response were inspected. This is extracted-package evidence on the existing Windows machine, not a clean-machine installation or upgrade test. |
+| Packaged Stop/UI | A fresh request rediscovered the fixture and observed it. The compact native indicator and labelled Stop button were visually inspected over maximized Mivlet while the fixture was foreground. Ctrl+Alt+Esc terminated the exact owned packaged driver. The Computer panel subsequently reported `Stopped with Ctrl+Alt+Esc` and required a new request. The button's mouse-click path was not separately exercised. |
 
-## Acceptance record
+The initial migration's live image claim applies only to the tested Codex
+app-server route. At that point no other route advertised screenshot tools.
+The subsequent visual-provider expansion and its separate live limitations are
+recorded below. External connector writes were not exercised in this acceptance.
 
-At baseline, Docker Desktop's Linux engine returned HTTP 500 on `/version`.
-The Docker client was present (29.7.2). No native computer acceptance is claimed
-from that prerequisite check. Local baseline logs are excluded under `output/`.
+Read-only process/service checks found no Docker Desktop, Docker backend or
+Windows Docker service running. No Docker engine was started, stopped or queried
+through the CLI, and no container, volume, Docker/WSL installation or user file
+was removed. This is not an inventory of processes inside every WSL distribution.
 
-Record actual routes, measurements and material limitations here as acceptance
-steps complete. Never store credentials, browser profiles or private user data.
+Saved agents, existing conversations and provider sign-in remained available in
+the live Mivlet session. Compatible old shared Workspace files retain their scope;
+legacy computer metadata is marked retired and preserved. Docker-home-only files
+require deliberate export by their owner. No automatic volume migration is claimed.
 
-### Lifecycle and artifact regression evidence — 6 September 2026
+## Repeat the disposable test
 
-- The isolated Docker lifecycle test
-  `local_computer::lifecycle::tests::real_stop_sleep_restart_and_update_preserve_workspace_and_home`
-  passed in 31.79 seconds. It created a fresh labelled test computer, slept and
-  woke it, stopped and restarted it, replaced its system container, and verified
-  that generated Workspace and agent-home files retained their exact contents.
-  The user's saved computer was not used. A subsequent Docker inventory found
-  zero Mivlet-labelled test containers and zero Mivlet-labelled test volumes.
-- Deterministic native authority tests cover idle suspension racing operation
-  completion and viewer arrival; the startup-budget test rejects a third
-  computer while allowing reuse of an existing slot. This does not measure a
-  real 30-minute idle period or prove behavior across Windows sleep.
-- Six native artifact tests passed: allowed content types, Office macro and
-  embedded-program rejection, opaque scope-bound receipts, traversal rejection,
-  actual file containment, and immutable publication copies. Native artifact
-  opening through a real conversation remains part of the acceptance journey.
-- The viewer-state hook and artifact component suites passed 16 tests, including
-  stopped-state frame clearing, takeover/reconnect/scope races, explicit resume,
-  thumbnail demand, receipt decoding, native-open errors, and stale error
-  suppression. Desktop typecheck and scoped ESLint passed.
-- A real-browser component fixture covered light/dark file cards, long titles,
-  360px/240px columns, error/disabled states, and keyboard activation. Card
-  targets measured 57px high with no internal horizontal overflow. Pending
-  native opens retain keyboard focus. This fixture does not establish native
-  file opening or the full conversation layout.
+Use an interactive Windows x64 session and only non-sensitive test data. Build
+`apps/desktop/scripts/native-computer-fixture.cs` as a WinForms executable named
+`MivletComputerFixture.exe`, then open it visibly. The native regression requires
+its exact PID in `MIVLET_NATIVE_LIVE_FIXTURE_PID`:
 
-The later approval and recovery regressions passed 83 focused desktop tests:
-same-owner account refresh preserves a pending approval and its waiter; changing
-owner or workspace cancels the gate before hydration; grant-to-native execution
-reports actual tool use; unmount cancels the native provider; failed snapshot
-reads cannot overwrite saved data; and pending saves cannot follow a scope
-change. The snapshot error screen offers Retry and prevents submission until
-hydration succeeds. This loading/error screen has not had a native failure
-injection check. Desktop typecheck and scoped ESLint passed.
+```powershell
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml live_actions_stop_queue_and_reconnect -- --ignored --nocapture
+```
 
-Gemini and native agent-loop suites passed 22 tests, including multiple calls
-to the same tool in one stream and across turns, distinct approval IDs, and
-provider call-ID roundtrip. This is fixture evidence; no live Gemini run is
-claimed. PDF publication and opening are disabled pending a validated sanitizer;
-the native regression refuses an automatic-JavaScript PDF and directs the tool
-to DOCX, text, or PNG. DOCX/XLSX remain the native acceptance artifact formats.
+The test controls only that PID and exact fixture titles. Keep the fixture
+foreground while it runs; switching applications correctly revokes its lease.
+The fixture contains no account data or network features. Tests are ignored by
+default so ordinary test runs cannot take over a user's applications.
 
-### Bounded completion pass — 6 September 2026
+For provider acceptance, open normal Mivlet with a validated provider, use the
+existing global approval setting and ask the agent to discover the disposable
+app. Verify the screenshot-only painted marker, actual text/button/scroll effects
+and a published scoped text artifact. Inspect native Stop while the fixture is
+foreground and verify a fresh user request is needed after stopping.
 
-- Reproduced the native New conversation failure. Saved new-thread drafts contain
-  `threadId: null` after native serialization; the renderer now normalizes that
-  optional field without relaxing malformed-content or workspace validation.
-  Five new draft regressions and three existing snapshot tests passed. Desktop
-  typecheck, scoped production ESLint, and the native debug packaged application
-  build (`pnpm tauri:build --debug --no-bundle`) passed. The rebuilt native app
-  opened New conversation successfully and retained existing conversation history.
-  The provider-runtime conformance suite also passed 27 tests, and the rebuilt
-  frontend passed the bundle budget check. Staged diff whitespace and a
-  high-confidence credential-pattern scan passed; runtime/output paths were
-  excluded from staging.
-- The acceptance journey stopped at the computer prerequisite. Starting the
-  existing Docker Desktop installation failed with `initializing Ingest server`
-  because `AppData/Local/Docker/run/sailor-ingest.sock` could not be accessed by
-  the system. The Linux engine pipe was absent. No image rebuild, Docker reset,
-  provider/model setting change, or credit purchase was attempted.
-- Consequently live provider/browser research, XLSX/DOCX creation and native
-  artifact opening, human takeover, and explicit return were **not reached** in
-  this pass. The complete ordinary-conversation acceptance remains incomplete.
-  When the engine was unavailable, the overview still said "Set up computer";
-  expanded computer options correctly directed the user to start Docker Desktop.
-- Reused recent local logs under `output/local-computer-goal`: repository tests,
-  types, quality, bundle budget, dependency audits, Clippy, 446 native tests,
-  native packaging, and isolated browser navigation passed. Their relevant
-  implementation source was unchanged by this pass except the renderer draft
-  fix covered above. `perf-runtime-final.log` is **not** a pass: its native test
-  link failed with Windows `LNK1104`. No broad suites were repeated.
-- Local logs and temporary files are retained outside the implementation commit.
+## Background delivery expansion, 10 September 2026
 
-### Native acceptance follow-up — 6 September 2026
+This pass retains the bundled Cua Driver 0.25.0 and its exact executable hash.
+The production native lease now binds a background or foreground mode.
+Background is the default selection; foreground selection remains an explicit
+tool approval under the existing global policy, followed by a fresh observation.
+Provider image transport from the preceding pass remains in place.
 
-- Docker became available. The saved agent computer started through Mivlet and
-  reported healthy; the native viewer showed Chromium. Human takeover and
-  explicit return switched the viewer between human control and watching.
-- A user-submitted public Python research and DOCX/XLSX task failed after Retry
-  with `Blocked by Mivlet's read-only permission mode`, although the composer
-  displayed Full access. The user confirmed using Retry. Its hook hardcoded
-  read-only; the retry action now supplies the current permission mode. It
-  starts a new attempt and retains fresh tool approvals rather than reusing
-  historical approval IDs. Default callers without an explicit mode remain
-  read-only.
-- The 33 native-agent hook tests passed, including regressions for full-access
-  and read-only retries. Another 26 focused tests passed for computer state,
-  artifacts, task execution and shell approvals. Desktop typecheck and scoped
-  ESLint passed.
-- The real lifecycle test passed in 24.28 seconds. The real container isolation,
-  document generation, process cancellation and persistence test passed in
-  20.20 seconds. Both use separate test resources.
-- The three-test live browser command stalled in its first test,
-  `real_agent_navigation_uses_the_isolated_browser_and_returns_no_frame`, and
-  was interrupted without a result. Its remaining labelled test container was
-  stopped. This is not a pass.
-- The Windows automation helper could read the app but returned
-  `coordinate input geometry is unavailable` for native controls and a UIA
-  CacheRequest error for setting the composer value, including after reconnect.
-  The user submitted the test prompt manually. Full live research, artifact
-  publication/opening and repeated end-to-end tasks remain incomplete.
-- The fixed frontend production build and bundle budget passed. The native
-  rebuild could not replace `target/debug/fable-desktop.exe` because the old
-  app remained running (`Access is denied`, Windows error 5). Normal closure
-  was requested after the automation helper also failed on the Close button.
-  The Retry fix is not yet present in the running native app.
+Source review used the bundled Cua commit
+[`45d78fed`](https://github.com/trycua/cua/tree/45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f/libs/cua-driver)
+and Open Computer Use commit
+[`386a260d`](https://github.com/ifuryst/open-codex-computer-use/blob/386a260d1ab8b690adbbb27f7471595cf0c2b752/apps/OpenComputerUseWindows/runtime.ps1).
+Cua already provides background delivery through the existing Rust/MCP boundary.
+Open Computer Use's PowerShell runtime adds a second integration path without
+solving the relevant capture privacy issue: its screen-copy capture can include
+covering windows too. Retaining Cua avoids adding another runtime and approval
+surface; this is a source-based integration decision, not an all-app benchmark.
 
-### Full access follow-up — 6 September 2026
+The pinned Cua screenshot path can fall back to a desktop crop without exposing
+enough capture provenance in `get_window_state` to exclude covering windows.
+Background image requests therefore fail before dispatch. Background observations
+are structured UIA only. Pixel input, keys, caret editing and WPF `HwndWrapper`
+input require foreground selection. Background typing appends with UIA SetValue.
+Minimized windows are excluded from discovery and revoke an existing lease.
 
-- After normal app closure, the native rebuild succeeded. A live task then
-  exposed a second issue: Full access still queued interactive approvals for
-  each computer action. Full access now resolves each exact tool authorization
-  automatically through native persistence; Ask first keeps its queue. Native
-  failures, permission downgrades, cancellation and workspace changes do not
-  release the pending action. The permission description matches this behavior.
-- Nine shell approval tests and 33 native-agent tests passed, including automatic
-  authorization, native failure, permission downgrade, workspace change and Retry.
-  Desktop types, scoped production-source ESLint, production frontend build,
-  performance budget and native debug build passed. The updated app was launched.
-- Screenshot-coordinate interaction worked after raising the Mivlet window;
-  accessibility-index clicks remain unreliable. The live acceptance task was
-  submitted through the composer using the user's selected GPT-5.6-Luna High.
-  Browser and short shell actions completed without interactive approval. File
-  creation failed with `Execution blocked: approval metadata changed after the
-  user decision.` Native approval resolution shortened/normalized the request
-  before recording its fingerprint, while execution supplied the original.
-- Native resolution now retains the exact unmodified request for the permit;
-  audit display normalization remains bounded. A long multiline regression proves
-  unchanged content executes, changed suffixes fail and permits remain single-use.
-  All 447 enabled native tests passed (six live tests ignored), along with Rust
-  formatting and all-target/all-feature Clippy with warnings denied.
-- The subsequent live agent run created both files through the isolated shell,
-  reported reading both back and returned two working artifact cards in the
-  conversation (XLSX 8 KB, DOCX 37 KB), with no approval interaction. Direct
-  `write-file` exposed a missing confirmation field in the desktop dispatch
-  resolution; that dispatch now uses the shared exact resolution builder. All
-  22 desktop tool executor tests passed, including the forwarding regression.
-  External opening of the returned copies and repeated complete tasks have not
-  yet been verified. The lifecycle controls also have a narrow-layout defect
-  visible when Computer options is expanded; this pass does not fix that layout.
+| Evidence | Result and boundary |
+| --- | --- |
+| Real Windows fixture | Background selection, UIA observation, text append, button invocation and element scrolling ran with the target fully covered by a second disposable window. Foreground HWND stayed unchanged and the cover text remained untouched. This verifies WinForms controls, not all Windows frameworks. |
+| Known refusals | Background screenshot, key and pixel requests caused zero driver dispatches. The action refusals consumed the observation and returned `foreground-required` with `inputDispatched: false`. |
+| User interference | The real native input-hook thread started successfully. Direct calls to its target-interference handler preserved control for another window and revoked it for the selected one. This is callback-level evidence, not a physical-user input test. Minimization was exercised against the real fixture and blocked old-generation input. |
+| Stop during input | A fixture handler recorded a real UIA text append, then deliberately held that call. Native Stop returned below 500 ms, killed the owned driver, fenced a queued observation, restored NOACTIVATE after process exit and allowed a fresh generation. The final control value and fixture event log proved the uncertain append was not replayed. Already dispatched app work remains non-undoable. |
+| Automated regression | Exact selection arguments distinguish background and foreground approvals. The executor requires explicit foreground selection plus observation after a known refusal, and blocks replay of uncertain input across a mode change. A latched native focus test prevents a monitor from consuming takeover detection before a concurrent action. |
+| Panel preview | Production component inspected at 1280 × 800 and 390 × 844 for background, foreground and stopped states. No horizontal overflow; narrow Stop target was 44 px tall with visible keyboard focus. Mouse and keyboard activation reached stopped state through a mocked runtime. |
+| Existing foreground regression | Explicit foreground selection, observed text entry, keys, button invocation and PNG capture ran. The extended regression then failed at `desktop_tools::delivery_ticket` with `Mivlet's encrypted store is not initialized`. Its later provider-delivery/old-image assertions were not reached in this standalone fixture. No store or provider validation was bypassed; this is an incomplete live regression, not a passing egress test. |
+| Repository gates | `pnpm typecheck`, `pnpm test` (1,443 package tests passed, five skipped, plus two Node environment tests), `pnpm quality`, `pnpm verify:build`, Rust formatting, Clippy with warnings denied, and Rust tests (499 passed, five opt-in tests ignored) passed. The background native fixture runs separately. |
 
-### Daily-driver implementation evidence — 7 September 2026
+Repeat background acceptance by building the fixture and opening a second
+instance with `--cover`. Set `MIVLET_NATIVE_LIVE_FIXTURE_PID`,
+`MIVLET_NATIVE_LIVE_FIXTURE_COVER_PID`, and `MIVLET_NATIVE_LIVE_FIXTURE_DIR` to
+the two disposable PIDs and their dedicated executable directory. Both windows
+must be visible and restored. Use a fresh fixture directory for each run so its
+synthetic text/event assertions start empty. The test positions and activates
+the cover during setup, then measures that background operations leave focus
+unchanged. It restores window visibility/stacking when it finishes.
 
-- Browser and Computer built-ins now have native enablement/admission checks,
-  a shared lazy-start path and revocation/draining on disable. Browser-only
-  access does not grant desktop or shell tools. The 51 focused desktop tests
-  and native admission regression passed. The actual marketplace and composer
-  components were inspected at desktop and 390px widths in the labelled
-  browser preview. This does not exercise native enablement through the UI.
-- A direct ephemeral Codex app-server probe on the connected default
-  `gpt-6-astra` route performed a fresh search with 18 structured results,
-  then opened a returned page with one result and a linked citation. Shell,
-  unified execution, memories, apps and MCP were disabled in that probe.
-  It did not use the packaged Mivlet conversation. Public URL fetching now
-  returns readable content and bounded source metadata under existing SSRF,
-  redirect and body limits. Other provider routes still lack dedicated search.
-- The document guest image generated DOCX, XLSX, PDF and PPTX, recalculated the
-  workbook and rendered Office/PDF outputs. Eight focused native artifact
-  tests and the opt-in real-fixture test across seven files passed. Rendered
-  fixture pages/slides were visually inspected for clipping/overlap; the XLSX
-  formula `SUM(A1:A2)` had cached value `5`, matching its expected result.
-  These are simple fixture checks, not arbitrary-document layout guarantees.
-  Native external opening from an ordinary conversation remains unverified.
-- Four native repository import tests passed for scoped extraction, common
-  credential/dependency exclusions, traversal and case collisions. A separate
-  read-only-mounted synthetic repo ran inside image
-  `sha256:32cf0a743af2f566f5c28008bf77e83c35012d94958b9d48991fad6e3dbcf1f9`:
-  its baseline test failed, an isolated Git worktree fixed one source file,
-  the test and `git diff --check` passed, and the original source, unrelated
-  tracked file and untracked scratch file retained their contents. Network was
-  disabled. No remote write or PR was attempted. The native chooser-to-chat
-  journey is not covered by this probe.
-- Interrupted-attempt checkpoints preserve intent, successful tool results and
-  uncertainty while dropping reusable authority identifiers. Unused persisted
-  approvals are invalidated on recovery. Focused tests cover bounded recovery,
-  uncertain-write replay prevention and current-route retry behavior; real
-  crash/restart and consequential external-write reconciliation remain open.
-- Memory Settings now supports inspect/correct/disable/forget. The correction
-  test rejects stale revisions and forgotten records; two UI tests cover save
-  errors and management filtering. A labelled synthetic preview exercised
-  correction at desktop and phone widths. Native state-change and final broad
-  gates are still being completed; no packaged memory acceptance is claimed.
+```powershell
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml live_background_actions_stop_and_refusals --lib -- --ignored --nocapture
+```
 
-The Linux Docker engine was available for these isolated checks. Native app
-automation was unavailable in this session, so private sign-in takeover,
-packaged conversation delivery and repeated end-to-end completion remain open.
-All implementation changes remain uncommitted in the isolated worktree.
+No packaged/provider-driven background conversation, physical user interference,
+WPF/XAML/Chromium live matrix, signed installer, cloud execution or deployment was
+verified in this pass. These remain separate acceptance work. No runtime pin,
+credentials, provider route, cloud worker, commit, push or deployment was changed.
+
+## Gates and limitations
+
+The final source passed repository typechecking, all package tests (1,426 passed,
+five skipped, plus two Node environment tests), quality gates, `pnpm verify:build`,
+Rust formatting and Clippy with warnings denied, and Rust tests (487 passed,
+three opt-in live tests ignored). The disposable native regression above was run
+separately and passed. Performance budgets, performance regressions/runtime checks,
+release-manifest tests and `git diff --check` also passed. See
+[the repository verification guide](verification.md) for commands.
+
+Audits currently report three moderate Hono advisories inherited
+through the unchanged hosted-runner `@cloudflare/sandbox` dependency. The Rust
+audit passes with the repository's reviewed exceptions and informational notices.
+
+The driver needs no user-installed Node, Python, uv, Docker, MCP client, daemon
+or separate Cua app. Mivlet still needs supported Windows x64/WebView2 and its
+account and validated model provider. Provider-specific runtime, network and
+entitlement prerequisites remain separate. A build on a developer machine does
+not establish a clean-machine installation or every provider route.
+
+No source was committed or pushed, and no installer was published or installed
+over the user's existing installation during this task. Existing account data
+was read by the extracted package; the additional disposable acceptance turns
+remain in its normal local conversation history.
+
+## Visual provider expansion
+
+The later 9 September 2026 implementation adds native screenshot round trips for
+the existing direct OpenAI, Anthropic and xAI catalogue routes. The
+[adapter matrix](../architecture/local-teammate-computer.md#tool-and-provider-paths)
+records every implemented provider adapter, exact supported API models and why
+other routes remain unavailable. The original migration and packaged-app evidence
+above is historical; it is not a new live pass for this expansion.
+
+### Source inspection
+
+- Rechecked Cua release tag `cua-driver-rs-v0.25.0` against commit
+  `45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f`. The bundled executable's SHA-256 is
+  `57919fe31bf91b7ff8af35630fdb3d31ed92fd1c333b9e9678a508cecd476719` and its
+  Authenticode signature is valid for Cua AI Inc. Neither the executable nor
+  the Cua launch/action/foreground configuration changed in this expansion.
+- [OpenAI computer-use guidance](https://developers.openai.com/api/docs/guides/tools-computer-use)
+  supports retaining existing function/MCP tools and an observe/action/observation
+  loop. Mivlet retains its shared schemas and approval controls.
+- [Anthropic tool results](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls)
+  permit image blocks inside the matching result and require parallel results
+  in the following user message. The streaming regression caught and fixed
+  `message_stop` overwriting an earlier `tool_use` stop reason.
+- [xAI image input](https://docs.x.ai/developers/model-capabilities/images/understanding)
+  and the OpenAI-compatible Chat Completions wire use image content in user
+  messages. Native egress inserts the image after the complete set of tool results.
+- [ACP content](https://agentclientprotocol.com/protocol/v1/content) supports image
+  input/MCP forwarding, but Mivlet's current managed and Antigravity sessions use
+  text prompts and provider-owned yes/no permissions without a Mivlet result bridge.
+  Those protocols are not described as inherently image-incapable.
+- Reviewed [Cua at the bundled revision](https://github.com/trycua/cua/tree/45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f)
+  and [the alternative implementation](https://github.com/ifuryst/open-codex-computer-use/tree/386a260d1ab8b690adbbb27f7471595cf0c2b752).
+  Useful patterns were bounded image tool results and fresh observations after
+  actions; no replacement driver, external tool schema or copied implementation
+  was introduced.
+
+### Regression and gate evidence
+
+Mocked provider loops cover OpenAI, Anthropic and xAI observe/action/observation
+continuations, exact approval IDs, missing native bindings, unavailable schemas,
+Stop after capture and grouped Anthropic parallel results. Native tests cover
+exact image/call/result pairing, renderer image injection and replay, fragmented
+SSE, scope/generation/single-use claims, incomplete responses, oversized input,
+expiry and late capture after cancellation. Transport tests cover session reuse,
+native-control-event separation, late session creation after Stop and cleanup on
+provider failure. These establish local behavior, not live model acceptance.
+
+Repository types, all package tests (1,440 passed, five skipped, plus two Node
+environment tests), quality, production build, performance budgets and regressions,
+runtime performance checks, release-manifest tests and Rust compile/tests (496
+passed, four opt-in live tests ignored) passed.
+Rust formatting, Clippy with warnings denied and `git diff --check` passed.
+The pnpm audit still reports the same three moderate Hono advisories through the
+unchanged hosted-runner `@cloudflare/sandbox`; it is not a clean full audit.
+The separate Cargo audit passed with the repository's reviewed exceptions and
+informational notices. No dependency was upgraded to silence the findings.
+
+### Live checks and remaining acceptance
+
+| Check | Result for this expansion |
+| --- | --- |
+| Direct API credential inventory | Native OS-store check: OpenAI, Anthropic and xAI credentials unavailable. Their new image round trips could not be exercised live. A custom endpoint credential exists, which does not establish its image support or connection health. No secret was printed or passed through JavaScript. |
+| Native Windows fixture | Built and opened the disposable WinForms app. The opt-in test stopped at selected-window activation with `Foreground focus changed`. The test's added old-image-after-action/reobservation assertions therefore did not run live. This is a failed/blocked live check, not a passing input or screenshot test. Focus restrictions were not relaxed. |
+| Available Codex connection | `codex login status` confirmed ChatGPT sign-in. A separate ephemeral app-server probe on CLI `0.153.4`, default image-advertising `gpt-6-astra`, requested one synthetic image through `local-desktop-observe`. Two attempts failed image-identification acceptance; the observed response reported that no image was visible. The response shape matches the installed generated `DynamicToolCallResponse` schema (`inputImage`/`imageUrl`). This probe does not prove current Codex image understanding or the normal Mivlet UI path. |
+| Saved data and publication | The Codex probe used synthetic pixels and an ephemeral session; it did not capture personal windows. The disposable app and probe processes were closed. Cua, foreground behavior and cloud execution remain unchanged. No commit, push, deploy or package publication occurred. |
+
+Repeat the real native fixture test in an interactive session that can retain
+foreground focus. With each supported direct API connected, run an ordinary
+Mivlet conversation against that fixture, verify its screenshot-only marker,
+then verify a fresh screenshot after a harmless action and immediate Stop.
+Current live acceptance remains outstanding for those routes. The Codex
+synthetic-image failure also needs a successful current-runtime repeat before
+extending the earlier migration's live claim to this default model/runtime.
+
+The read-only direct credential inventory is opt-in:
+
+```powershell
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml live_visual_provider_connection_inventory --lib -- --ignored --nocapture
+```

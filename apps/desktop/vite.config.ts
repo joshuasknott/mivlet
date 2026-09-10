@@ -1,9 +1,13 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), pruneUnusedIconWeights([
+    fileURLToPath(new URL("./src", import.meta.url)),
+    fileURLToPath(new URL("../../packages", import.meta.url))
+  ])],
   resolve: {
     alias: [
       {

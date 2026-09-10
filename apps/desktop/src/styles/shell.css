@@ -172,10 +172,10 @@
 }
 
 /* Full lockups are reserved for product entry points, never agent messages. */
-.mivlet-brand { display: inline-flex; width: 112px; flex: 0 0 auto; align-items: center; }
-.mivlet-brand img { display: block; width: 100%; height: auto; }
-.mivlet-brand .mivlet-brand__dark { display: none; }
-:root[data-theme="dark"] .mivlet-brand__light { display: none; }
-:root[data-theme="dark"] .mivlet-brand__dark { display: block; }
-.mivlet-brand--compact { width: 40px; }
+.mivlet-brand { display: inline-flex; width: 112px; flex: 0 0 auto; aspect-ratio: 1001 / 198; background: url("/brand/mivlet-lockup-light.png") center / contain no-repeat; }
+.mivlet-brand--compact { width: 40px; aspect-ratio: 360 / 198; background-image: url("/brand/mivlet-symbol-light.png"); }
+:root[data-theme="dark"] .mivlet-brand,
+.desktop-frame[data-theme="dark"] .mivlet-brand { background-image: url("/brand/mivlet-lockup-dark.png"); }
+:root[data-theme="dark"] .mivlet-brand--compact,
+.desktop-frame[data-theme="dark"] .mivlet-brand--compact { background-image: url("/brand/mivlet-symbol-dark.png"); }
 .og-brand { width: 180px; margin-bottom: 36px; }

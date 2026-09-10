@@ -144,7 +144,8 @@ export async function* runAgentLoop(
     options.modelSupportsTools ??
     catalogueCapabilities(request.providerId, request.model)?.tools;
   const tools = options.toolsEnabled === false || modelSupportsTools !== true ? []
-    : request.tools.length ? request.tools.filter((tool) => lookupTool(tool.name)) : registeredToolSpecs();
+    : request.tools.length ? request.tools.filter((tool) => lookupTool(tool.name))
+      : registeredToolSpecs().filter(tool => !tool.name.startsWith("local-desktop-"));
   const maxTurns = options.maxTurns ?? 8;
   const permissionMode = options.permissionMode ?? "full-access";
   const execute = permissionGatedExecutor(options.execute, permissionMode);
@@ -165,7 +166,7 @@ export async function* runAgentLoop(
 
   const bindApproval = (callId: string, approval: ApprovalRequest): ApprovalRequest => ({
     ...approval,
-    id: `native-${options.runId ?? "run"}-${callId}`
+    id: transport.toolApprovalId?.(callId) ?? `native-${options.runId ?? "run"}-${callId}`
       .replace(/[^a-zA-Z0-9_-]/g, "-")
       .slice(0, 160),
     service: request.providerId,
@@ -204,6 +205,10 @@ export async function* runAgentLoop(
           const invalidReason =
             !lookupTool(event.tool)
               ? `Rejected unknown tool "${event.tool}".`
+              : !tools.some(tool => tool.name === event.tool)
+                ? `Rejected tool "${event.tool}" because it was not advertised for this route.`
+                : event.tool.startsWith("local-desktop-") && !transport.toolApprovalId?.(event.callId)
+                  ? "Rejected desktop tool because its native provider call binding is missing."
               : !event.callId ||
                   event.callId.length > 160 ||
                   !/^[a-zA-Z0-9_-]+$/.test(event.callId)
@@ -286,8 +291,16 @@ export async function* runAgentLoop(
     });
 
     for (const call of pendingToolCalls) {
+      if (options.shouldCancel?.()) {
+        yield { type: "cancelled" };
+        return;
+      }
       try {
         const result = boundedToolOutput(await execute(call.approval, call.arguments));
+        if (options.shouldCancel?.()) {
+          yield { type: "cancelled" };
+          return;
+        }
         yield { type: "tool-result", callId: call.callId, ok: true, output: result };
         messages.push({ role: "tool", content: result, toolCallId: call.callId, toolName: call.tool });
       } catch (error) {

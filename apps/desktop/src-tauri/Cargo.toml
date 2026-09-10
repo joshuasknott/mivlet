@@ -65,7 +65,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 aes-gcm = "0.10"
 hex = "0.4"
 tempfile = "3"
-headless_chrome = { version = "1.0.22", default-features = false }
 # Managed Google Antigravity runtime archives are ZIP files. Only DEFLATE
 # decoding is enabled; Fable never creates archives or enables legacy codecs.
 zip = { version = "6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
@@ -79,10 +78,9 @@ crc32fast = "=1.5.0"
 # document reaches a host Office application.
 quick-xml = "0.42.0"
 rfd = "=0.17.2"
-axum = { version = "0.8.9", features = ["ws"] }
-tokio-tungstenite = "0.29"
 
 [target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_UI_Accessibility"] }
 # The managed Antigravity binary launches a child ACP process. A Windows job
 # keeps that full process tree tied to Fable so failed checks cannot leave a
 # profile-locking ACP process behind.
@@ -91,4 +89,11 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_JobObjects",
     "Win32_Storage_FileSystem",
     "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_Threading",
+    "Win32_System_LibraryLoader",
+    "Win32_Graphics_Gdi",
+    "Win32_System_RemoteDesktop",
+    "Win32_Security",
 ] }

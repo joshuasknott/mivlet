@@ -35,7 +35,7 @@ export function BuiltinPlugins({ workspaceId, query, onUse }: { workspaceId?: st
   return <>
     <div className="marketplace-connector-grid">{visible.map((entry) => <div className="marketplace-connector-row marketplace-builtin" key={entry.id}>
       <span className="marketplace-connector-icon" aria-hidden="true"><img className="marketplace-builtin__icon" src={entry.icon} alt="" /></span>
-      <span className="marketplace-connector-row__copy"><strong>{entry.name}</strong><span>{entry.description}</span><small>{!plugins ? "Unavailable" : plugins[entry.id] ? "Enabled · requires a running agent computer" : "Disabled"}</small></span>
+      <span className="marketplace-connector-row__copy"><strong>{entry.name}</strong><span>{entry.description}</span><small>{!plugins ? "Unavailable" : plugins[entry.id] ? "Enabled · app control requires permission" : "Disabled"}</small></span>
       <div className="marketplace-builtin__actions">
       {onUse && plugins?.[entry.id] ? <button className="marketplace-builtin__toggle" type="button" disabled={busy} aria-label={`Use ${entry.name}`} onClick={() => onUse(entry.id)}>Use</button> : null}
       <button className="marketplace-builtin__toggle" type="button" aria-label={`${plugins?.[entry.id] ? "Disable" : "Enable"} ${entry.name}`} disabled={!plugins || busy} onClick={async () => {

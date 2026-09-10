@@ -22,10 +22,6 @@ function normalize(text: string): string {
     .trim();
 }
 
-function tokens(text: string): Set<string> {
-  return new Set(normalize(text).split(" ").filter(Boolean));
-}
-
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 && b.size === 0) return 1;
   let intersection = 0;
@@ -34,56 +30,38 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-function levenshtein(a: string, b: string): number {
+/** Only visit edit paths that can still meet the similarity threshold. */
+function boundedEditDistance(a: string, b: string, maxDistance: number): number {
   if (a === b) return 0;
   if (a.length === 0) return b.length;
   if (b.length === 0) return a.length;
-  const prev = new Array<number>(b.length + 1);
-  const curr = new Array<number>(b.length + 1);
-  for (let j = 0; j <= b.length; j++) prev[j] = j;
+  const exceeded = maxDistance + 1;
+  if (Math.abs(a.length - b.length) > maxDistance) return exceeded;
+  if (a.length < b.length) [a, b] = [b, a];
+  let prev = new Array<number>(b.length + 1).fill(exceeded);
+  let curr = new Array<number>(b.length + 1).fill(exceeded);
+  for (let j = 0; j <= Math.min(b.length, maxDistance); j++) prev[j] = j;
   for (let i = 1; i <= a.length; i++) {
-    curr[0] = i;
-    for (let j = 1; j <= b.length; j++) {
+    const start = Math.max(1, i - maxDistance);
+    const end = Math.min(b.length, i + maxDistance);
+    curr[start - 1] = start === 1 ? Math.min(i, exceeded) : exceeded;
+    let rowMin = exceeded;
+    for (let j = start; j <= end; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
       curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+      rowMin = Math.min(rowMin, curr[j]);
     }
-    for (let j = 0; j <= b.length; j++) prev[j] = curr[j];
+    if (rowMin > maxDistance) return exceeded;
+    if (end < b.length) curr[end + 1] = exceeded;
+    [prev, curr] = [curr, prev];
   }
   return prev[b.length];
 }
 
-function levenshteinRatio(a: string, b: string): number {
+function hasSimilarSpelling(a: string, b: string): boolean {
   const max = Math.max(a.length, b.length);
-  if (max === 0) return 1;
-  return 1 - levenshtein(a, b) / max;
-}
-
-/**
- * Core near-identical test over PRE-normalized values + pre-tokenized sets, so
- * batch callers (e.g. retention) can normalize each value once and reuse it
- * across many comparisons instead of re-normalizing per pairwise check. The
- * matching math is identical to {@link isNearIdentical}.
- */
-function isNearIdenticalValues(
-  cv: string,
-  ev: string,
-  cTokens: Set<string>,
-  eTokens: Set<string>
-): boolean {
-  if (cv.length > 0 && cv === ev) return true;
-  if (cv.length > 0 && ev.length > 0 && (cv.includes(ev) || ev.includes(cv))) return true;
-  if (jaccard(cTokens, eTokens) >= 0.8) return true;
-  if (cv.length > 0 && ev.length > 0 && levenshteinRatio(cv, ev) >= 0.9) return true;
-  return false;
-}
-
-function isNearIdentical(candidate: Candidate, existing: MemoryRecord): boolean {
-  return isNearIdenticalValues(
-    normalize(candidate.value),
-    normalize(existing.value),
-    tokens(candidate.value),
-    tokens(existing.value)
-  );
+  if (max === 0) return true;
+  return 1 - boundedEditDistance(a, b, Math.floor(max / 10)) / max >= 0.9;
 }
 
 const NEGATORS = [
@@ -109,9 +87,10 @@ export function detectDuplicate(
   candidate: Candidate,
   existing: MemoryRecord[]
 ): { memory: MemoryRecord } | null {
-  const live = existing.filter(isLiveMemory);
-  for (const memory of live) {
-    if (isNearIdentical(candidate, memory)) {
+  const normalized = normalizeMemoryValue(candidate.value);
+  for (const memory of existing) {
+    if (!isLiveMemory(memory)) continue;
+    if (isNearIdenticalNormalized(normalized, normalizeMemoryValue(memory.value))) {
       return { memory };
     }
   }
@@ -129,18 +108,20 @@ export interface NormalizedMemoryValue {
 
 /** Normalize a value's text + token set once for repeated near-identical checks. */
 export function normalizeMemoryValue(value: string): NormalizedMemoryValue {
-  return { value: normalize(value), tokens: tokens(value) };
+  const normalized = normalize(value);
+  return { value: normalized, tokens: new Set(normalized.split(" ").filter(Boolean)) };
 }
 
-/**
- * Core near-identical predicate over pre-normalized views — the single source of
- * truth for the matching math used by {@link detectDuplicate} and retention.
- */
+/** Shared matching rules for duplicate detection and retention. */
 export function isNearIdenticalNormalized(
   candidate: NormalizedMemoryValue,
   existing: NormalizedMemoryValue
 ): boolean {
-  return isNearIdenticalValues(candidate.value, existing.value, candidate.tokens, existing.tokens);
+  const left = candidate.value;
+  const right = existing.value;
+  if (left && right && (left.includes(right) || right.includes(left))) return true;
+  if (jaccard(candidate.tokens, existing.tokens) >= 0.8) return true;
+  return Boolean(left && right) && hasSimilarSpelling(left, right);
 }
 
 /**
@@ -153,14 +134,14 @@ export function detectContradiction(
   candidate: Candidate,
   existing: MemoryRecord[]
 ): { memory: MemoryRecord; reason: string } | null {
-  const live = existing.filter(isLiveMemory);
   const candidateTitleTokens = significantTokens(candidate.title);
+  const candidateNeg = hasNegator(candidate.value);
 
-  for (const memory of live) {
+  for (const memory of existing) {
+    if (!isLiveMemory(memory)) continue;
     const existingTitleTokens = significantTokens(memory.title);
     if (!shareSubject(candidateTitleTokens, existingTitleTokens)) continue;
 
-    const candidateNeg = hasNegator(candidate.value);
     const existingNeg = hasNegator(memory.value);
 
     if (candidateNeg !== existingNeg) {

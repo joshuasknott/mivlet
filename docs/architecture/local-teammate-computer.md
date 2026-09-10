@@ -1,291 +1,201 @@
-# Local teammate computer
+# Native Windows computer
 
-> **Status: implemented local foundation.** Mivlet creates a separate Linux
-> container desktop for each workspace/teammate pair. This is a genuine
-> operating-system userspace, but it is a Docker container inside Docker
-> Desktop's Linux environment, not a separate virtual machine per teammate.
+Mivlet uses existing Windows applications in the user's interactive session.
+This replaces the retired Docker Linux computer. Supported accessibility controls
+can run in the background; other operations require explicit foreground selection.
+It is not a VM, separate desktop, host-code sandbox or unattended computer.
+Prefer an existing connector when it can complete the task without desktop input.
 
-## Experience
+## Integration and distribution
 
-The computer presents one compact desktop with Chromium, Files, and Terminal.
-Mivlet can show an ephemeral screen, launch those applications, and let the
-person take control for a human-only step. An inactive human lease expires after
-five minutes into an explicit paused state. Closing or disconnecting the viewer
-never returns control to the agent. Native authority is persisted independently
-from Chromium; process restart and browser reconnection require an explicit
-resume. Every takeover, return, restart, and frame checks its generation.
+The native boundary supervises the official Windows x64 Cua Driver **0.25.0**
+release from tag `cua-driver-rs-v0.25.0`, commit
+`45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f`.
+[Upstream source](https://github.com/trycua/cua/tree/45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f/libs/cua-driver)
+and the [release](https://github.com/trycua/cua/releases/tag/cua-driver-rs-v0.25.0)
+are the supported integration references. No fork or upstream patch is used.
 
-The app exposes a bounded relative file list and an ephemeral UTF-8 text preview
-for the teammate workspace. It never returns the host path, Docker resource
-name, browser-debug endpoint, cookie store, or process handle to React or the
-model.
+`local_computer/cua.rs` starts `cua-driver.exe mcp --direct --no-overlay`
+using upstream's stdio MCP interface. It does not install Cua's separate agent,
+start its daemon, register login tasks, or expose a network listener. Each grant
+has its own process, private temporary configuration, bounded permission
+manifest, and Windows kill-on-close job. Only Mivlet-owned processes are stopped.
+The inherited environment is cleared; only required Windows paths are retained.
+Optional telemetry and update checks are disabled by documented flags.
 
-Conversation artifact previews read the immutable published copy through the
-same encrypted receipt, digest, workspace/agent and generation checks as opening
-a file. The main window receives at most 256 KB of UTF-8 text or an 8 MB raster
-image as an ephemeral preview. Office files and larger images retain the verified
-open-copy action. Previewing never navigates to a model-provided local path or
-renders executable HTML. Narrow layouts use a focus-trapped preview dialog.
+`resources/cua-driver/runtime.json` pins the archive and executable hashes.
+`prepare-cua-driver.mjs` verifies both hashes and the Cua AI Inc Authenticode
+signature before installing the build resource. The native boundary verifies the
+executable hash again and holds a deny-write file handle while it is running.
+The normal `pnpm tauri:dev` and `pnpm tauri:build` flows prepare this resource.
+Release resources resolve relative to Tauri's resource directory; development
+uses the source resource directory.
 
-## Storage and lifecycle
+The executable imports Windows system libraries. Native computer use requires
+Windows x64 and the installed Mivlet application, including WebView2; it does not
+require user-installed Docker, Python, Node, uv, an MCP client or a Cua app.
+Build tools and the selected model provider's own prerequisites remain separate.
+Missing or incompatible resources fail closed with repair guidance.
 
-Each opaque workspace/teammate scope owns:
+Cua's runtime is MIT licensed. The bundle includes its license, a target-specific
+normal/build dependency inventory, transitive notices, Inter's OFL notice, and
+exact source archives for MPL-covered crates. The collector uses the pinned
+Cargo.lock and verifies source hashes. These files accompany the executable;
+regenerate and review them when changing the upstream pin. The upstream SDK DLL
+is not used or bundled. Cua cloud services and orchestration are not dependencies.
 
-- a Docker volume mounted at `/home/fable`, preserving the Linux home,
-  applications' settings, downloads, and Chromium profile across container
-  replacement;
-- a separate labelled volume at `/home/agent` for the unprivileged agent's
-  terminal home and tool configuration;
-- one Mivlet-owned host directory mounted at `/home/fable/Workspace`, providing
-  the narrow file bridge used by approved file tools and the trusted UI; and
-- one labelled container whose ownership and scope labels must match before
-  Mivlet reuses, starts, stops, or replaces it.
+## Permission and input
 
-The first setup builds the bundled `fable-local-computer` image. Setup fails
-closed if Docker Desktop's WSL 2 Linux engine is unavailable or the bundled
-image context is missing. The expected image tag, actual image ID, and runtime
-configuration version are checked at startup. A mismatch replaces the system
-container while retaining both labelled home volumes and the scoped workspace.
+Computer Use follows the existing global approvals setting. Full Access resolves
+exact single-use tool approvals automatically; other modes use the existing
+approval queue. There is no separate per-app permission prompt. The agent lists
+open applications and selects an opaque window ID itself, asking only when the
+user's intended target is ambiguous. Native execution consumes the exact approval
+and binds workspace, agent, request, window identity and turn generation. Only
+one Mivlet agent can hold computer control at a time, in either delivery mode.
 
-Computer options exposes Stop, Restart, and Update system. Each action revokes
-authority immediately, cancels agent processes, drains admitted operations, and
-invalidates the browser connection before changing the container. Restart and
-update finish paused and require an explicit choice of who continues. Save open
-work first: saved files persist, but stopping applications can lose unsaved work.
+Window identity includes PID, process creation time, HWND, thread and class. A
+random native window property detects HWND reuse even within one process.
+Inaccessible, protected and elevated targets fail closed. `local-app-select`
+defaults to `deliveryMode: "background"`. Selection and supported element actions
+do not activate the target. A foreground operation requires a new exact selection
+with `deliveryMode: "foreground"` under the existing approval policy, then a new
+observation. The native lease fixes the mode; action arguments and driver hints
+cannot change it. Full Access continues to resolve exact approvals automatically.
 
-At most two Mivlet computers may run or sleep at once; sleeping computers still
-reserve their memory slot. Start admission is serialized across computers. The
-Docker restart policy is `no`, so an engine restart does not silently start all
-agent desktops. Existing containers receive the same policy when started.
+Both modes require the exact window to remain open, visible, non-minimized and
+unreplaced. Mivlet never restores minimized windows automatically. Foreground
+mode revokes on focus loss. Background mode allows work in other applications,
+but revokes when the target or an owned popup becomes foreground, or when native
+input hooks detect physical typing/clicking/scrolling in the target. The hooks
+retain only the target HWND, never keys, text or input history. Already active
+windows can be selected in background mode; physical input still stops control.
 
-While Mivlet is running, a computer with no admitted operation and no active
-viewer sleeps after 30 minutes of inactivity. Idle checks and viewer/operation
-admission share the native authority lock. Sleep uses Docker pause to freeze
-CPU activity while preserving application memory; it keeps its RAM allocation.
-Starting the computer unpauses it with control remaining explicitly paused.
-The native monitor stops with Mivlet and does not promise work after app exit.
-These semantics follow Docker's [pause](https://docs.docker.com/reference/cli/docker/container/pause/)
-and [restart policy](https://docs.docker.com/engine/containers/start-containers-automatically/) contracts.
+Background `local-app-observe` returns accessibility structure without an image.
+Element clicks, append text via UIA SetValue, and element scrolling are attempted
+with Cua's background mode. Text appends to the control's value, not the caret;
+caret editing needs foreground mode. Screenshots, pixel actions and keys require
+foreground mode before dispatch. WPF `HwndWrapper` input also requires foreground
+because the pinned driver documents self-activation in those providers. Other
+apps can reject background input; support is per control, not guaranteed by an
+application name.
 
-Closing Mivlet's main window immediately removes viewer capabilities and blocks
-new computer and provider work. Native shutdown revokes every known computer,
-drains admitted actions, cancels supervised commands and pending downloads, and
-stops retained provider processes before exiting. The Linux container and saved
-state may remain alive; ordinary conversations do not continue after app exit.
+A native preflight refusal returns `foreground-required` with
+`inputDispatched: false`, consumes the observation, and does not call Cua. The
+executor then requires explicit foreground selection and observation before any
+mutation. A Cua error, timeout or disconnect is an uncertain outcome: revoke,
+do not replay, and require a fresh user request to inspect the result. Driver
+`background_unavailable` is not proof that no input occurred. No error silently
+switches mode or repeats input.
 
-## Generated artifacts
+The compact native activity window has a Stop button and a global Ctrl+Alt+Esc
+shortcut. It runs on its own Windows message thread and does not depend on React,
+the model, a driver reply or accessibility calls. Missing Stop support prevents
+a grant, as does failure to install the native input hooks. Stop removes the active grant and observations, cancels operation
+tickets, advances the durable generation, terminates the owned driver, and drains
+old work. Queued input cannot acquire a new grant. Input already handed to Windows
+may have taken effect and cannot be undone; unknown outcomes are never retried
+automatically. Runtime failure, restart and reconnect require a fresh user turn,
+current discovery and another exactly authorized selection. A stopped turn cannot
+silently obtain a new lease, including under Full Access. If background input was
+in flight, a separate cleanup worker waits for the killed process to exit before
+restoring Cua's temporary NOACTIVATE flag and, for the pin's XAML/Chromium shield,
+enabled state. Identity is checked again and real modal owners remain disabled.
+New selection stays blocked until cleanup succeeds; Stop never waits for UIA or
+window restoration. Already submitted application work can still complete.
 
-The explicit `computer-artifact` tool publishes one generated Workspace file
-under an exact approval and the current agent-control generation. It accepts
-PDF, DOCX, XLSX, PPTX, CSV, TXT, Markdown, PNG, JPEG, GIF, and WebP files of at
-most 25 MiB. Relative paths, opened file handles, size, and type signatures are
-checked; links, hidden path components, host paths, executables, HTML, SVG,
-macro-enabled Office files, embedded Office programs, and external Office
-relationships are rejected. Office packages must contain the matching standard
-main part, content type, and root relationship metadata.
+Authority checks surround transport dispatch and response. One request is
+outstanding per driver. The dispatch fence and owned process termination are
+independent of the response lock, so a blocked accessibility provider cannot hold
+Stop behind its reply. Responses from retired grants are discarded. Permissions
+expire after 30 minutes or five minutes of inactivity; observations expire after
+30 seconds, are consumed once, and are invalidated by window size changes.
 
-PDFs pass a strict parser-backed structural validator before publication and
-again before opening. The accepted subset has one PDF header and final marker,
-at least one page, bounded object, page, node, and stream expansion counts, and
-no encryption, forms, scripts, actions, external streams, multimedia, or
-embedded files. The validator parses indirect and compressed object-stream
-objects rather than relying on byte-pattern removal. It rejects unsafe input; it
-does not rewrite or claim to sanitize a document.
+This is an authorization boundary, not application sandboxing. A permitted app
+can access files, navigate or send information through its own UI. Dialogs and
+shortcuts may change context. Mivlet restricts keys and checks the selected
+window and delivery mode, but cannot make the shared desktop equivalent to a VM.
+Users must finish password and private sign-in steps themselves; detected password
+fields or credential-shaped text stop observation. Arbitrary sensitive screen
+content cannot be reliably classified, so choose non-sensitive windows.
 
-The guest exposes PptxGenJS 4.0.1 through `NODE_PATH` for editable slide
-generation, LibreOffice Impress for presentation editing and PDF conversion,
-and Poppler command-line tools for PDF inspection and page rendering. The image
-build generates all four document formats, renders the document and
-presentation PDFs, and verifies LibreOffice's cached spreadsheet recalculation.
+## Tool and provider paths
 
-Publication copies the bytes outside the guest mount. An opaque ID and
-credential-free metadata return in the tool result, which persists with the
-conversation. The existing encrypted private-workspace document store holds
-the authenticated scope and digest receipt; retired artifact tables are not
-reintroduced. The main Mivlet window can open the receipt only for its saved
-agent and a current generation. Native code verifies the immutable published
-copy against its receipt, then opens a fresh copy through Windows' registered
-file application. Edits to that opened copy do not alter the published version.
-No host path, file contents, or native digest enter the conversation receipt.
-Publication and open-copy folders each allow at most 256 files per computer.
+The driver is private to Rust; React receives no driver methods, process handles,
+raw accessibility tokens or screenshots. Native code only exposes:
 
-## Tool boundary
+- `local-app-list/select`: scoped discovery and exact window selection through
+  the ordinary global approval boundary.
+- `local-app-observe`: bounded untrusted accessibility text and opaque controls.
+- `local-app-action`: click, bounded non-secret text, scrolling and navigation keys
+  tied to one fresh observation. Results report input dispatch and require a new
+  observation to confirm the actual effect.
+- `local-desktop-observe/action`: the same target and authority with a bounded
+  window PNG, delivered natively by a supported provider adapter.
 
-- `read-file` and `write-file` are confined to the exact teammate workspace.
-  Absolute paths, traversal, links, junctions, and canonical escapes fail.
-- `run-shell` executes as the unprivileged `agent` user (UID 1001) in
-  `/home/fable/Workspace`, with a 60-second timeout and bounded output. It never
-  falls back to Command Prompt, PowerShell, or another host shell.
-- `local-browser` accepts a credential-free HTTP(S) URL under exact approval.
-  The model receives only bounded title/origin metadata.
-- `local-browser-observe` returns bounded visible page text, at most 40 named
-  controls, and up to 16 tabs. Input values, editable text, hidden content, and
-  credential-shaped containers are excluded. References bind the current
-  generation and observation; mutations consume the observation once.
-- `local-browser-action` supports exact referenced click, fill, selection,
-  allowlisted keys, and file upload. Uploads read at most 25 MiB from a verified
-  opened Workspace file, then stage an immutable guest copy inaccessible to
-  agent processes before binding it to the observed file input.
-- `local-browser-tab` opens normalized HTTP(S) URLs or switches/closes an exact
-  observed tab. Downloads use the shared Workspace/Downloads directory.
-- `local-desktop-observe` and `local-desktop-action` support native screenshots
-  and bounded pointer, drag, scroll, text, and keyboard input. Observations
-  expire after 30 seconds, are single-use, and bind pixel dimensions. A resized
-  desktop requires a new observation. Private browser surfaces, visible secret
-  fields, and credential-shaped text input fail closed for human completion.
-- Desktop images are available only to Codex models whose live model catalog
-  advertises image input. Native code binds pixels to the exact pending provider
-  call, arguments, approved scope, generation, and response. JPEG bytes stay in
-  native memory until a checked image response goes directly to the ephemeral
-  provider session. React and Mivlet's saved transcript receive metadata only.
-  Other providers retain structured browser, terminal, and file tools.
-- Every computer tool requires an exact, single-use persisted approval with
-  workspace, agent, and generation binding. Agent observation, files, terminal,
-  browser, and desktop operations share native admission tickets. Takeover
-  revokes tickets immediately, cancels guest agent processes, and drains old
-  operations before enabling human input. Late results are discarded. A drain
-  timeout leaves control paused with an explicit retry.
+Structured tools require an actual connected provider/model route with Mivlet
+tool execution support. Image input metadata alone cannot enable screenshots.
 
-Website sign-in happens inside the container browser. Mivlet does not scrape its
-cookies or translate that browser session into an application credential.
-Before model image capture, native checks inspect visible X11 window metadata
-and AT-SPI password/modal roles without reading text values. Unknown browser
-dialogs and browser-owned file choosers require human control; approved
-structured uploads retain their Workspace confinement. The checks use the
-standard [AT-SPI roles](https://gnome.pages.gitlab.gnome.org/at-spi2-core/libatspi/enum.Role.html)
-and [X11 modal window properties](https://apol.pages.freedesktop.org/xdg-specs/wm-spec/latest/ar01s05.html).
-
-## Isolation controls
-
-The container is limited to two CPUs, 2 GiB memory plus 1 GiB additional swap,
-512 processes, and bounded shared-memory and temporary filesystems. Docker
-publishes a native-authenticated gateway on a random loopback-only host port. Mivlet invokes
-Docker with argument arrays rather than a host shell, validates labelled
-resources before reuse, and keeps resource identifiers native.
-
-Root initializes service state and supervises the gateway. Chromium and the
-window manager use UID 1000. Approved commands use UID 1001, with an empty
-capability bounding set, `NoNewPrivs`, and no X or browser credentials. Files,
-Writer, spreadsheets, and the terminal display use UID 1002 with the same
-privilege drop and a separate application home. Root initialization refuses
-symlinked directories before changing ownership or permissions.
-
-The fixed native GUI launcher requires [Landlock ABI 6 or newer](https://docs.kernel.org/userspace-api/landlock.html)
-and fails closed when unavailable. It allows application files, Workspace, and
-required system runtime files while denying the browser profile and private
-service state. X authenticates GUI applications through the Unix socket peer's
-UID using `SI:localuser:apps`; those applications receive no copyable X cookie.
-A root-owned preload installs an additional deny-all-execution
-Landlock rule and seccomp filter before application code runs. This blocks Open
-With shell commands, custom executables, direct dynamic-loader invocation, and
-memory-file execution. Writable home, Workspace, and temporary mounts are
-`noexec,nosuid,nodev`; the app sandbox denies TCP and scopes signals. The XFCE
-panel and desktop launchers are replaced by Mivlet's fixed application buttons.
-
-Terminal uses a root-created PTY: its closed-execution xterm display is UID 1002
-and its interactive shell is UID 1001. The narrowly allowed root launcher accepts
-no arguments and acknowledges only after the display guard and shell privilege
-checks succeed. Its supervisor shares the shell operation lock, rejects queued
-concurrent commands, and kills UID 1001 descendants including detached sessions
-on completion or cancellation. The GUI applications retain unsaved documents
-through takeover; Mivlet drains their admitted native input and launch operations.
-
-Chromium uses anonymous debugging pipes. There is no TCP CDP listener; the
-native-only gateway translates its authenticated WebSocket to those pipes.
-The root service's random credential stays in native memory and a private guest
-directory, outside the renderer and model. Human viewing uses a distinct,
-ephemeral native capability. Browser uploads are copied from verified artifact
-bytes into root-owned staging readable by Chromium and inaccessible to UID 1001,
-preventing a later Workspace symlink swap from changing the upload. Staging
-limits are 32 MiB per file, 128 MiB total, and one-hour expiry. Browser downloads
-first enter a private UID 1000 directory under GUID filenames. The root gateway
-publishes completed files up to 25 MiB into `Workspace/Downloads` using held
-directory handles, refusing symlinks and overwrites. A replaced Downloads link
-therefore cannot redirect Chromium writes into its profile. Safe completion or
-failure status is available through structured browser observations. Revocation
-cancels active downloads and drains publication already in progress.
-
-The container drops capabilities by default and adds the bounded capabilities
-needed by Chromium's SUID sandbox and root initialization/process cancellation.
-Chromium keeps its sandbox enabled and its built-in password manager disabled.
-LibreOffice macro execution and extension installation/removal are disabled by
-finalized system policy. Native admission prevents new Mivlet-issued input after
-revocation; ordinary page scripts and existing trusted GUI behavior can continue.
-This is a layered desktop boundary, not a claim that third-party GUI applications
-or the shared X server are free from exploitable vulnerabilities.
-
-## Limits
-
-- Containers share the Docker Linux kernel and Docker daemon trust boundary.
-  This is materially separate from the user's Windows desktop but weaker than a
-  dedicated virtual machine or remote hardware boundary.
-- Default Docker networking remains available. The current implementation does
-  not yet provide per-teammate egress allowlists, DNS policy, or network
-  accounting.
-- The scoped workspace is an intentional host bind mount. A vulnerability in an
-  approved container process could affect files inside that scope, though not
-  arbitrary host paths through Mivlet's interface.
-- Package updates, image signing, vulnerability response, resource telemetry,
-  container reset/export, and public installer validation remain incomplete.
-- Tools expose no arbitrary selector/script channel, host clipboard, or secure
-  secret injection. Structured text and screenshots are untrusted evidence;
-  private sign-in requires human control. Visual image delivery currently uses
-  the Codex adapter; other provider image bridges are not implemented.
-
-## Verification
-
-Portable tests cover scope derivation, resource naming, Docker argument
-construction, path confinement, file projection, URL policy, generation fences,
-and exact control references. Live tests require Docker and exercise image
-build, container startup, persistence across replacement, Chromium sandboxing,
-screen capture, terminal execution, browser navigation, and human-control
-fencing. Those tests prove the local machine under test only.
-
-## Component selection and stream transport
-
-The September 2026 review compared the actual Mivlet container boundary with
-three maintained upstream projects:
-
-| Component | Verified upstream | Decision |
+| Implemented adapter/route | Image and tool response path | Screenshot availability |
 | --- | --- | --- |
-| KasmVNC | [1.5.0 release](https://github.com/kasmtech/KasmVNC/releases/tag/v1.5.0), July 29, 2026; GPL-2.0 server and MPL-2.0 noVNC-derived client | Use its desktop streaming server and a small decoder bundle, behind Mivlet's authority boundary. |
-| Cua | [Current Rust driver source](https://github.com/trycua/cua/tree/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/cua-driver) and [Python server package](https://github.com/trycua/cua/blob/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/python/computer-server/pyproject.toml); MIT project, Rust driver 0.23.2 and Python computer-server 0.3.45 | Retain Mivlet's native tools. Cua's newer Rust driver provides a possible later accessibility integration, but importing its complete server adds another session, tool, and policy boundary. |
-| Browser Use | [0.13.10 release](https://github.com/browser-use/browser-use/releases/tag/0.13.10), September 4, 2026; MIT, Python 3.11+ | Keep Mivlet's native CDP implementation. Its [Actor API](https://github.com/browser-use/browser-use/blob/0.13.10/browser_use/actor/README.md) can attach without its Agent runtime, but importing the full package adds provider SDKs, telemetry configuration, and a Python dependency graph for capabilities already reachable through CDP. |
+| Codex app-server | Existing pending dynamic-tool claim and native `inputImage` response | Models advertising image input in the current runtime catalogue |
+| Direct OpenAI API | Chat Completions tool results remain together; native code inserts a labelled `image_url` user message immediately after them | `gpt-5.2`, `gpt-5`, `gpt-4.1` with current tool/vision capability and route checks |
+| Direct Anthropic API | Native base64 PNG inside the exact `tool_result`; parallel results share one following user message | `claude-sonnet-4-6`, `claude-opus-4-8` with current tool/vision capability and route checks |
+| Direct xAI API | OpenAI-compatible Chat Completions image message after all tool results | `grok-4` with current tool/vision capability and route checks |
+| Custom API endpoint | Text/tool transport; endpoint configuration establishes neither image support nor an audited image profile | Unavailable, even when model metadata claims vision |
+| Managed Claude, Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
+| Antigravity ACP | Text prompts and provider-owned permission decisions; sessions currently register no Mivlet MCP servers | Unavailable for the same bridge reason |
+| Legacy Gemini native parser | Image-capable upstream protocol, but this direct route is retired from Mivlet's provider registry and native egress allowlist | Not a reachable provider route; this change does not reactivate it |
 
-Cua's Python server requires Python 3.12–3.13, while the Debian image uses 3.11.
-Its [Linux Python accessibility handler](https://github.com/trycua/cua/blob/5cd40c1d0222bc378635f6f65444cf3ececf7979/libs/python/computer-server/computer_server/handlers/linux.py)
-contains simulated accessibility data; the newer Rust driver has real
-AT-SPI/X11/Wayland support, so those are distinct integration candidates.
-Mivlet does not install a second autonomous agent loop from either project.
+The managed/ACP restriction describes Mivlet's current adapters, not an upstream
+claim that ACP, MCP or those models cannot carry images. Current ACP content
+supports images and MCP forwarding, but no such native bridge is configured here.
 
-KasmVNC 1.5 adds H.264/H.265/AV1 video support through browser WebCodecs. The
-actual encoding depends on browser/host capabilities; rectangle decoding remains
-available when those codecs are unavailable. The image limits streaming to 30
-frames per second. It pins the Debian bookworm amd64 release package by SHA-256
-`770fd3df51510beecc89666879d82faf411276e68c6e11df612f736b891b5f71` and builds
-the matching [client commit](https://github.com/kasmtech/noVNC/tree/475ecfa5356579ef222983c7ce4619a7576a3bce)
-from an archive pinned to
-`325084abe7af9174812f06933a9f154d044b485254eda9f49ce511552a262420`.
-This is KasmVNC's client protocol, rather than an interchangeable stock noVNC
-package. The decoder adapter uses the source's six-argument RFB constructor,
-removes its own input listeners, disables automatic session resizing and WebRTC,
-and retains Mivlet's viewer UI. Upstream client source, build adapter, MPL license,
-and pako license are included in the image. The server remains GPL software;
-the separate MIT-licensed Cua integration named Kasm does not relicense it.
+Direct API sessions bind the installation identity, persisted provider route,
+model, workspace, agent and computer generation. Rust reconstructs completed
+provider tool calls from bounded SSE and issues opaque single-use approval IDs;
+renderer-authored tool calls cannot authorize screenshot capture. Existing global
+approvals still authorize the exact tool and arguments. The native screenshot
+is paired with the exact unmodified tool result before one HTTP request, with no
+automatic image retry. It is discarded after consumption, cancellation or a
+30-second delivery timeout. Only one screenshot request per provider response
+is accepted. The renderer and durable transcript contain observation metadata.
 
-The [server configuration](https://github.com/kasmtech/KasmVNC/blob/v1.5.0/unix/kasmvnc_defaults.yaml)
-disables pointer, keyboard, clipboard, and client setting overrides. Its account
-has read permission only. Kasm's local WebSocket still requires HTTP Basic
-authentication; the gateway supplies a private read-only credential and the
-[required Origin header](https://github.com/kasmtech/KasmVNC/blob/v1.5.0/common/network/websocket.c).
-Legacy RFB authentication is disabled only inside that authenticated transport,
-and direct RFB ports are disabled. Human input travels through a separately
-authenticated typed native operation, never through the viewing stream.
+At capture and again before egress, native code checks the current generation,
+selected-window identity, selection ID, latest unconsumed observation, dimensions,
+privacy state and foreground lease. Stop cancels the provider request and retires
+pending calls; late captures cannot restore a closed session. Replacing an
+observation or dispatching input prevents delivery of the old screenshot. A fresh
+observation confirms effects after input. Normal provider-session cleanup leaves
+the existing computer-control policy unchanged.
 
-Live guest protocol probes verified private Chromium CDP, blocked unauthenticated
-gateway access, absence of listeners on 5900/5901/9222, read-only rejection of raw
-RFB pointer input, and approved pointer movement. Thirty guest-local input calls
-measured roughly 32 ms median and 40 ms p95 on the development machine; this is
-transport/helper evidence, not an end-to-end visual latency guarantee. A clean
-idle desktop used about 426 MiB in one sample. Native UI and release verification
-must assess the complete frame-to-input experience separately.
+Each real tool needs Mivlet's exact single-use tool approval. Provider authentication and credential
+custody remain in existing adapters. There is no local shell, registry access,
+arbitrary driver invocation, inherited plugin execution or cloud fallback.
+Hosted browser/process tools retain their separate deployment boundary.
+
+## Files and saved computers
+
+The scope hash and `local-computers/<scope>/workspace` directory are unchanged.
+File listing, reading, writing, repository ZIP import and artifact publication
+remain confined to this explicit Mivlet-owned scope. Paths are relative; legacy
+`/home/fable` or `/home/agent` paths never become arbitrary host filesystem access.
+Artifacts retain strict type/content validation and immutable publication copies.
+The removed Linux image no longer supplies office, coding or shell programs.
+
+`native-control.json` stores only generation and the retired-computer marker.
+Loading a compatible legacy `control.json` advances its generation, marks the old
+computer retired and preserves the complete old file. No input permission is
+persisted. The UI explains that former shared Workspace files remain accessible
+in Files. Files saved only in Docker home volumes require a deliberate manual
+Docker export. Mivlet does not start/stop old containers, delete volumes, uninstall
+Docker/WSL or automatically migrate private browser profiles. Existing agents,
+conversations, provider sign-ins and hosted foundations keep their identities.
+
+## Evidence
+
+See [native acceptance evidence](../development/local-computer-verification.md).
+Standalone driver probes, native-boundary tests, mocked provider tests, live
+Mivlet conversations and packaged-app checks are separate evidence classes.
+No passing import, build or mock establishes live provider image understanding,
+input cancellation or packaged installation acceptance.

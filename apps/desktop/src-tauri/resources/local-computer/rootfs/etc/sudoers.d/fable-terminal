@@ -1,6 +1,0 @@
-# The native boundary owns the control audit. This exact launcher cannot write
-# the host kernel audit log and must not require CAP_AUDIT_WRITE to open a shell.
-Defaults!/usr/local/bin/fable-agent-terminal env_reset, !setenv, !log_allowed
-fable ALL=(root) NOPASSWD: /usr/local/bin/fable-agent-terminal ""
-Defaults!/usr/local/bin/fable-gui-launch env_reset, !setenv, !log_allowed
-fable ALL=(root) NOPASSWD: /usr/local/bin/fable-gui-launch files, /usr/local/bin/fable-gui-launch writer, /usr/local/bin/fable-gui-launch spreadsheet

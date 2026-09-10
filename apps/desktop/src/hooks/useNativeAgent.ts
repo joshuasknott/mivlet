@@ -1286,7 +1286,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       }
       return persisted;
     },
-    [backend, options.providers],
+    [backend, options.providers, options.computer?.workspaceId, options.computer?.agentId],
   );
 
   const retry = useCallback(

@@ -50,18 +50,19 @@ owners, telemetry, backups, and access controls.
 - Add a negative replay/freshness test before restoring the effect path. Never
   repair by weakening the approval assertion.
 
-## Local teammate computer incident
+## Native computer incident
 
-- Return control if possible, then stop the exact labelled container. Do not
-  remove a container or volume until its scope labels have been verified.
-- Preserve the container inspection, image ID, bounded logs, and affected scoped
-  workspace. Treat files and browser state inside the volume as sensitive.
-- If the image is suspect, rebuild from a clean checkout and replace the
-  container. Retain or discard the persistent volume only through an explicit
-  user decision because it contains the teammate's Linux home and browser
-  profile.
-- An incident in one container does not justify deleting unrelated teammate
-  volumes or the user's Docker installation.
+- Use the native Stop button or Ctrl+Alt+Esc. This revokes the grant and stops
+  Mivlet's owned driver; input already handed to Windows may have taken effect.
+- Inspect the selected app before deciding whether a consequential input took
+  effect. Never replay an input with an unknown outcome automatically.
+- Preserve the exact approval, generation and bounded error evidence. Keep
+  screenshots and selected-app content out of ordinary diagnostic logs.
+- A missing or mismatched driver requires repairing the Mivlet installation.
+  Start a fresh user request after resolving the fault. Discovery and window
+  selection use global approvals; a stopped turn cannot resume control.
+- Preserve scoped workspace files and retired Docker volumes. Do not stop
+  unrelated containers, delete user files or uninstall Docker/WSL as recovery.
 
 ## Optional account, sync, or hosted incident
 

@@ -162,14 +162,11 @@ export function createDesktopToolExecutor(
         throw new Error("Computer control changed or is paused. Wait for the user to return control, then observe the current state before acting.");
       }
     };
-    if (toolName === "run-shell" && !admittedComputer?.ready && !(hostedShellRequested && options.hostedComputer?.ready)) {
-      throw new Error("Set up this agent's isolated local computer before asking it to run terminal commands.");
+    if (toolName === "run-shell" && !(hostedShellRequested && options.hostedComputer?.ready)) {
+      throw new Error("Shell execution requires an explicitly configured hosted computer. Native Windows control has no shell tool.");
     }
     if ((toolName === "read-file" || toolName === "write-file") && !admittedComputer?.ready) {
       throw new Error("Set up this agent's local computer before asking it to use files.");
-    }
-    if ((toolName === "local-browser" || toolName === "local-browser-observe" || toolName === "local-browser-action") && !admittedComputer?.ready) {
-      throw new Error("Set up this agent's local computer before asking it to use its browser.");
     }
     checkComputerAuthority();
     if (admittedComputer) {

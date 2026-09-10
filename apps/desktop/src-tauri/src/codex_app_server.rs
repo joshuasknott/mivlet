@@ -1606,7 +1606,7 @@ pub fn respond_codex_app_server_approval(
                     &image,
                 ) {
                     Ok(ticket) => {
-                        items.push(json!({"type":"inputImage","imageUrl":format!("data:image/jpeg;base64,{}", STANDARD.encode(&image.jpeg))}));
+                        items.push(json!({"type":"inputImage","imageUrl":format!("data:image/png;base64,{}", STANDARD.encode(&image.png))}));
                         delivery = Some(ticket);
                     }
                     Err(_) => {
@@ -1799,7 +1799,9 @@ mod tests {
         assert!(super::take_desktop_capture(&mut pending, &response).is_err());
         let capture = || crate::local_computer::desktop_tools::NativeDesktopCapture {
             output: "native-metadata".into(),
-            jpeg: vec![1, 2, 3],
+            png: vec![1, 2, 3],
+            observation_id: "observation-a".into(),
+            selection_id: "selection-a".into(),
             generation: 1,
             workspace_id: "workspace-a".into(),
             agent_id: "agent-a".into(),
@@ -1817,7 +1819,7 @@ mod tests {
             super::take_desktop_capture(&mut pending, &response)
                 .unwrap()
                 .unwrap()
-                .jpeg,
+                .png,
             vec![1, 2, 3]
         );
         assert!(super::take_desktop_capture(&mut pending, &response).is_err());

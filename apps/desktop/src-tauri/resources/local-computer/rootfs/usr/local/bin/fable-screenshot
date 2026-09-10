@@ -1,4 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-
-exec import -display :99 -window root -quality 72 jpg:-

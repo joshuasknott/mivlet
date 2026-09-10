@@ -1,3 +1,5 @@
+import { SchedulesDialog } from "../components/agents/SchedulesDialog";
+import { WorkspaceMenu } from "../components/agents/WorkspaceMenu";
 import { Brand } from "../components/Brand";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { useConversationScroll } from "../hooks/useConversationScroll";
@@ -14,7 +16,6 @@ import {
   useState,
 } from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import type { FableAgentProfile } from "@fable/protocol";
 import { SettingsModal } from "../components/settings/SettingsModal";
@@ -78,6 +79,7 @@ const OnboardingPage = lazy(() =>
     default: module.OnboardingPage,
   })),
 );
+const LocalSchedules = lazy(() => import("../components/settings/LocalSchedules").then((module) => ({ default: module.LocalSchedules })));
 const SettingsPage = lazy(() =>
   import("../components/pages/SettingsPage").then((module) => ({
     default: module.SettingsPage,
@@ -125,6 +127,10 @@ export function ChatWorkspace() {
     const saved = window.localStorage.getItem("fable-theme");
     return saved === "dark" ? "dark" : "light";
   });
+  const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const [scheduleAgentId, setScheduleAgentId] = useState<string>();
+  const openSchedules = (agentId?: string) => { setScheduleAgentId(agentId); setSchedulesOpen(true); };
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [accountDialog, setAccountDialog] = useState<"usage" | "sign-out" | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
@@ -135,12 +141,6 @@ export function ChatWorkspace() {
   const [workPanelOpen, setWorkPanelOpen] = useState(false);
   const isPhone = useMediaQuery("(max-width: 650px)");
   const [mobileConversation, setMobileConversation] = useState(false);
-  const [pageVisible, setPageVisible] = useState(() => document.visibilityState !== "hidden");
-  useEffect(() => {
-    const update = () => setPageVisible(document.visibilityState !== "hidden");
-    document.addEventListener("visibilitychange", update);
-    return () => document.removeEventListener("visibilitychange", update);
-  }, []);
   const navigationPending = useRef(false);
   const [agentEditorOpen, setAgentEditorOpen] = useState(false);
   const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
@@ -160,7 +160,6 @@ export function ChatWorkspace() {
     threadId: selectedThreadId,
     executionAgentId: selectedProjectId ? projectExecutor?.agentId : undefined,
     executionProviderId: selectedProjectId ? projectExecutor?.providerId || undefined : undefined,
-    thumbnailEnabled: workPanelOpen && pageVisible,
     onDictation: addDictationToComposer,
     onVoiceCancel: focusComposer,
   });
@@ -201,7 +200,7 @@ export function ChatWorkspace() {
     const target = { workspaceId: runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId, agentId: activeAgent.id };
     try {
       setSubmissionError("");
-      const node = await localComputer.prepareForTool("computer-shell");
+      const node = await localComputer.prepareForTool("read-file");
       if (currentRepositoryScope.current !== scope) return;
       const receipt = await importRuntimeRepository(target, node.generation);
       if (!receipt || currentRepositoryScope.current !== scope) return;
@@ -363,7 +362,7 @@ export function ChatWorkspace() {
         const { ids: connectorIds, tools: connectorTools } = await beginConnectorTurn();
         if (!projectIsCurrent()) return;
         const projectInstructions = batch ? `Shared project: ${batch.project.name}\nYou are ${activeAgent.name}. This conversation is shared with the user's agents. Read the recorded conversation before acting and identify your own contribution. Files available as context are the project sources explicitly supplied to this response. Other agents' computers and private files are not accessible through your computer tools.\n\nProject instructions:\n${batch.project.instructions}` : "";
-        const tools = conversationToolsForModel(connectorTools, computerToolsReady(localComputer.node), connected, selectedModel, localComputer.node?.plugins, imageApiConnected);
+        const tools = conversationToolsForModel(connectorTools, computerToolsReady(localComputer.node), connected, selectedModel, localComputer.node?.plugins, imageApiConnected, localComputer.node?.runtimeAvailable === true);
         const pluginInstructions = builtinPluginInstructions(prompt, localComputer.node?.plugins, tools.map((tool) => tool.name));
         const instructions = [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS, pluginInstructions, projectInstructions].filter(Boolean).join("\n\n");
         const preparedContext = await runtime.assembleConversationContext(prompt, {
@@ -448,7 +447,7 @@ export function ChatWorkspace() {
       imageApiConnected,
       localComputer.node?.lifecycle,
       localComputer.node?.plugins,
-      localComputer.node?.browserAvailable,
+      localComputer.node?.runtimeAvailable,
       localComputer.node?.controller,
       selectedReasoningEffort,
       selectedThreadId,
@@ -724,7 +723,7 @@ export function ChatWorkspace() {
   );
   const computerToolActive = agent.state.responseParts?.some((part) => part.kind === "tool" && part.state === "running" && (part.tool.startsWith("local-") || part.tool === "run-shell"));
   const activePresence = agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt), {
-    computerController: localComputer.node?.browserActive && (computerToolActive || (!agent.state.running && localComputer.controller === "human")) ? localComputer.controller : undefined,
+    computerController: localComputer.node?.control.status === "active" && computerToolActive ? localComputer.controller : undefined,
     providerUnavailable: runtime.runtimeSnapshotReady && !runtime.connectedAgentBackend,
     listening: voice.state.status === "listening",
   });
@@ -773,7 +772,6 @@ export function ChatWorkspace() {
     return [author.runId, { ...(profile ?? activeAgent), id: author.agentId, name: author.agentName, avatarSeed: profile?.avatarSeed ?? `blob-v1:${author.agentId}` }];
   })) : undefined;
   const screenPreviewUrl =
-    localComputer.snapshot?.previewDataUrl ??
     hostedBrowser.snapshot?.previewDataUrl;
   const approvalPanel = runtime.openApprovals.length ? (
     <Suspense fallback={null}>
@@ -802,12 +800,14 @@ export function ChatWorkspace() {
 
   return (
     <main
-      className={`desktop-frame desktop-frame--agents${selectedProjectId ? " desktop-frame--project" : ""}${(workPanelOpen || artifactPreview) && !marketplaceTab ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`}
+      className={`desktop-frame desktop-frame--agents${navigationCollapsed && !isPhone ? " desktop-frame--nav-collapsed" : ""}${selectedProjectId ? " desktop-frame--project" : ""}${(workPanelOpen || artifactPreview) && !marketplaceTab ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`}
       data-theme={theme}
       data-mobile-view={mobileConversation || marketplaceTab ? "conversation" : "list"}
     >
-      {scheduleNotice && dismissedScheduleNotice !== scheduleNoticeKey ? <aside className="scheduled-work-notice" aria-label="Scheduled work"><p role="status">{scheduleNotice}</p><div><button type="button" className="button button--secondary" onClick={() => { setSettingsTab("schedules"); setSettingsOpen(true); setDismissedScheduleNotice(scheduleNoticeKey); }}>View schedules</button><button type="button" className="button button--secondary" onClick={() => setDismissedScheduleNotice(scheduleNoticeKey)} aria-label="Dismiss scheduled work notice">Dismiss</button></div></aside> : null}
+      {scheduleNotice && dismissedScheduleNotice !== scheduleNoticeKey ? <aside className="scheduled-work-notice" aria-label="Scheduled work"><p role="status">{scheduleNotice}</p><div><button type="button" className="button button--secondary" onClick={() => { openSchedules(); setDismissedScheduleNotice(scheduleNoticeKey); }}>View schedules</button><button type="button" className="button button--secondary" onClick={() => setDismissedScheduleNotice(scheduleNoticeKey)} aria-label="Dismiss scheduled work notice">Dismiss</button></div></aside> : null}
       <AgentSidebar
+        collapsed={navigationCollapsed && !isPhone}
+        onToggleCollapsed={() => setNavigationCollapsed((value) => !value)}
         hidden={isPhone && (mobileConversation || marketplaceTab !== null)}
         connectors={runtime.connectorManifests}
         agents={runtime.agents}
@@ -846,8 +846,9 @@ export function ChatWorkspace() {
             )}
             accounts={runtime.connectorAccounts}
             connectorStatus={runtime.connectorStatus}
-            onUseConnector={(connector) => {
+            onUseConnector={(connector, prompt) => {
               runtime.useConnector(connector);
+              if (prompt) runtime.setComposerValue(`${runtime.composerValue}${runtime.composerValue && !/\s$/.test(runtime.composerValue) ? " " : ""}@${connector.id} ${prompt}`);
               setMarketplaceTab(null);
             }}
             onUseBuiltinPlugin={(id) => {
@@ -874,8 +875,8 @@ export function ChatWorkspace() {
         isPhone && !mobileConversation ? null : <Suspense fallback={null}><ProjectWorkspace name={selectedProject.name} activeTab={projectTab} onTabChange={setProjectTab}
           onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); } : undefined}
           headerActions={<>
-            <button type="button" className="project-room-action" aria-label={`Open ${activeAgent.name}'s computer`} onClick={() => { setArtifactPreview(null); setWorkPanelOpen((open) => !open); }}><Desktop size={19} aria-hidden="true" /></button>
-            <button type="button" className="project-room-action" aria-label="Edit project" disabled={projectBusy} onClick={() => { setEditingProjectId(selectedProject.id); setProjectError(""); setProjectEditorOpen(true); }}><DotsThree size={22} aria-hidden="true" /></button>
+            <button type="button" className="project-room-action" data-work-panel-toggle aria-label={`Open ${activeAgent.name}'s computer`} onClick={() => { setArtifactPreview(null); setWorkPanelOpen((open) => !open); }}><Desktop size={19} aria-hidden="true" /></button>
+            <WorkspaceMenu label="Project options" onSchedules={() => openSchedules()} onEdit={projectBusy ? undefined : () => { setEditingProjectId(selectedProject.id); setProjectError(""); setProjectEditorOpen(true); }} />
           </>}
           conversation={renderConversation()}
           files={projectFilesView()}
@@ -897,10 +898,11 @@ export function ChatWorkspace() {
       <section className="workspace agent-workspace" hidden={isPhone && !mobileConversation}>
         <AgentWorkspaceHeader
           agent={activeAgent}
+          onSchedules={() => openSchedules(activeAgent.id)}
           attentionCount={runtime.openApprovals.length}
           presence={activePresence}
           activity={agent.state.activity}
-          computerActive={Boolean(localComputer.node?.browserActive || hostedBrowser.opening)}
+          computerActive={Boolean(localComputer.node?.control.status === "active" || hostedBrowser.opening)}
           onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.focus()); } : undefined}
           panelOpen={workPanelOpen && !artifactPreview}
           onTogglePanel={() => { if (artifactPreview) { setArtifactPreview(null); setWorkPanelOpen(true); } else setWorkPanelOpen((open) => !open); }}
@@ -940,52 +942,7 @@ export function ChatWorkspace() {
             setSelectedThreadId(id); runtime.setComposerValue(""); setOptimisticUserMessage(""); setSubmissionError("");
           }}
           agentName={activeAgent.name}
-          localComputer={{
-            available: localComputer.available,
-            status: localComputer.node?.lifecycle,
-            browserAvailable: localComputer.node?.browserAvailable ?? false,
-            browserActive: localComputer.node?.browserActive ?? false,
-            browserProduct: localComputer.node?.browserProduct,
-            canGoBack: localComputer.snapshot?.canGoBack ?? false,
-            canGoForward: localComputer.snapshot?.canGoForward ?? false,
-            filesAvailable: Boolean(
-              localComputer.node &&
-              localComputer.node.lifecycle !== "unprovisioned" &&
-              localComputer.node.capabilities.includes("persistent-files"),
-            ),
-            files: localComputer.files,
-            filesLoading: localComputer.filesLoading,
-            filesError: localComputer.filesError,
-            filePreview: localComputer.filePreview,
-            filePreviewLoading: localComputer.filePreviewLoading,
-            filePreviewError: localComputer.filePreviewError,
-            controller: localComputer.controller,
-            loading: localComputer.loading,
-            provisioning: localComputer.provisioning,
-            busy: localComputer.browserBusy,
-            recoveryNeeded: localComputer.recoveryNeeded,
-            error: localComputer.error,
-            browserUrl: localComputer.snapshot?.currentUrl,
-            browserTitle: localComputer.snapshot?.title,
-            generation: localComputer.node?.generation ?? 0,
-            leaseExpiresAt: localComputer.node?.leaseExpiresAt,
-            viewport: localComputer.snapshot?.viewport,
-            onProvision: localComputer.provision,
-            onOpenViewer: localComputer.openViewer,
-            onStop: localComputer.stop,
-            onRestart: localComputer.restart,
-            onUpdateSystem: localComputer.updateSystem,
-            onOpenBrowser: localComputer.navigate,
-            onRefreshBrowser: localComputer.refresh,
-            onGoBack: localComputer.goBack,
-            onGoForward: localComputer.goForward,
-            onRefreshFiles: localComputer.refreshFiles,
-            onPreviewFile: localComputer.previewFile,
-            onCloseFilePreview: localComputer.closeFilePreview,
-            onTakeControl: localComputer.takeControl,
-            onReturnControl: localComputer.returnControl,
-            onLaunchApplication: localComputer.launchApplication,
-          }}
+          localComputer={localComputer}
           hostedComputer={{
             available: hostedComputer.available,
             status: hostedComputer.node?.status,
@@ -1006,7 +963,7 @@ export function ChatWorkspace() {
             onRefreshBrowser: hostedBrowser.refresh,
           }}
           screenPreviewUrl={screenPreviewUrl}
-          onClose={() => setWorkPanelOpen(false)}
+          onClose={() => { setWorkPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-work-panel-toggle]")?.focus()); }}
         /></Suspense>
       ) : null}
 
@@ -1074,20 +1031,8 @@ export function ChatWorkspace() {
         records={Object.values(agent.state.usageReceipts)} onClose={() => setAccountDialog(null)}
         onSignOut={async () => { await stopCurrentWork(); await runtime.signOutIdentity(); }} /></Suspense> : null}
 
-      {settingsOpen ? (
-        <SettingsModal activeTab={settingsTab} onSelectTab={setSettingsTab} onClose={() => setSettingsOpen(false)}>
-              <Suspense fallback={null}>
-                <SettingsPage
-                  runtime={runtime}
-                  theme={theme}
-                  onThemeChange={setTheme}
-                  activeTab={settingsTab}
-                  workspaceName={
-                    runtime.accountWorkspaceStatus.activeWorkspace.name ||
-                    "Mivlet workspace"
-                  }
-                  dictationCapability={voice.capability}
-                  onOpenScheduleResult={async (agentId, threadId) => {
+      {schedulesOpen ? <SchedulesDialog onClose={() => setSchedulesOpen(false)}><Suspense fallback={<p role="status">Loading schedules…</p>}><LocalSchedules runtime={runtime} initialAgentId={scheduleAgentId}
+                  onOpenResult={async (agentId, threadId) => {
                     const expectedScope = currentRepositoryScope.current;
                     const profile = runtime.agents.find((candidate) => candidate.id === agentId);
                     if (!profile) throw new Error("This schedule's agent is no longer available.");
@@ -1102,9 +1047,25 @@ export function ChatWorkspace() {
                     runtime.setComposerValue("");
                     setOptimisticUserMessage("");
                     setSubmissionError("");
-                    setSettingsOpen(false);
+                    setSchedulesOpen(false);
                     focusComposer();
                   }}
+      /></Suspense></SchedulesDialog> : null}
+
+      {settingsOpen ? (
+        <SettingsModal activeTab={settingsTab} onSelectTab={setSettingsTab} onClose={() => setSettingsOpen(false)}>
+              <Suspense fallback={null}>
+                <SettingsPage
+                  runtime={runtime}
+                  theme={theme}
+                  onThemeChange={setTheme}
+                  activeTab={settingsTab}
+                  workspaceName={
+                    runtime.accountWorkspaceStatus.activeWorkspace.name ||
+                    "Mivlet workspace"
+                  }
+                  dictationCapability={voice.capability}
+
                   titleId="settings-modal-title"
                 />
               </Suspense>
@@ -1136,7 +1097,7 @@ export function ChatWorkspace() {
             <div className="conversation-feed" ref={conversationScroll.contentRef} onClickCapture={(event) => {
               if (event.target instanceof Element && event.target.closest("summary")) conversationScroll.pauseFollowing();
             }}>
-              <ConversationFeed messages={messages} agent={activeAgent} authors={projectAuthors} requireAuthor={Boolean(selectedProjectId)} suppressLivePrompt={Boolean(selectedProjectId && suppressProjectPrompt)} state={agent.state} presence={activePresence} threadId={selectedThreadId}
+              <ConversationFeed showAuthor={false} messages={messages} agent={activeAgent} authors={projectAuthors} requireAuthor={Boolean(selectedProjectId)} suppressLivePrompt={Boolean(selectedProjectId && suppressProjectPrompt)} state={agent.state} presence={activePresence} threadId={selectedThreadId}
                 profileName={profileName} connectors={runtime.connectorManifests} optimisticPrompt={optimisticUserMessage}
                 onOpenConnector={(id) => { setMarketplaceConnectorId(id); setMarketplaceTab("plugins"); }}
                 workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId ?? ""}
@@ -1169,7 +1130,7 @@ export function ChatWorkspace() {
                       else void executePrompt(prompt);
                     }}>Continue</button>
                   </div> : null}
-                  {agent.state.recoverableAttempts.filter((attempt) => attempt.threadId === selectedThreadId).slice(0, 2).map((attempt) => <div className="conversation-attention" key={attempt.id}>
+                  {agent.state.recoverableAttempts.filter((attempt) => !agent.state.running && attempt.threadId === selectedThreadId && attempt.id === messages.at(-1)?.message.runId).slice(0, 1).map((attempt) => <div className="conversation-attention" key={attempt.id}>
                     <p>This response was interrupted. Your completed work remains in the conversation.</p>
                     <button type="button" disabled={agent.state.running || Boolean(projectBatch)} onClick={async () => {
                       const retryPrompt = attempt.exchanges?.filter((exchange) => exchange.role === "user").at(-1)?.content ?? "";
@@ -1191,7 +1152,7 @@ export function ChatWorkspace() {
                         resetCancellation();
                         const retryProvider = runtime.backendProviders.find((provider) => provider.id === attempt.providerId);
                         const retryModel = composerModels.find((model) => model.providerId === attempt.providerId && model.modelId === attempt.model);
-                        const tools = conversationToolsForModel(connectorTools, computerToolsReady(localComputer.node), retryProvider, retryModel, localComputer.node?.plugins, imageApiConnected);
+                        const tools = conversationToolsForModel(connectorTools, computerToolsReady(localComputer.node), retryProvider, retryModel, localComputer.node?.plugins, imageApiConnected, localComputer.node?.runtimeAvailable === true);
                         const pluginInstructions = builtinPluginInstructions(retryPrompt, localComputer.node?.plugins, tools.map((tool) => tool.name));
                         await agent.retry(attempt, tools, runtime.permissionMode,
                           [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS, pluginInstructions].filter(Boolean).join("\n\n"));
@@ -1248,7 +1209,7 @@ export function ChatWorkspace() {
               selectedModelLabel={selectedModelLabel}
               selectedReasoningEffort={selectedReasoningEffort}
               onSelectReasoningEffort={(reasoningEffort) => runtime.updateAgent(activeAgent.id, { reasoningEffort })}
-              placeholder={selectedProjectId ? "Message this project…" : `Message ${activeAgent.name}…`}
+              placeholder={selectedProjectId ? "Message this project…" : "Message…"}
               onSelectModel={(modelId) => {
                 runtime.selectModel(modelId);
                 runtime.updateAgent(activeAgent.id, { modelId, reasoningEffort: undefined });

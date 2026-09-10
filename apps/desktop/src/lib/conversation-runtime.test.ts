@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   createConversationRuntime,
   createDurableRunWriter,
@@ -124,6 +124,31 @@ describe("conversation runtime", () => {
     expect(transport.views[0].message.idempotencyKey).toBe("run-1:message:0");
     expect(transport.views[1].currentRevision.content).toBe("Complete");
     expect(transport.views[1].currentRevision.reason).toBe("completion");
+  });
+
+  it("appends from the thread head without loading historical messages", async () => {
+    const transport = transportFixture();
+    transport.getThread = vi.fn(async () => thread({
+      messageHead: { lastSequence: 10_000, lastMessageId: "previous-message" as never }
+    }));
+    transport.listMessages = vi.fn(async () => { throw new Error("History must not be loaded for writing."); });
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({ kind: "user", content: "Continue" });
+    await writer.checkpointAssistant("Done", true);
+
+    expect(transport.listMessages).not.toHaveBeenCalled();
+    expect(transport.getThread).toHaveBeenCalledTimes(1);
+    expect(transport.views.map((view) => view.message.sequence)).toEqual([10_001, 10_002]);
+    expect(transport.views[0].message.previousMessageId).toBe("previous-message");
+    expect(transport.views[1].message.previousMessageId).toBe(transport.views[0].message.id);
+  });
+
+  it("rejects writes when the thread no longer exists", async () => {
+    const transport = transportFixture();
+    transport.getThread = async () => null;
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await expect(writer.record({ kind: "user", content: "Hello" })).rejects.toThrow("no longer exists");
+    expect(transport.views).toHaveLength(0);
   });
 
   it("keeps updates on either side of tools in order with unique revision keys", async () => {

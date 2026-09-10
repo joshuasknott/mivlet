@@ -1,3 +1,4 @@
+import { PluginOverview } from "./marketplace/PluginOverview";
 import { useMemo, useRef, useState } from "react";
 import { BuiltinPlugins } from "./marketplace/BuiltinPlugins";
 import { builtinPluginEntries } from "../lib/builtin-plugins";
@@ -15,7 +16,6 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { ConnectorIcon } from "./ConnectorIcon";
-import { connectorGuides } from "./marketplace/connector-guides";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
 import {
@@ -55,7 +55,7 @@ export function PluginPanel({
   initialConnectorId?: string;
   workspaceId?: string;
   manifests: ConnectorManifest[];
-  onUseConnector: (connector: ConnectorManifest) => void;
+  onUseConnector: (connector: ConnectorManifest, prompt?: string) => void;
   onUseBuiltinPlugin?: (id: "browser" | "computer") => void;
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   onDisconnect: (connectorId: string) => void | Promise<void>;
@@ -371,7 +371,8 @@ function PlannedConnectorDetails({
 }) {
   return (
     <article className="connector-detail connector-detail--planned">
-      <div className="connector-detail__header">
+      <p className="connector-detail__eyebrow">Plugins</p>
+    <div className="connector-detail__header">
         <span
           className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
           aria-hidden="true"
@@ -409,7 +410,7 @@ function ConnectorDetails({
   connector, onUseConnector, onDisconnect, onRefresh, accounts, onSwitchAccount, onConnect, titleId,
 }: {
   connector: ConnectorManifest;
-  onUseConnector: (connector: ConnectorManifest) => void;
+  onUseConnector: (connector: ConnectorManifest, prompt?: string) => void;
   onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
   accounts: ConnectorAccountOption[];
@@ -421,7 +422,6 @@ function ConnectorDetails({
   const [notice, setNotice] = useState("");
   const operation = useRef(false);
   const detail = resolveDetailedStatus(connector);
-  const guide = connectorGuides[connector.id];
   const connected = connector.status === "connected";
   const needsRepair = ["failed", "permission-limited", "expired", "revoked", "unverified"].includes(detail.className);
   const ready = connected && !needsRepair;
@@ -436,6 +436,7 @@ function ConnectorDetails({
   const granted = connector.scopes?.filter((scope) => scope.granted) ?? [];
 
   return <article className="connector-detail" aria-label={`${connector.name} details`} aria-busy={busy}>
+    <p className="connector-detail__eyebrow">Plugins</p>
     <div className="connector-detail__header">
       <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>
       <div><h2 id={titleId}>{connector.name}</h2><p>{findMarketplaceConnector(connector.id)?.description ?? connector.name}</p></div>
@@ -459,10 +460,10 @@ function ConnectorDetails({
       {connected || connector.account ? <button type="button" disabled={busy} onClick={() => void run(() => onDisconnect(connector.id))}>Disconnect</button> : null}
     </div>
     {notice ? <p className="connector-detail__notice" role="alert">{notice}</p> : null}
+    <PluginOverview id={connector.id} access={ready ? connectorAccessSummary(connector) : "Chosen when you connect"} onExample={ready && !busy ? (prompt) => onUseConnector(connector, prompt) : undefined} />
     <p className="connector-detail__hint">{ready ? connectorAccessSummary(connector) : "Choose your account and grant access on the sign-in page."} Actions follow your workspace approval preference.</p>
     <details className="connector-guide">
       <summary>About this connection</summary>
-      {guide ? <><p>Try asking:</p><ul>{guide.examples.slice(0, 2).map((example) => <li key={example}>{example}</li>)}</ul></> : null}
       {granted.length ? <><p>Access granted</p><ul>{granted.map((scope) => <li key={scope.id}>{scope.label}</li>)}</ul></> : null}
       {!ready ? <p>{detail.summary}</p> : null}
       {connected ? <button type="button" className="connector-detail__text-action" disabled={busy || connector.sync?.phase === "syncing"} onClick={() => onRefresh(connector.id)}>Sync files</button> : null}

@@ -29,6 +29,8 @@ import {
 } from "@fable/connectors";
 import {
   cancelRuntimeCompletion,
+  beginRuntimeComputerSession,
+  endRuntimeComputerSession,
   listenRuntimeBackendEvents,
   streamRuntimeCompletion
 } from "../runtime";
@@ -67,12 +69,41 @@ function hasDesktopRuntime(): boolean {
 function tauriTransport(
   provider: BackendProvider,
   handlers: TransportHandlers
-): HttpTransport | null {
+): TransportHandle | null {
   if (!hasDesktopRuntime()) {
     return null;
   }
-  return {
+  let computerSession: string | undefined;
+  let openingComputerSession: Promise<string> | undefined;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  const approvalIds = new Map<string, string>();
+  const shutdown = () => {
+    closed = true;
+    approvalIds.clear();
+    closing ??= (async () => {
+      const session = computerSession ?? await openingComputerSession?.catch(() => undefined);
+      if (session) await endRuntimeComputerSession(session);
+      computerSession = undefined;
+    })();
+    return closing;
+  };
+  const transport: HttpTransport = {
+    toolApprovalId: callId => approvalIds.get(callId),
     async *stream(request: NativeCompletionRequest): AsyncIterable<string> {
+      if (closed) throw new BackendRuntimeError("Provider request was cancelled.", "cancelled", false);
+      if (request.tools.some(tool => tool.name.startsWith("local-desktop-")) && !computerSession) {
+        if (!request.computer || !request.providerRoute) throw new Error("Screenshot delivery requires an exact computer scope and provider route.");
+        openingComputerSession = beginRuntimeComputerSession({
+          providerId: provider.id, model: request.model, computer: request.computer, providerRoute: request.providerRoute,
+        });
+        computerSession = await openingComputerSession;
+        if (closed) {
+          await shutdown();
+          throw new BackendRuntimeError("Provider request was cancelled.", "cancelled", false);
+        }
+      }
+      approvalIds.clear();
       const requestId = `req-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       const queue: string[] = [];
       let resolveNext: ((value: string | undefined) => void) | null = null;
@@ -98,7 +129,14 @@ function tauriTransport(
         try {
           const parsed = JSON.parse(line) as {
             __fableTransport?: NativeTransportControlPayload;
+            __fableComputerTool?: { callId?: string; approvalId?: string };
           };
+          if (parsed.__fableComputerTool) {
+            const { callId, approvalId } = parsed.__fableComputerTool;
+            if (computerSession && typeof callId === "string" && typeof approvalId === "string"
+              && /^api-visual-[a-f0-9]{48}$/.test(approvalId)) approvalIds.set(callId, approvalId);
+            return;
+          }
           if (parsed.__fableTransport) {
             if (parsed.__fableTransport.kind === "error") {
               transportError = new BackendRuntimeError(
@@ -120,6 +158,10 @@ function tauriTransport(
       });
 
       handlers.onRequestStarted(requestId);
+      if (closed) {
+        void unlisten?.();
+        throw new BackendRuntimeError("Provider request was cancelled.", "cancelled", false);
+      }
       // Tauri commands resolve when the Rust future finishes. Start the command
       // without awaiting it so events are yielded to the UI as they arrive.
       const completion = streamRuntimeCompletion({
@@ -127,6 +169,7 @@ function tauriTransport(
         requestId,
         model: request.model,
         body: shapeBodyFor(request),
+        ...(computerSession ? { computerSessionId: computerSession } : {}),
         ...(request.providerRoute ? { providerRoute: request.providerRoute } : {})
       }).catch((error) => {
         if (!transportError) {
@@ -167,6 +210,14 @@ function tauriTransport(
       }
     }
   };
+  return {
+    transport,
+    cancel: async requestId => {
+      await shutdown();
+      await cancelRuntimeCompletion(requestId);
+    },
+    shutdown,
+  };
 }
 
 /**
@@ -177,12 +228,5 @@ export function createDesktopTransport(
   provider: BackendProvider,
   handlers: TransportHandlers
 ): TransportHandle | null {
-  const transport = tauriTransport(provider, handlers);
-  if (!transport) return null;
-  return {
-    transport,
-    cancel: async (requestId) => {
-      await cancelRuntimeCompletion(requestId);
-    }
-  };
+  return tauriTransport(provider, handlers);
 }

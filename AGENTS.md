@@ -4,7 +4,7 @@ Independent, provider-neutral, local-first AI agent workspace. Preserve the quie
 
 ## Map and context
 
-- apps/desktop: React, Convex, and the Tauri/Rust boundary; src-tauri/resources/local-computer contains the Linux desktop image.
+- apps/desktop: React, Convex, and the Tauri/Rust boundary; src-tauri/resources/cua-driver contains the pinned Windows runtime and redistribution notices.
 - apps/hosted-runner: deployment-gated Cloudflare computer/browser worker.
 - apps/broker: confidential connector OAuth broker, separate from account data.
 - packages: shared protocol, providers, connectors, tools, voice, and knowledge.
@@ -15,7 +15,8 @@ Read README.md and the architecture or ADR relevant to the change. Use Node 22+,
 
 - Keep secrets behind native or deployment-secret boundaries, out of React state, logs, model transcripts, fixtures, and exports.
 - Preserve exact single-use approvals, workspace/agent/request/generation/freshness fences, and computer control leases.
-- Missing providers, credentials, entitlements, Docker, or hosted dependencies must fail closed with a clear prerequisite.
+- Missing providers, credentials, entitlements, the bundled Windows runtime, or hosted dependencies must fail closed with a clear prerequisite.
+- Native computer use shares the user's Windows session and follows global approvals. Full Access adds no app grants; agents select an exact window and delivery mode through approved tools. Background actions must never silently escalate to foreground. Preserve immediate Stop, exact target identity, turn generations and single-agent control. Never add a host-shell fallback.
 - Use shared protocol types and provider adapters; keep vendor behavior inside drivers/adapters.
 - Preserve image avatars, accessible controls, keyboard/focus behavior, touch targets, reduced motion, and the trimmed-text voice/send composer action.
 - Fixtures and dry-runs do not establish live capability. Do not copy proprietary branding, assets, code, or product copy.

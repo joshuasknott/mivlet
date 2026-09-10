@@ -19,6 +19,19 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
+  it("keeps agents reachable in collapsed navigation even after a search", () => {
+    const onSelectAgent = vi.fn();
+    const sidebar = (collapsed: boolean) => <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
+      previews={{}} marketplaceActive={false} onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()} onEditAgent={vi.fn()}
+      onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} collapsed={collapsed} onToggleCollapsed={vi.fn()} />;
+    const view = render(sidebar(false));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "No match" } });
+    expect(screen.queryByRole("button", { name: /^Mira/ })).toBeNull();
+    view.rerender(sidebar(true));
+    expect(screen.getByRole("button", { name: "Expand navigation" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Mira" }));
+    expect(onSelectAgent).toHaveBeenCalledWith(agent);
+  });
   it("shows work in progress, then a completion dot until selected, and rearms for the next task", () => {
     const onSelectAgent = vi.fn();
     const sidebar = (presence: "idle" | "working" | "done" | "waiting" | "blocked", completionId = "turn-1") => (

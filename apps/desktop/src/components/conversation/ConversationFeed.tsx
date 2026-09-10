@@ -16,6 +16,7 @@ interface Props {
   agent: FableAgentProfile;
   authors?: Record<string, FableAgentProfile>;
   requireAuthor?: boolean;
+  showAuthor?: boolean;
   suppressLivePrompt?: boolean;
   state: NativeAgentState;
   presence?: AgentPresence;
@@ -104,7 +105,7 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
   return <section className="conversation-turn">
     {turn.prompt ? <UserMessage content={turn.prompt} {...props} /> : null}
     <article className="conversation-response" aria-label={`${props.agent.name}'s response`}>
-      <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header>
+      {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header> : null}
       {hasActivity ? <details className="turn-activity" open={expanded}>
         <summary onClick={(event) => { event.preventDefault(); setDisclosure({ running, open: !expanded }); }}>
           <span>{label}</span>

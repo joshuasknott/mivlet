@@ -129,17 +129,17 @@ function approvalFor(
       decisions: ["once", "modify", "deny"],
       confirmationPhrase: "approve cloud-browser-action"
     },
-    "local-browser-action": {
+    "local-app-action": {
       id,
       service: "openai",
-      action: "local-browser-action action: select elementRef: control-1234567890abcdef-2",
+      action: "local-app-action action: select elementRef: control-1234567890abcdef-2",
       mode: "full-access",
       riskLevel: "critical",
       dataUsed: ["action: select", "observationId: observation-1234567890abcdef", "elementRef: control-1234567890abcdef-2", "controlRole: combobox", "controlName: Region", "value: Europe"],
       consequence: "Use one exact observed local browser control.",
       requestedAt: new Date(0).toISOString(),
       decisions: ["once", "modify", "deny"],
-      confirmationPhrase: "approve local-browser-action"
+      confirmationPhrase: "approve local-app-action"
     }
   };
   return { ...base[tool], ...over };
@@ -152,7 +152,7 @@ function argsFor(tool: string): string {
     case "write-file":
       return JSON.stringify({ path: "y.txt", content: "hi" });
     case "run-shell":
-      return JSON.stringify({ command: "ls" });
+      return JSON.stringify({ command: "ls", location: "hosted" });
     case "web-fetch":
       return JSON.stringify({ url: "https://x.test" });
     case "cloud-browser":
@@ -165,15 +165,8 @@ function argsFor(tool: string): string {
         controlRole: "button",
         controlName: "Continue"
       });
-    case "local-browser-action":
-      return JSON.stringify({
-        action: "select",
-        observationId: "observation-1234567890abcdef",
-        elementRef: "control-1234567890abcdef-2",
-        controlRole: "combobox",
-        controlName: "Region",
-        value: "Europe"
-      });
+    case "local-app-action":
+      return JSON.stringify({action:"type",observationId:"observation-1234567890abcdef",elementRef:"control-1234567890abcdef-2",text:"Europe"});
     default:
       return "{}";
   }
@@ -187,7 +180,7 @@ function fakeRuntime(): ToolRuntime & {
   fetched: string[];
   opened: string[];
   browserActions: string[];
-  localBrowserActions: string[];
+  appActions: string[];
   imageCalls: Array<{ kind: "generate" | "edit"; input: unknown }>;
 } {
   const files = new Map<string, string>([["x.txt", "hello world"]]);
@@ -196,7 +189,7 @@ function fakeRuntime(): ToolRuntime & {
   const fetched: string[] = [];
   const opened: string[] = [];
   const browserActions: string[] = [];
-  const localBrowserActions: string[] = [];
+  const appActions: string[] = [];
   const imageCalls: Array<{ kind: "generate" | "edit"; input: unknown }> = [];
   return {
     files,
@@ -205,7 +198,7 @@ function fakeRuntime(): ToolRuntime & {
     fetched,
     opened,
     browserActions,
-    localBrowserActions,
+    appActions,
     imageCalls,
     async readFile(path) {
       return files.get(path) ?? null;
@@ -231,8 +224,8 @@ function fakeRuntime(): ToolRuntime & {
       browserActions.push(`${input.action}:${input.controlRole}:${input.controlName}`);
       return "browser action complete";
     },
-    async actLocalBrowser(input) {
-      localBrowserActions.push(`${input.action}:${input.controlRole}:${input.controlName}:${input.value ?? ""}`);
+    async actApp(input) {
+      appActions.push(`${input.action}:${input.elementRef}:${input.text ?? ""}`);
       return "local browser action complete";
     },
     async generateImage(input) {
@@ -324,13 +317,13 @@ describe("createToolExecutor — dispatch + grant gating", () => {
     expect(runtime.browserActions).toEqual(["select:combobox:Region"]);
   });
 
-  it("dispatches an exact native-dropdown selection to the local agent browser", async () => {
+  it("dispatches an observed text control through the native app boundary", async () => {
     const runtime = fakeRuntime();
     const executor = createToolExecutor({ runtime, gate: decisionGate("granted") });
     await expect(
-      executor(approvalFor("c1", "local-browser-action"), argsFor("local-browser-action"))
+      executor(approvalFor("c1", "local-app-action"), argsFor("local-app-action"))
     ).resolves.toBe("local browser action complete");
-    expect(runtime.localBrowserActions).toEqual(["select:combobox:Region:Europe"]);
+    expect(runtime.appActions).toEqual(["type:control-1234567890abcdef-2:Europe"]);
   });
 
   it("dispatches an observation-scoped page scroll without a selector or script", async () => {

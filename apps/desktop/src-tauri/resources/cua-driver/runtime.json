@@ -1,0 +1,9 @@
+{
+  "version": "0.25.0",
+  "sourceCommit": "45d78fedcf2c7033ba33f10dd30f8af8ba31ec3f",
+  "target": "x86_64-pc-windows-msvc",
+  "archiveUrl": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.25.0/cua-driver-rs-0.25.0-windows-x86_64-binary.zip",
+  "archiveSha256": "314f5df05933810499deaa61022c714341aff64f8e45157a589df6a4b1724fa4",
+  "executable": "cua-driver.exe",
+  "executableSha256": "57919fe31bf91b7ff8af35630fdb3d31ed92fd1c333b9e9678a508cecd476719"
+}

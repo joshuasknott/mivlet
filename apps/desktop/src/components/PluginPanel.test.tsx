@@ -51,6 +51,16 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it("prepares a connected plugin example without starting a connection or action", async () => {
+    const user = userEvent.setup();
+    const onUse = vi.fn();
+    const onConnect = vi.fn();
+    render(<PluginPanel manifests={[gmail]} accounts={{}} onUseConnector={onUse} onConnect={onConnect} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Manage Gmail from Installed" }));
+    await user.click(screen.getByRole("button", { name: "Find unread messages from this week." }));
+    expect(onUse).toHaveBeenCalledWith(gmail, "Find unread messages from this week.");
+    expect(onConnect).not.toHaveBeenCalled();
+  });
   it("describes granted Drive access without promising ungranted writes", () => {
     const scope = (name: string, granted: boolean) => ({ id: `https://www.googleapis.com/auth/${name}`, label: name, access: "read" as const, required: false, granted });
     expect(connectorAccessSummary({ ...gmail, id: "google-drive", scopes: [scope("drive.readonly", true), scope("drive.file", false), scope("drive", false)] })).toBe("Read your Drive files.");

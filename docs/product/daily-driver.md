@@ -1,7 +1,9 @@
 # Plugins and daily-driver assessment
 
-Assessed 7 September 2026 against the current working tree. Implemented changes
-and their evidence are recorded below. Container checks, native unit tests,
+Computer architecture updated 9 September 2026. Earlier assessment evidence
+is retained below with its date; Docker-era capability claims are superseded by
+the [native Windows architecture](../architecture/local-teammate-computer.md).
+Standalone driver checks, native unit tests,
 browser previews and direct provider probes are separate evidence classes;
 they do not establish repeated completion through the packaged application.
 The complete daily-driver criteria remain the assessment target. Implementation
@@ -9,10 +11,10 @@ was stopped at the user's requested handoff; outstanding criteria are not closed
 
 ## Recommended plugin model
 
-Make Browser and Computer Use built-in plugins backed by the existing isolated
-computer. Both use the same agent browser session, filesystem, generation and
-human-control lease. Do not create competing browser profiles or another agent
-loop. Providers supply reasoning; Mivlet owns tool discovery, execution and policy.
+Computer Use is a built-in plugin for the user's existing Windows applications.
+Providers supply reasoning; Mivlet owns discovery, exact global approvals,
+background and explicit foreground control, and Stop. Prefer connectors when they can complete
+the task without desktop control. The Docker Browser plugin is retired.
 
 A plugin should package an identity/version, task instructions, tool references,
 runtime dependencies, supported input/output modalities, permissions and health
@@ -22,27 +24,24 @@ plugin contributes its own versioned workflow instructions.
 
 | Plugin | Existing foundation | Proposed experience |
 | --- | --- | --- |
-| Browser | `local-browser`, observe/action/tab, uploads and downloads in the computer | Enable, open websites, read structured page state, navigate tabs, fill forms, download and return files; use visual fallback when structured state is insufficient |
-| Computer Use | Desktop observe/action, application launch, terminal, file operations and artifact publication | Enable, watch, take control for sign-in, return control, resume from a fresh observation, receive verified outputs |
+| Computer Use | `local-app-list/select/observe/action`, route-gated screenshots, scoped files and artifacts | Enable and describe the task; the agent finds the app, follows global approvals, verifies effects and publishes outputs |
 
-Keep installation distinct from readiness. A built-in plugin can be enabled but
-require Docker, a started computer or a compatible model. Show one actionable
-prerequisite. Disabling either plugin removes its tools and invalidates pending
-authority without deleting the computer or browser profile. Both plugins share
-one lazy-started runtime, with concurrency controlled by the existing lease.
-Browser-only access must not silently grant shell or desktop access.
-
-The marketplace now exposes both built-ins. Enabled + ready/lazily startable +
-compatible capability resolution is shared by submission and retry. Native
-admission checks enforce enablement, generation and control lease; disabling
-revokes admitted authority and pauses/drains the shared computer. Browser-only
-access includes scoped artifact publication, without shell or desktop access.
+Enabling the plugin advertises tools. A compatible connected model, bundled
+Windows runtime and exactly approved selection are required. Full Access resolves
+that approval automatically, with no extra per-app grant. Other modes use the
+existing approval queue. The agent asks about the target only when ambiguous.
+Disabling removes its tools and revokes input without deleting files. One agent
+can control Windows input at a time. Supported element actions run in the
+background; screenshots, keys, pixels and caret editing need explicit foreground
+selection. Minimized windows are unavailable and uncertain inputs are never
+automatically replayed in either mode. Submission and retry use the executing
+provider/model's capabilities. No local shell tool is available.
 
 ## What makes it effective
 
-Use structured browser observations first, then screenshots for canvas, unusual
-widgets and desktop applications. Return stable element references, tab identity,
-URL, bounded content and freshness information. Act on observed targets and
+Use structured app observations first, then screenshots for canvas and unusual
+widgets on a supported visual route. Return opaque element references, bounded
+content and freshness information. Act on observed targets and
 verify the resulting state. Preserve the current generation and single-use
 observation fences. Never blindly repeat a submission after an ambiguous failure.
 
@@ -51,17 +50,17 @@ every integration at full size. Maintain a common result envelope for text,
 images, sources, artifacts and recoverable errors across provider adapters.
 Preserve secret-free native image delivery when adding additional visual providers.
 
-Recovery now distinguishes stale observations, lost tabs, loading and uncertain
+Recovery distinguishes stale observations, revoked control, loading and uncertain
 writes. It uses bounded class-specific recovery, keeps uncertain writes blocked
 against replay, and preserves task intent plus successful-result evidence for
 explicit continuation. Historical authority identifiers are stripped; unused
 persisted permits are invalidated during crash recovery. Live crash/side-effect
 acceptance remains required.
 
-KasmVNC is already in the current Dockerfile and viewer. Evaluate Browser Use or
-Cua only against concrete failures in the present adapters, behind Mivlet-owned
-contracts. The earlier research is not evidence that either library is integrated.
-A dependency swap alone does not establish better task success.
+Cua Driver 0.25.0 is bundled behind the native boundary. The Docker image,
+KasmVNC viewer and container-only tools have been removed. A dependency swap
+alone does not establish better task success; live and packaged evidence must
+cover the new Windows path.
 
 ## Daily-driver gaps, in priority order
 
@@ -84,7 +83,7 @@ Primary code evidence: `apps/desktop/src/shell/ChatWorkspace.tsx`,
 `apps/desktop/src/lib/desktop-tool-runtime.ts`,
 `apps/desktop/src/components/PluginPanel.tsx`,
 `packages/connectors/src/native-api/tools.ts`,
-`apps/desktop/src-tauri/src/codex_app_server.rs`, and the local-computer Dockerfile.
+`apps/desktop/src-tauri/src/codex_app_server.rs`, and `local_computer/control.rs`.
 See [native acceptance evidence](../development/local-computer-verification.md)
 and [computer architecture](../architecture/local-teammate-computer.md).
 
@@ -100,7 +99,7 @@ Use approved test accounts for writes. Treat mocks, container probes and full
 native tasks as separate evidence classes.
 
 Build order: fix ordinary-chat capability reachability and retry consistency;
-package the two built-ins; complete files/research and repeated native acceptance;
+verify the Computer Use built-in; complete files/research and repeated native acceptance;
 then expand projects, coding, media and durable background work. This order targets
 the reasons a person would currently switch back to ChatGPT/Codex mid-task.
 
@@ -125,12 +124,11 @@ activity and upstream benchmarks do not establish task success in Mivlet.
 
 | Area | Repository | Recommendation for Mivlet |
 | --- | --- | --- |
-| Browser execution and verification | [Playwright](https://github.com/microsoft/playwright) | Preferred library to evaluate for robust locators, actionability waits and browser tests. Run inside the isolated computer through the existing native gateway; do not expose unrestricted evaluation, cookies or a new public CDP port. |
+| Browser execution and verification | [Playwright](https://github.com/microsoft/playwright) | Development browser verification remains useful. It is not the native Windows computer runtime or authority boundary. |
 | Browser agent workflows | [Browser Use](https://github.com/browser-use/browser-use) | Evaluate observation/action and recovery quality against current structured tools. Its full agent loop and cloud/profile-sync features are not automatic dependencies. Keep Mivlet's model route and approvals authoritative. |
-| Desktop drivers and evaluation | [Cua](https://github.com/trycua/cua) | Evaluate Linux driver and benchmark components if they improve measured desktop failures. Do not replace the computer or introduce a second authority model. Optional components have different licenses. |
-| Desktop viewing | [KasmVNC](https://github.com/kasmtech/KasmVNC) | Already used. Keep the native-authenticated viewer and control lease; this is the display layer, not reasoning or task recovery. |
+| Desktop drivers and evaluation | [Cua](https://github.com/trycua/cua) | Windows Driver 0.25.0 is pinned and bundled. Mivlet retains permission, input supervision, model execution and Stop. Cua cloud/orchestration is not imported. |
 | Document ingestion | [MarkItDown](https://github.com/microsoft/markitdown) | Candidate for extracting Office/PDF content into model-readable text inside the guest. Extraction does not preserve full layout or supply editing/export. |
-| Slide output | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) | The guest pins MIT-licensed 4.0.1 with a build-time generation smoke test and LibreOffice Impress for editing/rendering. Native PPTX publication rejects macros, embedded programs, duplicate or invalid package paths, and external relationships. Rendered-slide QA remains required before claiming a presentation is correct. |
+| Slide output | [PptxGenJS](https://github.com/gitbrent/PptxGenJS) | No document runtime is currently bundled with native computer use. Existing PPTX publication still rejects macros, embedded programs, invalid package paths and external relationships. Rendered-slide QA remains required. |
 | PDF preview | [PDF.js](https://github.com/mozilla/pdf.js) | Still a candidate for a bounded, isolated in-app viewer. Native PDF export now uses MIT-licensed lopdf 0.44.0 as a strict, resource-bounded structural validator and rejects active or ambiguous documents before host opening; this is rejection, not sanitization. |
 | Search | [SearXNG](https://github.com/searxng/searxng) | Optional self-hosted search service, with operational and upstream-engine reliability costs. A supported search API behind a native adapter is the alternative; public instances are not a dependable product backend. |
 | Research orchestration | [GPT Researcher](https://github.com/assafelovic/gpt-researcher) | Reference for research decomposition and reporting. Avoid adding a parallel credential store or duplicating Mivlet's conversation execution loop. |
@@ -141,7 +139,7 @@ activity and upstream benchmarks do not establish task success in Mivlet.
 | Native coding runtime | [Codex](https://github.com/openai/codex) | User-selected reference for repository workflows, native tool delivery, checkpoints and context handling. Apache-2.0 licensed; inspect the relevant version and retain required notices for any reused code. Mivlet's provider adapters, isolated computer and approval authority remain the integration boundaries. |
 | Capability evaluations | [promptfoo](https://github.com/promptfoo/promptfoo) | Candidate for repeatable prompt/tool/provider comparisons. Pair with actual native workflow tests; an evaluation configuration alone does not prove parity. |
 
-Retain the existing guest Python document/data libraries for DOCX and XLSX.
+The retired guest Python document/data libraries are no longer a local capability.
 Use supported provider APIs for image generation/editing and speech; an open-source
 wrapper cannot supply model weights, account access or free inference. Project
 organization, memory correctness, notifications, signing/updating and multi-device

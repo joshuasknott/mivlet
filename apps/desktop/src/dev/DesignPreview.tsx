@@ -1,3 +1,5 @@
+import { AgentWelcome } from "../components/agents/AgentWelcome";
+import { SchedulesDialog } from "../components/agents/SchedulesDialog";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { WindowControls } from "../components/WindowControls";
 import { ArtifactPreview } from "../components/conversation/ArtifactPreview";
@@ -113,38 +115,20 @@ const models: ProviderModelOption[] = [
     },
   },
 ];
+const previewComputerNode: import("@fable/protocol").LocalComputerSnapshot = {
+  computerId: "preview-computer", workspaceId: "preview-workspace", agentId: "preview-agent",
+  locality: "local", backend: "cua-driver", isolation: "windows-session", lifecycle: "ready",
+  controller: "agent", generation: 1, capabilities: ["persistent-files", "app-observe", "app-control"],
+  runtimeAvailable: true, retiredComputer: false, plugins: { computer: true }, updatedAt: "Preview",
+  control: { status: "idle", requestId: null, generation: null, application: null, title: null, message: null },
+};
 const localComputer: ComponentProps<typeof LiveWorkRail>["localComputer"] = {
-  available: false,
-  browserAvailable: false,
-  browserActive: false,
-  canGoBack: false,
-  canGoForward: false,
-  filesAvailable: false,
-  files: null,
-  filesLoading: false,
-  filesError: null,
-  filePreview: null,
-  filePreviewLoading: false,
-  filePreviewError: null,
-  controller: "agent",
-  loading: false,
-  provisioning: false,
-  busy: false,
-  recoveryNeeded: false,
-  error: null,
-  generation: 0,
-  onProvision: asyncNoop,
-  onOpenBrowser: asyncNoop,
-  onRefreshBrowser: asyncNoop,
-  onGoBack: asyncNoop,
-  onGoForward: asyncNoop,
-  onRefreshFiles: asyncNoop,
-  onPreviewFile: asyncNoop,
-  onCloseFilePreview: noop,
-  onTakeControl: asyncNoop,
-  onReturnControl: asyncNoop,
-  onOpenViewer: asyncNoop,
-  onLaunchApplication: asyncNoop,
+  scopeKey: "preview-computer", available: true, node: previewComputerNode, controller: "agent", paused: false,
+  loading: false, busy: false, error: null, stop: async () => previewComputerNode,
+  refresh: async () => previewComputerNode, prepareForTool: async () => previewComputerNode,
+  files: null, filesLoading: false, filesError: null, refreshFiles: async () => null,
+  filePreview: null, filePreviewLoading: false, filePreviewError: null,
+  previewFile: async () => null, closeFilePreview: noop,
 };
 const hostedComputer: ComponentProps<typeof LiveWorkRail>["hostedComputer"] = {
   available: false,
@@ -205,9 +189,11 @@ function DesignPreview() {
   const [notice, setNotice] = useState("");
   const schedulePreview =
     new URLSearchParams(window.location.search).get("view") === "schedule";
-  const [settingsOpen, setSettingsOpen] = useState(schedulePreview);
+  const [schedulesOpen, setSchedulesOpen] = useState(schedulePreview);
+  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>(
-    schedulePreview ? "schedules" : "general",
+    "general",
   );
   const [theme, setTheme] = useState<"light" | "dark">(
     new URLSearchParams(window.location.search).get("theme") === "dark"
@@ -299,7 +285,7 @@ function DesignPreview() {
   return (
     <>
       <main
-        className={`desktop-frame desktop-frame--agents${(rail || artifactPreview) && page === "chat" ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`}
+        className={`desktop-frame desktop-frame--agents${navigationCollapsed && !isPhone ? " desktop-frame--nav-collapsed" : ""}${(rail || artifactPreview) && page === "chat" ? "" : " desktop-frame--live-closed"}${artifactPreview ? " desktop-frame--artifact" : ""}`}
         data-theme={theme}
         data-mobile-view={
           mobileConversation || page !== "chat" ? "conversation" : "list"
@@ -307,6 +293,8 @@ function DesignPreview() {
       >
         <WindowControls preview />
         <AgentSidebar
+          collapsed={navigationCollapsed && !isPhone}
+          onToggleCollapsed={() => setNavigationCollapsed((value) => !value)}
           hidden={isPhone && (mobileConversation || page !== "chat")}
           agents={profiles}
           activeAgentId={agentId}
@@ -349,7 +337,7 @@ function DesignPreview() {
             accounts={{}}
             connectorStatus={notice || null}
             onBack={() => setPage("chat")}
-            onUseConnector={noop}
+            onUseConnector={(connector, prompt) => { setMessage(`@${connector.id} ${prompt ?? ""}`); setPage("chat"); setMobileConversation(true); }}
             onConnect={() =>
               setNotice("Design preview: no account connection was started.")
             }
@@ -364,6 +352,7 @@ function DesignPreview() {
             hidden={isPhone && !mobileConversation}
           >
             <AgentWorkspaceHeader
+              onSchedules={() => setSchedulesOpen(true)}
               agent={agent}
               presence={showApproval ? "waiting" : "idle"}
               onBack={isPhone ? () => setMobileConversation(false) : undefined}
@@ -388,10 +377,10 @@ function DesignPreview() {
                       scroll.pauseFollowing();
                   }}
                 >
-                  <ConversationSample
+                  {new URLSearchParams(window.location.search).get("conversation") === "empty" ? <AgentWelcome agent={agent} onChoose={setMessage} /> : <ConversationSample
                     agent={agent}
                     onPreviewArtifact={setArtifactPreview}
-                  />
+                  />}
                   {showApproval ? (
                     <article className="conversation-message conversation-message--assistant conversation-message--approval">
                       <div className="conversation-message__author">
@@ -540,7 +529,7 @@ function DesignPreview() {
                   ]}
                   selectedReasoningEffort={reasoning}
                   onSelectReasoningEffort={setReasoning}
-                  placeholder={`Message ${agent.name}…`}
+                  placeholder="Message…"
                   inThread
                 />
               </div>
@@ -566,7 +555,7 @@ function DesignPreview() {
             agentName={agent.name}
             localComputer={localComputer}
             hostedComputer={hostedComputer}
-            onClose={() => setRail(false)}
+            onClose={() => { setRail(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-work-panel-toggle]")?.focus()); }}
             onNewConversation={() => {
               setMessage("");
               composerRef.current?.focus();
@@ -623,21 +612,12 @@ function DesignPreview() {
           />
         ) : null}
       </main>
-      {settingsOpen ? (
-        <SettingsModal
-          activeTab={settingsTab}
-          onSelectTab={setSettingsTab}
-          onClose={() => setSettingsOpen(false)}
-        >
-          {schedulePreview && settingsTab === "schedules" ? (
-            <section className="settings-page">
-              <div className="settings-page__content">
-                <h1 id="settings-modal-title">Schedules</h1>
-                <div className="settings-page__body local-schedules">
+      {schedulesOpen ? <SchedulesDialog onClose={() => setSchedulesOpen(false)}><div className="settings-page__body local-schedules">
                   <p>
                     Preview sample. Keep Mivlet open and your computer awake.
                   </p>
                   <ScheduleEditor
+                    initialAgentId={agent.id}
                     runtime={{
                       ...settingsRuntime,
                       backendProviders: [resolveCodexProvider("connected")],
@@ -647,12 +627,15 @@ function DesignPreview() {
                     onSave={() =>
                       setNotice("Preview only: schedule was not saved.")
                     }
-                    onCancel={() => setSettingsOpen(false)}
+                    onCancel={() => setSchedulesOpen(false)}
                   />
-                </div>
-              </div>
-            </section>
-          ) : (
+                </div></SchedulesDialog> : null}
+      {settingsOpen ? (
+        <SettingsModal
+          activeTab={settingsTab}
+          onSelectTab={setSettingsTab}
+          onClose={() => setSettingsOpen(false)}
+        >
             <SettingsPage
               runtime={settingsRuntime}
               theme={theme}
@@ -661,7 +644,6 @@ function DesignPreview() {
               workspaceName="Preview workspace"
               titleId="settings-modal-title"
             />
-          )}
         </SettingsModal>
       ) : null}
       <div

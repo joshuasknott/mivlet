@@ -22,6 +22,8 @@ use crate::models::BackendVerifyResult;
 use tauri::{AppHandle, Emitter};
 use url::{Host, Url};
 
+pub(crate) mod computer;
+
 /// Which wire family a native provider speaks (selects endpoint + auth header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderKind {
@@ -357,6 +359,7 @@ pub struct BackendStreamRequest {
     pub model: String,
     pub body: serde_json::Value,
     pub provider_route: Option<crate::models::ProviderRouteExecutionBinding>,
+    pub computer_session_id: Option<String>,
 }
 
 #[derive(Default)]
@@ -863,6 +866,38 @@ async fn wait_for_cancel(rx: &mut tokio::sync::watch::Receiver<bool>) {
     }
 }
 
+async fn wait_for_request_cancel(
+    rx: &mut tokio::sync::watch::Receiver<bool>,
+    computer: Option<&computer::ComputerStream>,
+) {
+    if let Some(computer) = computer {
+        tokio::select! {
+            biased;
+            _ = wait_for_cancel(rx) => {}
+            _ = computer.wait_for_cancel() => {}
+        }
+    } else {
+        wait_for_cancel(rx).await;
+    }
+}
+
+fn emit_provider_payload(
+    app: &AppHandle,
+    channel: &str,
+    payload: String,
+    computer: &mut Option<computer::ComputerStream>,
+    terminal: &mut ProviderTerminalObservation,
+) -> Result<(), String> {
+    if let Some(computer) = computer {
+        for binding in computer.observe(&payload)? {
+            let _ = app.emit(channel, binding.to_string());
+        }
+    }
+    terminal.observe(&payload);
+    let _ = app.emit(channel, payload);
+    Ok(())
+}
+
 /// Look up the key for a provider, preferring the OS keychain and falling back
 /// to the in-memory store. Returns Err if neither has a credential — the
 /// command then fails closed (no egress). The resolved key never crosses into
@@ -966,7 +1001,8 @@ fn emit_control(app: &AppHandle, channel: &str, event: TransportControlEvent<'_>
 #[tauri::command]
 pub async fn stream_backend_completion(
     app: AppHandle,
-    request: BackendStreamRequest,
+    mut request: BackendStreamRequest,
+    computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<(), String> {
     crate::execution_control::ensure_active_execution_allowed()?;
     if !NATIVE_PROVIDER_IDS.contains(&request.provider_id.as_str()) {
@@ -984,6 +1020,14 @@ pub async fn stream_backend_completion(
     if request.body.to_string().len() > 2 * 1024 * 1024 {
         return Err("Native provider request body exceeds the supported limit.".to_string());
     }
+    if request
+        .body
+        .get("model")
+        .and_then(serde_json::Value::as_str)
+        != Some(&request.model)
+    {
+        return Err("The provider request body does not match the selected model.".into());
+    }
     let route = request.provider_route.as_ref().ok_or_else(|| {
         "Native provider egress requires an authorized provider route.".to_string()
     })?;
@@ -992,6 +1036,12 @@ pub async fn stream_backend_completion(
         &request.model,
         route,
     )?;
+
+    let mut body = std::mem::take(&mut request.body);
+    let mut computer = computer::begin_stream(&request, &mut body, computers.inner())?;
+    if computer.is_some() && request.provider_id == "openai" {
+        body["store"] = serde_json::json!(false);
+    }
 
     let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
     let observation_started = Instant::now();
@@ -1018,8 +1068,34 @@ pub async fn stream_backend_completion(
     let mut transport_failed = false;
     let mut terminal_observation = ProviderTerminalObservation::new(&request.provider_id, false);
 
-    for attempt in 0..MAX_ATTEMPTS {
-        let mut outbound = client.post(&url).json(&request.body);
+    // Screenshot deliveries are single-use: never silently resend their pixels
+    // after an uncertain network outcome, rate limit or provider failure.
+    let max_attempts = if computer.as_ref().is_some_and(|c| c.has_image()) {
+        1
+    } else {
+        MAX_ATTEMPTS
+    };
+    for attempt in 0..max_attempts {
+        if let Some(visual) = &computer {
+            if let Err(message) = visual.before_send(computers.inner()) {
+                emit_control(
+                    &app,
+                    &channel,
+                    TransportControlEvent {
+                        kind: "error",
+                        code: "stale-observation",
+                        message,
+                        retryable: false,
+                        attempt: attempt + 1,
+                        retry_after_ms: None,
+                    },
+                );
+                completed = true;
+                transport_failed = true;
+                break;
+            }
+        }
+        let mut outbound = client.post(&url).json(&body);
         if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
             outbound = outbound.header(auth_name.as_str(), auth_value.as_str());
         }
@@ -1029,7 +1105,7 @@ pub async fn stream_backend_completion(
 
         let response = tokio::select! {
             biased;
-            _ = wait_for_cancel(&mut rx) => {
+            _ = wait_for_request_cancel(&mut rx, computer.as_ref()) => {
                 cancelled = true;
                 None
             }
@@ -1040,7 +1116,7 @@ pub async fn stream_backend_completion(
         };
         let response = match response {
             Ok(response) => response,
-            Err(error) if attempt + 1 < MAX_ATTEMPTS => {
+            Err(error) if attempt + 1 < max_attempts => {
                 let code = request_error_code(&error);
                 let delay =
                     Duration::from_millis(250_u64.saturating_mul(2_u64.pow(attempt as u32)));
@@ -1062,7 +1138,7 @@ pub async fn stream_backend_completion(
                 );
                 tokio::select! {
                     biased;
-                    _ = wait_for_cancel(&mut rx) => {
+                    _ = wait_for_request_cancel(&mut rx, computer.as_ref()) => {
                         cancelled = true;
                         break;
                     }
@@ -1097,7 +1173,7 @@ pub async fn stream_backend_completion(
         if !response.status().is_success() {
             let status = response.status();
             let retryable = retryable_status(status);
-            if retryable && attempt + 1 < MAX_ATTEMPTS {
+            if retryable && attempt + 1 < max_attempts {
                 let delay = retry_after(&response, attempt);
                 emit_control(
                     &app,
@@ -1113,7 +1189,7 @@ pub async fn stream_backend_completion(
                 );
                 tokio::select! {
                     biased;
-                    _ = wait_for_cancel(&mut rx) => {
+                    _ = wait_for_request_cancel(&mut rx, computer.as_ref()) => {
                         cancelled = true;
                         break;
                     }
@@ -1144,7 +1220,7 @@ pub async fn stream_backend_completion(
         loop {
             tokio::select! {
                 biased;
-                _ = wait_for_cancel(&mut rx) => {
+                _ = wait_for_request_cancel(&mut rx, computer.as_ref()) => {
                     cancelled = true;
                     break;
                 }
@@ -1183,10 +1259,18 @@ pub async fn stream_backend_completion(
                             };
                             for line in lines {
                                 if let Some(payload) = normalize_sse_line(&line) {
-                                    terminal_observation.observe(&payload);
-                                    let _ = app.emit(&channel, payload);
+                                    if let Err(message) = emit_provider_payload(&app, &channel, payload, &mut computer, &mut terminal_observation) {
+                                        emit_control(&app, &channel, TransportControlEvent {
+                                            kind: "error", code: "invalid-tool-protocol", message,
+                                            retryable: false, attempt: attempt + 1, retry_after_ms: None,
+                                        });
+                                        completed = true;
+                                        transport_failed = true;
+                                        break;
+                                    }
                                 }
                             }
+                            if transport_failed { break; }
                         }
                         Some(Err(error)) => {
                             emit_control(&app, &channel, TransportControlEvent {
@@ -1214,8 +1298,28 @@ pub async fn stream_backend_completion(
                 Ok(lines) => {
                     for line in lines {
                         if let Some(payload) = normalize_sse_line(&line) {
-                            terminal_observation.observe(&payload);
-                            let _ = app.emit(&channel, payload);
+                            if let Err(message) = emit_provider_payload(
+                                &app,
+                                &channel,
+                                payload,
+                                &mut computer,
+                                &mut terminal_observation,
+                            ) {
+                                emit_control(
+                                    &app,
+                                    &channel,
+                                    TransportControlEvent {
+                                        kind: "error",
+                                        code: "invalid-tool-protocol",
+                                        message,
+                                        retryable: false,
+                                        attempt: attempt + 1,
+                                        retry_after_ms: None,
+                                    },
+                                );
+                                transport_failed = true;
+                                break;
+                            }
                         }
                     }
                 }
@@ -1240,6 +1344,25 @@ pub async fn stream_backend_completion(
         break;
     }
 
+    if let Some(visual) = &mut computer {
+        if !cancelled {
+            if let Err(message) = visual.complete(completed && !transport_failed) {
+                emit_control(
+                    &app,
+                    &channel,
+                    TransportControlEvent {
+                        kind: "error",
+                        code: "invalid-tool-protocol",
+                        message,
+                        retryable: false,
+                        attempt: 1,
+                        retry_after_ms: None,
+                    },
+                );
+                transport_failed = true;
+            }
+        }
+    }
     let _ = cancel_map()
         .lock()
         .map(|mut map| map.remove(&request.request_id));

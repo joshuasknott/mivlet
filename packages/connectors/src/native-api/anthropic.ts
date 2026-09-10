@@ -26,11 +26,12 @@ interface ToolBuffer {
 export interface AnthropicStreamState {
   toolBuffers: Map<number, ToolBuffer>;
   inputTokens: number;
+  terminalSeen: boolean;
 }
 
 /** Create fresh per-stream state. */
 export function newAnthropicState(): AnthropicStreamState {
-  return { toolBuffers: new Map(), inputTokens: 0 };
+  return { toolBuffers: new Map(), inputTokens: 0, terminalSeen: false };
 }
 
 /** Shape a normalized request into the Anthropic Messages body. */
@@ -39,7 +40,7 @@ export function shapeAnthropicRequest(request: NativeCompletionRequest): unknown
     .filter((message) => message.role === "system")
     .map((message) => message.content)
     .join("\n\n");
-  const messages = request.messages
+  const shaped = request.messages
     .filter((message) => message.role !== "system")
     .map((message) => {
       if (message.toolCallId) {
@@ -67,6 +68,18 @@ export function shapeAnthropicRequest(request: NativeCompletionRequest): unknown
       }
       return { role: message.role, content: message.content };
     });
+  // Parallel tool results belong in the same user message immediately after
+  // their assistant tool_use blocks. Native egress may add an image to a result.
+  const messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }> = [];
+  for (const message of shaped) {
+    const previous = messages.at(-1);
+    if (message.role === "user" && previous?.role === "user"
+      && Array.isArray(message.content) && Array.isArray(previous.content)
+      && message.content.every(block => block.type === "tool_result")
+      && previous.content.every(block => block.type === "tool_result")) {
+      previous.content = [...previous.content, ...message.content];
+    } else messages.push(message);
+  }
 
   return {
     model: request.model,
@@ -171,6 +184,7 @@ export function parseAnthropicLine(
       });
     }
     if (delta?.stop_reason) {
+      state.terminalSeen = true;
       const reason = delta.stop_reason as string;
       events.push({
         type: "done",
@@ -180,8 +194,9 @@ export function parseAnthropicLine(
     }
   }
 
-  if (type === "message_stop" && events.length === 0) {
+  if (type === "message_stop" && !state.terminalSeen) {
     // message_stop without a preceding message_delta still closes the stream.
+    state.terminalSeen = true;
     events.push({ type: "done", finishReason: "stop" });
   }
 

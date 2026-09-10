@@ -1306,12 +1306,12 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires fixtures produced by fable-verify-document-tools in the guest image"]
-    fn guest_generated_documents_pass_the_native_validator() {
-        let fixture_root = PathBuf::from(
-            std::env::var("FABLE_ARTIFACT_FIXTURE_DIR")
-                .expect("set FABLE_ARTIFACT_FIXTURE_DIR to the guest script output"),
-        );
+    #[ignore = "requires explicit generated Office/PDF fixtures in FABLE_ARTIFACT_FIXTURE_DIR"]
+    fn generated_documents_pass_the_native_validator() {
+        let fixture_root =
+            PathBuf::from(std::env::var("FABLE_ARTIFACT_FIXTURE_DIR").expect(
+                "set FABLE_ARTIFACT_FIXTURE_DIR to the approved document fixture directory",
+            ));
         for (relative, extension) in [
             ("source/document.docx", "docx"),
             ("source/workbook.xlsx", "xlsx"),

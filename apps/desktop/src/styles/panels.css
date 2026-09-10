@@ -28,17 +28,12 @@
   line-height: 1.05;
 }
 
-.approval-list,
-.source-list,
-.memory-list {
+.approval-list {
   display: grid;
   gap: 8px;
 }
 
 .approval-card,
-.memory-row,
-.connector-card,
-.source-row,
 .empty-state,
 .audit-strip {
   background: var(--surface-raised);
@@ -116,10 +111,7 @@
   font-weight: 500;
 }
 
-.approval-card h3,
-.memory-row strong,
-.connector-card strong,
-.source-row strong {
+.approval-card h3 {
   margin: 0;
   color: var(--ink);
   font-size: var(--text-14);
@@ -127,8 +119,7 @@
   line-height: 1.25;
 }
 
-.approval-card p,
-.memory-row p {
+.approval-card p {
   margin: 6px 0 0;
   color: var(--ink-muted);
   font-size: var(--text-14);
@@ -208,8 +199,7 @@
   display: block;
 }
 
-.approval-actions button,
-.connector-card button {
+.approval-actions button {
   min-height: 34px;
   padding: 0 12px;
   color: var(--ink);
@@ -220,8 +210,7 @@
   font-weight: 500;
 }
 
-.approval-actions button:hover,
-.connector-card button:hover {
+.approval-actions button:hover {
   color: var(--accent);
   background: var(--accent-subtle);
   border-color: var(--accent-line);
@@ -366,38 +355,6 @@
   font-size: var(--text-12);
 }
 
-.source-actions button:hover:not(:disabled) {
-  color: var(--accent);
-  background: var(--accent-subtle);
-}
-
-.source-row small,
-.connector-card small,
-.memory-row small {
-  display: block;
-  margin-top: 4px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.35;
-}
-
-.connector-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.connector-card {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  box-shadow: none;
-}
-
 .connector-card__logo-container {
   display: grid;
   place-items: center;
@@ -443,73 +400,6 @@
   background: rgba(94, 106, 210, 0.07);
 }
 
-.connector-card strong {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--text-14);
-  font-weight: 500;
-  line-height: 1.25;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.connector-card button {
-  height: 30px;
-  min-height: 0;
-  padding: 0 10px;
-  color: var(--ink);
-  background: var(--surface-raised);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-1);
-  font-size: var(--text-12);
-  font-weight: 500;
-  box-shadow: var(--shadow-1);
-  cursor: pointer;
-  transition: background-color 0.2s, border-color 0.2s;
-}
-
-.connector-card button:hover {
-  color: var(--accent);
-  background: var(--accent-subtle);
-  border-color: var(--accent-line);
-}
-
-.connector-browser__heading p,
-.connector-result p,
-.connector-browser__status {
-  margin: 4px 0 0;
-  color: var(--ink-muted);
-  font-size: var(--text-13);
-  line-height: 1.45;
-}
-
-.connector-result {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-  padding: 13px 14px;
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.connector-result strong {
-  color: var(--ink);
-  font-size: var(--text-14);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.connector-result small {
-  display: block;
-  margin-top: 3px;
-  color: var(--ink-muted);
-  font-size: var(--text-11);
-}
-
 /* ---------- Shared page loading / error states ---------- */
 
 @keyframes fable-spin {
@@ -551,11 +441,7 @@
 
 .connector-detail {
   display: grid;
-  gap: 18px;
-  padding: 28px;
-  background: var(--surface-raised);
   border: 0;
-  border-radius: 20px;
 }
 
 .connector-detail-modal {
@@ -565,22 +451,19 @@
   display: grid;
   place-items: center;
   padding: 24px;
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(0, 0, 0, 0.42);
 }
 
 .connector-detail-modal__panel {
   position: relative;
-  width: min(680px, 100%);
-  max-height: min(720px, calc(100dvh - 48px));
+  width: min(720px, 100%);
+  max-height: calc(100dvh - 48px);
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: 20px;
   box-shadow: var(--shadow-3);
 }
 
 .connector-detail-modal__close {
-  position: absolute;
-  top: 12px;
   right: 12px;
   z-index: 1;
   display: grid;
@@ -589,7 +472,6 @@
   place-items: center;
   padding: 0;
   color: var(--ink-muted);
-  background: transparent;
   border: 0;
   border-radius: var(--radius-1);
 }
@@ -601,16 +483,11 @@
 
 .connector-detail__header {
   display: grid;
-  grid-template-columns: 46px minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 13px;
   padding-right: 36px;
 }
 
 .connector-detail__header h2 {
-  margin: 1px 0 4px;
   color: var(--ink);
-  font-size: 22px;
   font-weight: 500;
   line-height: 1.25;
 }
@@ -635,7 +512,6 @@
 }
 
 .connector-detail__status--connected {
-  color: var(--ink-muted);
   background: var(--positive-subtle);
   border-color: var(--line);
 }
@@ -699,13 +575,9 @@
 }
 
 .connector-detail__actions button {
-  min-height: 40px;
-  padding: 0 16px;
   color: var(--ink);
   background: var(--surface-raised);
   border: 1px solid var(--line-strong);
-  border-radius: 10px;
-  font-size: var(--text-12);
   font-weight: 500;
 }
 
@@ -720,9 +592,6 @@
  * (no `paint`) is used deliberately so absolutely-positioned menus that open
  * from a row are still allowed to overflow it visually.
  */
-.connector-card {
-  contain: layout style;
-}
 
 .marketplace-back, .connector-detail__text-action {
   min-height: 40px;
@@ -736,8 +605,6 @@
 .marketplace-back:hover, .connector-detail__text-action:hover { color: var(--ink); }
 .connector-detail__intro, .connector-detail__notice { margin: 0; font-size: var(--text-13); line-height: 1.55; overflow-wrap: anywhere; }
 .connector-detail__notice[role="alert"] { color: var(--danger, #b34b35); }
-.connector-detail__hint { margin: 0; color: var(--ink-muted); font-size: var(--text-12); line-height: 1.55; }
-.connector-detail__account { overflow-wrap: anywhere; }
 .connector-detail__account select { max-width: 100%; min-height: 40px; }
 .connector-detail__actions button:disabled { cursor: default; opacity: .55; }
 .marketplace-back:focus-visible, .connector-detail button:focus-visible, .connector-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
@@ -748,9 +615,49 @@
 @media (max-width: 650px) {
   .connector-detail-modal { padding: 12px; }
   .connector-detail-modal__panel { max-height: calc(100dvh - 24px); }
-  .connector-detail { padding: 24px 20px; }
   .connector-detail__header { grid-template-columns: 36px minmax(0, 1fr); gap: 12px; }
   .connector-detail__status { grid-column: 2; justify-self: start; }
   .connector-detail__body { grid-template-columns: minmax(0, 1fr); }
-  .connector-detail__actions button { min-height: 44px; }
 }
+
+/* Plugin detail: one header, useful examples, and concise connection metadata. */
+.connector-detail-modal__panel { background: var(--surface-overlay); border-radius: 18px; }
+.connector-detail { grid-template-columns: minmax(0, 1fr) auto; gap: 20px 24px; padding: 32px 36px; background: var(--surface-overlay); border-radius: 18px; }
+.connector-detail > * { grid-column: 1 / -1; }
+.connector-detail__eyebrow { margin: 0 0 8px; font-size: 12px; color: var(--ink-muted); }
+.connector-detail__header { grid-column: 1; grid-row: 2; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 4px 16px; padding: 0; }
+.connector-detail__header > span:first-child { width: 48px; height: 48px; grid-row: 1 / 3; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 12px; display: grid; place-items: center; }
+.connector-detail__header h2 { font-size: 25px; letter-spacing: -.035em; margin: 0 0 6px; }
+.connector-detail__header p { font-size: 13px; line-height: 1.6; }
+.connector-detail__header .connector-detail__status { grid-column: 2; justify-self: start; padding: 0; border: 0; background: none; font-size: 11px; }
+.connector-detail__status--connected { color: var(--positive); }
+.connector-detail__actions { grid-column: 2; grid-row: 2; align-self: center; flex-direction: column; align-items: stretch; }
+.connector-detail__actions button { min-height: 34px; padding: 0 16px; border-radius: 8px; font-size: 12px; }
+.connector-detail__actions button:first-child { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.connector-detail__intro { margin: 0; font-size: 13px; color: var(--ink-muted); line-height: 1.6; }
+.connector-detail__account { margin: 0; color: var(--ink-muted); font-size: 12px; overflow-wrap: anywhere; }
+.plugin-overview { display: grid; gap: 26px; padding-top: 24px; border-top: 1px solid var(--line); }
+.plugin-overview h3 { margin: 0 0 14px; font-size: 14px; font-weight: 500; }
+.plugin-overview__examples > div { padding: 0 16px; background: var(--surface-hover); border-radius: 10px; }
+.plugin-overview__examples button { display: flex; align-items: center; justify-content: space-between; gap: 18px; width: 100%; min-height: 52px; padding: 14px 0; border: 0; border-bottom: 1px solid var(--line-strong); border-radius: 0; background: transparent; color: var(--ink); text-align: left; font-size: 13px; line-height: 1.6; }
+.plugin-overview__examples button:last-child { border-bottom: 0; }
+.plugin-overview__examples button svg { flex: 0 0 16px; color: var(--ink-muted); }
+.plugin-overview__examples button:hover:not(:disabled) { color: var(--accent-strong); }
+.plugin-overview__examples button:disabled { opacity: .7; }
+.plugin-overview__about p { margin: 0 0 18px; color: var(--ink-muted); font-size: 13px; line-height: 1.7; }
+.plugin-overview dl { margin: 0; font-size: 12px; line-height: 1.6; }
+.plugin-overview dl > div { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+.plugin-overview dt { color: var(--ink-muted); }
+.plugin-overview dd { margin: 0; overflow-wrap: anywhere; }
+.connector-detail__hint { margin: 0; padding-top: 18px; border-top: 1px solid var(--line); color: var(--ink-muted); font-size: 11px; line-height: 1.7; }
+.connector-detail .connector-guide { margin: 0; }
+@media (max-width: 650px) {
+  .connector-detail { padding: 28px 20px; gap: 18px; }
+  .connector-detail__header { grid-column: 1 / -1; }
+  .connector-detail__actions { grid-column: 1 / -1; grid-row: 3; flex-direction: row; }
+  .connector-detail__actions button { min-height: 44px; }
+  .plugin-overview dl > div { grid-template-columns: 80px minmax(0, 1fr); }
+}
+
+.connector-detail__header .connector-icon-svg { width: 28px; height: 28px; }
+.connector-detail-modal__close { position: sticky; top: 12px; margin: 12px 12px -48px auto; background: var(--surface-overlay); }

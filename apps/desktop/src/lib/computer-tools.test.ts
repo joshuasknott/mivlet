@@ -3,28 +3,32 @@ import { conversationComputerTools, conversationToolsForModel, supportsComputerV
 import type { BackendProvider, LocalComputerSnapshot } from "@fable/protocol";
 
 describe("conversation computer tools", () => {
-  const enabled = { browser: true, computer: true };
+  const enabled = { computer: true };
   const connector = { name: "gmail-read", description: "Read Gmail", parameters: "{}" };
+  it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
+    const prior = conversationComputerTools([connector], true, true, enabled);
+    const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "computer-artifact"]));
+    expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-"))).toBe(false);
+  });
   it("requires a separate image API connection and Computer plugin even for previously discovered image tools", () => {
     const discovered = ["generate-image", "edit-image"].map((name) => ({ name, description: "Image API", parameters: "{}" }));
     expect(conversationComputerTools(discovered, true, true, enabled).map((tool) => tool.name)).not.toContain("generate-image");
-    expect(conversationComputerTools(discovered, true, true, { browser: true, computer: false }, true).map((tool) => tool.name)).not.toContain("edit-image");
+    expect(conversationComputerTools(discovered, true, true, { computer: false }, true).map((tool) => tool.name)).not.toContain("edit-image");
     expect(conversationComputerTools(discovered, false, true, enabled, true).map((tool) => tool.name)).not.toContain("generate-image");
     expect(conversationComputerTools(discovered, true, false, enabled, true).map((tool) => tool.name)).toEqual(expect.arrayContaining(["generate-image", "edit-image"]));
     expect(isLocalComputerTool("generate-image", "{}")).toBe(true);
     expect(isLocalComputerTool("edit-image", "{}")).toBe(true);
   });
-  it("offers first-use startup only when Docker is available and control has not been paused", () => {
-    const computer = { lifecycle: "unprovisioned", browserAvailable: true, controller: "agent" } as LocalComputerSnapshot;
+  it("requires current scope authority for scoped computer tools", () => {
+    const computer = { lifecycle: "ready", controller: "agent" } as LocalComputerSnapshot;
     expect(computerToolsReady(computer)).toBe(true);
-    expect(computerToolsReady({ ...computer, browserAvailable: false })).toBe(false);
     expect(computerToolsReady({ ...computer, controller: "paused" })).toBe(false);
-    expect(computerToolsReady({ ...computer, controller: "human" })).toBe(false);
-    expect(computerToolsReady({ ...computer, lifecycle: "stopped" })).toBe(false);
+    expect(computerToolsReady(null)).toBe(false);
   });
   it("keeps computer tools alongside connected apps and excludes hosted runtimes", () => {
     const tools = conversationComputerTools([connector], true, false, enabled).map((tool) => tool.name);
-    expect(tools).toEqual(expect.arrayContaining(["gmail-read", "run-shell", "read-file", "write-file", "local-browser-observe"]));
+    expect(tools).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "local-app-observe"]));
     expect(tools).not.toContain("cloud-browser");
     expect(new Set(tools).size).toBe(tools.length);
   });
@@ -32,21 +36,17 @@ describe("conversation computer tools", () => {
     const previous = conversationComputerTools([], true, true, enabled);
     expect(conversationComputerTools(previous, true, true).map(tool => tool.name)).toEqual(["web-fetch"]);
   });
-  it("browser enablement never grants shell, desktop or filesystem tools", () => {
-    const names = conversationComputerTools([], true, true, { browser: true, computer: false }).map(tool => tool.name);
-    expect(names).toContain("local-browser-observe");
-    expect(names).toContain("computer-artifact");
+  it("removes retired browser and local shell tools, including stale discoveries", () => {
+    const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
+    const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names).not.toContain("read-file");
-    expect(names).not.toContain("local-desktop-action");
-    const computer = conversationComputerTools([], true, true, { browser: false, computer: true }).map(tool => tool.name);
-    expect(computer).toContain("run-shell");
-    expect(computer).not.toContain("local-browser-action");
+    expect(names.some(name => name.startsWith("local-browser"))).toBe(false);
+    expect(names).toContain("local-app-observe");
   });
   it("does not advertise unavailable computers", () => {
     expect(conversationComputerTools([connector], false).map((tool) => tool.name)).toEqual(["gmail-read", "web-fetch"]);
   });
-  it("keeps public URL reads available without Docker and deduplicates them", () => {
+  it("keeps public URL reads available without computer control and deduplicates them", () => {
     const tools = conversationComputerTools([], false);
     expect(tools.map((tool) => tool.name)).toEqual(["web-fetch"]);
     expect(conversationComputerTools(tools, false)).toEqual(tools);

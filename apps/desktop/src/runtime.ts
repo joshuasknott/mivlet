@@ -53,20 +53,11 @@ export {
   type HostedComputerRuntimePort,
 } from "./runtime/domains/hosted-computer";
 export {
-  historyRuntimeLocalBrowser,
-  keyRuntimeLocalBrowser,
-  launchRuntimeLocalComputerApplication,
   listRuntimeLocalComputerFiles,
   previewRuntimeLocalComputerFile,
   loadRuntimeLocalComputer,
-  navigateRuntimeLocalBrowser,
-  pointRuntimeLocalBrowser,
-  provisionRuntimeLocalComputer,
-  setRuntimeLocalComputerController,
-  snapshotRuntimeLocalBrowser,
-  openRuntimeLocalComputerViewer,
-  closeRuntimeLocalComputerViewer,
   cancelRuntimeLocalComputer,
+  stopRuntimeAppControl,
 } from "./runtime/domains/local-computer";
 import type { LocalTextFileCandidate } from "@fable/connectors/local-files";
 import type {
@@ -1543,6 +1534,21 @@ export interface RuntimeStreamRequest {
   model: string;
   body: unknown;
   providerRoute?: import("@fable/protocol").ProviderRouteExecutionBinding;
+  computerSessionId?: string;
+}
+
+export async function beginRuntimeComputerSession(request: {
+  providerId: string;
+  model: string;
+  computer: { workspaceId: string; agentId: string };
+  providerRoute: import("@fable/protocol").ProviderRouteExecutionBinding;
+}): Promise<string> {
+  if (!hasTauriRuntime()) throw new Error("Native screenshot delivery requires the desktop runtime.");
+  return invoke<string>("begin_native_computer_session", { request });
+}
+
+export async function endRuntimeComputerSession(sessionId: string): Promise<void> {
+  if (hasTauriRuntime()) await invoke("end_native_computer_session", { sessionId });
 }
 
 export interface RuntimeMediaImageStatus {

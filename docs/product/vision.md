@@ -54,8 +54,8 @@ states. Infrastructure is successful when it makes conversation simpler.
 ## Current boundary
 
 The repository implements a local Windows desktop foundation, encrypted local
-data, provider and Connection boundaries, approvals, and a Docker/WSL-backed
-Linux teammate computer. First-run account sign-in requires configured identity;
+data, provider and Connection boundaries, approvals, and native Windows
+application control through global approvals and immediate Stop. Full Access adds no per-app grants. First-run account sign-in requires configured identity;
 hosted computer/browser and synchronization remain optional and deployment-gated.
 Production hosted operation, secure
 hosted sign-in, ordinary conversation continuation after close, multi-device

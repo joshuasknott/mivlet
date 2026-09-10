@@ -19,9 +19,10 @@ must not replace that local authority implicitly.
   thread context where their repository supports it.
 - Provider and plugin-style Connection metadata belongs to a workspace, while
   the associated credential stays behind its own secure boundary.
-- A local teammate computer is derived from the exact workspace and teammate
-  identity. Its Docker volume and scoped file bridge are not general workspace
-  database records.
+- Native computer permission binds an exact workspace, agent, request, selected
+  window and generation. It is transient and never restored from disk. The
+  agent's scoped workspace files and retired Docker metadata retain their stable
+  identities outside general workspace database records.
 
 ## Isolation rules
 

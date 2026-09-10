@@ -1,4 +1,5 @@
 import { Brand } from "../Brand";
+import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
@@ -44,6 +45,8 @@ export function AgentSidebar({
   onSelectProject,
   onCreateProject,
   hidden = false,
+  collapsed = false,
+  onToggleCollapsed,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -63,6 +66,8 @@ export function AgentSidebar({
   onSelectProject?: (project: AgentSidebarProject) => void;
   onCreateProject?: () => void;
   hidden?: boolean;
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const [completions, setCompletions] = useState<
@@ -87,7 +92,7 @@ export function AgentSidebar({
       return changed ? next : current;
     });
   }, [previews]);
-  const normalizedQuery = query.trim().toLowerCase();
+  const normalizedQuery = collapsed ? "" : query.trim().toLowerCase();
   const visibleAgents = agents.filter((agent) =>
     `${agent.name} ${previews[agent.id]?.message ?? ""}`
       .toLowerCase()
@@ -102,9 +107,10 @@ export function AgentSidebar({
   );
 
   return (
-    <aside className="agent-sidebar" aria-label="Agents" hidden={hidden}>
+    <aside className={`agent-sidebar${collapsed ? " agent-sidebar--collapsed" : ""}`} aria-label="Agents" hidden={hidden}>
       <div className="agent-sidebar__topline">
         <Brand className="agent-sidebar__brand" />
+        {onToggleCollapsed ? <button className="agent-sidebar__collapse" type="button" aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} title={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed} onClick={onToggleCollapsed}><SidebarSimple size={18} /></button> : null}
       </div>
 
       <label className="agent-search">
@@ -216,6 +222,8 @@ export function AgentSidebar({
                   onSelectAgent(agent);
                 }}
                 aria-current={active ? "page" : undefined}
+                aria-label={collapsed ? agent.name : undefined}
+                title={collapsed ? agent.name : undefined}
               >
                 <ProfileAgentAvatar
                   agent={agent}

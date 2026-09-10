@@ -11,6 +11,7 @@ import type {
 } from "../contract";
 import { backendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
+import { computerVisionUnavailableReason } from "../../native-api/computer-vision";
 
 const PROVIDER_OWNED_DRIVERS = new Set([
   "claude-agent",
@@ -43,7 +44,7 @@ export function createManagedRuntimeBackend(
       try {
         await liveHandle.initialize();
         for await (const event of liveHandle.submitTurn(request, {
-          contextPrefix: options.contextPrefix,
+          contextPrefix: [options.contextPrefix, options.computer && computerVisionUnavailableReason(provider, provider.models.find(model => model.id === request.model))].filter(Boolean).join("\n\n"),
           permissionMode: options.permissionMode,
           attemptId: options.attemptId,
         })) {

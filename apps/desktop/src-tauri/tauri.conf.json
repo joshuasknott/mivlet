@@ -46,7 +46,7 @@
       }
     },
     "resources": [
-      "resources/local-computer/**/*"
+      "resources/cua-driver/**/*"
     ],
     "icon": [
       "icons/icon.ico"

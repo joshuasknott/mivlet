@@ -43,58 +43,40 @@ describe("buildToolApproval", () => {
     expect(approval.confirmationPhrase).toBe("approve cloud-browser");
   });
 
-  it("binds an on-device browser page to a critical one-time confirmation", () => {
-    const approval = buildToolApproval(
-      "openai",
-      "local-browser",
-      '{"url":"https://example.com/path#section"}'
-    );
-    expect(approval).toMatchObject({
-      mode: "full-access",
-      riskLevel: "critical",
-      dataUsed: ["url: https://example.com/path"],
-      confirmationPhrase: "approve local-browser"
-    });
-    expect(approval.consequence).not.toMatch(/unregistered/i);
-  });
 
-  it("binds every local browser control field and treats observation as a read", () => {
-    const observation = buildToolApproval("openai", "local-browser-observe", "{}");
+  it("binds every native application control field and treats observation as a read", () => {
+    const observation = buildToolApproval("openai", "local-app-observe", "{}");
     expect(observation).toMatchObject({ mode: "read-only", riskLevel: "medium" });
     expect(observation.confirmationPhrase).toBeUndefined();
 
-    const action = buildToolApproval("openai", "local-browser-action", JSON.stringify({
-      action: "fill",
+    const action = buildToolApproval("openai", "local-app-action", JSON.stringify({
+      action: "type",
       observationId: "observation-1234567890abcdef",
       elementRef: "control-1234567890abcdef-0",
-      controlRole: "textbox",
-      controlName: "Search",
-      value: "Mivlet"
+      text: "Mivlet"
     }));
     expect(action).toMatchObject({
       mode: "full-access",
       riskLevel: "critical",
-      confirmationPhrase: "approve local-browser-action"
+      confirmationPhrase: "approve local-app-action"
     });
     expect(action.dataUsed).toEqual([
-      "action: fill",
-      "controlName: Search",
-      "controlRole: textbox",
+      "action: type",
       "elementRef: control-1234567890abcdef-0",
       "observationId: observation-1234567890abcdef",
-      "value: Mivlet"
+      "text: Mivlet"
     ]);
 
-    const selection = buildToolApproval("openai", "local-browser-action", JSON.stringify({
-      action: "select",
-      observationId: "observation-1234567890abcdef",
-      elementRef: "control-1234567890abcdef-1",
-      controlRole: "combobox",
-      controlName: "Region",
-      value: "Europe"
-    }));
-    expect(selection.dataUsed).toContain("value: Europe");
-    expect(selection.confirmationPhrase).toBe("approve local-browser-action");
+
+  });
+
+  it("binds foreground selection separately and explains its focus effect", () => {
+    const background = buildToolApproval("openai", "local-app-select", '{"windowId":"window-a"}');
+    const foreground = buildToolApproval("openai", "local-app-select", '{"windowId":"window-a","deliveryMode":"foreground"}');
+    expect(background.consequence).toContain("without bringing it forward");
+    expect(foreground.consequence).toContain("may interrupt your work");
+    expect(foreground.dataUsed).toEqual(["deliveryMode: foreground", "windowId: window-a"]);
+    expect(foreground.id).not.toBe(background.id);
   });
 
   it("fails closed for an unregistered tool — critical risk, refusal consequence", () => {
@@ -112,18 +94,14 @@ describe("buildToolApproval", () => {
 
   it("binds every browser control argument shown to the user", () => {
     const approval = buildToolApproval("openai", "cloud-browser-action", JSON.stringify({
-      action: "fill",
+      action: "type",
       observationId: "observation-1234567890abcdef",
       elementRef: "control-1234567890abcdef-1",
-      controlRole: "textbox",
-      controlName: "Search",
       value: "quarterly plan"
     }));
 
     expect(approval.dataUsed).toEqual([
-      "action: fill",
-      "controlName: Search",
-      "controlRole: textbox",
+      "action: type",
       "elementRef: control-1234567890abcdef-1",
       "observationId: observation-1234567890abcdef",
       "value: quarterly plan"

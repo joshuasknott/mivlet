@@ -1,29 +1,18 @@
 import type { BuiltinPlugins } from "@fable/protocol";
-import browserIcon from "../assets/plugins/browser.png?no-inline";
 import computerIcon from "../assets/plugins/computer.png?no-inline";
-
 export const builtinPluginEntries = [
-  { id: "browser", name: "Browser", description: "Read websites and use tabs in your agent's browser.", icon: browserIcon },
-  { id: "computer", name: "Computer Use", description: "Use desktop apps, terminal and files in your agent's computer.", icon: computerIcon },
+  { id: "computer", name: "Computer Use", description: "Use a Windows application with your permission, and work with agent workspace files.", icon: computerIcon },
 ] as const;
-
 export function builtinPluginMentions(plugins?: BuiltinPlugins) {
-  return builtinPluginEntries.filter((entry) => plugins?.[entry.id]).map((entry) => ({ ...entry, status: "enabled" }));
+  return builtinPluginEntries.filter(entry => plugins?.[entry.id]).map(entry => ({ ...entry, status: "enabled" }));
 }
-
 export function mentionedBuiltinPlugins(prompt: string) {
-  const ids = new Set([...prompt.matchAll(/(^|\s)@(browser|computer)(?=$|\s|[.,!?;:])/gi)].map((match) => match[2].toLowerCase()));
-  return builtinPluginEntries.filter((entry) => ids.has(entry.id));
+  return /(^|\s)@computer(?=$|\s|[.,!?;:])/i.test(prompt) ? [...builtinPluginEntries] : [];
 }
-
-/** Mentions select a workflow, never grant permission or return human control. */
+/** Selecting a workflow never grants foreground input permission. */
 export function builtinPluginInstructions(prompt: string, plugins: BuiltinPlugins | undefined, toolNames: readonly string[]) {
-  return mentionedBuiltinPlugins(prompt).map((entry) => {
-    if (!plugins?.[entry.id]) throw new Error(`Enable ${entry.name} in Plugins → Featured before using @${entry.id}.`);
-    const required = entry.id === "browser" ? "local-browser-observe" : "run-shell";
-    if (!toolNames.includes(required)) throw new Error(`${entry.name} is unavailable. Start the agent's computer and return control to the agent before using @${entry.id}.`);
-    return entry.id === "browser"
-      ? "The user selected @browser. Use the Browser plugin's local-browser tools for this request, starting with a fresh structured observation or tab listing. Verify results and publish requested downloads with computer-artifact. This mention grants no additional permissions."
-      : `The user selected @computer. Use the Computer Use plugin's isolated computer tools for this request. Verify work and publish outputs with computer-artifact. This mention grants no additional permissions.${toolNames.includes("local-desktop-observe") ? " Observe the desktop before visual actions." : " Visual desktop control is unavailable on this model route; explain this if required. File and terminal tools remain available."}`;
-  }).join("\n\n");
+  if (!mentionedBuiltinPlugins(prompt).length) return "";
+  if (!plugins?.computer) throw new Error("Enable Computer Use in Plugins before using @computer.");
+  if (!toolNames.includes("local-app-observe")) throw new Error("Computer Use is unavailable on this executing model route.");
+  return "The user selected @computer. Find the application with local-app-list and select its exact window with local-app-select. Follow the existing global approval policy; Full Access needs no separate app grant. Ask about the target only when it is genuinely ambiguous. Verify effects and publish workspace outputs with computer-artifact.";
 }

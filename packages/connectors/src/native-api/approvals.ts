@@ -59,14 +59,6 @@ function normalizeCloudBrowserUrl(raw: string): string | null {
   }
 }
 
-function normalizeLocalBrowserUrl(raw: string): string | null {
-  const normalized = normalizeWebFetchUrl(raw);
-  if (!normalized) return null;
-  const url = new URL(normalized);
-  url.hash = "";
-  return url.toString();
-}
-
 /** Build the ApprovalRequest for a model-emitted tool call. */
 function canonicalValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalValue);
@@ -102,15 +94,15 @@ export function buildToolApproval(
         const norm = normalizeCloudBrowserUrl(value);
         if (norm) vstr = norm;
       }
-      if (toolName === "local-browser" && key === "url" && typeof value === "string") {
-        const norm = normalizeLocalBrowserUrl(value);
-        if (norm) vstr = norm;
-      }
       return `${key}: ${vstr}`;
     });
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
-  const consequence = isRegistered
+  const consequence = toolName === "local-app-select" && isRegistered
+    ? parsed.deliveryMode === "foreground"
+      ? "Bring the selected Windows app forward and allow approved actions to use its foreground window. This may interrupt your work."
+      : "Select the Windows app for supported background controls without bringing it forward. Each action still follows your approval settings."
+    : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;
 

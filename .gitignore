@@ -20,6 +20,7 @@ coverage/
 **/.wrangler/
 .superpowers/
 .worktrees/
+apps/desktop/src-tauri/resources/cua-driver/cua-driver.exe
 
 # local wrangler/d1 state
 .wrangler/

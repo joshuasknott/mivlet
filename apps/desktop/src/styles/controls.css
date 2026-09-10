@@ -130,9 +130,9 @@ textarea:focus-visible {
   text-transform: none;
 }
 
-.window-controls { position: fixed; z-index: 1000; inset: 0 0 auto; height: 40px; display: flex; align-items: stretch; color: var(--ink); background: var(--surface); pointer-events: none; }
-.window-controls__drag { flex: 1; margin-right: 48px; pointer-events: auto; user-select: none; }
-.window-controls button { display: grid; place-items: center; pointer-events: auto; width: 46px; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
+.window-controls { position: fixed; z-index: 1000; inset: 0 0 auto; height: 30px; display: flex; align-items: stretch; color: var(--ink); background: var(--surface); pointer-events: none; }
+.window-controls__drag { flex: 1; margin-right: 0; pointer-events: auto; user-select: none; }
+.window-controls button { display: grid; place-items: center; pointer-events: auto; width: 42px; padding: 0; border: 0; border-radius: 0; background: transparent; color: inherit; }
 .window-controls button:hover { background: var(--surface-hover); color: var(--ink); }
 .window-controls button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
 .window-controls button.window-controls__close:hover { background: #c42b1c; color: white; }
@@ -140,7 +140,7 @@ textarea:focus-visible {
 
 @media (min-width: 651px) {
   /* Reserve native chrome space without covering app controls or scroll areas. */
-  #root:has(.window-controls) { --window-chrome-height: 40px; padding-top: var(--window-chrome-height); }
+  #root:has(.window-controls) { --window-chrome-height: 30px; padding-top: var(--window-chrome-height); }
   #root:has(.window-controls) .desktop-frame { min-height: 0; height: calc(100dvh - var(--window-chrome-height)); }
   #root:has(.window-controls) .desktop-frame > .workspace { height: 100%; min-height: 0; }
 }

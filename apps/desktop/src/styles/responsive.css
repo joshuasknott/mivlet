@@ -15,7 +15,6 @@
   }
 
   .context-panel--split,
-  .connector-grid,
   .connector-search,
   .settings-grid,
   .settings-form-grid {
@@ -31,9 +30,6 @@
      already left-anchored menu) can overflow the viewport's right edge. Clamp
      its width so it never clips or pushes off-screen between the phone (700px)
      and desktop layouts. */
-  .composer-submenu-sidebar {
-    max-width: min(320px, calc(100vw - 24px));
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -145,11 +141,6 @@
     font-size: var(--text-15);
   }
 
-  .composer-permissions-card {
-    padding-inline: 12px;
-    font-size: var(--text-15);
-  }
-
   .composer-control-anchor--permissions .composer-menu {
     right: 12px;
     left: 12px;
@@ -178,8 +169,7 @@
     border-radius: 16px;
   }
 
-  .composer-add-menu button,
-  .composer-permissions button {
+  .composer-add-menu button {
     width: 100%;
     min-width: 0;
   }
@@ -193,8 +183,7 @@
     height: 34px;
   }
 
-  .approval-details,
-  .source-row {
+  .approval-details {
     grid-template-columns: 1fr;
   }
 
@@ -260,7 +249,6 @@
   .desktop-frame--agents .composer-preferences .composer-menu { position: static; inset: auto; width: 100%; }
   .desktop-frame--agents .composer-add-menu { position: absolute; inset: auto 0 calc(100% + 8px); width: auto; }
   .desktop-frame--agents .composer-add-menu button { min-width: 0; }
-  .desktop-frame--agents .composer-submenu-sidebar { position: static; width: 100%; min-width: 0; margin-top: 4px; box-shadow: none; }
   .desktop-frame--agents .composer-preferences > header button { width: 44px; height: 44px; }
 }
 

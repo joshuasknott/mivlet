@@ -1,5 +1,4 @@
 import type { FableAgentProfile } from "@fable/protocol";
-import { ProfileAgentAvatar } from "./agent-icons";
 
 const newAgentSuggestions = [
   "Keep me on top of daily work",
@@ -26,13 +25,12 @@ export function AgentWelcome({
   return (
     <section className="agent-welcome" aria-labelledby="agent-welcome-title">
       <div className="agent-welcome__message">
-        <ProfileAgentAvatar agent={agent} iconSize={34} />
         <div>
-          <strong id="agent-welcome-title">{agent.name}</strong>
+          <h1 id="agent-welcome-title">What should we work on?</h1>
           <p>
             {needsPurpose
-              ? "Hey. Fresh start — what do you want me around for? Daily work, a project, research, or something else?"
-              : "What should we work on? Give me the outcome and I’ll take it from there."}
+              ? "Choose a focus, or tell me what you have in mind."
+              : "Give me the outcome and I’ll take it from there."}
           </p>
         </div>
       </div>

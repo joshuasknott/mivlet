@@ -1,9 +1,0 @@
-#!/bin/bash
-set -euo pipefail
-export DISPLAY=:99 HOME=/home/fable XAUTHORITY=/run/fable-desktop/Xauthority
-export XDG_CONFIG_HOME="$HOME/.config" XDG_CACHE_HOME="$HOME/.cache"
-umask 0007
-# Fable owns fixed application launch actions. A generic desktop/panel Run or
-# custom-launcher surface would execute outside the GUI process sandbox.
-xsetroot -solid '#20242b'
-exec xfwm4 --replace --compositor=off

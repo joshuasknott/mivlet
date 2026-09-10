@@ -4,76 +4,96 @@ import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);
 describe("computer task execution bounds", () => {
+  it("requires explicit foreground selection and a new observation after a no-input refusal", async () => {
+    const execute = vi.fn(async (request: ApprovalRequest, args: string) => {
+      if (request.action.startsWith("local-app-select")) return JSON.stringify({ status: "active", deliveryMode: JSON.parse(args).deliveryMode });
+      if (request.action.startsWith("local-app-observe")) return '{"observationId":"fresh"}';
+      return '{"status":"foreground-required","inputDispatched":false}';
+    });
+    const guarded = createComputerTaskExecutor(execute);
+    const action = '{"action":"key","key":"Enter","observationId":"old"}';
+    await expect(guarded(approval("local-app-action"), action)).resolves.toContain("foreground-required");
+    await guarded(approval("local-app-observe"), "{}");
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("approved foreground");
+    await guarded(approval("local-app-select"), '{"windowId":"next","deliveryMode":"background"}');
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("approved foreground");
+    await guarded(approval("local-app-select"), '{"windowId":"next","deliveryMode":"foreground"}');
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("Observe the current application");
+    await guarded(approval("local-app-observe"), "{}");
+    execute.mockResolvedValueOnce('{"status":"input-dispatched"}');
+    await expect(guarded(approval("local-app-action"), action.replace("old", "fresh"))).resolves.toContain("input-dispatched");
+    expect(execute.mock.calls.filter(([request]) => request.action.startsWith("local-app-action"))).toHaveLength(2);
+  });
+
+  it("never treats an uncertain background failure as permission to replay in foreground", async () => {
+    const execute = vi.fn().mockRejectedValueOnce(new Error("Background action outcome is uncertain. Do not replay it."));
+    const guarded = createComputerTaskExecutor(execute);
+    const action = '{"action":"type","text":"once","observationId":"old"}';
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("uncertain");
+    execute.mockResolvedValueOnce('{"status":"active","deliveryMode":"foreground"}');
+    await guarded(approval("local-app-select"), '{"windowId":"next","deliveryMode":"foreground"}');
+    execute.mockResolvedValueOnce('{"observationId":"fresh","text":"once"}');
+    await guarded(approval("local-app-observe"), "{}");
+    await expect(guarded(approval("local-app-action"), action.replace("old", "fresh"))).rejects.toThrow("already has an uncertain outcome");
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
   it("requires a fresh observation after a stale action, then permits a deliberate retry", async () => {
     let actions = 0;
     const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("local-browser-observe")) return '{"observationId":"fresh"}';
+      if (request.action.startsWith("local-app-observe")) return '{"observationId":"fresh"}';
       if (actions++ === 0) throw new Error("That local browser observation is stale.");
       return "clicked";
     });
     const guarded = createComputerTaskExecutor(execute);
     const action = JSON.stringify({ action: "click", controlName: "Submit", observationId: "old" });
-    await expect(guarded(approval("local-browser-action"), action)).rejects.toThrow("stale");
-    await expect(guarded(approval("local-browser-action"), action)).rejects.toThrow("Observe the current application");
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("stale");
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("Observe the current application");
     expect(execute).toHaveBeenCalledTimes(1);
-    await expect(guarded(approval("local-browser-observe"), "{}")).resolves.toContain("fresh");
-    await expect(guarded(approval("local-browser-action"), action)).resolves.toBe("clicked");
+    await expect(guarded(approval("local-app-observe"), "{}")).resolves.toContain("fresh");
+    await expect(guarded(approval("local-app-action"), action)).resolves.toBe("clicked");
     expect(execute).toHaveBeenCalledTimes(3);
   });
 
   it("stops after three failures in one recognized recovery class", async () => {
     const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("local-browser-observe")) return '{"observationId":"fresh"}';
-      throw new Error("The observed local browser control changed.");
+      if (request.action.startsWith("local-app-observe")) return '{"observationId":"fresh"}';
+      throw new Error("The observed application control changed.");
     });
     const guarded = createComputerTaskExecutor(execute);
     for (let attempt = 0; attempt < 3; attempt++) {
-      await expect(guarded(approval("local-browser-action"), `{"observationId":"${attempt}"}`)).rejects.toThrow("changed");
-      await guarded(approval("local-browser-observe"), "{}");
+      await expect(guarded(approval("local-app-action"), `{"observationId":"${attempt}"}`)).rejects.toThrow("changed");
+      await guarded(approval("local-app-observe"), "{}");
     }
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("3 stale observation failures");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("3 stale observation failures");
     expect(execute).toHaveBeenCalledTimes(6);
   });
 
-  it("reacquires a closed tab through a browser observation before continuing", async () => {
-    let tabChanges = 0;
-    const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("local-browser-observe")) return '{"tabs":[{"tabRef":"tab-new"}]}';
-      if (tabChanges++ === 0) throw new Error("That browser tab was closed. Observe again.");
-      return "switched";
-    });
-    const guarded = createComputerTaskExecutor(execute);
-    await expect(guarded(approval("local-browser-tab"), '{"action":"switch","tabRef":"tab-old"}')).rejects.toThrow("closed");
-    await expect(guarded(approval("local-browser-tab"), '{"action":"switch","tabRef":"tab-old"}')).rejects.toThrow("reacquire");
-    await guarded(approval("local-browser-observe"), "{}");
-    await expect(guarded(approval("local-browser-tab"), '{"action":"switch","tabRef":"tab-new"}')).resolves.toBe("switched");
-  });
 
   it("treats an unknown mutation failure as uncertain and never replays it", async () => {
     const execute = vi.fn().mockRejectedValue(new Error("Application rejected this action after dispatch."));
     const guarded = createComputerTaskExecutor(execute);
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("after dispatch");
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("uncertain outcome");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("after dispatch");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("uncertain outcome");
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
   it("bounds repeated errors that explicitly prove execution never began", async () => {
-    const execute = vi.fn().mockRejectedValue(new Error("Tool call denied: local-browser-action approved action."));
+    const execute = vi.fn().mockRejectedValue(new Error("Tool call denied: local-app-action approved action."));
     const guarded = createComputerTaskExecutor(execute);
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("denied");
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("denied");
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("failed twice before execution");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("denied");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("denied");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("failed twice before execution");
     expect(execute).toHaveBeenCalledTimes(2);
   });
   it("detects three actions that leave the application unchanged", async () => {
     let id = 0;
-    const execute = vi.fn(async (request: ApprovalRequest) => request.action.startsWith("local-browser-observe")
+    const execute = vi.fn(async (request: ApprovalRequest) => request.action.startsWith("local-app-observe")
       ? JSON.stringify({ observationId: String(++id), text: "Still loading", controls: [] }) : "clicked");
     const guarded = createComputerTaskExecutor(execute);
-    await guarded(approval("local-browser-observe"), "{}");
+    await guarded(approval("local-app-observe"), "{}");
     for (let i = 0; i < 3; i++) {
-      await guarded(approval("local-browser-action"), JSON.stringify({ observationId: String(i), action: "click" }));
-      await guarded(approval("local-browser-observe"), "{}");
+      await guarded(approval("local-app-action"), JSON.stringify({ observationId: String(i), action: "click" }));
+      await guarded(approval("local-app-observe"), "{}");
     }
     await expect(guarded(approval("write-file"), '{"path":"result.txt"}')).rejects.toThrow("unchanged");
     expect(execute).toHaveBeenCalledTimes(7);
@@ -82,16 +102,16 @@ describe("computer task execution bounds", () => {
   it("bounds repeated loading recovery without replaying a mutation", async () => {
     const activity = vi.fn();
     const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("local-browser-observe")) {
+      if (request.action.startsWith("local-app-observe")) {
         throw new Error("The browser could not read the visible page. Observe again after it finishes loading.");
       }
       return "clicked";
     });
     const guarded = createComputerTaskExecutor(execute, activity);
     for (let attempt = 0; attempt < 3; attempt++) {
-      await expect(guarded(approval("local-browser-observe"), "{}")).rejects.toThrow("finishes loading");
+      await expect(guarded(approval("local-app-observe"), "{}")).rejects.toThrow("finishes loading");
     }
-    await expect(guarded(approval("local-browser-action"), '{}')).rejects.toThrow("3 loading failures");
+    await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("3 loading failures");
     expect(execute).toHaveBeenCalledTimes(3);
     expect(activity).toHaveBeenCalledWith("Waiting for the application to finish loading");
   });
@@ -100,8 +120,8 @@ describe("computer task execution bounds", () => {
     const execute = vi.fn(async () => JSON.stringify({ text: `Page ${++state}` }));
     const guarded = createComputerTaskExecutor(execute);
     for (let i = 0; i < 5; i++) {
-      await guarded(approval("local-browser-action"), '{}');
-      await guarded(approval("local-browser-observe"), '{}');
+      await guarded(approval("local-app-action"), '{}');
+      await guarded(approval("local-app-observe"), '{}');
     }
     expect(execute).toHaveBeenCalledTimes(10);
   });
@@ -109,7 +129,7 @@ describe("computer task execution bounds", () => {
     const execute = vi.fn(async () => "done");
     const guarded = createComputerTaskExecutor(execute);
     for (let i = 0; i < 80; i++) await guarded(approval("read-file"), '{}');
-    await expect(guarded(approval("run-shell"), '{"command":"echo done"}')).rejects.toThrow("action limit");
+    await expect(guarded(approval("local-app-action"), '{"action":"key","key":"Enter"}')).rejects.toThrow("action limit");
     await expect(guarded(approval("gmail-read"), '{}')).resolves.toBe("done");
   });
   it("reports waiting for control without retrying automatically", async () => {
@@ -142,38 +162,19 @@ describe("computer task execution bounds", () => {
 
   it("does not downgrade an uncertain effect when its reconciliation read also fails", async () => {
     const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("local-browser-action")) throw new Error("Browser outcome is uncertain.");
-      if (request.action.startsWith("local-browser-observe")) {
+      if (request.action.startsWith("local-app-action")) throw new Error("Browser outcome is uncertain.");
+      if (request.action.startsWith("local-app-observe")) {
         throw new Error("That local browser observation is stale.");
       }
       return "done";
     });
     const guarded = createComputerTaskExecutor(execute);
     const action = '{"action":"click","controlName":"Submit","observationId":"old"}';
-    await expect(guarded(approval("local-browser-action"), action)).rejects.toThrow("uncertain");
-    await expect(guarded(approval("local-browser-observe"), "{}")).rejects.toThrow("stale");
-    await expect(guarded(approval("local-browser-action"), action)).rejects.toThrow("uncertain outcome");
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("uncertain");
+    await expect(guarded(approval("local-app-observe"), "{}")).rejects.toThrow("stale");
+    await expect(guarded(approval("local-app-action"), action)).rejects.toThrow("uncertain outcome");
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("treats a tab-list error after close dispatch as uncertain", async () => {
-    const execute = vi.fn().mockRejectedValue(new Error("The browser tab list changed. Observe again."));
-    const guarded = createComputerTaskExecutor(execute);
-    const close = '{"action":"close","tabRef":"tab-old"}';
-    await expect(guarded(approval("local-browser-tab"), close)).rejects.toThrow("tab list changed");
-    await expect(guarded(approval("local-browser-tab"), close)).rejects.toThrow("uncertain outcome");
-    expect(execute).toHaveBeenCalledTimes(1);
-  });
 
-  it("never unlocks an uncertain shell command through an unrelated read", async () => {
-    const execute = vi.fn(async (request: ApprovalRequest) => {
-      if (request.action.startsWith("run-shell")) throw new Error("Command timed out and may still be running.");
-      return "read";
-    });
-    const guarded = createComputerTaskExecutor(execute);
-    await expect(guarded(approval("run-shell"), '{"command":"job"}')).rejects.toThrow("may still be running");
-    await guarded(approval("read-file"), '{"path":"status.txt"}');
-    await expect(guarded(approval("run-shell"), '{"command":"job"}')).rejects.toThrow("Reconcile its result");
-    expect(execute).toHaveBeenCalledTimes(2);
-  });
 });

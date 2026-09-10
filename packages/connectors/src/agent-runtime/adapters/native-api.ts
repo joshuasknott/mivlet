@@ -26,6 +26,7 @@ import type {
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { resolveModelCapabilities } from "../../native-api/model-catalogue";
+import { computerVisionUnavailableReason, supportsNativeComputerVision } from "../../native-api/computer-vision";
 import { validateReasoningEffort } from "../../native-api/reasoning";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
@@ -35,6 +36,7 @@ interface ActiveRun {
   requestId: string | null;
   cancel: (requestId: string) => Promise<void>;
   cancelRequested: boolean;
+  shutdown?: () => Promise<void>;
 }
 
 /**
@@ -93,6 +95,7 @@ export function createNativeApiBackend(
     const handle = deps.createTransport(provider, handlers);
     if (handle === null) return null;
     activeRun.cancel = handle.cancel;
+    activeRun.shutdown = handle.shutdown;
     if (activeRun.cancelRequested && activeRun.requestId) {
       void activeRun.cancel(activeRun.requestId).catch(() => undefined);
     }
@@ -107,21 +110,24 @@ export function createNativeApiBackend(
       providerId: provider.id,
       model: request.model,
       messages: request.messages,
-      tools: request.tools,
+      tools: request.tools.filter(tool => !tool.name.startsWith("local-desktop-")
+        || (options.computer && supportsNativeComputerVision(provider.id, selectedModel))),
       maxTokens: request.maxTokens,
       ...(request.reasoningEffort ? { reasoningEffort: request.reasoningEffort } : {}),
-      ...(request.providerRoute ? { providerRoute: request.providerRoute } : {})
+      ...(request.providerRoute ? { providerRoute: request.providerRoute } : {}),
+      ...(options.computer ? { computer: options.computer } : {})
     };
     const eventStream = runAgentLoop(handle.transport, nativeRequest, {
       execute,
       modelSupportsTools: modelCapabilities?.tools,
-      shouldCancel: options.shouldCancel,
-      contextPrefix: options.contextPrefix,
+      shouldCancel: () => activeRun.cancelRequested || options.shouldCancel?.() === true,
+      contextPrefix: [options.contextPrefix, computerVisionUnavailableReason(provider, selectedModel)].filter(Boolean).join("\n\n"),
       permissionMode: options.permissionMode,
       runId: options.attemptId,
       maxTurns: options.maxTurns,
       maxToolCalls: options.maxToolCalls,
-      maxToolOutputCharacters: options.maxToolOutputCharacters
+      maxToolOutputCharacters: options.maxToolOutputCharacters,
+      toolsEnabled: request.tools.length > 0 ? nativeRequest.tools.length > 0 : undefined
     });
 
     if (!eventStream) return null;
@@ -146,6 +152,7 @@ export function createNativeApiBackend(
         if (sawCancelled && capabilities.includes("cancellation") && activeRun.requestId) {
           await activeRun.cancel(activeRun.requestId);
         }
+        await activeRun.shutdown?.();
         if (active.get(executionId) === activeRun) active.delete(executionId);
       }
     }
@@ -165,6 +172,7 @@ export function createNativeApiBackend(
     if (matches.length === 0 && active.size === 1) matches = [...active.entries()];
     for (const [key, run] of matches) {
       run.cancelRequested = true;
+      await run.shutdown?.();
       if (run.requestId) {
         await run.cancel(run.requestId);
         if (active.get(key) === run) active.delete(key);

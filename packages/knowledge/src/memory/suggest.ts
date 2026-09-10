@@ -130,11 +130,6 @@ function deriveFromSources(sources: KnowledgeSource[]): RawCandidate[] {
  * matched ids so the UI can show the relationship.
  */
 export function suggestMemories(ctx: MemorySuggestionContext): MemorySuggestion[] {
-  // --- PURE READ ONLY -----------------------------------------------------
-  // This function MUST NOT call any store, mutate any argument, or persist.
-  // It returns MemorySuggestion objects for the caller to surface/approve.
-  // ------------------------------------------------------------------------
-
   const raw: RawCandidate[] = [];
   for (const message of ctx.recentMessages ?? []) {
     if (message.role === "user") {

@@ -18,6 +18,8 @@ import type { NativeCompletionRequest } from "@fable/protocol";
  *  added by the transport in production — Rust — never in the request type). */
 export interface HttpTransport {
   stream(request: NativeCompletionRequest): AsyncIterable<string>;
+  /** Native attestation of an exact provider-emitted computer call; no pixels. */
+  toolApprovalId?(callId: string): string | undefined;
 }
 
 /** A transport that replays a fixed list of SSE lines (blank lines dropped). */

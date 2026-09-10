@@ -33,7 +33,7 @@ export function ConversationSample({ agent, onPreviewArtifact }: { agent: FableA
     responseParts: mode === "failure" ? [...parts.slice(0, 2), { id: "failed", kind: "tool", tool: "read-file", state: "failed", content: "The connection expired. Reconnect GitHub to read this file." }] : parts.slice(0, step),
   };
   return <>
-    <ConversationFeed messages={[]} agent={agent} state={state} threadId="sample-thread" profileName="Joshua" connectors={[]} optimisticPrompt="" workspaceId="sample-workspace"
+    <ConversationFeed showAuthor={false} messages={[]} agent={agent} state={state} threadId="sample-thread" profileName="Joshua" connectors={[]} optimisticPrompt="" workspaceId="sample-workspace"
       onPreviewArtifact={onPreviewArtifact} interruption={mode === "stopped" ? <div className="conversation-attention"><p>Stopped. Your completed work is still here.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Continue</button></div> : mode === "failure" ? <div className="conversation-attention"><p>Your GitHub connection has expired. Reconnect to continue.</p><button onClick={() => { setMode("stream"); setStep(3); }}>Reconnect (sample)</button></div> : null} />
   </>;
 }

@@ -100,8 +100,9 @@ new attempt from the durable user request. It never replays a previous tool
 result, approval permit, or external effect. Completed, cancelled, failed, and
 interrupted are mutually exclusive terminal outcomes.
 
-Ordinary conversation does not continue after Mivlet closes. A local Docker
-container or optional hosted computer being alive does not change that claim.
+Ordinary conversation does not continue after Mivlet closes. Closing Mivlet also
+revokes native window permission and stops its owned computer driver. An optional
+hosted computer being alive does not change the conversation-lifetime claim.
 
 ## Tool safety
 
@@ -114,10 +115,10 @@ permission mode, bounded preview, workspace, teammate, computer generation, and
 fresh single-use permit. The final trusted boundary revalidates and consumes
 that authority immediately before the effect.
 
-Local file and terminal tools target only the selected teammate's local
-computer scope. `run-shell` executes inside that Docker container. Hosted tools
-run only when the request explicitly selects hosted placement and the external
-hosted prerequisites are valid.
+Local file tools target only the selected agent's scoped workspace. Native
+application tools follow global approvals, exact window selection and fresh
+observations. Full Access has no additional per-app prompt. Mivlet exposes no local host-shell tool. `run-shell` and other
+hosted tools require explicit hosted placement and valid external prerequisites.
 
 ## Evidence boundary
 

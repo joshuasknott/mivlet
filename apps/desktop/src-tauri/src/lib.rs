@@ -90,7 +90,7 @@ pub fn run() {
             let _ = connector_auth::provision_connector_configuration();
             let computers =
                 std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
-            local_computer::lifecycle::start_idle_monitor(computers.clone());
+            computers.start_activity();
             app.manage(computers);
             app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
             Ok(())
@@ -112,7 +112,6 @@ pub fn run() {
                     .inner()
                     .clone();
                 let _ = window.hide();
-                local_computer::viewer::close_all(&app);
                 tauri::async_runtime::spawn(async move {
                     codex_app_server::shutdown_all_runs();
                     local_computer::shutdown_all(computers).await;
@@ -121,13 +120,11 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
-            local_computer::viewer::local_computer_open_viewer,
-            local_computer::viewer::local_computer_close_viewer,
+            local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
             local_computer::artifacts::local_computer_preview_artifact,
             conversation_links::open_conversation_link,
             local_computer::local_computer_cancel,
-            local_computer::lifecycle::local_computer_lifecycle,
             window_controls::control_main_window,
             snapshot::runtime_status,
             execution_attempts::save_execution_attempt,
@@ -249,6 +246,8 @@ pub fn run() {
             connector_cache::delete_connector_cache_settings,
             native_api::stream_backend_completion,
             native_api::cancel_backend_completion,
+            native_api::computer::begin_native_computer_session,
+            native_api::computer::end_native_computer_session,
             native_api::list_backend_models,
             native_api::verify_backend_credential,
             clerk_identity::identity_status,
@@ -275,16 +274,8 @@ pub fn run() {
             local_computer::plugins::builtin_plugin_prepare_computer,
             local_computer::repositories::local_computer_import_repository,
             local_computer::local_computer_status,
-            local_computer::local_computer_provision,
             local_computer::local_computer_files,
             local_computer::local_computer_file_preview,
-            local_computer::local_browser_navigate,
-            local_computer::local_browser_snapshot,
-            local_computer::local_computer_set_controller,
-            local_computer::local_browser_pointer,
-            local_computer::local_browser_key,
-            local_computer::local_browser_history,
-            local_computer::local_computer_launch_app,
             mcp_process::spawn_mcp_process,
             mcp_process::write_mcp_frame,
             mcp_process::close_mcp_process,

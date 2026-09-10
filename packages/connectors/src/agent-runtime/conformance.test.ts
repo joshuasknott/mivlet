@@ -405,10 +405,10 @@ describe("AgentBackend Conformance Tests", () => {
         type: "approval-request",
         requestId: `request-${index}`,
         callId: `call-${index}`,
-        tool: "local-browser-observe",
+        tool: "local-app-observe",
         arguments: "{}",
         approval: {
-          id: `native-approval-${index}`, service: "codex", action: "local-browser-observe",
+          id: `native-approval-${index}`, service: "codex", action: "local-app-observe",
           mode: "full-access", riskLevel: "low", dataUsed: [], consequence: "Observe the computer",
           requestedAt: "", decisions: []
         }
@@ -417,7 +417,7 @@ describe("AgentBackend Conformance Tests", () => {
       const execute = vi.fn().mockResolvedValue("observed");
       const events = await collectEvents(createCodexBackend(mockCodexProvider(), mockCodexDeps(handle))?.run({
         ...baseRequest,
-        tools: registeredToolSpecs().filter((tool) => tool.name === "local-browser-observe")
+        tools: registeredToolSpecs().filter((tool) => tool.name === "local-app-observe")
       }, { execute, permissionMode: "full-access", maxToolCalls: 2 }));
       expect(execute).toHaveBeenCalledTimes(2);
       expect(handle.approvalResponses).toHaveLength(3);

@@ -67,10 +67,10 @@ describe("approval queue workspace hydration", () => {
     let finish!: (value: ApprovalResolutionResponse) => void;
     if (scenario === "failure") mocks.resolveApproval.mockRejectedValueOnce(new Error("Audit unavailable"));
     if (scenario === "downgrade" || scenario === "workspace") mocks.resolveApproval.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
-    const approval = buildToolApproval("Codex", "local-browser", '{"url":"https://example.test"}');
+    const approval = buildToolApproval("Codex", "local-app-select", '{"windowId":"opaque-choice"}');
     gate.register(approval);
     const outcome = gate.waitForDecision(approval).catch(() => "cancelled");
-    await act(async () => result.current.recordBackendToolCall({ callId: approval.id, tool: "local-browser", arguments: "{}", approval }));
+    await act(async () => result.current.recordBackendToolCall({ callId: approval.id, tool: "local-app-select", arguments: "{}", approval }));
     expect(result.current.openApprovals).toEqual([]);
     expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once" }));
     if (scenario === "downgrade") {
@@ -93,10 +93,10 @@ describe("approval queue workspace hydration", () => {
     await act(async () => {});
     const initialLoads = mocks.loadSnapshot.mock.calls.length;
     reset.mockClear();
-    const approval = buildToolApproval("Codex", "local-browser", '{"url":"https://example.test"}');
+    const approval = buildToolApproval("Codex", "local-app-select", '{"windowId":"opaque-choice"}');
     gate.register(approval);
     const decision = gate.waitForDecision(approval).catch((error: Error) => error.message);
-    act(() => result.current.recordBackendToolCall({ callId: "call-a", tool: "local-browser", arguments: "{}", approval }));
+    act(() => result.current.recordBackendToolCall({ callId: "call-a", tool: "local-app-select", arguments: "{}", approval }));
     await act(async () => { await result.current.reconcileAccountWorkspace(); });
     expect(result.current.openApprovals.map((item) => item.id)).toEqual([approval.id]);
     expect(gate.hasPending(approval.id)).toBe(true);
@@ -113,10 +113,10 @@ describe("approval queue workspace hydration", () => {
     await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
     await act(async () => {});
     const initialLoads = mocks.loadSnapshot.mock.calls.length;
-    const approval = buildToolApproval("Codex", "local-browser", '{"url":"https://example.test"}');
+    const approval = buildToolApproval("Codex", "local-app-select", '{"windowId":"opaque-choice"}');
     gate.register(approval);
     const outcome = gate.waitForDecision(approval).catch((error: Error) => error.message);
-    act(() => result.current.recordBackendToolCall({ callId: "call-a", tool: "local-browser", arguments: "{}", approval }));
+    act(() => result.current.recordBackendToolCall({ callId: "call-a", tool: "local-app-select", arguments: "{}", approval }));
     reset.mockClear();
     mocks.status = { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
     await act(async () => { await result.current.reconcileAccountWorkspace(); });

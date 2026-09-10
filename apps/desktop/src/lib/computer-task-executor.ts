@@ -1,25 +1,25 @@
 import type { ToolExecutor } from "@fable/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
-const OBSERVATIONS = new Set(["local-browser-observe", "local-desktop-observe"]);
-const MUTATIONS = new Set(["local-browser", "local-browser-action", "local-browser-tab", "local-desktop-action", "write-file", "run-shell"]);
-type RecoveryClass = "stale-observation" | "lost-tab" | "loading" | "human-control" | "uncertain-effect";
+const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe"]);
+const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "write-file"]);
+type RecoveryClass = "stale-observation" | "loading" | "human-control" | "uncertain-effect" | "foreground-required";
 type PendingRecovery = { kind: RecoveryClass; tools: ReadonlySet<string>; target?: string };
 
 const RECOVERY_LIMIT = 3;
 const RECOVERY_ACTIVITY: Record<RecoveryClass, string> = {
   "stale-observation": "Recovering: checking the current state",
-  "lost-tab": "Recovering: finding the active browser tab",
   loading: "Waiting for the application to finish loading",
   "human-control": "Waiting for computer control",
-  "uncertain-effect": "Checking whether the last action completed"
+  "uncertain-effect": "Checking whether the last action completed",
+  "foreground-required": "This action needs the foreground window"
 };
 const RECOVERY_GUIDANCE: Record<RecoveryClass, string> = {
   "stale-observation": "Observe the current application before making another change.",
-  "lost-tab": "Observe the browser to reacquire its current tabs before making another change.",
   loading: "Wait briefly, then observe the application again before making another change.",
   "human-control": "Wait for the user to return control, then observe the current state before acting.",
-  "uncertain-effect": "The previous action has an uncertain outcome. Reconcile its result before making another change; do not replay it."
+  "uncertain-effect": "The previous action has an uncertain outcome. Reconcile its result before making another change; do not replay it.",
+  "foreground-required": "Request an approved foreground window selection, then observe it before choosing the next action. No input was sent."
 };
 
 /** A fresh guard belongs to one provider turn. It never retries an action. */
@@ -56,6 +56,13 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
     if (calls > 84) throw new Error("Computer work stopped at its turn limit. Report the current state to the user.");
     try {
       const result = await execute(approval, argumentsJson);
+      if (mutation && stringArgument(result, "status") === "foreground-required") {
+        mutationSinceObservation = false;
+        preflightFailures.set(fingerprint, (preflightFailures.get(fingerprint) ?? 0) + 1);
+        pendingRecovery = { kind: "foreground-required", tools: new Set(["local-app-select"]) };
+        activity(RECOVERY_ACTIVITY["foreground-required"]);
+        return result;
+      }
       if (OBSERVATIONS.has(name)) {
         const next = stableArguments(result);
         if (mutationSinceObservation) unchangedActions = next === observation ? unchangedActions + 1 : 0;
@@ -68,7 +75,13 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
         activity("Verifying computer work");
       }
       if (pendingRecovery && recoverySatisfied(pendingRecovery, name, argumentsJson)) {
-        pendingRecovery = null;
+        if (pendingRecovery.kind === "foreground-required") {
+          if (stringArgument(argumentsJson, "deliveryMode") === "foreground"
+            && stringArgument(result, "status") === "active"
+            && stringArgument(result, "deliveryMode") === "foreground") {
+            pendingRecovery = { kind: "stale-observation", tools: OBSERVATIONS };
+          }
+        } else pendingRecovery = null;
       }
       return result;
     } catch (error) {
@@ -113,22 +126,16 @@ function classifyRecovery(error: unknown, tool: string, argumentsJson: string): 
   }
   if (message.includes("private sign-in or dialog") || message.includes("private browser or sign-in surface")
     || message.includes("return control") || message.includes("user has control")
-    || message.includes("actions and agent observation are paused") || message.includes("control changed or is paused")) {
+    || message.includes("actions and agent observation are paused") || message.includes("control changed or is paused") || message.includes("fresh permission") || message.includes("select a window and allow")) {
     return { kind: "human-control", tools: observationTools(tool) };
   }
   if (message.includes("after it finishes loading")) {
     return { kind: "loading", tools: observationTools(tool) };
   }
-  if (message.includes("browser tab was closed") || message.includes("active tab changed")
-    || message.includes("browser tab reference is stale")
-    || message.includes("browser is not running")
-    || message.includes("reconnect this computer before using its browser")) {
-    return { kind: "lost-tab", tools: new Set(["local-browser-observe"]) };
-  }
   if (code === "stale-action" || message.includes("observation is stale")
-    || message.includes("control is stale") || message.includes("observed local browser control changed")
-    || message.includes("observed browser control changed") || message.includes("observation delivery expired")
-    || message.includes("observe the local browser again before acting")) {
+    || message.includes("control is stale") || message.includes("observed application control changed")
+    || message.includes("observed application control changed") || message.includes("observation delivery expired")
+    || message.includes("observe the selected window before acting")) {
     return { kind: "stale-observation", tools: observationTools(tool) };
   }
   if (MUTATIONS.has(tool) && !provesNoEffect(error)) {
@@ -155,8 +162,8 @@ function provesNoEffect(error: unknown): boolean {
 }
 
 function observationTools(tool: string): ReadonlySet<string> {
-  return new Set(tool.startsWith("local-browser")
-    ? ["local-browser-observe"]
+  return new Set(tool.startsWith("local-app")
+    ? ["local-app-observe"]
     : ["local-desktop-observe"]);
 }
 
@@ -164,8 +171,8 @@ function uncertainRecovery(tool: string, argumentsJson: string): PendingRecovery
   if (tool === "write-file") {
     return { kind: "uncertain-effect", tools: new Set(["read-file"]), target: stringArgument(argumentsJson, "path") };
   }
-  if (tool.startsWith("local-browser")) {
-    return { kind: "uncertain-effect", tools: new Set(["local-browser-observe"]) };
+  if (tool.startsWith("local-app")) {
+    return { kind: "uncertain-effect", tools: new Set(["local-app-observe"]) };
   }
   if (tool === "local-desktop-action") {
     return { kind: "uncertain-effect", tools: new Set(["local-desktop-observe"]) };

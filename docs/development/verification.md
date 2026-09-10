@@ -34,7 +34,14 @@ For Rust changes, use the affected tests plus:
 
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 
-UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, Docker availability, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
+UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
+
+Production builds prune unused Phosphor icon weights with `apps/desktop/scripts/icon-weights.ts`.
+It reads the desktop and shared package sources, keeps the original SVG artwork,
+and retains all variants for indirect uses or unknown props. Context, re-exports,
+and dynamic icon imports disable pruning. Package-format changes keep the original
+definitions; the bundle gate still checks the resulting size. The desktop suite
+tests the analysis and retained artwork against the installed icon package.
 
 The development-only `design-preview.html` exercises the production conversation
 components with labelled sample data: streaming, completion, reasoning disclosure,

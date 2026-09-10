@@ -268,7 +268,7 @@ describe("hosted computer shell execution", () => {
 describe("local computer tool isolation", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it("routes approved shell work into the active agent container", async () => {
+  it("rejects local shell execution before approval or native dispatch", async () => {
     const shellApproval: ApprovalRequest = {
       id: "native-local-shell-blocked",
       service: "openai",
@@ -286,18 +286,9 @@ describe("local computer tool isolation", () => {
       workspaceId: "workspace-local",
       localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" }
     });
-    runtime.executeTool.mockResolvedValue({ ok: true, output: "isolated\n" });
-
-    await expect(executor(shellApproval, JSON.stringify({ command: "pwd" })))
-      .resolves.toBe("isolated\n");
-    expect(gate.waitForDecision).toHaveBeenCalledWith({ ...shellApproval, dataUsed: [...shellApproval.dataUsed,
-      "Computer workspace: workspace-local", "Computer agent: agent-research", "Computer generation: 1"] });
-    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
-      tool: "run-shell",
-      workspaceId: "workspace-local",
-      agentId: "agent-research",
-      arguments: { command: "pwd" }
-    }));
+    await expect(executor(shellApproval, JSON.stringify({ command: "pwd" }))).rejects.toThrow("explicitly configured hosted computer");
+    expect(gate.waitForDecision).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
     expect(runtime.launchHosted).not.toHaveBeenCalled();
   });
 
@@ -331,18 +322,18 @@ describe("local computer tool isolation", () => {
     }));
   });
 
-  it("routes approved local browser navigation to the active agent without exposing a frame", async () => {
+  it("routes approved native application observation to the active agent without exposing a frame", async () => {
     const browserApproval: ApprovalRequest = {
-      id: "native-local-browser",
+      id: "native-local-app-observe",
       service: "openai",
-      action: "local-browser url: https://example.com/",
+      action: "local-app-observe ",
       mode: "full-access",
       riskLevel: "critical",
-      dataUsed: ["url: https://example.com/"],
-      consequence: "Open one page in the agent browser.",
+      dataUsed: [""],
+      consequence: "Observe the selected application.",
       requestedAt: "2026-08-27T12:00:00.000Z",
       decisions: ["once", "deny"],
-      confirmationPhrase: "approve local-browser"
+      confirmationPhrase: "approve local-app-observe"
     };
     const output = JSON.stringify({
       computerId: "local-opaque",
@@ -357,37 +348,37 @@ describe("local computer tool isolation", () => {
       localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" }
     });
 
-    await expect(executor(browserApproval, JSON.stringify({ url: "https://example.com/" })))
+    await expect(executor(browserApproval, JSON.stringify({})))
       .resolves.toBe(output);
     expect(gate.waitForDecision).toHaveBeenCalledWith({ ...browserApproval, dataUsed: [...browserApproval.dataUsed,
       "Computer workspace: workspace-local", "Computer agent: agent-research", "Computer generation: 1"] });
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
-      tool: "local-browser",
+      tool: "local-app-observe",
       workspaceId: "workspace-local",
       agentId: "agent-research",
-      arguments: { url: "https://example.com/" }
+      arguments: {}
     }));
     expect(output).not.toContain("data:image");
   });
 
-  it("rejects local browser navigation before approval when the agent computer is not set up", async () => {
+  it("rejects native application observation before approval when the agent computer is not set up", async () => {
     const browserApproval: ApprovalRequest = {
-      id: "native-local-browser-missing",
+      id: "native-local-app-observe-missing",
       service: "openai",
-      action: "local-browser url: https://example.com/",
+      action: "local-app-observe ",
       mode: "full-access",
       riskLevel: "critical",
-      dataUsed: ["url: https://example.com/"],
-      consequence: "Open one page in the agent browser.",
+      dataUsed: [""],
+      consequence: "Observe the selected application.",
       requestedAt: "2026-08-27T12:00:00.000Z",
       decisions: ["once", "deny"],
-      confirmationPhrase: "approve local-browser"
+      confirmationPhrase: "approve local-app-observe"
     };
     const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
     const executor = createDesktopToolExecutor(gate);
 
-    await expect(executor(browserApproval, JSON.stringify({ url: "https://example.com/" })))
-      .rejects.toThrow(/set up.*local computer/i);
+    await expect(executor(browserApproval, JSON.stringify({})))
+      .rejects.toThrow(/control changed or is paused/i);
     expect(gate.waitForDecision).not.toHaveBeenCalled();
     expect(runtime.executeTool).not.toHaveBeenCalled();
   });

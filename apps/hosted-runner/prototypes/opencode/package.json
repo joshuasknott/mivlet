@@ -1,0 +1,23 @@
+{
+  "name": "@fable/opencode-compatibility-probe",
+  "version": "0.0.0",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "dev": "wrangler dev --local --ip 127.0.0.1 --port 8797",
+    "package:check": "wrangler deploy --dry-run --outdir dist",
+    "check:local": "node check-local.mjs"
+  },
+  "dependencies": {
+    "@opencode/plugin": "0.0.0-dev-19417",
+    "@opencode/sdk": "0.0.0-dev-19417",
+    "typescript": "5.9.2",
+    "wrangler": "4.130.0"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@ai-sdk/provider": "3.0.8",
+    "@cloudflare/workers-types": "5.20260908.1"
+  }
+}

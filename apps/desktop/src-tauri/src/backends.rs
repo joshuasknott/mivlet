@@ -1710,6 +1710,23 @@ pub fn record_backend_event(
 
 #[cfg(test)]
 mod provider_route_tests {
+    #[test]
+    #[ignore = "read-only inventory of this installation's real OS-stored direct API credentials"]
+    fn live_visual_provider_connection_inventory() {
+        use super::BackendCredentialStore;
+        let user = super::require_current_internal_user().unwrap();
+        for provider in ["openai", "anthropic", "xai", "custom"] {
+            let present = super::KeyringStore
+                .get(&super::scoped_credential_key(&user, provider))
+                .expect("OS credential store is unavailable")
+                .is_some();
+            println!(
+                "{provider}: native credential {}",
+                if present { "present" } else { "unavailable" }
+            );
+        }
+    }
+
     use super::*;
 
     #[test]

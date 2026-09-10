@@ -34,13 +34,15 @@ are deterministic for identical artifact bytes. Installer bytes can still
 include toolchain or Windows packaging metadata; byte-for-byte reproducibility
 across runners is not yet claimed.
 
-The bundled local-computer Dockerfile pins the verified Debian and Node base
-image manifests by digest, and the desktop records a deterministic build-context
-digest on both its owned image and containers. A missing, foreign, or stale label
-causes a rebuild and replacement while the scoped persistent volumes remain in
-place. Debian apt indexes and package versions still follow the current Bookworm
-repositories; a release snapshot and package-lock policy is required before the
-guest image itself can be claimed byte-for-byte reproducible.
+The normal Tauri build prepares Cua Driver 0.25.0 for Windows x64. Its archive
+and executable hashes are pinned in `resources/cua-driver/runtime.json`; the
+preparer also checks the publisher signature. Both installer formats must include
+the executable, MIT license, transitive notices, inventory and MPL source archives.
+See the [native computer architecture](../architecture/local-teammate-computer.md).
+The installed capability has no Docker, Python, Node or separate Cua application
+requirement. Build prerequisites and model-provider prerequisites are separate.
+An extracted package proves resource inclusion; clean-machine launch and real
+computer control are additional acceptance checks.
 
 Local manifest tests:
 
@@ -90,7 +92,7 @@ The app window, interface, native icons and release notes use Mivlet. The lowerc
 mivlet wordmark is reserved for logo lockups; agents retain their own portraits.
 
 Keep `com.fable.workspace`, `@fable/*`, the Rust binary/crate names, credential
-namespaces, local storage keys, database filenames, Docker paths and OAuth
+namespaces, local storage keys, database filenames, saved computer paths and OAuth
 configuration stable. The pinned MSI upgrade code is the existing Fable code,
 verified against the previously generated WiX manifest.
 

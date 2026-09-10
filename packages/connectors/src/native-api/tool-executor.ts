@@ -2,7 +2,7 @@
  * Real tool execution behind Mivlet's approval layer.
  *
  * The executor is the concrete implementation of the four registered tools
- * (read-file, write-file, run-shell, web-fetch, local-browser, cloud-browser). It is pure over an injectable
+ * (read-file, write-file, run-shell, web-fetch, local-app-observe/action, cloud-browser). It is pure over an injectable
  * {@link ToolRuntime} — every filesystem/shell/network capability flows through
  * that seam, so production wires it to Tauri commands (Rust owns the actual
  * side effects) and tests inject a fake filesystem. Tools never spawn a shell
@@ -40,26 +40,17 @@ export interface ToolRuntime {
   readFile(path: string): Promise<string | null>;
   /** Write/overwrite a workspace file. Returns the number of bytes written. */
   writeFile(path: string, content: string): Promise<number>;
-  /** Run a shell command in the workspace via the Rust runtime. */
+  /** Run a command only when an isolated hosted runtime is explicitly supplied. */
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
   fetchUrl(url: string): Promise<string | null>;
   /** Open a page in a hosted browser when the runtime supplies that capability. */
   openBrowser?(url: string): Promise<string>;
-  /** Open a page in the on-device teammate browser when supplied by the runtime. */
-  openLocalBrowser?(url: string): Promise<string>;
-  /** Return a bounded control observation from the on-device teammate browser. */
-  observeLocalBrowser?(): Promise<string>;
-  /** Act on one exact, single-use local-browser control observation. */
-  actLocalBrowser?(input: {
-    action: "click" | "fill" | "press" | "select";
-    observationId: string;
-    elementRef: string;
-    controlRole: string;
-    controlName: string;
-    value?: string;
-    key?: string;
-  }): Promise<string>;
+  /** Optional native Windows boundary; the desktop supplies its own exact approval executor. */
+  listAppWindows?(): Promise<string>;
+  selectAppWindow?(windowId: string, deliveryMode?: import("@fable/protocol").NativeComputerDeliveryMode): Promise<string>;
+  observeApp?(): Promise<string>;
+  actApp?(input: import("@fable/protocol").NativeAppAction): Promise<string>;
   /** Act on one opaque control ref from the latest hosted-browser observation. */
   actBrowser?(input: {
     action: "click" | "fill" | "press" | "select" | "scroll" | "history";
@@ -379,6 +370,7 @@ async function dispatch(
       return `Wrote ${written} byte${written === 1 ? "" : "s"} to ${path}.`;
     }
     case "run-shell": {
+      if (parsed.location !== "hosted") throw new Error("Shell execution requires an explicitly configured hosted computer.");
       const command = requireString(parsed, toolName, "command");
       const result = await runtime.runShell(command);
       if (result.exitCode !== 0) {
@@ -403,36 +395,29 @@ async function dispatch(
       }
       return runtime.openBrowser(url);
     }
-    case "local-browser": {
-      const url = requireString(parsed, toolName, "url");
-      if (!runtime.openLocalBrowser) {
-        throw new Error("The local agent browser is unavailable in this runtime.");
-      }
-      return runtime.openLocalBrowser(url);
+    case "local-app-list": {
+      if (!runtime.listAppWindows) throw new Error("Native Windows discovery is unavailable in this runtime.");
+      if (Object.keys(parsed).length) throw new Error("Application discovery takes no arguments.");
+      return runtime.listAppWindows();
     }
-    case "local-browser-observe": {
-      if (!runtime.observeLocalBrowser) {
-        throw new Error("Local browser observation is unavailable in this runtime.");
-      }
-      return runtime.observeLocalBrowser();
+    case "local-app-select": {
+      if (!runtime.selectAppWindow) throw new Error("Native Windows selection is unavailable in this runtime.");
+      if (Object.keys(parsed).some(key => !["windowId", "deliveryMode"].includes(key))) throw new Error("Application selection accepts only windowId and deliveryMode.");
+      const deliveryMode = parsed.deliveryMode === undefined ? "background" : parsed.deliveryMode;
+      if (deliveryMode !== "background" && deliveryMode !== "foreground") throw new Error("Application selection requires background or foreground deliveryMode.");
+      return runtime.selectAppWindow(requireString(parsed, toolName, "windowId"), deliveryMode);
     }
-    case "local-browser-action": {
-      if (!runtime.actLocalBrowser) {
-        throw new Error("Local browser actions are unavailable in this runtime.");
-      }
+    case "local-app-observe": {
+      if (!runtime.observeApp) throw new Error("Native Windows observation is unavailable in this runtime.");
+      if (Object.keys(parsed).length) throw new Error("Application observation takes no arguments.");
+      return runtime.observeApp();
+    }
+    case "local-app-action": {
+      if (!runtime.actApp) throw new Error("Native Windows actions are unavailable in this runtime.");
       const action = requireString(parsed, toolName, "action");
-      if (action !== "click" && action !== "fill" && action !== "press" && action !== "select") {
-        throw new Error("Tool local-browser-action requires click, fill, press, or select.");
-      }
-      return runtime.actLocalBrowser({
-        action,
-        observationId: requireString(parsed, toolName, "observationId"),
-        elementRef: requireString(parsed, toolName, "elementRef"),
-        controlRole: requireString(parsed, toolName, "controlRole"),
-        controlName: requireString(parsed, toolName, "controlName"),
-        ...(typeof parsed.value === "string" ? { value: parsed.value } : {}),
-        ...(typeof parsed.key === "string" ? { key: parsed.key } : {})
-      });
+      if (!["click", "type", "scroll", "key"].includes(action)) throw new Error("Unsupported Windows application action.");
+      // Exact fields and native window authority are revalidated by the runtime.
+      return runtime.actApp({ ...parsed, action: action as import("@fable/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
     }
     case "cloud-browser-action": {
       if (!runtime.actBrowser) {

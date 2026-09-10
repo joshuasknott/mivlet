@@ -145,6 +145,8 @@ export interface TransportHandle {
   readonly transport: HttpTransport;
   /** Drop the in-flight request for the given requestId at the egress boundary. */
   cancel: (requestId: string) => Promise<void>;
+  /** Release any native observation session when the entire agent loop ends. */
+  shutdown?: () => Promise<void>;
 }
 
 export interface CodexAppServerHandlers {

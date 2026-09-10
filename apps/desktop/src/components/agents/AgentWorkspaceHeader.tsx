@@ -1,5 +1,6 @@
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { WorkspaceMenu } from "./WorkspaceMenu";
 import type { FableAgentProfile } from "@fable/protocol";
 import { ProfileAgentAvatar } from "./agent-icons";
 import { presenceLabel, type AgentPresence } from "../../lib/agent-presence";
@@ -13,6 +14,7 @@ export function AgentWorkspaceHeader({
   presence = "idle",
   activity,
   computerActive = false,
+  onSchedules,
 }: {
   agent: FableAgentProfile;
   attentionCount: number;
@@ -22,6 +24,7 @@ export function AgentWorkspaceHeader({
   presence?: AgentPresence;
   activity?: string;
   computerActive?: boolean;
+  onSchedules?: () => void;
 }) {
   return (
     <header className="agent-workspace-header">
@@ -34,13 +37,15 @@ export function AgentWorkspaceHeader({
         </div>
       </div>
       <div className="agent-workspace-header__actions">
+        {onSchedules ? <WorkspaceMenu onSchedules={onSchedules} /> : null}
         <button
           type="button"
+          data-work-panel-toggle
           className={`${panelOpen ? "is-active" : ""}${computerActive ? " is-working" : ""}`}
           onClick={onTogglePanel}
           aria-expanded={panelOpen}
           aria-label={
-            attentionCount
+            panelOpen ? "Close agent computer" : attentionCount
               ? `Open work panel, ${attentionCount} needs attention`
               : "Open agent computer"
           }
@@ -50,7 +55,7 @@ export function AgentWorkspaceHeader({
               : "Agent computer"
           }
         >
-          <SidebarSimple size={22} />
+          <SidebarSimple size={18} />
           {attentionCount ? (
             <span className="agent-workspace-header__count agent-workspace-header__count--attention">
               {attentionCount}

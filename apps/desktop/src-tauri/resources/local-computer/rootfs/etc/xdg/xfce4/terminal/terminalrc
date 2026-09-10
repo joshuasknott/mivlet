@@ -1,3 +1,0 @@
-[Configuration]
-RunCustomCommand=TRUE
-CustomCommand=/usr/bin/sudo -n /usr/local/bin/fable-agent-terminal

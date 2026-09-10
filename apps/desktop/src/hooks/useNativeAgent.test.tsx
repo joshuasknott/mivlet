@@ -834,6 +834,17 @@ describe("useNativeAgent", () => {
     });
   });
 
+  it("binds a new Codex turn to the saved computer scope after hydration changes it", async () => {
+    installDesktopRuntime();
+    mocks.codexEvents = [{ type: "done", finishReason: "stop" }];
+    const providers = [connectedCodexProvider()];
+    const { result, rerender } = renderHook(({agentId}) => useNativeAgent({providers, computer: {workspaceId:"workspace-1", agentId}}), {initialProps:{agentId:"initial-placeholder"}});
+    rerender({agentId:"saved-agent"});
+    await act(async () => { await result.current.run(baseRequest); });
+    const { startRuntimeCodexTurn } = await import("../runtime");
+    expect(startRuntimeCodexTurn).toHaveBeenCalledWith(expect.objectContaining({options:expect.objectContaining({computer:{workspaceId:"workspace-1",agentId:"saved-agent"}})}));
+  });
+
   it("persists image metadata without transient pixels", async () => {
     installDesktopRuntime();
     mocks.codexEvents = [{ type: "done", finishReason: "stop" }];

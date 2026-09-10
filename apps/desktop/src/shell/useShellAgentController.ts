@@ -43,14 +43,12 @@ export function useShellAgentController({
   threadId,
   executionAgentId,
   executionProviderId,
-  thumbnailEnabled = true,
 }: {
   onDictation: (transcript: string) => void;
   onVoiceCancel: () => void;
   threadId?: string;
   executionAgentId?: string;
   executionProviderId?: string;
-  thumbnailEnabled?: boolean;
 }) {
   const gateRef = useRef<ReturnType<typeof createApprovalGate> | null>(null);
   if (!gateRef.current) gateRef.current = createApprovalGate();
@@ -84,7 +82,8 @@ export function useShellAgentController({
     runtime.accountWorkspaceStatus.activeWorkspace.source === "local"
       ? runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId
       : undefined;
-  const activeAgentId = executionAgentId ?? runtime.activeAgentId ?? runtime.agents[0]?.id;
+  const requestedAgentId = executionAgentId ?? runtime.activeAgentId;
+  const activeAgentId = runtime.agents.find(profile => profile.id === requestedAgentId)?.id ?? runtime.agents[0]?.id;
   const connectorAccessRef = useRef({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId,
@@ -126,10 +125,10 @@ export function useShellAgentController({
   const localComputer = useLocalComputer({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId ?? "agent-unavailable",
-    thumbnailEnabled,
   });
   const localComputerRef =
     useRef<DesktopToolExecutorOptions["localComputer"]>(undefined);
+  const computerTurnRef = useRef<{ workspaceId: string; agentId: string; generation: number } | null>(null);
   localComputerRef.current =
     activeWorkspaceId && activeAgentId
       ? {
@@ -331,7 +330,10 @@ export function useShellAgentController({
             controller: node.controller,
           };
         },
-        shouldCancel: () => cancelRequestedRef.current,
+        shouldCancel: () => cancelRequestedRef.current || Boolean(computerTurnRef.current && localComputerRef.current &&
+          (computerTurnRef.current.workspaceId !== localComputerRef.current.workspaceId ||
+           computerTurnRef.current.agentId !== localComputerRef.current.agentId ||
+           computerTurnRef.current.generation !== localComputerRef.current.generation)),
         onExecuting: (approval, tool) =>
           executionActivityRef.current(approval.id, tool),
         ...(activeWorkspaceId && activeAgentId
@@ -494,6 +496,8 @@ export function useShellAgentController({
       cancelRequestedRef.current = false;
     },
     beginConnectorTurn: async () => {
+      const computer = await localComputer.refresh();
+      computerTurnRef.current = computer ? { workspaceId: computer.workspaceId, agentId: computer.agentId, generation: computer.generation } : null;
       const latest = await runtime.refreshConnectorStatuses();
       if (
         connectorAccessRef.current.workspaceId !== activeWorkspaceId ||

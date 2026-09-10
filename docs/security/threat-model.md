@@ -10,7 +10,7 @@ has been deployed or independently reviewed.
 - model-provider, connector, identity-session, and vault credentials;
 - conversation, knowledge, memory, Connection, approval, and audit data;
 - exact approval permits and request fingerprints;
-- teammate workspace files, persistent Linux home volumes, and browser profiles;
+- agent workspace files, selected Windows applications, and preserved legacy volumes;
 - optional remote membership, device, capability, and hosted-computer state;
 - release artifacts and update metadata.
 
@@ -18,9 +18,9 @@ has been deployed or independently reviewed.
 
 - React/WebView to typed Tauri commands;
 - Rust to encrypted SQLite and the operating-system credential store;
-- Rust to model providers, connector providers, installed runtimes, Docker, and
+- Rust to model providers, connector providers, installed runtimes, Cua Driver, and
   optional remote services;
-- the host to each Docker-backed Linux teammate computer;
+- native permission to background or foreground input in the user's Windows session;
 - Convex to the deployment-gated hosted runner;
 - the desktop to the narrow confidential connector OAuth broker; and
 - build inputs to packaged desktop and service artifacts.
@@ -45,7 +45,7 @@ has been deployed or independently reviewed.
 ### Renderer compromise or confused IPC
 
 The renderer receives capability metadata and bounded display projections, not
-credentials, host paths, Docker names, browser-debug URLs, cookies, or process
+credentials, host paths, raw window/driver handles, browser-debug URLs, cookies, or process
 handles. Tauri commands validate identifiers, sizes, scope, generation, and
 ownership again. The production content-security policy denies direct provider
 and secret-service egress from the WebView.
@@ -74,25 +74,43 @@ authority. Tools use strict schemas and bounds. The approval record binds the
 exact proposed effect and is rechecked immediately before dispatch. Replayed or
 stale permits, changed browser controls, unknown tools, and scope changes fail.
 
-### Local teammate computer escape
+### Native application control
 
-Each workspace/teammate gets one labelled Docker container, persistent home
-volume, and narrow Mivlet-owned workspace bind. Commands run as UID 1000 with
-timeouts and bounded output. Chromium keeps its sandbox; the debug bridge is
-published only on host loopback. Container resources are capped and native code
-validates labels before lifecycle actions.
+The bundled driver operates one exactly selected Windows window. The existing
+global policy authorizes each tool; Full Access resolves approvals automatically
+without a separate app grant. Native authority binds workspace, agent, request,
+generation, process identity and a native window
+marker. The driver receives a bounded manifest and a cleared environment, and
+runs in an owned kill-on-close job. No shell, registry, arbitrary driver method,
+daemon or network endpoint is exposed by this integration.
 
-Docker daemon access is privileged, containers share the Docker Linux kernel,
-default container networking remains available, and the scoped bind is writable
-when authorized. This is stronger separation than a browser profile or host
-directory alone, but it is not a dedicated VM or a hostile-code guarantee.
+This shares the user's session and is not an application sandbox. A permitted
+app can use its own file and network access. Foreground focus loss, background
+target takeover, dialogs, closure,
+replaced handles, stale observations and runtime failure revoke input authority.
+Password-field checks fail closed, but arbitrary private screen content cannot
+be reliably classified. Choose non-sensitive windows and complete private steps
+without agent control. Workspace file tools remain separately path-confined.
 
 ### Human/agent control collision
 
-Takeover creates a five-minute lease and advances the computer generation.
-Pointer, key, browser, and return-control actions cite the current generation.
-Agent browser actions fail while the human holds control, and observed control
-references are single-use and invalidated by state changes.
+An authorized selection binds its background/foreground delivery mode to one
+window lease with 30-minute maximum and five-minute
+idle expiry. A native activity window and Ctrl+Alt+Esc revoke it independently of
+React and driver response locks. Stop invalidates queued work and terminates the
+owned runtime. Already dispatched Windows input cannot be undone. Observations
+are single-use, expire after 30 seconds and reject changed window dimensions.
+Restart/reconnect never restore a lease and unknown inputs are not retried.
+Stop invalidates the turn generation: a stopped turn cannot reselect and resume.
+Background selection does not activate its target. Physical input into that
+window or its becoming foreground revokes the lease; other apps remain usable.
+Foreground selection requires a new exact approval and fresh observation.
+Background preflight refusals send no input, while runtime errors are treated as
+uncertain and never silently retried or escalated. Background screenshots are
+disabled because the pinned capture path can fall back to a desktop crop and
+does not expose enough provenance to exclude covering windows. Stop during
+background input fences new leases until the killed driver's temporary window
+flags are restored, after process exit and only on the same window identity.
 
 ### Optional account, sync, and hosted boundaries
 
@@ -117,8 +135,8 @@ review. Generated output and credentials must stay out of commits.
 ## Known gaps
 
 - No public signed release or updater channel is complete.
-- No per-container network allowlist, image-signing policy, or production
-  vulnerability-response process is complete.
+- Native app allowlisting does not constrain the app's own filesystem or network
+  capabilities. No production vulnerability-response process is complete.
 - Hosted sign-in/secret handoff, production account recovery, multi-device
   authorization, metering, abuse controls, and disaster recovery are not live-
   validated.

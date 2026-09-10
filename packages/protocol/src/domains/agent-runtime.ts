@@ -551,6 +551,8 @@ export interface NativeCompletionRequest {
   maxTokens: number;
   /** Exact portable route binding for an ordinary native provider run. */
   providerRoute?: ProviderRouteExecutionBinding;
+  /** Native screenshot session scope. Pixels never enter this request. */
+  computer?: { workspaceId: string; agentId: string };
 }
 
 /** Workspace-fenced route authority carried unchanged from selection to egress. */

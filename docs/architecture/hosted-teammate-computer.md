@@ -42,6 +42,10 @@ stale generation or capability cannot target its replacement.
 
 ## Deployment prerequisites
 
+The separate [OpenCode hosted-agent evaluation](hosted-opencode-prototype.md)
+records a blocked local SDK compatibility probe and the proposed task authority,
+approval and recovery boundaries. It is not connected to this runner's routes.
+
 The path requires configured identity and Convex state, a deployed Cloudflare
 Worker, Container/Sandbox and Browser Rendering bindings, Durable Objects,
 secrets, quotas, and a live smoke test. A build or Wrangler dry-run verifies

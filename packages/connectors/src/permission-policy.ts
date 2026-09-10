@@ -124,12 +124,12 @@ export function effectForTool(toolName: string): PermissionEffect | null {
       return "shell-execution";
     case "web-fetch":
       return "web-fetch";
-    case "local-browser-observe":
+    case "local-app-observe":
+    case "local-app-list":
+    case "local-app-select":
     case "local-desktop-observe":
       return "browser-read";
-    case "local-browser":
-    case "local-browser-action":
-    case "local-browser-tab":
+    case "local-app-action":
     case "local-desktop-action":
     case "cloud-browser":
     case "cloud-browser-action":

@@ -1,21 +1,7 @@
 /* Settings, provider connection, and onboarding surfaces. */
 
-.profile-settings-layout,
 .settings-page {
   gap: 12px;
-}
-
-.settings-panel,
-.profile-card {
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-
-.settings-panel {
-  display: grid;
-  gap: 14px;
-  padding: 15px;
 }
 
 .profile-clean-card {
@@ -34,7 +20,6 @@
   padding: 38px 44px 32px;
 }
 
-.profile-photo img,
 .avatar img {
   display: block;
   width: 100%;
@@ -42,8 +27,6 @@
   object-fit: cover;
 }
 
-.profile-photo-actions strong,
-.settings-panel__heading strong,
 .toggle-row strong {
   display: block;
   color: var(--ink);
@@ -52,8 +35,6 @@
   line-height: 1.25;
 }
 
-.profile-photo-actions small,
-.settings-panel__heading small,
 .toggle-row small {
   display: block;
   margin-top: 3px;
@@ -151,8 +132,7 @@
   gap: 7px;
 }
 
-.profile-action-row button,
-.settings-tabs button {
+.profile-action-row button {
   display: inline-flex;
   align-items: center;
   min-height: 34px;
@@ -166,23 +146,15 @@
   font-weight: 500;
 }
 
-.profile-action-row button:hover,
-.settings-tabs button:hover {
+.profile-action-row button:hover {
   color: var(--ink);
   background: var(--line-strong);
 }
 
-.profile-action-row button[aria-pressed="true"],
-.settings-tabs button[aria-selected="true"] {
+.profile-action-row button[aria-pressed="true"] {
   color: var(--ink);
   background: var(--accent-subtle);
   border-color: var(--accent-line);
-}
-
-.settings-tabs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
 }
 
 .settings-status {
@@ -210,13 +182,13 @@
 
 .settings-modal {
   display: grid;
-  grid-template-columns: 184px minmax(0, 1fr);
-  width: min(880px, 100%);
-  height: min(660px, calc(100dvh - 52px));
+  grid-template-columns: 200px minmax(0, 1fr);
+  width: min(920px, 100%);
+  height: min(680px, calc(100dvh - 52px));
   overflow: hidden;
   background: var(--surface-overlay);
   border: 1px solid var(--line);
-  border-radius: 22px;
+  border-radius: 18px;
   box-shadow: var(--shadow-3);
 }
 
@@ -226,7 +198,6 @@
   gap: 12px;
   min-height: 0;
   padding: 36px 16px;
-  background: var(--surface-overlay);
   border-right: 1px solid var(--line);
 }
 
@@ -243,8 +214,6 @@
   color: var(--ink-muted);
   background: transparent;
   border: 0;
-  border-radius: var(--radius-1);
-  font-size: var(--text-13);
   text-align: left;
 }
 
@@ -286,12 +255,10 @@
 
 .settings-page__body {
   display: grid;
-  gap: 18px;
   /* min-height:0 lets this grid shrink within its scrolling flex parent so the
      overflow-y:auto on .settings-page__content owns the scrollbar instead of
      the body grid forcing the modal to grow with long tabs (Providers). */
   min-height: 0;
-  padding-top: 7px;
 }
 
 .settings-page__content {
@@ -301,13 +268,7 @@
   padding: 36px 34px;
 }
 
-.settings-page__header {
-  margin-bottom: 0;
-}
-
 .settings-page__header h1 {
-  font-size: var(--text-30);
-  font-weight: 500;
   letter-spacing: 0;
   margin: 0;
 }
@@ -365,21 +326,12 @@
    primary action (drop the credential) stays visually dominant. The shared
    .provider-access-row button rule carries base sizing; this trims it. */
 
-.provider-access-row__refresh:hover:not(:disabled) {
-  color: var(--ink);
-  background: var(--surface-raised);
-}
-
 /* Per-provider model-discovery runtime health note. Toned to match the badge
    palette so degraded states read as cautionary, never as a hard error. */
 
 /* Inline API-key form revealed by the native provider "Connect" action. The key
    input is uncontrolled: the secret is read once at submit and passed straight
    to the credential boundary, then cleared — it never enters React state. */
-
-.provider-access-key-form__submit:hover:not(:disabled) {
-  background: var(--accent-strong);
-}
 
 .provider-access-row button,
 .settings-local-storage button {
@@ -469,8 +421,6 @@
 
 .mcp-settings__form {
   display: grid;
-  gap: var(--space-3);
-  max-width: 42rem;
 }
 
 .mcp-settings__form textarea {
@@ -570,147 +520,7 @@
   transform: translateX(17px);
 }
 
-.approvals-settings {
-  display: grid;
-  gap: 20px;
-}
-
-.approvals-settings__section {
-  padding: 18px 0;
-  border-top: 1px solid var(--line);
-}
-
-.approvals-settings__section:first-of-type {
-  border-top: 0;
-}
-
-.approval-preset-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.approval-preset-option {
-  display: grid;
-  gap: 5px;
-  min-height: 82px;
-  padding: 13px 14px;
-  color: var(--ink);
-  background: var(--surface);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-2);
-  text-align: left;
-}
-
-.approval-preset-option:hover,
-.approval-preset-option:focus-visible {
-  border-color: var(--ink-muted);
-}
-
-.approval-preset-option[data-selected] {
-  background: var(--surface-raised);
-  border-color: var(--ink);
-  box-shadow: inset 3px 0 0 var(--ink);
-}
-
-.approval-preset-option strong,
-.custom-approval-toggle strong,
-.remote-approval-status strong {
-  font-size: var(--text-14);
-  font-weight: 500;
-}
-
-.approval-preset-option span,
-.custom-approval-toggle small,
-.remote-approval-status span {
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  line-height: 1.45;
-}
-
-.custom-approvals-list {
-  display: grid;
-  margin-top: 14px;
-}
-
-.custom-approval-toggle > span:first-child {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.approvals-settings__note {
-  margin: 12px 0 0;
-  color: var(--ink-soft);
-  font-size: var(--text-13);
-  line-height: 1.5;
-}
-
-@media (max-width: 680px) {
-  .approval-preset-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Native-API agent activity panel — streamed deltas, usage/cost, status. */
-
-.agent-panel {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 14px;
-  padding: 14px 16px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-2);
-  background: var(--surface-raised, var(--canvas));
-}
-
-.agent-panel__transcript {
-  margin: 0;
-  color: var(--ink);
-  font-size: var(--text-14);
-  line-height: 1.5;
-  white-space: pre-wrap;
-}
-
-.agent-panel__usage {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-}
-
-.agent-panel__recovery {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.agent-panel__recovery p {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-}
-
-.agent-panel__recovery button {
-  flex: 0 0 auto;
-}
-
-.agent-panel__running {
-  margin: 0;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
-
-.agent-panel__error,
-.agent-panel__notice {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--text-12);
-}
 
 /* Connected AI backends panel (Connectors page) */
 
@@ -1352,11 +1162,11 @@
   }
 }
 
-.settings-modal__label { display: block; padding: 0 12px 24px; font-size: 17px; font-weight: 500; letter-spacing: -.02em; }
+.settings-modal__label { display: block; padding: 0 12px 24px; font-weight: 500; letter-spacing: -.02em; }
 .settings-modal .settings-page__header { margin-bottom: 26px; }
-.settings-modal .settings-page__header h1 { font-size: 22px; font-weight: 500; letter-spacing: -.03em; }
+.settings-modal .settings-page__header h1 { font-weight: 500; }
 .settings-modal .settings-page__body { gap: 12px; margin-bottom: 20px; }
-.settings-modal .settings-section-heading p { color: var(--ink-muted); font-size: 12px; margin: 0 0 10px; }
+.settings-modal .settings-section-heading p { color: var(--ink-muted); margin: 0 0 10px; }
 .settings-modal .profile-clean-card, .settings-modal .provider-access-list { padding: 0 !important; background: transparent; border: 0; box-shadow: none; border-radius: 0; }
 .settings-modal .profile-clean-card__content { padding: 0; }
 .settings-modal .profile-section { gap: 10px; padding: 16px 0; border-top: 1px solid var(--line); }
@@ -1374,12 +1184,6 @@
 .settings-modal .settings-local-storage { margin-top: 24px; padding: 16px 0 0; border: 0; border-top: 1px solid var(--line); background: transparent; }
 .settings-modal .settings-local-storage strong { font-size: 12px; font-weight: 500; }
 .settings-modal .settings-local-storage p { font-size: 11px; line-height: 1.65; }
-.settings-modal .approval-preset-grid { display: flex; flex-direction: column; gap: 0; }
-.settings-modal .approval-preset-option { display: grid; grid-template-columns: 90px 1fr; gap: 14px; min-height: 46px; padding: 12px; border: 0; border-radius: 9px; background: transparent; box-shadow: none; }
-.settings-modal .approval-preset-option[data-selected=true] { background: var(--surface-hover); }
-.settings-modal .approval-preset-option strong { font-size: 12px; font-weight: 500; }
-.settings-modal .approval-preset-option span { font-size: 11px; }
-.settings-modal .approvals-settings__section { padding: 6px 0; }
 .settings-modal .provider-catalogue__grid { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .settings-modal .provider-catalogue-item { grid-template-columns: 40px minmax(0, 1fr); align-items: center; justify-items: start; min-height: 66px; padding: 10px; border: 0; border-radius: 10px; background: transparent; text-align: left; }
 .settings-modal .provider-catalogue-item:hover { background: var(--surface-hover); }
@@ -1390,7 +1194,7 @@
 .settings-modal .provider-catalogue__show-all { justify-self: start; }
 .settings-disclosure { margin: 20px 0; border-top: 1px solid var(--line); padding-top: 15px; }
 .settings-disclosure summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
-@media (max-width: 650px) { .settings-modal__label { padding-bottom: 8px; } .settings-modal .approval-preset-option { grid-template-columns: 1fr; gap: 4px; } }
+@media (max-width: 650px) { .settings-modal__label { padding-bottom: 8px; } }
 .privacy-dialog { max-height: calc(100dvh - 40px); overflow-y: auto; }
 .approval-card__context { margin: 4px 0 8px; color: var(--ink-muted); font-size: var(--text-13); overflow-wrap: anywhere; }
 .approval-card__payload { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font: inherit; font-size: var(--text-13); }
@@ -1413,7 +1217,7 @@
 /* Quiet rows shared by the four settings pages. */
 .settings-page__header { margin-bottom: 16px; }
 .settings-page__header h1 { font-size: 24px; font-weight: 550; }
-.settings-modal__nav { background: var(--surface-sunken); }
+.settings-modal__nav { background: var(--sidebar-surface); }
 .settings-page__body { gap: 16px; padding-top: 0; }
 .settings-preference-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 88px; padding: 20px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
 .settings-preference-row strong, .settings-preference-row small { display: block; }
@@ -1430,7 +1234,7 @@
 .settings-page .provider-catalogue-item__text { display: flex; flex: 1; align-items: center; justify-content: space-between; gap: 12px; text-align: left; }
 .settings-page .provider-catalogue-item__logo { width: 32px; height: 32px; }
 .settings-page .settings-local-storage { margin-top: 8px; padding: 16px 0; background: transparent; border: 0; }
-.settings-page .mcp-settings__empty { display: grid; place-items: center; min-height: 180px; text-align: center; padding: 24px; border: 1px dashed var(--line); border-radius: 12px; }
+.settings-page .mcp-settings__empty { margin: 8px 0 24px; padding: 28px 20px; color: var(--ink-muted); background: var(--surface-hover); border: 0; border-radius: 10px; line-height: 1.6; }
 .settings-page .settings-disclosure { margin-top: 16px; }
 @media (max-width: 650px) { .settings-preference-row { gap: 12px; flex-wrap: wrap; } .settings-page .provider-catalogue-item__text { align-items: flex-start; flex-direction: column; gap: 4px; } }
 
@@ -1449,3 +1253,31 @@
 .scheduled-work-notice p { margin: 0 0 12px; overflow-wrap: anywhere; }
 .scheduled-work-notice > div { display: flex; gap: 8px; flex-wrap: wrap; }
 .scheduled-work-notice button { min-height: 44px; }
+
+.settings-modal__tab { display: flex; align-items: center; gap: 10px; font-size: 13px; border-radius: 8px; }
+.settings-modal__label { font-size: 13px; color: var(--ink-muted); padding-bottom: 20px; }
+.settings-modal .settings-page__header h1 { font-size: 25px; letter-spacing: -.035em; }
+.settings-modal .settings-section-heading p { font-size: 13px; line-height: 1.65; }
+.settings-modal .mcp-settings__server { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.settings-modal .mcp-settings__server .provider-access-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0; }
+.settings-modal .mcp-settings__server .provider-access-row > span:first-child { flex: 1 1 180px; }
+.mcp-settings__access { margin-top: 16px; }
+.schedules-dialog { position: relative; width: min(680px, 100%); max-height: calc(100dvh - 48px); overflow: auto; padding: 32px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-overlay); box-shadow: var(--shadow-3); }
+.schedules-dialog > header { margin-bottom: 24px; }
+.schedules-dialog h1 { margin: 0; padding-right: 32px; font-size: 25px; letter-spacing: -.03em; }
+.schedules-dialog .local-schedules { margin: 0; }
+.schedules-dialog .profile-section { border-top: 1px solid var(--line); padding: 20px 0; }
+@media (max-width: 650px) { .schedules-dialog { padding: 24px 20px; } }
+
+.settings-modal .mcp-settings__add > p { margin: 18px 0; font-size: 12px; line-height: 1.7; }
+.mcp-settings__form { max-width: none; gap: 16px; }
+.mcp-settings__form .settings-field { display: grid; gap: 8px; min-width: 0; }
+.mcp-settings__form input, .mcp-settings__form select, .mcp-settings__form textarea,
+.schedules-dialog .settings-field select { width: 100%; min-width: 0; min-height: 40px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.mcp-settings__form > button { justify-self: start; }
+.mcp-settings__form input::placeholder { color: var(--ink-soft); }
+
+.schedules-toolbar { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
+.schedules-toolbar > label { flex: 1 1 180px; display: grid; gap: 8px; }
+.schedule-limits { color: var(--ink-muted); font-size: 12px; line-height: 1.65; }
+.schedule-limits summary { cursor: pointer; }

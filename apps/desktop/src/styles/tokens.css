@@ -89,19 +89,19 @@
 :root[data-theme="dark"],
 .desktop-frame[data-theme="dark"] {
   color-scheme: dark;
-  --ink: #f1eee6;
-  --ink-muted: #b1ada3;
-  --ink-soft: #a39e94;
-  --surface: #242320;
-  --surface-raised: #2c2b27;
-  --surface-hover: #35342f;
-  --surface-overlay: #2d2c28;
-  --sidebar-surface: #201f1c;
+  --ink: #eeefef;
+  --ink-muted: #b0b3b8;
+  --ink-soft: #a0a4ab;
+  --surface: #202123;
+  --surface-raised: #26282b;
+  --surface-hover: #2e3034;
+  --surface-overlay: #242629;
+  --sidebar-surface: #1c1d1f;
   --provider-monochrome: #f2f2f2;
-  --line: #393832;
-  --line-strong: #4c4941;
+  --line: #35373b;
+  --line-strong: #4a4d52;
   --accent: #f1eee6;
-  --accent-subtle: #35342f;
+  --accent-subtle: #2e3034;
   --accent-line: #5b574e;
   --accent-strong: #ffffff;
   --brand-copper: #a9a9a9;

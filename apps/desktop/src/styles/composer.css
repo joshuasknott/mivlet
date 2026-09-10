@@ -252,7 +252,6 @@
 }
 
 .composer-model,
-.composer-permissions-card,
 .composer-chip {
   display: inline-flex;
   align-items: center;
@@ -276,13 +275,6 @@
   font-weight: 500;
 }
 
-.composer-permissions-card {
-  gap: 8px;
-  padding: 0 12px;
-  font-size: var(--text-15);
-  font-weight: 500;
-}
-
 .composer-chip {
   width: 34px;
   border-radius: 13px;
@@ -291,8 +283,7 @@
 /* Long model/permission labels must truncate instead of growing the chip and
    shifting sibling controls in the space-between controls row. The min-width:0
    lets the flex child shrink below its content size. */
-.composer-model > span,
-.composer-permissions-card > span {
+.composer-model > span {
   min-width: 0;
   max-width: 180px;
   overflow: hidden;
@@ -301,14 +292,12 @@
 }
 
 .composer-model:hover,
-.composer-permissions-card:hover,
 .composer-chip:hover {
   color: var(--accent);
   background: var(--accent-subtle);
 }
 
 .composer-model:focus-visible,
-.composer-permissions-card:focus-visible,
 .composer-chip:focus-visible,
 .send-button:focus-visible {
   outline: none;
@@ -430,34 +419,6 @@
 }
 
 /* Permissions view — a read-only list of connectors and their scopes. */
-
-.composer-permissions {
-  min-width: 310px;
-}
-
-.composer-permissions button {
-  display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  align-items: start;
-  gap: 10px;
-  min-width: 292px;
-}
-
-.composer-permissions__icon {
-  margin-top: 2px;
-  color: var(--ink-muted);
-}
-
-.composer-permissions button > span {
-  display: grid;
-  gap: 3px;
-}
-
-.composer-permissions button strong {
-  color: var(--ink);
-  font-size: var(--text-13);
-  font-weight: 500;
-}
 
 .composer-menu button[aria-checked="true"] {
   color: var(--accent-strong);
@@ -668,7 +629,6 @@
   .composer-glow,
   .composer-input,
   .composer-model,
-  .composer-permissions-card,
   .composer-chip,
   .voice-tooltip {
     transition: none;

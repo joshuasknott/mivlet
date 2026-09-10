@@ -38,7 +38,7 @@ jobs:
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
-      - run: pnpm --filter @fable/desktop tauri build --ci --no-sign --bundles msi,nsis
+      - run: pnpm tauri:build --ci --no-sign --bundles msi,nsis
       - name: Stage installers
         shell: pwsh
         run: |

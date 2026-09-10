@@ -85,13 +85,13 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 22] = [
     "write-file",
     "run-shell",
     "web-fetch",
-    "local-browser",
-    "local-browser-observe",
-    "local-browser-action",
-    "local-browser-tab",
     "computer-artifact",
     "generate-image",
     "edit-image",
+    "local-app-observe",
+    "local-app-list",
+    "local-app-select",
+    "local-app-action",
     "local-desktop-observe",
     "local-desktop-action",
     "connection-read",
@@ -263,11 +263,10 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "write-file" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
-        "local-browser" => Some(("full-access", "critical")),
-        "local-browser-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
-        "local-browser-action" | "local-browser-tab" | "local-desktop-action" => {
-            Some(("full-access", "critical"))
-        }
+        "local-app-list" => Some(("read-only", "low")),
+        "local-app-select" => Some(("read-only", "medium")),
+        "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
+        "local-app-action" | "local-desktop-action" => Some(("full-access", "critical")),
         "computer-artifact" => Some(("read-only", "low")),
         "generate-image" | "edit-image" => Some(("full-access", "high")),
         "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
@@ -327,13 +326,13 @@ fn is_computer_tool(tool: &str) -> bool {
         "run-shell"
             | "read-file"
             | "write-file"
-            | "local-browser"
-            | "local-browser-observe"
-            | "local-browser-action"
-            | "local-browser-tab"
             | "computer-artifact"
             | "generate-image"
             | "edit-image"
+            | "local-app-observe"
+            | "local-app-list"
+            | "local-app-select"
+            | "local-app-action"
             | "local-desktop-observe"
             | "local-desktop-action"
     )
@@ -407,7 +406,7 @@ pub(crate) fn validate_tool_approval_binding(
                 .unwrap_or_else(|| value.to_string());
             let rendered = if tool == "web-fetch" && key == "url" {
                 normalize_url_for_fingerprint(&raw_rendered).unwrap_or(raw_rendered)
-            } else if matches!(tool, "cloud-browser" | "local-browser") && key == "url" {
+            } else if matches!(tool, "cloud-browser") && key == "url" {
                 crate::hosted_computer::normalize_public_https_url(&raw_rendered)
                     .or_else(|_| crate::local_computer::normalize_user_navigation(&raw_rendered))
                     .unwrap_or(raw_rendered)
@@ -1225,6 +1224,98 @@ pub async fn execute_tool_call(
         );
         return result.map(|output| ToolResult { ok: true, output });
     }
+    if matches!(tool.as_str(), "local-app-list" | "local-app-select") {
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Application tools require a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Application tools require an agent.")?;
+        let computers = local_computers.inner().clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            if tool == "local-app-list" {
+                if arguments != serde_json::json!({}) {
+                    return Err("Application discovery takes no arguments.".into());
+                }
+                crate::local_computer::control::list_app_windows(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                )
+            } else {
+                #[derive(Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct Selection {
+                    window_id: String,
+                    #[serde(default)]
+                    delivery_mode: crate::local_computer::control::DeliveryMode,
+                }
+                let selection: Selection = serde_json::from_value(arguments)
+                    .map_err(|_| "Select a windowId from the current application list.")?;
+                let selected = crate::local_computer::control::select_app_window(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    &selection.window_id,
+                    selection.delivery_mode,
+                    &request_id,
+                )?;
+                serde_json::to_string(&selected)
+                    .map_err(|_| "The application selection result is invalid.".into())
+            }
+        })
+        .await
+        .map_err(|_| "Application selection stopped unexpectedly.")?;
+        return result.map(|output| ToolResult { ok: true, output });
+    }
+    if matches!(tool.as_str(), "local-app-observe" | "local-app-action") {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or("Application tools require a workspace.")?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or("Application tools require an agent.")?;
+        let computers = local_computers.inner().clone();
+        crate::local_computer::desktop_tools::prepare(
+            computers.clone(),
+            &workspace_id,
+            &agent_id,
+            computer_generation,
+        )
+        .await?;
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            if tool == "local-app-observe" {
+                if arguments != serde_json::json!({}) {
+                    return Err("Application observation takes no arguments.".into());
+                }
+                crate::local_computer::desktop_tools::observe_app(
+                    &computers,
+                    &workspace_id,
+                    &agent_id,
+                    computer_generation,
+                )
+            } else {
+                let action = serde_json::from_value(arguments)
+                    .map_err(|_| "Application action fields are invalid.")?;
+                crate::local_computer::desktop_tools::act(
+                    &computers,
+                    &workspace_id,
+                    &agent_id,
+                    computer_generation,
+                    action,
+                )
+            }
+        })
+        .await
+        .map_err(|_| "The application tool stopped unexpectedly.")?;
+        return result.map(|output| ToolResult { ok: true, output });
+    }
     if matches!(
         tool.as_str(),
         "local-desktop-observe" | "local-desktop-action"
@@ -1237,14 +1328,29 @@ pub async fn execute_tool_call(
             .agent_id
             .clone()
             .ok_or("Desktop tools require an agent.")?;
-        let claim = crate::codex_app_server::claim_desktop_tool(
-            &request_id,
-            &tool,
-            &arguments,
-            &workspace_id,
-            &agent_id,
-            computer_generation,
-        )?;
+        enum ImageClaim {
+            Codex(crate::codex_app_server::DesktopToolClaim),
+            Api(crate::native_api::computer::DesktopToolClaim),
+        }
+        let claim = if request_id.starts_with("api-visual-") {
+            ImageClaim::Api(crate::native_api::computer::claim_desktop_tool(
+                &request_id,
+                &tool,
+                &arguments,
+                &workspace_id,
+                &agent_id,
+                computer_generation,
+            )?)
+        } else {
+            ImageClaim::Codex(crate::codex_app_server::claim_desktop_tool(
+                &request_id,
+                &tool,
+                &arguments,
+                &workspace_id,
+                &agent_id,
+                computer_generation,
+            )?)
+        };
         let computers = local_computers.inner().clone();
         crate::local_computer::desktop_tools::prepare(
             computers.clone(),
@@ -1255,6 +1361,9 @@ pub async fn execute_tool_call(
         .await?;
         let result = tauri::async_runtime::spawn_blocking(move || {
             if tool == "local-desktop-observe" {
+                if let ImageClaim::Api(claim) = &claim {
+                    claim.check()?;
+                }
                 if arguments != serde_json::json!({}) {
                     return Err("Desktop observation takes no arguments.".into());
                 }
@@ -1264,24 +1373,38 @@ pub async fn execute_tool_call(
                     &agent_id,
                     computer_generation,
                 )?;
-                crate::codex_app_server::retain_desktop_capture(claim, capture)
+                match claim {
+                    ImageClaim::Codex(claim) => {
+                        crate::codex_app_server::retain_desktop_capture(claim, capture)
+                    }
+                    ImageClaim::Api(claim) => {
+                        crate::native_api::computer::retain_desktop_capture(claim, capture)
+                    }
+                }
             } else {
+                if let ImageClaim::Api(claim) = &claim {
+                    claim.check()?;
+                }
                 let action = serde_json::from_value(arguments)
                     .map_err(|_| "Desktop action fields are invalid.".to_string())?;
-                crate::local_computer::desktop_tools::act(
+                let result = crate::local_computer::desktop_tools::act(
                     &computers,
                     &workspace_id,
                     &agent_id,
                     computer_generation,
                     action,
-                )
+                );
+                if let ImageClaim::Api(claim) = &claim {
+                    claim.check()?;
+                }
+                result
             }
         })
         .await
         .map_err(|_| "The desktop tool stopped unexpectedly.".to_string())?;
         return result.map(|output| ToolResult { ok: true, output });
     }
-    if tool == "local-browser-tab" || tool == "computer-artifact" {
+    if tool == "computer-artifact" {
         let workspace_id = request
             .workspace_id
             .clone()
@@ -1291,29 +1414,7 @@ pub async fn execute_tool_call(
             .clone()
             .ok_or_else(|| "Computer tools require a saved agent.".to_string())?;
         let computers = local_computers.inner().clone();
-        let result = if tool == "local-browser-tab" {
-            computers
-                .tab_for_agent(
-                    workspace_id,
-                    agent_id,
-                    require_string_argument(&arguments, "observationId")?,
-                    require_string_argument(&arguments, "action")?,
-                    arguments
-                        .get("tabRef")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned),
-                    arguments
-                        .get("url")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_owned),
-                    computer_generation,
-                )
-                .await
-                .and_then(|result| {
-                    serde_json::to_string(&result)
-                        .map_err(|_| "The browser tab result is invalid.".to_string())
-                })
-        } else {
+        let result = {
             let path = require_string_argument(&arguments, "path")?;
             let title = arguments
                 .get("title")
@@ -1353,217 +1454,6 @@ pub async fn execute_tool_call(
             None,
         );
         return result.map(|output| ToolResult { ok: true, output });
-    }
-    if tool == "run-shell" {
-        let workspace_id = request
-            .workspace_id
-            .clone()
-            .ok_or_else(|| "The isolated terminal requires an active workspace.".to_string())?;
-        let agent_id = request
-            .agent_id
-            .clone()
-            .ok_or_else(|| "The isolated terminal requires an active agent.".to_string())?;
-        let command = require_string_argument(&arguments, "command")?;
-        let result = local_computers
-            .inner()
-            .clone()
-            .run_shell_for_agent(workspace_id, agent_id, command, computer_generation)
-            .await
-            .inspect_err(|error| {
-                audit_tool_outcome(
-                    ToolOutcomeAudit {
-                        tool: &tool,
-                        request_id: &request_id,
-                        mode,
-                        risk,
-                        status: "failed",
-                        error_code: "isolated-terminal",
-                        message: error,
-                    },
-                    None,
-                );
-            })?;
-        let ok = result.exit_code == 0;
-        let output = serde_json::to_string(&result)
-            .map_err(|_| "Mivlet could not encode the isolated terminal result.".to_string())?;
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: if ok { "ok" } else { "failed" },
-                error_code: if ok { "" } else { "process-exit" },
-                message: "run-shell executed in the agent container",
-            },
-            None,
-        );
-        return Ok(ToolResult { ok, output });
-    }
-    if tool == "local-browser" {
-        let workspace_id = request
-            .workspace_id
-            .clone()
-            .ok_or_else(|| "The local browser requires an active workspace.".to_string())?;
-        let agent_id = request
-            .agent_id
-            .clone()
-            .ok_or_else(|| "The local browser requires an active agent.".to_string())?;
-        let url = require_string_argument(&arguments, "url")?;
-        let result = local_computers
-            .inner()
-            .clone()
-            .navigate_for_agent(workspace_id, agent_id, url, computer_generation)
-            .await
-            .inspect_err(|error| {
-                audit_tool_outcome(
-                    ToolOutcomeAudit {
-                        tool: &tool,
-                        request_id: &request_id,
-                        mode,
-                        risk,
-                        status: "failed",
-                        error_code: "local-browser",
-                        message: error,
-                    },
-                    None,
-                );
-            })?;
-        let output = serde_json::to_string(&result)
-            .map_err(|_| "Mivlet could not encode the local browser result.".to_string())?;
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: "ok",
-                error_code: "",
-                message: "local-browser executed",
-            },
-            None,
-        );
-        return Ok(ToolResult { ok: true, output });
-    }
-    if tool == "local-browser-observe" {
-        let workspace_id = request
-            .workspace_id
-            .clone()
-            .ok_or_else(|| "Local browser observation requires an active workspace.".to_string())?;
-        let agent_id = request
-            .agent_id
-            .clone()
-            .ok_or_else(|| "Local browser observation requires an active agent.".to_string())?;
-        let result = local_computers
-            .inner()
-            .clone()
-            .observe_for_agent(workspace_id, agent_id, computer_generation)
-            .await
-            .inspect_err(|error| {
-                audit_tool_outcome(
-                    ToolOutcomeAudit {
-                        tool: &tool,
-                        request_id: &request_id,
-                        mode,
-                        risk,
-                        status: "failed",
-                        error_code: "local-browser-observe",
-                        message: error,
-                    },
-                    None,
-                );
-            })?;
-        let output = serde_json::to_string(&result)
-            .map_err(|_| "Mivlet could not encode the local browser observation.".to_string())?;
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: "ok",
-                error_code: "",
-                message: "local-browser-observe executed",
-            },
-            None,
-        );
-        return Ok(ToolResult { ok: true, output });
-    }
-    if tool == "local-browser-action" {
-        let workspace_id = request
-            .workspace_id
-            .clone()
-            .ok_or_else(|| "Local browser actions require an active workspace.".to_string())?;
-        let agent_id = request
-            .agent_id
-            .clone()
-            .ok_or_else(|| "Local browser actions require an active agent.".to_string())?;
-        let action = require_string_argument(&arguments, "action")?;
-        if !matches!(
-            action.as_str(),
-            "click" | "fill" | "press" | "select" | "upload"
-        ) {
-            return Err(
-                "The local browser action must be click, fill, press, select, or upload.".into(),
-            );
-        }
-        let observation_id = require_string_argument(&arguments, "observationId")?;
-        let element_ref = require_string_argument(&arguments, "elementRef")?;
-        let control_role = require_string_argument(&arguments, "controlRole")?;
-        let control_name = require_string_argument(&arguments, "controlName")?;
-        let value = arguments
-            .get("value")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-        let key = arguments
-            .get("key")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string);
-        let result = local_computers
-            .inner()
-            .clone()
-            .act_for_agent(
-                workspace_id,
-                agent_id,
-                observation_id,
-                element_ref,
-                control_role,
-                control_name,
-                action,
-                value,
-                key,
-                computer_generation,
-            )
-            .await
-            .inspect_err(|error| {
-                audit_tool_outcome(
-                    ToolOutcomeAudit {
-                        tool: &tool,
-                        request_id: &request_id,
-                        mode,
-                        risk,
-                        status: "failed",
-                        error_code: "local-browser-action",
-                        message: error,
-                    },
-                    None,
-                );
-            })?;
-        let output = serde_json::to_string(&result)
-            .map_err(|_| "Mivlet could not encode the local browser action result.".to_string())?;
-        audit_tool_outcome(
-            ToolOutcomeAudit {
-                tool: &tool,
-                request_id: &request_id,
-                mode,
-                risk,
-                status: "ok",
-                error_code: "",
-                message: "local-browser-action executed",
-            },
-            None,
-        );
-        return Ok(ToolResult { ok: true, output });
     }
     if request.tool == "search-notion" || request.tool == "search-slack" {
         let connector_id = if request.tool == "search-notion" {

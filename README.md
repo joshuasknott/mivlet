@@ -5,10 +5,11 @@
   <img src="apps/desktop/public/brand/mivlet-lockup-light.png" alt="Mivlet" width="280">
 </picture>
 
-Mivlet is an independent, provider-neutral AI agent workspace. Its default
-experience is a quiet desktop conversation with named agents. Connections,
-files, approvals, and an agent's computer appear only when the work needs
-them.
+*One place for your AI agents.*
+
+Mivlet is a provider-neutral, local-first workspace built around a quiet desktop
+conversation with named agents. Connections, files, approvals, and an agent's
+computer appear only when the work needs them.
 
 Mivlet is local-first: conversations and workspace data are stored on the device,
 provider credentials stay in native secure storage, and the default agent computer
@@ -62,11 +63,19 @@ a deployed or production-validated service.
   conversation pickers; hiding the selected model requires a new selection.
 - File attachments and memory provide conversation context; Knowledge is no
   longer a separate product feature. Existing imported records remain stored.
-- A genuine separate Linux desktop per workspace/agent, backed by Docker
-  Desktop's WSL 2 engine. It has a persistent home volume, Chromium, a file
-  manager, a terminal, a small scoped workspace bridge, resource limits, and a
-  five-minute watch/take-control lease. Local terminal commands execute only
-  inside that container; Mivlet never falls back to the host shell.
+- Native Windows application control through bundled Cua Driver 0.25.0, governed
+  by the global approvals setting. Full Access needs
+  no separate app grant; the agent finds and selects the window itself.
+  A compact native activity window and Ctrl+Alt+Esc stop control. This shares
+  your Windows session. Supported app controls use background delivery by default;
+  screenshots, keys and pixel actions require an explicitly approved foreground
+  selection. Minimized windows are unavailable. This is not a separate desktop.
+  Structured observations, bounded input and scoped workspace files
+  use Mivlet's native approval boundary. Screenshot delivery supports the
+  vision-capable Codex app-server route and the audited OpenAI, Anthropic and xAI
+  direct API models. See the [provider matrix](docs/architecture/local-teammate-computer.md#tool-and-provider-paths)
+  for supported routes and [verification evidence](docs/development/local-computer-verification.md#visual-provider-expansion)
+  for live limitations. No local shell tool is exposed.
 - Runtime-detected operating-system dictation. It fails closed when speech
   recognition is unavailable and does not retain raw audio.
 
@@ -119,12 +128,13 @@ docs                maintained architecture, security, and operations notes
 - pnpm 10 (the repository pins `pnpm@10.15.0`)
 - Stable Rust and the Windows Tauri prerequisites
 - Windows WebView2
-- Docker Desktop using its WSL 2 Linux engine for the isolated local computer
 - Official Codex app-server components for optional ChatGPT browser sign-in
 
-Docker is not required for the browser-only preview or ordinary TypeScript
-tests. The first local-computer setup builds its bundled image and therefore
-needs Docker running plus network access for the image packages.
+Native computer use supports Windows x64. The normal development/build commands
+download and verify the pinned driver, then bundle it with Mivlet and its license
+notices. Installed users need no Docker, Python, Node, uv or separate Cua app for
+this capability. Windows WebView2 and a validated model provider are still
+required; provider-specific runtime prerequisites above remain separate.
 
 ## Development
 
@@ -135,7 +145,7 @@ pnpm dev
 
 `pnpm dev` starts the browser-only Vite preview, whose synthetic state is
 labelled. Use the native app for provider credentials, encrypted persistence,
-and the isolated agent computer:
+and native Windows application control:
 
 ```bash
 pnpm tauri:dev

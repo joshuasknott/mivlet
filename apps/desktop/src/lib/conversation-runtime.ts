@@ -107,7 +107,7 @@ export function createDurableRunWriter(
   threadId: string,
   runId: string
 ): DurableRunWriter {
-  let initialized: Promise<{ thread: ConversationThread; messages: ConversationMessageView[] }> | null = null;
+  let initialized: Promise<ConversationThread> | null = null;
   let chain = Promise.resolve();
   let nextSequence = 0;
   let previousMessageId: string | undefined;
@@ -118,15 +118,12 @@ export function createDurableRunWriter(
 
   const initialize = async () => {
     if (!initialized) {
-      initialized = Promise.all([transport.getThread(threadId), transport.listMessages(threadId)]).then(
-        ([thread, messages]) => {
-          if (!thread) throw new Error("The active conversation no longer exists in this workspace.");
-          const ordered = [...messages].sort((a, b) => a.message.sequence - b.message.sequence);
-          nextSequence = thread.messageHead.lastSequence;
-          previousMessageId = thread.messageHead.lastMessageId;
-          return { thread, messages: ordered };
-        }
-      );
+      initialized = transport.getThread(threadId).then((thread) => {
+        if (!thread) throw new Error("The active conversation no longer exists in this workspace.");
+        nextSequence = thread.messageHead.lastSequence;
+        previousMessageId = thread.messageHead.lastMessageId;
+        return thread;
+      });
     }
     return initialized;
   };
@@ -138,7 +135,7 @@ export function createDurableRunWriter(
   };
 
   const append = async (record: DurableRunRecord) => {
-    const { thread } = await initialize();
+    const thread = await initialize();
     const currentOrdinal = ordinal++;
     const now = new Date().toISOString();
     const messageId = `message-${runId}-${currentOrdinal}` as never;

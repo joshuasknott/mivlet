@@ -7,7 +7,6 @@ import { useState } from "react";
 import type { VoiceCapability } from "@fable/protocol";
 import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
-import { LocalSchedules } from "../settings/LocalSchedules";
 import {
   createRuntimeLocalBackup,
   deleteRuntimeLocalData,
@@ -48,7 +47,6 @@ export function SettingsPage({
   activeTab,
   workspaceName,
   dictationCapability = DEFAULT_DICTATION_CAPABILITY,
-  onOpenScheduleResult,
   titleId = "settings-title"
 }: {
   runtime: SettingsRuntime;
@@ -57,7 +55,6 @@ export function SettingsPage({
   activeTab: SettingsTab;
   workspaceName: string;
   dictationCapability?: VoiceCapability;
-  onOpenScheduleResult?: (agentId: string, threadId: string) => Promise<void>;
   titleId?: string;
 }) {
   const [status, setStatus] = useState<{ tab: SettingsTab; message: string } | null>(null);
@@ -84,8 +81,6 @@ export function SettingsPage({
           <ProviderSettings runtime={runtime} onStatus={reportStatus} />
         ) : activeTab === "connections" ? (
           <ConnectionSettings runtime={runtime} onStatus={reportStatus} />
-        ) : activeTab === "schedules" ? (
-          <LocalSchedules runtime={runtime} onOpenResult={onOpenScheduleResult} />
         ) : (
           <PrivacyAndDataSettings
             runtime={runtime}

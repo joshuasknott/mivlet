@@ -66,13 +66,12 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         "write-file" | "generate-image" | "edit-image" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
-        "local-browser-observe" | "local-desktop-observe" => Some("browser-read"),
-        "local-browser"
-        | "local-browser-action"
-        | "local-browser-tab"
-        | "local-desktop-action"
-        | "cloud-browser"
-        | "cloud-browser-action" => Some("browser-state-mutation"),
+        "local-app-list" | "local-app-select" | "local-app-observe" | "local-desktop-observe" => {
+            Some("browser-read")
+        }
+        "local-app-action" | "local-desktop-action" | "cloud-browser" | "cloud-browser-action" => {
+            Some("browser-state-mutation")
+        }
         "connection-read"
         | "github-read"
         | "vercel-read"

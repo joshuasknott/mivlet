@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { KnowledgeSource, MemoryRecord, SourceChunk } from "@fable/protocol";
 import { retrieve, type RetrievalSource } from "./retrieval/retrieve";
 import { applyRetention, DEFAULT_RETENTION_POLICY } from "./memory/retention";
+import { detectDuplicate } from "./memory/duplicate";
 
 function retrievalSources(sourceCount: number, chunksPerSource: number): RetrievalSource[] {
   return Array.from({ length: sourceCount }, (_, sourceIndex) => {
@@ -48,6 +49,20 @@ function memories(count: number): MemoryRecord[] {
 }
 
 describe("knowledge performance baseline guardrails", () => {
+  it("rejects unrelated long memory values within a loose local guardrail", () => {
+    const existing = memories(40).map((record, index) => ({
+      ...record,
+      value: `${"abcdefghij".repeat(150)}${index}`
+    }));
+    const start = performance.now();
+    const result = detectDuplicate({ title: "Unrelated", value: "klmnopqrst".repeat(150) }, existing);
+    const durationMs = performance.now() - start;
+
+    console.info(`Synthetic long-memory duplicate scan: ${durationMs.toFixed(1)} ms`);
+    expect(result).toBeNull();
+    expect(durationMs).toBeLessThan(1_500);
+  });
+
   it("retrieves from synthetic local chunks within a loose local guardrail", async () => {
     const start = performance.now();
     const response = await retrieve(retrievalSources(600, 3), {

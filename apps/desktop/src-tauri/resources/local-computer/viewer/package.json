@@ -1,6 +1,0 @@
-{
-  "name": "fable-local-computer-viewer-build",
-  "private": true,
-  "type": "module",
-  "dependencies": { "pako": "2.1.0", "vite": "8.2.2" }
-}

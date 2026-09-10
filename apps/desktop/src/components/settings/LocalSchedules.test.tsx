@@ -19,9 +19,9 @@ function runtime(): SettingsRuntime {
     backendProviders: [{ id: "codex", label: "ChatGPT", backendType: "codex-app-server", authState: "connected" }],
   } as unknown as SettingsRuntime;
 }
-function mount(value = runtime()) {
+function mount(value = runtime(), initialAgentId?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><LocalSchedules runtime={value} /></QueryClientProvider>);
+  return render(<QueryClientProvider client={client}><LocalSchedules runtime={value} initialAgentId={initialAgentId} /></QueryClientProvider>);
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -32,6 +32,17 @@ beforeEach(() => {
   vi.mocked(updateLocalSchedule).mockResolvedValue(schedule);
 });
 describe("Local schedules", () => {
+  it("opens on the current agent, prefills new schedules, and can show every agent", async () => {
+    vi.mocked(listLocalSchedules).mockResolvedValue([schedule, { ...schedule, id: "other", agentId: "other", prompt: "Another agent's research" }]);
+    mount(runtime(), "agent");
+    expect(await screen.findByText("Research rainfall")).toBeVisible();
+    expect(screen.queryByText("Another agent's research")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
+    expect(screen.getByLabelText("Agent")).toHaveValue("agent");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.change(screen.getByRole("combobox", { name: "Filter schedules by agent" }), { target: { value: "" } });
+    expect(screen.getByText("Another agent's research")).toBeVisible();
+  });
   it("creates against the chosen agent route and keeps a rejected draft editable", async () => {
     vi.mocked(createLocalSchedule).mockRejectedValueOnce(new Error("The schedule changed. Refresh and try again."));
     mount();

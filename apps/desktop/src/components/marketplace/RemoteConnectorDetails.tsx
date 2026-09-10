@@ -1,3 +1,4 @@
+import { PluginOverview } from "./PluginOverview";
 import { useEffect, useRef, useState } from "react";
 import type { ConnectorManifest } from "@fable/protocol";
 import { openConnectorTools } from "../../lib/connector-mcp";
@@ -15,7 +16,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
   workspaceId?: string;
   titleId: string;
   onSaved: () => void;
-  onUseConnector?: (connector: ConnectorManifest) => void;
+  onUseConnector?: (connector: ConnectorManifest, prompt?: string) => void;
 }) {
   const [saved, setSaved] = useState(false);
   const [available, setAvailable] = useState(false);
@@ -68,6 +69,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
   const connected = Boolean(discovery && remoteConnectionReady(discovery));
   const disabled = busy || !available;
   return <article className="connector-detail" aria-label={`${entry.name} connection`} aria-busy={busy}>
+    <p className="connector-detail__eyebrow">Plugins</p>
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>
       <div><h2 id={titleId}>{entry.name}</h2><p>{entry.description}</p></div>
@@ -89,6 +91,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
       })}>Disconnect</button> : null}
     </div>
     {notice ? <p className="connector-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
+    <PluginOverview id={entry.id} access={connected ? "Uses your connected account permissions" : "Chosen when you connect"} onExample={connected && !disabled && onUseConnector ? (prompt) => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" }, prompt) : undefined} />
     <p className="connector-detail__hint">Read access is included when you connect. Actions follow your workspace approval preference.</p>
     <details className="connector-guide"><summary>About this connection</summary>
       <p>Account access is managed by {entry.name}. You can disconnect at any time.</p>
