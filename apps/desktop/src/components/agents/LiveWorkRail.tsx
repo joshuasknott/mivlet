@@ -196,7 +196,7 @@ export function LiveWorkRail({
       </section> : null}
 
       <section className="rail-conversations" aria-labelledby="rail-conversations-title">
-        <header><h2 id="rail-conversations-title">Conversations</h2><button type="button" onClick={onNewConversation} disabled={conversationBusy || !onNewConversation} aria-label="New conversation"><Plus size={18} /></button></header>
+        <header><h2 id="rail-conversations-title">Conversations</h2><button type="button" onClick={() => onNewConversation?.()} disabled={conversationBusy || !onNewConversation} aria-label="New conversation"><Plus size={18} /></button></header>
         {conversations.length ? <ul>{conversations.map((conversation) => <li key={conversation.id}><button type="button" disabled={conversationBusy} aria-current={activeConversationId === conversation.id ? "page" : undefined} onClick={() => onSelectConversation?.(conversation.id)}><span>{conversation.title}</span><time>{conversation.time}</time></button>{onDeleteConversation ? <button className="rail-conversation-delete" type="button" disabled={conversationBusy} onClick={() => onDeleteConversation(conversation.id)} aria-label={`Delete conversation: ${conversation.title}`} title="Delete conversation"><Trash size={15} aria-hidden="true" /></button> : null}</li>)}</ul> : <p>Your saved conversations will appear here.</p>}
       </section>
 
