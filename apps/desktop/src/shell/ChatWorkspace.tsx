@@ -1224,7 +1224,7 @@ export function ChatWorkspace() {
                       failedPrompt: activeContextFailure.requestPrompt,
                     }))}
                   /> : null}
-                  {(submissionError || agent.state.lastError) && !agent.state.contextFailure ? <div className="conversation-attention" role="alert">
+                  {submissionError || (agent.state.lastError && !agent.state.contextFailure) ? <div className="conversation-attention" role="alert">
                     <p>{submissionError || agent.state.lastError}</p>
                     {/sign.in|authenticat|credential|provider.*connect|api.key/i.test(submissionError || agent.state.lastError || "") ? <button type="button" onClick={() => { setSettingsTab("providers"); setSettingsOpen(true); }}>Check provider connection</button> : null}
                   </div> : null}
