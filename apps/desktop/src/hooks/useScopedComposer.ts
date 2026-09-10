@@ -139,6 +139,21 @@ export function useScopedComposer(scope?: ComposerScope) {
     setText: (text: string) => mutate((content) => ({ ...content, text })),
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
+    saveNewThreadDraft: async (threadId: string, text: string) => {
+      if (!entry?.ready || !allowed(entry)) throw new Error("Wait for this draft to load before continuing.");
+      const destinationScope = { ...entry.scope, threadId };
+      const destinationKey = composerScopeKey(destinationScope);
+      if (entries.current.has(destinationKey)) throw new Error("Choose a new conversation for this handoff.");
+      const destination: Entry = {
+        scope: destinationScope,
+        content: { text, attachments: [] },
+        ready: true,
+        revision: 1,
+        error: "",
+      };
+      entries.current.set(destinationKey, destination);
+      await persist(destination);
+    },
     consume: async () => {
       const attachments = entry?.content.attachments ?? [];
       mutate(() => empty());

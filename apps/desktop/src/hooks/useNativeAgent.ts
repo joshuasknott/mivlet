@@ -39,6 +39,10 @@ import {
 } from "@fable/connectors";
 import { validateReasoningEffort } from "@fable/connectors/native-api/reasoning";
 import { describeBackendError } from "../lib/backend-errors";
+import {
+  createAttemptPersistence,
+  type AttemptPersistence,
+} from "../lib/attempt-persistence";
 import { createComputerTaskExecutor } from "../lib/computer-task-executor";
 import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopAntigravityAcp } from "../lib/antigravity-acp";
@@ -61,7 +65,7 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
-import { planConversationContext } from "../lib/conversation-context";
+import { planConversationContext, type ConversationContextFailure } from "../lib/conversation-context";
 import {
   appendResponseText,
   CONVERSATION_STYLE_INSTRUCTIONS,
@@ -104,6 +108,16 @@ export interface NativeAgentState {
   } | null;
   running: boolean;
   lastError: string | null;
+  contextFailure?: ConversationContextFailure & {
+    requestPrompt: string;
+    scope: {
+      workspaceId?: string;
+      agentId?: string;
+      threadId?: string;
+      ownerInternalUserId?: string;
+      ownerMemberId?: string;
+    };
+  };
   status: ExecutionAttempt["status"] | "idle";
   recoverableAttempts: ExecutionAttempt[];
   /** Immutable context evidence keyed by canonical attempt id, including recovered completed attempts. */
@@ -120,6 +134,7 @@ export interface NativeAgentState {
 
 export interface UseNativeAgentOptions {
   computer?: { workspaceId: string; agentId: string };
+  contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
   /** Provider selected by the combined model picker. */
   activeProviderId?: string;
@@ -207,8 +222,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   // cancel map for native-API) using the requestId it captured from the transport.
   const activeBackendRef = useRef<AgentBackend | null>(null);
   const activeAttemptIdRef = useRef<string | null>(null);
-  const activePersistedRef = useRef<ExecutionAttempt | null>(null);
-  const activeWriterRef = useRef<DurableRunWriter | null>(null);
+  const activePersistenceRef = useRef<AttemptPersistence | null>(null);
   const onToolCallRef = useRef(options.onToolCall);
   onToolCallRef.current = options.onToolCall;
   // The executor + cancellation hook are read live each run so App.tsx can wire
@@ -223,12 +237,28 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   onCancelRef.current = options.onCancel;
   const threadIdRef = useRef(options.threadId);
   threadIdRef.current = options.threadId;
+  const contextScope = {
+    workspaceId: options.computer?.workspaceId,
+    agentId: options.computer?.agentId,
+    threadId: options.threadId,
+    ownerInternalUserId: options.contextOwner?.internalUserId,
+    ownerMemberId: options.contextOwner?.memberId,
+  };
+  const contextScopeKey = JSON.stringify(contextScope);
+  const contextScopeRef = useRef(contextScope);
+  contextScopeRef.current = contextScope;
   const loadConversationRef = useRef(options.loadConversation);
   loadConversationRef.current = options.loadConversation;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
   createDurableRunWriterRef.current = options.createDurableRunWriter;
+
+  useEffect(() => {
+    setState((current) => current.contextFailure && JSON.stringify(current.contextFailure.scope) !== contextScopeKey
+      ? { ...current, lastError: null, contextFailure: undefined }
+      : current);
+  }, [contextScopeKey]);
 
   useEffect(() => {
     void (async () => {
@@ -339,6 +369,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       control?: NativeAgentRunControl,
     ) => {
       let persisted: ExecutionAttempt | null = null;
+      const persistence = createAttemptPersistence(saveRuntimeExecutionAttempt);
       let terminalized = false;
       if (activeAttemptIdRef.current) {
         setState((current) => ({
@@ -348,6 +379,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         }));
         return;
       }
+      setState((current) => ({ ...current, lastError: null, contextFailure: undefined }));
       if (!backend) {
         setState((current) => ({
           ...current,
@@ -401,6 +433,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       // cannot both acquire provider authority before either durable write.
       activeAttemptIdRef.current = attemptId;
       const requestThreadId = threadIdRef.current;
+      const requestContextScope = contextScopeRef.current;
+      const requestContextScopeKey = JSON.stringify(requestContextScope);
       let history: AgentTurnRequest["messages"] = [];
       if (requestThreadId && loadConversationRef.current) {
         try {
@@ -409,7 +443,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           if (
             !conversation ||
             conversation.thread.id !== requestThreadId ||
-            threadIdRef.current !== requestThreadId
+            threadIdRef.current !== requestThreadId ||
+            JSON.stringify(contextScopeRef.current) !== requestContextScopeKey
           ) {
             throw new Error(
               "The conversation changed before the message could be sent. Try again.",
@@ -427,6 +462,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           );
         } catch (error) {
           activeAttemptIdRef.current = null;
+          if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) return;
           setState((current) => ({
             ...current,
             lastError:
@@ -447,18 +483,27 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const selectedModel =
         modelsRef.current.find((model) => model.id === request.model) ??
         backend.backend.models.find((model) => model.id === request.model);
-      const contextPlan = planConversationContext({
+      const contextPlan = await planConversationContext({
         history,
         request,
         contextPrefix: prepared.systemPrefix,
         contextWindowTokens: selectedModel?.capabilities?.contextWindow,
         backendType: provider?.backendType ?? backend.backend.backendType,
       });
+      if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) {
+        if (activeAttemptIdRef.current === attemptId) activeAttemptIdRef.current = null;
+        return;
+      }
       if (!contextPlan.ok) {
         activeAttemptIdRef.current = null;
         setState((current) => ({
           ...current,
           lastError: contextPlan.message,
+          contextFailure: {
+            ...contextPlan,
+            requestPrompt: request.messages.filter((message) => message.role === "user").at(-1)?.content ?? "",
+            scope: requestContextScope,
+          },
           status: "failed",
           currentAttemptId: null,
         }));
@@ -492,6 +537,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       if (
         activeAttemptIdRef.current !== attemptId ||
         threadIdRef.current !== requestThreadId ||
+        JSON.stringify(contextScopeRef.current) !== requestContextScopeKey ||
         shouldCancelRef.current?.()
       ) {
         if (activeAttemptIdRef.current === attemptId)
@@ -513,6 +559,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         usage: null,
         running: true,
         lastError: null,
+        contextFailure: undefined,
         status: "queued",
         recoverableAttempts: parentAttemptId
           ? current.recoverableAttempts.filter(
@@ -586,17 +633,20 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         createdAt,
         updatedAt: createdAt,
       };
-      activePersistedRef.current = persisted;
+      persistence.current = persisted;
+      activePersistenceRef.current = persistence;
       const durableWriter = requestThreadId
         ? (createDurableRunWriterRef.current?.(requestThreadId, attemptId) ??
           null)
         : null;
-      activeWriterRef.current = durableWriter;
+      persistence.setWriter(durableWriter);
       try {
         // The queued journal is the authority callback's immutable anchor. It
         // must exist before project binding and before any provider egress.
-        await saveRuntimeExecutionAttempt(persisted);
+        await persistence.save(persisted);
+        if (persistence.stopped) return persistence.current ?? undefined;
       } catch (error) {
+        if (persistence.stopped) return persistence.current ?? undefined;
         const message =
           error instanceof Error
             ? error.message
@@ -608,7 +658,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           error: message,
           updatedAt: new Date().toISOString(),
         };
-        activePersistedRef.current = failed;
+        persistence.current = failed;
         setState((current) => {
           const contextReceipts = { ...current.contextReceipts };
           delete contextReceipts[attemptId];
@@ -626,13 +676,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           };
         });
         try {
-          await saveRuntimeExecutionAttempt(failed);
+          await persistence.save(failed);
         } catch {
           /* persistence is already the reported terminal failure */
         }
         activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        activePersistenceRef.current = null;
         return;
       }
       try {
@@ -641,6 +690,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           threadId: requestThreadId,
         });
       } catch (error) {
+        if (persistence.stopped) return persistence.current ?? undefined;
         const message =
           error instanceof Error
             ? error.message
@@ -653,9 +703,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           updatedAt: new Date().toISOString(),
         };
         persisted = failed;
-        activePersistedRef.current = failed;
+        persistence.current = failed;
         try {
-          await saveRuntimeExecutionAttempt(failed);
+          await persistence.save(failed);
         } catch {
           /* the queued journal already records the failed boundary */
         }
@@ -674,24 +724,22 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           currentAttemptId: null,
         }));
         activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        activePersistenceRef.current = null;
         return failed;
       }
       const cancelledAfterQueue = Boolean(shouldCancelRef.current?.());
       const staleAfterQueue =
         activeAttemptIdRef.current !== attemptId ||
         threadIdRef.current !== requestThreadId ||
-        activePersistedRef.current?.status === "cancelled";
+        persistence.stopped;
       if (cancelledAfterQueue || staleAfterQueue) {
-        const alreadyCancelled =
-          activePersistedRef.current?.status === "cancelled";
+        const alreadyCancelled = persistence.stopped;
         const message =
           cancelledAfterQueue || alreadyCancelled
             ? "The queued agent contribution was cancelled before it started."
             : "The conversation changed before the queued agent contribution could start.";
         const terminal: ExecutionAttempt = alreadyCancelled
-          ? activePersistedRef.current!
+          ? persistence.current!
           : {
               ...persisted,
               status: cancelledAfterQueue ? "cancelled" : "failed",
@@ -702,7 +750,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         persisted = terminal;
         if (!alreadyCancelled) {
           try {
-            await saveRuntimeExecutionAttempt(terminal);
+            await persistence.save(terminal);
           } catch {
             /* the queued journal remains recoverable */
           }
@@ -724,8 +772,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           currentAttemptId: null,
         }));
         activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        activePersistenceRef.current = null;
         return terminal;
       }
       try {
@@ -737,7 +784,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             (entry) => entry.role === "user",
           );
           for (const [index, exchange] of userExchanges.entries()) {
-            await durableWriter.record({
+            await persistence.record({
               kind: "user",
               content: exchange.content,
               ...(index === userExchanges.length - 1 && control?.attachments?.length
@@ -746,15 +793,18 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             });
           }
         }
+        if (persistence.stopped) return persistence.current ?? undefined;
         persisted = {
           ...persisted,
           status: "streaming",
           updatedAt: new Date().toISOString(),
         };
-        activePersistedRef.current = persisted;
-        await saveRuntimeExecutionAttempt(persisted);
+        persistence.current = persisted;
+        await persistence.save(persisted);
+        if (persistence.stopped) return persistence.current ?? undefined;
         setState((current) => ({ ...current, status: "streaming" }));
       } catch (error) {
+        if (persistence.stopped) return persistence.current ?? undefined;
         const message =
           error instanceof Error
             ? error.message
@@ -767,7 +817,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           updatedAt: new Date().toISOString(),
         };
         persisted = failed;
-        activePersistedRef.current = failed;
+        persistence.current = failed;
         setState((current) => ({
           ...current,
           running: false,
@@ -782,13 +832,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           currentAttemptId: null,
         }));
         try {
-          await saveRuntimeExecutionAttempt(failed);
+          await persistence.save(failed);
         } catch {
           /* preserve the original terminal failure */
         }
         activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        activePersistenceRef.current = null;
         return failed;
       }
       let lastPersistedTranscriptLength = 0;
@@ -827,14 +876,24 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           attemptId,
           computer: options.computer,
           onRetry: () => {
-            if (!persisted) return;
+            if (!persisted || persistence.stopped) return;
             persisted = {
               ...persisted,
               status: "retrying",
               retryCount: persisted.retryCount + 1,
               updatedAt: new Date().toISOString(),
             };
-            void saveRuntimeExecutionAttempt(persisted);
+            persistence.current = persisted;
+            void persistence.save(persisted).catch((error: unknown) => {
+              if (!persistence.stopped)
+                setState((current) => ({
+                  ...current,
+                  lastError:
+                    error instanceof Error
+                      ? error.message
+                      : "Could not save retry progress.",
+                }));
+            });
           },
         },
       );
@@ -847,8 +906,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           status: "failed",
         }));
         activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        activePersistenceRef.current = null;
         return;
       }
       // Capture the active attempt's backend + id so cancel() reaches the egress
@@ -858,8 +916,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       activeAttemptIdRef.current = attemptId;
       try {
         for await (const event of eventStream) {
-          if (activePersistedRef.current?.status === "cancelled") {
-            persisted = activePersistedRef.current;
+          if (persistence.stopped) {
+            persisted = persistence.current;
             terminalized = true;
             break;
           }
@@ -908,8 +966,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               exchanges,
               updatedAt: new Date().toISOString(),
             };
+            persistence.current = persisted;
             if (durableWriter)
-              await durableWriter.checkpointAssistant(persisted.transcript);
+              await persistence.checkpointAssistant(persisted.transcript);
           } else if (event.type === "usage") {
             const usage = {
               inputTokens: event.inputTokens,
@@ -936,6 +995,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 status: "streaming",
                 updatedAt: new Date().toISOString(),
               };
+              persistence.current = persisted;
               setState((current) => ({
                 ...current,
                 activity: toolActivity(event.tool, "running"),
@@ -951,7 +1011,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 ],
               }));
               if (durableWriter) {
-                await durableWriter.record({
+                await persistence.record({
                   kind: "tool-call",
                   content: event.arguments,
                   callId: event.callId,
@@ -977,6 +1037,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 ],
                 updatedAt: new Date().toISOString(),
               };
+              persistence.current = persisted;
               setState((current) => ({
                 ...current,
                 activity: "",
@@ -988,7 +1049,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                 ),
               }));
               if (durableWriter) {
-                await durableWriter.record({
+                await persistence.record({
                   kind: "tool-result",
                   content: output,
                   callId: event.callId,
@@ -1017,6 +1078,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
               updatedAt: new Date().toISOString(),
             };
+            persistence.current = persisted;
             setState((current) => ({
               ...current,
               status: needsApproval ? "awaiting-approval" : "streaming",
@@ -1034,7 +1096,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
             }));
             if (durableWriter) {
-              await durableWriter.record({
+              await persistence.record({
                 kind: "tool-call",
                 content: `Tool requested: ${event.tool}`,
                 callId: event.callId,
@@ -1043,7 +1105,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               // Historical evidence only: a recovered request must never become
               // a new permit or standing grant after restart.
               if (needsApproval)
-                await durableWriter.record({
+                await persistence.record({
                   kind: "approval-request",
                   content: `Approval requested for ${event.tool}.`,
                   approvalRequestId: event.approval.id,
@@ -1072,6 +1134,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
               updatedAt: new Date().toISOString(),
             };
+            persistence.current = persisted;
             setState((current) => ({
               ...current,
               status: "streaming",
@@ -1084,7 +1147,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ),
             }));
             if (durableWriter)
-              await durableWriter.record({
+              await persistence.record({
                 kind: "tool-result",
                 content: event.output,
                 callId: event.callId,
@@ -1119,9 +1182,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString(),
             };
             persisted = terminalRun;
+            persistence.current = terminalRun;
             terminalized = true;
             if (durableWriter)
-              await durableWriter.record({
+              await persistence.record({
                 kind: "error",
                 content: described.message,
                 code: event.code ?? "provider-error",
@@ -1156,14 +1220,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               updatedAt: new Date().toISOString(),
             };
             persisted = terminalRun;
+            persistence.current = terminalRun;
             terminalized = true;
             if (durableWriter) {
-              await durableWriter.checkpointAssistant(
+              await persistence.checkpointAssistant(
                 terminalRun.transcript,
                 true,
               );
               if (terminalStatus === "cancelled")
-                await durableWriter.record({
+                await persistence.record({
                   kind: "interruption",
                   content: "The response was stopped.",
                   reason: "user-stop",
@@ -1193,14 +1258,17 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
                   : current.recoverableAttempts,
             }));
           }
+          // Publish every accepted mutation synchronously. Stop reads this
+          // snapshot; disk checkpoint cadence must never define visible state.
+          persistence.current = persisted;
           const terminalOrBoundary =
             event.type !== "text-delta" ||
             persisted.transcript.length - lastPersistedTranscriptLength >=
               512 ||
             Date.now() - lastPersistedAt >= 1_000;
           if (terminalOrBoundary) {
-            await saveRuntimeExecutionAttempt(persisted);
-            activePersistedRef.current = persisted;
+            persistence.current = persisted;
+            await persistence.save(persisted);
             lastPersistedTranscriptLength = persisted.transcript.length;
             lastPersistedAt = Date.now();
           }
@@ -1216,14 +1284,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             updatedAt: new Date().toISOString(),
           };
           persisted = terminalRun;
+          persistence.current = terminalRun;
           if (durableWriter)
-            await durableWriter.record({
+            await persistence.record({
               kind: "error",
               content: terminalRun.error!,
               code: "provider-eof",
               retryable: true,
             });
-          await saveRuntimeExecutionAttempt(terminalRun);
+          await persistence.save(terminalRun);
           setState((current) => ({
             ...current,
             running: false,
@@ -1238,6 +1307,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }));
         }
       } catch (error) {
+        if (persistence.stopped) return persistence.current ?? undefined;
         // A thrown BackendRuntimeError carries the structured code from the
         // transport boundary; classify it so config vs runtime is visible.
         const thrown = error as { code?: string; retryable?: boolean };
@@ -1258,8 +1328,9 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           updatedAt: new Date().toISOString(),
         };
         persisted = terminalRun;
+        persistence.current = terminalRun;
         if (durableWriter) {
-          await durableWriter.record(
+          await persistence.record(
             cancelled
               ? {
                   kind: "interruption",
@@ -1290,19 +1361,25 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
               ],
         }));
         try {
-          await saveRuntimeExecutionAttempt(persisted);
+          await persistence.save(persisted);
         } catch {
           /* preserve the original terminal failure */
         }
       } finally {
-        activeBackendRef.current = null;
-        activeAttemptIdRef.current = null;
-        activePersistedRef.current = null;
-        activeWriterRef.current = null;
+        if (activePersistenceRef.current === persistence) {
+          activeBackendRef.current = null;
+          activeAttemptIdRef.current = null;
+          activePersistenceRef.current = null;
+        }
       }
       return persisted;
     },
-    [backend, options.providers, options.computer?.workspaceId, options.computer?.agentId],
+    [
+      backend,
+      options.providers,
+      options.computer?.workspaceId,
+      options.computer?.agentId,
+    ],
   );
 
   const retry = useCallback(
@@ -1393,14 +1470,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   );
 
   const markToolExecuting = useCallback((approvalId: string, tool: string) => {
-    const persisted = activePersistedRef.current;
+    const persistence = activePersistenceRef.current;
+    const persisted = persistence?.current;
     if (
       !persisted ||
       !persisted.pendingApprovalIds.includes(approvalId) ||
       persisted.status === "cancelled"
     )
       return;
-    activePersistedRef.current = {
+    persistence.current = {
       ...persisted,
       status: "streaming",
       pendingApprovalIds: persisted.pendingApprovalIds.filter(
@@ -1421,8 +1499,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const cancel = useCallback(async () => {
     const backendToCancel = activeBackendRef.current;
     const attemptToCancel = activeAttemptIdRef.current;
-    const writerToCancel = activeWriterRef.current;
-    const persisted = activePersistedRef.current;
+    const persistence = activePersistenceRef.current;
+    // Freeze the generation before any await. Approval authority is revoked at
+    // the same boundary, while disk and provider acknowledgement finish below.
+    const finalFlush = persistence?.stop();
     // Reject approval waiters immediately, even when native cancellation is
     // slow or unavailable. No lost card may leave a provider waiting forever.
     onCancelRef.current?.();
@@ -1439,27 +1519,12 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             : current,
         );
       });
-    if (persisted && persisted.status !== "cancelled") {
-      const terminalRun: ExecutionAttempt = {
-        ...persisted,
-        status: "cancelled",
-        recoverable: false,
-        pendingApprovalIds: [],
-        updatedAt: new Date().toISOString(),
-      };
-      activePersistedRef.current = terminalRun;
-      try {
-        await writerToCancel?.checkpointAssistant(terminalRun.transcript, true);
-        await writerToCancel?.record({
-          kind: "interruption",
-          content: "The response was stopped.",
-          reason: "user-stop",
-        });
-        await saveRuntimeExecutionAttempt(terminalRun);
-      } catch {
-        // Cancellation is terminal even when a checkpoint cannot be written;
-        // the next scoped recovery can surface the adapter state safely.
-      }
+    let persistenceError: string | null = null;
+    try {
+      await finalFlush;
+    } catch {
+      persistenceError =
+        "The response stopped, but its latest output could not be saved. Keep this conversation open and copy the response before reloading or continuing.";
     }
     setState((current) =>
       current.currentAttemptId === attemptToCancel
@@ -1467,12 +1532,22 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             ...current,
             running: false,
             status: "cancelled",
-            endedAt: new Date().toISOString(),
+            endedAt:
+              persistence?.current?.updatedAt ?? new Date().toISOString(),
+            lastError: persistenceError ?? current.lastError,
           }
         : current,
     );
+    if (activePersistenceRef.current === persistence) {
+      activeBackendRef.current = null;
+      activeAttemptIdRef.current = null;
+      activePersistenceRef.current = null;
+    }
     await nativeCancellation;
+    if (activeAttemptIdRef.current === attemptToCancel) activeAttemptIdRef.current = null;
   }, []);
+
+  const getActiveAttemptId = useCallback(() => activeAttemptIdRef.current, []);
 
   useEffect(
     () => () => {
@@ -1494,6 +1569,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       ...current,
       running: false,
       lastError: message,
+      contextFailure: undefined,
       transcript: "",
       reasoningSummaries: {},
       activity: "",
@@ -1504,9 +1580,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, []);
 
   const clearError = useCallback(() => {
-    setState((current) => current.lastError === null ? current : {
+    setState((current) => current.lastError === null && !current.contextFailure ? current : {
       ...current,
       lastError: null,
+      contextFailure: undefined,
       status: current.status === "failed" ? "idle" : current.status,
     });
   }, []);
@@ -1518,6 +1595,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     cancel,
     markToolExecuting,
     reportError,
+    getActiveAttemptId,
     clearError,
     backend,
     resolveBackend,

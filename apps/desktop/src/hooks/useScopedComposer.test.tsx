@@ -32,6 +32,55 @@ describe("useScopedComposer", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("saves a reviewed handoff separately from source and unsent new-conversation drafts", async () => {
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("chief") } },
+    );
+    await act(async () => {});
+    act(() => result.current.setText("keep unsent new draft"));
+    await act(async () => result.current.flush());
+
+    rerender({ value: scope("chief", "source-thread") });
+    await act(async () => {});
+    act(() => {
+      result.current.setText("keep source draft");
+      result.current.setAttachments(() => [{
+        id: "private",
+        name: "private.txt",
+        type: "text/plain",
+        sizeBytes: 5,
+        sourceId: "private-source",
+      }]);
+    });
+    await act(async () => result.current.flush());
+    await act(async () => result.current.saveNewThreadDraft("continuation-thread", "review this handoff"));
+
+    expect(result.current.text).toBe("keep source draft");
+    expect(result.current.attachments).toHaveLength(1);
+    rerender({ value: scope("chief", "continuation-thread") });
+    await act(async () => {});
+    expect(result.current.text).toBe("review this handoff");
+    expect(result.current.attachments).toEqual([]);
+    rerender({ value: scope("chief") });
+    await act(async () => {});
+    expect(result.current.text).toBe("keep unsent new draft");
+  });
+
+  it("rejects a late handoff write after the account changes", async () => {
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("chief", "source-thread") } },
+    );
+    await act(async () => {});
+    const saveHandoff = result.current.saveNewThreadDraft;
+    rerender({ value: { ...scope("chief", "source-thread"), accountId: "different-account" } });
+    await act(async () => {});
+
+    await expect(saveHandoff("continuation-thread", "private handoff")).rejects.toThrow();
+    expect(mocks.saves).toEqual([]);
+  });
+
   it("keeps text and late attachment ingestion in the scope that started them", async () => {
     const { result, rerender } = renderHook(
       ({ value }) => useScopedComposer(value),

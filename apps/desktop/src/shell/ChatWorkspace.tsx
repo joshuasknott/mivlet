@@ -2,6 +2,7 @@ import { SchedulesDialog } from "../components/agents/SchedulesDialog";
 import { WorkspaceMenu } from "../components/agents/WorkspaceMenu";
 import { Brand } from "../components/Brand";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
+import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -49,7 +50,7 @@ import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { stageRuntimeLocalComputerAttachment } from "../runtime/domains/local-computer";
 import { composerImageInputs } from "../lib/composer-images";
 import { prepareComposerImage } from "../lib/composer-images";
-import { getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
+import { createRuntimeConversationThread, getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { useLocalProjects } from "../hooks/useLocalProjects";
 import { createLocalProject, updateLocalProject, archiveLocalProject, bindLocalProjectRunAuthor } from "../runtime/domains/local-projects";
@@ -59,6 +60,7 @@ import type { ExecutionAttempt, LocalProject } from "@fable/protocol";
 import type { ProjectDraft } from "../components/projects/ProjectWorkspace";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../lib/constants";
+import { buildConversationHandoff } from "../lib/conversation-handoff";
 import type { ComposerAttachment } from "../lib/types";
 import { useScopedComposer } from "../hooks/useScopedComposer";
 import { startScopedConversation, type ConversationStartScope } from "../lib/scoped-conversation-start";
@@ -884,20 +886,42 @@ export function ChatWorkspace() {
     setEditingAgentId(profile.id);
     setAgentEditorOpen(true);
   };
-  const startNewConversation = async () => {
+  const startNewConversation = async (draft = "") => {
     if (navigationPending.current || agent.state.running || projectBatch || selectedProjectId) return;
+    navigationPending.current = true;
+    const originKey = composerNavigationScope.current.conversationKey;
+    const originScope = composerNavigationScope.current;
     try {
       await composer.flush();
-    } catch {
-      setSubmissionError("Your draft could not be saved. Try again before starting a new conversation.");
-      return;
+      if (composerNavigationScope.current.conversationKey !== originKey) return;
+      let threadId: string | undefined;
+      if (draft) {
+        const thread = await createRuntimeConversationThread({
+          authorityScope: {
+            authority: "local",
+            visibility: "member-private",
+            ownerMemberId: (contextOwner?.memberId ?? originScope.workspaceId) as never,
+          },
+          title: "Reviewed continuation",
+        }, originScope.workspaceId);
+        if (composerNavigationScope.current.conversationKey !== originKey) return;
+        await composer.saveNewThreadDraft(thread.id, draft);
+        if (composerNavigationScope.current.conversationKey !== originKey) return;
+        threadId = thread.id;
+      }
+      runtime.updateAgent(originScope.agentId, { threadId });
+      setSelectedThreadId(threadId);
+      agent.clearError();
+      setSubmissionError("");
+      setOptimisticUserMessage("");
+      window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
+    } catch (error) {
+      if (composerNavigationScope.current.conversationKey === originKey) {
+        setSubmissionError(error instanceof Error ? error.message : "Your draft could not be saved. Try again before starting a new conversation.");
+      }
+    } finally {
+      navigationPending.current = false;
     }
-    runtime.updateAgent(activeAgent.id, { threadId: undefined });
-    setSelectedThreadId(undefined);
-    agent.clearError();
-    setSubmissionError("");
-    setOptimisticUserMessage("");
-    window.requestAnimationFrame(() => runtime.composerRef.current?.focus());
   };
 
   const threadById = new Map(
@@ -936,6 +960,15 @@ export function ChatWorkspace() {
   const profileName =
     verifiedDisplay?.displayName ?? verifiedDisplay?.email ?? "Local workspace";
   const conversation = durableConversation.state.conversation?.thread.id === selectedThreadId ? durableConversation.state.conversation : null;
+  const contextFailure = agent.state.contextFailure;
+  const activeContextFailure = contextFailure
+    && contextFailure.scope.workspaceId === workspaceId
+    && contextFailure.scope.agentId === activeAgent.id
+    && contextFailure.scope.threadId === selectedThreadId
+    && contextFailure.scope.ownerInternalUserId === runtime.accountWorkspaceStatus.activeContextOwner?.internalUserId
+    && contextFailure.scope.ownerMemberId === runtime.accountWorkspaceStatus.activeContextOwner?.memberId
+    ? contextFailure
+    : undefined;
   const scheduleNoticeKey = scheduleDispatch ? `${scheduleDispatch.scheduleId ?? ""}:${scheduleDispatch.occurrenceId ?? ""}:${scheduleDispatch.phase}:${scheduleDispatch.message ?? ""}` : "";
   const scheduleNotice = scheduleDispatch?.phase === "needs-user" || scheduleDispatch?.phase === "failed"
     ? scheduleDispatch.message ?? "Scheduled work needs your attention."
@@ -1306,7 +1339,16 @@ export function ChatWorkspace() {
                   }
                 }}
                 interruption={<>
-                  {submissionError || agent.state.lastError ? <div className="conversation-attention" role="alert">
+                  {activeContextFailure && conversation ? <ContextRecoveryPanel
+                    failure={activeContextFailure}
+                    disabled={agent.state.running || Boolean(projectBatch) || Boolean(selectedProjectId)}
+                    onPrepareHandoff={() => startNewConversation(buildConversationHandoff({
+                      thread: conversation.thread,
+                      messages,
+                      failedPrompt: activeContextFailure.requestPrompt,
+                    }))}
+                  /> : null}
+                  {submissionError || (agent.state.lastError && !agent.state.contextFailure) ? <div className="conversation-attention" role="alert">
                     <p>{submissionError || agent.state.lastError}</p>
                     {/sign.in|authenticat|credential|provider.*connect|api.key/i.test(submissionError || agent.state.lastError || "") ? <button type="button" onClick={() => { setSettingsTab("providers"); setSettingsOpen(true); }}>Check provider connection</button> : null}
                   </div> : null}
