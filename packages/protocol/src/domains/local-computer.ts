@@ -67,6 +67,27 @@ export interface LocalComputerFileRequest extends LocalComputerTarget {
   path: string;
 }
 
+/** User-authorized upload copied into one exact agent workspace. */
+export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget {
+  expectedGeneration: number;
+  attachmentId: string;
+  name: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
+/** Credential-free proof of the exact bytes and relative path staged. */
+export interface LocalComputerAttachmentReceipt {
+  computerId: string;
+  attachmentId: string;
+  originalName: string;
+  mimeType: string;
+  relativePath: string;
+  sizeBytes: number;
+  sha256: string;
+  stagedAt: string;
+}
+
 /**
  * An ephemeral, explicitly selected text-file preview for the trusted Fable UI.
  * The content must not enter model context, logs, or persisted runtime state.

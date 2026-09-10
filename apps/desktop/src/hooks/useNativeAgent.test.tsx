@@ -672,6 +672,26 @@ describe("useNativeAgent", () => {
     );
   });
 
+  it("binds submitted attachment metadata to the canonical user record", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Done"), finishStop];
+    const record = vi.fn(async (_entry: Parameters<DurableRunWriter["record"]>[0]) => {});
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()],
+      threadId: "thread-1",
+      createDurableRunWriter: () => ({ record, checkpointAssistant: vi.fn(async () => {}) }),
+    }));
+    await act(async () => {
+      await result.current.run(baseRequest, preparedContext, undefined, undefined, {
+        attachments: [{ id: "attachment-1", name: "totals.csv", mimeType: "text/csv", sizeBytes: 24, availability: "workspace-file", relativePath: "Attachments/totals-a1.csv" }],
+      });
+    });
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "user",
+      attachments: [expect.objectContaining({ relativePath: "Attachments/totals-a1.csv" })],
+    }));
+  });
+
   it("reloads canonical project history for each sequential contribution", async () => {
     installDesktopRuntime();
     mocks.lines = [openAiChunk("Current contribution"), finishStop];

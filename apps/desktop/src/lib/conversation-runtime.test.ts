@@ -116,12 +116,19 @@ describe("conversation runtime", () => {
   it("writes checkpointed assistant state with deterministic run keys", async () => {
     const transport = transportFixture();
     const writer = createDurableRunWriter(transport, "thread-1", "run-1");
-    await writer.record({ kind: "user", content: "Hello" });
+    await writer.record({ kind: "user", content: "Hello", attachments: [{
+      id: "attachment-1", name: "totals.csv", mimeType: "text/csv", sizeBytes: 24,
+      availability: "workspace-file", relativePath: "Attachments/totals-a1.csv",
+    }] });
     await writer.checkpointAssistant("Partial");
     await writer.checkpointAssistant("Complete", true);
 
     expect(transport.views).toHaveLength(2);
     expect(transport.views[0].message.idempotencyKey).toBe("run-1:message:0");
+    expect(transport.views[0].message.detail).toEqual({ attachments: [{
+      id: "attachment-1", name: "totals.csv", mimeType: "text/csv", sizeBytes: 24,
+      availability: "workspace-file", relativePath: "Attachments/totals-a1.csv",
+    }] });
     expect(transport.views[1].currentRevision.content).toBe("Complete");
     expect(transport.views[1].currentRevision.reason).toBe("completion");
   });

@@ -30,4 +30,13 @@ describe("conversation presentation", () => {
     parts = resolveResponseTool(parts, "call", "Read it", true);
     expect(parts.map((part) => part.content)).toEqual(["First update.", "Read it", "Answer."]);
   });
+  it("retains only bounded attachment metadata from a user message", () => {
+    const valid = view("one", "user", 1, "Inspect this", { attachments: [{
+      id: "attachment-1", name: "totals.csv", mimeType: "text/csv", sizeBytes: 24,
+      availability: "workspace-file", relativePath: "Attachments/totals-a1.csv",
+    }] });
+    expect(conversationTurns([valid])[0].attachments?.[0]).toMatchObject({ name: "totals.csv", relativePath: "Attachments/totals-a1.csv" });
+    const malformed = view("two", "user", 2, "Ignore bad metadata", { attachments: [{ id: "bad", name: 42 }] });
+    expect(conversationTurns([malformed])[0].attachments).toBeUndefined();
+  });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
+import type { ConnectorManifest, FableAgentProfile, Spine } from "@fable/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { conversationTurns, toolActivity, toolFailureSummary, type ConversationTurn, type ResponsePart } from "../../lib/conversation-presentation";
@@ -24,6 +24,7 @@ interface Props {
   profileName: string;
   connectors: ConnectorManifest[];
   optimisticPrompt: string;
+  optimisticAttachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
   workspaceId: string;
   generation?: number;
   approval?: ReactNode;
@@ -45,6 +46,7 @@ export function ConversationFeed(props: Props) {
       canonical.parts.filter((part) => part.kind === "text").map((part) => part.content).join("") === state.transcript);
     const turn: ConversationTurn = {
       id: state.currentAttemptId!, prompt: props.suppressLivePrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
+      attachments: canonical?.attachments ?? props.optimisticAttachments,
       parts: canonicalReady ? canonical.parts : state.responseParts ?? (state.transcript ? [{ id: "text", kind: "text", content: state.transcript }] : []),
       startedAt: state.startedAt, endedAt: state.endedAt,
     };
@@ -59,14 +61,18 @@ export function ConversationFeed(props: Props) {
         generation={props.requireAuthor && !author ? undefined : props.generation}
         live={Boolean(live && turn.id === state.currentAttemptId)} />;
     })}
-    {props.optimisticPrompt && (!live || props.optimisticPrompt !== state.progressPrompt) ? <UserMessage content={props.optimisticPrompt} {...props} /> : null}
+    {props.optimisticPrompt && (!live || props.optimisticPrompt !== state.progressPrompt) ? <UserMessage content={props.optimisticPrompt} attachments={props.optimisticAttachments} {...props} /> : null}
     {!live && (props.approval || props.interruption) ? <div className="conversation-attention">{props.approval}{props.interruption}</div> : null}
   </>;
 }
 
-function UserMessage({ content, profileName, connectors }: { content: string; profileName: string; connectors: ConnectorManifest[] }) {
+function UserMessage({ content, profileName, connectors, attachments }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[] }) {
   return <article className="conversation-message conversation-message--user" aria-label={`${profileName}'s message`}>
     <p><ConnectorMentionText text={content} connectors={connectors} /></p>
+    {attachments?.length ? <ul className="conversation-message__attachments" aria-label="Attached files">{attachments.map((attachment) => <li key={attachment.id}>
+      <strong>{attachment.name}</strong>
+      <small>{attachment.availability === "workspace-file" && attachment.relativePath ? attachment.relativePath : attachment.availability === "project-file" ? "Project file" : attachment.availability === "image-input" ? "Image input" : "Knowledge context"}</small>
+    </li>)}</ul> : null}
   </article>;
 }
 
@@ -101,9 +107,9 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
   const label = running ? props.approval ? "Waiting for your approval" : "Working" : stopped ? "Stopped" : elapsed > 0 ? `Worked for ${duration}` : "Worked";
   const currentTool = [...turn.parts].reverse().find((part) => part.kind === "tool" && part.state === "running");
   const activity = props.state.activity || (currentTool?.kind === "tool" ? toolActivity(currentTool.tool, "running") : "");
-  if (!turn.parts.length && !running && !live) return turn.prompt ? <UserMessage content={turn.prompt} {...props} /> : null;
+  if (!turn.parts.length && !running && !live) return turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} {...props} /> : null;
   return <section className="conversation-turn">
-    {turn.prompt ? <UserMessage content={turn.prompt} {...props} /> : null}
+    {turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} {...props} /> : null}
     <article className="conversation-response" aria-label={`${props.agent.name}'s response`}>
       {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header> : null}
       {hasActivity ? <details className="turn-activity" open={expanded}>

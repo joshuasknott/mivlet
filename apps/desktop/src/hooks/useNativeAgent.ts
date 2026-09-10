@@ -29,6 +29,7 @@ import type {
   PreparedExecutionContext,
   ProviderRouteExecutionBinding,
   ExecutionContextReceipt,
+  Spine,
 } from "@fable/protocol";
 import {
   resolveAgentBackend,
@@ -181,6 +182,8 @@ export interface NativeAgentRunControl {
   }) => void | Promise<void>;
   /** Suppress only the canonical user record for an internal contribution. */
   canonicalUserMessage?: "persist" | "suppress";
+  /** Safe metadata for the exact attachments captured by this submitted turn. */
+  attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
 }
 
 export function useNativeAgent(options: UseNativeAgentOptions) {
@@ -721,12 +724,16 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         // represented by its queued execution exchange. Do not misattribute it
         // as a human-authored canonical message when suppression is explicit.
         if (durableWriter && control?.canonicalUserMessage !== "suppress") {
-          for (const exchange of initialExchanges.filter(
+          const userExchanges = initialExchanges.filter(
             (entry) => entry.role === "user",
-          )) {
+          );
+          for (const [index, exchange] of userExchanges.entries()) {
             await durableWriter.record({
               kind: "user",
               content: exchange.content,
+              ...(index === userExchanges.length - 1 && control?.attachments?.length
+                ? { attachments: control.attachments }
+                : {}),
             });
           }
         }

@@ -53,11 +53,13 @@ describe("useScopedComposer", () => {
       type: "text/plain",
       sizeBytes: 12,
       sourceId: "source-private",
+      transientBytes: new Uint8Array([112, 114, 105, 118, 97, 116, 101]),
     }]));
     expect(result.current.attachments).toEqual([]);
 
     await act(async () => { vi.runAllTimers(); await Promise.resolve(); });
     expect(mocks.saves.some((draft) => draft.draftKey === composerScopeKey(scope("chief", "thread-chief")) && draft.content.includes("source-private"))).toBe(true);
+    expect(mocks.saves.every((draft) => !draft.content.includes("transientBytes"))).toBe(true);
     expect(mocks.saves.some((draft) => draft.draftKey === composerScopeKey(scope("new-agent")) && draft.content.includes("source-private"))).toBe(false);
   });
 

@@ -84,7 +84,8 @@ export function createConversationRuntime(transport: ConversationTransport) {
 }
 
 export type DurableRunRecord =
-  | { kind: "user" | "assistant"; content: string; state?: "streaming" | "terminal" }
+  | { kind: "user"; content: string; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[] }
+  | { kind: "assistant"; content: string; state?: "streaming" | "terminal" }
   | { kind: "tool-call"; content: string; callId: string; toolName: string }
   | { kind: "tool-result"; content: string; callId: string; toolName: string; ok: boolean }
   | { kind: "approval-request"; content: string; approvalRequestId: string }
@@ -153,7 +154,9 @@ export function createDurableRunWriter(
               ? { kind: "interruption" as const, detail: { reason: record.reason } }
               : record.kind === "error"
                 ? { kind: "error" as const, detail: { code: record.code, retryable: record.retryable } }
-                : { kind: record.kind };
+                : record.kind === "user" && record.attachments?.length
+                  ? { kind: "user" as const, detail: { attachments: record.attachments } }
+                  : { kind: record.kind };
     const view = await transport.appendMessage({
       ...kindDetail,
       threadId: thread.id,

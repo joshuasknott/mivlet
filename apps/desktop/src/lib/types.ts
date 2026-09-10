@@ -39,6 +39,9 @@ export interface ComposerAttachment {
   /** Prepared transient model input. Its data URL must never enter durable state. */
   imageInput?: import("@fable/protocol").NativeImageInput;
   sourceId?: string;
+  /** Original upload bytes for one pending send. Never persisted in a draft. */
+  transientBytes?: Uint8Array;
+  workspaceFile?: import("@fable/protocol").LocalComputerAttachmentReceipt;
   status?: string;
 }
 

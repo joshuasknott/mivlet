@@ -276,6 +276,7 @@ pub fn run() {
             local_computer::local_computer_status,
             local_computer::local_computer_files,
             local_computer::local_computer_file_preview,
+            local_computer::local_computer_stage_attachment,
             mcp_process::spawn_mcp_process,
             mcp_process::write_mcp_frame,
             mcp_process::close_mcp_process,

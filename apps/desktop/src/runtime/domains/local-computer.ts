@@ -6,6 +6,8 @@ import type {
   LocalComputerFileRequest,
   LocalComputerFilesSnapshot,
   LocalComputerFilePreview,
+  LocalComputerAttachmentStageRequest,
+  LocalComputerAttachmentReceipt,
 } from "@fable/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
@@ -51,6 +53,13 @@ export const previewRuntimeLocalComputerFile = (
 ) =>
   nativeComputerCommand<LocalComputerFilePreview>(
     "local_computer_file_preview",
+    { request },
+  );
+export const stageRuntimeLocalComputerAttachment = (
+  request: LocalComputerAttachmentStageRequest,
+) =>
+  nativeComputerCommand<LocalComputerAttachmentReceipt>(
+    "local_computer_stage_attachment",
     { request },
   );
 export const cancelRuntimeLocalComputer = (

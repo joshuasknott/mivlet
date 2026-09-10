@@ -36,10 +36,10 @@ function serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
   return next;
 }
 function durableContent(content: ComposerContent): ComposerContent {
-  return { ...content, attachments: content.attachments.map(({ imageInput: _image, previewUrl: _preview, ...attachment }) => ({
+  return { ...content, attachments: content.attachments.map(({ imageInput: _image, previewUrl: _preview, transientBytes: _bytes, ...attachment }) => ({
     ...attachment,
     // Image bytes are deliberately transient, never stored in draft payloads.
-    status: attachment.type.startsWith("image/") ? "Reattach image before sending" : attachment.sourceId ? "Attached" : "Reattach file before sending",
+    status: attachment.type.startsWith("image/") ? "Reattach image before sending" : attachment.sourceId ? "Knowledge context · reattach for workspace file" : "Reattach file before sending",
   })) };
 }
 function decode(content: string): ComposerContent {
