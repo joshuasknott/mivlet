@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@fable/protocol";
 import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
+import { McpClient } from "@fable/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+
+vi.mock("./native-mcp-client", () => ({ McpClient }));
 
 describe("computer authority across approvals", () => {
   const args = '{"path":"report.txt","content":"draft"}';

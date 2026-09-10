@@ -1,6 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable/connectors";
+import { McpClient } from "@fable/connectors/mcp/sdk-client";
+
+vi.mock("../../lib/native-mcp-client", () => ({ McpClient }));
 
 const runtime = vi.hoisted(() => ({
   beginAuth: vi.fn(),
