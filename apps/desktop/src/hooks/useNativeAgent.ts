@@ -1526,12 +1526,13 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     }));
   }, []);
 
-  const clearContextFailure = useCallback(() => {
-    setState((current) => ({
+  const clearError = useCallback(() => {
+    setState((current) => current.lastError === null && !current.contextFailure ? current : {
       ...current,
-      lastError: current.contextFailure ? null : current.lastError,
+      lastError: null,
       contextFailure: undefined,
-    }));
+      status: current.status === "failed" ? "idle" : current.status,
+    });
   }, []);
 
   return {
@@ -1541,8 +1542,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     cancel,
     markToolExecuting,
     reportError,
-    clearContextFailure,
     getActiveAttemptId,
+    clearError,
     backend,
     resolveBackend,
   };
