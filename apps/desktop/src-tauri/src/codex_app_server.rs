@@ -1931,7 +1931,7 @@ mod tests {
                 { "role": "user", "content": "My project is called Elm." },
                 { "role": "assistant", "content": "I will use Elm." },
                 { "role": "user", "content": "What is its name?" }
-            ], "tools": [{ "name": "google-drive-read", "description": "Read connected Drive", "parameters": "{\"type\":\"object\",\"properties\":{\"operation\":{\"type\":\"string\"}}}" }], "maxTokens": 2048 },
+            ], "tools": [{ "name": "google-drive-read", "description": "Read connected Drive", "parameters": "{\"type\":\"object\",\"properties\":{\"input\":{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"click\"]}},\"required\":[\"action\"],\"additionalProperties\":false}]}},\"required\":[\"input\"],\"additionalProperties\":false}" }], "maxTokens": 2048 },
             "options": { "contextPrefix": "Quoted knowledge", "permissionMode": "trusted-scope" }
         }))
         .unwrap();
@@ -1953,6 +1953,11 @@ mod tests {
         assert_eq!(
             thread["params"]["dynamicTools"][0]["inputSchema"]["type"],
             "object"
+        );
+        assert_eq!(
+            thread["params"]["dynamicTools"][0]["inputSchema"]["properties"]["input"]["anyOf"][0]
+                ["properties"]["action"]["enum"][0],
+            "click"
         );
         assert_eq!(
             thread["params"]["developerInstructions"],

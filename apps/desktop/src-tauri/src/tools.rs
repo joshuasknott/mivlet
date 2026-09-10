@@ -1281,6 +1281,14 @@ pub async fn execute_tool_call(
             .agent_id
             .clone()
             .ok_or("Application tools require an agent.")?;
+        let action = if tool == "local-app-action" {
+            Some(crate::local_computer::desktop_tools::parse_action(
+                arguments.clone(),
+                false,
+            )?)
+        } else {
+            None
+        };
         let computers = local_computers.inner().clone();
         crate::local_computer::desktop_tools::prepare(
             computers.clone(),
@@ -1301,14 +1309,12 @@ pub async fn execute_tool_call(
                     computer_generation,
                 )
             } else {
-                let action = serde_json::from_value(arguments)
-                    .map_err(|_| "Application action fields are invalid.")?;
                 crate::local_computer::desktop_tools::act(
                     &computers,
                     &workspace_id,
                     &agent_id,
                     computer_generation,
-                    action,
+                    action.expect("application action was parsed before native preparation"),
                 )
             }
         })
@@ -1328,6 +1334,14 @@ pub async fn execute_tool_call(
             .agent_id
             .clone()
             .ok_or("Desktop tools require an agent.")?;
+        let action = if tool == "local-desktop-action" {
+            Some(crate::local_computer::desktop_tools::parse_action(
+                arguments.clone(),
+                true,
+            )?)
+        } else {
+            None
+        };
         enum ImageClaim {
             Codex(crate::codex_app_server::DesktopToolClaim),
             Api(crate::native_api::computer::DesktopToolClaim),
@@ -1385,14 +1399,12 @@ pub async fn execute_tool_call(
                 if let ImageClaim::Api(claim) = &claim {
                     claim.check()?;
                 }
-                let action = serde_json::from_value(arguments)
-                    .map_err(|_| "Desktop action fields are invalid.".to_string())?;
                 let result = crate::local_computer::desktop_tools::act(
                     &computers,
                     &workspace_id,
                     &agent_id,
                     computer_generation,
-                    action,
+                    action.expect("desktop action was parsed before native preparation"),
                 );
                 if let ImageClaim::Api(claim) = &claim {
                     claim.check()?;

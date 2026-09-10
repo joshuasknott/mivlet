@@ -33,7 +33,7 @@ describe("visual tool continuations (mocked native transport)", () => {
     const requests: NativeCompletionRequest[] = [];
     const ids = ["observe-1", "act-1", "observe-2"];
     const turns = [response(providerId, ids[0], "local-desktop-observe", "{}"),
-      response(providerId, ids[1], "local-desktop-action", '{"action":"click","observationId":"fresh-1","x":25,"y":40}'),
+      response(providerId, ids[1], "local-desktop-action", '{"observationId":"fresh-1","input":{"action":"click","x":25,"y":40}}'),
       response(providerId, ids[2], "local-desktop-observe", "{}")];
     const transport: HttpTransport = {
       toolApprovalId: id => ids.includes(id) ? `api-visual-${id}` : undefined,
@@ -50,7 +50,7 @@ describe("visual tool continuations (mocked native transport)", () => {
     expect(execute.mock.calls.map(([approval]) => approval.id)).toEqual(ids.map(id => `api-visual-${id}`));
     expect(requests).toHaveLength(4);
     expect(requests[1].messages.at(-1)).toMatchObject({ role: "tool", toolCallId: ids[0], content: metadata("fresh-1") });
-    expect(JSON.parse(execute.mock.calls[1][1])).toEqual({ action: "click", observationId: "fresh-1", x: 25, y: 40 });
+    expect(JSON.parse(execute.mock.calls[1][1])).toEqual({ observationId: "fresh-1", input: { action: "click", x: 25, y: 40 } });
     expect(requests[3].messages.at(-1)?.content).toBe(metadata("fresh-2"));
     expect(JSON.stringify(requests)).not.toMatch(/data:image|"images"|base64/);
     expect(events.at(-1)).toEqual({ type: "done", finishReason: "stop" });
