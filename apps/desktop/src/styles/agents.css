@@ -428,15 +428,6 @@
 
 .live-rail__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
 .live-rail__header strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.computer-overview__preview { display: block; position: relative; width: 100%; margin: 0; padding: 0; overflow: hidden; background: #dcdedb; border: 0; border-radius: 14px; box-shadow: var(--shadow-1); }
-.computer-overview__preview img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
-.computer-overview__preview > span { position: absolute; bottom: 10px; left: 12px; color: white; font-size: 10px; text-shadow: 0 1px 4px #000; }
-.computer-overview > p { margin: 16px 0 2px; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
-.computer-overview__action { min-height: 36px; margin-left: -6px; padding: 0 6px; color: var(--ink); background: transparent; border: 0; border-radius: 7px; font-size: 13px; }
-.computer-overview__action:hover { background: var(--surface-hover); }
-.computer-details { margin-top: 6px; }
-.computer-details > summary { width: fit-content; min-height: 32px; padding: 8px 0; color: var(--ink-muted); cursor: pointer; font-size: 11px; }
-.computer-details[open] > summary { margin-bottom: 8px; }
 .rail-conversations { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
 .rail-conversations > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
 .rail-conversations h2 { margin: 0; color: var(--ink-muted); font-size: 12px; font-weight: 400; }
@@ -499,10 +490,6 @@
 .hosted-computer-card__state { color: var(--positive); font-size: 10px; font-weight: 650; }
 .local-computer-card { background: color-mix(in srgb, var(--surface-raised) 88%, var(--positive-subtle)); }
 .local-computer-card__boundary { grid-column: 1 / -1; color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
-.local-computer-apps { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
-.local-computer-apps button { min-height: 28px; padding: 0 7px; color: var(--ink-soft); background: var(--surface-overlay); border: 1px solid var(--line); border-radius: 8px; font-size: 9.5px; }
-.local-computer-apps button:hover, .local-computer-apps button:focus-visible { color: var(--ink); border-color: var(--line-strong); background: var(--surface-hover); }
-.local-computer-apps button:disabled { opacity: .5; }
 .local-computer-files { display: grid; grid-column: 1 / -1; gap: 6px; }
 .local-computer-files__toolbar { display: flex; align-items: center; gap: 5px; }
 .local-computer-files__toolbar button { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 0 8px; color: var(--ink-soft); background: var(--surface-overlay); border: 1px solid var(--line); border-radius: 8px; font-size: 10px; }
@@ -658,7 +645,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .agent-welcome__suggestions button { min-height: 44px; }
   .hosted-browser-launcher input { height: 40px; }
   .hosted-browser-launcher button { min-height: 40px; padding-inline: 11px; }
-  .local-computer-apps button { min-height: 40px; }
   .local-computer-files__toolbar button { min-height: 40px; }
   .local-computer-files__toolbar button:last-child:not(:first-child) { width: 40px; }
   .live-screen-modal { padding: 10px; }
@@ -857,14 +843,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .native-computer-panel button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); color: inherit; cursor: pointer; }
 .native-computer-panel button:disabled { cursor: default; opacity: .5; }
 .native-computer-panel .native-computer-stop { background: #a62634; border-color: #a62634; color: white; font-weight: 600; }
-.native-computer-panel button:focus-visible, .native-window-picker input:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
-.native-window-picker { margin-top: 12px; }
-.native-window-picker input { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: inherit; }
-.native-window-picker ul { display: grid; gap: 5px; max-height: 240px; overflow-y: auto; margin: 8px 0 0; padding: 3px; list-style: none; }
-.native-window-picker li, .native-window-picker button { min-width: 0; }
-.native-window-picker button { display: grid; gap: 2px; width: 100%; text-align: left; }
-.native-window-picker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-soft); }
-.native-computer-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.native-computer-panel button:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .native-computer-retired { margin-top: 14px; color: var(--ink-soft); }
 .native-computer-retired summary { cursor: pointer; }
 @media (max-width: 650px) { .native-computer-panel button { min-height: 44px; } }
