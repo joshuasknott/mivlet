@@ -609,7 +609,17 @@ fn normalize_runtime_agents(
         };
         let avatar_seed = agent
             .avatar_seed
-            .filter(|seed| seed.starts_with("blob-v1:") && seed.len() <= 160)
+            .filter(|seed| {
+                seed.len() <= 160
+                    && (seed.starts_with("blob-v1:")
+                        || ["robot-v3:", "rounded-v2:", "organic-v1:"]
+                            .iter()
+                            .any(|prefix| {
+                                seed.strip_prefix(prefix).is_some_and(|rest| {
+                                    matches!(rest.as_bytes(), [b'0'..=b'7', b':', ..])
+                                })
+                            }))
+            })
             .unwrap_or_else(|| format!("blob-v1:{id}"));
         normalized.push(FableAgentProfile {
             id,
@@ -787,6 +797,56 @@ pub fn save_runtime_snapshot(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn selected_avatar_versions_survive_native_snapshot_roundtrip() {
+        let mut seeds = vec!["blob-v1:legacy".to_string()];
+        for version in ["robot-v3", "rounded-v2", "organic-v1"] {
+            for variant in 0..8 {
+                seeds.push(format!("{version}:{variant}:saved-agent"));
+            }
+        }
+        for seed in seeds {
+            let snapshot: RuntimeSnapshot = serde_json::from_value(serde_json::json!({
+                "version": RUNTIME_SNAPSHOT_VERSION, "activeItem": "Chat", "composerDraft": "",
+                "voiceEnabled": false, "approvalAudit": [], "dismissedApprovalIds": [],
+                "approvalRules": [], "pinnedSourceIds": [], "importedKnowledgeSources": [],
+                "memoryDisabled": false, "memoryRecords": [], "connectedBackendIds": [],
+                "savedAt": "2026-09-10T12:00:00Z",
+                "agents": [{"id": "avatar-agent", "name": "Avatar", "instructions": "",
+                    "modelId": "", "icon": "agent", "permissionLabel": "Ask Me", "avatarSeed": seed}]
+            })).unwrap();
+            let normalized = normalize_runtime_snapshot(snapshot).unwrap();
+            let restored: RuntimeSnapshot =
+                serde_json::from_slice(&serde_json::to_vec(&normalized).unwrap()).unwrap();
+            let reloaded = normalize_runtime_snapshot(restored).unwrap();
+            assert_eq!(
+                reloaded.agents[0].avatar_seed.as_deref(),
+                Some(seed.as_str())
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_avatar_seeds_use_the_stable_native_fallback() {
+        for seed in [
+            "robot-v3:8:invalid".to_string(),
+            "robot-v3:missing".into(),
+            "unknown:3:invalid".into(),
+            format!("robot-v3:2:{}", "a".repeat(160)),
+        ] {
+            let agent: FableAgentProfile = serde_json::from_value(serde_json::json!({
+                "id": "avatar-agent", "name": "Avatar", "instructions": "", "modelId": "",
+                "icon": "agent", "permissionLabel": "Ask Me", "avatarSeed": seed
+            }))
+            .unwrap();
+            let restored = normalize_runtime_agents(vec![agent]).unwrap();
+            assert_eq!(
+                restored[0].avatar_seed.as_deref(),
+                Some("blob-v1:avatar-agent")
+            );
+        }
+    }
 
     #[test]
     fn teammate_preferences_and_skills_survive_native_roundtrip() {
