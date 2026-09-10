@@ -423,10 +423,15 @@ async function dispatch(
     }
     case "local-app-action": {
       if (!runtime.actApp) throw new Error("Native Windows actions are unavailable in this runtime.");
-      const action = requireString(parsed, toolName, "action");
+      const input = parsed.input;
+      if (!input || typeof input !== "object" || Array.isArray(input)) {
+        throw new Error("Tool local-app-action requires one action-specific \"input\" object.");
+      }
+      const actionInput = input as Record<string, unknown>;
+      const action = requireString(actionInput, toolName, "action");
       if (!["click", "type", "scroll", "key"].includes(action)) throw new Error("Unsupported Windows application action.");
       // Exact fields and native window authority are revalidated by the runtime.
-      return runtime.actApp({ ...parsed, action: action as import("@fable/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
+      return runtime.actApp({ ...actionInput, action: action as import("@fable/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
     }
     case "cloud-browser-action": {
       if (!runtime.actBrowser) {
