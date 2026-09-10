@@ -519,9 +519,11 @@ export function ChatWorkspace() {
       try {
         if (!submissionIsCurrent()) return;
         const attachmentStage = await stageAttachmentsForRun(turnAttachments, activeAgent.id, submissionIsCurrent);
+        // Capture cleanup authority before yielding to the stale-return path.
+        // Stop can invalidate the submission immediately after native staging.
+        stagedBatch = attachmentStage.batch;
         if (!submissionIsCurrent()) return;
         const runAttachments = attachmentStage.attachments;
-        stagedBatch = attachmentStage.batch;
         const computerNode = attachmentStage.node;
         if (!batch || (batch.index === 0 && !batch.suppressHuman)) {
           setOptimisticAttachments(attachmentMessageMetadata(runAttachments, Boolean(batch)));
