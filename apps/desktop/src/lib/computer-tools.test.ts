@@ -8,7 +8,7 @@ describe("conversation computer tools", () => {
   it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
     const prior = conversationComputerTools([connector], true, true, enabled);
     const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "computer-artifact"]));
+    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "create-spreadsheet", "create-document", "computer-artifact"]));
     expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-"))).toBe(false);
   });
   it("requires a separate image API connection and Computer plugin even for previously discovered image tools", () => {
@@ -25,6 +25,8 @@ describe("conversation computer tools", () => {
     expect(computerToolsReady(computer)).toBe(true);
     expect(computerToolsReady({ ...computer, controller: "paused" })).toBe(false);
     expect(computerToolsReady(null)).toBe(false);
+    expect(isLocalComputerTool("create-spreadsheet", "{}")).toBe(true);
+    expect(isLocalComputerTool("create-document", "{}")).toBe(true);
   });
   it("keeps computer tools alongside connected apps and excludes hosted runtimes", () => {
     const tools = conversationComputerTools([connector], true, false, enabled).map((tool) => tool.name);

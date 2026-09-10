@@ -165,7 +165,7 @@ export function createDesktopToolExecutor(
     if (toolName === "run-shell" && !(hostedShellRequested && options.hostedComputer?.ready)) {
       throw new Error("Shell execution requires an explicitly configured hosted computer. Native Windows control has no shell tool.");
     }
-    if ((toolName === "read-file" || toolName === "write-file") && !admittedComputer?.ready) {
+    if ((toolName === "read-file" || toolName === "write-file" || toolName === "create-spreadsheet" || toolName === "create-document") && !admittedComputer?.ready) {
       throw new Error("Set up this agent's local computer before asking it to use files.");
     }
     checkComputerAuthority();

@@ -368,7 +368,7 @@ export function ChatWorkspace() {
       const receipt = await importRuntimeRepository(target, node.generation);
       if (!receipt || currentRepositoryScope.current !== scope) return;
       const draft = currentRepositoryDraft.current;
-      setComposerValue(`${draft}${draft ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. Work only in this isolated copy, initialize a Git baseline before changes, use a separate work branch, run relevant tests and show the final diff. Ask before publishing any changes.`);
+      setComposerValue(`${draft}${draft ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. Work only in this private snapshot. You can read and make explicit text-file edits here, but this import is not connected to an execution runtime: do not claim to initialize Git, run builds or tests, or produce a verified diff. Those steps require a separately configured cloud computer plus an approved repository transfer, which is not available for this imported snapshot. Ask before publishing any changes.`);
       void localComputer.refreshFiles();
     } catch (error) {
       if (currentRepositoryScope.current === scope) setSubmissionError(error instanceof Error ? error.message : "Repository import failed.");

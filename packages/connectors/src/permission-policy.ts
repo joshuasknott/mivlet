@@ -117,6 +117,8 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "computer-artifact":
       return "local-read";
     case "write-file":
+    case "create-spreadsheet":
+    case "create-document":
     case "generate-image":
     case "edit-image":
       return "local-write";

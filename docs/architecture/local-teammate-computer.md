@@ -183,6 +183,24 @@ remain confined to this explicit Mivlet-owned scope. Paths are relative; legacy
 Artifacts retain strict type/content validation and immutable publication copies.
 The removed Linux image no longer supplies office, coding or shell programs.
 
+Two native-boundary tools author a narrow passive Office subset without launching
+Microsoft Office, a scripting language or a process. `create-document` accepts a
+title plus bounded headings, paragraphs, bullets and tables. `create-spreadsheet`
+accepts at most eight sheets and 100,000 cells; formula cells are limited to
+same-sheet `SUM`, `AVERAGE`, `MIN`, `MAX` and `COUNT` over earlier A1 ranges of at
+most 10,000 cells. Rust calculates the cached formula result. Both tools write a
+temporary OOXML package, reopen it through the existing macro, embedding and
+external-relationship validator, and only then place it at a new publication-safe
+workspace path. `computer-artifact` remains a distinct, explicit publication step.
+
+Repository ZIP import has a different boundary. It creates a sanitized private
+snapshot for bounded file reads and explicit text edits. It does not initialize
+Git or connect that snapshot to the hosted process workspace. Build, test and diff
+claims therefore remain unavailable for an imported snapshot until Mivlet has a
+separately approved repository transfer into a configured cloud computer. The
+native UI and agent instructions state this prerequisite rather than treating ZIP
+import as execution evidence.
+
 `native-control.json` stores only generation and the retired-computer marker.
 Loading a compatible legacy `control.json` advances its generation, marks the old
 computer retired and preserves the complete old file. No input permission is

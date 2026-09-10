@@ -78,7 +78,7 @@ fn random_id() -> Result<String, String> {
     Ok(format!("artifact-{}", hex::encode(bytes)))
 }
 
-fn allowed_path(relative: &str) -> Result<&str, String> {
+pub(crate) fn allowed_path(relative: &str) -> Result<&str, String> {
     if relative.is_empty()
         || relative.len() > 512
         || relative.contains(['\\', ':'])
@@ -206,7 +206,7 @@ fn check_office_relationships(
     Ok(root_main_relationship)
 }
 
-fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String> {
+pub(crate) fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String> {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|_| "The document is not a supported Office file.")?;
     if archive.len() > 2000 {

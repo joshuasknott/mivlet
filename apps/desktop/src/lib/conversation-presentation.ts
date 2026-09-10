@@ -33,6 +33,8 @@ const toolLabels: Record<string, [string, string]> = {
   "write-file": ["Writing a file", "Wrote a file"],
   "list-files": ["Looking through files", "Listed files"],
   "run-shell": ["Running a command", "Ran a command"],
+  "create-spreadsheet": ["Creating a spreadsheet", "Created a spreadsheet"],
+  "create-document": ["Creating a document", "Created a document"],
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-app-select": ["Selecting an application window", "Selected an application window"],

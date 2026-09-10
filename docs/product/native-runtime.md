@@ -119,6 +119,10 @@ Local file tools target only the selected agent's scoped workspace. Native
 application tools follow global approvals, exact window selection and fresh
 observations. Full Access has no additional per-app prompt. Mivlet exposes no local host-shell tool. `run-shell` and other
 hosted tools require explicit hosted placement and valid external prerequisites.
+Bounded `create-document` and `create-spreadsheet` calls are native file
+transformations, not shell execution or Office automation. They produce only the
+declared passive OOXML subset, validate it before placement, and require a
+separate `computer-artifact` call for immutable publication.
 
 ## Evidence boundary
 
