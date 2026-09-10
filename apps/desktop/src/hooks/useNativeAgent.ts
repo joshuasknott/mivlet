@@ -105,7 +105,13 @@ export interface NativeAgentState {
   lastError: string | null;
   contextFailure?: ConversationContextFailure & {
     requestPrompt: string;
-    scope: { workspaceId?: string; agentId?: string; threadId?: string };
+    scope: {
+      workspaceId?: string;
+      agentId?: string;
+      threadId?: string;
+      ownerInternalUserId?: string;
+      ownerMemberId?: string;
+    };
   };
   status: ExecutionAttempt["status"] | "idle";
   recoverableAttempts: ExecutionAttempt[];
@@ -123,6 +129,7 @@ export interface NativeAgentState {
 
 export interface UseNativeAgentOptions {
   computer?: { workspaceId: string; agentId: string };
+  contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
   /** Provider selected by the combined model picker. */
   activeProviderId?: string;
@@ -228,6 +235,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     workspaceId: options.computer?.workspaceId,
     agentId: options.computer?.agentId,
     threadId: options.threadId,
+    ownerInternalUserId: options.contextOwner?.internalUserId,
+    ownerMemberId: options.contextOwner?.memberId,
   };
   const contextScopeKey = JSON.stringify(contextScope);
   const contextScopeRef = useRef(contextScope);
@@ -1482,7 +1491,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         : current,
     );
     await nativeCancellation;
+    if (activeAttemptIdRef.current === attemptToCancel) activeAttemptIdRef.current = null;
   }, []);
+
+  const getActiveAttemptId = useCallback(() => activeAttemptIdRef.current, []);
 
   useEffect(
     () => () => {
@@ -1530,6 +1542,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     markToolExecuting,
     reportError,
     clearContextFailure,
+    getActiveAttemptId,
     backend,
     resolveBackend,
   };

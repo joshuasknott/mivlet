@@ -392,6 +392,7 @@ describe("useNativeAgent", () => {
         providers: [connectedCodexProvider()],
         activeProviderId: "codex",
         computer: { workspaceId: "workspace-1", agentId: "agent-1" },
+        contextOwner: { internalUserId: "user-1", memberId: "member-1" },
         threadId: "thread-1",
         loadConversation: async () =>
           ({
@@ -422,7 +423,13 @@ describe("useNativeAgent", () => {
       requestPrompt: "summarize the conversation",
       capacitySource: "unavailable",
       nativeHistoryMaxUtf8Bytes: 64 * 1024,
-      scope: { workspaceId: "workspace-1", agentId: "agent-1", threadId: "thread-1" },
+      scope: {
+        workspaceId: "workspace-1",
+        agentId: "agent-1",
+        threadId: "thread-1",
+        ownerInternalUserId: "user-1",
+        ownerMemberId: "member-1",
+      },
     });
     expect(result.current.state.lastError).toContain("Codex history envelope");
     expect(record).not.toHaveBeenCalled();
@@ -434,14 +441,15 @@ describe("useNativeAgent", () => {
     expect(result.current.state.lastError).toBeNull();
   });
 
-  it("clears a context failure when its workspace, agent, or thread scope changes", async () => {
+  it("clears a context failure when only its account owner changes", async () => {
     installDesktopRuntime();
     const { result, rerender } = renderHook(
-      ({ workspaceId, threadId, agentId }) => useNativeAgent({
+      ({ internalUserId, memberId }) => useNativeAgent({
         providers: [connectedCodexProvider()],
         activeProviderId: "codex",
-        computer: { workspaceId, agentId },
-        threadId,
+        computer: { workspaceId: "workspace-1", agentId: "agent-1" },
+        contextOwner: { internalUserId, memberId },
+        threadId: "thread-1",
         loadConversation: async (id) => ({
           thread: { id },
           messages: [{
@@ -450,12 +458,12 @@ describe("useNativeAgent", () => {
           }],
         }) as never,
       }),
-      { initialProps: { workspaceId: "workspace-1", threadId: "thread-1", agentId: "agent-1" } },
+      { initialProps: { internalUserId: "user-1", memberId: "member-1" } },
     );
     await act(async () => { await result.current.run(baseRequest); });
     expect(result.current.state.contextFailure?.scope.threadId).toBe("thread-1");
 
-    rerender({ workspaceId: "workspace-2", threadId: "thread-2", agentId: "agent-2" });
+    rerender({ internalUserId: "user-2", memberId: "member-2" });
     await waitFor(() => expect(result.current.state.contextFailure).toBeUndefined());
     expect(result.current.state.lastError).toBeNull();
   });
@@ -465,19 +473,23 @@ describe("useNativeAgent", () => {
     let release: ((value: never) => void) | undefined;
     const loadConversation = vi.fn(() => new Promise<never>((resolve) => { release = resolve; }));
     const { result, rerender } = renderHook(
-      ({ threadId }) => useNativeAgent({
+      ({ internalUserId, memberId }) => useNativeAgent({
         providers: [connectedCodexProvider()],
         activeProviderId: "codex",
         computer: { workspaceId: "workspace-1", agentId: "agent-1" },
-        threadId,
+        contextOwner: { internalUserId, memberId },
+        threadId: "thread-1",
         loadConversation,
       }),
-      { initialProps: { threadId: "thread-1" } },
+      { initialProps: { internalUserId: "user-1", memberId: "member-1" } },
     );
     let pending!: Promise<ExecutionAttempt | undefined>;
     act(() => { pending = result.current.run(baseRequest); });
     await waitFor(() => expect(loadConversation).toHaveBeenCalledWith("thread-1"));
-    rerender({ threadId: "thread-2" });
+    expect(result.current.getActiveAttemptId()).not.toBeNull();
+    rerender({ internalUserId: "user-2", memberId: "member-2" });
+    await act(async () => { await result.current.cancel(); });
+    expect(result.current.getActiveAttemptId()).toBeNull();
     await act(async () => {
       release?.(({ thread: { id: "thread-1" }, messages: [] }) as never);
       await pending;

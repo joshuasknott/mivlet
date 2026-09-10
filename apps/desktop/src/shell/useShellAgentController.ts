@@ -397,6 +397,7 @@ export function useShellAgentController({
       activeWorkspaceId && activeAgentId
         ? { workspaceId: activeWorkspaceId, agentId: activeAgentId }
         : undefined,
+    contextOwner: runtime.accountWorkspaceStatus.activeContextOwner,
     providers: runtime.backendProviders,
     activeProviderId: executionProviderId ?? runtime.connectedAgentBackend?.id,
     models: executionProviderId ? modelsForProvider(runtime.modelOptions, executionProviderId) : runtime.selectableModels,
@@ -435,9 +436,8 @@ export function useShellAgentController({
   );
   executionActivityRef.current = agent.markToolExecuting;
   scopeResetRef.current = () => {
-    const attemptId = agent.state.currentAttemptId;
+    const attemptId = agent.getActiveAttemptId();
     if (
-      !agent.state.running ||
       !attemptId ||
       cancelledScopeAttemptRef.current === attemptId
     )

@@ -759,6 +759,8 @@ export function ChatWorkspace() {
     && contextFailure.scope.workspaceId === workspaceId
     && contextFailure.scope.agentId === activeAgent.id
     && contextFailure.scope.threadId === selectedThreadId
+    && contextFailure.scope.ownerInternalUserId === runtime.accountWorkspaceStatus.activeContextOwner?.internalUserId
+    && contextFailure.scope.ownerMemberId === runtime.accountWorkspaceStatus.activeContextOwner?.memberId
     ? contextFailure
     : undefined;
   const scheduleNoticeKey = scheduleDispatch ? `${scheduleDispatch.scheduleId ?? ""}:${scheduleDispatch.occurrenceId ?? ""}:${scheduleDispatch.phase}:${scheduleDispatch.message ?? ""}` : "";
