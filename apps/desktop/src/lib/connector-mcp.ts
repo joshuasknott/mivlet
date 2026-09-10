@@ -1,4 +1,4 @@
-import { McpClient } from "@fable/connectors/mcp/client";
+import { McpClient } from "./native-mcp-client";
 import { createDesktopRemoteMcpTransport } from "./mcp-transport";
 import { assertConnectorToolSucceeded } from "./connector-errors";
 
@@ -6,7 +6,7 @@ import { assertConnectorToolSucceeded } from "./connector-errors";
 export async function openConnectorTools(workspaceId: string, serverId: string) {
   const transport = await createDesktopRemoteMcpTransport(workspaceId, serverId);
   if (!transport) throw new Error("Plugins require the desktop app.");
-  const client = new McpClient(transport, { authorizeToolCall: async () => false });
+  const client = new McpClient(transport);
   try {
     const initialized = await client.initialize();
     const tools = initialized.capabilities.tools ? await client.listTools() : [];

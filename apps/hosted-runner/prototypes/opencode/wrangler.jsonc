@@ -1,10 +1,10 @@
 {
   "name": "mivlet-opencode-compatibility-probe",
-  "main": "worker.ts",
+  "main": "task-entry.ts",
   "compatibility_date": "2026-08-28",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": false,
   "preview_urls": false,
-  "durable_objects": { "bindings": [{ "name": "PROBE", "class_name": "CompatibilityProbe" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CompatibilityProbe"] }]
+  "durable_objects": { "bindings": [{ "name": "PROBE", "class_name": "CompatibilityProbe" }, { "name": "TASK", "class_name": "FixtureTask" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["CompatibilityProbe"] }, { "tag": "v2", "new_sqlite_classes": ["FixtureTask"] }]
 }

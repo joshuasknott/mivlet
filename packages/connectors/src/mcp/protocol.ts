@@ -1,6 +1,12 @@
-/** Transport-neutral MCP 2025-11-25 JSON-RPC framing. */
+/**
+ * Bounded MCP JSON-RPC framing shared with the renderer.
+ *
+ * The renderer only parses and forwards already-authorized frames. Protocol
+ * and discovery validation lives in sdk-client.ts, which is owned by the
+ * bundled native host and never enters the desktop browser bundle.
+ */
 
-export const MCP_PROTOCOL_VERSION = "2025-11-25" as const;
+export const MCP_PROTOCOL_VERSION = "2025-11-25";
 export const MAX_MCP_FRAME_CHARACTERS = 10 * 1024 * 1024;
 
 export type McpRequestId = string | number;
@@ -15,13 +21,13 @@ export interface McpRequest {
   jsonrpc: "2.0";
   id: McpRequestId;
   method: string;
-  params?: unknown;
+  params?: Record<string, unknown>;
 }
 
 export interface McpNotification {
   jsonrpc: "2.0";
   method: string;
-  params?: unknown;
+  params?: Record<string, unknown>;
 }
 
 export interface McpResponse {
@@ -33,61 +39,104 @@ export interface McpResponse {
 
 export type McpFrame = McpRequest | McpNotification | McpResponse;
 
-function isObject(value: unknown): value is Record<string, unknown> {
+export interface McpServerCapabilities {
+  tools?: { listChanged?: boolean };
+  resources?: { subscribe?: boolean; listChanged?: boolean };
+  prompts?: { listChanged?: boolean };
+  completions?: object;
+  logging?: object;
+  [key: string]: unknown;
+}
+
+export interface McpTool {
+  name: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface McpResource {
+  uri: string;
+  name: string;
+  description?: string;
+  mimeType?: string;
+  annotations?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface McpInitializeResult {
+  protocolVersion: string;
+  capabilities: McpServerCapabilities;
+  serverInfo: { name: string; version: string; [key: string]: unknown };
+  instructions?: string;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function validId(value: unknown): value is McpRequestId {
-  return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
+function isRequestId(value: unknown): value is McpRequestId {
+  return (typeof value === "string" && value.length > 0) ||
+    (typeof value === "number" && Number.isFinite(value));
+}
+
+function hasValidParams(value: Record<string, unknown>): boolean {
+  return value.params === undefined || isRecord(value.params);
 }
 
 export function isMcpRequest(frame: McpFrame): frame is McpRequest {
-  return "id" in frame && "method" in frame;
+  return isRecord(frame) &&
+    frame.jsonrpc === "2.0" &&
+    isRequestId(frame.id) &&
+    typeof frame.method === "string" &&
+    frame.method.length > 0 &&
+    hasValidParams(frame);
 }
 
 export function isMcpNotification(frame: McpFrame): frame is McpNotification {
-  return !("id" in frame) && "method" in frame;
+  return isRecord(frame) &&
+    frame.jsonrpc === "2.0" &&
+    typeof frame.method === "string" &&
+    frame.method.length > 0 &&
+    !("id" in frame) &&
+    hasValidParams(frame);
 }
 
 export function isMcpResponse(frame: McpFrame): frame is McpResponse {
-  return "id" in frame && !("method" in frame);
+  if (!isRecord(frame) || frame.jsonrpc !== "2.0" || !isRequestId(frame.id)) return false;
+  const hasResult = "result" in frame;
+  const hasError = "error" in frame;
+  if (hasResult === hasError) return false;
+  if (!hasError) return true;
+  const error = frame.error;
+  return isRecord(error) && typeof error.code === "number" && Number.isFinite(error.code) &&
+    typeof error.message === "string";
 }
 
-/** Parse one newline-delimited MCP stdio message without accepting log output. */
+/** Parse one newline-delimited MCP message without accepting log output. */
 export function parseMcpLine(line: string): McpFrame | null {
   const trimmed = line.trim();
   if (trimmed.length === 0 || trimmed.length > MAX_MCP_FRAME_CHARACTERS) return null;
 
-  let value: unknown;
   try {
-    value = JSON.parse(trimmed);
+    const value: unknown = JSON.parse(trimmed);
+    if (!isRecord(value)) return null;
+    const frame = value as unknown as McpFrame;
+    return isMcpRequest(frame) || isMcpNotification(frame) || isMcpResponse(frame) ? frame : null;
   } catch {
     return null;
   }
-  if (!isObject(value) || value.jsonrpc !== "2.0") return null;
-
-  const hasId = "id" in value;
-  const hasMethod = typeof value.method === "string" && value.method.length > 0;
-  if (hasId && !validId(value.id)) return null;
-
-  if (hasId && hasMethod) return value as unknown as McpRequest;
-  if (!hasId && hasMethod) return value as unknown as McpNotification;
-  if (hasId && !hasMethod) {
-    const hasResult = "result" in value;
-    const error = value.error;
-    const validError =
-      isObject(error) && typeof error.code === "number" && typeof error.message === "string";
-    if (hasResult === validError) return null;
-    return value as unknown as McpResponse;
-  }
-  return null;
 }
 
 export function encodeMcpFrame(frame: McpFrame): string {
-  const encoded = JSON.stringify(frame);
-  if (encoded.includes("\n") || encoded.length > MAX_MCP_FRAME_CHARACTERS) {
+  if (!isMcpRequest(frame) && !isMcpNotification(frame) && !isMcpResponse(frame)) {
+    throw new Error("MCP frame is invalid.");
+  }
+  const body = JSON.stringify(frame);
+  if (body === undefined || body.includes("\n") || body.length > MAX_MCP_FRAME_CHARACTERS) {
     throw new Error("MCP frame exceeds the supported single-line size limit.");
   }
-  return `${encoded}\n`;
+  return `${body}\n`;
 }
-

@@ -1,0 +1,23 @@
+{
+  "name": "@fable/agent-host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Native embedded OpenCode host. Never imported into the renderer.",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "@fable/connectors": "workspace:*",
+    "@fable/protocol": "workspace:*",
+    "@opencode/plugin": "0.0.0-dev-19449",
+    "@opencode/sdk": "0.0.0-dev-19449"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.3",
+    "@oven/bun-windows-x64": "1.3.3",
+    "typescript": "5.9.2"
+  }
+}

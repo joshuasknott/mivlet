@@ -882,19 +882,18 @@ async fn wait_for_request_cancel(
 }
 
 fn emit_provider_payload(
-    app: &AppHandle,
-    channel: &str,
+    emit: &(dyn Fn(String) + Send + Sync),
     payload: String,
     computer: &mut Option<computer::ComputerStream>,
     terminal: &mut ProviderTerminalObservation,
 ) -> Result<(), String> {
     if let Some(computer) = computer {
         for binding in computer.observe(&payload)? {
-            let _ = app.emit(channel, binding.to_string());
+            emit(binding.to_string());
         }
     }
     terminal.observe(&payload);
-    let _ = app.emit(channel, payload);
+    emit(payload);
     Ok(())
 }
 
@@ -987,11 +986,11 @@ fn request_error_code(error: &reqwest::Error) -> &'static str {
     }
 }
 
-fn emit_control(app: &AppHandle, channel: &str, event: TransportControlEvent<'_>) {
+fn emit_control(emit: &(dyn Fn(String) + Send + Sync), event: TransportControlEvent<'_>) {
     if let Ok(payload) = serde_json::to_string(&serde_json::json!({
         "__fableTransport": event
     })) {
-        let _ = app.emit(channel, payload);
+        emit(payload);
     }
 }
 
@@ -1001,8 +1000,22 @@ fn emit_control(app: &AppHandle, channel: &str, event: TransportControlEvent<'_>
 #[tauri::command]
 pub async fn stream_backend_completion(
     app: AppHandle,
-    mut request: BackendStreamRequest,
+    request: BackendStreamRequest,
     computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
+) -> Result<(), String> {
+    let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
+    stream_completion(request, computers.inner(), &|payload| {
+        let _ = app.emit(&channel, payload);
+    })
+    .await
+}
+
+/// Shared credential-bearing egress for the visual route and embedded host.
+/// Neither caller receives provider credentials.
+pub(crate) async fn stream_completion(
+    mut request: BackendStreamRequest,
+    computers: &std::sync::Arc<crate::local_computer::LocalComputerState>,
+    emit: &(dyn Fn(String) + Send + Sync),
 ) -> Result<(), String> {
     crate::execution_control::ensure_active_execution_allowed()?;
     if !NATIVE_PROVIDER_IDS.contains(&request.provider_id.as_str()) {
@@ -1038,12 +1051,11 @@ pub async fn stream_backend_completion(
     )?;
 
     let mut body = std::mem::take(&mut request.body);
-    let mut computer = computer::begin_stream(&request, &mut body, computers.inner())?;
+    let mut computer = computer::begin_stream(&request, &mut body, computers)?;
     if computer.is_some() && request.provider_id == "openai" {
         body["store"] = serde_json::json!(false);
     }
 
-    let channel = format!("{EVENT_CHANNEL_PREFIX}{}", request.request_id);
     let observation_started = Instant::now();
     let credential = require_key(&request.provider_id)?;
     let connection =
@@ -1077,10 +1089,9 @@ pub async fn stream_backend_completion(
     };
     for attempt in 0..max_attempts {
         if let Some(visual) = &computer {
-            if let Err(message) = visual.before_send(computers.inner()) {
+            if let Err(message) = visual.before_send(computers) {
                 emit_control(
-                    &app,
-                    &channel,
+                    emit,
                     TransportControlEvent {
                         kind: "error",
                         code: "stale-observation",
@@ -1121,8 +1132,7 @@ pub async fn stream_backend_completion(
                 let delay =
                     Duration::from_millis(250_u64.saturating_mul(2_u64.pow(attempt as u32)));
                 emit_control(
-                    &app,
-                    &channel,
+                    emit,
                     TransportControlEvent {
                         kind: "retrying",
                         code,
@@ -1149,8 +1159,7 @@ pub async fn stream_backend_completion(
             Err(error) => {
                 let code = request_error_code(&error);
                 emit_control(
-                    &app,
-                    &channel,
+                    emit,
                     TransportControlEvent {
                         kind: "error",
                         code,
@@ -1176,8 +1185,7 @@ pub async fn stream_backend_completion(
             if retryable && attempt + 1 < max_attempts {
                 let delay = retry_after(&response, attempt);
                 emit_control(
-                    &app,
-                    &channel,
+                    emit,
                     TransportControlEvent {
                         kind: "retrying",
                         code: status_error_code(status),
@@ -1198,8 +1206,7 @@ pub async fn stream_backend_completion(
                 continue;
             }
             emit_control(
-                &app,
-                &channel,
+                emit,
                 TransportControlEvent {
                     kind: "error",
                     code: status_error_code(status),
@@ -1228,7 +1235,7 @@ pub async fn stream_backend_completion(
                     match chunk {
                         Some(Ok(bytes)) => {
                             if accumulate_and_check_bound(&mut response_bytes, &mut buffer, &bytes) {
-                                emit_control(&app, &channel, TransportControlEvent {
+                                emit_control(emit, TransportControlEvent {
                                     kind: "error",
                                     code: "response-too-large",
                                     message: "Provider stream exceeded Mivlet's response-size limit.".to_string(),
@@ -1243,7 +1250,7 @@ pub async fn stream_backend_completion(
                             let lines = match drain_strict_sse_lines(&mut buffer, false) {
                                 Ok(lines) => lines,
                                 Err(()) => {
-                                    emit_control(&app, &channel, TransportControlEvent {
+                                    emit_control(emit, TransportControlEvent {
                                         kind: "error",
                                         code: "invalid-utf8",
                                         message: "Provider stream contained invalid UTF-8.".to_string(),
@@ -1259,8 +1266,8 @@ pub async fn stream_backend_completion(
                             };
                             for line in lines {
                                 if let Some(payload) = normalize_sse_line(&line) {
-                                    if let Err(message) = emit_provider_payload(&app, &channel, payload, &mut computer, &mut terminal_observation) {
-                                        emit_control(&app, &channel, TransportControlEvent {
+                                    if let Err(message) = emit_provider_payload(emit, payload, &mut computer, &mut terminal_observation) {
+                                        emit_control(emit, TransportControlEvent {
                                             kind: "error", code: "invalid-tool-protocol", message,
                                             retryable: false, attempt: attempt + 1, retry_after_ms: None,
                                         });
@@ -1273,7 +1280,7 @@ pub async fn stream_backend_completion(
                             if transport_failed { break; }
                         }
                         Some(Err(error)) => {
-                            emit_control(&app, &channel, TransportControlEvent {
+                            emit_control(emit, TransportControlEvent {
                                 kind: "error",
                                 code: request_error_code(&error),
                                 message: "Provider stream ended unexpectedly.".to_string(),
@@ -1299,15 +1306,13 @@ pub async fn stream_backend_completion(
                     for line in lines {
                         if let Some(payload) = normalize_sse_line(&line) {
                             if let Err(message) = emit_provider_payload(
-                                &app,
-                                &channel,
+                                emit,
                                 payload,
                                 &mut computer,
                                 &mut terminal_observation,
                             ) {
                                 emit_control(
-                                    &app,
-                                    &channel,
+                                    emit,
                                     TransportControlEvent {
                                         kind: "error",
                                         code: "invalid-tool-protocol",
@@ -1325,8 +1330,7 @@ pub async fn stream_backend_completion(
                 }
                 Err(()) => {
                     emit_control(
-                        &app,
-                        &channel,
+                        emit,
                         TransportControlEvent {
                             kind: "error",
                             code: "invalid-utf8",
@@ -1348,8 +1352,7 @@ pub async fn stream_backend_completion(
         if !cancelled {
             if let Err(message) = visual.complete(completed && !transport_failed) {
                 emit_control(
-                    &app,
-                    &channel,
+                    emit,
                     TransportControlEvent {
                         kind: "error",
                         code: "invalid-tool-protocol",
@@ -1367,7 +1370,7 @@ pub async fn stream_backend_completion(
         .lock()
         .map(|mut map| map.remove(&request.request_id));
     let terminal = if cancelled { "[CANCELLED]" } else { "[DONE]" };
-    let _ = app.emit(&channel, terminal);
+    emit(terminal.to_string());
 
     let (status, code) = if cancelled {
         ("cancelled", "cancelled")

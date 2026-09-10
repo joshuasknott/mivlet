@@ -5,11 +5,13 @@
     "typecheck": "tsc -p tsconfig.json",
     "dev": "wrangler dev --local --ip 127.0.0.1 --port 8797",
     "package:check": "wrangler deploy --dry-run --outdir dist",
-    "check:local": "node check-local.mjs"
+    "check:local": "node check-local.mjs",
+    "check:task": "node check-task.mjs"
   },
   "dependencies": {
-    "@opencode/plugin": "0.0.0-dev-19417",
-    "@opencode/sdk": "0.0.0-dev-19417",
+    "@opencode/plugin": "0.0.0-dev-19449",
+    "@opencode/sdk": "0.0.0-dev-19449",
+    "agents": "0.22.0",
     "typescript": "5.9.2",
     "wrangler": "4.130.0"
   },
@@ -17,7 +19,16 @@
   "type": "module",
   "private": true,
   "devDependencies": {
-    "@ai-sdk/provider": "3.0.8",
     "@cloudflare/workers-types": "5.20260908.1"
+  },
+  "pnpm": {
+    "overrides": {
+      "brace-expansion@>=4.0.0 <5.0.9": "5.0.9",
+      "@opentelemetry/core@<2.8.0": "2.8.0",
+      "@ai-sdk/provider-utils@>=4.0.0-beta.10 <4.0.33": "4.0.33",
+      "js-yaml": "4.3.2",
+      "@modelcontextprotocol/sdk": "1.30.0",
+      "sharp": "0.35.4"
+    }
   }
 }

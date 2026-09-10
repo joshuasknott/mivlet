@@ -4,3 +4,5 @@ dist/
 .dev.vars*
 .env*
 evidence.local.json
+task-evidence.local.json
+.local-probe/

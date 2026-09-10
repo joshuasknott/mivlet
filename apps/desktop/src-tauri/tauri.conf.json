@@ -46,7 +46,8 @@
       }
     },
     "resources": [
-      "resources/cua-driver/**/*"
+      "resources/cua-driver/**/*",
+      "resources/agent-host/**/*"
     ],
     "icon": [
       "icons/icon.ico"

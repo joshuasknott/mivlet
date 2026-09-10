@@ -2,17 +2,15 @@
  * Native-API `AgentBackend` adapter.
  *
  * This is one adapter among equals — it implements the provider-neutral
- * {@link AgentBackend} contract for direct model APIs (OpenAI, Anthropic,
- * Gemini, xAI, OpenRouter, and the wider OpenAI-compatible catalogue). Mivlet owns the full agent loop here (request
- * shaping, streaming, tool-call/approval routing), delegating only the HTTP/SSE
- * egress to the injected {@link HttpTransport} (the Rust boundary in production,
- * a `FixtureTransport` in tests). The provider-id wire-family dispatch stays
- * inside the existing `runAgentLoop`/`streamFor`/`shapeBodyFor` helpers — it is
- * native-API-specific by nature and does not leak into the contract.
+ * {@link AgentBackend} contract for direct model APIs. Ordinary OpenAI,
+ * Anthropic, xAI, and custom turns use the embedded SDK host when available;
+ * Gemini, OpenRouter, image turns, and browser fixtures retain Mivlet's local
+ * loop. Both paths keep HTTP egress and credentials behind the injected native
+ * boundary.
  *
  * SECRET INVARIANT: the adapter holds no key. The transport it receives owns
  * egress; in production Rust adds the Authorization/x-api-key/x-goog-api-key
- * header from the keychain. The adapter only shapes the key-free request body.
+ * header from the keychain. The adapter only handles key-free requests.
  */
 
 import type {
@@ -30,6 +28,7 @@ import { computerVisionUnavailableReason, supportsNativeComputerVision } from ".
 import { validateReasoningEffort } from "../../native-api/reasoning";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
+import { createEmbeddedBackend } from "./embedded";
 
 /** One bound native request, keyed by the runtime execution id. */
 interface ActiveRun {
@@ -50,6 +49,7 @@ export function createNativeApiBackend(
   deps: BackendDeps
 ): AgentBackend | null {
   const capabilities: readonly BackendCapability[] = provider.capabilities;
+  const embedded = deps.createEmbeddedRuntime ? createEmbeddedBackend(provider, deps) : undefined;
 
   // Each conversation attempt owns one cancellation handle.
   const active = new Map<string, ActiveRun>();
@@ -61,6 +61,12 @@ export function createNativeApiBackend(
   ): AsyncIterable<BackendAgentEvent> | null {
     if (!capabilities.includes("streaming")) {
       return null;
+    }
+    // Keep the audited transient user-image wire route until its SDK admission
+    // contract is verified. Ordinary turns and native computer tools use OpenCode.
+    if (embedded && ["openai", "anthropic", "xai", "custom"].includes(provider.id)
+      && !request.messages.some(message => message.images?.length)) {
+      return embedded.run(request, options);
     }
     if (
       request.tools.length > 0 &&
@@ -161,6 +167,7 @@ export function createNativeApiBackend(
   }
 
   async function cancel(runId: string): Promise<void> {
+    await embedded?.cancel(runId);
     if (!capabilities.includes("cancellation")) {
       return;
     }

@@ -8,6 +8,7 @@ import type {
 } from "@fable/protocol";
 import { createDesktopCodexAppServer } from "./codex-app-server";
 import { createDesktopTransport } from "./native-transport";
+import { createDesktopEmbeddedRuntime } from "./embedded-agent";
 import { createDesktopAntigravityAcp } from "./antigravity-acp";
 import { createDesktopManagedRuntime } from "./managed-runtime";
 import { planConversationContext } from "./conversation-context";
@@ -63,6 +64,7 @@ export interface ScheduledResearchRunResult {
 function deps(): BackendDeps {
   return {
     createTransport: createDesktopTransport,
+    createEmbeddedRuntime: createDesktopEmbeddedRuntime,
     createCodexAppServer: createDesktopCodexAppServer,
     createAntigravityAcp: createDesktopAntigravityAcp,
     createManagedRuntime: createDesktopManagedRuntime,

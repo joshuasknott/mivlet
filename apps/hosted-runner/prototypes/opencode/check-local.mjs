@@ -34,5 +34,8 @@ if (response.status !== 200 || result.modelCalls === 0 || result.toolCalls === 0
   console.error("BLOCKED: the SDK session did not reach the synthetic model and artifact tool. No successful agent-loop claim.");
   process.exitCode = 1;
 } else {
-  console.log("PASS: SDK loop reached the synthetic model and paused tool. Artifact approval and write remain unimplemented.");
+  assert.equal(result.outcome, "completed");
+  assert.equal(result.modelCalls, 2);
+  assert.equal(result.toolCalls, 1);
+  console.log("PASS: native SDK adapter -> model fixture -> Mivlet tool proposal -> final answer. Run check:task for durable approval and artifact acceptance.");
 }

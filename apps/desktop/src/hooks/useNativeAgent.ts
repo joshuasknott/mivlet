@@ -48,6 +48,7 @@ import { createDesktopCodexAppServer } from "../lib/codex-app-server";
 import { createDesktopAntigravityAcp } from "../lib/antigravity-acp";
 import { createDesktopManagedRuntime } from "../lib/managed-runtime";
 import { createDesktopTransport } from "../lib/native-transport";
+import { createDesktopEmbeddedRuntime } from "../lib/embedded-agent";
 import {
   listRuntimeBackendModels,
   listRuntimeExecutionAttempts,
@@ -322,6 +323,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const deps: BackendDeps = useMemo(
     () => ({
       createTransport: createDesktopTransport,
+      createEmbeddedRuntime: createDesktopEmbeddedRuntime,
       createCodexAppServer: createDesktopCodexAppServer,
       createAntigravityAcp: createDesktopAntigravityAcp,
       createManagedRuntime: createDesktopManagedRuntime,

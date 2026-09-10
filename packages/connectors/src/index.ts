@@ -157,6 +157,8 @@ export {
   createManagedRuntimeBackend,
   createNativeApiBackend,
   type AgentBackend,
+  type EmbeddedRuntimeHandle,
+  type EmbeddedRuntimeEvent,
   type AgentBackendFactory,
   type AgentTurnRequest,
   type AgentTurnOptions,

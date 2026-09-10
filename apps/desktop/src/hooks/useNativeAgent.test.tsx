@@ -13,6 +13,10 @@ import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
 import { useNativeAgent } from "./useNativeAgent";
 
+// This suite retains the direct wire-family and provider-owned runtime coverage.
+// The embedded production bridge is exercised in useNativeAgent.embedded.test.tsx.
+vi.mock("../lib/embedded-agent", () => ({ createDesktopEmbeddedRuntime: undefined }));
+
 /**
  * useNativeAgent owns the agent run/cancel loop and the event-reduction state
  * machine. Outside Tauri the hook surfaces a no-transport notice; with a faked

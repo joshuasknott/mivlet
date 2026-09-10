@@ -32,6 +32,8 @@ mod connectors;
 mod conversation_links;
 mod conversations;
 mod diagnostics;
+mod embedded_agent;
+mod embedded_mcp;
 mod execution_approvals;
 mod execution_attempts;
 mod execution_control;
@@ -114,6 +116,8 @@ pub fn run() {
                 let _ = window.hide();
                 tauri::async_runtime::spawn(async move {
                     codex_app_server::shutdown_all_runs();
+                    embedded_agent::shutdown_all();
+                    embedded_mcp::shutdown_all();
                     local_computer::shutdown_all(computers).await;
                     app.exit(0);
                 });
@@ -245,6 +249,12 @@ pub fn run() {
             connector_cache::set_connector_cache_settings,
             connector_cache::delete_connector_cache_settings,
             native_api::stream_backend_completion,
+            embedded_agent::start_embedded_agent,
+            embedded_agent::reply_embedded_agent,
+            embedded_agent::cancel_embedded_agent,
+            embedded_mcp::start_embedded_mcp,
+            embedded_mcp::send_embedded_mcp,
+            embedded_mcp::close_embedded_mcp,
             native_api::cancel_backend_completion,
             native_api::computer::begin_native_computer_session,
             native_api::computer::end_native_computer_session,

@@ -1,7 +1,8 @@
 /**
- * Native model API adapter. Mivlet owns the full agent loop here — tool
- * dispatch, streaming, approval routing, memory, usage/cost, and cancellation —
- * unlike Codex browser sign-in, which uses provider-owned app-server state.
+ * Native model API adapter. Supported text turns use Mivlet's ephemeral
+ * embedded SDK host while legacy/image routes retain the local loop. Mivlet
+ * still owns durable memory, approvals, credentials, usage receipts, and
+ * cancellation around both execution paths.
  *
  * All native providers are API-key only, so the only two meaningful auth states
  * are `needs-auth` (empty capabilities — fail closed) and `connected` (the full
