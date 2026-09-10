@@ -2,6 +2,7 @@ import {
   MAX_LOCAL_FILE_BYTES,
   SUPPORTED_LOCAL_FILE_EXTENSIONS,
 } from "@fable/connectors/local-files";
+import type { ExecutionExchange } from "@fable/protocol";
 
 const readableExtensions = new Set<string>(SUPPORTED_LOCAL_FILE_EXTENSIONS);
 
@@ -34,4 +35,16 @@ export async function prepareReadableComposerAttachment(
         status: "Knowledge context · workspace file when sent",
       }
     : { status: "Could not read file" };
+}
+
+export function projectAttachmentRetryError(
+  exchanges?: readonly ExecutionExchange[],
+) {
+  if (exchanges?.some((exchange) => exchange.images?.length)) {
+    return "Reattach the original images and send a new project message; image pixels are not stored.";
+  }
+  if (exchanges?.some((exchange) => exchange.attachments?.length)) {
+    return "Reattach the original files and send a new project message; retry does not reuse attachment access.";
+  }
+  return "";
 }

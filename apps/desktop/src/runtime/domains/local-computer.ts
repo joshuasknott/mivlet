@@ -8,6 +8,7 @@ import type {
   LocalComputerFilePreview,
   LocalComputerAttachmentStageRequest,
   LocalComputerAttachmentReceipt,
+  LocalComputerAttachmentDiscardRequest,
 } from "@fable/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
@@ -62,6 +63,12 @@ export const stageRuntimeLocalComputerAttachment = (
     "local_computer_stage_attachment",
     { request },
   );
+export const discardRuntimeLocalComputerAttachmentBatch = (
+  request: LocalComputerAttachmentDiscardRequest,
+) =>
+  nativeComputerCommand<void>("local_computer_discard_attachment_batch", {
+    request,
+  });
 export const cancelRuntimeLocalComputer = (
   request: LocalComputerEpochRequest,
 ) =>

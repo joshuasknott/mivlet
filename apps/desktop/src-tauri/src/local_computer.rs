@@ -121,6 +121,7 @@ pub struct LocalComputerAttachmentStageRequest {
 #[serde(rename_all = "camelCase")]
 pub struct LocalComputerAttachmentReceipt {
     computer_id: String,
+    batch_id: String,
     attachment_id: String,
     original_name: String,
     mime_type: String,
@@ -128,6 +129,15 @@ pub struct LocalComputerAttachmentReceipt {
     size_bytes: u64,
     sha256: String,
     staged_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocalComputerAttachmentDiscardRequest {
+    workspace_id: String,
+    agent_id: String,
+    computer_id: String,
+    batch_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -558,6 +568,7 @@ fn attachment_stem(name: &str) -> String {
 
 fn write_staged_attachment(
     directory: &Path,
+    batch_id: &str,
     relative_directory: &str,
     computer_id: &str,
     request: &LocalComputerAttachmentStageInput,
@@ -605,6 +616,7 @@ fn write_staged_attachment(
     digest.update(&bytes);
     Ok(LocalComputerAttachmentReceipt {
         computer_id: computer_id.into(),
+        batch_id: batch_id.into(),
         attachment_id: request.attachment_id.clone(),
         original_name: request.name.clone(),
         mime_type: mime_type.into(),
@@ -641,7 +653,9 @@ fn write_staged_attachments(
     if !canonical_attachments.starts_with(&canonical_workspace) {
         return Err("Attachment storage escaped this agent's workspace.".into());
     }
-    let batch_name = format!("upload-{}", &desktop_tools::opaque_id()?[..12]);
+    let opaque = desktop_tools::opaque_id()?;
+    let batch_id = &opaque[..12];
+    let batch_name = format!("upload-{batch_id}");
     let batch_directory = canonical_attachments.join(&batch_name);
     std::fs::create_dir(&batch_directory)
         .map_err(|_| "Mivlet could not reserve collision-safe attachment storage.".to_string())?;
@@ -658,6 +672,7 @@ fn write_staged_attachments(
             ticket.check()?;
             receipts.push(write_staged_attachment(
                 &canonical_batch,
+                batch_id,
                 &relative_directory,
                 computer_id,
                 attachment,
@@ -673,6 +688,42 @@ fn write_staged_attachments(
             Err(error)
         }
     }
+}
+
+fn discard_attachment_batch(
+    computers: &LocalComputerState,
+    request: &LocalComputerAttachmentDiscardRequest,
+) -> Result<(), String> {
+    computers.validate_target(&request.workspace_id, &request.agent_id)?;
+    validate_scope_id(&request.computer_id)?;
+    validate_scope_id(&request.batch_id)?;
+    let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
+    discard_scoped_attachment_batch(&scope, request)
+}
+
+fn discard_scoped_attachment_batch(
+    scope: &ComputerScope,
+    request: &LocalComputerAttachmentDiscardRequest,
+) -> Result<(), String> {
+    if scope.computer_id != request.computer_id {
+        return Err("The attachment batch belongs to a different agent computer.".into());
+    }
+    let workspace = crate::paths::strict_canonicalize(&scope.directory.join("workspace"))
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
+    let attachments = workspace.join("Attachments");
+    let batch = attachments.join(format!("upload-{}", request.batch_id));
+    if !batch.exists() {
+        return Ok(());
+    }
+    let canonical_workspace = crate::paths::strict_canonicalize(&workspace)
+        .map_err(|_| "The agent computer workspace failed its security check.".to_string())?;
+    let canonical_batch = crate::paths::strict_canonicalize(&batch)
+        .map_err(|_| "The attachment batch failed its security check.".to_string())?;
+    if !canonical_batch.starts_with(canonical_workspace.join("Attachments")) {
+        return Err("The attachment batch escaped this agent's workspace.".into());
+    }
+    std::fs::remove_dir_all(canonical_batch)
+        .map_err(|_| "Mivlet could not discard the unused attachment batch.".to_string())
 }
 
 fn finish_staged_attachments(
@@ -848,6 +899,17 @@ pub async fn local_computer_stage_attachment(
     })
     .await
     .map_err(|_| "The attachment staging task stopped unexpectedly.".to_string())?
+}
+
+#[tauri::command]
+pub async fn local_computer_discard_attachment_batch(
+    request: LocalComputerAttachmentDiscardRequest,
+    state: State<'_, Arc<LocalComputerState>>,
+) -> Result<(), String> {
+    let computers = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || discard_attachment_batch(&computers, &request))
+        .await
+        .map_err(|_| "The attachment cleanup task stopped unexpectedly.".to_string())?
 }
 
 #[tauri::command]
@@ -1047,12 +1109,22 @@ mod tests {
         let batch = workspace.join("Attachments").join("upload-test");
         std::fs::create_dir_all(&batch).unwrap();
         let request = attachment_request("Quarterly totals.csv", b"name,value\r\nalpha,6\r\n");
-        let first =
-            write_staged_attachment(&batch, "Attachments/upload-test", "computer-one", &request)
-                .unwrap();
-        let second =
-            write_staged_attachment(&batch, "Attachments/upload-test", "computer-one", &request)
-                .unwrap();
+        let first = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &request,
+        )
+        .unwrap();
+        let second = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &request,
+        )
+        .unwrap();
         assert_ne!(first.relative_path, second.relative_path);
         assert!(first
             .relative_path
@@ -1079,6 +1151,7 @@ mod tests {
             request.attachment_id = "attachment-safe".into();
             assert!(write_staged_attachment(
                 &batch,
+                "test-batch",
                 "Attachments/upload-test",
                 "computer-one",
                 &request,
@@ -1111,6 +1184,37 @@ mod tests {
         assert!(batch.is_dir());
         authority.revoke(1).unwrap();
         assert!(finish_staged_attachments(ticket, batch.clone(), receipts).is_err());
+        assert!(!batch.exists());
+    }
+
+    #[test]
+    fn unadopted_attachment_batch_can_be_discarded_after_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let state = LocalComputerState::for_test(temp.path().to_path_buf());
+        let scope = state.scope("workspace-files", "agent-files").unwrap();
+        ensure_scope_directories(&scope).unwrap();
+        let authority = state
+            .authority_for("workspace-files", "agent-files")
+            .unwrap();
+        let ticket = authority.begin_agent(1).unwrap();
+        let (batch, receipts) = write_staged_attachments(
+            &scope.directory.join("workspace"),
+            &scope.computer_id,
+            &[attachment_request("one.txt", b"one")],
+            &ticket,
+        )
+        .unwrap();
+        let receipts = finish_staged_attachments(ticket, batch.clone(), receipts).unwrap();
+        discard_scoped_attachment_batch(
+            &scope,
+            &LocalComputerAttachmentDiscardRequest {
+                workspace_id: "workspace-files".into(),
+                agent_id: "agent-files".into(),
+                computer_id: scope.computer_id.clone(),
+                batch_id: receipts[0].batch_id.clone(),
+            },
+        )
+        .unwrap();
         assert!(!batch.exists());
     }
 }

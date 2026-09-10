@@ -46,8 +46,11 @@ import {
 } from "../components/pages/settings-tabs";
 import { composerModelsFor } from "./composer-models";
 import { useShellAgentController } from "./useShellAgentController";
-import { importRuntimeRepository } from "../runtime/domains/local-computer";
-import { stageRuntimeLocalComputerAttachment } from "../runtime/domains/local-computer";
+import {
+  discardRuntimeLocalComputerAttachmentBatch,
+  importRuntimeRepository,
+  stageRuntimeLocalComputerAttachment,
+} from "../runtime/domains/local-computer";
 import { composerImageInputs } from "../lib/composer-images";
 import { prepareComposerImage } from "../lib/composer-images";
 import { createRuntimeConversationThread, getRuntimeConversationThread, loadRuntimeLocalComputer } from "../runtime";
@@ -64,7 +67,10 @@ import { buildConversationHandoff } from "../lib/conversation-handoff";
 import type { ComposerAttachment } from "../lib/types";
 import { useScopedComposer } from "../hooks/useScopedComposer";
 import { startScopedConversation, type ConversationStartScope } from "../lib/scoped-conversation-start";
-import { prepareReadableComposerAttachment } from "../lib/composer-attachments";
+import {
+  prepareReadableComposerAttachment,
+  projectAttachmentRetryError,
+} from "../lib/composer-attachments";
 import "./project-room.css";
 
 const ProjectEditor = lazy(() => import("../components/projects/ProjectWorkspace").then((module) => ({ default: module.ProjectEditor })));
@@ -295,7 +301,11 @@ export function ChatWorkspace() {
     attachments: readonly ComposerAttachment[],
     agentId: string,
     isCurrent: () => boolean,
-  ): Promise<{ attachments: ComposerAttachment[]; node: LocalComputerSnapshot | null }> => {
+  ): Promise<{
+    attachments: ComposerAttachment[];
+    node: LocalComputerSnapshot | null;
+    batch?: { computerId: string; batchId: string };
+  }> => {
     const stageable = attachments.filter((attachment) => attachment.transientBytes && !attachment.type.startsWith("image/"));
     if (!stageable.length) return { attachments: [...attachments], node: localComputer.node };
     setSubmissionStatus(`Preparing ${stageable.length} readable attachment${stageable.length === 1 ? "" : "s"}…`);
@@ -329,9 +339,14 @@ export function ChatWorkspace() {
           expectedGeneration: node.generation,
           attachments: encoded,
       });
-      if (!isCurrent()) return { attachments: [...attachments], node };
       const byId = new Map(receipts?.map((receipt) => [receipt.attachmentId, receipt]));
-      if (!receipts || receipts.length !== stageable.length || byId.size !== stageable.length) throw new Error("The staged attachment receipt did not match this upload.");
+      const batchIds = new Set(receipts?.map((receipt) => receipt.batchId));
+      if (!receipts || receipts.length !== stageable.length || byId.size !== stageable.length || batchIds.size !== 1) throw new Error("The staged attachment receipt did not match this upload.");
+      const batch = { computerId: node.computerId, batchId: receipts[0].batchId };
+      if (!isCurrent()) {
+        await discardRuntimeLocalComputerAttachmentBatch({ workspaceId, agentId, ...batch }).catch(() => undefined);
+        return { attachments: [...attachments], node };
+      }
       const staged = attachments.map((attachment) => {
         if (!attachment.transientBytes || attachment.type.startsWith("image/")) return attachment;
         const receipt = byId.get(attachment.id);
@@ -339,7 +354,7 @@ export function ChatWorkspace() {
         return { ...attachment, workspaceFile: receipt, status: `Workspace/${receipt.relativePath}` };
       });
       void localComputer.refreshFiles();
-      return { attachments: staged, node };
+      return { attachments: staged, node, batch };
     } catch {
       if (!isCurrent()) return { attachments: [...attachments], node };
       return {
@@ -498,13 +513,15 @@ export function ChatWorkspace() {
       setSubmissionError("");
       setOptimisticUserMessage(batch && (batch.index > 0 || batch.suppressHuman) ? "" : prompt);
       setSuppressProjectPrompt(Boolean(batch && (batch.index > 0 || batch.suppressHuman)));
-      if (!batch || batch.index === 0) await composer.consume();
       resetCancellation();
+      let stagedBatch: { computerId: string; batchId: string } | undefined;
+      let attachmentBatchAdopted = false;
       try {
         if (!submissionIsCurrent()) return;
         const attachmentStage = await stageAttachmentsForRun(turnAttachments, activeAgent.id, submissionIsCurrent);
         if (!submissionIsCurrent()) return;
         const runAttachments = attachmentStage.attachments;
+        stagedBatch = attachmentStage.batch;
         const computerNode = attachmentStage.node;
         if (!batch || (batch.index === 0 && !batch.suppressHuman)) {
           setOptimisticAttachments(attachmentMessageMetadata(runAttachments, Boolean(batch)));
@@ -541,14 +558,17 @@ export function ChatWorkspace() {
           batch?.retryAttempt?.id,
           {
             attachments: attachmentMessageMetadata(runAttachments, Boolean(batch)),
-            ...(batch ? {
-            canonicalUserMessage: batch.index > 0 || batch.suppressHuman ? "suppress" : "persist",
             afterAttemptQueued: async ({ attemptId, threadId }) => {
+              attachmentBatchAdopted = true;
+              if (!batch || batch.index === 0) await composer.consume();
+              if (!batch) return;
               if (!projectIsCurrent() || threadId !== batch.project.threadId) throw new Error("The project changed before this response started.");
               const author = await bindLocalProjectRunAuthor({ workspaceId: batch.workspaceId, projectId: batch.project.id, expectedRevision: batch.project.revision, runId: attemptId, agentId: activeAgent.id, threadId });
               if (!projectIsCurrent()) throw new Error("The project response was stopped.");
               projects.setAuthors((current) => [...current.filter((item) => item.runId !== author.runId), author]);
             },
+            ...(batch ? {
+              canonicalUserMessage: batch.index > 0 || batch.suppressHuman ? "suppress" : "persist",
             } : {}),
           },
         );
@@ -567,6 +587,13 @@ export function ChatWorkspace() {
         setSubmissionError(message);
         if (!currentRepositoryDraft.current.trim()) setComposerValue(batch?.prompt ?? prompt);
       } finally {
+        if (stagedBatch && !attachmentBatchAdopted) {
+          await discardRuntimeLocalComputerAttachmentBatch({
+            workspaceId,
+            agentId: activeAgent.id,
+            ...stagedBatch,
+          }).catch(() => undefined);
+        }
         stagingNodeRef.current = null;
         setSubmissionBusy(false);
         setSubmissionStatus("");
@@ -1369,7 +1396,8 @@ export function ChatWorkspace() {
                         const profile = runtime.agents.find((item) => item.id === author?.agentId);
                         const model = composerModels.find((item) => item.providerId === attempt.providerId && item.modelId === attempt.model && item.available);
                         if (!profile || !model) { setSubmissionError("This response's original agent and connected model must be available before retrying."); return; }
-                        if (attempt.exchanges?.some((exchange) => exchange.images?.length)) { setSubmissionError("Reattach the original images and send a new project message; image pixels are not stored."); return; }
+                        const attachmentRetryError = projectAttachmentRetryError(attempt.exchanges);
+                        if (attachmentRetryError) { setSubmissionError(attachmentRetryError); return; }
                         const contribution = { agentId: profile.id, providerId: model.providerId, modelId: model.modelId, modelOptionId: model.id };
                         const batch = { id: crypto.randomUUID(), workspaceId, project: selectedProject, prompt: retryPrompt, attachments: [], contributions: [contribution], index: 0, retryAttempt: attempt,
                           suppressHuman: messages.some((view) => view.message.runId === attempt.id && view.message.kind === "user") || retryPrompt.startsWith("Contribute to the user's project request below.") };

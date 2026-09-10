@@ -84,6 +84,7 @@ export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget
 /** Credential-free proof of the exact bytes and relative path staged. */
 export interface LocalComputerAttachmentReceipt {
   computerId: string;
+  batchId: string;
   attachmentId: string;
   originalName: string;
   mimeType: string;
@@ -91,6 +92,12 @@ export interface LocalComputerAttachmentReceipt {
   sizeBytes: number;
   sha256: string;
   stagedAt: string;
+}
+
+/** Exact native batch capability used only to discard an unadopted upload. */
+export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarget {
+  computerId: string;
+  batchId: string;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { beforeEach,describe,expect,it,vi } from "vitest";
 import { selectRuntimeAdapterForTest } from "./runtime/adapters/select";
-import {loadRuntimeLocalComputer,listRuntimeLocalComputerFiles,previewRuntimeLocalComputerFile,stageRuntimeLocalComputerAttachment,stopRuntimeAppControl} from "./runtime";
+import {discardRuntimeLocalComputerAttachmentBatch,loadRuntimeLocalComputer,listRuntimeLocalComputerFiles,previewRuntimeLocalComputerFile,stageRuntimeLocalComputerAttachment,stopRuntimeAppControl} from "./runtime";
 const mocks=vi.hoisted(()=>({invoke:vi.fn()}));
 vi.mock("@tauri-apps/api/core",()=>({invoke:mocks.invoke}));
 const target={workspaceId:"workspace-a",agentId:"agent-a"};
@@ -22,9 +22,15 @@ describe("native Windows runtime boundary",()=>{
     await expect(loadRuntimeLocalComputer(target)).rejects.toThrow("checksum");
   });
   it("stages attachment bytes through one captured target and generation",async()=>{
-    native(true);mocks.invoke.mockResolvedValue([{ computerId:"computer-a",attachmentId:"attachment-a",originalName:"totals.csv",mimeType:"text/csv",relativePath:"Attachments/upload-a/totals-a.csv",sizeBytes:4,sha256:"hash",stagedAt:"now" }]);
+    native(true);mocks.invoke.mockResolvedValue([{ computerId:"computer-a",batchId:"batch-a",attachmentId:"attachment-a",originalName:"totals.csv",mimeType:"text/csv",relativePath:"Attachments/upload-a/totals-a.csv",sizeBytes:4,sha256:"hash",stagedAt:"now" }]);
     const request={...target,expectedGeneration:7,attachments:[{attachmentId:"attachment-a",name:"totals.csv",mimeType:"text/csv",contentBase64:"YSxiCg=="}]};
     await stageRuntimeLocalComputerAttachment(request);
     expect(mocks.invoke).toHaveBeenCalledWith("local_computer_stage_attachment",{request});
+  });
+  it("discards one exact unadopted attachment batch",async()=>{
+    native(true);mocks.invoke.mockResolvedValue(undefined);
+    const request={...target,computerId:"computer-a",batchId:"batch-a"};
+    await discardRuntimeLocalComputerAttachmentBatch(request);
+    expect(mocks.invoke).toHaveBeenCalledWith("local_computer_discard_attachment_batch",{request});
   });
 });

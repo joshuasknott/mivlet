@@ -4,6 +4,7 @@ export {
   setRuntimeBuiltinPlugin,
   prepareRuntimeBuiltinComputer,
   stageRuntimeLocalComputerAttachment,
+  discardRuntimeLocalComputerAttachmentBatch,
 } from "./runtime/domains/local-computer";
 import { mergeConnectorConnections } from "./lib/connector-connections";
 import {

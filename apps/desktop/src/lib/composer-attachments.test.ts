@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { MAX_LOCAL_FILE_BYTES } from "@fable/connectors/local-files";
-import { prepareReadableComposerAttachment } from "./composer-attachments";
+import {
+  prepareReadableComposerAttachment,
+  projectAttachmentRetryError,
+} from "./composer-attachments";
 
 describe("readable composer attachments", () => {
   it.each([
@@ -27,5 +30,20 @@ describe("readable composer attachments", () => {
     expect(arrayBuffer).toHaveBeenCalledOnce();
     expect(importKnowledgeFile).toHaveBeenCalledWith(file, "name,value\r\nalpha,6\r\n");
     expect(Array.from(prepared.transientBytes ?? [])).toEqual(Array.from(bytes));
+  });
+
+  it("blocks project retry when the original execution depended on a file", () => {
+    expect(projectAttachmentRetryError([{
+      role: "user",
+      content: "Summarize this",
+      attachments: [{
+        id: "attachment-1",
+        name: "brief.md",
+        mimeType: "text/markdown",
+        sizeBytes: 12,
+        availability: "workspace-file",
+        relativePath: "Attachments/upload-a/brief.md",
+      }],
+    }])).toContain("Reattach the original files");
   });
 });
