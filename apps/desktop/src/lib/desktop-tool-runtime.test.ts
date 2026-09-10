@@ -63,6 +63,22 @@ describe("computer authority across approvals", () => {
     await expect(execute(approval(), args)).rejects.toThrow("cancelled");
     expect(runtime.executeTool).not.toHaveBeenCalled();
   });
+  it("routes bounded Office authoring through the scoped native file boundary", async () => {
+    runtime.executeTool.mockResolvedValue({ ok: true, output: '{"validated":true,"path":"summary.docx"}' });
+    const args = JSON.stringify({ path: "summary.docx", title: "Summary", blocks: [{ type: "paragraph", text: "Ready." }] });
+    const execute = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      { localComputer: computer() },
+    );
+    await expect(execute(buildToolApproval("Codex", "create-document", args), args)).resolves.toContain('"validated":true');
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "create-document",
+      workspaceId: "workspace-a",
+      agentId: "agent-a",
+      computerGeneration: 4,
+    }));
+    expect(runtime.prepareHosted).not.toHaveBeenCalled();
+  });
 });
 
 describe("native connector chat tools", () => {

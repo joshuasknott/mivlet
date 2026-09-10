@@ -63,7 +63,8 @@ pub(crate) fn normalize_permission_route(
 pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
     match tool {
         "read-file" | "computer-artifact" => Some("local-read"),
-        "write-file" | "generate-image" | "edit-image" => Some("local-write"),
+        "write-file" | "create-spreadsheet" | "create-document" | "generate-image"
+        | "edit-image" => Some("local-write"),
         "run-shell" => Some("shell-execution"),
         "web-fetch" => Some("web-fetch"),
         "local-app-list" | "local-app-select" | "local-app-observe" | "local-desktop-observe" => {

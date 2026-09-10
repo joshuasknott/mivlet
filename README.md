@@ -54,9 +54,11 @@ a deployed or production-validated service.
   Codex sessions while Mivlet keeps the durable conversation locally.
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
-  scrolling. Published text and raster images can be previewed beside the
-  conversation; structurally validated Office documents and passive PDFs open
-  as verified copies in their associated app.
+  scrolling. Agents can create bounded passive DOCX files and XLSX workbooks
+  with safe aggregate formulas in their private workspace. Generation,
+  structural validation and immutable publication are separate steps;
+  published Office documents and passive PDFs open as verified copies in their
+  associated app.
 - Workspace-wide app access and approval preferences shared by all agents,
   with exact approval checks for consequential tools and connector actions.
 - Provider model visibility controls in Settings. Hidden models stay out of

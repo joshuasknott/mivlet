@@ -5,6 +5,7 @@ pub(crate) mod authority;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
+pub(crate) mod office_authoring;
 pub(crate) mod plugins;
 pub(crate) mod repositories;
 mod windows;

@@ -80,9 +80,11 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 22] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 24] = [
     "read-file",
     "write-file",
+    "create-spreadsheet",
+    "create-document",
     "run-shell",
     "web-fetch",
     "computer-artifact",
@@ -201,6 +203,9 @@ pub(crate) fn execute_tool_outcome(
     match tool.as_str() {
         "read-file" => ToolOutcome::Done(run_read_file(&arguments, workspace_root)),
         "write-file" => ToolOutcome::Done(run_write_file(&arguments, workspace_root)),
+        "create-spreadsheet" | "create-document" => ToolOutcome::Done(Err(
+            "Office authoring requires the scoped native workspace boundary.".into(),
+        )),
         "run-shell" => ToolOutcome::Done(Err(
             "Terminal commands require the asynchronous isolated-computer boundary.".into(),
         )),
@@ -261,6 +266,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
+        "create-spreadsheet" | "create-document" => Some(("full-access", "high")),
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
@@ -326,6 +332,8 @@ fn is_computer_tool(tool: &str) -> bool {
         "run-shell"
             | "read-file"
             | "write-file"
+            | "create-spreadsheet"
+            | "create-document"
             | "computer-artifact"
             | "generate-image"
             | "edit-image"
@@ -1455,6 +1463,42 @@ pub async fn execute_tool_call(
         );
         return result.map(|output| ToolResult { ok: true, output });
     }
+    if matches!(tool.as_str(), "create-spreadsheet" | "create-document") {
+        let workspace_id = request
+            .workspace_id
+            .clone()
+            .ok_or_else(|| "Office authoring requires an active workspace.".to_string())?;
+        let agent_id = request
+            .agent_id
+            .clone()
+            .ok_or_else(|| "Office authoring requires a saved agent.".to_string())?;
+        let computers = local_computers.inner().clone();
+        let operation_tool = tool.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            computers.with_agent_files(&workspace_id, &agent_id, computer_generation, |root| {
+                crate::local_computer::office_authoring::author(&operation_tool, &arguments, root)
+            })
+        })
+        .await
+        .map_err(|_| "The Office authoring task stopped unexpectedly.".to_string())?;
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: if result.is_ok() { "ok" } else { "failed" },
+                error_code: if result.is_ok() {
+                    ""
+                } else {
+                    "office-authoring"
+                },
+                message: "Office authoring completed",
+            },
+            None,
+        );
+        return result;
+    }
     if request.tool == "search-notion" || request.tool == "search-slack" {
         let connector_id = if request.tool == "search-notion" {
             "notion"
@@ -1722,7 +1766,7 @@ fn record_audit(recorder: crate::action_history::Recorder, store: Option<&crate:
 /// file content, env values, or command payloads beyond a bounded prefix.
 fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
     let pick = match tool {
-        "read-file" | "write-file" => "path",
+        "read-file" | "write-file" | "create-spreadsheet" | "create-document" => "path",
         "run-shell" => "command",
         "web-fetch" => "url",
         "generate-image" | "edit-image" => "title",
@@ -1980,6 +2024,8 @@ mod connector_authority_tests {
         assert!(require_computer_generation(&request).is_err());
         request.computer_generation = Some(42);
         assert_eq!(require_computer_generation(&request).unwrap(), 42);
+        assert!(is_computer_tool("create-spreadsheet"));
+        assert!(is_computer_tool("create-document"));
         assert!(is_computer_tool("generate-image"));
         assert!(is_computer_tool("edit-image"));
     }

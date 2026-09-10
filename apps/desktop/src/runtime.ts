@@ -2611,7 +2611,7 @@ export async function listenRuntimeMcpFrames(
 // ---------------------------------------------------------------------------
 
 export interface RuntimeToolRequest {
-  /** The registered tool name (read-file/write-file/run-shell/web-fetch). */
+  /** The registered tool name (including bounded file, Office, shell, and web tools). */
   tool: string;
   /** The tool-call arguments as a parsed JSON value. */
   arguments: unknown;

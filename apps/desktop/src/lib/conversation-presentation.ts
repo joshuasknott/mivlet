@@ -31,6 +31,8 @@ const toolLabels: Record<string, [string, string]> = {
   "write-file": ["Writing a file", "Wrote a file"],
   "list-files": ["Looking through files", "Listed files"],
   "run-shell": ["Running a command", "Ran a command"],
+  "create-spreadsheet": ["Creating a spreadsheet", "Created a spreadsheet"],
+  "create-document": ["Creating a document", "Created a document"],
   "local-app-observe": ["Checking the application", "Observed the application"],
   "local-app-action": ["Sending application input", "Input sent; awaiting observation"],
   "local-desktop-observe": ["Checking the computer", "Checked the computer"],
