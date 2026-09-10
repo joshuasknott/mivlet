@@ -166,7 +166,7 @@ function argsFor(tool: string): string {
         controlName: "Continue"
       });
     case "local-app-action":
-      return JSON.stringify({action:"type",observationId:"observation-1234567890abcdef",elementRef:"control-1234567890abcdef-2",text:"Europe"});
+      return JSON.stringify({observationId:"observation-1234567890abcdef",input:{action:"type",elementRef:"control-1234567890abcdef-2",text:"Europe"}});
     default:
       return "{}";
   }

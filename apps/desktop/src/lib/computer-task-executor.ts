@@ -153,6 +153,7 @@ function provesNoEffect(error: unknown): boolean {
   const message = typeof candidate?.message === "string" ? candidate.message.toLowerCase() : String(error).toLowerCase();
   return message.startsWith("tool call denied:")
     || message.startsWith("execution blocked:")
+    || message.startsWith("invalid application input")
     || message.startsWith("set up this agent's")
     || message.startsWith("unknown tool ")
     || message.includes("requires the desktop runtime to execute")

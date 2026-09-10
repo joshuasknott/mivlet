@@ -85,6 +85,18 @@ describe("computer task execution bounds", () => {
     await expect(guarded(approval("local-app-action"), '{}')).rejects.toThrow("failed twice before execution");
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it("allows a corrected action after native field validation rejects input before dispatch", async () => {
+    const execute = vi.fn()
+      .mockRejectedValueOnce(new Error("Invalid application input for 'click': click requires exactly elementRef. No input was dispatched; correct this call using the same fresh observationId."))
+      .mockResolvedValueOnce('{"status":"input-dispatched"}');
+    const guarded = createComputerTaskExecutor(execute);
+    const malformed = '{"observationId":"fresh","input":{"action":"click","elementRef":"e0","text":"irrelevant"}}';
+    const corrected = '{"observationId":"fresh","input":{"action":"click","elementRef":"e0"}}';
+
+    await expect(guarded(approval("local-app-action"), malformed)).rejects.toThrow("No input was dispatched");
+    await expect(guarded(approval("local-app-action"), corrected)).resolves.toContain("input-dispatched");
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
   it("detects three actions that leave the application unchanged", async () => {
     let id = 0;
     const execute = vi.fn(async (request: ApprovalRequest) => request.action.startsWith("local-app-observe")
