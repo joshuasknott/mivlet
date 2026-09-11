@@ -113,12 +113,6 @@ class IpcMcpTransport implements McpTransport {
   private readonly frameHandlers = new Set<(frame: McpFrame) => void>();
   private readonly closeHandlers = new Set<() => void>();
   private readonly pendingSends = new Map<number, PendingSend>();
-  /**
-   * Acknowledgements that arrived before their send was registered. The only
-   * legitimate early id is the next send id: the renderer can only
-   * acknowledge a send event it received, and the host assigns ids in order.
-   */
-  private readonly earlyAcks = new Map<number, boolean>();
   private nextSendId = 1;
   private closed = false;
 
@@ -137,11 +131,6 @@ class IpcMcpTransport implements McpTransport {
       // arrives before this microtask chain completes still matches.
       this.pendingSends.set(id, { resolve, reject, timeout });
     });
-    const early = this.earlyAcks.get(id);
-    if (early !== undefined) {
-      this.earlyAcks.delete(id);
-      this.applyAck(id, early);
-    }
     try {
       this.write({ type: "send", id, frame });
     } catch (error) {
@@ -160,11 +149,6 @@ class IpcMcpTransport implements McpTransport {
     if (this.closed) return;
     if (this.pendingSends.has(id)) {
       this.applyAck(id, ok);
-      return;
-    }
-    if (id === this.nextSendId) {
-      if (this.earlyAcks.has(id)) throw new Error("MCP host send acknowledgement is duplicated.");
-      this.earlyAcks.set(id, ok);
       return;
     }
     throw new Error("MCP host send acknowledgement is unexpected.");
@@ -206,7 +190,6 @@ class IpcMcpTransport implements McpTransport {
       pending.reject(new Error("MCP transport is closed."));
     }
     this.pendingSends.clear();
-    this.earlyAcks.clear();
     for (const handler of this.closeHandlers) handler();
     this.closeHandlers.clear();
     this.frameHandlers.clear();

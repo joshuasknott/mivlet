@@ -48,6 +48,15 @@ function lineFor(value) {
   return `${JSON.stringify(value)}\n`;
 }
 
+test("MCP host rejects acknowledgements for sends that have not happened", async () => {
+  await withMcpHost(async (host) => {
+    host.write({ type: "sent", id: 1, ok: true });
+    await host.nextType("closed");
+    assert.notEqual((await host.waitForExit()).code, 0);
+    assert.equal(host.events.some((event) => event.type === "send"), false);
+  });
+});
+
 test("MCP host drops late results when initialization is cancelled", async () => {
   await withMcpHost(async (host) => {
     host.write({ type: "request", id: 1, method: "initialize" });
