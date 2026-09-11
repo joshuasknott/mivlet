@@ -97,6 +97,9 @@ export function useVoice(
   const handledGenerationRef = useRef<number | null>(null);
   const onTranscriptRef = useRef(onTranscript);
   const onCancelRef = useRef(onCancel);
+  // Delivery target captured when dictation starts, so a late completion always
+  // lands in the conversation that began the session, never the current scope.
+  const deliveryTranscriptRef = useRef(onTranscript);
 
   onTranscriptRef.current = onTranscript;
   onCancelRef.current = onCancel;
@@ -180,7 +183,7 @@ export function useVoice(
           if (sessionRef.current === session) sessionRef.current = null;
           setReview(null);
           session.dispose();
-          onTranscriptRef.current(normalized);
+          deliveryTranscriptRef.current(normalized);
           if (!isCurrent(generation)) return;
           setState({
             status: "success",
@@ -206,6 +209,7 @@ export function useVoice(
     const generation = generationRef.current + 1;
     generationRef.current = generation;
     handledGenerationRef.current = null;
+    deliveryTranscriptRef.current = onTranscriptRef.current;
     setReview(null);
     const controller = new AbortController();
     abortRef.current = controller;
