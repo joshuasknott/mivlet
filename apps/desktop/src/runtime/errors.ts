@@ -3,26 +3,27 @@ export function toRuntimeError(error: unknown) {
     return error;
   }
 
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string"
-  ) {
-    const runtimeError = new Error(error.message) as Error & {
-      code?: string;
-      retryable?: boolean;
-    };
-    if ("code" in error && typeof error.code === "string") {
-      runtimeError.code = error.code;
-    }
-    if ("retryable" in error && typeof error.retryable === "boolean") {
-      runtimeError.retryable = error.retryable;
-    }
-    return runtimeError;
-  }
+  const candidate = error as {
+    message?: unknown;
+    code?: unknown;
+    retryable?: unknown;
+  };
+  const message =
+    typeof candidate?.message === "string" && candidate.message.trim()
+      ? candidate.message
+      : typeof error === "string" && error.trim()
+        ? error
+        : "Mivlet runtime request failed.";
 
-  return new Error(
-    typeof error === "string" ? error : "Mivlet runtime request failed.",
-  );
+  const runtimeError = new Error(message) as Error & {
+    code?: string;
+    retryable?: boolean;
+  };
+  if (typeof candidate?.code === "string") {
+    runtimeError.code = candidate.code;
+  }
+  if (typeof candidate?.retryable === "boolean") {
+    runtimeError.retryable = candidate.retryable;
+  }
+  return runtimeError;
 }
