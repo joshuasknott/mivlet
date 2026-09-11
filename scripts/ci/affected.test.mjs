@@ -9,7 +9,7 @@ test('renderer changes run TypeScript without Windows compilation', () => {
   assert.deepEqual(affected(['apps/desktop/src/App.tsx']), { code: true, native: false });
 });
 test('native, shared host dependencies, lockfile and workflow changes require Windows', () => {
-  for (const path of ['apps/desktop/src-tauri/src/lib.rs', 'packages/agent-host/src/main.ts', 'packages/connectors/src/index.ts', 'packages/protocol/src/index.ts', 'pnpm-lock.yaml', '.github/workflows/ci.yml', 'scripts/release/windows-manifest.mjs']) {
+  for (const path of ['apps/desktop/src-tauri/src/lib.rs', 'apps/desktop/scripts/prepare-cua-driver.mjs', 'packages/agent-host/src/main.ts', 'packages/connectors/src/index.ts', 'packages/protocol/src/index.ts', 'pnpm-lock.yaml', '.github/workflows/ci.yml', 'scripts/release/windows-manifest.mjs']) {
     assert.deepEqual(affected([path]), { code: true, native: true }, path);
   }
 });

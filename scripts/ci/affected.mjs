@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url';
 
 export function affected(paths) {
   const code = paths.some(path => !(/\.md$/i.test(path) || /^(docs\/|LICENSE$|NOTICE$)/.test(path)));
-  const native = paths.some(path => /^(apps\/desktop\/(src-tauri\/|scripts\/tauri)|packages\/(agent-host|protocol|connectors)\/|scripts\/(ci|release|audit)\/|\.github\/workflows\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)/.test(path));
+  const native = paths.some(path => /^(apps\/desktop\/(src-tauri\/|scripts\/(tauri|prepare-cua|collect-cua|native-computer|local-env))|packages\/(agent-host|protocol|connectors)\/|scripts\/(ci|release|audit)\/|\.github\/workflows\/|package\.json$|pnpm-lock\.yaml$|pnpm-workspace\.yaml$)/.test(path));
   return { code, native };
 }
 
