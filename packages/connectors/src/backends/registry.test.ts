@@ -14,6 +14,7 @@ describe("provider registry", () => {
       "claude",
       "anthropic",
       "antigravity",
+      "gemini",
       "grok",
       "xai",
       "cursor",

@@ -193,6 +193,23 @@ const CATALOG: &[BackendCatalogEntry] = &[
         recommended: true,
     },
     BackendCatalogEntry {
+        id: "gemini",
+        driver_kind: "native-api",
+        backend_type: "native-api",
+        label: "Gemini API",
+        description: "Reach Gemini models directly with a Google AI Gemini API key. Mivlet owns the agent loop, tool dispatch, and approvals.",
+        install_hint: "",
+        models: &[
+            ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+            ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+        ],
+        capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "Gemini API key",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
+        recommended: false,
+    },
+    BackendCatalogEntry {
         id: "grok",
         driver_kind: "grok-acp",
         backend_type: "grok-acp",
@@ -1715,7 +1732,7 @@ mod provider_route_tests {
     fn live_visual_provider_connection_inventory() {
         use super::BackendCredentialStore;
         let user = super::require_current_internal_user().unwrap();
-        for provider in ["openai", "anthropic", "xai", "custom"] {
+        for provider in ["openai", "anthropic", "gemini", "xai", "custom"] {
             let present = super::KeyringStore
                 .get(&super::scoped_credential_key(&user, provider))
                 .expect("OS credential store is unavailable")
@@ -1840,6 +1857,32 @@ mod provider_route_tests {
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"
         );
+    }
+
+    #[test]
+    fn gemini_catalogue_entry_is_a_native_api_key_route_distinct_from_antigravity() {
+        let gemini = catalog_entry("gemini").expect("gemini catalogue entry");
+        assert_eq!(gemini.backend_type, "native-api");
+        assert_eq!(gemini.driver_kind, "native-api");
+        assert_eq!(gemini.setup_kind, "api-key");
+        assert_eq!(gemini.setup_label, "Gemini API key");
+        assert!(!gemini.recommended);
+        assert!(gemini
+            .models
+            .iter()
+            .any(|(id, _)| *id == "gemini-3.5-flash"));
+        assert!(gemini.models.iter().any(|(id, _)| *id == "gemini-2.5-pro"));
+
+        let antigravity = catalog_entry("antigravity").expect("antigravity catalogue entry");
+        assert_eq!(antigravity.backend_type, "antigravity-acp");
+        assert_eq!(antigravity.setup_kind, "browser");
+        assert!(antigravity.recommended);
+
+        let provider = build_provider(gemini, resolve_auth_state("gemini", &HashMap::new()));
+        assert_eq!(provider.auth_state, "needs-auth");
+        assert!(provider.capabilities.is_empty());
+        assert!(provider.models.iter().all(|model| !model.available));
+        assert_eq!(provider.install_hint.as_deref(), Some(""));
     }
 
     #[test]

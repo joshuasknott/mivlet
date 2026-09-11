@@ -145,7 +145,7 @@ tool execution support. Image input metadata alone cannot enable screenshots.
 | Custom API endpoint | Text/tool transport; endpoint configuration establishes neither image support nor an audited image profile | Unavailable, even when model metadata claims vision |
 | Managed Claude, Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
 | Antigravity ACP | Text prompts and provider-owned permission decisions; sessions currently register no Mivlet MCP servers | Unavailable for the same bridge reason |
-| Legacy Gemini native parser | Image-capable upstream protocol, but this direct route is retired from Mivlet's provider registry and native egress allowlist | Not a reachable provider route; this change does not reactivate it |
+| Direct Gemini API | Text and tool turns exchange `functionCall`/`functionResponse` parts inside Gemini `contents`; the API key stays in the Rust egress header | Unavailable; no audited native screenshot bridge exists for this route, and vision metadata alone never enables one |
 
 The managed/ACP restriction describes Mivlet's current adapters, not an upstream
 claim that ACP, MCP or those models cannot carry images. Current ACP content

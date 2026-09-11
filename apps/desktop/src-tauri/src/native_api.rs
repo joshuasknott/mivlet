@@ -912,6 +912,7 @@ fn require_key(provider_id: &str) -> Result<String, String> {
 pub fn missing_key_message(provider_id: &str) -> String {
     match provider_id {
         "custom" => "Add a custom OpenAI-compatible endpoint to connect.".to_string(),
+        "gemini" => "Add a Gemini API key to connect.".to_string(),
         _ => format!("Add an {provider_id} API key to connect."),
     }
 }
@@ -919,7 +920,7 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 4] = ["openai", "anthropic", "xai", "custom"];
+const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "gemini", "xai", "custom"];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -2001,6 +2002,24 @@ mod transport_policy_tests {
         assert!(endpoint.contains("/models/gemini-2.5-pro:streamGenerateContent"));
         assert!(endpoint.ends_with("alt=sse"));
         assert!(endpoint_for_model("gemini", "../escape?key=secret").is_err());
+    }
+
+    #[test]
+    fn gemini_is_admitted_to_egress_discovery_and_verification() {
+        assert!(NATIVE_PROVIDER_IDS.contains(&"gemini"));
+        assert_eq!(
+            auth_header_for("gemini", "test-key"),
+            ("x-goog-api-key".to_string(), "test-key".to_string())
+        );
+        assert!(endpoint_for("gemini").contains("generativelanguage.googleapis.com"));
+        assert_eq!(
+            missing_key_message("gemini"),
+            "Add a Gemini API key to connect."
+        );
+        assert_eq!(
+            missing_key_message("anthropic"),
+            "Add an anthropic API key to connect."
+        );
     }
 
     #[test]

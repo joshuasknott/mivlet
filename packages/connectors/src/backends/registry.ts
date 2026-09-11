@@ -9,6 +9,7 @@ export const BACKEND_PROVIDER_IDS = [
   "claude",
   "anthropic",
   "antigravity",
+  "gemini",
   "grok",
   "xai",
   "cursor",

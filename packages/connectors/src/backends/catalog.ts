@@ -24,7 +24,7 @@ export interface ManagedProviderCatalogEntry {
   models: BackendCatalogModel[];
 }
 
-export type NativeProviderId = "openai" | "anthropic" | "xai" | "custom";
+export type NativeProviderId = "openai" | "anthropic" | "gemini" | "xai" | "custom";
 
 export interface NativeProviderCatalogEntry {
   providerId: NativeProviderId;
@@ -124,6 +124,16 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
     models: [
       { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
       { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+    ],
+  },
+  {
+    providerId: "gemini",
+    label: "Gemini API",
+    description: "Connect a Google AI Gemini API key for direct model access.",
+    authLabel: "Gemini API key",
+    models: [
+      { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+      { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
     ],
   },
   {
