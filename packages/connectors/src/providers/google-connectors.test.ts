@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
 import { ConnectorRuntime, type ConnectorApprovalBoundary } from "../sdk";
 import { createGoogleDriveAdapter, GOOGLE_DRIVE_CAPABILITIES } from "./google-drive";
+import { importConnectorSearchItem } from "./shared";
 import { createGmailAdapter, GMAIL_CAPABILITIES } from "./gmail";
 import {
   createGoogleCalendarAdapter,
@@ -327,6 +328,281 @@ describe("Google Drive production adapter", () => {
     const err = await errPromise.catch((e) => e);
     expect(err.message).not.toContain("secret-google-abc");
     expect(err.message).toBe("The provider rejected the request.");
+  });
+});
+
+describe("Google Drive document export", () => {
+  const session = {
+    connectorId: "google-drive",
+    account: { id: "u1", displayName: "User" },
+    tokens
+  } as const;
+
+  function driveExportRuntime(fetcher: ReturnType<typeof vi.fn>) {
+    const adapter = createGoogleDriveAdapter({ ...common, fetch: fetcher });
+    const boundary: ConnectorApprovalBoundary = {
+      approve: vi.fn(async (record: ConnectorApprovalRecord) => ({
+        ...record,
+        result: "approved" as const,
+        decidedAt: new Date().toISOString()
+      })),
+      complete: vi.fn(async () => undefined)
+    };
+    const runtime = new ConnectorRuntime({ approvals: boundary });
+    runtime.register(adapter);
+    return runtime;
+  }
+
+  function docMetadata(extra: Record<string, unknown> = {}) {
+    return response({
+      id: "doc-1",
+      name: "Brief",
+      mimeType: "application/vnd.google-apps.document",
+      modifiedTime: "2026-09-01T00:00:00Z",
+      webViewLink: "https://docs.google.com/document/d/doc-1",
+      ...extra
+    });
+  }
+
+  it("registers a bounded document export capability distinct from metadata reads", () => {
+    const ids = GOOGLE_DRIVE_CAPABILITIES.map((capability) => capability.id);
+    expect(ids).toContain("drive.export");
+    const exportCapability = GOOGLE_DRIVE_CAPABILITIES.find(
+      (capability) => capability.id === "drive.export"
+    );
+    expect(exportCapability?.kind).toBe("read");
+    expect(exportCapability?.consequential).toBe(false);
+  });
+
+  it("exports a selected Google Docs file as bounded plain text through the runtime", async () => {
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const called = String(url);
+      if (called.includes("/export")) {
+        expect(init?.headers).toMatchObject({ authorization: "Bearer test-token" });
+        return new Response("Meeting notes\n- ship the brief", {
+          status: 200,
+          headers: { "content-type": "text/plain" }
+        });
+      }
+      if (called.includes("files/doc-1")) return docMetadata();
+      return response({}, 404);
+    });
+    const runtime = driveExportRuntime(fetcher);
+    const result = await runtime.read(session, {
+      capability: "drive.export",
+      input: { fileId: "doc-1", selected: true }
+    });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: "doc-1",
+      connectorId: "google-drive",
+      title: "Brief",
+      url: "https://docs.google.com/document/d/doc-1",
+      provenance: "Google Drive · selected file",
+      contentPreview: "Meeting notes\n- ship the brief",
+      providerMetadata: {
+        mimeType: "application/vnd.google-apps.document",
+        selected: "true"
+      }
+    });
+    // Metadata lookup is distinct from content retrieval: one metadata request
+    // plus one export request.
+    const exportUrl = String(fetchUrl(fetcher, 1));
+    expect(exportUrl).toContain("files/doc-1/export");
+    expect(exportUrl).toContain("mimeType=text%2Fplain");
+  });
+
+  it("truncates oversized exports to the preview bound before returning", async () => {
+    const longText = "a".repeat(20_001);
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes("/export")) {
+        return new Response(longText, { status: 200, headers: { "content-type": "text/plain" } });
+      }
+      return docMetadata();
+    });
+    const runtime = driveExportRuntime(fetcher);
+    const result = await runtime.read<Record<string, unknown>>(session, {
+      capability: "drive.export",
+      input: { fileId: "doc-1", selected: true }
+    });
+    const preview = String(result.items[0]?.contentPreview ?? "");
+    expect([...preview]).toHaveLength(20_000);
+    expect(result.items[0]).toMatchObject({ providerMetadata: { truncated: "true" } });
+  });
+
+  it("fails closed when the file is not accessible with the granted scope", async () => {
+    for (const [status, code] of [
+      [403, "permission-denied"],
+      [404, "not-found"]
+    ] as const) {
+      const fetcher = vi.fn(async () => response({ error: "no access" }, status));
+      const runtime = driveExportRuntime(fetcher);
+      await expect(
+        runtime.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+      ).rejects.toMatchObject({ code });
+    }
+    // The export itself can also be denied even when metadata is readable.
+    const fetcher = vi.fn(async (url: string) => {
+      if (String(url).includes("/export")) return response({ error: "blocked" }, 403);
+      return docMetadata();
+    });
+    const runtime = driveExportRuntime(fetcher);
+    await expect(
+      runtime.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+    ).rejects.toMatchObject({ code: "permission-denied" });
+  });
+
+  it("rejects non-Docs file types before any content request", async () => {
+    for (const mimeType of [
+      "application/vnd.google-apps.spreadsheet",
+      "application/vnd.google-apps.presentation",
+      "application/vnd.google-apps.folder",
+      "image/png"
+    ]) {
+      const fetcher = vi.fn(async () =>
+        response({ id: "file-1", name: "not-a-doc", mimeType })
+      );
+      const runtime = driveExportRuntime(fetcher);
+      await expect(
+        runtime.read(session, { capability: "drive.export", input: { fileId: "file-1" } })
+      ).rejects.toMatchObject({ code: "invalid-request" });
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it("rejects malformed metadata and malformed export bodies", async () => {
+    const malformed = driveExportRuntime(
+      vi.fn(async () => response({ id: "doc-1" }))
+    );
+    await expect(
+      malformed.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+    ).rejects.toMatchObject({ code: "invalid-request" });
+
+    const binary = driveExportRuntime(
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/export")) {
+          return new Response(new Uint8Array([0xff, 0xfe, 0xfd]), {
+            status: 200,
+            headers: { "content-type": "application/octet-stream" }
+          });
+        }
+        return docMetadata();
+      })
+    );
+    await expect(
+      binary.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+    ).rejects.toMatchObject({ code: "invalid-request" });
+  });
+
+  it("rejects oversized export responses before ingestion", async () => {
+    const declared = driveExportRuntime(
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/export")) {
+          return new Response("x", {
+            status: 200,
+            headers: { "content-length": String(4 * 1024 * 1024 + 1) }
+          });
+        }
+        return docMetadata();
+      })
+    );
+    await expect(
+      declared.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+    ).rejects.toMatchObject({ code: "invalid-request" });
+
+    const streaming = driveExportRuntime(
+      vi.fn(async (url: string) => {
+        if (String(url).includes("/export")) {
+          return new Response("x".repeat(4 * 1024 * 1024 + 1), {
+            status: 200,
+            headers: { "content-type": "text/plain" }
+          });
+        }
+        return docMetadata();
+      })
+    );
+    await expect(
+      streaming.read(session, { capability: "drive.export", input: { fileId: "doc-1" } })
+    ).rejects.toMatchObject({ code: "invalid-request" });
+  });
+
+  it("cancels an in-flight export when the caller aborts", async () => {
+    const controller = new AbortController();
+    let egressSignal: AbortSignal | null | undefined;
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/export")) {
+        egressSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init?.signal?.reason ?? new DOMException("cancelled", "AbortError")),
+            { once: true }
+          );
+        });
+      }
+      return docMetadata();
+    });
+    const runtime = driveExportRuntime(fetcher);
+    const pending = runtime.read(session, {
+      capability: "drive.export",
+      input: { fileId: "doc-1" },
+      signal: controller.signal
+    });
+    await vi.waitFor(() => expect(egressSignal).toBeDefined());
+    controller.abort(new DOMException("cancelled", "AbortError"));
+    await expect(pending).rejects.toBeDefined();
+    expect(egressSignal?.aborted).toBe(true);
+  });
+
+  it("never forwards credentials to a Drive export redirect target", async () => {
+    let redirectInit: RequestInit | undefined;
+    const fetcher = vi.fn(async (url: string, init?: RequestInit) => {
+      const called = String(url);
+      if (called.includes("/export") && !called.includes("cdn.example")) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://cdn.example.com/exported.txt" }
+        });
+      }
+      if (called.includes("cdn.example")) {
+        redirectInit = init;
+        return new Response("redirected plain text", {
+          status: 200,
+          headers: { "content-type": "text/plain" }
+        });
+      }
+      return docMetadata();
+    });
+    const runtime = driveExportRuntime(fetcher);
+    const result = await runtime.read(session, {
+      capability: "drive.export",
+      input: { fileId: "doc-1" }
+    });
+    expect((redirectInit?.headers as Record<string, string> | undefined)?.authorization).toBeUndefined();
+    expect(result.items[0]).toMatchObject({ contentPreview: "redirected plain text" });
+  });
+
+  it("does not import an exported item that lacks explicit selection evidence", () => {
+    const item = {
+      id: "doc-1",
+      connectorId: "google-drive",
+      title: "Brief",
+      kind: "file",
+      summary: "File metadata; import is unavailable until selected",
+      provenance: "Google Drive · selected file",
+      freshness: "Provider freshness unavailable",
+      trust: "untrusted",
+      contentPreview: "Meeting notes",
+      providerMetadata: { mimeType: "application/vnd.google-apps.document", selected: "false" }
+    } as const;
+    expect(() =>
+      importConnectorSearchItem({
+        connectorId: "google-drive",
+        item,
+        importedAt: "2026-09-01T00:00:00Z"
+      })
+    ).toThrow(/explicitly selected/);
   });
 });
 
