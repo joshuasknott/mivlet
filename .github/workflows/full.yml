@@ -1,0 +1,46 @@
+name: Full validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - uses: actions/cache@v4
+        id: audit
+        with:
+          path: ~/.cargo/bin/cargo-audit.exe
+          key: ${{ runner.os }}-cargo-audit-0.22.2
+      - if: steps.audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check

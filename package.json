@@ -2,6 +2,7 @@
   "name": "fable",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Mivlet is a local-first AI agent workspace.",
   "packageManager": "pnpm@10.15.0",
   "scripts": {
