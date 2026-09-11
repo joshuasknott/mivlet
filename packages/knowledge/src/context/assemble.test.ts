@@ -457,4 +457,171 @@ describe("assembleContext — budget", () => {
     });
     expect(assembled.systemPrefix.length).toBeLessThan(4000);
   });
+
+  it("includes a citation whose truncated excerpt fits even when the full snippet would not", () => {
+    const citation = makeCitation({ snippet: "x".repeat(600), chunkId: "s1#0" });
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [citation],
+      prefixBudget: 600
+    });
+    // The full 600-char snippet cannot fit, but the 500-char excerpt does.
+    expect(assembled.citations).toHaveLength(1);
+    expect(assembled.citations[0].snippet.length).toBe(500);
+    expect(assembled.usage.find((u) => u.id === "s1")?.reason).toBe("retrieved");
+  });
+
+  it("never lets the excerpt block exceed the prefix budget", () => {
+    const snippets = Array.from({ length: 12 }, (_, i) => "connector ".repeat(60));
+    const citations = snippets.map((snippet, i) =>
+      makeCitation({ sourceId: `s${i}`, snippet, chunkId: `s${i}#0` })
+    );
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations,
+      prefixBudget: 1000
+    });
+    // Instructions absent: the excerpt block is the entire prefix.
+    expect(assembled.systemPrefix.length).toBeLessThanOrEqual(1000);
+    // Citations were added only while their lines fit exactly.
+    const blockLength = assembled.systemPrefix.length;
+    const oneMore = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations,
+      prefixBudget: blockLength
+    });
+    expect(oneMore.systemPrefix.length).toBe(blockLength);
+  });
+
+  it("includes a line that exactly fills the budget and drops the next", () => {
+    const citation = makeCitation({ snippet: "x".repeat(40), chunkId: "s1#0" });
+    const probe = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [citation],
+      prefixBudget: 1_000_000
+    });
+    const exact = probe.systemPrefix.length;
+    expect(exact).toBeGreaterThan(0);
+
+    const fits = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [citation],
+      prefixBudget: exact
+    });
+    expect(fits.citations).toHaveLength(1);
+    expect(fits.systemPrefix.length).toBe(exact);
+
+    const tight = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [citation],
+      prefixBudget: exact - 1
+    });
+    expect(tight.citations).toHaveLength(0);
+    expect(tight.systemPrefix).toBe("");
+  });
+
+  it("counts large metadata (long titles) toward the budget", () => {
+    const longTitle = "A remarkably long title ".repeat(20).trim();
+    const shortTitle = "T";
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [
+        makeCitation({ sourceId: "long", title: longTitle, snippet: "x".repeat(30), chunkId: "long#0" }),
+        makeCitation({ sourceId: "short", title: shortTitle, snippet: "x".repeat(30), chunkId: "short#0" })
+      ],
+      prefixBudget: 200
+    });
+    // The long title's line prefix does not fit; the short one does.
+    expect(assembled.citations.map((c) => c.sourceId)).toEqual(["short"]);
+  });
+
+  it("carries only the included excerpt on the receipt citation", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [makeCitation({ snippet: "y".repeat(700) })],
+      prefixBudget: 100_000
+    });
+    const excerpt = assembled.citations[0].snippet;
+    expect(excerpt.length).toBe(500);
+    expect(assembled.systemPrefix).toContain(excerpt);
+    expect(assembled.systemPrefix).not.toContain("y".repeat(501));
+    expect(assembled.receipt.citations[0].snippet).toBe(excerpt);
+  });
+
+  it("never splits a surrogate pair when truncating excerpts", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [makeCitation({ snippet: "🚀".repeat(300) })],
+      prefixBudget: 100_000
+    });
+    const line = assembled.systemPrefix.split("\n").find((l) => l.includes("["))!;
+    expect(line).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    expect(assembled.citations[0].snippet.length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe("assembleContext — citation scope isolation", () => {
+  it("excludes out-of-scope citations from a global run while keeping global ones", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      scope: GLOBAL_SCOPE,
+      memory: [],
+      citations: [
+        makeCitation({ sourceId: "thread-source", scope: { level: "thread", threadId: "t1" } }),
+        makeCitation({ sourceId: "global-source" })
+      ]
+    });
+    expect(assembled.citations.map((c) => c.sourceId)).toEqual(["global-source"]);
+    expect(assembled.usage.map((u) => u.id)).toEqual(["global-source"]);
+  });
+
+  it("admits matching-scope citations into a thread run", () => {
+    const scope = { level: "thread" as const, threadId: "t1" };
+    const assembled = assembleContext({
+      attemptId: "r1",
+      scope,
+      memory: [],
+      citations: [
+        makeCitation({ sourceId: "thread-source", scope }),
+        makeCitation({ sourceId: "global-source" }),
+        makeCitation({ sourceId: "other-thread", scope: { level: "thread" as const, threadId: "t2" } })
+      ]
+    });
+    expect(assembled.citations.map((c) => c.sourceId).sort()).toEqual(["global-source", "thread-source"]);
+  });
+});
+
+describe("assembleContext — forbidden sources", () => {
+  it("a highly ranked forbidden citation never enters context or the receipt", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [
+        makeCitation({
+          sourceId: "source-github-forbidden",
+          provenance: "Connector: github",
+          score: 9
+        }),
+        makeCitation({
+          sourceId: "source-local-allowed",
+          provenance: "Local file - 1.0 KB",
+          score: 1
+        })
+      ],
+      authorization: { isSourceAuthorized: (connectorId) => connectorId !== "github" }
+    });
+    expect(assembled.citations.map((c) => c.sourceId)).toEqual(["source-local-allowed"]);
+    expect(assembled.systemPrefix).not.toContain("github");
+    expect(assembled.receipt.citations.map((c) => c.sourceId)).toEqual(["source-local-allowed"]);
+    expect(assembled.usage.map((u) => u.id)).toEqual(["source-local-allowed"]);
+  });
 });

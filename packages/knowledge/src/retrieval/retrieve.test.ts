@@ -162,6 +162,60 @@ describe("retrieve — context budget + dedup", () => {
     expect(result.citations.length).toBeLessThanOrEqual(2);
   });
 
+  it("fits a snippet that exactly fills the remaining budget", async () => {
+    const text = "connector " + "x".repeat(91);
+    const sources = [
+      src(makeSource({ id: "plan", title: "Launch plan" }), [
+        makeChunk("plan", 0, text.slice(0, 100))
+      ])
+    ];
+    const exact = await retrieve(sources, { query: "connector", budgetChars: 100, snippetChars: 320 });
+    expect(exact.citations).toHaveLength(1);
+    expect(exact.citations[0].snippet.length).toBe(100);
+
+    // A 101-char chunk under a 100-char budget truncates to exactly 100.
+    const over = await retrieve(
+      [src(makeSource({ id: "plan", title: "Launch plan" }), [makeChunk("plan", 0, text)])],
+      { query: "connector", budgetChars: 100, snippetChars: 320 }
+    );
+    expect(over.citations[0].snippet.length).toBe(100);
+  });
+
+  it("deduplicates duplicates before the budget so redundancy never consumes it", async () => {
+    const text = "connector ".repeat(30);
+    const sources = [
+      src(makeSource({ id: "plan", title: "Launch plan" }), [
+        makeChunk("plan", 0, text, { contentHash: "dup" }),
+        makeChunk("plan", 1, text, { contentHash: "dup", charStart: 1000, charEnd: 1000 + text.length }),
+        makeChunk("plan", 2, text + " unique", { charStart: 2000, charEnd: 2000 + text.length + 7 })
+      ])
+    ];
+    // Budget fits exactly two snippets: the duplicate must not eat budget.
+    const result = await retrieve(sources, { query: "connector", budgetChars: 480, snippetChars: 240 });
+    expect(result.citations).toHaveLength(2);
+    expect(result.citations[0].chunkId).toBe("plan#0");
+    expect(result.citations[1].chunkId).toBe("plan#2");
+  });
+
+  it("never splits a surrogate pair when truncating snippets", async () => {
+    const emoji = "🚀".repeat(60);
+    const sources = [
+      src(makeSource({ id: "e1", title: "emoji 🚀" }), [
+        makeChunk("e1", 0, `preamble here ${emoji}`)
+      ])
+    ];
+    for (const budgetChars of [7, 12, 41, 100, 320]) {
+      const result = await retrieve(sources, {
+        query: "emoji",
+        budgetChars,
+        snippetChars: budgetChars
+      });
+      const snippet = result.citations[0].snippet;
+      expect(snippet.length).toBeLessThanOrEqual(budgetChars);
+      expect(snippet).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/);
+    }
+  });
+
   it("respects the character budget", async () => {
     const long = "connector ".repeat(200);
     const sources = [
@@ -474,6 +528,25 @@ describe("retrieve — filters", () => {
     });
     expect(result.citations.map((c) => c.sourceId)).toEqual(["ok"]);
   });
+
+  it("a highly ranked forbidden source never leaks through scoring", async () => {
+    // The forbidden source matches the query far better than the allowed one;
+    // the authorization predicate must keep it out of scoring entirely.
+    const sources = [
+      src(makeSource({ id: "allowed", title: "allowed note" }), [
+        makeChunk("allowed", 0, "alpha appears once here")
+      ]),
+      src(makeSource({ id: "forbidden", title: "alpha alpha alpha", connectorId: "revoked-connector" }), [
+        makeChunk("forbidden", 0, "alpha alpha alpha alpha alpha alpha")
+      ])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      isAuthorized: (s) => s.connectorId !== "revoked-connector"
+    });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["allowed"]);
+    expect(result.citations.some((c) => c.sourceId === "forbidden")).toBe(false);
+  });
 });
 
 describe("retrieve — lifecycle exclusion", () => {
@@ -486,6 +559,19 @@ describe("retrieve — lifecycle exclusion", () => {
     ];
     const result = await retrieve(sources, { query: "alpha" });
     expect(result.citations.map((c) => c.sourceId)).toEqual(["ok"]);
+  });
+
+  it("excludes removed (deletedAt) sources before scoring even when they match best", async () => {
+    const sources = [
+      src(makeSource({ id: "removed", title: "Removed doc", deletedAt: "2026-09-01T00:00:00.000Z" }), [
+        makeChunk("removed", 0, "alpha alpha alpha alpha alpha")
+      ]),
+      src(makeSource({ id: "live", title: "Live doc" }), [
+        makeChunk("live", 0, "alpha")
+      ])
+    ];
+    const result = await retrieve(sources, { query: "alpha" });
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["live"]);
   });
 });
 
@@ -502,6 +588,47 @@ describe("retrieve — deterministic tie-breaking", () => {
     // All have identical lexical scores; Alpha (title) sorts before Beta.
     expect(result.citations[0].sourceId).toBe("a");
     expect(result.citations[0].chunkId).toBe("a#0");
+  });
+
+  it("ties order by code-unit order, not the runtime locale", async () => {
+    // Hybrid mode: chunk A ranks 0 lexically and 1 semantically; chunk B ranks
+    // 1 lexically and 0 semantically — both fuse to 1/(60+0)+1/(60+1), a true
+    // equal-score tie resolved by the title tie-break.
+    const sources = [
+      src(makeSource({ id: "lower", title: "alpha" }), [
+        makeChunk("lower", 0, "alpha alpha alpha", { embedding: [0, 1], embeddingModel: "fix" })
+      ]),
+      src(makeSource({ id: "upper", title: "Alpha" }), [
+        makeChunk("upper", 0, "alpha", { embedding: [1, 0], embeddingModel: "fix" })
+      ])
+    ];
+    const result = await retrieve(sources, {
+      query: "alpha",
+      embeddingProvider: { id: "fix", embedTexts: async () => [[1, 0]] }
+    });
+    // The tie-break must use code-unit order (uppercase first), never
+    // localeCompare, which flips this on different ICU locales.
+    expect(result.mode).toBe("hybrid");
+    expect(result.citations[0].sourceId).toBe("upper");
+    expect(result.citations.map((c) => c.sourceId)).toEqual(["upper", "lower"]);
+  });
+
+  it("produces byte-identical ordering across repeated runs of equal-score inputs", async () => {
+    const sources = () => [
+      src(makeSource({ id: "b", title: "Beta" }), [
+        makeChunk("b", 0, "alpha"),
+        makeChunk("b", 1, "alpha"),
+        makeChunk("b", 2, "alpha")
+      ]),
+      src(makeSource({ id: "a", title: "Alpha" }), [
+        makeChunk("a", 0, "alpha"),
+        makeChunk("a", 1, "alpha")
+      ]),
+      src(makeSource({ id: "c", title: "Gamma" }), [makeChunk("c", 0, "alpha")])
+    ];
+    const first = await retrieve(sources(), { query: "alpha", limit: 20 });
+    const second = await retrieve(sources(), { query: "alpha", limit: 20 });
+    expect(second.citations).toEqual(first.citations);
   });
 });
 
