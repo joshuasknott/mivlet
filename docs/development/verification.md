@@ -22,7 +22,7 @@ The Windows Bun dependency is optional on other operating systems; Windows host
 builds still fail if it is absent. These tests never substitute a Linux host.
 
 Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
-on the scheduled full workflow. Installer generation remains manual in the Windows
+nightly at 03:17 UTC. Installer generation remains manual in the Windows
 preview artifact workflow. Its artifacts are accessible to repository readers;
 the channel label does not make an artifact private. Cargo and cargo-audit are cached.
 

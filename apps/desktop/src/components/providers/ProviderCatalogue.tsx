@@ -8,7 +8,7 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { TerminalWindow } from "@phosphor-icons/react/dist/csr/TerminalWindow";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   BackendAuthState,
   BackendProvider,
@@ -542,9 +542,9 @@ function ProviderConnectionModal({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (selectedMethodId) {
-      window.requestAnimationFrame(() => backRef.current?.focus());
+      backRef.current?.focus();
     }
   }, [selectedMethodId]);
 
