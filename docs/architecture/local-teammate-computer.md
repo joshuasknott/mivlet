@@ -142,6 +142,7 @@ tool execution support. Image input metadata alone cannot enable screenshots.
 | Direct OpenAI API | Chat Completions tool results remain together; native code inserts a labelled `image_url` user message immediately after them | `gpt-5.2`, `gpt-5`, `gpt-4.1` with current tool/vision capability and route checks |
 | Direct Anthropic API | Native base64 PNG inside the exact `tool_result`; parallel results share one following user message | `claude-sonnet-4-6`, `claude-opus-4-8` with current tool/vision capability and route checks |
 | Direct xAI API | OpenAI-compatible Chat Completions image message after all tool results | `grok-4` with current tool/vision capability and route checks |
+| Direct OpenRouter API | Text/tool transport over the OpenAI-compatible chat route; the model id selects the exact OpenRouter route and Mivlet adds no fallback | Unavailable pending route-specific verification, even when model metadata lists image input |
 | Custom API endpoint | Text/tool transport; endpoint configuration establishes neither image support nor an audited image profile | Unavailable, even when model metadata claims vision |
 | Managed Claude, Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
 | Antigravity ACP | Text prompts and provider-owned permission decisions; sessions currently register no Mivlet MCP servers | Unavailable for the same bridge reason |

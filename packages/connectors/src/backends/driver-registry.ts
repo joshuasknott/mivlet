@@ -87,6 +87,14 @@ export const BUILT_IN_PROVIDER_DRIVERS: readonly ProviderDriverDefinition[] = [
       resolveNativeProvider("deepseek", authState),
   },
   {
+    driverKind: "native-api",
+    defaultInstanceId: "openrouter",
+    familyId: "openrouter",
+    category: "api",
+    createProvider: (authState = "needs-auth") =>
+      resolveNativeProvider("openrouter", authState),
+  },
+  {
     driverKind: "cursor-acp",
     defaultInstanceId: "cursor",
     familyId: "cursor",

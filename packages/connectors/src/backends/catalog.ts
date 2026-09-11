@@ -24,7 +24,7 @@ export interface ManagedProviderCatalogEntry {
   models: BackendCatalogModel[];
 }
 
-export type NativeProviderId = "openai" | "anthropic" | "xai" | "deepseek" | "custom";
+export type NativeProviderId = "openai" | "anthropic" | "xai" | "deepseek" | "openrouter" | "custom";
 
 export interface NativeProviderCatalogEntry {
   providerId: NativeProviderId;
@@ -143,6 +143,14 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
       { id: "deepseek-flash", label: "DeepSeek Flash" },
       { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
     ],
+  },
+  {
+    providerId: "openrouter",
+    label: "OpenRouter",
+    description:
+      "Connect one OpenRouter API key to hundreds of models. The model id selects the exact route; OpenRouter performs its own downstream provider routing.",
+    authLabel: "OpenRouter API key",
+    models: [],
   },
   {
     providerId: "custom",

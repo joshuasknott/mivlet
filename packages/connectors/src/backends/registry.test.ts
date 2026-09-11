@@ -17,6 +17,7 @@ describe("provider registry", () => {
       "grok",
       "xai",
       "deepseek",
+      "openrouter",
       "cursor",
       "opencode",
       "custom",

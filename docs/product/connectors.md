@@ -35,6 +35,7 @@ The supported catalogue is intentionally small:
 | OpenCode   | Existing OpenCode provider config  | Mivlet-owned loopback server           |
 | xAI        | API key                            | Embedded OpenCode host, native keys    |
 | DeepSeek   | API key                            | Embedded OpenCode host, non-thinking mode |
+| OpenRouter | API key                            | Embedded OpenCode host, discovered model routes |
 | Custom API | API key, HTTPS base URL, and model | Embedded OpenCode host, native keys    |
 
 Codex owns its browser session. Antigravity owns its Google session in an

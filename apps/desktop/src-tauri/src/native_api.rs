@@ -75,6 +75,18 @@ const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
         models_endpoint: Some("https://api.deepseek.com/models"),
         auth_required: true,
     },
+    // OpenRouter speaks the OpenAI-compatible chat wire. The model id selects
+    // the exact route (provider slug, plus :free/:floor/:extended variants or
+    // the openrouter/auto router); OpenRouter performs its own downstream
+    // provider selection for that id. Mivlet adds no fallback of its own.
+    // Optional app-attribution headers (HTTP-Referer / X-OpenRouter-Title) are
+    // deliberately not sent: Mivlet does not identify the app to OpenRouter.
+    OpenAiCompatProfile {
+        id: "openrouter",
+        chat_endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        models_endpoint: Some("https://openrouter.ai/api/v1/models"),
+        auth_required: true,
+    },
 ];
 
 fn openai_compat_profile(provider_id: &str) -> Option<&'static OpenAiCompatProfile> {
@@ -407,6 +419,7 @@ struct OpenAiCompatibleTerminalObservation {
     /// emits a separate usage-only chunk; this flag accepts the DeepSeek shape
     /// while keeping the shared shape strict.
     usage_rides_terminal_chunk: bool,
+    repeated_finish_usage: bool,
 }
 
 impl OpenAiCompatibleTerminalObservation {
@@ -415,6 +428,7 @@ impl OpenAiCompatibleTerminalObservation {
             capture_output,
             cumulative_output: false,
             usage_rides_terminal_chunk: provider_id == "deepseek",
+            repeated_finish_usage: provider_id == "openrouter",
             ..Self::default()
         }
     }
@@ -433,6 +447,27 @@ impl OpenAiCompatibleTerminalObservation {
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
             .is_some();
+        // OpenRouter repeats the terminal reason in its one final accounting
+        // frame. Accept only a content-free frame with the same reason and
+        // usage; later content, conflicting reasons and duplicate usage fail.
+        let accounting_frame = self.repeated_finish_usage
+            && terminal_was_seen
+            && !usage_was_seen
+            && value.get("usage").is_some_and(|usage| !usage.is_null())
+            && value
+                .pointer("/choices/0/finish_reason")
+                .and_then(serde_json::Value::as_str)
+                == self.finish_reason.as_deref()
+            && value
+                .pointer("/choices/0/delta")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|delta| {
+                    delta.iter().all(|(key, value)| match key.as_str() {
+                        "content" => value.is_null() || value.as_str() == Some(""),
+                        "role" => value.is_null() || value.as_str() == Some("assistant"),
+                        _ => false,
+                    })
+                });
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
@@ -486,7 +521,7 @@ impl OpenAiCompatibleTerminalObservation {
         let content = value
             .pointer("/choices/0/delta/content")
             .and_then(serde_json::Value::as_str);
-        if terminal_was_seen && content.is_some() {
+        if terminal_was_seen && content.is_some() && !accounting_frame {
             self.provider_error = true;
         }
         if self.capture_output {
@@ -500,7 +535,7 @@ impl OpenAiCompatibleTerminalObservation {
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
         {
-            if terminal_was_seen {
+            if terminal_was_seen && !accounting_frame {
                 self.provider_error = true;
             } else {
                 self.finish_reason = Some(reason.to_string());
@@ -967,7 +1002,14 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "xai", "deepseek", "custom"];
+const NATIVE_PROVIDER_IDS: [&str; 6] = [
+    "openai",
+    "anthropic",
+    "xai",
+    "deepseek",
+    "openrouter",
+    "custom",
+];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1521,12 +1563,25 @@ pub fn models_endpoint_for(provider_id: &str) -> Result<String, String> {
 }
 
 /// A discovered model id surfaced back to JavaScript. No capability data is
-/// invented here — the TS merge step attaches catalogue capabilities where known.
+/// invented here — the TS merge step attaches catalogue capabilities where
+/// known, and OpenRouter discovery carries the model's own bounded metadata.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredModel {
     pub id: String,
     pub available: bool,
+    /// Provider-reported display name (OpenRouter `name`), bounded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Provider-reported capabilities mapped into the Mivlet capability
+    /// vocabulary, bounded and validated by this boundary. Only fields the
+    /// provider metadata substantiates are present; unknown stays absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
+    /// Provider-reported reasoning levels mapped into the Mivlet reasoning
+    /// contract, bounded and validated by this boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1565,11 +1620,147 @@ fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -
     .any(|marker| normalized.contains(marker))
 }
 
+/// OpenRouter reasoning-effort vocabulary (documented `ReasoningEffort` enum).
+const OPENROUTER_REASONING_EFFORTS: [&str; 7] =
+    ["max", "xhigh", "high", "medium", "low", "minimal", "none"];
+
+/// Bounds accepted by the embedded host context budget validation.
+const OPENROUTER_CONTEXT_MIN: u64 = 1_024;
+const OPENROUTER_CONTEXT_MAX: u64 = 2_000_000;
+
+/// Map OpenRouter model metadata into Mivlet's bounded capability vocabulary.
+///
+/// Truth rules (sources: openrouter.ai/docs/api/api-reference/models and the
+/// live GET /api/v1/models shape):
+///   - contextWindow from `context_length` (bounded; absent when unknown).
+///   - tools only when `supported_parameters` lists both `tools` and
+///     `tool_choice` — a model without tool support never inherits it.
+///   - structuredOutput only when `structured_outputs` is listed.
+///   - vision is deliberately never advertised: the OpenRouter metadata lists
+///     `image` input for many models, but Mivlet's OpenRouter route has no
+///     verified image-egress protocol (native screenshot delivery and image
+///     turns both fail closed on this route).
+///   - reasoning is advertised only when the `reasoning` object and
+///     `reasoning_effort` parameter are both present (see
+///     [`openrouter_reasoning`]).
+///
+/// Unknown metadata produces no field — unknown is never treated as capable.
+fn openrouter_capabilities(model: &serde_json::Value) -> Option<serde_json::Value> {
+    let context = model
+        .get("context_length")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| (OPENROUTER_CONTEXT_MIN..=OPENROUTER_CONTEXT_MAX).contains(value));
+    let parameters = model
+        .get("supported_parameters")
+        .and_then(serde_json::Value::as_array);
+    let supports = |name: &str| {
+        parameters.is_some_and(|list| list.iter().any(|entry| entry.as_str() == Some(name)))
+    };
+    let tools = supports("tools") && supports("tool_choice");
+    let structured = supports("structured_outputs");
+    let mut capabilities = serde_json::json!({ "streaming": true });
+    if let Some(context) = context {
+        capabilities["contextWindow"] = serde_json::json!(context);
+    }
+    if tools {
+        capabilities["tools"] = serde_json::json!(true);
+    }
+    if structured {
+        capabilities["structuredOutput"] = serde_json::json!(true);
+    }
+    if openrouter_reasoning(model).is_some() {
+        capabilities["reasoning"] = serde_json::json!(true);
+    }
+    Some(capabilities)
+}
+
+/// Map OpenRouter `reasoning` metadata into the Mivlet reasoning contract.
+/// Only models that list `reasoning_effort` as a supported parameter and carry
+/// a non-empty allowlist of recognized effort levels advertise levels; a
+/// `null` allowlist ("all gateway effort values accepted") stays unadvertised
+/// so Mivlet never rejects a valid level it does not know.
+fn openrouter_reasoning(model: &serde_json::Value) -> Option<serde_json::Value> {
+    let reasoning = model.get("reasoning")?;
+    if reasoning.is_null() {
+        return None;
+    }
+    let supports = |name: &str| {
+        model
+            .get("supported_parameters")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|list| list.iter().any(|entry| entry.as_str() == Some(name)))
+    };
+    if !supports("reasoning_effort") {
+        return None;
+    }
+    let efforts: Vec<String> = reasoning
+        .get("supported_efforts")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|effort| OPENROUTER_REASONING_EFFORTS.contains(effort))
+        .take(8)
+        .map(str::to_string)
+        .collect();
+    if efforts.is_empty() {
+        return None;
+    }
+    let default = reasoning
+        .get("default_effort")
+        .and_then(serde_json::Value::as_str)
+        .filter(|effort| efforts.iter().any(|known| known == effort))
+        .map(str::to_string);
+    let mut result = serde_json::json!({ "supportedEfforts": efforts });
+    if let Some(default) = default {
+        result["defaultEffort"] = serde_json::json!(default);
+    }
+    Some(result)
+}
+
+/// Bounded display name from OpenRouter `name`, or None when absent/unclean.
+fn openrouter_label(model: &serde_json::Value) -> Option<String> {
+    let label = model
+        .get("name")
+        .and_then(serde_json::Value::as_str)?
+        .trim();
+    if label.is_empty() || label.chars().count() > 240 {
+        return None;
+    }
+    Some(label.to_string())
+}
+
+/// A `~` "latest alias" entry resolves to a different model over time and has
+/// no stable identity of its own; only the canonical rows are surfaced.
+fn is_openrouter_alias(model: &serde_json::Value, id: &str) -> bool {
+    id.starts_with('~')
+        || model
+            .get("alias_target")
+            .is_some_and(|target| !target.is_null())
+}
+
+/// OpenRouter chat-completions models produce text; non-text output rows
+/// (image/embedding/audio generation) have no chat-completions route.
+fn is_openrouter_text_output(model: &serde_json::Value) -> bool {
+    model
+        .get("architecture")
+        .and_then(|architecture| architecture.get("output_modalities"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|modalities| {
+            modalities
+                .iter()
+                .any(|modality| modality.as_str() == Some("text"))
+        })
+}
+
 /// Extract model ids from a list-models JSON body across provider shapes. Pure
 /// helper so the per-provider parsing contract is unit-tested without a socket.
 ///
 /// Recognized shapes:
-///   - OpenAI / xAI / OpenRouter: `{ "data": [{ "id": "..." }] }`
+///   - OpenAI / xAI: `{ "data": [{ "id": "..." }] }`
+///   - OpenRouter: `{ "data": [{ "id", "name", "context_length",
+///     "architecture", "supported_parameters", "reasoning" }] }` — the same
+///     `data` array, with bounded per-model capability metadata attached and
+///     unstable `~` alias rows and non-text-output rows filtered out.
 ///   - Anthropic: `{ "data": [{ "id": "..." }] }`
 ///   - Gemini: `{ "models": [{ "name": "models/gemini-...", "supportedGenerationMethods": [...] }] }`
 pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<DiscoveredModel> {
@@ -1598,6 +1789,9 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
                     out.push(DiscoveredModel {
                         id,
                         available: true,
+                        label: None,
+                        capabilities: None,
+                        reasoning: None,
                     });
                 }
             }
@@ -1621,9 +1815,27 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
             if !is_generation_model(provider_id, model, id) {
                 continue;
             }
+            if provider_id == "openrouter" {
+                // Unstable aliases and non-chat output rows are not selectable
+                // routes for Mivlet's chat-completions transport.
+                if is_openrouter_alias(model, id) || !is_openrouter_text_output(model) {
+                    continue;
+                }
+                out.push(DiscoveredModel {
+                    id: id.to_string(),
+                    available: true,
+                    label: openrouter_label(model),
+                    capabilities: openrouter_capabilities(model),
+                    reasoning: openrouter_reasoning(model),
+                });
+                continue;
+            }
             out.push(DiscoveredModel {
                 id: id.to_string(),
                 available: true,
+                label: None,
+                capabilities: None,
+                reasoning: None,
             });
         }
     }
@@ -1637,6 +1849,24 @@ fn discovery_cursor(provider_id: &str, body: &serde_json::Value) -> Option<Strin
             .and_then(|value| value.as_str())
             .map(str::to_string)
             .filter(|value| !value.is_empty());
+    }
+    if provider_id == "openrouter" {
+        // OpenRouter paginates with `links.next` (e.g. "/api/v1/models?offset=500&limit=500").
+        // Only the bounded offset value is trusted; the path itself is pinned
+        // to the known models endpoint.
+        let next = body
+            .get("links")
+            .and_then(|links| links.get("next"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let offset = next
+            .strip_prefix("/api/v1/models?offset=")
+            .or_else(|| next.strip_prefix("?offset="));
+        return offset
+            .and_then(|rest| rest.split('&').next())
+            .filter(|value| !value.is_empty() && value.len() <= 20)
+            .map(str::to_string)
+            .filter(|value| value.chars().all(|character| character.is_ascii_digit()));
     }
     if body.get("has_more").and_then(|value| value.as_bool()) != Some(true) {
         return None;
@@ -1674,6 +1904,9 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
             models: vec![DiscoveredModel {
                 id: custom.model_id,
                 available: true,
+                label: None,
+                capabilities: None,
+                reasoning: None,
             }],
             message: Some("Using the model ID configured for this custom endpoint.".to_string()),
         });
@@ -1708,6 +1941,9 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
         if let Some(cursor_value) = cursor.as_deref() {
             let key = if provider_kind(&provider_id) == ProviderKind::Gemini {
                 "pageToken"
+            } else if provider_id == "openrouter" {
+                // OpenRouter paginates with an offset into the full catalog.
+                "offset"
             } else if provider_kind(&provider_id) == ProviderKind::Anthropic {
                 "after_id"
             } else {
@@ -2077,7 +2313,11 @@ mod transport_policy_tests {
             models_endpoint_for("xai").unwrap(),
             "https://api.x.ai/v1/models"
         );
-        assert!(models_endpoint_for("openrouter").is_err());
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert!(models_endpoint_for("unknown").is_err());
     }
 
     #[test]
@@ -2211,6 +2451,229 @@ mod transport_policy_tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["gpt-5", "gpt-4.1"]);
         assert!(models.iter().all(|m| m.available));
+    }
+
+    #[test]
+    fn openrouter_profile_uses_bearer_auth_and_documented_endpoints() {
+        assert_eq!(
+            endpoint_for("openrouter"),
+            "https://openrouter.ai/api/v1/chat/completions"
+        );
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert_eq!(
+            auth_header_for("openrouter", "sk-test"),
+            ("Authorization".to_string(), "Bearer sk-test".to_string())
+        );
+        assert!(extra_headers("openrouter").is_empty());
+        assert!(
+            resolve_provider_connection("openrouter", "sk-test", "openai/gpt-4.1")
+                .unwrap()
+                .auth_header
+                .is_some()
+        );
+    }
+
+    fn openrouter_model(id: &str, overrides: serde_json::Value) -> serde_json::Value {
+        let mut model = serde_json::json!({
+            "id": id,
+            "canonical_slug": id,
+            "name": "Fixture Model",
+            "context_length": 200_000,
+            "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+            "supported_parameters": ["max_tokens", "tools", "tool_choice", "structured_outputs", "reasoning_effort"],
+            "top_provider": { "max_completion_tokens": 32_768, "is_moderated": false },
+        });
+        if let Some(object) = model.as_object_mut() {
+            for (key, value) in overrides.as_object().expect("overrides must be an object") {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        model
+    }
+
+    #[test]
+    fn openrouter_discovery_maps_bounded_capabilities_from_provider_metadata() {
+        let body = serde_json::json!({
+            "data": [
+                openrouter_model("anthropic/claude-sonnet-4.6", serde_json::json!({
+                    "reasoning": { "mandatory": false, "default_enabled": true, "supported_efforts": ["max", "high", "medium", "low"], "default_effort": "medium" },
+                    "architecture": { "input_modalities": ["text", "image"], "output_modalities": ["text"] },
+                })),
+                openrouter_model("deepseek/deepseek-chat:free", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "reasoning_effort", "reasoning"],
+                    "reasoning": { "mandatory": false, "default_enabled": true, "supported_efforts": null },
+                })),
+                openrouter_model("mystery/unlisted", serde_json::json!({
+                    "supported_parameters": ["max_tokens"],
+                    "context_length": null,
+                })),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        assert_eq!(models.len(), 3);
+
+        let capable = models
+            .iter()
+            .find(|model| model.id == "anthropic/claude-sonnet-4.6")
+            .unwrap();
+        assert_eq!(capable.label.as_deref(), Some("Fixture Model"));
+        let capabilities = capable.capabilities.as_ref().unwrap();
+        assert_eq!(capabilities["streaming"], true);
+        assert_eq!(capabilities["contextWindow"], 200_000);
+        assert_eq!(capabilities["tools"], true);
+        assert_eq!(capabilities["structuredOutput"], true);
+        assert_eq!(capabilities["reasoning"], true);
+        // Image input is documented for this model, but the Mivlet route has no
+        // verified image-egress protocol: vision is never advertised.
+        assert!(capabilities.get("vision").is_none());
+        let reasoning = capable.reasoning.as_ref().unwrap();
+        assert_eq!(
+            reasoning["supportedEfforts"],
+            serde_json::json!(["max", "high", "medium", "low"])
+        );
+        assert_eq!(reasoning["defaultEffort"], "medium");
+
+        // A null effort allowlist means "all gateway efforts accepted"; Mivlet
+        // does not advertise a level list it could not validate, so reasoning
+        // stays entirely unknown for this model.
+        let unrestricted = models
+            .iter()
+            .find(|model| model.id == "deepseek/deepseek-chat:free")
+            .unwrap();
+        assert!(unrestricted.reasoning.is_none());
+        assert!(unrestricted
+            .capabilities
+            .as_ref()
+            .unwrap()
+            .get("reasoning")
+            .is_none());
+
+        // Unknown metadata stays unknown: only streaming is claimed.
+        let unknown = models
+            .iter()
+            .find(|model| model.id == "mystery/unlisted")
+            .unwrap();
+        assert_eq!(
+            unknown.capabilities.as_ref().unwrap(),
+            &serde_json::json!({ "streaming": true })
+        );
+        assert!(unknown.reasoning.is_none());
+    }
+
+    #[test]
+    fn openrouter_discovery_rejects_unstable_aliases_and_non_chat_output_rows() {
+        let body = serde_json::json!({
+            "data": [
+                // "Latest alias" rows resolve to a different model over time.
+                openrouter_model("~openai/gpt-sol-latest", serde_json::json!({
+                    "alias_target": { "name": "OpenAI: GPT Sol", "slug": "openai/gpt-5.6-sol" },
+                })),
+                openrouter_model("openai/gpt-sol-latest", serde_json::json!({
+                    "alias_target": { "name": "OpenAI: GPT Sol", "slug": "openai/gpt-5.6-sol" },
+                })),
+                // Image-output rows have no chat-completions route.
+                openrouter_model("openai/gpt-image-1", serde_json::json!({
+                    "architecture": { "input_modalities": ["text"], "output_modalities": ["image"] },
+                })),
+                // Embedding rows are filtered by the generation-model markers.
+                openrouter_model("openai/text-embedding-3-large", serde_json::json!({
+                    "architecture": { "input_modalities": ["text"], "output_modalities": ["embeddings"] },
+                })),
+                openrouter_model("openai/gpt-4.1", serde_json::json!({})),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "openai/gpt-4.1");
+    }
+
+    #[test]
+    fn openrouter_tools_require_both_tool_parameters_and_reasoning_requires_effort_parameter() {
+        let body = serde_json::json!({
+            "data": [
+                openrouter_model("provider/tools-only", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tools"],
+                })),
+                openrouter_model("provider/tool-choice-only", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tool_choice"],
+                })),
+                openrouter_model("provider/reasoning-no-param", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tools", "tool_choice"],
+                    "reasoning": { "mandatory": false, "supported_efforts": ["high", "low"], "default_effort": "low" },
+                })),
+                openrouter_model("provider/out-of-bound-context", serde_json::json!({
+                    "context_length": 20_000_000,
+                })),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        let by_id: std::collections::HashMap<&str, &DiscoveredModel> = models
+            .iter()
+            .map(|model| (model.id.as_str(), model))
+            .collect();
+        assert_eq!(
+            by_id["provider/tools-only"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("tools"),
+            None
+        );
+        assert_eq!(
+            by_id["provider/tool-choice-only"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("tools"),
+            None
+        );
+        // Reasoning requires the `reasoning_effort` parameter in addition to
+        // the reasoning object; without it no effort levels are advertised.
+        assert_eq!(by_id["provider/reasoning-no-param"].reasoning, None);
+        assert_eq!(
+            by_id["provider/reasoning-no-param"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("reasoning"),
+            None
+        );
+        // Out-of-bound context metadata is dropped, not trusted.
+        assert_eq!(
+            by_id["provider/out-of-bound-context"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("contextWindow"),
+            None
+        );
+    }
+
+    #[test]
+    fn openrouter_discovery_cursor_follows_only_bounded_offset_links() {
+        let with_offset =
+            serde_json::json!({ "links": { "next": "/api/v1/models?offset=500&limit=500" } });
+        assert_eq!(
+            discovery_cursor("openrouter", &with_offset).as_deref(),
+            Some("500")
+        );
+        let bare_offset = serde_json::json!({ "links": { "next": "?offset=100" } });
+        assert_eq!(
+            discovery_cursor("openrouter", &bare_offset).as_deref(),
+            Some("100")
+        );
+        for hostile in [
+            serde_json::json!({ "links": { "next": "https://evil.example/models?offset=500" } }),
+            serde_json::json!({ "links": { "next": "/api/v1/models?offset=abc" } }),
+            serde_json::json!({ "links": { "next": null } }),
+            serde_json::json!({ "links": {} }),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(discovery_cursor("openrouter", &hostile), None);
+        }
     }
 
     #[test]
@@ -2585,5 +3048,57 @@ mod deepseek_egress_tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["deepseek-flash", "deepseek-v4-pro"]);
         assert!(models.iter().all(|m| m.available));
+    }
+}
+
+#[cfg(test)]
+mod openrouter_accounting_tests {
+    use super::*;
+
+    fn terminal_usage(reason: &str, content: &str) -> String {
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": {"content": content, "role": "assistant"}, "finish_reason": reason}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2}
+        }).to_string()
+    }
+
+    fn finished(provider: &str) -> OpenAiCompatibleTerminalObservation {
+        let mut observed = OpenAiCompatibleTerminalObservation::new_for_provider(provider, true);
+        observed.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        observed.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        observed
+    }
+
+    #[test]
+    fn accepts_documented_openrouter_accounting_frame() {
+        let mut observed = finished("openrouter");
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(observed.clean_stop());
+        assert_eq!(observed.output, "Hello");
+        assert_eq!(observed.usage, Some((7, 2)));
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(
+            !observed.clean_stop(),
+            "duplicate accounting frame must fail"
+        );
+    }
+
+    #[test]
+    fn accounting_exception_rejects_content_conflicts_and_other_providers() {
+        for (provider, reason, content) in [
+            ("openrouter", "stop", "late"),
+            ("openrouter", "length", ""),
+            ("openai", "stop", ""),
+        ] {
+            let mut observed = finished(provider);
+            observed.observe(&terminal_usage(reason, content));
+            assert!(!observed.clean_stop());
+        }
+        let mut early = OpenAiCompatibleTerminalObservation::new_for_provider("openrouter", true);
+        early.observe(&terminal_usage("stop", ""));
+        assert!(!early.clean_stop());
+        let mut no_usage = finished("openrouter");
+        no_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!no_usage.clean_stop());
     }
 }

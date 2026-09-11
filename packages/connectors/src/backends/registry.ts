@@ -12,6 +12,7 @@ export const BACKEND_PROVIDER_IDS = [
   "grok",
   "xai",
   "deepseek",
+  "openrouter",
   "cursor",
   "opencode",
   "custom"

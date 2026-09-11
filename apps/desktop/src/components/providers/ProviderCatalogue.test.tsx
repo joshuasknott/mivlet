@@ -81,6 +81,7 @@ describe("provider families", () => {
       "deepseek",
       "openai",
       "opencode",
+      "openrouter",
       "xai",
     ]);
     expect(

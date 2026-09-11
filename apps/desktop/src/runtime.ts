@@ -1678,7 +1678,9 @@ export async function cancelRuntimeCompletion(requestId: string) {
 export interface RuntimeDiscoveredModel {
   id: string;
   available: boolean;
+  label?: string;
   capabilities?: import("@fable/protocol").ModelCapabilities;
+  reasoning?: import("@fable/protocol").BackendModel["reasoning"];
 }
 
 export interface RuntimeModelDiscoveryResult {
