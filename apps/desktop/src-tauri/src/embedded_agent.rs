@@ -188,7 +188,8 @@ pub(crate) fn host_command(app: &AppHandle) -> Result<(Command, File, tempfile::
 pub async fn start_embedded_agent(app: AppHandle, input: StartRequest) -> Result<(), String> {
     crate::execution_control::ensure_active_execution_allowed()?;
     if !valid_id(&input.request_id)
-        || !["openai", "anthropic", "xai", "custom"].contains(&input.provider_id.as_str())
+        || !["openai", "anthropic", "xai", "openrouter", "custom"]
+            .contains(&input.provider_id.as_str())
         || !(1..=32).contains(&input.max_turns)
         || !(1..=80).contains(&input.max_tool_calls)
         || !(1_024..=2_000_000).contains(&input.context_window)

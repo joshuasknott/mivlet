@@ -16,6 +16,7 @@ describe("provider registry", () => {
       "antigravity",
       "grok",
       "xai",
+      "openrouter",
       "cursor",
       "opencode",
       "custom",

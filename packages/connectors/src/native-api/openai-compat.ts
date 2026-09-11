@@ -76,11 +76,12 @@ interface OpenAiStreamState {
   toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
 }
 
-function newOpenAiStreamState(): OpenAiStreamState {
+/** Create fresh per-stream state. */
+export function newOpenAiStreamState(): OpenAiStreamState {
   return { toolCalls: new Map() };
 }
 
-function parseOpenAiStreamLine(
+export function parseOpenAiStreamLine(
   providerId: string,
   line: string,
   state: OpenAiStreamState

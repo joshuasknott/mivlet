@@ -221,6 +221,20 @@ const CATALOG: &[BackendCatalogEntry] = &[
         recommended: false,
     },
     BackendCatalogEntry {
+        id: "openrouter",
+        driver_kind: "native-api",
+        backend_type: "native-api",
+        label: "OpenRouter",
+        description: "Reach hundreds of models through one OpenRouter API key. Mivlet owns the agent loop, tool dispatch, and approvals; the model id selects the exact route.",
+        install_hint: "",
+        models: &[],
+        capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "OpenRouter API key",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
+        recommended: false,
+    },
+    BackendCatalogEntry {
         id: "cursor",
         driver_kind: "cursor-acp",
         backend_type: "cursor-acp",
@@ -1715,7 +1729,7 @@ mod provider_route_tests {
     fn live_visual_provider_connection_inventory() {
         use super::BackendCredentialStore;
         let user = super::require_current_internal_user().unwrap();
-        for provider in ["openai", "anthropic", "xai", "custom"] {
+        for provider in ["openai", "anthropic", "xai", "openrouter", "custom"] {
             let present = super::KeyringStore
                 .get(&super::scoped_credential_key(&user, provider))
                 .expect("OS credential store is unavailable")

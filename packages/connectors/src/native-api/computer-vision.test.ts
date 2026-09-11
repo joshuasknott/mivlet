@@ -17,11 +17,12 @@ describe("computer route availability", () => {
   it("audits every registered route without confusing provider-owned tools with Mivlet tools", () => {
     const providers = listBackendProviders().map(provider => ({ ...provider, authState: "connected", capabilities: ["tool-requests"] } as BackendProvider));
     const vision = { id: "vision", label: "Vision", available: true, capabilities: { vision: true, tools: true } };
-    expect(providers.filter(supportsSharedComputerTools).map(p => p.id)).toEqual(["codex", "openai", "anthropic", "xai", "custom"]);
+    expect(providers.filter(supportsSharedComputerTools).map(p => p.id)).toEqual(["codex", "openai", "anthropic", "xai", "openrouter", "custom"]);
     for (const id of ["claude", "cursor", "grok", "opencode", "antigravity"]) {
       expect(computerVisionUnavailableReason(providers.find(p => p.id === id), vision)).toMatch(/no Mivlet computer-tool response bridge/);
     }
     expect(computerVisionUnavailableReason(providers.find(p => p.id === "custom"), vision)).toMatch(/metadata alone/);
+    expect(computerVisionUnavailableReason(providers.find(p => p.id === "openrouter"), vision)).toMatch(/metadata alone/);
     expect(supportsNativeComputerVision("gemini", { ...vision, id: "gemini-3.5-flash" })).toBe(false);
     expect(computerVisionUnavailableReason(providers.find(p => p.id === "codex"), vision)).toBeNull();
   });

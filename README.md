@@ -39,9 +39,12 @@ a deployed or production-validated service.
   Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
   protocol; and OpenCode runs behind a Mivlet-owned authenticated loopback
   server. All six provider-owned routes mediate consequential actions through
-  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI and custom
-  API turns use the bundled OpenCode V2 embedded host, with native credential
-  custody and Mivlet tool approvals. User-image turns retain the audited visual
+  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI, OpenRouter
+  and custom API turns use the bundled OpenCode V2 embedded host, with native
+  credential custody and Mivlet tool approvals. OpenRouter routes through its
+  OpenAI-compatible API with the exact selected model id; Mivlet adds no
+  fallback, and OpenRouter performs its own documented downstream provider
+  routing. User-image turns retain the audited visual
   wire route; other provider-specific wire adapters remain separate. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.

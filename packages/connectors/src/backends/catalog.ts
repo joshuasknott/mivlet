@@ -24,7 +24,7 @@ export interface ManagedProviderCatalogEntry {
   models: BackendCatalogModel[];
 }
 
-export type NativeProviderId = "openai" | "anthropic" | "xai" | "custom";
+export type NativeProviderId = "openai" | "anthropic" | "xai" | "openrouter" | "custom";
 
 export interface NativeProviderCatalogEntry {
   providerId: NativeProviderId;
@@ -132,6 +132,14 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
     description: "Connect an xAI API key for direct Grok access.",
     authLabel: "xAI API key",
     models: [{ id: "grok-4", label: "Grok 4" }],
+  },
+  {
+    providerId: "openrouter",
+    label: "OpenRouter",
+    description:
+      "Connect one OpenRouter API key to hundreds of models. The model id selects the exact route; OpenRouter performs its own downstream provider routing.",
+    authLabel: "OpenRouter API key",
+    models: [],
   },
   {
     providerId: "custom",
