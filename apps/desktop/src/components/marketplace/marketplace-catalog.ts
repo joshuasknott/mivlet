@@ -69,6 +69,18 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
         "product",
         true,
       ),
+      entry(
+        "atlassian-rovo",
+        "Atlassian Rovo",
+        "Search and summarize across Jira, Confluence, and more",
+        "communication",
+      ),
+      entry(
+        "todoist",
+        "Todoist",
+        "Plan, capture, and track tasks and projects",
+        "product",
+      ),
     ],
   },
   {

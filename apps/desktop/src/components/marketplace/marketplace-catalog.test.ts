@@ -37,6 +37,8 @@ describe("connector marketplace catalogue", () => {
       "notion",
       "vercel",
       "linear",
+      "atlassian-rovo",
+      "todoist",
     ]) {
       expect(entries.has(id)).toBe(true);
     }
