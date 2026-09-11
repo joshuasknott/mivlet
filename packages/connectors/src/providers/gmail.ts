@@ -26,6 +26,12 @@ import {
   googleScopeDescriptions,
   googleScopeIds
 } from "./google-shared";
+import {
+  boundedPreview,
+  buildGmailDraft,
+  gmailTextContent,
+  type GmailPartLike
+} from "./gmail-content";
 
 const GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 const GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose";
@@ -57,16 +63,16 @@ export function normalizeGmailItem(payload: GmailPayload): ConnectorSearchItem {
   return {
     id: payload.id,
     connectorId: "gmail",
-    title: payload.subject || "(No subject)",
+    title: boundedPreview(payload.subject) || "(No subject)",
     kind: "message",
-    summary: `Message from ${payload.from}`,
+    summary: boundedPreview(`Message from ${payload.from}`),
     provenance: "Gmail · selected search result",
     freshness: payload.internalDate ?? "Provider freshness unavailable",
     trust: "untrusted",
-    contentPreview: payload.snippet,
+    contentPreview: boundedPreview(payload.snippet),
     providerMetadata: {
       threadId: payload.threadId,
-      from: payload.from,
+      from: boundedPreview(payload.from),
       labels: (payload.labels ?? []).join(",")
     }
   };
@@ -210,7 +216,21 @@ function gmailWriteRequest(request: ConnectorWriteRequest): ProviderRequest {
   const input = request.input;
   switch (request.capability) {
     case "gmail.create-draft":
-      return { method: "POST", path: "drafts", body: draftBody(input), signal: request.signal };
+      // Drafts go to `users/me/drafts` and are never a send; the request body
+      // is the Draft resource with the raw message built safely (header
+      // injection rejected, UTF-8 base64url, optional threading).
+      return {
+        method: "POST",
+        path: "drafts",
+        body: buildGmailDraft({
+          to: optional(input, "to"),
+          subject: optional(input, "subject"),
+          body: optional(input, "body"),
+          threadId: optional(input, "threadId"),
+          inReplyTo: optional(input, "inReplyTo")
+        }),
+        signal: request.signal
+      };
     case "gmail.send":
       return { method: "POST", path: "messages/send", body: { raw: required(input, "raw") }, signal: request.signal };
     default:
@@ -218,24 +238,18 @@ function gmailWriteRequest(request: ConnectorWriteRequest): ProviderRequest {
   }
 }
 
-function draftBody(input: Record<string, unknown>): JsonObject {
-  const message: JsonObject = {};
-  const headers: string[] = [];
-  const to = optional(input, "to");
-  if (to) headers.push(`To: ${to}`);
-  const subject = optional(input, "subject");
-  if (subject) headers.push(`Subject: ${subject}`);
-  if (headers.length) message.raw = btoa(`${headers.join("\r\n")}\r\n\r\n${optional(input, "body") ?? ""}`);
-  return { message };
-}
-
 function redactGmailObject(value: JsonObject): JsonObject {
   // Strip raw payload bytes and any history/credential-like fields so the
   // knowledge layer only ever sees envelope metadata, not message bodies.
   const copy = { ...value };
+  const payload = isObject(copy.payload) ? (copy.payload as GmailPartLike) : undefined;
+  const preview = payload ? gmailTextContent(payload) : "";
   for (const key of ["raw", "payload", "historyId", "sizeEstimate", "internalDate", "token", "apiKey"]) {
     delete copy[key];
   }
+  if (typeof copy.snippet === "string") copy.snippet = boundedPreview(copy.snippet);
+  // A bounded plaintext preview survives redaction; full bodies never do.
+  if (preview) copy.contentPreview = preview;
   return copy;
 }
 
