@@ -93,10 +93,17 @@ available while work runs. Skills are specific to a teammate and live in that te
 outside Plugins. See the [plugin and daily-driver assessment](daily-driver.md)
 for the proposed Browser and Computer Use plugins and remaining capability gaps.
 Official remote connection routes are also available for Notion, Linear,
-Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, and Granola. These use the
+Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, Atlassian Rovo, and
+Todoist. These use the
 existing native MCP OAuth boundary and provider-hosted endpoints; no broker
 client secret is required when the provider supports public client registration.
-Figma client approval, organization policies, provider plans, and OAuth
+Atlassian Rovo and Todoist authorize through the provider's dynamic client
+registration with a public client; Rovo rate limits, Rovo credit usage, and
+admin controls still apply per site. Asana's official MCP server requires
+pre-registering an OAuth app with a client secret in the Asana developer
+console and does not support dynamic client registration, so it remains on
+manual server configuration in advanced Settings. Figma client approval,
+organization policies, provider plans, and OAuth
 registration requirements still apply. Each detail view links to its provider's
 setup guide. The endpoint registry is
 `apps/desktop/src/components/marketplace/remote-connectors.ts`.
