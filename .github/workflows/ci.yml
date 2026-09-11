@@ -1,32 +1,100 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
 
 jobs:
-  check:
-    runs-on: windows-latest
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.paths.outputs.code }}
+      native: ${{ steps.paths.outputs.native }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/ci/affected.mjs
+
+  typescript:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
-          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm quality
+      - run: pnpm --filter '!@fable/agent-host' -r --if-present test
+      - run: node --test scripts/ci/affected.test.mjs
+
+  windows:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows
       - run: pnpm install --frozen-lockfile
-      - run: pnpm check
+      - run: pnpm --filter @fable/protocol build
+      - run: pnpm --filter @fable/connectors build
+      - run: pnpm --filter @fable/agent-host build
+      - run: pnpm --filter @fable/agent-host test
+      - run: pnpm release:test
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
-      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+
+  check:
+    if: always()
+    needs: [changes, typescript, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every affected job to pass
+        env:
+          CHANGES: ${{ needs.changes.result }}
+          CODE: ${{ needs.changes.outputs.code }}
+          NATIVE: ${{ needs.changes.outputs.native }}
+          TYPESCRIPT: ${{ needs.typescript.result }}
+          WINDOWS: ${{ needs.windows.result }}
+        run: |
+          test "$CHANGES" = success
+          if [ "$CODE" = true ]; then test "$TYPESCRIPT" = success; fi
+          if [ "$NATIVE" = true ]; then test "$WINDOWS" = success; fi

@@ -1,10 +1,10 @@
-name: Windows private artifacts
+name: Windows preview artifacts
 
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: Private artifact channel
+        description: Artifact channel (artifacts are accessible from this repository)
         required: true
         default: private
         type: choice
@@ -19,10 +19,12 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
           version: 10.15.0
@@ -32,7 +34,17 @@ jobs:
           node-version: 24
           cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo install cargo-audit --locked
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows
+      - uses: actions/cache@v4
+        id: audit
+        with:
+          path: ~/.cargo/bin/cargo-audit.exe
+          key: ${{ runner.os }}-cargo-audit-0.22.2
+      - if: steps.audit.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.22.2 --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
