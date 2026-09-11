@@ -99,6 +99,9 @@ export function useModalFocusTrap({
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const releaseModalBackground = claimModalBackground(container);
     const focusInitial = () => {
+      // A click or key action may have already moved focus into the modal.
+      // Do not let this deferred initial focus interrupt that interaction.
+      if (container.contains(document.activeElement)) return;
       const target = initialFocusRef?.current ?? focusableElements(container)[0] ?? container;
       target.focus();
     };
