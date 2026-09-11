@@ -1,6 +1,7 @@
 import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 import type { KnowledgeSource, MemoryRecord, SourceChunk } from "@fable/protocol";
+import { chunkSourceText } from "./ingestion/chunk";
 import { retrieve, type RetrievalSource } from "./retrieval/retrieve";
 import { applyRetention, DEFAULT_RETENTION_POLICY } from "./memory/retention";
 import { detectDuplicate } from "./memory/duplicate";
@@ -89,5 +90,31 @@ describe("knowledge performance baseline guardrails", () => {
     expect(durationMs, `memory retention took ${Math.round(durationMs)} ms`).toBeLessThan(1_500);
     expect(result.prunedIds).toEqual(expect.any(Array));
     expect(Object.keys(result.reasons).length).toBeGreaterThan(0);
+  });
+
+  it("chunks a large bounded markdown document with fences and emoji within a loose guardrail", () => {
+    const section = [
+      "# Section heading",
+      "",
+      "A representative paragraph with mixed sentence boundaries. ",
+      "```ts",
+      "# not a heading",
+      "const value = 1;",
+      "```",
+      "",
+      "Emoji-heavy line: " + "😀".repeat(40) + ".",
+      "日本語のテキスト。".repeat(8),
+      "",
+      "a".repeat(300) + " " + "b".repeat(300)
+    ].join("\n");
+    const text = Array.from({ length: 80 }, (_, i) => `## Sub ${i}\n\n${section}\n`).join("\n");
+
+    const start = performance.now();
+    const chunks = chunkSourceText(text, { sourceId: "perf", type: "markdown" });
+    const durationMs = performance.now() - start;
+
+    console.info(`Markdown chunking ${text.length.toLocaleString()} chars: ${durationMs.toFixed(1)} ms (${chunks.length} chunks)`);
+    expect(chunks.length).toBeGreaterThan(10);
+    expect(durationMs, `chunking took ${Math.round(durationMs)} ms`).toBeLessThan(1_500);
   });
 });
