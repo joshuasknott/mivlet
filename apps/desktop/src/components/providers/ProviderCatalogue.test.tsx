@@ -1,4 +1,5 @@
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -429,6 +430,28 @@ describe("ProviderCatalogue", () => {
     expect(
       within(dialog).queryByText("Connected and verified."),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps endpoint input focus when a method transition frame arrives late", () => {
+    const frames: FrameRequestCallback[] = [];
+    const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const view = renderCatalogue([provider("custom", "Custom provider")]);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: /Custom provider, / }));
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      const dialog = screen.getByRole("dialog", { name: "Custom provider" });
+      fireEvent.click(within(dialog).getByRole("button", { name: /OpenAI-compatible endpoint/ }));
+      const input = within(dialog).getByLabelText("Custom provider base URL");
+      input.focus();
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(input).toHaveFocus();
+    } finally {
+      view.unmount();
+      request.mockRestore();
+    }
   });
 
   it("labels stored direct credentials as configured rather than verified", async () => {

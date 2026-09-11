@@ -10,10 +10,26 @@ before dependent ones. Update affected documentation in the same pull request;
 delete superseded instructions and obsolete tests with the behavior they describe.
 Retain tests for observable behavior, authorization, persistence, and regressions.
 
-CI runs on pull requests to `main` and pushes to `main`. New revisions cancel
-older runs of the same pull request. Local feature-branch pushes need a pull
-request for CI; run focused checks locally before pushing. Require the CI check
-before merging and rerun affected checks after resolving conflicts.
+CI runs on pull requests to `main`, or manually. New revisions cancel older runs
+of the same pull request. There is no duplicate full run on pushes to `main`.
+The required `check` job aggregates affected jobs and fails if any required job
+fails, is cancelled, or unexpectedly skips. Documentation-only PRs skip compilation.
+
+TypeScript changes run types, quality and package tests on Linux. Rust/Tauri,
+embedded host, protocol/connectors, dependency, release and workflow changes also
+run Windows host acceptance, Rust tests, Clippy and formatting with Cargo caching.
+The Windows Bun dependency is optional on other operating systems; Windows host
+builds still fail if it is absent. These tests never substitute a Linux host.
+
+Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
+nightly at 03:17 UTC. Installer generation remains manual in the Windows
+preview artifact workflow. Its artifacts are accessible to repository readers;
+the channel label does not make an artifact private. Cargo and cargo-audit are cached.
+
+While editing a renderer, run desktop typecheck and focused tests; for a package,
+run its build and tests. Run native checks for native changes. Use `pnpm check`
+for release candidates and broad integration work, not every intermediate edit.
+Require the aggregate CI check before merging and rerun affected checks after conflicts.
 
 | Scope | Commands |
 | --- | --- |
