@@ -50,7 +50,7 @@ const write = (
   capability: ConnectorWriteRequest["capability"],
   input: Record<string, unknown>,
   signal?: AbortSignal,
-) => ({
+): ConnectorWriteRequest => ({
   capability,
   input,
   target: "FBL / New issue",
