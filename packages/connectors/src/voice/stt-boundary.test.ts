@@ -150,6 +150,43 @@ describe("browser speech-to-text boundary", () => {
     expect(fixture.recognition().onresult).toBeNull();
   });
 
+  it("includes a final result delivered between stop and natural end", async () => {
+    const fixture = recognitionFixture();
+    const pending = fixture.provider.start();
+    fixture.recognition().emitStart();
+    const session = await pending;
+
+    session.stop();
+    fixture.recognition().emitResult([
+      { transcript: "finalized", final: true }
+    ]);
+    fixture.recognition().emitEnd();
+
+    await expect(session.completion).resolves.toBe("finalized");
+    expect(fixture.recognition().stop).toHaveBeenCalledOnce();
+    session.dispose();
+  });
+
+  it("ignores final results delivered after the recognizer ended", async () => {
+    const fixture = recognitionFixture();
+    const pending = fixture.provider.start();
+    fixture.recognition().emitStart();
+    const session = await pending;
+
+    fixture.recognition().emitResult([
+      { transcript: "committed", final: true }
+    ]);
+    fixture.recognition().emitEnd();
+    fixture.recognition().emitResult(
+      [{ transcript: "late", final: true }],
+      0
+    );
+
+    await expect(session.completion).resolves.toBe("committed");
+    session.dispose();
+    expect(fixture.recognition().onresult).toBeNull();
+  });
+
   it("maps permission denial before start and runtime failures after start", async () => {
     const denied = recognitionFixture();
     const deniedStart = denied.provider.start();
