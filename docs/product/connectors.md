@@ -23,37 +23,45 @@ remote connector sign-in.
 
 The supported catalogue is intentionally small:
 
-| Connection | Method                             | Runtime                           |
-| ---------- | ---------------------------------- | --------------------------------- |
-| Codex      | Official ChatGPT browser sign-in   | Codex app-server                  |
-| Claude     | Official Claude browser sign-in    | Restricted Claude CLI JSON stream|
-| OpenAI     | API key                            | Native OpenAI-compatible adapter  |
-| Anthropic  | API key                            | Native Anthropic Messages adapter |
-| Antigravity| Official Google browser sign-in    | Google Antigravity ACP agent      |
-| Cursor     | Official Cursor browser sign-in    | Cursor ACP agent                  |
-| Grok       | Official Grok browser sign-in      | Grok ACP agent                    |
-| OpenCode   | Existing OpenCode provider config  | Restricted OpenCode JSON stream   |
-| xAI        | API key                            | Native OpenAI-compatible adapter  |
-| Custom API | API key, HTTPS base URL, and model | Native OpenAI-compatible adapter  |
+| Connection | Method                             | Runtime                                |
+| ---------- | ---------------------------------- | -------------------------------------- |
+| Codex      | Official ChatGPT browser sign-in   | Codex app-server                       |
+| Claude     | Claude account via official runtime| Claude Agent SDK stdio, mediated tools |
+| OpenAI     | API key                            | Embedded OpenCode host, native keys    |
+| Anthropic  | API key                            | Embedded OpenCode host, native keys    |
+| Antigravity| Official Google browser sign-in    | Google Antigravity ACP agent           |
+| Cursor     | Official Cursor browser sign-in    | Cursor ACP agent                       |
+| Grok       | Official Grok browser sign-in      | Grok ACP agent                         |
+| OpenCode   | Existing OpenCode provider config  | Mivlet-owned loopback server           |
+| xAI        | API key                            | Embedded OpenCode host, native keys    |
+| Custom API | API key, HTTPS base URL, and model | Embedded OpenCode host, native keys    |
 
 Codex owns its browser session. Antigravity owns its Google session in an
 account-scoped local profile and exposes model turns through ACP; Mivlet pins
 and verifies the downloaded agent, strips ambient Google credentials, and
 mediates every ACP permission request. Cursor and Grok likewise own their
-sessions and expose turns through ACP, but their official runtimes must be
-installed separately. Claude and OpenCode run in deliberately restricted
-conversation modes: tools are disabled or denied until their native permission
-surfaces can be mediated by Mivlet. API credentials stay in the operating-system
-credential store and enter outbound requests only inside Rust. Mivlet does not
-accept browser cookies or private session tokens. A consumer subscription is
-not treated as an API key.
+sessions and expose turns through ACP. Claude runs Anthropic's Agent SDK
+protocol, and OpenCode connects through a Mivlet-owned authenticated loopback
+server with a session event stream. These four runtimes are installed
+separately from their official sources and must be signed in; Mivlet routes
+their tool permission requests through the same exact-approval boundary and
+advertises tool, approval, and file-change capabilities only when the runtime
+and account are connected. Direct API text and tool turns run on the embedded
+OpenCode host bundled with the desktop app; user-image turns keep the audited
+native adapter. API credentials stay in the operating-system credential store
+and enter outbound requests only inside Rust. Mivlet does not accept browser
+cookies or private session tokens. A consumer subscription is not treated as an
+API key.
 
 Custom endpoints must use HTTPS except for loopback development. URLs with
 user info, query strings, or fragments are rejected. Every connection is
 verified before onboarding can finish. The managed Antigravity installer is
 currently available on Windows x64; other platforms fail closed. The other
 provider-owned runtimes are detected from their official local installations
-and fail closed when missing, signed out, or unconfigured.
+and fail closed when missing, signed out, or unconfigured; Codex additionally
+requires the official Codex desktop app components. Direct API turns start only
+when the bundled OpenCode host and its verified manifest are present; packaged
+builds include both.
 
 ## Service connectors
 
@@ -126,8 +134,9 @@ account's consent without an extra approval; external writes require a fresh,
 exact approval with a preview in the conversation. Connector status refreshes
 after turns and when the window regains focus.
 Connector mentions display an inline logo and name while retaining stable IDs
-in stored messages. Codex turns disable host shell tools and provider memories;
-unadvertised tool requests are declined without opening an approval card.
+in stored messages. Codex and embedded OpenCode turns disable host shell tools
+and provider memories; unadvertised tool requests are declined without opening
+an approval card.
 
 Direct API and ChatGPT/Codex agents can use `connector-tools` to discover enabled tool schemas
 and `connector-call` to invoke them. Verified official remote connections are available
