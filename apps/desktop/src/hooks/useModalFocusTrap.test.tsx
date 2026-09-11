@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { useModalFocusTrap } from "./useModalFocusTrap";
 
 function ModalHarness() {
@@ -124,6 +124,25 @@ function NestedModalHarness() {
 }
 
 describe("useModalFocusTrap", () => {
+  it("does not steal focus when the user acts before the initial frame", () => {
+    const frames: FrameRequestCallback[] = [];
+    const request = vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback);
+      return frames.length;
+    });
+    const view = render(<ModalHarness />);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Open modal" }));
+      const last = screen.getByRole("button", { name: "Last action" });
+      last.focus();
+      act(() => frames.splice(0).forEach((callback) => callback(0)));
+      expect(last).toHaveFocus();
+    } finally {
+      view.unmount();
+      request.mockRestore();
+    }
+  });
+
   it("focuses the modal, wraps Tab in both directions, closes on Escape, and restores focus", async () => {
     const user = userEvent.setup();
     render(<ModalHarness />);
