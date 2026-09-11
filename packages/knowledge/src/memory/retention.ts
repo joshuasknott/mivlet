@@ -24,6 +24,25 @@ export const DEFAULT_RETENTION_POLICY: MemoryRetentionPolicy = {
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
+/** Parsed timestamp, or -Infinity for missing/invalid dates so they sort last. */
+function timestampMs(createdAt: string | undefined): number {
+  if (!createdAt) return Number.NEGATIVE_INFINITY;
+  const ms = Date.parse(createdAt);
+  return Number.isNaN(ms) ? Number.NEGATIVE_INFINITY : ms;
+}
+
+/** Both timestamps must parse; only a strictly later instant counts as newer. */
+function isStrictlyNewer(candidate: MemoryRecord, record: MemoryRecord): boolean {
+  const candidateMs = timestampMs(candidate.createdAt);
+  const recordMs = timestampMs(record.createdAt);
+  return Number.isFinite(candidateMs) && Number.isFinite(recordMs) && candidateMs > recordMs;
+}
+
+/** Unknown ownership is treated as the same store context (legacy records). */
+function inSameWorkspace(a: MemoryRecord, b: MemoryRecord): boolean {
+  return !a.workspaceId || !b.workspaceId || a.workspaceId === b.workspaceId;
+}
+
 function isStale(record: MemoryRecord, now: string, staleAfterDays: number): boolean {
   if (!record.createdAt) return false;
   const created = Date.parse(record.createdAt);
@@ -54,9 +73,8 @@ export function applyRetention(
   // isNearIdentical per comparison). Matching math is unchanged.
   const live = memory.filter(isLiveMemory);
   const byRecencyDesc = [...live].sort((a, b) => {
-    const ta = a.createdAt ? Date.parse(a.createdAt) : 0;
-    const tb = b.createdAt ? Date.parse(b.createdAt) : 0;
-    return tb - ta;
+    const diff = timestampMs(b.createdAt) - timestampMs(a.createdAt);
+    return diff !== 0 ? diff : a.id.localeCompare(b.id);
   });
   const normalizedValue = new Map<string, ReturnType<typeof normalizeMemoryValue>>();
   for (const record of live) {
@@ -71,14 +89,16 @@ export function applyRetention(
     const stale = isStale(record, now, policy.staleAfterDays);
     const lowConf = (record.confidence ?? 1) < policy.pruneBelowConfidence;
 
-    // A record is superseded when any NEWER live memory is near-identical.
-    // byRecencyDesc is newest-first, so the first qualifying entry is the
-    // newest duplicate — same result as the original `byRecencyDesc.find`.
+    // A record is superseded when any NEWER live memory in the same workspace
+    // is near-identical. byRecencyDesc is newest-first, so the first qualifying
+    // entry is the newest duplicate — same result as the original
+    // `byRecencyDesc.find`. Missing/invalid dates never count as newer.
     const candidateNorm = normalizedValue.get(record.id)!;
     let supersededBy: MemoryRecord | undefined;
     for (const other of byRecencyDesc) {
       if (other.id === record.id) continue;
-      if ((other.createdAt ?? "") <= (record.createdAt ?? "")) continue;
+      if (!inSameWorkspace(record, other)) continue;
+      if (!isStrictlyNewer(other, record)) continue;
       if (isNearIdenticalNormalized(candidateNorm, normalizedValue.get(other.id)!)) {
         supersededBy = other;
         break;
@@ -86,6 +106,9 @@ export function applyRetention(
     }
 
     if (supersededBy) {
+      // Reported as "superseded", but pruned only when the stale +
+      // low-confidence gates also hold (see the function contract).
+      if (stale && lowConf) prunedIds.push(record.id);
       reasons[record.id] = "superseded";
     } else if (stale && lowConf) {
       prunedIds.push(record.id);
