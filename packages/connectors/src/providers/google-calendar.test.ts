@@ -67,6 +67,23 @@ function calendarAdapter(fetcher: unknown) {
 }
 
 describe("Google Calendar event time shaping (write)", () => {
+  it("preserves PATCH semantics for a title-only update", async () => {
+    const fetcher = vi.fn(async () => response({ id: "evt-1" }));
+    await calendarAdapter(fetcher).write(writeRequest("google-calendar.update-draft", {
+      calendarId: "primary", eventId: "evt-1", title: "Renamed meeting"
+    }, "evt-1"), tokens);
+    expect(fetchInit(fetcher).method).toBe("PATCH");
+    expect(bodyOf(fetcher)).toEqual({ summary: "Renamed meeting" });
+  });
+
+  it("allows updating one event boundary without resending unchanged fields", async () => {
+    const fetcher = vi.fn(async () => response({ id: "evt-1" }));
+    await calendarAdapter(fetcher).write(writeRequest("google-calendar.update-draft", {
+      calendarId: "primary", eventId: "evt-1", end: "2026-06-01T11:00:00Z"
+    }, "evt-1"), tokens);
+    expect(bodyOf(fetcher)).toEqual({ end: { dateTime: "2026-06-01T11:00:00Z" } });
+  });
+
   it("shapes timed events as { dateTime, timeZone } without local conversion", async () => {
     const fetcher = vi.fn(async () => response({ id: "evt-1" }));
     const adapter = calendarAdapter(fetcher);

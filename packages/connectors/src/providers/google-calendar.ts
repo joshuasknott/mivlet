@@ -276,7 +276,7 @@ function googleCalendarWriteRequest(request: ConnectorWriteRequest): ProviderReq
       return { method: "POST", path: calendarEventPath(calendarId), body: eventBody(input), signal: request.signal };
     case "google-calendar.update-draft": {
       const eventId = required(input, "eventId");
-      return { method: "PATCH", path: calendarEventPath(calendarId, eventId), body: eventBody(input), signal: request.signal };
+      return { method: "PATCH", path: calendarEventPath(calendarId, eventId), body: eventBody(input, true), signal: request.signal };
     }
     case "google-calendar.cancel-event": {
       const eventId = required(input, "eventId");
@@ -296,7 +296,7 @@ function calendarEventPath(calendarId: string, eventId?: string): string {
   return eventId ? `${events}/${encodeURIComponent(eventId)}` : events;
 }
 
-function eventBody(input: Record<string, unknown>): JsonObject {
+function eventBody(input: Record<string, unknown>, partial = false): JsonObject {
   const body: JsonObject = {};
   const summary = optional(input, "title") ?? optional(input, "summary");
   if (summary) body.summary = summary;
@@ -316,13 +316,15 @@ function eventBody(input: Record<string, unknown>): JsonObject {
 
   const start = optional(input, "start");
   const end = optional(input, "end");
-  if (!start || !end) {
-    throw new Error("Google Calendar event create/update requires both start and end.");
+  if (!partial && (!start || !end)) {
+    throw new Error("Google Calendar event creation requires both start and end.");
   }
-  assertEventRange(start, end);
+  // PATCH leaves unspecified fields intact. Validate a complete range only
+  // when both endpoints were supplied; Google validates it against stored data.
+  if (start && end) assertEventRange(start, end);
   const timezone = optional(input, "timezone");
-  body.start = eventTime(start, timezone);
-  body.end = eventTime(end, timezone);
+  if (start) body.start = eventTime(start, timezone);
+  if (end) body.end = eventTime(end, timezone);
   return body;
 }
 
