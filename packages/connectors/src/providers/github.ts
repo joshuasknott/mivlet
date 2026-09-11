@@ -118,18 +118,20 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
     revocationEndpoint: new URL("oauth/github/revoke", authBase).toString(),
     scopes: ["read:user", "read:org", "repo"]
   });
-  const http = new ProviderHttpClient("github", options.apiBaseUrl ?? "https://api.github.com/", options.fetch);
+  const apiBaseUrl = options.apiBaseUrl ?? "https://api.github.com/";
+  const http = new ProviderHttpClient("github", apiBaseUrl, options.fetch);
   return {
     id: "github", capabilities: GITHUB_CAPABILITIES,
     ...auth,
     async read(request, tokens) {
-      const mapped = githubReadRequest(request);
+      const currentPage = githubCursorPage(request.cursor);
+      const mapped = githubReadRequest(request, currentPage);
       const { data, response } = await http.request<unknown>(mapped, tokens);
       const rawItems = Array.isArray(data)
         ? asObjects(data)
         : isObject(data) && Array.isArray(data.items) ? asObjects(data.items)
         : [data].filter(isObject);
-      return page(rawItems.map(redactGitHubObject), response, githubNextCursor(response));
+      return page(rawItems.map(redactGitHubObject), response, githubNextCursor(response, currentPage, apiBaseUrl));
     },
     async write(request, tokens) {
       void request;
@@ -139,11 +141,11 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
   };
 }
 
-function githubReadRequest(request: ConnectorRequest): ProviderRequest {
+function githubReadRequest(request: ConnectorRequest, currentPage: number): ProviderRequest {
   const input = request.input;
   const number = input.number === undefined ? undefined : String(input.number);
   const limit = bounded(input.limit);
-  const common = { signal: request.signal, query: { per_page: limit, page: request.cursor ? Number(request.cursor) : undefined } };
+  const common = { signal: request.signal, query: { per_page: limit, page: request.cursor === undefined ? undefined : currentPage } };
   switch (request.capability) {
     case "identity.read": return { path: "/user", signal: request.signal };
     case "organizations.read": return { path: "/user/orgs", ...common };
@@ -167,10 +169,34 @@ function redactGitHubObject(value: JsonObject): JsonObject {
   for (const key of ["token", "authorization", "email"]) delete copy[key];
   return copy;
 }
-function githubNextCursor(response: Response) {
-  const link = response.headers.get("link");
-  const match = link?.match(/[?&]page=(\d+)[^>]*>;\s*rel="next"/);
-  return match?.[1];
+function githubCursorPage(cursor: string | undefined): number {
+  if (cursor === undefined) return 1;
+  const page = Number(cursor);
+  if (!Number.isInteger(page) || page < 1) {
+    throw new Error("GitHub cursor must be a positive page number.");
+  }
+  return page;
+}
+function githubNextCursor(response: Response, currentPage: number, apiBaseUrl: string): string | undefined {
+  const apiOrigin = new URL(apiBaseUrl).origin;
+  let nextPage: number | undefined;
+  for (const link of (response.headers.get("link") ?? "").split(",")) {
+    const match = link.match(/<([^>]+)>;\s*rel="([^"]+)"/);
+    if (!match || match[2] !== "next") continue;
+    let url: URL;
+    try {
+      url = new URL(match[1]);
+    } catch {
+      continue;
+    }
+    if (url.origin !== apiOrigin) continue;
+    const raw = url.searchParams.get("page");
+    const parsed = raw === null ? Number.NaN : Number(raw);
+    if (!Number.isInteger(parsed) || parsed < 1) continue;
+    nextPage = parsed;
+    break;
+  }
+  return nextPage !== undefined && nextPage > currentPage ? String(nextPage) : undefined;
 }
 function required(input: Record<string, unknown>, key: string): string {
   const value = input[key];
@@ -178,7 +204,7 @@ function required(input: Record<string, unknown>, key: string): string {
   return String(value);
 }
 function optional(input: Record<string, unknown>, key: string) { const v = input[key]; return typeof v === "string" && v ? v : undefined; }
-function bounded(value: unknown) { return typeof value === "number" ? Math.max(1, Math.min(100, Math.floor(value))) : 30; }
+function bounded(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? Math.max(1, Math.min(100, Math.floor(value))) : 30; }
 function encodePath(path: string) { return path.split("/").map(encodeURIComponent).join("/"); }
 function githubRepository(input: Record<string, unknown>) {
   const repository = required(input, "repository");
