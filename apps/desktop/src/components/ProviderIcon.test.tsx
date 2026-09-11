@@ -9,6 +9,7 @@ describe("ProviderIcon", () => {
 
     expect(mark).toHaveAttribute("width", "28");
     expect(mark).toHaveAttribute("height", "28");
+    expect(mark).toHaveAttribute("viewBox", "1.68 1.75 16.65 16.5");
     expect(mark).toHaveStyle({ color: "var(--provider-monochrome)" });
     expect(mark).toHaveAttribute("aria-hidden", "true");
   });
@@ -19,6 +20,19 @@ describe("ProviderIcon", () => {
     expect(mark).toHaveAttribute("src", "/brand/google-antigravity.png");
     expect(mark).toHaveAttribute("width", "20");
     expect(mark).toHaveAttribute("height", "20");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+  });
+
+  it.each([
+    ["cursor", "/brand/cursor.svg"],
+    ["opencode", "/brand/opencode.svg"],
+  ])("uses the official %s artwork asset", (provider, src) => {
+    const { container } = render(<ProviderIcon provider={provider} size={16} />);
+    const mark = container.querySelector(`[data-provider-brand="${provider}"]`);
+    expect(mark?.tagName).toBe("IMG");
+    expect(mark).toHaveAttribute("src", src);
+    expect(mark).toHaveAttribute("width", "16");
+    expect(mark).toHaveAttribute("height", "16");
     expect(mark).toHaveAttribute("aria-hidden", "true");
   });
 
