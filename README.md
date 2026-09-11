@@ -20,6 +20,12 @@ the apps a person already uses.
 
 ## Maturity
 
+**Experimental / pre-release.** This is a source release for developers, not a
+supported production service or a signed installer release. See [LICENSE](LICENSE),
+[third-party notices](THIRD_PARTY_NOTICES.md), and the [security policy](SECURITY.md).
+Public source access does not provide a hosted Mivlet account service, provider
+subscriptions, or connector credentials; configure your own services as described below.
+
 Mivlet is pre-release Windows desktop software. This repository contains a
 substantial local product and an optional hosted-computer foundation; it is not
 a deployed or production-validated service.
