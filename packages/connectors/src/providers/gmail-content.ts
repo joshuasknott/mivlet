@@ -36,12 +36,12 @@ export function encodeGmailRaw(text: string): string {
     const b0 = bytes[i];
     const b1 = bytes[i + 1];
     const b2 = bytes[i + 2];
-    encoded += BASE64_ALPHABET[b0 >> 2];
-    encoded += BASE64_ALPHABET[((b0 & 0x03) << 4) | (b1 === undefined ? 0 : b1 >> 4)];
+    encoded += BASE64URL_ALPHABET[b0 >> 2];
+    encoded += BASE64URL_ALPHABET[((b0 & 0x03) << 4) | (b1 === undefined ? 0 : b1 >> 4)];
     if (b1 === undefined) continue;
-    encoded += BASE64_ALPHABET[((b1 & 0x0f) << 2) | (b2 === undefined ? 0 : b2 >> 6)];
+    encoded += BASE64URL_ALPHABET[((b1 & 0x0f) << 2) | (b2 === undefined ? 0 : b2 >> 6)];
     if (b2 === undefined) continue;
-    encoded += BASE64_ALPHABET[b2 & 0x3f];
+    encoded += BASE64URL_ALPHABET[b2 & 0x3f];
   }
   return encoded;
 }
@@ -62,6 +62,12 @@ export function decodeGmailBodyData(
 ): string | undefined {
   if (!data) return undefined;
   let cleaned = data.trim();
+  // Reject oversize input before walking or allocating decoded bytes.
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || cleaned.length > Math.ceil(maxBytes / 3) * 4) return undefined;
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(cleaned)) return undefined;
+  const unpaddedLength = cleaned.replace(/=+$/, "").length;
+  if (unpaddedLength % 4 === 1 || Math.floor(unpaddedLength * 3 / 4) > maxBytes) return undefined;
+  if (cleaned.includes("=") && cleaned.length % 4 !== 0) return undefined;
   const padding = cleaned.length % 4;
   if (padding === 1) return undefined;
   if (padding > 0) cleaned += "=".repeat(4 - padding);

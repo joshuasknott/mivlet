@@ -55,6 +55,19 @@ function part(mimeType: string, data: string, extra: Partial<GmailPartLike> = {}
 }
 
 describe("Gmail content helpers", () => {
+  it.each([[">>>", "Pj4-"], ["???", "Pz8_"], ["😀", "8J-YgA"]])(
+    "uses URL-safe alphabet for %s against independent known vectors",
+    (text, expected) => {
+      expect(encodeGmailRaw(text)).toBe(expected);
+      expect(decodeGmailBodyData(expected)).toBe(text);
+    }
+  );
+
+  it.each(["====", "a=GV", "aGV=sbG8", "aGVsbG8===", "aGVsbG8=="])(
+    "rejects invalid base64 padding: %s",
+    (encoded) => expect(decodeGmailBodyData(encoded)).toBeUndefined()
+  );
+
   it("encodes raw messages as unpadded base64url UTF-8", () => {
     const raw = encodeGmailRaw("To: a@example.com\r\nSubject: x\r\n\r\nhéllo");
     expect(raw).not.toMatch(/[+/=]/);
