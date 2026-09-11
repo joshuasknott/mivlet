@@ -902,18 +902,64 @@ pub(crate) fn verified_image_artifact(
     })
 }
 
+/// A launch copy prepared from a receipt-verified published artifact. The
+/// receipt travels with the copy so the exact file can be re-verified at the
+/// moment it is opened.
+struct PreparedArtifactOpen {
+    path: PathBuf,
+    receipt: ArtifactReceipt,
+}
+
+/// Write the verified bytes to a fresh private launch copy. Editors can save
+/// their own copy without altering the published result.
+fn prepare_open_copy(
+    open_root: &Path,
+    receipt: &ArtifactReceipt,
+    bytes: &[u8],
+) -> Result<PathBuf, String> {
+    write_copy(open_root, &random_id()?, &receipt.export_name, bytes)
+}
+
 fn prepare_open(
     computers: &LocalComputerState,
     request: &OpenArtifactRequest,
-) -> Result<PathBuf, String> {
+) -> Result<PreparedArtifactOpen, String> {
     let (receipt, bytes) = verified_artifact(computers, request)?;
     let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
-    // Editors can save their own copy without altering the published result.
-    write_copy(
+    let path = prepare_open_copy(&scope.directory.join("artifact-open"), &receipt, &bytes)?;
+    Ok(PreparedArtifactOpen { path, receipt })
+}
+
+/// Re-verify the exact launch copy against its receipt immediately before the
+/// system opens it. The published copy was verified earlier; this closes the
+/// window where the freshly written launch copy could be replaced with
+/// unverified content after preparation. Reading through `read_bounded` keeps
+/// the same containment, reparse-point and stale-handle checks used for every
+/// artifact read.
+fn verify_prepared_copy(
+    open_root: &Path,
+    path: &Path,
+    receipt: &ArtifactReceipt,
+) -> Result<(), String> {
+    let bytes = read_bounded(open_root, path)?;
+    if bytes.len() as u64 != receipt.artifact.size_bytes || digest(&bytes) != receipt.sha256 {
+        return Err(
+            "The prepared artifact changed and cannot be opened. Try opening it again.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn verify_prepared_open(
+    computers: &LocalComputerState,
+    request: &OpenArtifactRequest,
+    prepared: &PreparedArtifactOpen,
+) -> Result<(), String> {
+    let scope = computers.scope(&request.workspace_id, &request.agent_id)?;
+    verify_prepared_copy(
         &scope.directory.join("artifact-open"),
-        &random_id()?,
-        &receipt.export_name,
-        &bytes,
+        &prepared.path,
+        &prepared.receipt,
     )
 }
 
@@ -982,8 +1028,9 @@ pub async fn local_computer_preview_artifact(
 fn open_with_system(path: &Path) -> Result<(), String> {
     let operation: Vec<u16> = "open\0".encode_utf16().collect();
     // Shell associations expect a normal DOS path; Rust's filesystem APIs
-    // canonicalize to the Win32 verbatim form. The native path is already
-    // receipt-selected and checked, and never comes from the renderer.
+    // canonicalize to the Win32 verbatim form. The native path is
+    // receipt-selected, re-verified against the receipt right before this call,
+    // and never comes from the renderer.
     let path = path
         .to_str()
         .ok_or("Windows cannot open this artifact path.")?;
@@ -1024,13 +1071,14 @@ pub async fn local_computer_open_artifact(
     }
     let computers = computers.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let path = prepare_open(&computers, &request)?;
+        let prepared = prepare_open(&computers, &request)?;
         computers.validate_viewer_generation(
             &request.workspace_id,
             &request.agent_id,
             request.expected_generation,
         )?;
-        open_with_system(&path)
+        verify_prepared_open(&computers, &request, &prepared)?;
+        open_with_system(&prepared.path)
     })
     .await
     .map_err(|_| "Mivlet could not open the artifact.".to_string())?
@@ -1230,70 +1278,97 @@ mod tests {
         assert!(check_content(&object_stream, "pdf").is_err());
     }
 
+    fn office_fixture(extension: &str, extra: Option<&str>, external: bool) -> Vec<u8> {
+        let (main_part, main_content_type) = match extension {
+            "docx" => (
+                "word/document.xml",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
+            ),
+            "xlsx" => (
+                "xl/workbook.xml",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
+            ),
+            "pptx" => (
+                "ppt/presentation.xml",
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
+            ),
+            _ => unreachable!(),
+        };
+        let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for name in [
+            Some("[Content_Types].xml"),
+            Some("_rels/.rels"),
+            Some(main_part),
+            extra,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if name.ends_with('/') {
+                writer
+                    .add_directory(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                continue;
+            }
+            writer
+                .start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            let contents = if name == "[Content_Types].xml" {
+                format!("<Types><Override ContentType=\"{main_content_type}\"/></Types>")
+            } else if name == "_rels/.rels" && external {
+                "<Relationships><Relationship TargetMode='External' Target='https://example.test'/></Relationships>".into()
+            } else if name == "_rels/.rels" {
+                format!("<Relationships><Relationship Type='relationships/officeDocument' Target='{main_part}'/></Relationships>")
+            } else {
+                "<fixture/>".into()
+            };
+            writer.write_all(contents.as_bytes()).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn artifact_receipt(title: &str, extension: &str, bytes: &[u8]) -> ArtifactReceipt {
+        ArtifactReceipt {
+            artifact: LocalComputerArtifact {
+                kind: "computer-artifact".into(),
+                version: 1,
+                id: random_id().unwrap(),
+                computer_id: "computer".into(),
+                title: title.into(),
+                mime_type: mime_for(extension).unwrap().into(),
+                size_bytes: bytes.len() as u64,
+                relative_path: format!("report.{extension}"),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            },
+            workspace_id: "workspace".into(),
+            agent_id: "agent-a".into(),
+            export_name: format!("fable-{}.{extension}", crate::paths::file_slug(title)),
+            sha256: digest(bytes),
+        }
+    }
+
     #[test]
     fn office_documents_require_matching_parts_and_reject_active_content() {
-        fn office(extension: &str, extra: Option<&str>, external: bool) -> Vec<u8> {
-            let (main_part, main_content_type) = match extension {
-                "docx" => (
-                    "word/document.xml",
-                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
-                ),
-                "xlsx" => (
-                    "xl/workbook.xml",
-                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml",
-                ),
-                "pptx" => (
-                    "ppt/presentation.xml",
-                    "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
-                ),
-                _ => unreachable!(),
-            };
-            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-            for name in [
-                Some("[Content_Types].xml"),
-                Some("_rels/.rels"),
-                Some(main_part),
-                extra,
-            ]
-            .into_iter()
-            .flatten()
-            {
-                if name.ends_with('/') {
-                    writer
-                        .add_directory(name, zip::write::SimpleFileOptions::default())
-                        .unwrap();
-                    continue;
-                }
-                writer
-                    .start_file(name, zip::write::SimpleFileOptions::default())
-                    .unwrap();
-                let contents = if name == "[Content_Types].xml" {
-                    format!("<Types><Override ContentType=\"{main_content_type}\"/></Types>")
-                } else if name == "_rels/.rels" && external {
-                    "<Relationships><Relationship TargetMode='External' Target='https://example.test'/></Relationships>".into()
-                } else if name == "_rels/.rels" {
-                    format!("<Relationships><Relationship Type='relationships/officeDocument' Target='{main_part}'/></Relationships>")
-                } else {
-                    "<fixture/>".into()
-                };
-                writer.write_all(contents.as_bytes()).unwrap();
-            }
-            writer.finish().unwrap().into_inner()
-        }
-        assert!(check_content(&office("docx", None, false), "docx").is_ok());
-        assert!(check_content(&office("xlsx", None, false), "xlsx").is_ok());
-        assert!(check_content(&office("pptx", None, false), "pptx").is_ok());
-        assert!(check_content(&office("pptx", Some("ppt/embeddings/"), false), "pptx").is_ok());
-        assert!(check_content(&office("docx", None, false), "xlsx").is_err());
-        assert!(
-            check_content(&office("docx", Some("word/vbaProject.bin"), false), "docx").is_err()
-        );
+        assert!(check_content(&office_fixture("docx", None, false), "docx").is_ok());
+        assert!(check_content(&office_fixture("xlsx", None, false), "xlsx").is_ok());
+        assert!(check_content(&office_fixture("pptx", None, false), "pptx").is_ok());
         assert!(check_content(
-            &office("pptx", Some("ppt/embeddings/evil.bin"), false),
+            &office_fixture("pptx", Some("ppt/embeddings/"), false),
+            "pptx"
+        )
+        .is_ok());
+        assert!(check_content(&office_fixture("docx", None, false), "xlsx").is_err());
+        assert!(check_content(
+            &office_fixture("docx", Some("word/vbaProject.bin"), false),
+            "docx"
+        )
+        .is_err());
+        assert!(check_content(
+            &office_fixture("pptx", Some("ppt/embeddings/evil.bin"), false),
             "pptx"
         )
         .is_err());
-        assert!(check_content(&office("pptx", None, true), "pptx").is_err());
+        assert!(check_content(&office_fixture("pptx", None, true), "pptx").is_err());
         assert!(check_office_metadata_xml(
             b"<Types><!-- misleading metadata --></Types>",
             "document"
@@ -1356,6 +1431,104 @@ mod tests {
         );
         assert!(read_bounded(&workspace, &copy).is_err());
         assert_ne!(digest(b"first"), digest(b"second"));
+    }
+
+    #[test]
+    fn prepared_launch_copy_must_match_the_receipt_at_open_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_root = temp.path().join("artifact-open");
+        let bytes = b"verified published bytes\n".to_vec();
+        let receipt = artifact_receipt("Report", "txt", &bytes);
+        let prepared = prepare_open_copy(&open_root, &receipt, &bytes).unwrap();
+        assert_eq!(fs::read(&prepared).unwrap(), bytes);
+        // A local process can replace the freshly written launch copy between
+        // preparation and the system open; the launch-time check must reject
+        // content that never passed validation instead of opening it.
+        fs::write(
+            &prepared,
+            b"replacement content that never passed validation\n",
+        )
+        .unwrap();
+        let error = verify_prepared_copy(&open_root, &prepared, &receipt).unwrap_err();
+        assert!(error.contains("changed"));
+        // Restoring the verified bytes makes the same check pass.
+        fs::write(&prepared, &bytes).unwrap();
+        verify_prepared_copy(&open_root, &prepared, &receipt).unwrap();
+        // A receipt for different content cannot authorize the prepared copy.
+        let other = artifact_receipt("Report", "txt", b"other artifact bytes\n");
+        assert!(verify_prepared_copy(&open_root, &prepared, &other).is_err());
+        // A path outside the artifact-open root never passes launch verification.
+        let outside = temp.path().join("outside.txt");
+        fs::write(&outside, &bytes).unwrap();
+        assert!(verify_prepared_copy(&open_root, &outside, &receipt).is_err());
+    }
+
+    #[test]
+    fn a_different_valid_document_cannot_replace_the_prepared_copy() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_root = temp.path().join("artifact-open");
+        let first = office_fixture("docx", None, false);
+        let second = office_fixture("docx", Some("word/extra.xml"), false);
+        assert_ne!(first, second);
+        assert!(check_content(&second, "docx").is_ok());
+        let receipt = artifact_receipt("Report", "docx", &first);
+        let prepared = prepare_open_copy(&open_root, &receipt, &first).unwrap();
+        // Swapping in a different, still-valid document would pass the type
+        // check; only the receipt digest can bind the launch copy to the
+        // published artifact.
+        fs::write(&prepared, &second).unwrap();
+        assert!(verify_prepared_copy(&open_root, &prepared, &receipt).is_err());
+    }
+
+    #[test]
+    fn valid_docx_xlsx_and_pdf_preparation_passes_launch_verification() {
+        let temp = tempfile::tempdir().unwrap();
+        let open_root = temp.path().join("artifact-open");
+        for (extension, bytes) in [
+            ("docx", office_fixture("docx", None, false)),
+            ("xlsx", office_fixture("xlsx", None, false)),
+            ("pdf", pdf_document(|_, _| {})),
+        ] {
+            let receipt = artifact_receipt("Valid document", extension, &bytes);
+            let prepared = prepare_open_copy(&open_root, &receipt, &bytes).unwrap();
+            assert_eq!(
+                prepared.file_name().unwrap().to_str().unwrap(),
+                format!("fable-valid-document.{extension}")
+            );
+            assert_eq!(fs::read(&prepared).unwrap(), bytes);
+            verify_prepared_copy(&open_root, &prepared, &receipt).unwrap();
+        }
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn prepared_copy_reached_through_a_junction_is_rejected_before_launch() {
+        use std::process::Command;
+        let temp = tempfile::tempdir().unwrap();
+        let open_root = temp.path().join("artifact-open");
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        let bytes = b"verified published bytes\n".to_vec();
+        let receipt = artifact_receipt("Report", "txt", &bytes);
+        let prepared = prepare_open_copy(&open_root, &receipt, &bytes).unwrap();
+        let id = prepared.parent().unwrap();
+        let kept = temp.path().join("kept");
+        fs::rename(id, &kept).unwrap();
+        let junction = Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(id)
+            .arg(&outside)
+            .status();
+        match junction {
+            Ok(status) if status.success() => {}
+            _ => {
+                eprintln!("skipping junction regression: mklink /J unavailable");
+                return;
+            }
+        }
+        // The same bytes now sit behind a junction outside the artifact root.
+        fs::write(outside.join(receipt.export_name.clone()), &bytes).unwrap();
+        assert!(verify_prepared_copy(&open_root, &prepared, &receipt).is_err());
     }
 
     #[test]
