@@ -41,6 +41,21 @@ export interface ProviderRequest {
 
 export type ProviderHttpRequest = ProviderRequest;
 
+/**
+ * Auto-retry contract for {@link ProviderHttpClient}: only GET/HEAD requests
+ * are replayed, because every adapter treats them as idempotent reads with no
+ * side effects. POST/PATCH/DELETE cover writes and GraphQL-style searches
+ * whose effects may be uncertain and are never blindly replayed here; the
+ * runtime layer retries whole operations only for reads, or for writes that
+ * carry an explicit idempotency key.
+ */
+const MAX_IDEMPOTENT_ATTEMPTS = 2;
+/** Retry-After delays are clamped so a hostile or broken header cannot wedge a read. */
+export const MAX_RETRY_AFTER_MS = 60_000;
+/** Error bodies larger than this are dropped instead of buffered; matches the broker cap. */
+const MAX_ERROR_BODY_BYTES = 64 * 1024;
+const DEFAULT_RETRY_DELAY_MS = 100;
+
 export class ProviderHttpClient {
   constructor(
     private readonly connectorId: ConnectorId,
@@ -56,39 +71,74 @@ export class ProviderHttpClient {
     for (const [key, value] of Object.entries(request.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
-    let response: Response;
-    try {
-      response = await this.fetcher(url.toString(), {
-        method: request.method ?? "GET",
-        signal: request.signal,
-        headers: {
-          accept: "application/json",
-          authorization: `${tokens.tokenType || "Bearer"} ${tokens.accessToken}`,
-          ...(request.body === undefined ? {} : { "content-type": "application/json" }),
-          ...request.headers
-        },
-        ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) })
-      });
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") throw error;
-      if (request.signal?.aborted) throw error;
-      throw providerError(this.connectorId, 0, undefined, undefined);
-    }
-    if (!response.ok) {
-      const body = await optionalJson(response);
-      const code = stringValue(body, "code") ??
-        stringValue(body, "error") ??
-        stringValue(body, "error_description") ??
-        nestedString(body, "error", "code");
-      throw providerError(
-        this.connectorId,
-        response.status,
-        code,
-        response.headers.get("retry-after") ?? undefined
+    const method = (request.method ?? "GET").toUpperCase();
+    const attempts = method === "GET" || method === "HEAD" ? MAX_IDEMPOTENT_ATTEMPTS : 1;
+    const init: RequestInit = {
+      method,
+      signal: request.signal,
+      headers: {
+        accept: "application/json",
+        authorization: `${tokens.tokenType || "Bearer"} ${tokens.accessToken}`,
+        ...(request.body === undefined ? {} : { "content-type": "application/json" }),
+        ...request.headers
+      },
+      ...(request.body === undefined ? {} : { body: JSON.stringify(request.body) })
+    };
+    let response: Response | undefined;
+    let error: ConnectorError | undefined;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (request.signal?.aborted) throw abortError();
+      let current: Response;
+      try {
+        current = await this.fetcher(url.toString(), init);
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
+        if (request.signal?.aborted) throw cause;
+        if (attempt + 1 === attempts) {
+          throw providerError(this.connectorId, 0, undefined, undefined);
+        }
+        await abortableDelay(defaultDelayMs(attempt), request.signal);
+        continue;
+      }
+      if (current.ok) {
+        response = current;
+        break;
+      }
+      error = await this.requestError(current, request.signal);
+      if (!retryableStatus(current.status) || attempt + 1 === attempts) break;
+      await abortableDelay(
+        retryAfterDelayMs(current.headers.get("retry-after") ?? undefined) ?? defaultDelayMs(attempt),
+        request.signal
       );
     }
-    const data = (response.status === 204 ? {} : await safeJson(response)) as T;
+    if (response === undefined) {
+      throw error ?? providerError(this.connectorId, 0, undefined, undefined);
+    }
+    const data = (response.status === 204 ? {} : await this.readJson(response, request.signal)) as T;
     return { data, response, headers: response.headers };
+  }
+
+  private async requestError(response: Response, signal?: AbortSignal): Promise<ConnectorError> {
+    const body = await boundedOptionalJson(response, signal);
+    const code = stringValue(body, "code") ??
+      stringValue(body, "error") ??
+      stringValue(body, "error_description") ??
+      nestedString(body, "error", "code");
+    return providerError(
+      this.connectorId,
+      response.status,
+      code,
+      response.headers.get("retry-after") ?? undefined
+    );
+  }
+
+  private async readJson(response: Response, signal?: AbortSignal): Promise<unknown> {
+    try {
+      return await safeJson(response);
+    } catch (cause) {
+      if (signal?.aborted) throw abortError();
+      throw cause;
+    }
   }
 }
 
@@ -359,6 +409,7 @@ export function providerError(
   const missingScope = lowerCode.includes("missing_scope")
     ? " The installed app is missing a required scope."
     : "";
+  const retryAfterMs = retryAfterDelayMs(retryAfter);
   return {
     connectorId,
     code,
@@ -371,7 +422,7 @@ export function providerError(
       : code === "provider-unavailable" ? (status === 0 ? "The provider network request failed." : "The provider is temporarily unavailable.")
       : "The connector request failed.") + missingScope,
     retryable: code === "rate-limited" || code === "provider-unavailable",
-    ...(retryAfter ? { retryAfter: String(Number(retryAfter) * 1000) } : {})
+    ...(retryAfterMs !== undefined ? { retryAfter: String(retryAfterMs) } : {})
   };
 }
 
@@ -380,16 +431,22 @@ async function brokerError(
   operation: "handoff" | "refresh" | "revoke",
   response: Response
 ): Promise<ConnectorError> {
-  const body = await optionalJson(response);
+  const body = await boundedOptionalJson(response);
   const brokerCode = stringValue(body, "error");
   const message = stringValue(body, "message") ?? `The Mivlet auth broker ${operation} was unsuccessful.`;
   const retryable = isObject(body) && typeof body.retryable === "boolean" ? body.retryable : undefined;
-  const retryAfter = response.headers.get("retry-after") ?? undefined;
+  const retryAfterMs = retryAfterDelayMs(response.headers.get("retry-after") ?? undefined);
   if (brokerCode === "configuration-required") {
     return { connectorId, code: "configuration-required", message, retryable: false };
   }
   if (brokerCode === "rate-limited") {
-    return { connectorId, code: "rate-limited", message, retryable: true, ...(retryAfter ? { retryAfter: String(Number(retryAfter) * 1000) } : {}) };
+    return {
+      connectorId,
+      code: "rate-limited",
+      message,
+      retryable: true,
+      ...(retryAfterMs !== undefined ? { retryAfter: String(retryAfterMs) } : {})
+    };
   }
   if (brokerCode === "provider-unavailable") {
     return { connectorId, code: "provider-unavailable", message, retryable: retryable ?? true };
@@ -413,7 +470,7 @@ async function brokerError(
   if (retryable === true) {
     return { connectorId, code: "provider-unavailable", message, retryable: true };
   }
-  return providerError(connectorId, response.status, brokerCode, retryAfter);
+  return providerError(connectorId, response.status, brokerCode, response.headers.get("retry-after") ?? undefined);
 }
 
 export function asObjects(value: unknown): JsonObject[] {
@@ -436,12 +493,83 @@ async function safeJson(response: Response): Promise<unknown> {
     throw providerError("connector", 502, "malformed_response");
   }
 }
-async function optionalJson(response: Response): Promise<unknown> {
+async function boundedOptionalJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   try {
-    return await response.clone().json();
-  } catch {
+    const text = await readBoundedText(response, MAX_ERROR_BODY_BYTES, signal);
+    if (text === "") return {};
+    return JSON.parse(text) as unknown;
+  } catch (error) {
+    if (signal?.aborted) throw abortError();
     return {};
   }
+}
+async function readBoundedText(
+  response: Response,
+  maxBytes: number,
+  signal?: AbortSignal
+): Promise<string> {
+  const declared = response.headers.get("content-length");
+  if (declared !== null) {
+    const length = Number(declared);
+    if (Number.isFinite(length) && length > maxBytes) return "";
+  }
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  try {
+    const decoder = new TextDecoder();
+    let total = 0;
+    let text = "";
+    for (;;) {
+      if (signal?.aborted) throw abortError();
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) return "";
+      text += decoder.decode(value, { stream: true });
+    }
+    return text + decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+}
+function defaultDelayMs(attempt: number): number {
+  return Math.min(DEFAULT_RETRY_DELAY_MS * 2 ** attempt, MAX_RETRY_AFTER_MS);
+}
+function retryableStatus(status: number): boolean {
+  return status === 429 || status >= 500;
+}
+function retryAfterDelayMs(value: string | undefined, now = Date.now()): number | undefined {
+  if (value === undefined || value.trim() === "") return undefined;
+  const trimmed = value.trim();
+  const seconds = Number(trimmed);
+  const delayMs = Number.isFinite(seconds)
+    ? seconds * 1000
+    : Date.parse(trimmed) - now;
+  if (!Number.isFinite(delayMs)) return undefined;
+  return Math.min(Math.max(delayMs, 0), MAX_RETRY_AFTER_MS);
+}
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  if (milliseconds <= 0) return Promise.resolve();
+  if (signal === undefined) return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  return new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      if (timer !== undefined) clearTimeout(timer);
+      reject(abortError());
+    };
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, milliseconds);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 function tokenSet(value: unknown): ConnectorTokenSet {
   if (!isObject(value) || typeof value.access_token !== "string") {
