@@ -176,11 +176,14 @@ export interface GoogleCalendarAdapterOptions
   apiBaseUrl?: string;
   fetch?: FetchLike;
   scopes?: readonly string[];
+  /** Injectable clock for the deterministic "upcoming events only" default list window. */
+  now?: () => Date;
 }
 
 export function createGoogleCalendarAdapter(
   options: GoogleCalendarAdapterOptions
 ): ConnectorAdapter<JsonObject, JsonObject> {
+  const now = options.now ?? (() => new Date());
   const endpoints = googleOAuthEndpoints(options.authBaseUrl);
   const auth = googleOAuthClient({
     ...options,
@@ -205,7 +208,7 @@ export function createGoogleCalendarAdapter(
           ? [CALENDAR_LIST_SCOPE]
           : [CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE]
       );
-      const mapped = googleCalendarReadRequest(request);
+      const mapped = googleCalendarReadRequest(request, now);
       const { data, response } = await http.request<unknown>(mapped, tokens);
       const items = isObject(data) && Array.isArray(data.items)
         ? data.items.map(redactCalendarObject)
@@ -223,7 +226,7 @@ export function createGoogleCalendarAdapter(
   };
 }
 
-function googleCalendarReadRequest(request: ConnectorRequest): ProviderRequest {
+function googleCalendarReadRequest(request: ConnectorRequest, now: () => Date): ProviderRequest {
   const input = request.input;
   switch (request.capability) {
     case "calendar.list":
@@ -239,12 +242,15 @@ function googleCalendarReadRequest(request: ConnectorRequest): ProviderRequest {
       const eventId = optional(input, "eventId");
       if (eventId) {
         return {
-          path: `calendars/${required(input, "calendarId")}/events/${eventId}`,
+          path: `calendars/${encodeURIComponent(required(input, "calendarId"))}/events/${encodeURIComponent(eventId)}`,
           signal: request.signal
         };
       }
+      const timeMin = optional(input, "timeMin");
+      const timeMax = optional(input, "timeMax");
+      assertListBounds(timeMin, timeMax);
       return {
-        path: `calendars/${required(input, "calendarId")}/events`,
+        path: `calendars/${encodeURIComponent(required(input, "calendarId"))}/events`,
         signal: request.signal,
         query: {
           q: optional(input, "query"),
@@ -252,8 +258,8 @@ function googleCalendarReadRequest(request: ConnectorRequest): ProviderRequest {
           pageToken: request.cursor,
           singleEvents: true,
           orderBy: "startTime",
-          timeMin: optional(input, "timeMin"),
-          timeMax: optional(input, "timeMax")
+          timeMin: timeMin ?? now().toISOString(),
+          timeMax
         }
       };
     }
@@ -267,22 +273,27 @@ function googleCalendarWriteRequest(request: ConnectorWriteRequest): ProviderReq
   const calendarId = required(input, "calendarId");
   switch (request.capability) {
     case "google-calendar.create-draft":
-      return { method: "POST", path: `calendars/${calendarId}/events`, body: eventBody(input), signal: request.signal };
+      return { method: "POST", path: calendarEventPath(calendarId), body: eventBody(input), signal: request.signal };
     case "google-calendar.update-draft": {
       const eventId = required(input, "eventId");
-      return { method: "PATCH", path: `calendars/${calendarId}/events/${eventId}`, body: eventBody(input), signal: request.signal };
+      return { method: "PATCH", path: calendarEventPath(calendarId, eventId), body: eventBody(input), signal: request.signal };
     }
     case "google-calendar.cancel-event": {
       const eventId = required(input, "eventId");
-      return { method: "PATCH", path: `calendars/${calendarId}/events/${eventId}`, body: { status: "cancelled" }, signal: request.signal };
+      return { method: "PATCH", path: calendarEventPath(calendarId, eventId), body: { status: "cancelled" }, signal: request.signal };
     }
     case "google-calendar.delete-event": {
       const eventId = required(input, "eventId");
-      return { method: "DELETE", path: `calendars/${calendarId}/events/${eventId}`, signal: request.signal };
+      return { method: "DELETE", path: calendarEventPath(calendarId, eventId), signal: request.signal };
     }
     default:
       throw new Error(`Unsupported Google Calendar write capability: ${request.capability}`);
   }
+}
+
+function calendarEventPath(calendarId: string, eventId?: string): string {
+  const events = `calendars/${encodeURIComponent(calendarId)}/events`;
+  return eventId ? `${events}/${encodeURIComponent(eventId)}` : events;
 }
 
 function eventBody(input: Record<string, unknown>): JsonObject {
@@ -293,16 +304,89 @@ function eventBody(input: Record<string, unknown>): JsonObject {
   if (description) body.description = description;
   const location = optional(input, "location");
   if (location) body.location = location;
+
+  // Attendee invites and recurrence creation are not implemented. Failing
+  // closed keeps the executed operation exactly aligned with the approved
+  // payload instead of silently dropping approved fields.
+  for (const field of ["attendees", "recurrence"] as const) {
+    if (present(input, field)) {
+      throw new Error(`Google Calendar cannot apply "${field}" yet; refusing to drop the approved value.`);
+    }
+  }
+
   const start = optional(input, "start");
   const end = optional(input, "end");
-  if (start) body.start = dateTime(start, optional(input, "timezone"));
-  if (end) body.end = dateTime(end, optional(input, "timezone"));
+  if (!start || !end) {
+    throw new Error("Google Calendar event create/update requires both start and end.");
+  }
+  assertEventRange(start, end);
+  const timezone = optional(input, "timezone");
+  body.start = eventTime(start, timezone);
+  body.end = eventTime(end, timezone);
   return body;
 }
 
-function dateTime(value: string, timezone?: string): JsonObject {
-  // Google accepts { dateTime, timeZone } for timed events.
+function eventTime(value: string, timezone?: string): JsonObject {
+  // Date-only values are all-day events on Google's schema and must use the
+  // `date` field; the time zone field has no significance for them and
+  // end.date is exclusive. Timed events use `dateTime` with an optional
+  // IANA time zone and are passed through verbatim, never re-derived.
+  if (DATE_ONLY.test(value)) return { date: value };
   return { dateTime: value, ...(timezone ? { timeZone: timezone } : {}) };
+}
+
+function assertEventRange(start: string, end: string): void {
+  const startAllDay = DATE_ONLY.test(start);
+  const endAllDay = DATE_ONLY.test(end);
+  if (startAllDay !== endAllDay) {
+    throw new Error(
+      "Google Calendar events must be all-day or timed consistently: start and end cannot mix a date value with a dateTime value."
+    );
+  }
+  if (startAllDay) {
+    if (end <= start) {
+      throw new Error(
+        "Google Calendar all-day events use an exclusive end.date; end must be a date strictly after start.date."
+      );
+    }
+    return;
+  }
+  // Compare instants only when both values carry an explicit UTC offset so
+  // validation never assumes a browser-local time zone.
+  if (hasUtcOffset(start) && hasUtcOffset(end)) {
+    const startMs = Date.parse(start);
+    const endMs = Date.parse(end);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      throw new Error("Google Calendar timed events require end to be strictly after start.");
+    }
+  }
+}
+
+function assertListBounds(timeMin: string | undefined, timeMax: string | undefined): void {
+  for (const [value, label] of [[timeMin, "timeMin"], [timeMax, "timeMax"]] as const) {
+    if (value === undefined) continue;
+    if (!RFC3339_WITH_OFFSET.test(value) || !Number.isFinite(Date.parse(value))) {
+      throw new Error(
+        `Google Calendar ${label} must be an RFC3339 timestamp with a time zone offset (e.g. 2026-06-01T00:00:00Z).`
+      );
+    }
+  }
+  if (timeMin && timeMax && Date.parse(timeMax) <= Date.parse(timeMin)) {
+    throw new Error("Google Calendar requires timeMax to be strictly after timeMin.");
+  }
+}
+
+const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
+const RFC3339_WITH_OFFSET = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:?\d{2})$/;
+
+function hasUtcOffset(value: string): boolean {
+  return /(?:Z|[+-]\d{2}:?\d{2})$/.test(value);
+}
+
+function present(input: Record<string, unknown>, key: string): boolean {
+  const value = input[key];
+  if (typeof value === "string") return value.trim().length > 0;
+  return value !== undefined && value !== null;
 }
 
 function redactCalendarObject(value: JsonObject): JsonObject {
