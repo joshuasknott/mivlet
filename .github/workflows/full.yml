@@ -32,6 +32,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows
       - uses: actions/cache@v4
         id: audit
         with:

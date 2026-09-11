@@ -71,6 +71,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @fable/protocol build
       - run: pnpm --filter @fable/connectors build
