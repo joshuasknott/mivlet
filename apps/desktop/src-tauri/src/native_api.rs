@@ -385,13 +385,15 @@ struct OpenAiCompatibleTerminalObservation {
     usage: Option<(i64, i64)>,
     cumulative_output: bool,
     cumulative_snapshot: String,
+    repeated_finish_usage: bool,
 }
 
 impl OpenAiCompatibleTerminalObservation {
-    fn new_for_provider(_provider_id: &str, capture_output: bool) -> Self {
+    fn new_for_provider(provider_id: &str, capture_output: bool) -> Self {
         Self {
             capture_output,
             cumulative_output: false,
+            repeated_finish_usage: provider_id == "openrouter",
             ..Self::default()
         }
     }
@@ -403,6 +405,27 @@ impl OpenAiCompatibleTerminalObservation {
         };
         let terminal_was_seen = self.finish_reason.is_some();
         let usage_was_seen = self.usage.is_some();
+        // OpenRouter repeats the terminal reason in its one final accounting
+        // frame. Accept only a content-free frame with the same reason and
+        // usage; later content, conflicting reasons and duplicate usage fail.
+        let accounting_frame = self.repeated_finish_usage
+            && terminal_was_seen
+            && !usage_was_seen
+            && value.get("usage").is_some_and(|usage| !usage.is_null())
+            && value
+                .pointer("/choices/0/finish_reason")
+                .and_then(serde_json::Value::as_str)
+                == self.finish_reason.as_deref()
+            && value
+                .pointer("/choices/0/delta")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|delta| {
+                    delta.iter().all(|(key, value)| match key.as_str() {
+                        "content" => value.is_null() || value.as_str() == Some(""),
+                        "role" => value.is_null() || value.as_str() == Some("assistant"),
+                        _ => false,
+                    })
+                });
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
@@ -451,7 +474,7 @@ impl OpenAiCompatibleTerminalObservation {
         let content = value
             .pointer("/choices/0/delta/content")
             .and_then(serde_json::Value::as_str);
-        if terminal_was_seen && content.is_some() {
+        if terminal_was_seen && content.is_some() && !accounting_frame {
             self.provider_error = true;
         }
         if self.capture_output {
@@ -465,7 +488,7 @@ impl OpenAiCompatibleTerminalObservation {
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
         {
-            if terminal_was_seen {
+            if terminal_was_seen && !accounting_frame {
                 self.provider_error = true;
             } else {
                 self.finish_reason = Some(reason.to_string());
@@ -2852,5 +2875,57 @@ mod transport_policy_tests {
             let _ = rx.changed().await;
             assert!(*rx.borrow());
         });
+    }
+}
+
+#[cfg(test)]
+mod openrouter_accounting_tests {
+    use super::*;
+
+    fn terminal_usage(reason: &str, content: &str) -> String {
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": {"content": content, "role": "assistant"}, "finish_reason": reason}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2}
+        }).to_string()
+    }
+
+    fn finished(provider: &str) -> OpenAiCompatibleTerminalObservation {
+        let mut observed = OpenAiCompatibleTerminalObservation::new_for_provider(provider, true);
+        observed.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        observed.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        observed
+    }
+
+    #[test]
+    fn accepts_documented_openrouter_accounting_frame() {
+        let mut observed = finished("openrouter");
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(observed.clean_stop());
+        assert_eq!(observed.output, "Hello");
+        assert_eq!(observed.usage, Some((7, 2)));
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(
+            !observed.clean_stop(),
+            "duplicate accounting frame must fail"
+        );
+    }
+
+    #[test]
+    fn accounting_exception_rejects_content_conflicts_and_other_providers() {
+        for (provider, reason, content) in [
+            ("openrouter", "stop", "late"),
+            ("openrouter", "length", ""),
+            ("openai", "stop", ""),
+        ] {
+            let mut observed = finished(provider);
+            observed.observe(&terminal_usage(reason, content));
+            assert!(!observed.clean_stop());
+        }
+        let mut early = OpenAiCompatibleTerminalObservation::new_for_provider("openrouter", true);
+        early.observe(&terminal_usage("stop", ""));
+        assert!(!early.clean_stop());
+        let mut no_usage = finished("openrouter");
+        no_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!no_usage.clean_stop());
     }
 }

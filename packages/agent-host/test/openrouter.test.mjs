@@ -12,13 +12,13 @@ import { chunk, fixtureInput, sendChunks, withHost } from "./support/host-proces
 
 /** OpenRouter's documented chat-completions terminal chunk: one choice with a
  *  content-free delta repeating the finish_reason, plus the usage object. */
-function openRouterUsageChunk(inputTokens, outputTokens) {
+function openRouterUsageChunk(inputTokens, outputTokens, finishReason = "stop") {
   return JSON.stringify({
     id: "fixture-completion",
     object: "chat.completion.chunk",
     created: 1,
     model: "fixture-model",
-    choices: [{ index: 0, delta: { content: "", role: "assistant" }, finish_reason: "stop", native_finish_reason: "stop" }],
+    choices: [{ index: 0, delta: { content: "", role: "assistant" }, finish_reason: finishReason, native_finish_reason: finishReason }],
     usage: { prompt_tokens: inputTokens, completion_tokens: outputTokens, total_tokens: inputTokens + outputTokens },
   });
 }
@@ -69,7 +69,7 @@ test("OpenRouter assembles interleaved tool-call fragments in order with approva
       chunk({ tool_calls: [{ index: 0, id: "or-call", function: { name: "write_summary", arguments: '{"query":"fixture"' } }] }),
       chunk({ content: "", tool_calls: [{ index: 0, function: { arguments: '}' } }] }),
       chunk({}, "tool_calls"),
-      openRouterUsageChunk(9, 3),
+      openRouterUsageChunk(9, 3, "tool_calls"),
       "[DONE]",
     ]);
     const tool = await host.nextType("tool-request");
@@ -124,6 +124,30 @@ test("OpenRouter denial of an approved-request tool call continues the turn with
       openRouterUsageChunk(5, 2),
       "[DONE]",
     ]);
+    assert.equal((await host.nextType("done")).finishReason, "stop");
+    assert.equal((await host.waitForExit()).code, 0);
+  });
+});
+
+test("OpenRouter preserves signed and encrypted reasoning across a tool continuation", async () => {
+  await withHost(async (host) => {
+    host.write({ type: "start", input: openRouterInput() });
+    const first = await host.nextType("model-request");
+    const details = [
+      { type: "reasoning.text", text: "Check the source.", signature: "fixture-signature", format: "anthropic-claude-v1", index: 0 },
+      { type: "reasoning.encrypted", data: "fixture-encrypted-reasoning", id: "reasoning-1", format: "anthropic-claude-v1", index: 1 },
+    ];
+    sendChunks(host, first.id, [
+      chunk({ reasoning_details: details }),
+      chunk({ tool_calls: [{ index: 0, id: "signed-call", function: { name: "write_summary", arguments: '{"query":"fixture"}' } }] }),
+      chunk({}, "tool_calls"), openRouterUsageChunk(9, 3, "tool_calls"), "[DONE]",
+    ]);
+    const tool = await host.nextType("tool-request");
+    host.write({ type: "tool-result", callId: tool.callId, ok: true, output: "Fetched." });
+    const second = await host.nextType("model-request");
+    const assistant = second.body.messages.find(message => message.role === "assistant" && message.tool_calls?.some(call => call.id === "signed-call"));
+    assert.deepEqual(assistant?.reasoning_details, details);
+    sendChunks(host, second.id, [chunk({ content: "Done." }), chunk({}, "stop"), openRouterUsageChunk(11, 4), "[DONE]"]);
     assert.equal((await host.nextType("done")).finishReason, "stop");
     assert.equal((await host.waitForExit()).code, 0);
   });
