@@ -26,4 +26,8 @@ Read README.md and the architecture or ADR relevant to the change. Use Node 22+,
 
 Run the narrowest relevant test while editing, then the gates affected by the final diff. See [the verification guide](docs/development/verification.md) for package, Rust, performance, and release commands. Do not weaken useful assertions to pass a suite.
 
+Ordinary PRs use TypeScript checks and conditional Windows validation. Run focused
+local checks while editing; reserve `pnpm check` for release/integration readiness
+and manual or scheduled full validation. Batch coherent changes before pushing.
+
 Before handoff inspect the final diff and run `git diff --check`. Keep generated artifacts and secrets out of commits. Publication requires task authorization: verify the remote, reconcile upstream safely, and rerun affected checks. Do not force-push or discard unrelated work.
