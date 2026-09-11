@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ConnectorTokenSet } from "@fable/protocol";
 import { createGitHubAdapter } from "./github";
+import type { ProviderFetch } from "./http";
 
 const tokens: ConnectorTokenSet = { accessToken: "test-token", tokenType: "Bearer", scopes: [] };
 const common = { clientId: "client", authBaseUrl: "https://auth.example/", redirectUri: "http://127.0.0.1:43123/callback" };
@@ -193,7 +194,7 @@ describe("GitHub production adapter — request shaping", () => {
   });
 
   it("keeps the bearer token in the Authorization header, never in the URL", async () => {
-    const fetcher = vi.fn(async () => response([]));
+    const fetcher = vi.fn<ProviderFetch>(async () => response([]));
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     await adapter.read({ capability: "repositories.list", input: {}, cursor: "2" }, tokens);
     const [url, init] = fetcher.mock.calls[0];
