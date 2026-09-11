@@ -77,6 +77,7 @@ describe("provider families", () => {
       "antigravity",
       "cursor",
       "custom",
+      "deepseek",
       "openai",
       "opencode",
       "xai",

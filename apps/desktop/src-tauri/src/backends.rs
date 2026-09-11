@@ -220,6 +220,28 @@ const CATALOG: &[BackendCatalogEntry] = &[
         setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
         recommended: false,
     },
+    // DeepSeek: OpenAI-compatible Chat Completions with a documented
+    // list-models endpoint. Model IDs follow the official DeepSeek platform
+    // (api-docs.deepseek.com); Mivlet disables the default-enabled thinking
+    // mode at egress because the reasoning_content round-trip contract is not
+    // bridged, so no reasoning levels are advertised.
+    BackendCatalogEntry {
+        id: "deepseek",
+        driver_kind: "native-api",
+        backend_type: "native-api",
+        label: "DeepSeek",
+        description: "Reach DeepSeek models directly with a DeepSeek API key. Mivlet owns the agent loop, tool dispatch, and approvals.",
+        install_hint: "",
+        models: &[
+            ("deepseek-flash", "DeepSeek Flash"),
+            ("deepseek-v4-pro", "DeepSeek V4 Pro"),
+        ],
+        capabilities: NATIVE_API_CAPS,
+        setup_kind: "api-key",
+        setup_label: "DeepSeek API key",
+        setup_description: "Use a metered API key stored by Mivlet's local credential boundary.",
+        recommended: false,
+    },
     BackendCatalogEntry {
         id: "cursor",
         driver_kind: "cursor-acp",
@@ -1715,7 +1737,7 @@ mod provider_route_tests {
     fn live_visual_provider_connection_inventory() {
         use super::BackendCredentialStore;
         let user = super::require_current_internal_user().unwrap();
-        for provider in ["openai", "anthropic", "xai", "custom"] {
+        for provider in ["openai", "anthropic", "xai", "deepseek", "custom"] {
             let present = super::KeyringStore
                 .get(&super::scoped_credential_key(&user, provider))
                 .expect("OS credential store is unavailable")
@@ -1840,6 +1862,48 @@ mod provider_route_tests {
             route["boundaries"]["placementBoundary"],
             "local-credential-egress"
         );
+    }
+
+    #[test]
+    fn deepseek_catalogue_projects_exact_model_routes_without_pricing_claims() {
+        let flash = account_native_provider_route_id("user-1", "deepseek", "deepseek-flash");
+        let pro = account_native_provider_route_id("user-1", "deepseek", "deepseek-v4-pro");
+        assert_ne!(flash, pro);
+        assert!(flash.starts_with("provider-route:v2:deepseek:"));
+        assert!(native_provider_route_reason("deepseek", "deepseek-flash")
+            .unwrap()
+            .contains("DeepSeek DeepSeek Flash"));
+        assert!(native_provider_route_reason("deepseek", "ghost-model").is_err());
+        assert_eq!(
+            native_provider_route_boundary("deepseek"),
+            "boundary:installation-private:user-owned-provider:deepseek:local-credential-egress"
+        );
+        // DeepSeek pricing is not hardcoded: Mivlet fails closed with
+        // costUnknown instead of copying rates from memory.
+        assert!(exact_model_pricing_evidence("deepseek", "deepseek-flash").is_none());
+        let rows = [
+            crate::store::repos::backend_connection::BackendConnectionRow {
+                provider_id: "deepseek".into(),
+                connected_at: "2026-09-11T10:00:00Z".into(),
+                updated_at: "2026-09-11T10:01:00Z".into(),
+            },
+        ];
+        let routes = build_account_native_provider_routes(
+            "user-1",
+            "workspace-1",
+            "member-1",
+            &rows,
+            &HashMap::from([("deepseek".to_string(), true)]),
+            &HashMap::new(),
+            &std::collections::BTreeMap::new(),
+            &std::collections::BTreeMap::new(),
+        );
+        assert_eq!(routes.len(), 2);
+        assert!(routes
+            .iter()
+            .all(|route| route["providerFamily"] == "deepseek"));
+        assert!(routes.iter().all(|route| route["state"] == "available"));
+        assert!(routes.iter().all(|route| route["pricingSummary"].is_null()));
     }
 
     #[test]

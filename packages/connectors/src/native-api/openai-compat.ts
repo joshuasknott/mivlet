@@ -56,7 +56,19 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
       : { max_tokens: request.maxTokens }),
     stream: true,
     stream_options: { include_usage: true },
-    ...(request.reasoningEffort ? { reasoning_effort: request.reasoningEffort } : {}),
+    // DeepSeek never receives a reasoning_effort: thinking mode is disabled for
+    // this route (see below) and the field would flip it back on at the API.
+    ...(request.reasoningEffort && request.providerId !== "deepseek"
+      ? { reasoning_effort: request.reasoningEffort }
+      : {}),
+    // DeepSeek thinking mode defaults to enabled and emits `reasoning_content`
+    // deltas. Its documented contract then requires every later tool turn to
+    // resend that reasoning_content or the API returns 400 (api-docs.deepseek.com
+    // guides/thinking_mode "Tool Calls"). The shared shaper does not carry that
+    // field, so DeepSeek runs in the documented non-thinking mode; the Rust
+    // egress boundary enforces the same shape for the embedded host. Reasoning
+    // levels are therefore not advertised and fail closed if requested.
+    ...(request.providerId === "deepseek" ? { thinking: { type: "disabled" } } : {}),
     ...(request.tools.length > 0
       ? {
           tools: request.tools.map((tool) => ({

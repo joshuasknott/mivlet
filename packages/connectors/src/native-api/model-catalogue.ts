@@ -84,6 +84,41 @@ const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
       reasoning: true,
       structuredOutput: false
     }
+  },
+  // Official DeepSeek platform facts reviewed 2026-09-11:
+  // - Model IDs: deepseek-flash (DeepSeek-V4.1-Flash) and deepseek-v4-pro.
+  //   Legacy deepseek-v4-flash* ids are retired; requests are served by
+  //   DeepSeek-V4.1-Flash (api-docs.deepseek.com quick-start "Your First API Call").
+  // - Context length 1M and max output ceiling 384K for both models
+  //   (api-docs.deepseek.com quick_start/pricing "Model Details").
+  // - Non-thinking default output is 8K; Mivlet runs non-thinking mode only, so
+  //   the conservative 8K ceiling is used instead of the 384K maximum.
+  // - Streaming, tool calls, and JSON output are documented for both models.
+  // - Thinking mode is a documented option, but the reasoning_content
+  //   round-trip contract (400 when omitted on tool turns) is not bridged by
+  //   the shared OpenAI-compatible shaper, so Mivlet disables thinking mode at
+  //   the Rust egress boundary and does not advertise reasoning levels here.
+  // - deepseek-flash documents vision input, but Mivlet has no audited
+  //   screenshot/visual bridge for the DeepSeek route; vision stays unadvertised.
+  deepseek: {
+    "deepseek-flash": {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: false,
+      structuredOutput: false
+    },
+    "deepseek-v4-pro": {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
+      streaming: true,
+      tools: true,
+      vision: false,
+      reasoning: false,
+      structuredOutput: false
+    }
   }
 };
 
@@ -98,7 +133,7 @@ export function catalogueCapabilities(
 export function defaultDiscoveredCapabilities(
   providerId: string
 ): ModelCapabilities | undefined {
-  if (!["openai", "anthropic", "gemini", "xai"].includes(providerId)) {
+  if (!["openai", "anthropic", "gemini", "xai", "deepseek"].includes(providerId)) {
     return undefined;
   }
   return {

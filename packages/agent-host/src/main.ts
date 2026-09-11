@@ -28,7 +28,7 @@ function stop() {
 }
 async function start(input: HostInput) {
   try {
-    if (!["openai", "anthropic", "xai", "custom"].includes(input.providerId)
+    if (!["openai", "anthropic", "xai", "deepseek", "custom"].includes(input.providerId)
       || !input.request || input.request.messages.some(message => message.images?.length)
       || !Number.isInteger(input.maxTurns) || input.maxTurns < 1 || input.maxTurns > 32
       || !Number.isInteger(input.maxToolCalls) || input.maxToolCalls < 1 || input.maxToolCalls > 80
