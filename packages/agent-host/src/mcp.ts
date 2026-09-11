@@ -8,7 +8,20 @@ import { McpClient } from "@fable/connectors/mcp/sdk-client";
 import type { McpTransport } from "@fable/connectors/mcp/client";
 
 const MAX_IPC_LINE_CHARACTERS = 10 * 1024 * 1024;
-const REQUEST_TIMEOUT_MS = 30_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Test-only timeout knob. Production spawns clear the environment, so this
+ * stays inert there and the host always runs the production default.
+ */
+function requestTimeoutMs(): number {
+  const raw = process.env.MIVLET_MCP_REQUEST_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_REQUEST_TIMEOUT_MS;
+  const value = Number(raw);
+  return Number.isSafeInteger(value) && value >= 100 && value <= DEFAULT_REQUEST_TIMEOUT_MS
+    ? value
+    : DEFAULT_REQUEST_TIMEOUT_MS;
+}
 
 type DiscoveryMethod = "initialize" | "listTools" | "listResources";
 
@@ -108,19 +121,42 @@ class IpcMcpTransport implements McpTransport {
   async send(frame: McpRequest | McpNotification): Promise<void> {
     if (this.closed) throw new Error("MCP transport is closed.");
     const id = this.nextSendId++;
-    this.write({ type: "send", id, frame });
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => {
+    let timeout!: ReturnType<typeof setTimeout>;
+    const acknowledged = new Promise<void>((resolve, reject) => {
+      timeout = setTimeout(() => {
         this.pendingSends.delete(id);
         reject(new Error("MCP host send acknowledgement timed out."));
-      }, REQUEST_TIMEOUT_MS);
+      }, requestTimeoutMs());
+      // Register before the event is written so an acknowledgement that
+      // arrives before this microtask chain completes still matches.
       this.pendingSends.set(id, { resolve, reject, timeout });
     });
+    try {
+      this.write({ type: "send", id, frame });
+    } catch (error) {
+      this.pendingSends.delete(id);
+      clearTimeout(timeout);
+      throw error;
+    }
+    await acknowledged;
   }
 
   acknowledge(id: number, ok: boolean): void {
+    // The SDK closes the transport when a request fails (for example on
+    // timeout). An acknowledgement that was already in flight for a send the
+    // renderer received is then stale, not unexpected, and must be dropped
+    // instead of failing the session.
+    if (this.closed) return;
+    if (this.pendingSends.has(id)) {
+      this.applyAck(id, ok);
+      return;
+    }
+    throw new Error("MCP host send acknowledgement is unexpected.");
+  }
+
+  private applyAck(id: number, ok: boolean): void {
     const pending = this.pendingSends.get(id);
-    if (!pending) throw new Error("MCP host send acknowledgement is unexpected.");
+    if (!pending) return;
     this.pendingSends.delete(id);
     clearTimeout(pending.timeout);
     if (ok) pending.resolve();
@@ -163,16 +199,21 @@ class IpcMcpTransport implements McpTransport {
 /** Run the host-only official MCP discovery bridge over newline-delimited JSON. */
 export async function runMcpHost(): Promise<void> {
   let terminal = false;
-  let closing: Promise<void> | undefined;
+  let closing = false;
+  let closingPromise: Promise<void> | undefined;
   const activeRequests = new Set<Promise<void>>();
   const transport = new IpcMcpTransport(writeEvent);
   const client = new McpClient(transport, {
-    requestTimeoutMs: REQUEST_TIMEOUT_MS
+    requestTimeoutMs: requestTimeoutMs()
   });
 
   const finish = async (): Promise<void> => {
-    if (closing) return closing;
-    closing = (async () => {
+    if (closing) return closingPromise;
+    // Cancellation wins from this point: in-flight requests settle without
+    // publishing results, so a late response after close can never be treated
+    // as discovery of the session that was cancelled.
+    closing = true;
+    closingPromise = (async () => {
       await client.close().catch(() => undefined);
       await Promise.allSettled([...activeRequests]);
       if (!terminal) {
@@ -180,7 +221,7 @@ export async function runMcpHost(): Promise<void> {
         writeEvent({ type: "closed" });
       }
     })();
-    return closing;
+    return closingPromise;
   };
 
   const runRequest = async (request: RequestInput): Promise<void> => {
@@ -190,9 +231,9 @@ export async function runMcpHost(): Promise<void> {
         : request.method === "listTools"
           ? await client.listTools()
           : await client.listResources();
-      if (!terminal) writeEvent({ type: "result", id: request.id, ok: true, value });
+      if (!closing) writeEvent({ type: "result", id: request.id, ok: true, value });
     } catch (error) {
-      if (!terminal) {
+      if (!closing) {
         writeEvent({
           type: "result",
           id: request.id,
@@ -206,16 +247,17 @@ export async function runMcpHost(): Promise<void> {
   const seenRequestIds = new Set<number>();
   const handle = async (input: HostInput): Promise<void> => {
     if (terminal) return;
+    if (input.type === "close") {
+      await finish();
+      return;
+    }
+    if (closing) return;
     if (input.type === "frame") {
       transport.receive(input.frame);
       return;
     }
     if (input.type === "sent") {
       transport.acknowledge(input.id, input.ok);
-      return;
-    }
-    if (input.type === "close") {
-      await finish();
       return;
     }
     if (seenRequestIds.has(input.id)) throw new Error("MCP host request id was reused.");

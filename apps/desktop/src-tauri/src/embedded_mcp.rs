@@ -33,6 +33,13 @@ fn valid_id(id: &str) -> bool {
         && id.len() <= 80
         && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
+fn valid_input(frame: &Value) -> bool {
+    frame.to_string().len() <= LIMIT
+        && matches!(
+            frame["type"].as_str(),
+            Some("request" | "frame" | "sent" | "close")
+        )
+}
 
 #[tauri::command]
 pub async fn start_embedded_mcp(app: AppHandle, request_id: String) -> Result<(), String> {
@@ -113,10 +120,10 @@ pub async fn start_embedded_mcp(app: AppHandle, request_id: String) -> Result<()
             if !matches!(frame["type"].as_str(), Some("send" | "result" | "closed")) {
                 break;
             }
-            let _ = app.emit(&channel, &frame);
             if frame["type"] == "closed" {
                 break;
             }
+            let _ = app.emit(&channel, &frame);
         }
         let _ = session.stop.send(true);
         let _ = child.kill().await;
@@ -131,12 +138,7 @@ pub async fn start_embedded_mcp(app: AppHandle, request_id: String) -> Result<()
 
 #[tauri::command]
 pub async fn send_embedded_mcp(request_id: String, frame: Value) -> Result<(), String> {
-    if frame.to_string().len() > LIMIT
-        || !matches!(
-            frame["type"].as_str(),
-            Some("request" | "frame" | "sent" | "close")
-        )
-    {
+    if !valid_input(&frame) {
         return Err("Invalid MCP protocol frame.".into());
     }
     let session = registry()
@@ -179,5 +181,30 @@ pub(crate) fn shutdown_all() {
         for session in registry.active.values() {
             let _ = session.stop.send(true);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_validation_bounds_frames_and_types() {
+        assert!(valid_input(
+            &json!({"type": "request", "id": 1, "method": "initialize"})
+        ));
+        assert!(valid_input(&json!({"type": "sent", "id": 1, "ok": true})));
+        assert!(valid_input(&json!({"type": "close"})));
+        assert!(valid_input(
+            &json!({"type": "frame", "frame": {"jsonrpc": "2.0", "id": 0, "result": {}}})
+        ));
+        assert!(!valid_input(&json!({"type": "tools/call"})));
+        assert!(!valid_input(&json!({"type": "unknown"})));
+        assert!(!valid_input(
+            &json!({"type": "frame", "frame": {"jsonrpc": "2.0", "id": 0, "result": {}}, "bloat": "x".repeat(10 * 1024 * 1024 + 1)})
+        ));
+        assert!(valid_id("mcp-sdk-0123"));
+        assert!(!valid_id("mcp-sdk-x/y"));
+        assert!(!valid_id(&("mcp-sdk-".to_owned() + &"x".repeat(80))));
     }
 }
