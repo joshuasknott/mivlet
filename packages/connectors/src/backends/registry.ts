@@ -11,6 +11,7 @@ export const BACKEND_PROVIDER_IDS = [
   "antigravity",
   "grok",
   "xai",
+  "deepseek",
   "cursor",
   "opencode",
   "custom"
