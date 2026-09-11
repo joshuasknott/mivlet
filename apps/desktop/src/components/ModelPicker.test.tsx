@@ -156,10 +156,58 @@ describe("Model picker placement", () => {
     expect(menu.style.left).toBe("-246px");
   });
 
+  it("regrows the panel when a shrunken container widens", () => {
+    stubLayout({ width: 1100, height: 800 }, { left: 204, top: 30, right: 504, bottom: 800 }, { left: 230, top: 729, right: 310, bottom: 769 });
+    render(<PlacementHarness />);
+    const menu = openPanel();
+    expect(menu.style.width).toBe("276px");
+    stubLayout({ width: 1280, height: 800 }, { left: 240, top: 30, right: 1280, bottom: 800 }, { left: 400, top: 729, right: 480, bottom: 769 });
+    fireEvent(window, new Event("resize"));
+    expect(menu.style.width).toBe("");
+    expect(menu.style.left).toBe("-148px");
+  });
+
+  it("returns above the trigger once the space above recovers", () => {
+    stubLayout({ width: 1280, height: 800 }, { left: 0, top: 0, right: 1280, bottom: 800 }, { left: 100, top: 150, right: 420, bottom: 190 });
+    render(<PlacementHarness />);
+    const menu = openPanel();
+    expect(menu.style.top).toBe("calc(100% + 6px)");
+    stubLayout({ width: 1280, height: 800 }, { left: 0, top: 0, right: 1280, bottom: 800 }, { left: 100, top: 729, right: 420, bottom: 769 });
+    fireEvent(window, new Event("resize"));
+    expect(menu.style.top).toBe("auto");
+    expect(menu.style.bottom).toBe("");
+  });
+
+  it("repositions on scroll of a clipping ancestor while open", () => {
+    stubLayout({ width: 1100, height: 800 }, { left: 204, top: 30, right: 1100, bottom: 800 }, { left: 327, top: 729, right: 492, bottom: 769 });
+    render(<PlacementHarness />);
+    const menu = openPanel();
+    stubLayout({ width: 1100, height: 800 }, { left: 204, top: 30, right: 1100, bottom: 800 }, { left: 245, top: 729, right: 410, bottom: 769 });
+    fireEvent(window, new Event("scroll"));
+    expect(menu.style.left).toBe("-29px");
+  });
+
   it("keeps stylesheet placement when no geometry is measurable", () => {
     render(<PlacementHarness />);
     const menu = openPanel();
     expect(menu.style.left).toBe("");
+    expect(menu.style.maxHeight).toBe("");
+  });
+
+  it("releases inline placement when the responsive layout makes the anchor static", () => {
+    stubLayout({ width: 1100, height: 800 }, { left: 204, top: 30, right: 1100, bottom: 800 }, { left: 230, top: 729, right: 310, bottom: 769 });
+    render(<PlacementHarness />);
+    const menu = openPanel();
+    expect(menu.style.left).toBe("-14px");
+    const original = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element: Element, pseudo?: string | null) => (
+      element.classList.contains("composer-control-anchor")
+        ? { position: "static", overflow: "visible", overflowX: "visible", overflowY: "visible" } as CSSStyleDeclaration
+        : original(element, pseudo)
+    ));
+    fireEvent(window, new Event("resize"));
+    expect(menu.style.left).toBe("");
+    expect(menu.style.width).toBe("");
     expect(menu.style.maxHeight).toBe("");
   });
 

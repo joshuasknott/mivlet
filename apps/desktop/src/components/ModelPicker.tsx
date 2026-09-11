@@ -67,8 +67,21 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
     // measurable, leaving the stylesheet defaults.
     const place = () => {
       const anchorBox = anchor.getBoundingClientRect();
-      if (!anchorBox.width && !anchorBox.height) return;
-      if (getComputedStyle(anchor).position === "static") return;
+      // Hand placement back to the stylesheet when the responsive layout
+      // owns the anchor or nothing is measurable; stale inline placement
+      // would otherwise carry across layout modes.
+      const release = () => {
+        menu.style.left = "";
+        menu.style.width = "";
+        menu.style.maxHeight = "";
+        menu.style.top = "";
+        menu.style.bottom = "";
+      };
+      if (!anchorBox.width && !anchorBox.height) { release(); return; }
+      if (getComputedStyle(anchor).position === "static") { release(); return; }
+      // Re-measure from the stylesheet width: a previously clamped inline
+      // width would otherwise become the new natural width forever.
+      menu.style.width = "";
       const naturalWidth = menu.offsetWidth || menu.getBoundingClientRect().width;
       if (!naturalWidth) return;
       let frame = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
@@ -95,6 +108,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       const flipBelow = spaceAbove < FLIP_BELOW_THRESHOLD && spaceBelow > spaceAbove;
       menu.style.maxHeight = `${Math.round(Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, flipBelow ? spaceBelow : spaceAbove)))}px`;
       if (flipBelow) { menu.style.bottom = "auto"; menu.style.top = "calc(100% + 6px)"; }
+      else { menu.style.top = "auto"; menu.style.bottom = ""; }
     };
     place();
     window.addEventListener("resize", place);
