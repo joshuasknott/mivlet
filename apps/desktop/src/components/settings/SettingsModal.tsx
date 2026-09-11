@@ -14,13 +14,14 @@ export function SettingsModal({ activeTab, onSelectTab, onClose, children }: {
   children: ReactNode;
 }) {
   const ref = useRef<HTMLElement>(null);
-  useModalFocusTrap({ active: true, containerRef: ref, onClose });
+  const activeTabRef = useRef<HTMLButtonElement>(null);
+  useModalFocusTrap({ active: true, containerRef: ref, initialFocusRef: activeTabRef, onClose });
   return <div className="settings-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
     <section ref={ref} className="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" tabIndex={-1}>
       <aside className="settings-modal__nav" aria-label="Settings sections">
         <strong className="settings-modal__label">Settings</strong>
         <nav className="settings-modal__tab-list" aria-label="Settings">
-          {tabs.map((tab) => <button key={tab.id} type="button"
+          {tabs.map((tab) => <button key={tab.id} ref={tab.id === activeTab ? activeTabRef : undefined} type="button"
             className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
             aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => onSelectTab(tab.id)}>
             {tab.id === "general" ? <Gear size={18} aria-hidden="true" /> : tab.id === "providers" ? <PlugsConnected size={18} aria-hidden="true" /> : tab.id === "connections" ? <Desktop size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
