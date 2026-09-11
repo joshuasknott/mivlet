@@ -181,6 +181,11 @@ File listing, reading, writing, repository ZIP import and artifact publication
 remain confined to this explicit Mivlet-owned scope. Paths are relative; legacy
 `/home/fable` or `/home/agent` paths never become arbitrary host filesystem access.
 Artifacts retain strict type/content validation and immutable publication copies.
+Opening an artifact writes a fresh private launch copy of the receipt-verified
+bytes and re-verifies that exact copy against the receipt digest immediately
+before the system association opens it. This detects replacement between
+preparation and verification; the path-based system launch still leaves a race
+between verification and the associated application's open.
 The removed Linux image no longer supplies office, coding or shell programs.
 
 Two native-boundary tools author a narrow passive Office subset without launching

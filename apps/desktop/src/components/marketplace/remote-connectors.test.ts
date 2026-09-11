@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { remoteConnectors, remoteConnectorServerId } from "./remote-connectors";
+import { remoteConnectorFor, remoteConnectors, remoteConnectorServerId } from "./remote-connectors";
 import { findMarketplaceConnector } from "./marketplace-catalog";
 
 describe("official connection routes", () => {
@@ -15,5 +15,19 @@ describe("official connection routes", () => {
         expect(url.username + url.password + url.search + url.hash).toBe("");
       }
     }
+  });
+  it("points the verified Atlassian Rovo route at the provider's current MCP endpoint", () => {
+    expect(remoteConnectorFor("atlassian-rovo")).toMatchObject({
+      name: "Atlassian Rovo",
+      endpoint: "https://mcp.atlassian.com/v2/mcp",
+      documentation: "https://developer.atlassian.com/cloud/rovo-mcp/guides/getting-started",
+    });
+  });
+  it("points the verified Todoist route at the provider's hosted MCP endpoint", () => {
+    expect(remoteConnectorFor("todoist")).toMatchObject({
+      name: "Todoist",
+      endpoint: "https://ai.todoist.net/mcp",
+      documentation: "https://developer.todoist.com/api/v1/",
+    });
   });
 });

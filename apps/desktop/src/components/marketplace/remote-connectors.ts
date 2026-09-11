@@ -17,6 +17,8 @@ export const remoteConnectors: readonly RemoteConnector[] = [
   { id: "stripe", name: "Stripe", endpoint: "https://mcp.stripe.com", documentation: "https://docs.stripe.com/mcp" },
   { id: "cloudflare", name: "Cloudflare", endpoint: "https://mcp.cloudflare.com/mcp", documentation: "https://developers.cloudflare.com/agent-setup/codex/" },
   { id: "granola", name: "Granola", endpoint: "https://mcp.granola.ai/mcp", documentation: "https://docs.granola.ai/help-center/sharing/integrations/mcp" },
+  { id: "atlassian-rovo", name: "Atlassian Rovo", endpoint: "https://mcp.atlassian.com/v2/mcp", documentation: "https://developer.atlassian.com/cloud/rovo-mcp/guides/getting-started", prerequisite: "Available to all Atlassian Cloud sites. Site rate limits and Rovo credit usage apply; org admins control some tool groups." },
+  { id: "todoist", name: "Todoist", endpoint: "https://ai.todoist.net/mcp", documentation: "https://developer.todoist.com/api/v1/" },
 ];
 
 export function remoteConnectorFor(id: string) {

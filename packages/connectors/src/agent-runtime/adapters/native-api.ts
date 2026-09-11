@@ -3,10 +3,10 @@
  *
  * This is one adapter among equals — it implements the provider-neutral
  * {@link AgentBackend} contract for direct model APIs. Ordinary OpenAI,
- * Anthropic, xAI, and custom turns use the embedded SDK host when available;
- * Gemini, OpenRouter, image turns, and browser fixtures retain Mivlet's local
- * loop. Both paths keep HTTP egress and credentials behind the injected native
- * boundary.
+ * Anthropic, xAI, DeepSeek, and custom turns use the embedded SDK host when
+ * available; Gemini, OpenRouter, image turns, and browser fixtures retain
+ * Mivlet's local loop. Both paths keep HTTP egress and credentials behind the
+ * injected native boundary.
  *
  * SECRET INVARIANT: the adapter holds no key. The transport it receives owns
  * egress; in production Rust adds the Authorization/x-api-key/x-goog-api-key
@@ -64,7 +64,7 @@ export function createNativeApiBackend(
     }
     // Keep the audited transient user-image wire route until its SDK admission
     // contract is verified. Ordinary turns and native computer tools use OpenCode.
-    if (embedded && ["openai", "anthropic", "xai", "custom"].includes(provider.id)
+    if (embedded && ["openai", "anthropic", "xai", "deepseek", "custom"].includes(provider.id)
       && !request.messages.some(message => message.images?.length)) {
       return embedded.run(request, options);
     }

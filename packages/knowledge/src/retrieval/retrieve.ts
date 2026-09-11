@@ -341,12 +341,14 @@ export async function retrieve(
 
   // Rank: fused score desc, then deterministic tie-breakers (title, chunk
   // ordinal, chunkId) so identical inputs always produce identical ordering.
+  // Tie-breaks use code-unit order rather than localeCompare so the ordering
+  // cannot flip between runtimes with different ICU locales/versions.
   scored.sort(
     (a, b) =>
       b.fused - a.fused ||
-      a.source.title.localeCompare(b.source.title) ||
+      compareText(a.source.title, b.source.title) ||
       a.chunk.ordinal - b.chunk.ordinal ||
-      a.chunk.id.localeCompare(b.chunk.id)
+      compareText(a.chunk.id, b.chunk.id)
   );
 
   // Deduplicate overlapping chunks from the same source: keep the top chunk per
@@ -420,13 +422,41 @@ function makeSnippet(text: string, queryTokens: string[], maxChars: number): str
     .sort((left, right) => left - right)[0];
   const start = Math.max(0, (firstMatch ?? 0) - Math.floor(maxChars / 3));
   // Tiny snippets spend their budget on content rather than ellipses.
-  if (maxChars <= 6) return clean.slice(start, start + maxChars);
+  if (maxChars <= 6) {
+    const begin = skipSurrogatePairStart(clean, start);
+    const end = skipSurrogatePairEnd(clean, start + maxChars);
+    return clean.slice(begin, end);
+  }
   const prefix = start > 0 ? "..." : "";
   const available = maxChars - prefix.length;
   const truncated = start + available < clean.length;
   const suffix = truncated ? "..." : "";
-  const end = Math.min(clean.length, start + available - suffix.length);
-  return `${prefix}${clean.slice(start, end).trim()}${suffix}`;
+  // Adjust inward so truncation never splits a surrogate pair (adjusting
+  // inward keeps the snippet within the budget).
+  const begin = skipSurrogatePairStart(clean, start);
+  const end = skipSurrogatePairEnd(clean, Math.min(clean.length, start + available - suffix.length));
+  return `${prefix}${clean.slice(begin, end).trim()}${suffix}`;
+}
+
+/**
+ * True when `index` in `text` points at the low half of a surrogate pair
+ * (i.e. slicing at `index` would leave a dangling high surrogate).
+ */
+export function splitsSurrogatePair(text: string, index: number): boolean {
+  if (index <= 0 || index >= text.length) return false;
+  const prev = text.charCodeAt(index - 1);
+  const next = text.charCodeAt(index);
+  return prev >= 0xd800 && prev <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+}
+
+/** Move a slice start past a surrogate pair instead of splitting it. */
+function skipSurrogatePairStart(text: string, index: number): number {
+  return splitsSurrogatePair(text, index) ? index + 1 : index;
+}
+
+/** Pull a slice end back before a surrogate pair instead of splitting it. */
+function skipSurrogatePairEnd(text: string, index: number): number {
+  return splitsSurrogatePair(text, index) ? index - 1 : index;
 }
 
 function toCitation(scored: ScoredChunk, snippet: string): AuthorityScopedKnowledgeCitation {
@@ -453,6 +483,16 @@ function toCitation(scored: ScoredChunk, snippet: string): AuthorityScopedKnowle
 
 function round(value: number): number {
   return Number(value.toFixed(4));
+}
+
+/**
+ * Environment-independent string order (UTF-16 code-unit order). Used for
+ * deterministic tie-breaking so identical inputs produce identical ordering on
+ * every runtime — unlike `localeCompare`, which depends on the ICU locale and
+ * version (Node vs the Tauri WebView can disagree).
+ */
+function compareText(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }
 
 export type { RankingType };

@@ -299,3 +299,154 @@ describe("chunk: invariants", () => {
     expect(chunks.map((c) => c.id)).toEqual(chunks.map((_, i) => `s#${i}`));
   });
 });
+
+/** Count lone UTF-16 surrogates (code-unit level) in a chunk text. */
+function loneSurrogates(text: string): number {
+  let count = 0;
+  for (let i = 0; i < text.length; i++) {
+    const cu = text.charCodeAt(i);
+    const next = i + 1 < text.length ? text.charCodeAt(i + 1) : -1;
+    const prev = i > 0 ? text.charCodeAt(i - 1) : -1;
+    if (cu >= 0xd800 && cu <= 0xdbff && !(next >= 0xdc00 && next <= 0xdfff)) count++;
+    if (cu >= 0xdc00 && cu <= 0xdfff && !(prev >= 0xd800 && prev <= 0xdbff)) count++;
+  }
+  return count;
+}
+
+describe("chunk: UTF-16 surrogate boundaries", () => {
+  it("never splits a surrogate pair at a window edge (plain text)", () => {
+    // The emoji straddles the 100-char window edge.
+    const text = "a".repeat(99) + "😀" + "b".repeat(80);
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 100, overlapChars: 0 });
+    for (const c of chunks) {
+      expect(loneSurrogates(c.text)).toBe(0);
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+      expect(c.text.length).toBeLessThanOrEqual(101);
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+
+  it("never splits a surrogate pair at a window edge (markdown section)", () => {
+    const text = "# Heading\n\n" + "a".repeat(99) + "😀" + "b".repeat(80);
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "markdown", maxChars: 100, overlapChars: 0 });
+    for (const c of chunks) {
+      expect(loneSurrogates(c.text)).toBe(0);
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+
+  it("keeps a long unbroken emoji run intact and within the cap", () => {
+    const text = "😀".repeat(150);
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 40, overlapChars: 0 });
+    for (const c of chunks) {
+      expect(c.text.length).toBeLessThanOrEqual(40);
+      expect(loneSurrogates(c.text)).toBe(0);
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+
+  it("preserves combining characters across chunk boundaries without loss", () => {
+    const text = "café\u0301 ".repeat(40).trim();
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 60, overlapChars: 0 });
+    for (const c of chunks) {
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+});
+
+describe("chunk: CRLF and exact size boundaries", () => {
+  it("reconstructs CRLF text exactly without dropping \\r", () => {
+    const lines = Array.from({ length: 60 }, (_, i) => `line ${i} words here`).join("\r\n");
+    const chunks = chunkSourceText(lines, { sourceId: "s", type: "text", maxChars: 80, overlapChars: 0 });
+    expect(chunks.map((c) => c.text).join("")).toBe(lines);
+    for (const c of chunks) {
+      expect(c.text).toBe(lines.slice(c.charStart, c.charEnd));
+    }
+  });
+
+  it("input exactly maxChars is a single chunk", () => {
+    const text = "x".repeat(100);
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 100, overlapChars: 0 });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toBe(text);
+  });
+
+  it("input one char over maxChars splits into two bounded chunks", () => {
+    const text = "x".repeat(101);
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "text", maxChars: 100, overlapChars: 0 });
+    expect(chunks.length).toBeGreaterThanOrEqual(2);
+    for (const c of chunks) {
+      expect(c.text.length).toBeLessThanOrEqual(100);
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+});
+
+describe("chunk: markdown fenced code", () => {
+  const fixture = [
+    "# Intro",
+    "",
+    "Before the fence.",
+    "",
+    "```",
+    "# Not a real heading",
+    "console.log(1);",
+    "```",
+    "",
+    "## Real",
+    "",
+    "After the fence."
+  ].join("\n");
+
+  it("ignores ATX-style lines inside a backtick fence", () => {
+    const chunks = chunkSourceText(fixture, { sourceId: "s", type: "markdown" });
+    expect(chunks.some((c) => c.heading === "Not a real heading")).toBe(false);
+    expect(chunks.some((c) => c.heading === "Real")).toBe(true);
+    expect(chunks.map((c) => c.text).join("")).toBe(fixture);
+    for (const c of chunks) {
+      expect(c.text).toBe(fixture.slice(c.charStart, c.charEnd));
+    }
+  });
+
+  it("handles tilde fences and info strings", () => {
+    const text = "~~~ts\n# code line\nlet x = 1;\n~~~\n\n# Actual\n\nBody.";
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "markdown" });
+    expect(chunks.some((c) => c.heading === "code line")).toBe(false);
+    expect(chunks.some((c) => c.heading === "Actual")).toBe(true);
+  });
+
+  it("treats headings inside CRLF fences as code, preserving offsets", () => {
+    const text = "```js\r\n# fake\r\ncode\r\n```\r\n\r\n# Real\r\n\r\nBody";
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "markdown" });
+    expect(chunks.some((c) => c.heading === "fake")).toBe(false);
+    expect(chunks.some((c) => c.heading === "Real")).toBe(true);
+    for (const c of chunks) {
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+    }
+  });
+});
+
+describe("chunk: adversarial boundary invariants", () => {
+  const inputs = [
+    { type: "text" as const, text: "abc def ghi. ".repeat(200) },
+    { type: "text" as const, text: "a".repeat(5) + " " + "b".repeat(300) + " " + "c".repeat(5) },
+    { type: "text" as const, text: "日本語のテキストです。".repeat(40) },
+    { type: "text" as const, text: "aé😀\n\nb".repeat(40) },
+    { type: "markdown" as const, text: "# H\n\n" + "para one. ".repeat(40) + "\n\n```\n# code\nx\n```\n\n## H2\n\n" + "y".repeat(200) },
+    { type: "yaml" as const, text: "name: Fable\r\nkind: app\r\nnotes: " + "x".repeat(500) + "\r\n" }
+  ];
+
+  it.each(inputs)("covers every span exactly, stays bounded, and has no lone surrogates (%#)", ({ type, text }) => {
+    const chunks = chunkSourceText(text, { sourceId: "s", type, maxChars: 120, overlapChars: 0 });
+    for (const c of chunks) {
+      expect(c.text).toBe(text.slice(c.charStart, c.charEnd));
+      expect(c.text.length).toBeLessThanOrEqual(120 + 5);
+      expect(loneSurrogates(c.text)).toBe(0);
+    }
+    expect(chunks.map((c) => c.text).join("")).toBe(text);
+  });
+});

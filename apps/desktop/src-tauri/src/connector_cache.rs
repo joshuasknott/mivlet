@@ -18,6 +18,14 @@
 //! Cached data never includes provider secrets/tokens: the write path redacts
 //! token-shaped values and fails closed when a secret marker survives. Provider
 //! credentials live in OS secure storage under a separate lifecycle.
+//!
+//! Cache writes and reads are gated on the maintained canonical Connection
+//! records (`connection_record`, written by the auth lifecycle on
+//! connect/switch/disconnect): an account-bound item is only cached and served
+//! while that exact account has a live Connection, and workspace-scoped items
+//! only while the connector has at least one. This makes a stale in-flight
+//! response fail closed after an account switch or disconnect instead of
+//! seeding content the read path would serve.
 
 use crate::store::repos::connector_cache::{self, ConnectorCacheRow};
 use crate::store::repos::connector_cache_settings::{
@@ -71,7 +79,6 @@ mod lifecycle {
         workspace_id: &str,
         rows: Vec<ConnectorCacheRow>,
     ) -> StoreResult<Vec<ConnectorCacheRow>> {
-        use std::collections::HashSet;
         // Resolve the effective cache `enabled` flag for every connector in this
         // workspace ONCE, from plaintext columns only (no per-row payload
         // decryption). The previous path called `effective(...)` per row, which
@@ -79,19 +86,12 @@ mod lifecycle {
         // time just to read the boolean.
         let enabled_by_connector =
             connector_cache_settings::effective_enabled_for_workspace(conn, workspace_id)?;
-        // Load the connected accounts once into a HashSet for O(1) membership
-        // instead of re-scanning the full account list per cache row.
-        let mut statement = conn.prepare(
-            "SELECT connector_id, account_id FROM connector_account
-             WHERE workspace_id=?1 AND status='connected'
-               AND account_id IS NOT NULL AND account_id <> '';",
-        )?;
-        let connected: HashSet<(String, String)> = statement
-            .query_map([workspace_id], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?
-            .filter_map(|r| r.ok())
-            .collect();
+        // Connectors with at least one live canonical Connection — the
+        // maintained revocation hook. `connection_record` is written by the
+        // auth lifecycle (connect/switch/disconnect); the legacy
+        // `connector_account` snapshot is frozen at migration time and is not
+        // authoritative for revocation.
+        let live = connector_cache::live_connectors(conn, workspace_id)?;
         let _ = store; // settings are read from plaintext columns; no payload decryption here.
         let mut authorized = Vec::with_capacity(rows.len());
         for row in rows {
@@ -103,14 +103,25 @@ mod lifecycle {
                 .payload
                 .get("account")
                 .and_then(serde_json::Value::as_str);
-            if let Some(item_account) = item_account.filter(|value| !value.is_empty()) {
-                // Authorization gate: an account-bound row is only authorized if
-                // a matching connected account exists for its connector. The
-                // predicate is unchanged; only the lookup is now O(1).
-                let account_ok =
-                    connected.contains(&(row.connector_id.clone(), item_account.to_string()));
-                if !account_ok {
-                    continue;
+            match item_account.filter(|value| !value.is_empty()) {
+                // Account-bound row: authorized only while that exact account
+                // has a live canonical Connection.
+                Some(account) => {
+                    if !connector_cache::connection_authorized(
+                        conn,
+                        workspace_id,
+                        &row.connector_id,
+                        account,
+                    )? {
+                        continue;
+                    }
+                }
+                // Workspace-scoped row: authorized only while the connector has
+                // at least one live Connection (disconnect hides everything).
+                None => {
+                    if !live.contains(&row.connector_id) {
+                        continue;
+                    }
                 }
             }
             authorized.push(row);
@@ -515,7 +526,10 @@ pub fn search_connector_cache(
 /// is redacted before sealing; a record that still contains a token-shaped
 /// value after redaction is rejected (fail-closed). Honors the effective cache
 /// setting: when the cache is disabled for this workspace/connector, the write
-/// is a no-op and returns `cached: false`.
+/// is a no-op and returns `cached: false`. The write also fails closed when the
+/// item's account (or the connector, for unbound items) has no live canonical
+/// Connection, so a stale in-flight response cannot re-seed the cache after an
+/// account switch or disconnect.
 #[tauri::command]
 pub fn cache_connector_item(request: CacheConnectorItemRequest) -> Result<bool, String> {
     let ws = required_workspace(&request.workspace_id)?;
@@ -664,9 +678,92 @@ mod tests {
         })
     }
 
+    /// Insert a workspace plus a live (authorized) canonical Connection for a
+    /// connector, so unbound cache writes/list reads are permitted.
+    fn live_connection(store: &Store, workspace_id: &str, connector_id: &str) {
+        connection(store, workspace_id, connector_id, "acct-1");
+    }
+
+    /// Insert a canonical `connection_record` row for `(workspace, connector,
+    /// account)` in the authorized state, mirroring the plaintext columns the
+    /// cache authorization hooks read. The connection id is derived exactly
+    /// like production auth writes it.
+    fn connection(store: &Store, workspace_id: &str, connector_id: &str, account_id: &str) {
+        let id = crate::connector_auth::derive_native_connection_id(
+            workspace_id,
+            connector_id,
+            account_id,
+        );
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT OR IGNORE INTO workspace (id, name, created_at, updated_at)
+                     VALUES (?1, 'W', 'now', 'now');",
+                    [workspace_id],
+                )?;
+                tx.execute(
+                    "INSERT INTO connection_record(
+                       workspace_id,id,record_type,authority,visibility,owner_member_id,
+                       schema_version,revision,created_by_internal_user_id,created_by_device_id,
+                       kind,ownership,lifecycle,authorization_state,health_state,trust,
+                       credential_custody,credential_state,credential_ref,connector_definition_key,
+                       enabled_by_default,created_at,updated_at,deleted_at,payload,payload_nonce)
+                     VALUES(?1,?2,'connection','local','workspace-shared',NULL,1,1,
+                       'local-user-1',NULL,'native-connector','workspace-shared','authorized',
+                       'authorized','healthy','fable-reviewed','os-secure-store','available',
+                       ?3,?4,1,'now','now',NULL,x'01',x'02');",
+                    rusqlite::params![
+                        workspace_id,
+                        id,
+                        format!("oauth-token:{workspace_id}:{connector_id}:{account_id}"),
+                        connector_id,
+                    ],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    /// Transition the canonical Connection for `(workspace, connector, account)`
+    /// into the given lifecycle/authorization/credential state (production
+    /// disconnect writes `disconnected`/`revoked`/`revoked`).
+    fn transition(
+        store: &Store,
+        workspace_id: &str,
+        connector_id: &str,
+        account_id: &str,
+        lifecycle: &str,
+        authorization_state: &str,
+        credential_state: &str,
+    ) {
+        let id = crate::connector_auth::derive_native_connection_id(
+            workspace_id,
+            connector_id,
+            account_id,
+        );
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connection_record SET lifecycle=?1,
+                       authorization_state=?2, credential_state=?3
+                     WHERE workspace_id=?4 AND id=?5;",
+                    rusqlite::params![
+                        lifecycle,
+                        authorization_state,
+                        credential_state,
+                        workspace_id,
+                        id,
+                    ],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+    }
+
     #[test]
     fn disable_excludes_item_from_list_and_search() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "Alpha"), "t").unwrap();
         lifecycle::cache_item(&store, "ws-a", &item("github", "2", "Beta"), "t").unwrap();
         assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 2);
@@ -685,6 +782,7 @@ mod tests {
     #[test]
     fn delete_removes_item_scoped_to_workspace() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "Alpha"), "t").unwrap();
         // Deleting from another workspace does nothing (isolation).
         assert!(!lifecycle::delete(&store, "ws-b", "cache:ws-a:github:1").unwrap());
@@ -700,6 +798,7 @@ mod tests {
     #[test]
     fn export_is_credential_free_and_includes_disabled() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "Alpha"), "t").unwrap();
         lifecycle::cache_item(&store, "ws-a", &item("github", "2", "Beta"), "t").unwrap();
         lifecycle::set_disabled(&store, "ws-a", "cache:ws-a:github:1", true).unwrap();
@@ -724,6 +823,7 @@ mod tests {
     #[test]
     fn export_omits_token_shaped_values() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         // A provider response that leaked a token into the title is redacted
         // before caching, so the export never carries it.
         let mut leaky = item("github", "1", "ya29.LEAKED-TOKEN-VALUE");
@@ -745,6 +845,8 @@ mod tests {
     #[test]
     fn resync_remarks_connector_rows() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
+        live_connection(&store, "ws-a", "notion");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "Alpha"), "old").unwrap();
         lifecycle::cache_item(&store, "ws-a", &item("notion", "p1", "Page"), "old").unwrap();
         let touched = lifecycle::resync(&store, "ws-a", Some("github"), "fresh").unwrap();
@@ -758,6 +860,9 @@ mod tests {
     #[test]
     fn clear_respects_workspace_isolation() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
+        live_connection(&store, "ws-a", "notion");
+        live_connection(&store, "ws-b", "github");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "A1"), "t").unwrap();
         lifecycle::cache_item(&store, "ws-a", &item("notion", "p1", "A2"), "t").unwrap();
         lifecycle::cache_item(&store, "ws-b", &item("github", "1", "B1"), "t").unwrap();
@@ -787,6 +892,7 @@ mod tests {
     #[test]
     fn cache_write_honors_disabled_setting() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         // Disable the cache workspace-wide.
         lifecycle::set_settings(&store, "ws-a", "", false, false, "", "t").unwrap();
         // A write is a no-op and reports not-cached.
@@ -806,59 +912,136 @@ mod tests {
     #[test]
     fn connector_account_mismatch_and_revocation_exclude_cached_rows() {
         let store = store();
+        connection(&store, "ws-a", "github", "acct-a");
         let mut account_item = item("github", "1", "Account-bound");
         account_item["account"] = serde_json::json!("acct-a");
         lifecycle::cache_item(&store, "ws-a", &account_item, "t").unwrap();
 
-        // Account-bound rows fail closed when there is no matching connected account.
-        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "INSERT INTO workspace (id, name, created_at, updated_at)
-                     VALUES ('ws-a', 'A', 'now', 'now');",
-                    [],
-                )?;
-                tx.execute(
-                    "INSERT INTO connector_account
-                       (workspace_id, project_id, connector_id, account_id, status, expires_at,
-                        credential_ref, connected_at, updated_at, payload, payload_nonce)
-                     VALUES ('ws-a', NULL, 'github', 'acct-b', 'connected', NULL,
-                             'ref', 'now', 'now', x'01', x'02');",
-                    [],
-                )?;
-                Ok(())
-            })
-            .unwrap();
-        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
-
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "UPDATE connector_account SET account_id='acct-a', status='revoked'
-                     WHERE workspace_id='ws-a' AND connector_id='github';",
-                    [],
-                )?;
-                Ok(())
-            })
-            .unwrap();
-        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
-        store
-            .transaction(|tx| {
-                tx.execute(
-                    "UPDATE connector_account SET status='connected'
-                     WHERE workspace_id='ws-a' AND connector_id='github';",
-                    [],
-                )?;
-                Ok(())
-            })
-            .unwrap();
+        // A write bound to an account with no live Connection fails closed at
+        // write time (the stale in-flight write is rejected, not hidden later).
+        let mut other_item = item("github", "2", "Other-account");
+        other_item["account"] = serde_json::json!("acct-2");
+        assert!(lifecycle::cache_item(&store, "ws-a", &other_item, "t").is_err());
         assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
+
+        // Revoking the live Connection hides the account-bound row.
+        transition(
+            &store,
+            "ws-a",
+            "github",
+            "acct-a",
+            "disconnected",
+            "revoked",
+            "revoked",
+        );
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
+        assert!(lifecycle::search(&store, "ws-a", None, "account")
+            .unwrap()
+            .is_empty());
+
+        // Re-authorizing the Connection restores visibility.
+        transition(
+            &store,
+            "ws-a",
+            "github",
+            "acct-a",
+            "authorized",
+            "authorized",
+            "available",
+        );
+        assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn cache_contract_survives_account_switch_and_stale_in_flight_write() {
+        // End-to-end cache-contract regression for the observed defect: a
+        // search response that completes after the account switched must not
+        // overwrite the active account's row or re-seed content for a
+        // disconnected account, and disconnect must yield a valid empty result
+        // (not a failure and not a miss) until the connector is re-authorized.
+        let store = store();
+        connection(&store, "ws-a", "github", "acct-a");
+        let mut for_a = item("github", "issue-1", "Fresh acct-a");
+        for_a["account"] = serde_json::json!("acct-a");
+        assert!(lifecycle::cache_item(&store, "ws-a", &for_a, "t1").unwrap());
+
+        // Account switch: acct-a is revoked, acct-b is authorized.
+        transition(
+            &store,
+            "ws-a",
+            "github",
+            "acct-a",
+            "disconnected",
+            "revoked",
+            "revoked",
+        );
+        connection(&store, "ws-a", "github", "acct-b");
+
+        // The stale in-flight response for acct-a completes now and is rejected
+        // fail-closed; it cannot overwrite acct-b's future row.
+        let mut stale_a = item("github", "issue-1", "Stale acct-a");
+        stale_a["account"] = serde_json::json!("acct-a");
+        assert!(lifecycle::cache_item(&store, "ws-a", &stale_a, "t2").is_err());
+
+        // The active account's fresh re-sync lands and is the only content
+        // served for that provider item.
+        let mut for_b = item("github", "issue-1", "Fresh acct-b");
+        for_b["account"] = serde_json::json!("acct-b");
+        assert!(lifecycle::cache_item(&store, "ws-a", &for_b, "t3").unwrap());
+        let rows = lifecycle::search(&store, "ws-a", None, "acct-b").unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "stale acct-a write must not overwrite acct-b"
+        );
+        assert_eq!(rows[0].account, "acct-b");
+        assert_eq!(rows[0].title, "Fresh acct-b");
+
+        // Disconnect: a valid empty result, distinct from a failure.
+        transition(
+            &store,
+            "ws-a",
+            "github",
+            "acct-b",
+            "disconnected",
+            "revoked",
+            "revoked",
+        );
+        assert!(
+            lifecycle::list(&store, "ws-a", None).unwrap().is_empty(),
+            "disconnect must yield an empty result"
+        );
+        assert!(lifecycle::search(&store, "ws-a", None, "acct-b")
+            .unwrap()
+            .is_empty());
+
+        // Re-authorize: writes and reads recover deterministically; the rows
+        // are upserted in place (bounded storage).
+        transition(
+            &store,
+            "ws-a",
+            "github",
+            "acct-b",
+            "authorized",
+            "authorized",
+            "available",
+        );
+        assert!(lifecycle::cache_item(&store, "ws-a", &for_b, "t4").unwrap());
+        let rows = lifecycle::list(&store, "ws-a", None).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].title, "Fresh acct-b");
+
+        // A disabled cache is a no-op reporting not-cached — a third distinct
+        // outcome alongside empty results and failures.
+        lifecycle::set_settings(&store, "ws-a", "github", false, false, "", "t5").unwrap();
+        assert!(!lifecycle::cache_item(&store, "ws-a", &for_b, "t6").unwrap());
+        assert!(lifecycle::list(&store, "ws-a", None).unwrap().is_empty());
     }
 
     #[test]
     fn cache_write_rejects_unredactable_secret() {
         let store = store();
+        live_connection(&store, "ws-a", "github");
         // A token in a string field is redacted and cached; a token-shaped value
         // that survives redaction (none can, by construction) would fail closed.
         // Here we assert the redaction path keeps the write succeeding with the
@@ -910,6 +1093,8 @@ mod tests {
         // default of disabled must exclude every cached row of every connector
         // from list/search, even with no per-connector rows materialized.
         let store = store();
+        live_connection(&store, "ws-a", "github");
+        live_connection(&store, "ws-a", "notion");
         lifecycle::cache_item(&store, "ws-a", &item("github", "1", "G"), "t").unwrap();
         lifecycle::cache_item(&store, "ws-a", &item("notion", "1", "N"), "t").unwrap();
         assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 2);
@@ -924,6 +1109,89 @@ mod tests {
         let rows = lifecycle::list(&store, "ws-a", None).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].connector_id, "notion");
+    }
+
+    #[test]
+    fn cached_rows_hidden_when_live_connection_is_disconnected() {
+        // Production disconnect writes the canonical `connection_record` (the
+        // maintained revocation hook) while the legacy `connector_account`
+        // snapshot keeps a stale 'connected' status. The cache read path must
+        // honor the live hook so a disconnected account's cached content is
+        // never served.
+        let store = store();
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "INSERT INTO workspace (id, name, created_at, updated_at)
+                     VALUES ('ws-a', 'A', 'now', 'now');",
+                    [],
+                )?;
+                // Legacy snapshot, frozen at migration time.
+                tx.execute(
+                    "INSERT INTO connector_account
+                       (workspace_id, project_id, connector_id, account_id, status, expires_at,
+                        credential_ref, connected_at, updated_at, payload, payload_nonce)
+                     VALUES ('ws-a', NULL, 'github', 'acct-a', 'connected', NULL,
+                             'oauth-token:ws-a:github:acct-a', 'now', 'now', x'01', x'02');",
+                    [],
+                )?;
+                let id =
+                    crate::connector_auth::derive_native_connection_id("ws-a", "github", "acct-a");
+                tx.execute(
+                    "INSERT INTO connection_record(
+                       workspace_id,id,record_type,authority,visibility,owner_member_id,
+                       schema_version,revision,created_by_internal_user_id,created_by_device_id,
+                       kind,ownership,lifecycle,authorization_state,health_state,trust,
+                       credential_custody,credential_state,credential_ref,connector_definition_key,
+                       enabled_by_default,created_at,updated_at,deleted_at,payload,payload_nonce)
+                     VALUES('ws-a',?1,'connection','local','workspace-shared',NULL,1,1,
+                       'local-user-1',NULL,'native-connector','workspace-shared','authorized',
+                       'authorized','healthy','fable-reviewed','os-secure-store','available',
+                       'oauth-token:ws-a:github:acct-a','github',1,'now','now',NULL,x'01',x'02');",
+                    [id],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        let mut account_item = item("github", "1", "Account-bound");
+        account_item["account"] = serde_json::json!("acct-a");
+        lifecycle::cache_item(&store, "ws-a", &account_item, "t").unwrap();
+        assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
+        // Disconnect: the canonical Connection is revoked; the legacy snapshot
+        // is untouched (this is what production does today).
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connection_record SET lifecycle='disconnected',
+                       authorization_state='revoked', health_state='offline',
+                       credential_state='revoked'
+                     WHERE workspace_id='ws-a' AND connector_definition_key='github';",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(
+            lifecycle::list(&store, "ws-a", None).unwrap().is_empty(),
+            "disconnected account content must not be served"
+        );
+        assert!(lifecycle::search(&store, "ws-a", None, "account")
+            .unwrap()
+            .is_empty());
+        // Reconnecting restores access to cached content.
+        store
+            .transaction(|tx| {
+                tx.execute(
+                    "UPDATE connection_record SET lifecycle='authorized',
+                       authorization_state='authorized', health_state='healthy',
+                       credential_state='available'
+                     WHERE workspace_id='ws-a' AND connector_definition_key='github';",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(lifecycle::list(&store, "ws-a", None).unwrap().len(), 1);
     }
 
     #[test]

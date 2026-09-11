@@ -19,11 +19,11 @@ export class AgentHostProcess {
   #waiters = [];
   #closed;
 
-  constructor(args = []) {
+  constructor(args = [], env = {}) {
     this.directory = mkdtempSync(join(tmpdir(), "mivlet-agent-host-test-"));
     this.child = spawn(executable, args, {
       cwd: this.directory,
-      env: { ...Object.fromEntries(["SystemRoot", "WINDIR"].filter(key => process.env[key]).map(key => [key, process.env[key]])), TEMP: this.directory, TMP: this.directory },
+      env: { ...Object.fromEntries(["SystemRoot", "WINDIR"].filter(key => process.env[key]).map(key => [key, process.env[key]])), TEMP: this.directory, TMP: this.directory, ...env },
       stdio: ["pipe", "pipe", "ignore"],
       windowsHide: true,
     });

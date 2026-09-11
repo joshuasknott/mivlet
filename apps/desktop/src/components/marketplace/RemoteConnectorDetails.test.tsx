@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RemoteConnectorDetails } from "./RemoteConnectorDetails";
-import { remoteConnectors } from "./remote-connectors";
+import { remoteConnectorFor, remoteConnectors } from "./remote-connectors";
 import { findMarketplaceConnector } from "./marketplace-catalog";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), prepare: vi.fn(), commit: vi.fn(), resolve: vi.fn(), auth: vi.fn(), disconnect: vi.fn(), enable: vi.fn(), open: vi.fn() }));
@@ -42,6 +42,27 @@ describe("official connector setup", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Connect" })).not.toBeInTheDocument();
+  });
+  it("selects the exact official endpoint for each verified marketplace route", async () => {
+    const cases = [
+      { id: "atlassian-rovo", name: "Atlassian Rovo", endpoint: "https://mcp.atlassian.com/v2/mcp" },
+      { id: "todoist", name: "Todoist", endpoint: "https://ai.todoist.net/mcp" },
+    ];
+    for (const expected of cases) {
+      const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector(expected.id)!} preset={remoteConnectorFor(expected.id)!} workspaceId="workspace-1" titleId={`${expected.id}-title`} onSaved={vi.fn()} />);
+      await waitFor(() => expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled());
+      fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+      await screen.findByText("Connected");
+      expect(api.commit).toHaveBeenLastCalledWith(expect.objectContaining({ workspaceId: "workspace-1", id: `marketplace-${expected.id}`, displayName: expected.name, endpoint: expected.endpoint }), expect.anything());
+      view.unmount();
+    }
+  });
+  it("keeps an official route unavailable until the desktop runtime lists servers", async () => {
+    api.list.mockResolvedValue(null);
+    const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector("atlassian-rovo")!} preset={remoteConnectorFor("atlassian-rovo")!} workspaceId="workspace-1" titleId="rovo-title" onSaved={vi.fn()} />);
+    await screen.findByText("Account connections require the desktop app.");
+    expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
+    view.unmount();
   });
   it("restores existing access without sign-in or expanding permissions", async () => {
     api.list.mockResolvedValue([{ id: "marketplace-notion" }]);

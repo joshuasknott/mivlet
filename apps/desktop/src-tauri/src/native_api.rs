@@ -66,6 +66,15 @@ const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
         models_endpoint: Some("https://api.x.ai/v1/models"),
         auth_required: true,
     },
+    // Official DeepSeek platform: OpenAI-compatible base URL
+    // https://api.deepseek.com with POST /chat/completions and GET /models
+    // (api-docs.deepseek.com /api/create-chat-completion and /api/list-models).
+    OpenAiCompatProfile {
+        id: "deepseek",
+        chat_endpoint: "https://api.deepseek.com/chat/completions",
+        models_endpoint: Some("https://api.deepseek.com/models"),
+        auth_required: true,
+    },
 ];
 
 fn openai_compat_profile(provider_id: &str) -> Option<&'static OpenAiCompatProfile> {
@@ -265,6 +274,25 @@ fn resolve_provider_connection(
     })
 }
 
+/// Pure DeepSeek egress shaping: rejects unsupported thinking options and
+/// forces the documented non-thinking mode. Applied to every DeepSeek body at
+/// the single Rust egress boundary (embedded host and wire route alike).
+fn shape_deepseek_egress_body(body: &mut serde_json::Value) -> Result<(), String> {
+    if body.get("reasoning_effort").is_some() {
+        return Err("DeepSeek thinking mode is not supported by this route.".into());
+    }
+    if body
+        .get("thinking")
+        .and_then(|value| value.get("type"))
+        .and_then(serde_json::Value::as_str)
+        == Some("enabled")
+    {
+        return Err("DeepSeek thinking mode is not supported by this route.".into());
+    }
+    body["thinking"] = serde_json::json!({ "type": "disabled" });
+    Ok(())
+}
+
 /// Additional headers a provider requires beyond auth (e.g. anthropic-version).
 pub fn extra_headers(provider_id: &str) -> Vec<(String, String)> {
     match provider_kind(provider_id) {
@@ -373,13 +401,20 @@ struct OpenAiCompatibleTerminalObservation {
     usage: Option<(i64, i64)>,
     cumulative_output: bool,
     cumulative_snapshot: String,
+    /// DeepSeek documents that usage rides the same terminal chunk as
+    /// finish_reason ("no separate usage-only chunk is emitted",
+    /// api-docs.deepseek.com /api/create-chat-completion). OpenAI instead
+    /// emits a separate usage-only chunk; this flag accepts the DeepSeek shape
+    /// while keeping the shared shape strict.
+    usage_rides_terminal_chunk: bool,
 }
 
 impl OpenAiCompatibleTerminalObservation {
-    fn new_for_provider(_provider_id: &str, capture_output: bool) -> Self {
+    fn new_for_provider(provider_id: &str, capture_output: bool) -> Self {
         Self {
             capture_output,
             cumulative_output: false,
+            usage_rides_terminal_chunk: provider_id == "deepseek",
             ..Self::default()
         }
     }
@@ -391,12 +426,24 @@ impl OpenAiCompatibleTerminalObservation {
         };
         let terminal_was_seen = self.finish_reason.is_some();
         let usage_was_seen = self.usage.is_some();
+        // Whether this payload itself carries the terminal finish reason (the
+        // DeepSeek usage-riding-terminal-chunk shape checks this in place of a
+        // previously seen finish).
+        let terminal_here = value
+            .pointer("/choices/0/finish_reason")
+            .and_then(serde_json::Value::as_str)
+            .is_some();
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
         }
         if let Some(usage) = value.get("usage").filter(|usage| !usage.is_null()) {
-            if !terminal_was_seen || usage_was_seen {
+            // DeepSeek documents usage riding the same terminal chunk as
+            // finish_reason; every other OpenAI-compatible provider must have
+            // seen the terminal chunk already.
+            let usage_allowed =
+                terminal_was_seen || (self.usage_rides_terminal_chunk && terminal_here);
+            if !usage_allowed || usage_was_seen {
                 self.provider_error = true;
             }
             let parsed = usage.as_object().and_then(|usage| {
@@ -407,7 +454,7 @@ impl OpenAiCompatibleTerminalObservation {
             });
             match parsed {
                 Some((input, output)) if input >= 0 && output >= 0 => {
-                    if terminal_was_seen && !usage_was_seen {
+                    if usage_allowed && !usage_was_seen {
                         self.usage = Some((input, output));
                     }
                 }
@@ -912,6 +959,7 @@ fn require_key(provider_id: &str) -> Result<String, String> {
 pub fn missing_key_message(provider_id: &str) -> String {
     match provider_id {
         "custom" => "Add a custom OpenAI-compatible endpoint to connect.".to_string(),
+        "deepseek" => "Add a DeepSeek API key to connect.".to_string(),
         _ => format!("Add an {provider_id} API key to connect."),
     }
 }
@@ -919,7 +967,7 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 4] = ["openai", "anthropic", "xai", "custom"];
+const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "xai", "deepseek", "custom"];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1054,6 +1102,15 @@ pub(crate) async fn stream_completion(
     let mut computer = computer::begin_stream(&request, &mut body, computers)?;
     if computer.is_some() && request.provider_id == "openai" {
         body["store"] = serde_json::json!(false);
+    }
+    // DeepSeek thinking mode is default-enabled and its documented
+    // reasoning_content round-trip contract (the API returns 400 when a later
+    // tool turn omits it) is not bridged by the shared OpenAI-compatible
+    // shaper or the pinned SDK. This single egress choke point covers both the
+    // embedded host and the local wire route: unsupported options fail closed
+    // and every DeepSeek request runs the documented non-thinking mode.
+    if request.provider_id == "deepseek" {
+        shape_deepseek_egress_body(&mut body)?;
     }
 
     let observation_started = Instant::now();
@@ -2419,5 +2476,114 @@ mod transport_policy_tests {
             let _ = rx.changed().await;
             assert!(*rx.borrow());
         });
+    }
+}
+
+#[cfg(test)]
+mod deepseek_egress_tests {
+    use super::*;
+
+    /// The documented DeepSeek stream shape (api-docs.deepseek.com
+    /// /api/create-chat-completion): the last content chunk carries an empty
+    /// delta, a non-null finish_reason, and the usage statistics together.
+    /// "no separate usage-only chunk is emitted".
+    #[test]
+    fn deepseek_terminal_observation_accepts_usage_riding_the_terminal_chunk() {
+        let mut observation =
+            OpenAiCompatibleTerminalObservation::new_for_provider("deepseek", true);
+        observation.observe(r#"{"choices":[{"delta":{"role":"assistant","content":"Hello "}}]}"#);
+        observation.observe(r#"{"choices":[{"delta":{"content":"world"},"finish_reason":null}]}"#);
+        observation.observe(
+            r#"{"choices":[{"delta":{"content":"","role":null},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}}"#,
+        );
+        assert!(observation.clean_stop());
+        assert_eq!(observation.output, "Hello world");
+        assert_eq!(observation.usage, Some((7, 2)));
+    }
+
+    #[test]
+    fn shared_observation_still_rejects_usage_before_any_finish_for_other_providers() {
+        let mut early = OpenAiCompatibleTerminalObservation::new_for_provider("openai", false);
+        early.observe(r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#);
+        early.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!early.clean_stop());
+
+        // A non-deepseek provider must not accept the usage-riding-terminal shape.
+        let mut rides = OpenAiCompatibleTerminalObservation::new_for_provider("openai", false);
+        rides.observe(
+            r#"{"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#,
+        );
+        assert!(!rides.clean_stop());
+    }
+
+    #[test]
+    fn deepseek_profile_serves_documented_endpoints_and_bearer_auth() {
+        assert_eq!(
+            endpoint_for("deepseek"),
+            "https://api.deepseek.com/chat/completions"
+        );
+        assert_eq!(
+            models_endpoint_for("deepseek").unwrap(),
+            "https://api.deepseek.com/models"
+        );
+        assert_eq!(
+            auth_header_for("deepseek", "sk-fixture"),
+            ("Authorization".to_string(), "Bearer sk-fixture".to_string())
+        );
+        assert!(openai_compat_profile("deepseek").is_some());
+        assert!(openai_compat_profile("deepseek").unwrap().auth_required);
+    }
+
+    #[test]
+    fn deepseek_egress_rejects_thinking_options_and_forces_non_thinking_mode() {
+        let mut with_effort = serde_json::json!({
+            "model": "deepseek-flash",
+            "reasoning_effort": "high",
+        });
+        assert!(shape_deepseek_egress_body(&mut with_effort).is_err());
+
+        let mut thinking_enabled = serde_json::json!({
+            "model": "deepseek-flash",
+            "thinking": { "type": "enabled" },
+        });
+        assert!(shape_deepseek_egress_body(&mut thinking_enabled).is_err());
+
+        let mut plain = serde_json::json!({ "model": "deepseek-flash" });
+        shape_deepseek_egress_body(&mut plain).unwrap();
+        assert_eq!(plain["thinking"], serde_json::json!({ "type": "disabled" }));
+
+        let mut already_disabled = serde_json::json!({
+            "model": "deepseek-flash",
+            "thinking": { "type": "disabled" },
+        });
+        shape_deepseek_egress_body(&mut already_disabled).unwrap();
+        assert_eq!(
+            already_disabled["thinking"],
+            serde_json::json!({ "type": "disabled" })
+        );
+    }
+
+    #[test]
+    fn deepseek_missing_key_message_names_the_provider_without_rejection_copy() {
+        let message = missing_key_message("deepseek");
+        assert!(message.starts_with("Add a DeepSeek API key"));
+        assert!(message.to_lowercase().contains("deepseek"));
+        assert!(!message.to_lowercase().contains("reject"));
+        assert!(!message.to_lowercase().contains("invalid"));
+    }
+
+    #[test]
+    fn deepseek_discovery_parses_the_documented_list_models_shape() {
+        let body = serde_json::json!({
+            "object": "list",
+            "data": [
+                { "id": "deepseek-flash", "object": "model", "owned_by": "deepseek" },
+                { "id": "deepseek-v4-pro", "object": "model", "owned_by": "deepseek" },
+            ]
+        });
+        let models = parse_models_body("deepseek", &body);
+        let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["deepseek-flash", "deepseek-v4-pro"]);
+        assert!(models.iter().all(|m| m.available));
     }
 }

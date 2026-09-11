@@ -24,7 +24,7 @@ export interface ManagedProviderCatalogEntry {
   models: BackendCatalogModel[];
 }
 
-export type NativeProviderId = "openai" | "anthropic" | "xai" | "custom";
+export type NativeProviderId = "openai" | "anthropic" | "xai" | "deepseek" | "custom";
 
 export interface NativeProviderCatalogEntry {
   providerId: NativeProviderId;
@@ -132,6 +132,17 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
     description: "Connect an xAI API key for direct Grok access.",
     authLabel: "xAI API key",
     models: [{ id: "grok-4", label: "Grok 4" }],
+  },
+  {
+    providerId: "deepseek",
+    label: "DeepSeek",
+    description:
+      "Connect a DeepSeek API key for direct model access. Model IDs follow the official DeepSeek platform (api-docs.deepseek.com).",
+    authLabel: "DeepSeek API key",
+    models: [
+      { id: "deepseek-flash", label: "DeepSeek Flash" },
+      { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
+    ],
   },
   {
     providerId: "custom",

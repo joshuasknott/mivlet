@@ -1,5 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { loadRuntimeConversationDraft } from "../runtime";
 import type { ComposerScope } from "./useScopedComposer";
 import { composerScopeKey, useScopedComposer } from "./useScopedComposer";
 
@@ -7,6 +8,14 @@ const mocks = vi.hoisted(() => ({
   drafts: new Map<string, { draftKey: string; threadId?: string; content: string; updatedAt: string }>(),
   saves: [] as { draftKey: string; threadId?: string; content: string }[],
 }));
+
+type StoredDraft = { draftKey: string; threadId?: string; content: string; updatedAt: string };
+const deferred = () => {
+  let resolve!: (draft: StoredDraft | null) => void;
+  const promise = new Promise<StoredDraft | null>((res) => { resolve = res; });
+  return { promise, resolve };
+};
+const storedContent = (text: string) => JSON.stringify({ text, attachments: [] });
 
 vi.mock("../runtime", () => ({
   loadRuntimeConversationDraft: vi.fn(async (key: string) => mocks.drafts.get(key) ?? null),
@@ -29,6 +38,7 @@ describe("useScopedComposer", () => {
     vi.useFakeTimers();
     mocks.drafts.clear();
     mocks.saves.length = 0;
+    vi.mocked(loadRuntimeConversationDraft).mockImplementation(async (key: string) => mocks.drafts.get(key) ?? null);
   });
   afterEach(() => vi.useRealTimers());
 
@@ -185,5 +195,186 @@ describe("useScopedComposer", () => {
     rerender({ value: scope("agent-b") });
     await act(async () => {});
     expect(result.current.text).toBe("");
+  });
+
+  it("does not resurrect sent text when a queued re-load catches up after the send", async () => {
+    const first = deferred();
+    const second = deferred();
+    const third = deferred();
+    const load = vi.mocked(loadRuntimeConversationDraft);
+    load.mockImplementationOnce(() => first.promise);
+    load.mockImplementationOnce(() => second.promise);
+    load.mockImplementationOnce(() => third.promise);
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const keyB = composerScopeKey(scope("agent-b", "thread-b"));
+    const draftA: StoredDraft = { draftKey: keyA, threadId: "thread-a", content: storedContent("stored canary"), updatedAt: "2026-09-11T10:00:00Z" };
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    await act(async () => { void result.current.consume(); });
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    act(() => first.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.ready).toBe(true);
+    expect(result.current.text).toBe("");
+    act(() => second.resolve({ ...draftA, draftKey: keyB, threadId: "thread-b", content: storedContent("beta canary") }));
+    await act(async () => {});
+    act(() => third.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.text).toBe("");
+    const writes = mocks.saves.filter((saved) => saved.draftKey === keyA);
+    expect(JSON.parse(writes.at(-1)!.content)).toEqual({ text: "", attachments: [] });
+  });
+
+  it("does not overwrite typing with a queued re-load that caught up after the draft loaded", async () => {
+    const first = deferred();
+    const load = vi.mocked(loadRuntimeConversationDraft);
+    load.mockImplementationOnce(() => first.promise);
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const draftA: StoredDraft = { draftKey: keyA, threadId: "thread-a", content: storedContent("stored canary"), updatedAt: "2026-09-11T10:00:00Z" };
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    act(() => result.current.setText("typed before the load settled"));
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    const requeued = deferred();
+    load.mockImplementationOnce(() => requeued.promise);
+    act(() => first.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.ready).toBe(true);
+    expect(result.current.text).toBe("typed before the load settled");
+    act(() => requeued.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.text).toBe("typed before the load settled");
+  });
+
+  it("clears and persists the sent draft exactly once and keeps the clear on revisit", async () => {
+    const first = deferred();
+    const load = vi.mocked(loadRuntimeConversationDraft);
+    load.mockImplementationOnce(() => first.promise);
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const draftA: StoredDraft = { draftKey: keyA, threadId: "thread-a", content: storedContent("alpha canary"), updatedAt: "2026-09-11T10:00:00Z" };
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    act(() => first.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.text).toBe("alpha canary");
+    act(() => result.current.setText("sending now"));
+    await act(async () => { void result.current.consume(); });
+    expect(result.current.text).toBe("");
+    await act(async () => { vi.runAllTimers(); await Promise.resolve(); });
+    const writes = mocks.saves.filter((saved) => saved.draftKey === keyA);
+    expect(JSON.parse(writes.at(-1)!.content)).toEqual({ text: "", attachments: [] });
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    expect(result.current.text).toBe("");
+  });
+
+  it("keeps the caller's restored prompt after a failed send", async () => {
+    const first = deferred();
+    const load = vi.mocked(loadRuntimeConversationDraft);
+    load.mockImplementationOnce(() => first.promise);
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const draftA: StoredDraft = { draftKey: keyA, threadId: "thread-a", content: storedContent("alpha canary"), updatedAt: "2026-09-11T10:00:00Z" };
+    const { result } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    act(() => first.resolve(draftA));
+    await act(async () => {});
+    act(() => result.current.setText("will fail"));
+    await act(async () => { void result.current.consume(); });
+    expect(result.current.text).toBe("");
+    act(() => result.current.setText("retry prompt"));
+    await act(async () => { vi.runAllTimers(); await Promise.resolve(); });
+    expect(result.current.text).toBe("retry prompt");
+    const writes = mocks.saves.filter((saved) => saved.draftKey === keyA);
+    expect(JSON.parse(writes.at(-1)!.content)).toEqual({ text: "retry prompt", attachments: [] });
+  });
+
+  it("keeps distinct drafts across rapid scope switches with out-of-order restorations", async () => {
+    const first = deferred();
+    const second = deferred();
+    const load = vi.mocked(loadRuntimeConversationDraft);
+    load.mockImplementationOnce(() => first.promise);
+    load.mockImplementationOnce(() => second.promise);
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const keyB = composerScopeKey(scope("agent-b", "thread-b"));
+    const draftA: StoredDraft = { draftKey: keyA, threadId: "thread-a", content: storedContent("alpha canary"), updatedAt: "2026-09-11T10:00:00Z" };
+    const draftB: StoredDraft = { ...draftA, draftKey: keyB, threadId: "thread-b", content: storedContent("beta canary") };
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    const requeuedB = deferred();
+    load.mockImplementationOnce(() => requeuedB.promise);
+    act(() => second.resolve(draftB));
+    await act(async () => {});
+    expect(result.current.text).toBe("beta canary");
+    const requeuedA = deferred();
+    load.mockImplementationOnce(() => requeuedA.promise);
+    act(() => first.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.text).toBe("beta canary");
+    act(() => requeuedB.resolve(draftB));
+    await act(async () => {});
+    expect(result.current.text).toBe("beta canary");
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    expect(result.current.text).toBe("alpha canary");
+    act(() => requeuedA.resolve(draftA));
+    await act(async () => {});
+    expect(result.current.text).toBe("alpha canary");
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    expect(result.current.text).toBe("beta canary");
+  });
+
+  it("does not clear another scope's draft when sending from the current scope", async () => {
+    const keyA = composerScopeKey(scope("agent-a", "thread-a"));
+    const keyB = composerScopeKey(scope("agent-b", "thread-b"));
+    mocks.drafts.set(keyA, { draftKey: keyA, threadId: "thread-a", content: storedContent("alpha draft"), updatedAt: "2026-09-11T10:00:00Z" });
+    mocks.drafts.set(keyB, { draftKey: keyB, threadId: "thread-b", content: storedContent("beta draft"), updatedAt: "2026-09-11T10:00:00Z" });
+    const { result, rerender } = renderHook(
+      ({ value }) => useScopedComposer(value),
+      { initialProps: { value: scope("agent-a", "thread-a") } },
+    );
+    await act(async () => {});
+    expect(result.current.text).toBe("alpha draft");
+    rerender({ value: scope("agent-b", "thread-b") });
+    await act(async () => {});
+    expect(result.current.text).toBe("beta draft");
+    await act(async () => { void result.current.consume(); });
+    await act(async () => { vi.runAllTimers(); await Promise.resolve(); });
+    rerender({ value: scope("agent-a", "thread-a") });
+    await act(async () => {});
+    expect(result.current.text).toBe("alpha draft");
+    const alphaWrites = mocks.saves.filter((saved) => saved.draftKey === keyA);
+    expect(alphaWrites.length).toBe(0);
+    const betaWrites = mocks.saves.filter((saved) => saved.draftKey === keyB);
+    expect(JSON.parse(betaWrites.at(-1)!.content)).toEqual({ text: "", attachments: [] });
   });
 });

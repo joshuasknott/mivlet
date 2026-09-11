@@ -7,15 +7,20 @@
  * and the nearest heading when the source was chunked by structure.
  *
  * Per type:
- *   - markdown: split on ATX headings (^#{1..6} space); each section is one
- *     chunk carrying its heading; oversized sections further split on paragraph
- *     then fixed-window boundaries.
+ *   - markdown: split on ATX headings (^#{1..6} space) OUTSIDE fenced code
+ *     blocks, so a `# ...` line inside a ``` fence stays code, not a heading;
+ *     each section is one chunk carrying its heading; oversized sections
+ *     further split on paragraph then fixed-window boundaries.
  *   - json: top-level array -> each element serialized is a chunk; object ->
  *     each top-level key/value is a chunk; primitives -> fixed window.
  *   - csv: row-group boundaries (~50 rows or maxChars, whichever first), with
  *     the header line prepended to every chunk.
  *   - text/other/yaml: fixed window of maxChars with overlapChars overlap,
  *     breaking on sentence/paragraph boundaries where possible.
+ *
+ * Boundaries are aligned to UTF-16 code points: a window never splits a
+ * surrogate pair, so an emoji at a chunk edge survives intact instead of
+ * corrupting into lone surrogates.
  *
  * Bounded: the loop is driven by finite input, never unbounded.
  */
@@ -62,8 +67,50 @@ function makeChunk(
 }
 
 /**
+ * UTF-16 helper predicates. Chunk boundaries are code-unit indices; a boundary
+ * that lands between the two halves of a surrogate pair would emit a lone
+ * surrogate (a corrupted character). Alignment below refuses that.
+ */
+function isHighSurrogate(text: string, index: number): boolean {
+  const code = text.charCodeAt(index);
+  return code >= 0xd800 && code <= 0xdbff;
+}
+
+function isLowSurrogate(text: string, index: number): boolean {
+  const code = text.charCodeAt(index);
+  return code >= 0xdc00 && code <= 0xdfff;
+}
+
+/**
+ * Push an END boundary right one code unit when it splits a surrogate pair, so
+ * the low surrogate stays with its high surrogate in the current window.
+ * Returns `end` unchanged for lone surrogates (malformed input) and for
+ * boundaries that do not fall inside a pair.
+ */
+function alignEndBoundary(text: string, end: number): number {
+  if (end > 0 && end < text.length && isLowSurrogate(text, end) && isHighSurrogate(text, end - 1)) {
+    return end + 1;
+  }
+  return end;
+}
+
+/**
+ * Push a START boundary right one code unit when it splits a surrogate pair.
+ * The high surrogate at `start - 1` is always already covered by the previous
+ * window (every window end is aligned and the next start never exceeds it), so
+ * skipping the low surrogate never drops content.
+ */
+function alignStartBoundary(text: string, start: number): number {
+  if (start > 0 && start < text.length && isLowSurrogate(text, start) && isHighSurrogate(text, start - 1)) {
+    return start + 1;
+  }
+  return start;
+}
+
+/**
  * Fixed-window offsets over `text`, stepping by `maxChars - overlapChars`.
  * Always finite (bounded by text length). overlap is clamped so step >= 1.
+ * Both window ends and starts are aligned so they never split a surrogate pair.
  */
 function fixedWindowOffsets(
   text: string,
@@ -76,12 +123,17 @@ function fixedWindowOffsets(
   const safeOverlap = Math.min(overlapChars, maxChars - 1);
   let start = 0;
   while (start < text.length) {
-    const end = Math.max(start + 1, adjustToBoundary(text, start, Math.min(start + maxChars, text.length)));
+    const end = alignEndBoundary(
+      text,
+      Math.max(start + 1, adjustToBoundary(text, start, Math.min(start + maxChars, text.length)))
+    );
     windows.push({ start, end });
     if (end >= text.length) break;
     // Advance from the actual boundary, otherwise shortening a window can
-    // leave an unindexed gap before the next fixed start.
-    start = Math.max(start + 1, end - safeOverlap);
+    // leave an unindexed gap before the next fixed start. Aligning the start
+    // only ever pushes right (past a low surrogate whose pair was already
+    // covered), so progress toward the end of the text is guaranteed.
+    start = alignStartBoundary(text, Math.max(start + 1, end - safeOverlap));
   }
   return windows;
 }
@@ -184,8 +236,53 @@ function chunkPlainText(
 }
 
 /**
- * Markdown: split on ATX headings (^#{1..6} space). Text before the first
- * heading becomes an un-headed preamble section. Each section carries its
+ * Locate ATX heading positions (`^#{1..6} space`) that appear OUTSIDE fenced
+ * code blocks, so a `# ...` line inside a ``` or ~~~ fence stays code rather
+ * than being treated as a heading. Fences open on a line of 3+ backticks or
+ * tildes (with optional trailing info string) and close on a line of the same
+ * fence char repeated at least the opening run length. Returns absolute char
+ * offsets into `text` in document order.
+ */
+function findAtxHeadings(text: string): { index: number; heading: string }[] {
+  const positions: { index: number; heading: string }[] = [];
+  const lines = text.split("\n");
+  let offset = 0;
+  let fence: { char: string; length: number } | null = null;
+
+  for (const line of lines) {
+    // CRLF: strip the `\r` for line semantics but keep it in `offset`, so
+    // offsets stay exact against the original text.
+    const raw = line.replace(/\r$/, "");
+    const first = raw.charAt(0);
+
+    if (fence) {
+      // A closing fence must be a run of the same char (optionally indented).
+      if (first === fence.char || first === " ") {
+        const closing = new RegExp(`^\\s{0,3}${fence.char}{${fence.length},}\\s*$`);
+        if (closing.test(raw)) fence = null;
+      }
+    } else if (first === "`" || first === "~" || first === " ") {
+      // A fence opener may carry a trailing info string (e.g. "```ts").
+      const opening = raw.match(/^\s{0,3}(`{3,}|~{3,})/);
+      if (opening) {
+        fence = { char: opening[1][0], length: opening[1].length };
+      }
+    } else if (first === "#") {
+      const heading = raw.match(/^(#{1,6})\s+(.+?)\s*$/);
+      if (heading) {
+        positions.push({ index: offset, heading: heading[2].trim() });
+      }
+    }
+
+    offset += line.length + 1;
+  }
+
+  return positions;
+}
+
+/**
+ * Markdown: split on ATX headings outside fenced code blocks. Text before the
+ * first heading becomes an un-headed preamble section. Each section carries its
  * heading forward; oversized sections are split via buildChunksFromSegments.
  */
 function chunkMarkdown(
@@ -194,12 +291,7 @@ function chunkMarkdown(
   maxChars: number,
   overlapChars: number
 ): SourceChunk[] {
-  const headingRe = /^(#{1,6})\s+(.+?)\s*$/gm;
-  const positions: { index: number; heading: string }[] = [];
-  let match: RegExpExecArray | null;
-  while ((match = headingRe.exec(text)) !== null) {
-    positions.push({ index: match.index, heading: match[2].trim() });
-  }
+  const positions = findAtxHeadings(text);
 
   if (positions.length === 0) {
     return chunkPlainText(text, sourceId, maxChars, overlapChars);

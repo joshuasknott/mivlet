@@ -55,11 +55,12 @@ UI changes need browser/native inspection of affected flows and relevant viewpor
 
 `verify:build` builds the embedded host before the test gate runs its actual
 Windows executable. The fixture tests use the same cleared environment and
-stdio framing as native custody, with deterministic OpenAI-compatible and
-Anthropic SSE. They verify tool results, denial, ordering, Stop, replay rejection,
-provider failures and absence of plaintext prompt/tool canaries on disk. These
-tests do not establish live provider or signed-installer acceptance. Native
-computer authority and screenshot hydration retain their existing Rust tests.
+stdio framing as native custody, with deterministic OpenAI-compatible,
+DeepSeek and Anthropic SSE. They verify tool results, denial, ordering, Stop,
+replay rejection, provider failures and absence of plaintext prompt/tool
+canaries on disk. These tests do not establish live provider or signed-installer
+acceptance. Native computer authority and screenshot hydration retain their
+existing Rust tests.
 
 Production builds prune unused Phosphor icon weights with `apps/desktop/scripts/icon-weights.ts`.
 It reads the desktop and shared package sources, keeps the original SVG artwork,
