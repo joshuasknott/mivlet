@@ -94,29 +94,36 @@ export function useScopedComposer(scope?: ComposerScope) {
     if (!entry) return;
     const target = entry;
     if (!target.ready) {
-      const revision = target.revision;
       void serialize(key, async () => {
-        const draft = await loadRuntimeConversationDraft(key, target.scope.workspaceId, target.scope.threadId);
-        if (draft || !target.scope.threadId) return { draft, legacy: false };
-        // Thread ownership is already validated by the native repository, so a
-        // pre-scoping thread draft can be migrated safely. The old global
-        // new-thread slot is deliberately never imported into an agent/project.
-        const legacy = await loadRuntimeConversationDraft(`thread:${target.scope.threadId}`, target.scope.workspaceId, target.scope.threadId);
-        return { draft: legacy, legacy: Boolean(legacy) };
-      }).then(({ draft, legacy }) => {
-        if (!allowed(target)) return;
-        if (target.revision === revision) target.content = draft
-          ? legacy ? { text: draft.content, attachments: [] } : decode(draft.content)
-          : empty();
-        target.ready = true;
-        if (target.revision !== revision || legacy) void persist(target).catch(() => undefined);
-        repaint();
-      }).catch((error: unknown) => {
-        if (!allowed(target)) return;
-        if (target.revision === revision) target.content = empty();
-        target.ready = true;
-        if (target.revision !== revision) void persist(target).catch(() => undefined);
-        target.error = error instanceof Error ? error.message : "Could not load this draft.";
+        // Bind this load to the entry state at the moment it actually runs.
+        // A load re-queued by a rapid switch-back must not apply once the
+        // entry was already loaded, consumed, or typed over while waiting.
+        const anchor = { readyAtStart: target.ready, revisionAtStart: target.revision };
+        try {
+          const draft = await loadRuntimeConversationDraft(key, target.scope.workspaceId, target.scope.threadId);
+          if (draft || !target.scope.threadId) return { ok: true as const, ...anchor, draft, legacy: false };
+          // Thread ownership is already validated by the native repository, so a
+          // pre-scoping thread draft can be migrated safely. The old global
+          // new-thread slot is deliberately never imported into an agent/project.
+          const legacy = await loadRuntimeConversationDraft(`thread:${target.scope.threadId}`, target.scope.workspaceId, target.scope.threadId);
+          return { ok: true as const, ...anchor, draft: legacy, legacy: Boolean(legacy) };
+        } catch (error) {
+          return { ok: false as const, ...anchor, error };
+        }
+      }).then((result) => {
+        if (!allowed(target) || result.readyAtStart) return;
+        if (result.ok) {
+          if (target.revision === result.revisionAtStart) target.content = result.draft
+            ? result.legacy ? { text: result.draft.content, attachments: [] } : decode(result.draft.content)
+            : empty();
+          target.ready = true;
+          if (target.revision !== result.revisionAtStart || result.legacy) void persist(target).catch(() => undefined);
+        } else {
+          if (target.revision === result.revisionAtStart) target.content = empty();
+          target.ready = true;
+          if (target.revision !== result.revisionAtStart) void persist(target).catch(() => undefined);
+          target.error = result.error instanceof Error ? result.error.message : "Could not load this draft.";
+        }
         repaint();
       });
     }
