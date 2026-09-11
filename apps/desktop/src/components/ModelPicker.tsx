@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -14,6 +14,14 @@ const EFFORT_LABELS: Record<string, string> = {
 };
 const effortLabel = (value: string) => EFFORT_LABELS[value] ?? value;
 
+// Panel placement: the stylesheet anchors the panel to the trigger's far edge,
+// which runs past the workspace scroll container (and the navigation beside it)
+// whenever the trigger sits near that edge. These bound the measured fallback.
+const PANEL_GUTTER = 12;
+const PANEL_MAX_HEIGHT = 400;
+const PANEL_MIN_HEIGHT = 96;
+const FLIP_BELOW_THRESHOLD = 176;
+
 export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false }: {
   models: ProviderModelOption[];
   selectedId: string;
@@ -27,6 +35,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
 }) {
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
   const panelId = useId();
   const [view, setView] = useState<"effort" | "models">("effort");
   const [query, setQuery] = useState("");
@@ -46,6 +55,68 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   useEffect(() => {
     if (!open) return;
     root.current?.querySelector<HTMLElement>(showEffort ? '[type="range"]' : '[type="search"]')?.focus();
+  }, [open, showEffort]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const anchor = root.current;
+    const menu = panel.current;
+    if (!anchor || !menu) return;
+    // Keep the panel anchored to its trigger but inside the viewport and every
+    // clipping ancestor between it and the document. Skipped when the
+    // responsive layout owns placement (static anchor) or nothing is
+    // measurable, leaving the stylesheet defaults.
+    const place = () => {
+      const anchorBox = anchor.getBoundingClientRect();
+      // Hand placement back to the stylesheet when the responsive layout
+      // owns the anchor or nothing is measurable; stale inline placement
+      // would otherwise carry across layout modes.
+      const release = () => {
+        menu.style.left = "";
+        menu.style.width = "";
+        menu.style.maxHeight = "";
+        menu.style.top = "";
+        menu.style.bottom = "";
+      };
+      if (!anchorBox.width && !anchorBox.height) { release(); return; }
+      if (getComputedStyle(anchor).position === "static") { release(); return; }
+      // Re-measure from the stylesheet width: a previously clamped inline
+      // width would otherwise become the new natural width forever.
+      menu.style.width = "";
+      const naturalWidth = menu.offsetWidth || menu.getBoundingClientRect().width;
+      if (!naturalWidth) return;
+      let frame = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+      for (let parent = anchor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+        const overflow = getComputedStyle(parent);
+        if (overflow.overflow === "visible" && overflow.overflowX === "visible" && overflow.overflowY === "visible") continue;
+        const box = parent.getBoundingClientRect();
+        frame = {
+          left: Math.max(frame.left, box.left),
+          top: Math.max(frame.top, box.top),
+          right: Math.min(frame.right, box.right),
+          bottom: Math.min(frame.bottom, box.bottom)
+        };
+      }
+      const availableWidth = frame.right - frame.left - PANEL_GUTTER * 2;
+      const panelWidth = Math.min(naturalWidth, Math.max(0, availableWidth));
+      if (panelWidth < naturalWidth) menu.style.width = `${panelWidth}px`;
+      menu.style.right = "auto";
+      const desiredLeft = anchorBox.right - panelWidth;
+      const left = Math.min(Math.max(desiredLeft, frame.left + PANEL_GUTTER), Math.max(frame.left + PANEL_GUTTER, frame.right - PANEL_GUTTER - panelWidth));
+      menu.style.left = `${Math.round(left - anchorBox.left)}px`;
+      const spaceAbove = anchorBox.top - frame.top - PANEL_GUTTER;
+      const spaceBelow = frame.bottom - anchorBox.bottom - PANEL_GUTTER;
+      const flipBelow = spaceAbove < FLIP_BELOW_THRESHOLD && spaceBelow > spaceAbove;
+      menu.style.maxHeight = `${Math.round(Math.max(PANEL_MIN_HEIGHT, Math.min(PANEL_MAX_HEIGHT, flipBelow ? spaceBelow : spaceAbove)))}px`;
+      if (flipBelow) { menu.style.bottom = "auto"; menu.style.top = "calc(100% + 6px)"; }
+      else { menu.style.top = "auto"; menu.style.bottom = ""; }
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
   }, [open, showEffort]);
   useEffect(() => {
     if (!open) return;
@@ -84,7 +155,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
-    {open ? <div id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}`} role="dialog" aria-label="Model and reasoning">
+    {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}`} role="dialog" aria-label="Model and reasoning">
       {showEffort ? <div className="model-picker__effort-view">
         <div className="model-picker__summary">
           <ProviderIcon provider={selected!.providerId} size={20} />

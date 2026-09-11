@@ -694,7 +694,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .model-picker__providers { display: flex; gap: 4px; overflow-x: auto; padding: 7px 0; scrollbar-width: thin; }
 .model-picker__providers button { flex: 0 0 auto; width: auto; min-height: 32px; max-width: 170px; padding: 6px 9px; gap: 6px; font-size: 11px; color: var(--ink-muted); }
 .model-picker__providers button[aria-pressed=true] { background: var(--surface-hover); color: var(--ink); }
-.model-picker__models { height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-top: 4px; }
+.model-picker__models { max-height: 220px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-top: 4px; }
 .model-picker__models button { min-height: 48px; }
 .model-picker__models button[aria-checked=true] { background: var(--surface-hover); }
 .model-picker__model-name { display: flex; flex: 1; flex-direction: column; gap: 3px; }
