@@ -13,7 +13,7 @@ later back more than one named account without widening the conversation shell.
 
 The built-in catalogue contains account routes for ChatGPT/Codex, Claude,
 Google Antigravity, Grok, Cursor, and OpenCode, followed by direct OpenAI,
-Anthropic, xAI, and custom OpenAI-compatible connections. Provider families
+Anthropic, xAI, DeepSeek, and custom OpenAI-compatible connections. Provider families
 group an account route with its advanced API-key fallback.
 
 Configuration and execution use separate registries. The provider-driver
@@ -46,7 +46,7 @@ verified installation and account-scoped profile lifecycle.
 
 ### Embedded direct API execution (2026-09-10)
 
-Direct OpenAI, Anthropic, xAI and custom OpenAI-compatible text/tool turns use
+Direct OpenAI, Anthropic, xAI, DeepSeek and custom OpenAI-compatible text/tool turns use
 `packages/agent-host`, pinned to OpenCode V2 SDK/plugin `0.0.0-dev-19449`.
 This is the embedded SDK, separate from the retained OpenCode account/CLI route.
 OpenCode alone owns the model/tool loop for these turns. Its native provider

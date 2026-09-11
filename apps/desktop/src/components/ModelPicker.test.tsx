@@ -208,6 +208,7 @@ describe("Model picker placement", () => {
     fireEvent(window, new Event("resize"));
     expect(menu.style.left).toBe("");
     expect(menu.style.width).toBe("");
+    expect(menu.style.right).toBe("");
     expect(menu.style.maxHeight).toBe("");
   });
 

@@ -72,6 +72,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       // would otherwise carry across layout modes.
       const release = () => {
         menu.style.left = "";
+        menu.style.right = "";
         menu.style.width = "";
         menu.style.maxHeight = "";
         menu.style.top = "";

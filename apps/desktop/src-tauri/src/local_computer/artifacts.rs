@@ -931,9 +931,9 @@ fn prepare_open(
 }
 
 /// Re-verify the exact launch copy against its receipt immediately before the
-/// system opens it. The published copy was verified earlier; this closes the
-/// window where the freshly written launch copy could be replaced with
-/// unverified content after preparation. Reading through `read_bounded` keeps
+/// system opens it. This detects replacement since preparation, but does not
+/// eliminate the race between this read and the application's path-based open.
+/// Reading through `read_bounded` keeps
 /// the same containment, reparse-point and stale-handle checks used for every
 /// artifact read.
 fn verify_prepared_copy(
