@@ -43,6 +43,7 @@ export function Composer({
   models,
   selectedModelId,
   selectedModelLabel,
+  modelScope,
   selectedReasoningEffort,
   onSelectReasoningEffort,
   placeholder = "Ask anything…",
@@ -87,6 +88,7 @@ export function Composer({
   selectedModelId: string;
   /** Label to show on the model chip when a model is selected. */
   selectedModelLabel: string;
+  modelScope?: string;
   selectedReasoningEffort?: string;
   onSelectReasoningEffort?: (effort: string | undefined) => void;
   placeholder?: string;
@@ -298,7 +300,6 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-control-group">
-            {recipientControl}
             <div className="composer-control-anchor">
               <button
                 ref={addTrigger}
@@ -340,13 +341,14 @@ export function Composer({
             </div>
 
 
-            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
-              label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
-              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
-              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
+            {recipientControl}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
+            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
+              label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
+              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
             {!isWorking && (!hasComposerText || voiceListening || voiceTransitioning) ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">

@@ -65,6 +65,7 @@ export function PluginPanel({
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [readiness, setReadiness] = useState<"available" | "connected" | "attention" | "planned">("available");
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(initialConnectorId ?? null);
   const [useRemote, setUseRemote] = useState(() => {
@@ -97,12 +98,21 @@ export function PluginPanel({
   });
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
+  const matchesReadiness = (entry: MarketplaceConnectorEntry) => {
+    const connector = manifestById.get(entry.id);
+    const usable = Boolean(connector || remoteConnectorFor(entry.id));
+    if (readiness === "planned") return !usable;
+    if (readiness === "connected") return connector?.status === "connected" && ["connected", "syncing"].includes(resolveDetailedStatus(connector).className);
+    if (readiness === "attention") return !!connector && ["expired", "revoked", "failed", "unavailable", "permission-limited", "unverified", "configuration-required", "needs-auth"].includes(resolveDetailedStatus(connector).className);
+    return usable;
+  };
+  const showBuiltins = readiness === "available" && builtinPluginEntries.some((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery));
   const visibleSections = useMemo(() => {
-    if (!normalizedQuery) return marketplaceConnectorSections;
     return marketplaceConnectorSections
       .map((section) => ({
         ...section,
         connectors: section.connectors.filter((entry) => {
+          if (!matchesReadiness(entry)) return false;
           const manifest = manifestById.get(entry.id);
           return [
             entry.name,
@@ -119,7 +129,7 @@ export function PluginPanel({
         }),
       }))
       .filter((section) => section.connectors.length > 0);
-  }, [manifestById, normalizedQuery]);
+  }, [manifestById, normalizedQuery, readiness]);
   const installedManifests = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return manifests
@@ -148,7 +158,7 @@ export function PluginPanel({
         );
       });
   }, [manifests, query]);
-  const hasDirectoryMatches = visibleSections.length > 0 || ["Browser Read websites and use tabs in your agent's browser.", "Computer Use Use desktop apps, terminal and files in your agent's computer."].some((entry) => entry.toLowerCase().includes(normalizedQuery));
+  const hasDirectoryMatches = visibleSections.length > 0 || showBuiltins;
 
   const openEntry = (entry: MarketplaceConnectorEntry) => {
     setSelectedEntryId(entry.id);
@@ -165,16 +175,18 @@ export function PluginPanel({
     const connector = manifestById.get(entry.id);
     const remote = remoteConnectorFor(entry.id);
     const connectable = Boolean(connector || remote);
-    const connected = connector?.status === "connected";
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
+    const connected = connector?.status === "connected" && !!cardDetail && ["connected", "syncing"].includes(cardDetail.className);
     const needsReconnect =
       cardDetail?.className === "expired" ||
       cardDetail?.className === "revoked" ||
-      cardDetail?.className === "failed";
-    const ariaLabel = connected
-      ? `Manage ${entry.name}`
+      cardDetail?.className === "failed" ||
+      cardDetail?.className === "permission-limited";
+    const ariaLabel = needsReconnect
+      ? `Reconnect ${entry.name}`
+      : connector?.status === "connected" ? `Manage ${entry.name}`
       : connectable
-        ? `${needsReconnect ? "Reconnect" : "Connect"} ${entry.name}`
+        ? `Connect ${entry.name}`
         : `${entry.name} is planned`;
 
     return (
@@ -232,9 +244,9 @@ export function PluginPanel({
           />
         </label>
       </header>
-
-
-      <section
+      <div className="marketplace-readiness" role="group" aria-label="Filter plugins by readiness">{([ ["available", "Available"], ["connected", "Connected"], ["attention", "Needs attention"], ["planned", "Planned"] ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={readiness === value} onClick={() => setReadiness(value)}>{label}</button>)}</div>
+      {readiness === "planned" ? <p className="marketplace-section__empty">Planned integrations are not available to connect yet.</p> : null}
+      {readiness === "available" ? <section
         className="marketplace-section marketplace-section--installed"
         aria-labelledby="installed-connections-title"
       >
@@ -278,10 +290,10 @@ export function PluginPanel({
               : "Connect an app and it will appear here."}
           </p>
         )}
-      </section>
+      </section> : null}
 
       {[
-        ...(!normalizedQuery || builtinPluginEntries.some((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery)) ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)) }] : []),
+        ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(matchesReadiness) }] : []),
         ...visibleSections,
       ].map((section) => {
         const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
@@ -301,7 +313,7 @@ export function PluginPanel({
 
       {!hasDirectoryMatches ? (
         <p className="marketplace-search-empty" role="status">
-          No plugins match “{query.trim()}”.
+          {query.trim() ? `No plugins match “${query.trim()}” in this filter.` : "No plugins in this filter."}
         </p>
       ) : null}
 
@@ -460,12 +472,12 @@ function ConnectorDetails({
       {connected || connector.account ? <button type="button" disabled={busy} onClick={() => void run(() => onDisconnect(connector.id))}>Disconnect</button> : null}
     </div>
     {notice ? <p className="connector-detail__notice" role="alert">{notice}</p> : null}
+    {!ready && detail.summary ? <p className="connector-detail__notice" role="status">{detail.summary}</p> : null}
     <PluginOverview id={connector.id} access={ready ? connectorAccessSummary(connector) : "Chosen when you connect"} onExample={ready && !busy ? (prompt) => onUseConnector(connector, prompt) : undefined} />
     <p className="connector-detail__hint">{ready ? connectorAccessSummary(connector) : "Choose your account and grant access on the sign-in page."} Actions follow your workspace approval preference.</p>
     <details className="connector-guide">
       <summary>About this connection</summary>
       {granted.length ? <><p>Access granted</p><ul>{granted.map((scope) => <li key={scope.id}>{scope.label}</li>)}</ul></> : null}
-      {!ready ? <p>{detail.summary}</p> : null}
       {connected ? <button type="button" className="connector-detail__text-action" disabled={busy || connector.sync?.phase === "syncing"} onClick={() => onRefresh(connector.id)}>Sync files</button> : null}
     </details>
   </article>;

@@ -99,6 +99,7 @@ pub struct CreateLocalScheduleRequest {
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
+    pub reasoning_effort: Option<String>,
     pub prompt: String,
     pub timezone: String,
     pub trigger: LocalScheduleTrigger,
@@ -115,6 +116,7 @@ pub struct UpdateLocalScheduleRequest {
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
+    pub reasoning_effort: Option<String>,
     pub prompt: String,
     pub timezone: String,
     pub trigger: LocalScheduleTrigger,
@@ -156,6 +158,7 @@ struct SchedulePayload {
     agent_id: String,
     provider_id: String,
     model: String,
+    reasoning_effort: Option<String>,
     created_by_internal_user_id: String,
 }
 
@@ -171,6 +174,7 @@ struct OccurrencePayload {
     agent_id: String,
     provider_id: String,
     model: String,
+    reasoning_effort: Option<String>,
     intended_local_slot: String,
     capacity_reservation_fingerprint: String,
     outcome: Option<String>,
@@ -185,6 +189,8 @@ pub struct LocalSchedule {
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub prompt: String,
     pub timezone: String,
     pub trigger: LocalScheduleTrigger,
@@ -249,6 +255,8 @@ pub struct LocalScheduleClaim {
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_effort: Option<String>,
     pub prompt: String,
 }
 
@@ -316,6 +324,25 @@ pub struct AbandonLocalScheduleDispatchRequest {
 struct CivilSlot {
     key: String,
     instant: DateTime<Utc>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PreviewLocalScheduleRequest {
+    timezone: String,
+    trigger: LocalScheduleTrigger,
+}
+
+/// Pure civil-time preview using the same rules as saving and dispatching.
+#[tauri::command]
+pub fn local_schedule_preview(
+    request: PreviewLocalScheduleRequest,
+) -> Result<Option<String>, String> {
+    let timezone = parse_timezone(&request.timezone).map_err(|error| error.to_string())?;
+    validate_trigger(&request.trigger).map_err(|error| error.to_string())?;
+    initial_slot(&request.trigger, timezone, Utc::now())
+        .map(|slot| slot.map(|slot| timestamp(slot.instant)))
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -753,6 +780,7 @@ fn create_at(
 ) -> crate::store::Result<LocalSchedule> {
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
+    validate_reasoning_effort(request.reasoning_effort.as_deref())?;
     validate_prompt(&request.prompt)?;
     crate::collaboration::validate_schedule_project(
         tx,
@@ -789,6 +817,7 @@ fn create_at(
         agent_id: request.agent_id.clone(),
         provider_id: request.provider_id.clone(),
         model: request.model.clone(),
+        reasoning_effort: request.reasoning_effort,
         created_by_internal_user_id: scope.internal_user_id.clone(),
     };
     let row = ScheduleRow {
@@ -816,6 +845,7 @@ fn update_at(
 ) -> crate::store::Result<LocalSchedule> {
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
+    validate_reasoning_effort(request.reasoning_effort.as_deref())?;
     validate_prompt(&request.prompt)?;
     crate::collaboration::validate_schedule_project(
         tx,
@@ -857,6 +887,7 @@ fn update_at(
         agent_id: request.agent_id.clone(),
         provider_id: request.provider_id.clone(),
         model: request.model.clone(),
+        reasoning_effort: request.reasoning_effort,
         created_by_internal_user_id: prior.created_by_internal_user_id,
     };
     row.agent_id = request.agent_id;
@@ -979,6 +1010,7 @@ fn claim_due_after_capacity_matching(
             agent_id: schedule.agent_id.clone(),
             provider_id: schedule.provider_id.clone(),
             model: schedule.model.clone(),
+            reasoning_effort: schedule.reasoning_effort.clone(),
             intended_local_slot: slot.key.clone(),
             capacity_reservation_fingerprint: fingerprint(&reservation.id),
             outcome: None,
@@ -1024,6 +1056,7 @@ fn claim_due_after_capacity_matching(
             agent_id: schedule.agent_id,
             provider_id: schedule.provider_id,
             model: schedule.model,
+            reasoning_effort: schedule.reasoning_effort,
             prompt: schedule.prompt,
         }))
     })
@@ -1124,6 +1157,7 @@ fn schedule_from_row(row: ScheduleRow) -> crate::store::Result<LocalSchedule> {
         agent_id: row.agent_id,
         provider_id: payload.provider_id,
         model: payload.model,
+        reasoning_effort: payload.reasoning_effort,
         prompt: payload.prompt,
         timezone: payload.timezone,
         trigger: payload.trigger,
@@ -1201,6 +1235,20 @@ fn validate_prompt(prompt: &str) -> crate::store::Result<()> {
         return Err(StoreError::Invalid(format!(
             "The schedule prompt must contain 1 to {MAX_PROMPT_CHARACTERS} characters."
         )));
+    }
+    Ok(())
+}
+
+fn validate_reasoning_effort(effort: Option<&str>) -> crate::store::Result<()> {
+    if effort.is_some_and(|value| {
+        !matches!(
+            value,
+            "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
+        )
+    }) {
+        return Err(StoreError::Invalid(
+            "Choose a supported reasoning effort.".into(),
+        ));
     }
     Ok(())
 }
@@ -1525,6 +1573,7 @@ mod tests {
             agent_id: "agent-research".into(),
             provider_id: "openai".into(),
             model: "gpt-5".into(),
+            reasoning_effort: Some("low".into()),
             prompt: "Check the report. It may mention an API key without storing one.".into(),
             timezone: "Europe/London".into(),
             trigger: LocalScheduleTrigger::Daily {
@@ -1606,6 +1655,7 @@ mod tests {
             })
             .unwrap();
         assert_eq!(schedule.prompt_revision, 1);
+        assert_eq!(schedule.reasoning_effort.as_deref(), Some("low"));
         assert_eq!(
             schedule.next_run_at.as_deref(),
             Some("2026-09-07T08:00:00.000Z")
@@ -1618,9 +1668,38 @@ mod tests {
                     |row| row.get(0),
                 )?;
                 assert!(!String::from_utf8_lossy(&payload).contains("API key"));
+                let mut legacy =
+                    repo::get_schedule(conn, &store, &scope.private, "schedule-1")?.unwrap();
+                legacy
+                    .payload
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("reasoningEffort");
+                assert!(schedule_from_row(legacy)?.reasoning_effort.is_none());
                 Ok(())
             })
             .unwrap();
+    }
+
+    #[test]
+    fn previews_use_saved_civil_time_rules_and_reject_invalid_inputs() {
+        let result = local_schedule_preview(PreviewLocalScheduleRequest {
+            timezone: "Europe/London".into(),
+            trigger: LocalScheduleTrigger::Once {
+                local_date_time: "2099-01-01T09:00".into(),
+            },
+        })
+        .unwrap();
+        assert_eq!(result.as_deref(), Some("2099-01-01T09:00:00.000Z"));
+        assert!(local_schedule_preview(PreviewLocalScheduleRequest {
+            timezone: "Not/A_Timezone".into(),
+            trigger: LocalScheduleTrigger::Daily {
+                local_time: "09:00".into()
+            },
+        })
+        .is_err());
+        assert!(validate_reasoning_effort(Some("invented-effort")).is_err());
+        assert!(validate_reasoning_effort(Some("medium")).is_ok());
     }
 
     #[test]
@@ -1680,6 +1759,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(claim.scheduled_for, "2026-09-07T08:00:00.000Z");
+        assert_eq!(claim.reasoning_effort.as_deref(), Some("low"));
         assert!(claim_due_after_capacity(
             &store,
             &scope.private,
@@ -2219,6 +2299,7 @@ mod tests {
             agent_id: created.agent_id.clone(),
             provider_id: created.provider_id.clone(),
             model: created.model.clone(),
+            reasoning_effort: created.reasoning_effort.clone(),
             prompt: "Use the revised report prompt.".into(),
             timezone: created.timezone.clone(),
             trigger: created.trigger.clone(),

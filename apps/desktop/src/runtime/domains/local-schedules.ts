@@ -13,6 +13,7 @@ export interface LocalScheduleInput {
   agentId: string;
   providerId: string;
   model: string;
+  reasoningEffort?: string;
   prompt: string;
   timezone: string;
   trigger: LocalScheduleTrigger;
@@ -54,6 +55,7 @@ export interface LocalScheduleDispatchClaim {
   agentId: string;
   providerId: string;
   model: string;
+  reasoningEffort?: string;
   prompt: string;
 }
 
@@ -70,6 +72,10 @@ async function invoke<T>(command: string, request: object): Promise<T> {
 
 export const listLocalSchedules = (workspaceId: string) =>
   invoke<LocalSchedule[]>("local_schedule_list", { workspaceId });
+export const previewLocalSchedule = (request: {
+  timezone: string;
+  trigger: LocalScheduleTrigger;
+}) => invoke<string | null>("local_schedule_preview", request);
 export const createLocalSchedule = (
   request: LocalScheduleInput & { status: "enabled" | "paused" },
 ) => invoke<LocalSchedule>("local_schedule_create", request);

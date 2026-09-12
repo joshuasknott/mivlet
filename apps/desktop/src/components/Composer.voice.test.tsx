@@ -189,7 +189,7 @@ describe("Composer dictation controls", () => {
   });
   it("exposes the model directly without approval configuration", () => {
     render(<Composer {...propsFor("idle")} />);
-    expect(screen.getByRole("button", { name: "Select model" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Select model:/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approval preset" })).not.toBeInTheDocument();
   });
   it("keeps Stop available during work even with an empty draft", () => {

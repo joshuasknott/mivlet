@@ -41,7 +41,7 @@ import { composerScopeKey } from "../hooks/useScopedComposer";
 import { ConversationPane } from "./ConversationPane";
 import {
   ConversationTabs,
-  PaneDivider,
+  ConversationGrid,
 } from "../components/conversation/ConversationTabs";
 import {
   AgentSidebar,
@@ -52,6 +52,9 @@ import { SchedulesDialog } from "../components/agents/SchedulesDialog";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
+import { useConversationDrag } from "../hooks/useConversationDrag";
+import { WorkspaceHistory } from "../components/conversation/WorkspaceHistory";
+import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
 import "./teammate-workspace.css";
 
 const ExecutionWorker = lazy(() =>
@@ -210,8 +213,9 @@ function ActiveWorkspace({
   const restored = useRef(false);
   const mounts = useRef(0);
   const initialized = useRef(false);
-  const narrow = useMediaQuery("(max-width: 1100px)");
+  const narrow = useMediaQuery("(max-width: 850px)");
   const phone = useMediaQuery("(max-width: 700px)");
+  const [historyOpen, setHistoryOpen] = useState(!narrow);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -225,6 +229,7 @@ function ActiveWorkspace({
   } | null>(null);
   const [placeId, setPlaceId] = useState<string | null>(null);
   const [agentEditor, setAgentEditor] = useState<{ id?: string } | null>(null);
+  const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<{
     agentId?: string;
     projectId?: string;
@@ -418,7 +423,7 @@ function ActiveWorkspace({
     setMarketplace(null);
     setMobileNavigation(false);
   };
-  const open = (id: string) => {
+  const open = (id: string, newTab = false) => {
     if (
       !service.getSnapshot().data.conversations.some((room) => room.id === id)
     ) {
@@ -430,16 +435,28 @@ function ActiveWorkspace({
       return;
     }
     actLayout({
-      type: "open",
+      type: newTab ? "open" : "navigate",
       view: {
         id: `view-${crypto.randomUUID()}`,
         kind: "conversation",
         conversationId: id,
       },
     });
+    if (narrow) setHistoryOpen(false);
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if (
+        event.ctrlKey &&
+        event.shiftKey &&
+        (event.code === "Backslash" ||
+          event.code === "IntlBackslash" ||
+          event.key === "\\" ||
+          event.key === "|")
+      ) {
+        event.preventDefault();
+        actLayout({ type: "single" });
+      }
       if (
         event.ctrlKey &&
         event.shiftKey &&
@@ -511,7 +528,7 @@ function ActiveWorkspace({
         projectId,
       });
     if (seedText) await saveDraft(id, draft.facilitatorId, seedText, projectId);
-    open(id);
+    open(id, true);
     return id;
   };
   const selectAgent = async (
@@ -547,6 +564,13 @@ function ActiveWorkspace({
     );
     return id;
   };
+  useEffect(() => {
+    if (!createdAgentId) return;
+    const created = runtime.agents.find(agent => agent.id === createdAgentId);
+    if (!created) return;
+    setCreatedAgentId(null);
+    void selectAgent(created, true).catch(error => service.report(error));
+  }, [createdAgentId, runtime.agents]);
   const saveDraft = async (
     threadId: string,
     agentId: string,
@@ -642,15 +666,44 @@ function ActiveWorkspace({
       ];
     }),
   );
-  const activity = state.data.work.filter(
-    (work) =>
-      activeWork(work) || ["blocked", "awaiting-user"].includes(work.status),
+  const activeProject = projects.projects.find(
+    (project) => project.id === activeRoom?.projectId,
   );
-  const visiblePanes: (0 | 1)[] =
-    narrow || !layout.split ? [layout.activePane] : [0, 1];
+  const newConversation = () => {
+    if (activeRoom?.facilitatorId)
+      void createRoom(
+        {
+          kind: activeRoom.kind,
+          title: activeProject
+            ? "New conversation"
+            : activeRoom.kind === "group"
+              ? activeRoom.title
+              : "Conversation with " + (activeProfile?.name ?? "agent"),
+          instructions: "",
+          participantIds: activeRoom.participants.map(
+            (member) => member.agentId,
+          ),
+          facilitatorId: activeRoom.facilitatorId,
+          shareHistory: false,
+        },
+        activeRoom.projectId,
+      ).catch((error) => service.report(error));
+    else if (activeProfile)
+      void selectAgent(activeProfile, true).catch((error) =>
+        service.report(error),
+      );
+    else setAgentEditor({});
+  };
+  const onConversationPointerDown = useConversationDrag(
+    layout,
+    actLayout,
+    open,
+    !narrow,
+  );
   return (
     <main
-      className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${navigationCollapsed ? " teammates-workspace--collapsed" : ""}${computer ? " teammates-workspace--inspector" : ""}`}
+      onPointerDownCapture={onConversationPointerDown}
+      className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${navigationCollapsed ? " teammates-workspace--collapsed" : ""}${historyOpen || computer ? " teammates-workspace--history" : ""}`}
       data-theme={theme}
       data-mobile-navigation={mobileNavigation}
     >
@@ -682,7 +735,7 @@ function ActiveWorkspace({
             },
           })
         }
-        onCreateProject={() => setEditor({ draft: { kind: "project" } })}
+        onCreateProject={() => setEditor({ draft: { kind: "project", ...(activeProfile ? { facilitatorId: activeProfile.id, participantIds: [activeProfile.id] } : {}) } })}
         onSelectProject={(project) => {
           const saved = projects.projects.find(
             (item) => item.id === project.id,
@@ -698,46 +751,31 @@ function ActiveWorkspace({
         onOpenSettings={() => setSettings(true)}
         onOpenUsage={() => setAccountDialog("usage")}
         onSignOut={() => setAccountDialog("sign-out")}
-        activity={
-          activity.length ? (
-            <details className="workspace-activity">
-              <summary>
-                Activity <small>{activity.length}</small>
-              </summary>
-              <div>
-                {activity
-                  .slice(-12)
-                  .reverse()
-                  .map((work) => (
-                    <div key={work.id}>
-                      <button
-                        type="button"
-                        onClick={() => open(work.conversationId)}
-                      >
-                        <strong>{work.agentName}</strong>
-                        <span>{work.status.replaceAll("-", " ")}</span>
-                      </button>
-                      {activeWork(work) ? (
-                        <button
-                          type="button"
-                          aria-label={`Stop ${work.agentName}'s assignment`}
-                          onClick={() =>
-                            void service
-                              .stop(work.id)
-                              .catch((error) => service.report(error))
-                          }
-                        >
-                          Stop
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-              </div>
-            </details>
-          ) : undefined
-        }
       />
       <section className="workspace-views" aria-label="Conversation workspace">
+        <ConversationTabs
+          layout={layout}
+          titles={Object.fromEntries(
+            state.data.conversations.map((room) => [room.id, room.title]),
+          )}
+          indicators={indicators}
+          descriptions={Object.fromEntries(state.data.conversations.map(room => [room.id, [projects.projects.find(project => project.id === room.projectId)?.name, room.participants.map(member => member.name).join(", ")].filter(Boolean).join(" · ")]))}
+          onAction={actLayout}
+          onCreate={newConversation}
+        />
+        <button
+          type="button"
+          className="workspace-history-toggle"
+          aria-label={historyOpen ? "Hide history" : "Show history"}
+          title={historyOpen ? "Hide history" : "Show history"}
+          aria-expanded={historyOpen}
+          onClick={() => {
+            setComputer(null);
+            setHistoryOpen(!historyOpen);
+          }}
+        >
+          ◷
+        </button>
         {phone ? (
           <button
             type="button"
@@ -813,17 +851,11 @@ function ActiveWorkspace({
             />
           </Suspense>
         ) : (
-          <div
-            className={`conversation-panes${layout.split && !narrow ? " conversation-panes--split" : ""}`}
-            style={
-              layout.split && !narrow
-                ? {
-                    gridTemplateColumns: `minmax(0, ${layout.ratio}fr) 7px minmax(0, ${1 - layout.ratio}fr)`,
-                  }
-                : undefined
-            }
-          >
-            {visiblePanes.map((pane, index) => {
+          <ConversationGrid
+            layout={layout}
+            compact={narrow}
+            onAction={actLayout}
+            renderPane={(pane) => {
               const view = layout.views.find(
                 (view) => view.id === layout.active[pane],
               );
@@ -834,163 +866,120 @@ function ActiveWorkspace({
                 (project) => project.id === room?.projectId,
               );
               return (
-                <div
-                  className="conversation-pane-slot"
-                  key={pane}
-                  style={{ display: "contents" }}
+                <section
+                  className={`conversation-pane${pane === layout.activePane ? " conversation-pane--active" : ""}`}
+                  onFocusCapture={() => {
+                    if (view && pane !== layout.activePane)
+                      actLayout({ type: "activate", id: view.id });
+                  }}
+                  onPointerDown={() => {
+                    if (view && pane !== layout.activePane)
+                      actLayout({ type: "activate", id: view.id });
+                  }}
                 >
-                  {index > 0 ? (
-                    <PaneDivider
-                      ratio={layout.ratio}
-                      onResize={(ratio) => actLayout({ type: "resize", ratio })}
-                    />
-                  ) : null}
-                  <section
-                    className={`conversation-pane${pane === layout.activePane ? " conversation-pane--active" : ""}`}
-                    onFocusCapture={() => {
-                      if (view && pane !== layout.activePane)
-                        actLayout({ type: "activate", id: view.id });
-                    }}
-                    onPointerDown={() => {
-                      if (view && pane !== layout.activePane)
-                        actLayout({ type: "activate", id: view.id });
-                    }}
+                  <div
+                    role="tabpanel"
+                    id={view ? `panel-${view.id}` : undefined}
+                    aria-labelledby={view ? `tab-${view.id}` : undefined}
+                    className="conversation-panel"
+                    tabIndex={0}
                   >
-                    <ConversationTabs
-                      layout={layout}
-                      pane={pane}
-                      compact={narrow}
-                      titles={Object.fromEntries(
-                        state.data.conversations.map((room) => [
-                          room.id,
-                          room.title,
-                        ]),
-                      )}
-                      indicators={indicators}
-                      onAction={actLayout}
-                      onCreate={() => setEditor({})}
-                    />
-                    <div
-                      role="tabpanel"
-                      id={view ? `panel-${view.id}` : undefined}
-                      aria-labelledby={view ? `tab-${view.id}` : undefined}
-                      className="conversation-panel"
-                      tabIndex={0}
-                    >
-                      {view && room ? (
-                        <ConversationPane
-                          key={view.id}
-                          view={view}
-                          room={room}
-                          project={project}
-                          runtime={runtime}
-                          service={service}
-                          state={state}
-                          active={pane === layout.activePane}
-                          profileName={profileName}
-                          onOpen={open}
-                          onClose={() =>
-                            actLayout({ type: "close", id: view.id })
-                          }
-                          onArtifact={(output, agentId) => {
-                            const artifact = parseComputerArtifact(output);
-                            if (!artifact) return;
-                            actLayout({
-                              type: "open",
-                              pane: narrow ? pane : pane === 0 ? 1 : 0,
-                              view: {
-                                id: `view-${crypto.randomUUID()}`,
-                                conversationId: room.id,
-                                kind: "artifact",
-                                output,
-                                agentId,
-                                title: artifact.title,
-                              },
-                            });
-                          }}
-                          onEdit={() =>
-                            setEditor(
-                              project
-                                ? { projectId: project.id }
-                                : { roomId: room.id },
-                            )
-                          }
-                          onPlace={() => setPlaceId(room.id)}
-                          onSchedules={() =>
-                            setSchedules({
-                              agentId: room.facilitatorId,
-                              projectId: room.projectId,
-                            })
-                          }
-                          onComputer={setComputer}
-                          onPlugins={(id) => setMarketplace({ id })}
-                          onProjectUpdate={updateProject}
-                          onDraftReady={(append) => {
-                            appendDraft.current = append;
-                          }}
-                          onNew={async (text) => {
-                            if (!text) {
-                              setEditor({
-                                focused: Boolean(project),
-                                projectId: project?.id,
-                                draft: {
-                                  kind: room.kind,
-                                  participantIds: room.participants.map(
-                                    (member) => member.agentId,
-                                  ),
-                                  facilitatorId: room.facilitatorId,
-                                },
-                              });
-                              return;
-                            }
-                            const id = await createRoom(
-                              {
-                                kind: room.kind,
-                                title: `${room.title.slice(0, 98)} · continued`,
-                                instructions: "",
-                                participantIds: room.participants.map(
-                                  (member) => member.agentId,
-                                ),
-                                facilitatorId: room.facilitatorId ?? "",
-                                shareHistory: false,
-                              },
-                              project?.id,
-                              text,
-                            );
-                            return id;
-                          }}
-                        />
-                      ) : (
-                        <div className="workspace-empty">
-                          <h1>Your conversations, together</h1>
-                          <p>
-                            Open a conversation from the sidebar or start
-                            something new. Work continues when its tabs are
-                            closed.
-                          </p>
+                    {view && room ? (
+                      <ConversationPane
+                        key={view.id}
+                        view={view}
+                        room={room}
+                        project={project}
+                        runtime={runtime}
+                        service={service}
+                        state={state}
+                        active={pane === layout.activePane}
+                        profileName={profileName}
+                        onClose={() =>
+                          actLayout({ type: "close", id: view.id })
+                        }
+                        onArtifact={(output, agentId) => {
+                          const artifact = parseComputerArtifact(output);
+                          if (!artifact) return;
+                          actLayout({
+                            type: "open",
+                            pane,
+                            view: {
+                              id: `view-${crypto.randomUUID()}`,
+                              conversationId: room.id,
+                              kind: "artifact",
+                              output,
+                              agentId,
+                              title: artifact.title,
+                            },
+                          });
+                        }}
+                        onEdit={() =>
+                          setEditor(
+                            project
+                              ? { projectId: project.id }
+                              : { roomId: room.id },
+                          )
+                        }
+                        onPlace={() => setPlaceId(room.id)}
+                        onSchedules={() =>
+                          setSchedules({
+                            agentId: room.facilitatorId,
+                            projectId: room.projectId,
+                          })
+                        }
+                        onComputer={setComputer}
+                        onPlugins={(id) => setMarketplace({ id })}
+                        onProjectUpdate={updateProject}
+                        onDraftReady={(append) => {
+                          appendDraft.current = append;
+                        }}
+                        onNew={async (text) => {
+                          const id = await createRoom(
+                            {
+                              kind: room.kind,
+                              title: text
+                                ? `${room.title.slice(0, 98)} · continued`
+                                : "New conversation",
+                              instructions: "",
+                              participantIds: room.participants.map(
+                                (member) => member.agentId,
+                              ),
+                              facilitatorId: room.facilitatorId ?? "",
+                              shareHistory: false,
+                            },
+                            project?.id,
+                            text,
+                          );
+                          return id;
+                        }}
+                      />
+                    ) : (
+                      <div className="workspace-empty">
+                        <h1>Start a conversation</h1>
+
+                        <button
+                          type="button"
+                          className="button button--primary"
+                          onClick={newConversation}
+                        >
+                          New conversation
+                        </button>
+                        {layout.closed.length ? (
                           <button
                             type="button"
-                            className="button button--primary"
-                            onClick={() => setEditor({})}
+                            onClick={() => actLayout({ type: "reopen" })}
                           >
-                            New conversation
+                            Reopen last closed tab
                           </button>
-                          {layout.closed.length ? (
-                            <button
-                              type="button"
-                              onClick={() => actLayout({ type: "reopen" })}
-                            >
-                              Reopen last closed tab
-                            </button>
-                          ) : null}
-                        </div>
-                      )}
-                    </div>
-                  </section>
-                </div>
+                        ) : null}
+                      </div>
+                    )}
+                  </div>
+                </section>
               );
-            })}
-          </div>
+            }}
+          />
         )}
       </section>
       <Suspense fallback={null}>
@@ -1004,6 +993,39 @@ function ActiveWorkspace({
           />
         ))}
       </Suspense>
+      {historyOpen && !computer ? (
+        <WorkspaceHistory
+          rooms={state.data.conversations}
+          work={state.data.work}
+          activeId={activeRoom?.id}
+          indicators={indicators}
+          service={service}
+          onOpen={open}
+          onClose={() => setHistoryOpen(false)}
+          projectDetails={
+            activeProject && activeRoom ? (
+              <ProjectContextPanel
+                key={activeProject.id}
+                project={activeProject}
+                room={activeRoom}
+                data={state.data}
+                runtime={runtime}
+                service={service}
+                onOpen={open}
+                onEdit={() => { if (narrow) setHistoryOpen(false); setEditor({ projectId: activeProject.id }); }}
+                onSchedules={() => {
+                  if (narrow) setHistoryOpen(false);
+                  setSchedules({
+                    projectId: activeProject.id,
+                    agentId: activeRoom.facilitatorId,
+                  });
+                }}
+                onUpdate={updateProject}
+              />
+            ) : undefined
+          }
+        />
+      ) : null}
       {computer ? (
         <Suspense fallback={null}>
           <ComputerInspector
@@ -1130,7 +1152,7 @@ function ActiveWorkspace({
             onClose={() => setAgentEditor(null)}
             onSave={(draft) => {
               if (agentEditor.id) runtime.updateAgent(agentEditor.id, draft);
-              else runtime.createAgent(draft);
+              else setCreatedAgentId(runtime.createAgent(draft).id);
               setAgentEditor(null);
             }}
             onDelete={() => {

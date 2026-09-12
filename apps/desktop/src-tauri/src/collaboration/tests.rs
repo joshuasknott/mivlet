@@ -658,13 +658,12 @@ fn collaboration_sharing_requires_explicit_consent_and_layout_does_not_create_wo
             },
         )?;
         let layout = Layout {
-            version: 1,
+            version: 2,
             views: vec![],
-            panes: [vec![], vec![]],
-            active: [None, None],
+            panes: vec![vec![]],
+            active: vec![None],
             active_pane: 0,
-            split: false,
-            ratio: 0.5,
+            tree: Some(LayoutNode::Pane { pane: 0 }),
             closed: vec![View {
                 id: "tab".into(),
                 conversation_id: "private".into(),
@@ -800,4 +799,83 @@ fn collaboration_rejects_cross_conversation_run_binding_and_keeps_usage_on_conti
         assert!(work::current(ctx, "work", 1, None).is_err());
         Ok(())
     });
+}
+
+#[test]
+fn collaboration_grid_layout_is_bounded_scoped_and_has_unique_panes() {
+    fixture(&store(), |ctx| {
+        group(ctx, "grid-room")?;
+        fn grid(first: usize, count: usize) -> LayoutNode {
+            if count == 1 {
+                return LayoutNode::Pane { pane: first };
+            }
+            let half = count / 2;
+            LayoutNode::Split {
+                axis: if count > 2 { "row" } else { "column" }.into(),
+                ratio: 0.5,
+                children: [
+                    Box::new(grid(first, half)),
+                    Box::new(grid(first + half, count - half)),
+                ],
+            }
+        }
+        let layout = Layout {
+            version: 2,
+            views: (0..8)
+                .map(|i| View {
+                    id: format!("view-{i}"),
+                    conversation_id: "grid-room".into(),
+                    kind: "conversation".into(),
+                    agent_id: None,
+                    output: None,
+                    title: None,
+                })
+                .collect(),
+            panes: (0..8).map(|i| vec![format!("view-{i}")]).collect(),
+            active: (0..8).map(|i| Some(format!("view-{i}"))).collect(),
+            active_pane: 7,
+            tree: Some(grid(0, 8)),
+            closed: vec![],
+        };
+        commands::apply(
+            ctx,
+            Command::SaveLayout {
+                layout: layout.clone(),
+            },
+        )?;
+        assert_eq!(ctx.snapshot()?.layout, Some(layout.clone()));
+        assert!(ctx.all_work()?.is_empty());
+        let mut invalid = layout.clone();
+        invalid.tree = Some(LayoutNode::Split {
+            axis: "row".into(),
+            ratio: 0.5,
+            children: [Box::new(grid(0, 4)), Box::new(grid(0, 4))],
+        });
+        assert!(commands::apply(ctx, Command::SaveLayout { layout: invalid }).is_err());
+        let mut invalid = layout.clone();
+        invalid.views[0].conversation_id = "outside-workspace".into();
+        assert!(commands::apply(ctx, Command::SaveLayout { layout: invalid }).is_err());
+        let mut invalid = layout.clone();
+        invalid.panes.push(vec![]);
+        invalid.active.push(None);
+        invalid.tree = Some(grid(0, 9));
+        assert!(commands::apply(ctx, Command::SaveLayout { layout: invalid }).is_err());
+        let mut invalid = layout.clone();
+        invalid.active.pop();
+        assert!(commands::apply(ctx, Command::SaveLayout { layout: invalid }).is_err());
+        let mut invalid = layout.clone();
+        if let Some(LayoutNode::Split { ratio, .. }) = invalid.tree.as_mut() {
+            *ratio = 1.0;
+        }
+        assert!(commands::apply(ctx, Command::SaveLayout { layout: invalid }).is_err());
+        assert_eq!(ctx.snapshot()?.layout, Some(layout));
+        Ok(())
+    });
+}
+
+#[test]
+fn collaboration_legacy_layout_remains_readable_for_renderer_migration() {
+    let layout: Layout = serde_json::from_value(json!({ "version": 1, "panes": [[], []], "views": [], "active": [null, null], "activePane": 0, "split": false, "ratio": 0.5, "closed": [] })).unwrap();
+    assert_eq!(layout.version, 1);
+    assert!(layout.tree.is_none());
 }

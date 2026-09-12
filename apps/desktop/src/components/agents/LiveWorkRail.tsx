@@ -8,7 +8,8 @@ import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { NativeComputerPanel } from "./NativeComputerPanel";
 import type { useLocalComputer } from "../../hooks/useLocalComputer";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import { CopyButton } from "../CopyButton";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 
@@ -44,13 +45,17 @@ export function LiveWorkRail({
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
-  const compact = useMediaQuery("(max-width: 650px)");
+  const compact = useMediaQuery("(max-width: 850px)");
   const railRef = useRef<HTMLElement>(null);
   useModalFocusTrap({ active: compact, containerRef: railRef, onClose });
   const screenDialogRef = useRef<HTMLDivElement>(null);
   useModalFocusTrap({ active: screenOpen && Boolean(screenPreviewUrl), containerRef: screenDialogRef, onClose: () => setScreenOpen(false) });
   const [browserUrl, setBrowserUrl] = useState("");
-  const [filesOpen, setFilesOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(true);
+  const fileRefresh = useRef(localComputer.refreshFiles);
+  fileRefresh.current = localComputer.refreshFiles;
+  const fileComputerId = localComputer.node?.capabilities.includes("persistent-files") ? localComputer.node.computerId : undefined;
+  useEffect(() => { if (filesOpen && fileComputerId) void fileRefresh.current().catch(() => undefined); }, [filesOpen, fileComputerId]);
   const filePreviewDialogRef = useRef<HTMLDivElement>(null);
   const filePreviewCloseRef = useRef<HTMLButtonElement>(null);
   const submitBrowser = (event: FormEvent) => {
@@ -60,7 +65,6 @@ export function LiveWorkRail({
   const toggleLocalFiles = () => {
     const next = !filesOpen;
     setFilesOpen(next);
-    if (next) void localComputer.refreshFiles().catch(() => undefined);
   };
   const openLocalFile = (path: string) => {
     setScreenOpen(false);
@@ -125,7 +129,7 @@ export function LiveWorkRail({
               </div>
             ) : null}
           </div>
-        ) : null}
+        ) : <p className="local-computer-files__unavailable">{localComputer.loading ? "Checking workspace files…" : "Refresh computer status to load this agent's private files."}</p>}
       </section>
 
       {hostedComputer.available ? <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional hosted computer">
@@ -209,6 +213,7 @@ export function LiveWorkRail({
               </span>
             </header>
             <div className="local-file-preview">
+              <CopyButton text={localComputer.filePreview.content} label={localComputer.filePreview.truncated ? "Copy preview" : "Copy file contents"} />
               <pre tabIndex={0}>{localComputer.filePreview.content}</pre>
               {!localComputer.filePreview.content ? <small>This file is empty.</small>
                 : localComputer.filePreview.truncated ? <small>Preview stopped at 256 KB. The file itself is unchanged.</small>

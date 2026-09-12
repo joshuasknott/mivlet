@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import { ConversationFeed } from "./ConversationFeed";
@@ -15,6 +15,31 @@ const initial: NativeAgentState = { transcript: "", usage: null, running: true, 
 const props = { messages: [], agent, threadId: "thread-1", profileName: "Joshua", connectors: [], optimisticPrompt: "", workspaceId: "workspace-1" };
 
 describe("conversation turns", () => {
+  it("keeps a request rejected before execution visible and reusable", () => {
+    const reuse = vi.fn();
+    render(<ConversationFeed {...props} state={{ ...initial, currentAttemptId: null, running: false }} onReusePrompt={reuse} pendingTurns={[{ id: "failed", prompt: "Create the fixture file", startedAt: "2026-09-12T10:00:00Z", parts: [{ id: "error", kind: "notice", error: true, content: "Computer status unavailable" }] }]} />);
+    expect(screen.getByText("Create the fixture file")).toBeVisible();
+    expect(screen.getByText("Computer status unavailable")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Edit & resend" }));
+    expect(reuse).toHaveBeenCalledWith("Create the fixture file", "edit");
+    expect(screen.getByRole("button", { name: "Copy message" })).toBeVisible();
+    expect(document.querySelector("time")).toHaveAttribute("datetime", "2026-09-12T10:00:00Z");
+  });
+  it("offers workspace files only after a successful file tool result", () => {
+    const open = vi.fn();
+    const view = render(<ConversationFeed {...props} onOpenWorkspaceFiles={open} state={{ ...initial, running: false, responseParts: [{ id: "write", kind: "tool", tool: "write-file", state: "succeeded", content: "Saved fixture.txt" }] }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace files" }));
+    expect(open).toHaveBeenCalledWith("a");
+    view.rerender(<ConversationFeed {...props} onOpenWorkspaceFiles={open} state={{ ...initial, running: false, responseParts: [{ id: "text", kind: "text", content: "I saved fixture.txt" }] }} />);
+    expect(screen.queryByRole("button", { name: "Open workspace files" })).toBeNull();
+  });
+  it("surfaces a confirmed decision with its provenance and later state", () => {
+    render(<ConversationFeed {...props} state={{ ...initial, currentAttemptId: null, running: false }} decisionEvents={[{ id: "decision", projectId: "project", conversationId: "thread-1", kind: "decision", text: "Use the blue banner", confidence: "confirmed", status: "superseded", source: "Confirmed by you", createdAt: "2026-09-12T10:00:00Z" }]} />);
+    const event = screen.getByLabelText("Confirmed project decision");
+    expect(event).toHaveTextContent("Decision confirmed · superseded");
+    expect(event).toHaveTextContent("Use the blue banner");
+    expect(event).toHaveTextContent("Confirmed by you");
+  });
   it("omits repeated direct-chat identity but preserves project attribution", () => {
     const view = render(<ConversationFeed {...props} showAuthor={false} state={initial} />);
     expect(screen.queryByText("Chief of Staff")).toBeNull();

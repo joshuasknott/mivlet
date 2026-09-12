@@ -197,7 +197,7 @@ export function useLocalScheduleDispatcher(
           projectContext: claim.projectId ? await currentOptions.projectContext?.(claim.projectId, claim.prompt) : undefined,
           providerId: claim.providerId,
           model: claim.model,
-          agent,
+          agent: { ...agent, reasoningEffort: claim.reasoningEffort },
           provider,
           modelDefinition,
           isCurrent,

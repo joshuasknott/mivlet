@@ -1,64 +1,81 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { Columns } from "@phosphor-icons/react/dist/csr/Columns";
-import type { ConversationLayout, WorkspaceView } from "@fable/protocol";
-import type { LayoutAction } from "../../lib/conversation-layout";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
+import type {
+  ConversationLayout,
+  ConversationLayoutNode,
+} from "@fable/protocol";
+import { type LayoutAction } from "../../lib/conversation-layout";
 
 export function ConversationTabs({
   layout,
-  pane,
-  compact,
   titles,
   indicators,
+  descriptions = {},
   onAction,
   onCreate,
 }: {
   layout: ConversationLayout;
-  pane: 0 | 1;
-  compact: boolean;
   titles: Record<string, string>;
   indicators: Record<string, string>;
+  descriptions?: Record<string, string>;
   onAction: (action: LayoutAction) => void;
   onCreate: () => void;
 }) {
-  const ids = compact
-    ? [...layout.panes[0], ...layout.panes[1]]
-    : layout.panes[pane];
-  const active = layout.active[pane];
+  const [host, setHost] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    setHost(document.getElementById("window-tabs"));
+  }, []);
+  const ids = layout.panes.flat(),
+    active = layout.active[layout.activePane];
   const strip = useRef<HTMLDivElement>(null);
-  const focus = (id: string | null) =>
-    requestAnimationFrame(() => {
-      if (id) document.getElementById(`tab-${id}`)?.focus();
-      else
-        strip.current
-          ?.querySelector<HTMLButtonElement>(".conversation-tabs__new")
-          ?.focus();
-    });
-  const apply = (action: LayoutAction, focusId?: string | null) => {
-    onAction(action);
-    if (focusId !== undefined) focus(focusId);
-  };
+  const overflowTrigger = useRef<HTMLButtonElement>(null);
+  const overflowPanel = useRef<HTMLDivElement>(null);
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    const reveal = () => { if (active) document
+        .getElementById(`tab-${active}`)
+        ?.scrollIntoView?.({ block: "nearest", inline: "nearest" }); };
+    reveal();
+    window.addEventListener("resize", reveal);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(reveal);
+    if (strip.current) observer?.observe(strip.current);
+    return () => { window.removeEventListener("resize", reveal); observer?.disconnect(); };
+  }, [active, host]);
+  useEffect(() => {
+    if (!overflowOpen) return;
+    overflowPanel.current?.querySelector("input")?.focus();
+    const dismiss = (event: PointerEvent) => {
+      if (!overflowPanel.current?.contains(event.target as Node) && !overflowTrigger.current?.contains(event.target as Node)) setOverflowOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [overflowOpen]);
+  const entries = ids.map(id => {
+    const view = layout.views.find(view => view.id === id)!;
+    return { id, view, title: view.kind === "artifact" ? view.title : titles[view.conversationId] ?? "Conversation" };
+  });
+  const focus = (id?: string) =>
+    requestAnimationFrame(() =>
+      id
+        ? document.getElementById(`tab-${id}`)?.focus()
+        : strip.current
+            ?.querySelector<HTMLButtonElement>(".conversation-tabs__new")
+            ?.focus(),
+    );
   const close = (id: string) => {
     const i = ids.indexOf(id);
-    apply({ type: "close", id }, ids[i + 1] ?? ids[i - 1] ?? null);
+    onAction({ type: "close", id });
+    focus(ids[i + 1] ?? ids[i - 1]);
   };
-  const split = () => {
-    const view = layout.views.find((view) => view.id === active);
-    const duplicate: WorkspaceView | undefined = view
-      ? { ...view, id: `view-${crypto.randomUUID()}` }
-      : undefined;
-    apply({ type: "split", view: duplicate }, duplicate?.id);
-  };
-  return (
-    <div className="conversation-tabs" ref={strip}>
+  const tabs = (
+    <div className="conversation-tabs" ref={strip} data-conversation-tabs>
       <div
         role="tablist"
-        aria-label={
-          compact
-            ? "Open conversations and files"
-            : `${pane === 0 ? "Left" : "Right"} pane tabs`
-        }
+        aria-label="Open conversations and files"
         className="conversation-tabs__list"
       >
         {ids.map((id) => {
@@ -73,35 +90,9 @@ export function ConversationTabs({
               key={id}
               className={`conversation-tab${id === active ? " conversation-tab--active" : ""}`}
               role="presentation"
-              draggable
-              onDragStart={(event) => {
-                event.dataTransfer.setData("application/x-mivlet-view", id);
-                event.dataTransfer.effectAllowed = "move";
-              }}
-              onDragOver={(event) => {
-                if (
-                  event.dataTransfer.types.includes("application/x-mivlet-view")
-                )
-                  event.preventDefault();
-              }}
-              onDrop={(event) => {
-                const source = event.dataTransfer.getData(
-                  "application/x-mivlet-view",
-                );
-                if (source) {
-                  event.preventDefault();
-                  const targetPane = layout.panes[0].includes(id) ? 0 : 1;
-                  apply(
-                    {
-                      type: "move",
-                      id: source,
-                      pane: targetPane,
-                      index: layout.panes[targetPane].indexOf(id),
-                    },
-                    source,
-                  );
-                }
-              }}
+              data-conversation-view={id}
+              data-conversation-tab={id}
+              onDragStart={(event) => event.preventDefault()}
             >
               <button
                 type="button"
@@ -111,27 +102,51 @@ export function ConversationTabs({
                 aria-selected={id === active}
                 tabIndex={id === active ? 0 : -1}
                 title={`${title}${indicator ? ` · ${indicator}` : ""}`}
-                onClick={() => apply({ type: "activate", id })}
+                onClick={() => onAction({ type: "activate", id })}
                 onKeyDown={(event) => {
-                  const index = ids.indexOf(id);
+                  const index = ids.indexOf(id),
+                    pane = layout.panes.findIndex((ids) => ids.includes(id));
+                  if (
+                    event.ctrlKey &&
+                    event.altKey &&
+                    [
+                      "ArrowLeft",
+                      "ArrowRight",
+                      "ArrowUp",
+                      "ArrowDown",
+                    ].includes(event.key)
+                  ) {
+                    event.preventDefault();
+                    onAction({
+                      type: "dock",
+                      id,
+                      pane: layout.activePane,
+                      edge: (
+                        {
+                          ArrowLeft: "left",
+                          ArrowRight: "right",
+                          ArrowUp: "top",
+                          ArrowDown: "bottom",
+                        } as const
+                      )[event.key as "ArrowLeft"],
+                    });
+                    return;
+                  }
                   if (
                     event.altKey &&
                     event.shiftKey &&
                     ["ArrowLeft", "ArrowRight"].includes(event.key)
                   ) {
                     event.preventDefault();
-                    const owner = layout.panes[0].includes(id) ? 0 : 1;
-                    apply(
-                      {
-                        type: "move",
-                        id,
-                        pane: owner,
-                        index:
-                          layout.panes[owner].indexOf(id) +
-                          (event.key === "ArrowRight" ? 1 : -1),
-                      },
+                    onAction({
+                      type: "move",
                       id,
-                    );
+                      pane,
+                      index:
+                        layout.panes[pane].indexOf(id) +
+                        (event.key === "ArrowRight" ? 1 : -1),
+                    });
+                    focus(id);
                     return;
                   }
                   if (event.key === "Delete") {
@@ -146,36 +161,39 @@ export function ConversationTabs({
                   )
                     return;
                   event.preventDefault();
-                  const next =
-                    event.key === "Home"
-                      ? 0
-                      : event.key === "End"
-                        ? ids.length - 1
-                        : (index +
-                            (event.key === "ArrowRight" ? 1 : -1) +
-                            ids.length) %
-                          ids.length;
-                  apply({ type: "activate", id: ids[next] }, ids[next]);
+                  const target =
+                    ids[
+                      event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? ids.length - 1
+                          : (index +
+                              (event.key === "ArrowRight" ? 1 : -1) +
+                              ids.length) %
+                            ids.length
+                    ];
+                  onAction({ type: "activate", id: target });
+                  focus(target);
                 }}
               >
                 <span
                   className={`conversation-tab__indicator${indicator === "Working" ? " conversation-tab__indicator--working" : ""}`}
                   aria-label={indicator}
-                  title={indicator}
                 >
                   {indicator
-                    ? indicator === "Working" || indicator === "Unread"
+                    ? ["Working", "Unread"].includes(indicator)
                       ? "•"
                       : "!"
                     : view.kind === "artifact"
                       ? "▤"
                       : ""}
                 </span>
-                <span>{title}</span>
+                <span>{title.replace(/^Conversation with /, "")}{entries.filter(entry => entry.title === title).length > 1 ? ` · ${entries.filter(entry => entry.title === title).findIndex(entry => entry.id === id) + 1}` : ""}</span>
               </button>
               <button
                 type="button"
                 className="conversation-tab__close"
+                data-conversation-no-drag
                 tabIndex={id === active ? 0 : -1}
                 aria-label={`Close ${title}`}
                 onClick={() => close(id)}
@@ -195,110 +213,69 @@ export function ConversationTabs({
       >
         <Plus size={16} />
       </button>
-      <details className="conversation-tabs__menu">
-        <summary
-          aria-label="Tab and split options"
-          title="Tab and split options"
-        >
-          <Columns size={17} />
-        </summary>
-        <div>
-          <button
-            type="button"
-            onClick={(event) => {
-              split();
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            Split this view
-          </button>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={(event) => {
-              if (active)
-                apply(
-                  {
-                    type: "move",
-                    id: active,
-                    pane: pane === 0 ? 1 : 0,
-                    index: 999,
-                  },
-                  active,
-                );
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            Move tab to other pane
-          </button>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              if (active)
-                apply(
-                  {
-                    type: "move",
-                    id: active,
-                    pane,
-                    index: Math.max(0, layout.panes[pane].indexOf(active) - 1),
-                  },
-                  active,
-                );
-            }}
-          >
-            Move tab left
-          </button>
-          <button
-            type="button"
-            disabled={!active}
-            onClick={() => {
-              if (active)
-                apply(
-                  {
-                    type: "move",
-                    id: active,
-                    pane,
-                    index: layout.panes[pane].indexOf(active) + 1,
-                  },
-                  active,
-                );
-            }}
-          >
-            Move tab right
-          </button>
-          <button
-            type="button"
-            disabled={!layout.split}
-            onClick={(event) => {
-              apply({ type: "swap" }, active);
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            Swap panes
-          </button>
-          <button
-            type="button"
-            disabled={!layout.split}
-            onClick={(event) => {
-              apply({ type: "single" }, active);
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            Return to one pane
-          </button>
-          <button
-            type="button"
-            disabled={!layout.closed.length}
-            onClick={(event) => {
-              apply({ type: "reopen" }, layout.closed.at(-1)?.id);
-              event.currentTarget.closest("details")?.removeAttribute("open");
-            }}
-          >
-            Reopen closed tab <small>Ctrl Shift T</small>
-          </button>
-        </div>
-      </details>
+      <button ref={overflowTrigger} type="button" className="conversation-tabs__overflow" aria-label="Search open tabs" aria-expanded={overflowOpen} aria-haspopup="dialog" onClick={() => { setQuery(""); setOverflowOpen(!overflowOpen); }}><CaretDown size={16} /></button>
+      {overflowOpen ? createPortal(<div ref={overflowPanel} className="conversation-tabs-menu" role="dialog" aria-label="Open tabs" onKeyDown={(event) => {
+        if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOverflowOpen(false); overflowTrigger.current?.focus(); }
+        if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+          event.preventDefault(); const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button")]; const i = buttons.indexOf(document.activeElement as HTMLButtonElement);
+          const next = i < 0 ? (event.key === "ArrowDown" ? 0 : buttons.length - 1) : (i + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) % buttons.length;
+          buttons[next]?.focus();
+        }
+      }}>
+        <input type="search" aria-label="Search open tabs" placeholder="Search open tabs…" value={query} onChange={event => setQuery(event.target.value)} />
+        <div>{entries.filter(entry => `${entry.title} ${descriptions[entry.view.conversationId] ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())).map(entry => <button type="button" key={entry.id} aria-current={entry.id === active ? "page" : undefined} onClick={() => { onAction({ type: "activate", id: entry.id }); setOverflowOpen(false); focus(entry.id); }}><strong>{entry.title}</strong><small>{descriptions[entry.view.conversationId]}{indicators[entry.view.conversationId] ? ` · ${indicators[entry.view.conversationId]}` : ""}</small></button>)}</div>
+        {!entries.some(entry => `${entry.title} ${descriptions[entry.view.conversationId] ?? ""}`.toLowerCase().includes(query.trim().toLowerCase())) ? <p>No matching open tabs.</p> : null}
+      </div>, document.body) : null}
+    </div>
+  );
+  return host ? createPortal(tabs, host) : tabs;
+}
+
+export function ConversationGrid({
+  layout,
+  compact,
+  onAction,
+  renderPane,
+}: {
+  layout: ConversationLayout;
+  compact: boolean;
+  onAction: (action: LayoutAction) => void;
+  renderPane: (pane: number) => ReactNode;
+}) {
+  const render = (node: ConversationLayoutNode, path: number[]): ReactNode =>
+    node.kind === "pane" ? (
+      <div
+        key={node.pane}
+        className="conversation-dock"
+        data-conversation-pane={node.pane}
+      >
+        {renderPane(node.pane)}
+      </div>
+    ) : (
+      <div
+        className={`conversation-grid-split conversation-grid-split--${node.axis}`}
+        style={
+          node.axis === "row"
+            ? {
+                gridTemplateColumns: `minmax(0, ${node.ratio}fr) 5px minmax(0, ${1 - node.ratio}fr)`,
+              }
+            : {
+                gridTemplateRows: `minmax(0, ${node.ratio}fr) 5px minmax(0, ${1 - node.ratio}fr)`,
+              }
+        }
+      >
+        {render(node.children[0], [...path, 0])}
+        <PaneDivider
+          axis={node.axis}
+          ratio={node.ratio}
+          onResize={(ratio) => onAction({ type: "resize", path, ratio })}
+        />
+        {render(node.children[1], [...path, 1])}
+      </div>
+    );
+  return (
+    <div className="conversation-panes">
+      {compact ? renderPane(layout.activePane) : render(layout.tree, [])}
     </div>
   );
 }
@@ -306,29 +283,33 @@ export function ConversationTabs({
 export function PaneDivider({
   ratio,
   onResize,
+  axis = "row",
 }: {
   ratio: number;
   onResize: (ratio: number) => void;
+  axis?: "row" | "column";
 }) {
   return (
     <div
-      className="conversation-divider"
+      className={`conversation-divider conversation-divider--${axis}`}
       role="separator"
       tabIndex={0}
       aria-label="Resize conversation panes"
-      aria-orientation="vertical"
-      aria-valuemin={25}
-      aria-valuemax={75}
+      aria-orientation={axis === "row" ? "vertical" : "horizontal"}
+      aria-valuemin={20}
+      aria-valuemax={80}
       aria-valuenow={Math.round(ratio * 100)}
       onKeyDown={(event) => {
-        if (["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+        const backward = axis === "row" ? "ArrowLeft" : "ArrowUp",
+          forward = axis === "row" ? "ArrowRight" : "ArrowDown";
+        if ([backward, forward, "Home", "End"].includes(event.key)) {
           event.preventDefault();
           onResize(
             event.key === "Home"
-              ? 0.25
+              ? 0.2
               : event.key === "End"
-                ? 0.75
-                : ratio + (event.key === "ArrowRight" ? 0.025 : -0.025),
+                ? 0.8
+                : ratio + (event.key === forward ? 0.025 : -0.025),
           );
         }
       }}
@@ -338,12 +319,15 @@ export function PaneDivider({
       }}
       onPointerMove={(event) => {
         if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        // The immediate wrapper uses display:contents and has no layout box.
         const bounds = event.currentTarget
-          .closest(".conversation-panes")
+          .closest(".conversation-grid-split")
           ?.getBoundingClientRect();
-        if (bounds && bounds.width > 0)
-          onResize((event.clientX - bounds.left) / bounds.width);
+        if (bounds && (axis === "row" ? bounds.width : bounds.height) > 0)
+          onResize(
+            axis === "row"
+              ? (event.clientX - bounds.left) / bounds.width
+              : (event.clientY - bounds.top) / bounds.height,
+          );
       }}
       onPointerUp={(event) => {
         if (event.currentTarget.hasPointerCapture(event.pointerId))

@@ -144,6 +144,7 @@ pub fn run() {
             local_schedules::local_schedule_update,
             local_schedules::local_schedule_set_status,
             local_schedules::local_schedule_list,
+            local_schedules::local_schedule_preview,
             local_schedules::local_schedule_occurrence_list,
             local_schedules::local_schedule_dispatch_claim,
             local_schedules::local_schedule_dispatch_bind,

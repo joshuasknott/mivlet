@@ -154,7 +154,7 @@ export function ExecutionWorker({
   }, [runtime.openApprovals, service, session]);
 
   useEffect(() => {
-    if (session.started) return;
+    if (session.started || runtime.accountWorkspacePending) return;
     session.started = true;
     void (async () => {
       let batch: { computerId: string; batchId: string } | undefined;
@@ -255,7 +255,7 @@ export function ExecutionWorker({
         const instructions = [
           agentExecutionInstructions(session.profile),
           CONVERSATION_STYLE_INSTRUCTIONS,
-          COMPUTER_WORK_INSTRUCTIONS,
+          tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
           builtinPluginInstructions(
             session.work.prompt,
             staged.node?.plugins,
@@ -355,6 +355,6 @@ export function ExecutionWorker({
       }
     })();
     // StrictMode effect replay sees session.started. View mounts never own this effect.
-  }, [service, session]);
+  }, [service, session, runtime.accountWorkspacePending]);
   return null;
 }

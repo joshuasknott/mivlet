@@ -1,181 +1,269 @@
-import type { ConversationLayout, WorkspaceView } from "@fable/protocol";
+import type {
+  ConversationLayout,
+  ConversationLayoutNode,
+  WorkspaceView,
+} from "@fable/protocol";
 
+export type DockEdge = "left" | "right" | "top" | "bottom";
 export const emptyLayout = (): ConversationLayout => ({
-  version: 1,
-  panes: [[], []],
+  version: 2,
+  panes: [[]],
   views: [],
-  active: [null, null],
+  active: [null],
   activePane: 0,
-  split: false,
-  ratio: 0.5,
+  tree: { kind: "pane", pane: 0 },
   closed: [],
 });
 export type LayoutAction =
-  | { type: "open"; view: WorkspaceView; pane?: 0 | 1; duplicate?: boolean }
-  | { type: "activate"; id: string }
-  | { type: "close"; id: string }
-  | { type: "move"; id: string; pane: 0 | 1; index: number }
-  | { type: "split"; view?: WorkspaceView }
-  | { type: "swap" }
+  | {
+      type: "open" | "navigate";
+      view: WorkspaceView;
+      pane?: number;
+      duplicate?: boolean;
+    }
+  | { type: "activate" | "close"; id: string }
+  | { type: "move"; id: string; pane: number; index: number }
+  | {
+      type: "dock";
+      id?: string;
+      view?: WorkspaceView;
+      pane: number;
+      edge: DockEdge;
+    }
   | { type: "single" }
-  | { type: "resize"; ratio: number }
+  | { type: "resize"; path: number[]; ratio: number }
   | { type: "reopen" };
 
-/** Pure view state. No branch in this reducer can dispatch or cancel execution. */
+function compact(layout: ConversationLayout): ConversationLayout {
+  const keep = layout.panes.flatMap((ids, i) => (ids.length ? [i] : []));
+  if (!keep.length) return { ...emptyLayout(), closed: layout.closed };
+  const prune = (
+    node: ConversationLayoutNode,
+  ): ConversationLayoutNode | null => {
+    if (node.kind === "pane")
+      return keep.includes(node.pane)
+        ? { kind: "pane", pane: keep.indexOf(node.pane) }
+        : null;
+    const a = prune(node.children[0]),
+      b = prune(node.children[1]);
+    return a && b ? { ...node, children: [a, b] } : (a ?? b);
+  };
+  return {
+    ...layout,
+    panes: keep.map((i) => layout.panes[i]),
+    active: keep.map((i) => layout.active[i]),
+    activePane: Math.max(0, keep.indexOf(layout.activePane)),
+    tree: prune(layout.tree)!,
+  };
+}
+
+/** View changes never dispatch, stop, or duplicate an execution. */
 export function reduceLayout(
   state: ConversationLayout,
   action: LayoutAction,
 ): ConversationLayout {
   const next: ConversationLayout = {
     ...state,
-    panes: [[...state.panes[0]], [...state.panes[1]]],
+    panes: state.panes.map((ids) => [...ids]),
     views: [...state.views],
     active: [...state.active],
     closed: [...state.closed],
   };
-  const owner = (id: string): 0 | 1 | undefined =>
-    next.panes[0].includes(id) ? 0 : next.panes[1].includes(id) ? 1 : undefined;
+  const owner = (id: string) => next.panes.findIndex((ids) => ids.includes(id));
   const activate = (id: string) => {
     const pane = owner(id);
-    if (pane !== undefined) {
+    if (pane >= 0) {
       next.active[pane] = id;
       next.activePane = pane;
-      if (pane === 1) next.split = true;
     }
   };
   const remove = (id: string) => {
     const pane = owner(id);
-    if (pane === undefined) return;
+    if (pane < 0) return;
     const index = next.panes[pane].indexOf(id);
     next.panes[pane].splice(index, 1);
     if (next.active[pane] === id)
       next.active[pane] =
         next.panes[pane][Math.min(index, next.panes[pane].length - 1)] ?? null;
   };
-  const open = (view: WorkspaceView, pane: 0 | 1, duplicate: boolean) => {
-    const existing =
-      !duplicate &&
-      next.views.find(
-        (current) =>
-          current.kind === view.kind &&
-          current.conversationId === view.conversationId &&
-          (view.kind !== "artifact" ||
-            (current.kind === "artifact" && current.output === view.output)),
-      );
-    if (existing) {
-      activate(existing.id);
-      return;
-    }
+  const remember = (view: WorkspaceView) => {
+    next.closed = [
+      ...next.closed.filter((old) => old.id !== view.id),
+      view,
+    ].slice(-20);
+  };
+  const add = (view: WorkspaceView, pane: number) => {
     if (
       next.views.length >= 40 ||
-      next.views.some((current) => current.id === view.id)
+      next.views.some((old) => old.id === view.id) ||
+      !next.panes[pane]
     )
-      return;
+      return false;
     next.views.push(view);
     next.panes[pane].push(view.id);
-    next.closed = next.closed.filter((current) => current.id !== view.id);
+    next.closed = next.closed.filter((old) => old.id !== view.id);
     activate(view.id);
+    return true;
   };
   switch (action.type) {
     case "open":
-      open(
-        action.view,
-        action.pane ?? state.activePane,
-        action.duplicate ?? false,
-      );
+    case "navigate": {
+      const pane = action.pane ?? next.activePane;
+      if (!next.panes[pane]) return state;
+      const existing =
+        !action.duplicate &&
+        next.views.find(
+          (view) =>
+            view.kind === action.view.kind &&
+            view.conversationId === action.view.conversationId &&
+            (view.kind !== "artifact" ||
+              (action.view.kind === "artifact" &&
+                view.output === action.view.output)),
+        );
+      if (existing) {
+        activate(existing.id);
+        break;
+      }
+      if (action.type === "navigate") {
+        const old = next.views.find((view) => view.id === next.active[pane]);
+        if (old) {
+          remove(old.id);
+          next.views = next.views.filter((view) => view.id !== old.id);
+          remember(old);
+        }
+      }
+      add(action.view, pane);
       break;
+    }
     case "activate":
       activate(action.id);
       break;
     case "close": {
       const view = next.views.find((view) => view.id === action.id);
       if (!view) return state;
-      remove(action.id);
-      next.views = next.views.filter((view) => view.id !== action.id);
-      next.closed = [
-        ...next.closed.filter((old) => old.id !== view.id),
-        view,
-      ].slice(-20);
-      if (!next.active[next.activePane])
-        next.activePane = next.activePane === 0 ? 1 : 0;
+      remove(view.id);
+      next.views = next.views.filter((old) => old.id !== view.id);
+      remember(view);
       break;
     }
     case "move": {
-      if (owner(action.id) === undefined) return state;
+      if (owner(action.id) < 0 || !next.panes[action.pane]) return state;
       remove(action.id);
-      const pane = next.panes[action.pane];
-      pane.splice(
-        Math.max(0, Math.min(action.index, pane.length)),
+      next.panes[action.pane].splice(
+        Math.max(0, Math.min(action.index, next.panes[action.pane].length)),
         0,
         action.id,
       );
       activate(action.id);
       break;
     }
-    case "split": {
-      next.split = true;
-      if (action.view) open(action.view, 1, true);
-      else if (!next.panes[1].length && next.panes[0].length > 1) {
-        const id = next.active[0] ?? next.panes[0].at(-1)!;
-        remove(id);
-        next.panes[1].push(id);
-        activate(id);
-      }
+    case "dock": {
+      if (next.panes.length >= 8 || !next.panes[action.pane]) return state;
+      const source = action.id
+        ? next.views.find((view) => view.id === action.id)
+        : action.view;
+      if (
+        !source ||
+        (action.id &&
+          owner(action.id) === action.pane &&
+          next.panes[action.pane].length === 1)
+      )
+        return state;
+      const pane = next.panes.length;
+      next.panes.push([]);
+      next.active.push(null);
+      if (action.id) {
+        remove(action.id);
+        next.panes[pane].push(action.id);
+        activate(action.id);
+      } else if (!add(source, pane)) return state;
+      const before = action.edge === "left" || action.edge === "top";
+      const insert = (node: ConversationLayoutNode): ConversationLayoutNode =>
+        node.kind === "pane"
+          ? node.pane === action.pane
+            ? {
+                kind: "split",
+                axis:
+                  action.edge === "left" || action.edge === "right"
+                    ? "row"
+                    : "column",
+                ratio: 0.5,
+                children: before
+                  ? [{ kind: "pane", pane }, node]
+                  : [node, { kind: "pane", pane }],
+              }
+            : node
+          : {
+              ...node,
+              children: [insert(node.children[0]), insert(node.children[1])],
+            };
+      next.tree = insert(next.tree);
       break;
     }
-    case "swap":
-      next.panes = [next.panes[1], next.panes[0]];
-      next.active = [next.active[1], next.active[0]];
-      next.activePane = next.activePane === 0 ? 1 : 0;
-      next.ratio = 1 - next.ratio;
-      break;
-    case "single": {
-      const active = next.active[next.activePane];
-      next.panes = [[...next.panes[0], ...next.panes[1]], []];
-      next.active = [active ?? next.panes[0][0] ?? null, null];
+    case "single":
+      next.panes = [next.panes.flat()];
+      next.active = [next.active[next.activePane]];
       next.activePane = 0;
-      next.split = false;
+      next.tree = { kind: "pane", pane: 0 };
+      break;
+    case "resize": {
+      if (!Number.isFinite(action.ratio)) return state;
+      const resize = (
+        node: ConversationLayoutNode,
+        depth: number,
+      ): ConversationLayoutNode => {
+        if (node.kind === "pane") return node;
+        if (depth === action.path.length)
+          return { ...node, ratio: Math.max(0.2, Math.min(0.8, action.ratio)) };
+        const children: [ConversationLayoutNode, ConversationLayoutNode] = [
+          ...node.children,
+        ];
+        const index = action.path[depth];
+        if (index !== 0 && index !== 1) return node;
+        children[index] = resize(children[index], depth + 1);
+        return { ...node, children };
+      };
+      next.tree = resize(next.tree, 0);
       break;
     }
-    case "resize":
-      next.ratio = Math.max(0.25, Math.min(0.75, action.ratio));
-      break;
     case "reopen": {
       const view = next.closed.pop();
-      if (view) open(view, next.activePane, true);
+      if (view && !add(view, next.activePane)) next.closed.push(view);
       break;
     }
   }
-  if (!next.split) next.activePane = 0;
-  return next;
+  return compact(next);
 }
 
+/** v1 used two fixed panes. Preserve its tabs in the new single-pane default. */
 export function restoreLayout(
   layout: ConversationLayout | null,
   conversationIds: Set<string>,
 ): ConversationLayout {
-  if (!layout || layout.version !== 1) return emptyLayout();
-  const views = layout.views.filter((view) =>
-    conversationIds.has(view.conversationId),
-  );
+  if (!layout || ![1, 2].includes(layout.version)) return emptyLayout();
+  const views = layout.views
+    .filter((view) => conversationIds.has(view.conversationId))
+    .slice(0, 40);
   const ids = new Set(views.map((view) => view.id));
-  const panes: [string[], string[]] = [
-    layout.panes[0].filter((id) => ids.has(id)),
-    layout.panes[1].filter((id) => ids.has(id)),
-  ];
-  const active = panes.map((pane, index) =>
-    pane.includes(layout.active[index] ?? "")
-      ? layout.active[index]
+  const panes = layout.version === 2 ? layout.panes : [layout.panes.flat()];
+  const seen = new Set<string>();
+  const filtered = panes.map((pane) =>
+    pane.filter((id) => ids.has(id) && !seen.has(id) && Boolean(seen.add(id))),
+  );
+  const active = filtered.map((pane, i) =>
+    pane.includes(layout.active[i] ?? "")
+      ? layout.active[i]
       : (pane[0] ?? null),
-  ) as [string | null, string | null];
-  return {
-    ...layout,
-    views,
-    panes,
+  );
+  return compact({
+    ...emptyLayout(),
+    views: views.filter((view) => seen.has(view.id)),
+    panes: filtered,
     active,
-    closed: layout.closed.filter((view) =>
-      conversationIds.has(view.conversationId),
-    ),
-    ratio: Math.max(0.25, Math.min(0.75, layout.ratio)),
-  };
+    activePane: layout.version === 2 ? layout.activePane : 0,
+    tree: layout.version === 2 ? layout.tree : { kind: "pane", pane: 0 },
+    closed: layout.closed
+      .filter((view) => conversationIds.has(view.conversationId))
+      .slice(-20),
+  });
 }

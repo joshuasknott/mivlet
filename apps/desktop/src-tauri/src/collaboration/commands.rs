@@ -469,14 +469,49 @@ pub(super) fn save_fact(ctx: &Context<'_>, mut fact: Fact, sender: Option<&str>)
 }
 
 fn validate_layout(ctx: &Context<'_>, layout: &Layout) -> Result<()> {
-    if layout.version != 1
-        || layout.active_pane > 1
-        || !layout.ratio.is_finite()
-        || !(0.25..=0.75).contains(&layout.ratio)
+    if layout.version != 2
+        || layout.panes.is_empty()
+        || layout.panes.len() > 8
+        || layout.active_pane >= layout.panes.len()
+        || layout.active.len() != layout.panes.len()
         || layout.views.len() > 40
         || layout.closed.len() > 20
     {
         return Err(invalid("This workspace layout is invalid."));
+    }
+    fn validate_node(
+        node: &LayoutNode,
+        depth: usize,
+        count: usize,
+        leaves: &mut HashSet<usize>,
+    ) -> bool {
+        if depth > 7 {
+            return false;
+        }
+        match node {
+            LayoutNode::Pane { pane } => *pane < count && leaves.insert(*pane),
+            LayoutNode::Split {
+                axis,
+                ratio,
+                children,
+            } => {
+                ["row", "column"].contains(&axis.as_str())
+                    && ratio.is_finite()
+                    && (0.2..=0.8).contains(ratio)
+                    && children
+                        .iter()
+                        .all(|child| validate_node(child, depth + 1, count, leaves))
+            }
+        }
+    }
+    let mut leaves = HashSet::new();
+    if !layout
+        .tree
+        .as_ref()
+        .is_some_and(|tree| validate_node(tree, 0, layout.panes.len(), &mut leaves))
+        || leaves.len() != layout.panes.len()
+    {
+        return Err(invalid("Each pane must appear exactly once in the grid."));
     }
     let mut ids = HashSet::new();
     for view in layout.views.iter().chain(&layout.closed) {

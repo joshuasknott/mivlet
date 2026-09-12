@@ -23,17 +23,19 @@ import { builtinPluginMentions } from "../lib/builtin-plugins";
 import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerModelsFor } from "./composer-models";
 import { Composer } from "../components/Composer";
+import { RecipientPicker } from "../components/conversation/RecipientPicker";
 import type { ComposerInputHandle } from "../components/ComposerInput";
 import type { ComposerAttachment } from "../lib/types";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
-import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
-import { WorkItems } from "../components/projects/WorkItems";
 import { agentPresence } from "../lib/agent-presence";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
+import { WorkRecovery } from "../components/projects/WorkItems";
+import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
+import type { ConversationTurn } from "../lib/conversation-presentation";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -69,7 +71,6 @@ export function ConversationPane({
   state,
   active,
   profileName,
-  onOpen,
   onClose,
   onArtifact,
   onEdit,
@@ -89,7 +90,6 @@ export function ConversationPane({
   state: WorkspaceExecutionState;
   active: boolean;
   profileName: string;
-  onOpen: (id: string) => void;
   onClose: () => void;
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
@@ -138,6 +138,14 @@ export function ConversationPane({
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const optionsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) optionsRef.current.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, []);
   const submission = useRef(false);
   const currentComposer = useRef(composer);
   currentComposer.current = composer;
@@ -188,6 +196,11 @@ export function ConversationPane({
     (work) => work.conversationId === room.id,
   );
   const running = work.filter(activeWork);
+  const pendingTurns: ConversationTurn[] = work.filter(item => !item.parentId && !item.runIds.length).map(item => ({
+    id: item.id, prompt: item.userRequest || item.prompt, startedAt: item.createdAt, endedAt: item.updatedAt,
+    parts: item.status === "failed" ? [{ id: `${item.id}-error`, kind: "notice", error: true, content: item.reason || "This request could not start." }] : [],
+  }));
+  const recovery = work.filter(item => !item.parentId && ["failed", "blocked", "awaiting-user", "cancelled"].includes(item.status));
   const liveStates = sessions
     .filter((session) => session.state)
     .map((session) => ({
@@ -213,7 +226,7 @@ export function ConversationPane({
         sessions.some((session) => session.approvalIds.has(approval.id)),
       )
     : [];
-  const authors = Object.fromEntries(
+  const authors: Record<string, FableAgentProfile> = Object.fromEntries(
     state.data.authors
       .filter((author) => author.conversationId === room.id)
       .map((author) => [
@@ -229,7 +242,11 @@ export function ConversationPane({
         },
       ]),
   );
+  for (const item of work) {
+    authors[item.id] = { ...(runtime.agents.find(agent => agent.id === item.agentId) ?? displayAgent), id: item.agentId, name: item.agentName };
+  }
   const connected = [
+    // Capability mentions are inserted only from the current native snapshot.
     ...builtinPluginMentions(localComputer.node?.plugins),
     ...runtime.connectorManifests
       .filter(
@@ -271,6 +288,7 @@ export function ConversationPane({
     try {
       await runtime.flushSnapshot();
       await service.refresh();
+      if (mentionedBuiltinPlugins(prompt).length) await localComputer.prepareForTool("read-file");
       if (project) {
         const sourceIds = composer.attachments.flatMap((attachment) =>
           attachment.sourceId ? [attachment.sourceId] : [],
@@ -406,12 +424,6 @@ export function ConversationPane({
           />
           <span>
             <strong>{room.title}</strong>
-            <small>
-              {project ? `${project.name} · ` : ""}
-              {room.kind === "direct"
-                ? displayAgent.name
-                : `${room.participants.length} participants · ${runtime.agents.find((agent) => agent.id === room.facilitatorId)?.name ?? "Choose a facilitator"} facilitates`}
-            </small>
           </span>
         </div>
         <div className="team-conversation-actions">
@@ -422,11 +434,13 @@ export function ConversationPane({
           >
             <Desktop size={18} />
           </button>
-          <details>
+          <details ref={optionsRef} onKeyDown={(event) => {
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
             <summary aria-label="Conversation options">
               <DotsThree size={22} />
             </summary>
-            <div>
+            <div onClick={() => { if (optionsRef.current) optionsRef.current.open = false; }}>
               <button type="button" onClick={() => void onNew()}>
                 New conversation
               </button>
@@ -450,32 +464,6 @@ export function ConversationPane({
           </details>
         </div>
       </header>
-      {project ? (
-        <ProjectContextPanel
-          project={project}
-          room={room}
-          data={state.data}
-          runtime={runtime}
-          service={service}
-          onOpen={onOpen}
-          onNewConversation={() => void onNew()}
-          onEdit={onEdit}
-          onSchedules={onSchedules}
-          onUpdate={onProjectUpdate}
-        />
-      ) : work.length ? (
-        <details className="conversation-work">
-          <summary>
-            Activity{" "}
-            <small>
-              {running.length
-                ? `${running.length} active`
-                : `${work.length} recorded`}
-            </small>
-          </summary>
-          <WorkItems work={work} service={service} onOpen={onOpen} />
-        </details>
-      ) : null}
       <div
         className="conversation-pane-scroll"
         ref={scroll.scrollRef}
@@ -487,20 +475,13 @@ export function ConversationPane({
             <p className="team-empty" role="status">
               Loading conversation…
             </p>
-          ) : !history?.messages.length && !liveStates.length ? (
+          ) : !history?.messages.length && !liveStates.length && !pendingTurns.length ? (
             <div className="team-conversation-welcome">
               <h1>
-                {project
-                  ? "What should we move forward?"
-                  : room.kind === "group"
-                    ? "Give this group an outcome"
-                    : `Work with ${displayAgent.name}`}
-              </h1>
-              <p>
                 {room.kind === "group"
-                  ? "Address a participant, ask for a discussion, or let the facilitator organise the work."
-                  : "Each conversation keeps its own history and draft."}
-              </p>
+                  ? "Message the team"
+                  : `Message ${displayAgent.name}`}
+              </h1>
             </div>
           ) : null}
           <ConversationFeed
@@ -515,13 +496,27 @@ export function ConversationPane({
             profileName={profileName}
             connectors={runtime.connectorManifests}
             optimisticPrompt=""
+            pendingTurns={pendingTurns}
+            onOpenWorkspaceFiles={onComputer}
+            decisionEvents={state.data.facts.filter(fact => fact.projectId === room.projectId && fact.conversationId === room.id && fact.confidence === "confirmed" && fact.status !== "forgotten")}
             workspaceId={service.workspaceId}
             generation={localComputer.node?.generation}
             onPreviewArtifact={(output, authorId) =>
               onArtifact(output, authorId ?? displayAgent.id)
             }
             onOpenConnector={onPlugins}
+            onReusePrompt={(prompt, intent) => {
+              composer.setText(prompt);
+              setError(intent === "retry" ? "Review this request before sending again. Check any previous external actions and reattach files if needed." : "Editing a new message. The original and any actions already taken remain in the conversation; reattach files if needed.");
+              focus();
+            }}
           />
+          {recovery.map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Recovery for ${item.agentName}'s request`}>
+            {item.runIds.length ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
+            <WorkRecovery item={item} service={service} />
+            <button type="button" onClick={() => { composer.setText(item.userRequest || item.prompt); focus(); }}>Restore request to composer</button>
+            {/computer|runtime|plugin/i.test(item.reason ?? "") ? <button type="button" onClick={() => onComputer(item.agentId)}>Check Computer Use</button> : /provider|connect|model/i.test(item.reason ?? "") ? <button type="button" onClick={() => onPlugins()}>Check connections</button> : null}
+          </div>)}
           {running
             .filter(
               (item) =>
@@ -630,7 +625,7 @@ export function ConversationPane({
           onAttach={() => fileInput.current?.click()}
           onImportRepository={() => void importRepository()}
           addMenuOpen={addOpen}
-          onToggleAddMenu={() => setAddOpen(!addOpen)}
+          onToggleAddMenu={() => { if (optionsRef.current) optionsRef.current.open = false; setAddOpen(!addOpen); }}
           onOpenTool={() => onPlugins()}
           onRunCommand={composer.setText}
           onFileChange={(event) => {
@@ -640,6 +635,7 @@ export function ConversationPane({
           models={models}
           selectedModelId={model?.id ?? profile?.modelId ?? ""}
           selectedModelLabel={model?.label ?? "Choose model"}
+          modelScope={recipient === "discussion" ? `${displayAgent.name} leads this discussion using this model. Other participants use their own saved models if invited.` : `Model for ${displayAgent.name}. Changes apply to this agent's future requests.`}
           selectedReasoningEffort={profile?.reasoningEffort}
           onSelectReasoningEffort={(effort) => {
             if (profile)
@@ -675,53 +671,25 @@ export function ConversationPane({
           importStatus={pending ? "Saving message and context…" : undefined}
           recipientControl={
             room.kind === "group" ? (
-              <label className="team-recipient">
-                <span>To</span>
-                <select
-                  aria-label="Message recipient"
-                  value={recipient}
-                  onChange={(event) =>
-                    composer.setRecipient(event.target.value)
-                  }
-                >
-                  <option value={room.facilitatorId ?? ""}>
-                    {runtime.agents.find(
-                      (agent) => agent.id === room.facilitatorId,
-                    )?.name ?? "Choose facilitator"}{" "}
-                    · facilitator
-                  </option>
-                  {room.participants
-                    .filter((member) => member.agentId !== room.facilitatorId)
-                    .map((member) => (
-                      <option
-                        value={member.agentId}
-                        key={member.agentId}
-                        disabled={
-                          !runtime.agents.some(
-                            (agent) => agent.id === member.agentId,
-                          )
-                        }
-                      >
-                        {member.name}
-                        {!runtime.agents.some(
-                          (agent) => agent.id === member.agentId,
-                        )
-                          ? " · unavailable"
-                          : ""}
-                      </option>
-                    ))}
-                  <option value="discussion">Wider discussion</option>
-                </select>
-              </label>
+              <RecipientPicker
+                value={recipient}
+                onChange={composer.setRecipient}
+                options={[
+                  ...room.participants.map((member) => ({
+                    id: member.agentId,
+                    name:
+                      member.name +
+                      (member.agentId === room.facilitatorId ? " · Lead" : ""),
+                    disabled: !runtime.agents.some(
+                      (agent) => agent.id === member.agentId,
+                    ),
+                  })),
+                  { id: "discussion", name: "Team discussion", description: "The lead invites relevant contributions; each teammate uses its own model." },
+                ]}
+              />
             ) : undefined
           }
         />
-        {room.kind === "group" ? (
-          <p className="conversation-sharing">
-            Shared with this conversation’s participants. Each agent uses its
-            own model.
-          </p>
-        ) : null}
       </div>
     </div>
   );

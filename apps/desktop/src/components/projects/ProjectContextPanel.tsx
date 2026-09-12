@@ -22,7 +22,6 @@ export function ProjectContextPanel({
   runtime,
   service,
   onOpen,
-  onNewConversation,
   onEdit,
   onSchedules,
   onUpdate,
@@ -33,7 +32,6 @@ export function ProjectContextPanel({
   runtime: ShellRuntime;
   service: WorkspaceExecution;
   onOpen: (id: string) => void;
-  onNewConversation: () => void;
   onEdit: () => void;
   onSchedules: () => void;
   onUpdate: (
@@ -105,15 +103,7 @@ export function ProjectContextPanel({
     });
   };
   return (
-    <details className="project-context">
-      <summary>
-        <span>Project context</span>
-        <small>
-          {work.filter(activeWork).length} active ·{" "}
-          {facts.filter((fact) => fact.status === "current").length} facts &
-          decisions · {files.length} files
-        </small>
-      </summary>
+    <section className="project-context" aria-label={project.name}>
       <div className="project-context__body">
         <div className="project-context__intro">
           <p>
@@ -139,40 +129,6 @@ export function ProjectContextPanel({
             ) : null}
           </div>
         </div>
-        <details>
-          <summary>
-            Conversations{" "}
-            <small>
-              {
-                data.conversations.filter(
-                  (room) => room.projectId === project.id,
-                ).length
-              }
-            </small>
-          </summary>
-          <div className="project-context__conversations">
-            {data.conversations
-              .filter((room) => room.projectId === project.id)
-              .map((conversation) => (
-                <button
-                  type="button"
-                  key={conversation.id}
-                  aria-current={
-                    room.id === conversation.id ? "page" : undefined
-                  }
-                  onClick={() => onOpen(conversation.id)}
-                >
-                  {conversation.title}
-                  {conversation.id === project.threadId ? (
-                    <small>Main</small>
-                  ) : null}
-                </button>
-              ))}
-            <button type="button" onClick={onNewConversation}>
-              New focused conversation
-            </button>
-          </div>
-        </details>
         <details>
           <summary>
             Work <small>{work.length}</small>
@@ -398,6 +354,6 @@ export function ProjectContextPanel({
         </details>
         {error ? <p role="alert">{error}</p> : null}
       </div>
-    </details>
+    </section>
   );
 }

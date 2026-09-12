@@ -113,6 +113,24 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("workspace execution (deterministic fixtures, no live provider)", () => {
+  it("keeps attachments for an unstarted retry and releases them after a durable run", async () => {
+    const { service, update } = fixture([]);
+    await service.refresh();
+    const attachment = { id: "file", name: "brief.txt", type: "text/plain", sizeBytes: 4, transientBytes: new Uint8Array([116, 101, 115, 116]) };
+    const id = await service.submit("conversation-a", "a", "Read the brief", false, [attachment]);
+    let work = fixtureWork(id, "a", { conversationId: "conversation-a" });
+    update([work]); await service.refresh(); service.admit(agents, models, [provider], "trusted-scope");
+    const first = service.getSnapshot().sessions[0];
+    expect(first.attachments).toEqual([attachment]);
+    update([{ ...work, status: "failed" }]); await service.refresh(); await service.released(first);
+    work = { ...work, generation: 2 }; update([work]); await service.refresh(); service.admit(agents, models, [provider], "trusted-scope");
+    const retry = service.getSnapshot().sessions[0];
+    expect(retry.attachments).toEqual([attachment]);
+    update([{ ...work, status: "failed", runIds: ["durable-run"] }]); await service.refresh(); await service.released(retry);
+    update([{ ...work, generation: 3, runIds: ["durable-run"] }]); await service.refresh(); service.admit(agents, models, [provider], "trusted-scope");
+    expect(service.getSnapshot().sessions[0].attachments).toEqual([]);
+    service.dispose();
+  });
   it("keeps two same-agent conversations distinct and queues only that agent", async () => {
     const { service } = fixture([
       fixtureWork("one", "a"),

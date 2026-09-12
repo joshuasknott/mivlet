@@ -349,7 +349,9 @@ export class WorkspaceExecution {
   }
   async released(session: ExecutionSession) {
     this.approvals.release(session.key);
-    this.attachments.delete(session.work.id);
+    // Keep inputs for a same-session retry that failed before a durable run.
+    // A bound run has already persisted its attachment metadata and context.
+    if (this.state.data.work.find(work => work.id === session.work.id)?.runIds.length) this.attachments.delete(session.work.id);
     this.emit({
       sessions: this.state.sessions.filter((current) => current !== session),
     });

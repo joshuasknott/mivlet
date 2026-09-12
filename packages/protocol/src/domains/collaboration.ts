@@ -1,5 +1,14 @@
 /** Installation-private coordination. These records grant no tool authority. */
-export type WorkStatus = "queued" | "running" | "waiting" | "blocked" | "awaiting-approval" | "awaiting-user" | "completed" | "failed" | "cancelled";
+export type WorkStatus =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "blocked"
+  | "awaiting-approval"
+  | "awaiting-user"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface ConversationParticipant {
   agentId: string;
@@ -92,27 +101,37 @@ export interface ProjectFact {
   createdAt: string;
 }
 
-export type WorkspaceView = {
-  id: string;
-  conversationId: string;
-  kind: "conversation";
-} | {
-  id: string;
-  conversationId: string;
-  kind: "artifact";
-  agentId: string;
-  output: string;
-  title: string;
-};
+export type WorkspaceView =
+  | {
+      id: string;
+      conversationId: string;
+      kind: "conversation";
+    }
+  | {
+      id: string;
+      conversationId: string;
+      kind: "artifact";
+      agentId: string;
+      output: string;
+      title: string;
+    };
+
+export type ConversationLayoutNode =
+  | { kind: "pane"; pane: number }
+  | {
+      kind: "split";
+      axis: "row" | "column";
+      ratio: number;
+      children: [ConversationLayoutNode, ConversationLayoutNode];
+    };
 
 export interface ConversationLayout {
-  version: 1;
-  panes: [string[], string[]];
+  version: 2;
+  panes: string[][];
   views: WorkspaceView[];
-  active: [string | null, string | null];
-  activePane: 0 | 1;
-  split: boolean;
-  ratio: number;
+  active: (string | null)[];
+  activePane: number;
+  tree: ConversationLayoutNode;
   closed: WorkspaceView[];
 }
 
@@ -127,24 +146,113 @@ export interface CollaborationSnapshot {
 
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
-  | { action: "create-conversation"; id: string; title: string; kind: ConversationRoom["kind"]; participantIds: string[]; facilitatorId: string; projectId?: string }
-  | { action: "update-conversation"; id: string; expectedRevision: number; title: string; participantIds: string[]; facilitatorId: string; shareHistory: boolean }
-  | { action: "place-conversation"; id: string; expectedRevision: number; projectId: string; shareHistory: true }
-  | { action: "update-team"; projectId: string; expectedRevision: number; leadAgentId: string; participantIds: string[]; shareHistory: boolean }
-  | { action: "start-work"; id: string; conversationId: string; agentId: string; prompt: string; discussion: boolean }
+  | {
+      action: "create-conversation";
+      id: string;
+      title: string;
+      kind: ConversationRoom["kind"];
+      participantIds: string[];
+      facilitatorId: string;
+      projectId?: string;
+    }
+  | {
+      action: "update-conversation";
+      id: string;
+      expectedRevision: number;
+      title: string;
+      participantIds: string[];
+      facilitatorId: string;
+      shareHistory: boolean;
+    }
+  | {
+      action: "place-conversation";
+      id: string;
+      expectedRevision: number;
+      projectId: string;
+      shareHistory: true;
+    }
+  | {
+      action: "update-team";
+      projectId: string;
+      expectedRevision: number;
+      leadAgentId: string;
+      participantIds: string[];
+      shareHistory: boolean;
+    }
+  | {
+      action: "start-work";
+      id: string;
+      conversationId: string;
+      agentId: string;
+      prompt: string;
+      discussion: boolean;
+    }
   | { action: "bind-work"; id: string; generation: number; runId: string }
   | { action: "check-work"; id: string; generation: number; runId: string }
-  | { action: "finish-work"; id: string; generation: number; runId: string; status: "completed" | "failed" | "cancelled" | "awaiting-user"; reason?: string }
+  | {
+      action: "finish-work";
+      id: string;
+      generation: number;
+      runId: string;
+      status: "completed" | "failed" | "cancelled" | "awaiting-user";
+      reason?: string;
+    }
   | { action: "stop-work"; id: string }
   | { action: "stop-project"; projectId: string }
-  | { action: "continue-work"; id: string; expectedGeneration: number; reconcile: true }
-  | { action: "work-status"; id: string; generation: number; status: "awaiting-approval" | "running" | "failed"; reason?: string }
-  | { action: "agent-command"; id: string; generation: number; runId: string; callId: string; command: CollaborationAgentCommand }
-  | { action: "save-fact"; projectId: string; conversationId: string; id: string; kind: ProjectFact["kind"]; text: string; source: string; supersedesId?: string }
-  | { action: "change-fact"; id: string; projectId: string; status: "stale" | "forgotten" }
+  | {
+      action: "continue-work";
+      id: string;
+      expectedGeneration: number;
+      reconcile: true;
+    }
+  | {
+      action: "work-status";
+      id: string;
+      generation: number;
+      status: "awaiting-approval" | "running" | "failed";
+      reason?: string;
+    }
+  | {
+      action: "agent-command";
+      id: string;
+      generation: number;
+      runId: string;
+      callId: string;
+      command: CollaborationAgentCommand;
+    }
+  | {
+      action: "save-fact";
+      projectId: string;
+      conversationId: string;
+      id: string;
+      kind: ProjectFact["kind"];
+      text: string;
+      source: string;
+      supersedesId?: string;
+    }
+  | {
+      action: "change-fact";
+      id: string;
+      projectId: string;
+      status: "stale" | "forgotten";
+    }
   | { action: "save-layout"; layout: ConversationLayout };
 
 export type CollaborationAgentCommand =
-  | { kind: "delegate"; agentId: string; prompt: string; title: string; dependencies: string[]; focused: boolean }
-  | { kind: "record-fact"; text: string; factKind: ProjectFact["kind"]; source: string; confidence: "inference" | "external-observation"; supersedesId?: string }
+  | {
+      kind: "delegate";
+      agentId: string;
+      prompt: string;
+      title: string;
+      dependencies: string[];
+      focused: boolean;
+    }
+  | {
+      kind: "record-fact";
+      text: string;
+      factKind: ProjectFact["kind"];
+      source: string;
+      confidence: "inference" | "external-observation";
+      supersedesId?: string;
+    }
   | { kind: "await-user"; reason: string };

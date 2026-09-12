@@ -27,9 +27,7 @@ export function ConversationDialog({
   onSave: (draft: ConversationDraft) => Promise<void>;
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<ConversationDraft["kind"]>(
-    initial?.kind ?? "direct",
-  );
+  const [kind] = useState<ConversationDraft["kind"]>(initial?.kind ?? "direct");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [instructions, setInstructions] = useState(initial?.instructions ?? "");
   const [ids, setIds] = useState(
@@ -38,6 +36,7 @@ export function ConversationDialog({
   const [facilitator, setFacilitator] = useState(
     initial?.facilitatorId ?? agents[0]?.id ?? "",
   );
+  const explicitParticipants = useRef(new Set(initial?.participantIds?.filter(id => id !== initial.facilitatorId)));
   const [share, setShare] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
@@ -73,7 +72,7 @@ export function ConversationDialog({
               ? `Edit ${label}`
               : projectName
                 ? `Conversation in ${projectName}`
-                : "Start working together"}
+                : `New ${label}`}
           </h2>
           <button
             type="button"
@@ -92,7 +91,7 @@ export function ConversationDialog({
               return;
             }
             if (!ids.length || !ids.includes(facilitator)) {
-              setError("Choose a lead or facilitator from the participants.");
+              setError("Choose a lead from the participants.");
               return;
             }
             setPending(true);
@@ -120,29 +119,6 @@ export function ConversationDialog({
               .finally(() => setPending(false));
           }}
         >
-          {!edit && !projectName ? (
-            <fieldset className="team-kind">
-              <legend>Start a</legend>
-              {(["direct", "group", "project"] as const).map((value) => (
-                <label key={value}>
-                  <input
-                    type="radio"
-                    name="kind"
-                    checked={kind === value}
-                    onChange={() => {
-                      setKind(value);
-                      if (value === "direct") setIds([facilitator]);
-                    }}
-                  />
-                  {value === "direct"
-                    ? "Direct conversation"
-                    : value === "group"
-                      ? "Group"
-                      : "Project"}
-                </label>
-              ))}
-            </fieldset>
-          ) : null}
           <label>
             {kind === "project" ? "Project name" : "Conversation title"}
             <input
@@ -157,7 +133,7 @@ export function ConversationDialog({
                     ? "What are we working towards?"
                     : "What is this group for?"
               }
-              required={kind !== "direct"}
+              required={kind === "project"}
             />
           </label>
           {kind === "project" ? (
@@ -173,11 +149,7 @@ export function ConversationDialog({
             </label>
           ) : null}
           <label>
-            {kind === "direct"
-              ? "Teammate"
-              : kind === "project"
-                ? "Responsible lead"
-                : "Facilitator"}
+            {kind === "direct" ? "Teammate" : "Lead"}
             <select
               value={facilitator}
               onChange={(event) => {
@@ -185,7 +157,7 @@ export function ConversationDialog({
                 setIds(
                   kind === "direct"
                     ? [event.target.value]
-                    : [...new Set([...ids, event.target.value])],
+                    : [...new Set([...ids.filter(id => edit || id !== facilitator || explicitParticipants.current.has(id)), event.target.value])],
                 );
               }}
               required
@@ -214,18 +186,20 @@ export function ConversationDialog({
                       agent.id === facilitator ||
                       (!ids.includes(agent.id) && ids.length >= 8)
                     }
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      if (event.target.checked) explicitParticipants.current.add(agent.id);
+                      else explicitParticipants.current.delete(agent.id);
                       setIds(
                         event.target.checked
                           ? [...ids, agent.id]
                           : ids.filter((id) => id !== agent.id),
-                      )
-                    }
+                      );
+                    }}
                   />
                   <ProfileAgentAvatar agent={agent} iconSize={27} />
                   <span>{agent.name}</span>
                   {agent.id === facilitator ? (
-                    <small>{kind === "project" ? "Lead" : "Facilitator"}</small>
+                    <small>Lead</small>
                   ) : null}
                 </label>
               ))}

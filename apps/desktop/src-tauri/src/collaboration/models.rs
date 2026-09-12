@@ -165,15 +165,28 @@ pub struct View {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum LayoutNode {
+    Pane {
+        pane: usize,
+    },
+    Split {
+        axis: String,
+        ratio: f64,
+        children: [Box<LayoutNode>; 2],
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Layout {
     pub version: u32,
-    pub panes: [Vec<String>; 2],
+    pub panes: Vec<Vec<String>>,
     pub views: Vec<View>,
-    pub active: [Option<String>; 2],
+    pub active: Vec<Option<String>>,
     pub active_pane: usize,
-    pub split: bool,
-    pub ratio: f64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tree: Option<LayoutNode>,
     pub closed: Vec<View>,
 }
 
