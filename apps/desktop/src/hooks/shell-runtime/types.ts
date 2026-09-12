@@ -44,6 +44,7 @@ import type {
 } from "../../lib/types";
 
 export interface ShellRuntime {
+  flushSnapshot: () => Promise<void>;
   // navigation
   activeItem: string;
   setActiveItem: (value: string) => void;
@@ -205,6 +206,7 @@ export interface ShellRuntime {
    * calls are audited only after the user decides, before Mivlet dispatches the tool.
    */
   recordBackendToolCall: (event: {
+    allowAutomatic?: boolean;
     callId: string;
     tool: string;
     arguments: string;
@@ -212,7 +214,7 @@ export interface ShellRuntime {
   }) => void;
   approvalPreviews: Record<string, { summary: string; details: string }>;
   /** Remove cancelled backend tool calls from the transient approval queue. */
-  clearBackendToolApprovals: () => void;
+  clearBackendToolApprovals: (ids?: readonly string[]) => void;
   /** Optional hosted identity, separate from local data and provider credentials. */
   identityStatus: IdentityStatus;
   identityPending: boolean;

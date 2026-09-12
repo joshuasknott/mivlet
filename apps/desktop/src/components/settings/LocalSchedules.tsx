@@ -11,12 +11,12 @@ import {
 const weekdays = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"];
 const errorText = (error: unknown) => error instanceof Error ? error.message : "The schedule could not be saved.";
 
-export function LocalSchedules({ runtime, onOpenResult, initialAgentId }: { runtime: SettingsRuntime; initialAgentId?: string; onOpenResult?: (agentId: string, threadId: string) => Promise<void> }) {
+export function LocalSchedules({ runtime, onOpenResult, initialAgentId, project }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; onOpenResult?: (agentId: string, threadId: string) => Promise<void> }) {
   const workspaceId = runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
-  return <SchedulesWorkspace key={workspaceId} workspaceId={workspaceId} runtime={runtime} initialAgentId={initialAgentId} onOpenResult={onOpenResult} />;
+  return <SchedulesWorkspace key={workspaceId} workspaceId={workspaceId} runtime={runtime} project={project} initialAgentId={initialAgentId} onOpenResult={onOpenResult} />;
 }
 
-function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId }: { workspaceId: string; runtime: SettingsRuntime; initialAgentId?: string; onOpenResult?: (agentId: string, threadId: string) => Promise<void> }) {
+function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId, project }: { workspaceId: string; runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; onOpenResult?: (agentId: string, threadId: string) => Promise<void> }) {
   const queryClient = useQueryClient();
   const queryKey = ["local-schedules", workspaceId];
   const schedules = useQuery({ queryKey, queryFn: () => listLocalSchedules(workspaceId), retry: false, refetchInterval: 30_000 });
@@ -34,20 +34,21 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     finally { setPending(false); }
   };
   return <div className="settings-page__body local-schedules">
-    <div className="settings-section-heading"><p>Run web research with a named agent at a set time. Keep Mivlet open and this computer awake.</p></div>
+    <div className="settings-section-heading"><p>Run web research with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
+    {project ? <p>Research for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
     <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Scheduled runs use the saved Codex provider and model. They cannot use your apps or computer tools. Anything requiring permission stops for your attention.</p></details>
     <div className="schedules-toolbar"><label className="settings-field"><span>Show schedules for</span><select aria-label="Filter schedules by agent" value={filterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
     <button type="button" className="button button--primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}
     {schedules.error ? <p role="alert">{errorText(schedules.error)}</p> : null}
-    {creating || editing ? <ScheduleEditor key={editing?.id ?? "new"} runtime={runtime} initialAgentId={filterAgentId} schedule={editing} pending={pending}
+    {creating || editing ? <ScheduleEditor key={editing?.id ?? "new"} runtime={project ? { ...runtime, agents: runtime.agents.filter(agent => project.participantIds.includes(agent.id)) } : runtime} initialAgentId={filterAgentId} schedule={editing} pending={pending}
       onCancel={() => { setEditing(null); setCreating(false); }}
       onSave={(input) => void act(async () => {
-        if (editing) await updateLocalSchedule({ ...input, workspaceId, id: editing.id, expectedRevision: editing.revision });
-        else await createLocalSchedule({ ...input, workspaceId, id: crypto.randomUUID(), status: "enabled" });
+        if (editing) await updateLocalSchedule({ ...input, projectId: editing.projectId, workspaceId, id: editing.id, expectedRevision: editing.revision });
+        else await createLocalSchedule({ ...input, projectId: project?.id, workspaceId, id: crypto.randomUUID(), status: "enabled" });
         setEditing(null); setCreating(false);
       }, editing ? "Schedule updated." : "Schedule created.")} /> : null}
-    {schedules.data?.filter((schedule) => schedule.status !== "cancelled" && (!filterAgentId || schedule.agentId === filterAgentId)).map((schedule) => <article className="profile-section" key={schedule.id}>
+    {schedules.data?.filter((schedule) => schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)).map((schedule) => <article className="profile-section" key={schedule.id}>
       <strong>{runtime.agents.find((agent) => agent.id === schedule.agentId)?.name ?? "Unavailable agent"}</strong>
       <p className="local-schedules__prompt">{schedule.prompt}</p>
       <small>{describeTrigger(schedule.trigger)} · {schedule.timezone} · {schedule.status === "paused" ? "Paused" : schedule.nextRunAt ? `Next: ${new Date(schedule.nextRunAt).toLocaleString()}` : "No future run"}</small>
@@ -59,7 +60,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
       </div>
       <ScheduleResults workspaceId={workspaceId} scheduleId={schedule.id} onOpenResult={onOpenResult ? (threadId) => onOpenResult(schedule.agentId, threadId) : undefined} />
     </article>)}
-    {schedules.data && !schedules.data.some((schedule) => schedule.status !== "cancelled" && (!filterAgentId || schedule.agentId === filterAgentId)) ? <p>No schedules yet.</p> : null}
+    {schedules.data && !schedules.data.some((schedule) => schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)) ? <p>No schedules yet.</p> : null}
     {status ? <p role="status">{status}</p> : null}
   </div>;
 }
@@ -78,7 +79,7 @@ function ScheduleResults({ workspaceId, scheduleId, onOpenResult }: { workspaceI
 }
 
 type EditorInput = Pick<LocalSchedule, "agentId" | "providerId" | "model" | "prompt" | "timezone" | "trigger">;
-export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
+export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
   const [agentId, setAgentId] = useState(schedule?.agentId ?? initialAgentId ?? "");
   const [prompt, setPrompt] = useState(schedule?.prompt ?? "");
   const [kind, setKind] = useState<LocalScheduleTrigger["kind"]>(schedule?.trigger.kind ?? "daily");

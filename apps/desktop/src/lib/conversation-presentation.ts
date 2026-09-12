@@ -20,6 +20,9 @@ export interface ConversationTurn {
 
 /** Presentation only. Tool labels never confer execution authority. */
 const toolLabels: Record<string, [string, string]> = {
+  "teammate-assign": ["Handing work to a teammate", "Assigned to a teammate"],
+  "project-record": ["Recording project context", "Recorded project context"],
+  "team-await-user": ["Pausing for your input", "Waiting for your input"],
   "google-drive-read": ["Reading Google Drive", "Read Google Drive"],
   "gmail-read": ["Reading Gmail", "Read Gmail"],
   "google-calendar-read": ["Reading Google Calendar", "Read Google Calendar"],

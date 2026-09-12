@@ -5,7 +5,7 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
@@ -47,6 +47,7 @@ export function AgentSidebar({
   hidden = false,
   collapsed = false,
   onToggleCollapsed,
+  conversations = [], selectedConversationId, onSelectConversation, onCreateConversation, activity,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -68,8 +69,17 @@ export function AgentSidebar({
   hidden?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  conversations?: { id: string; title: string; kind: "direct" | "group"; projectId?: string; participants?: { agentId: string }[]; status?: string }[];
+  selectedConversationId?: string;
+  onSelectConversation?: (id: string) => void;
+  onCreateConversation?: (kind?: "direct" | "group", agentId?: string) => void;
+  activity?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string) => setExpanded(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  const reveal = (id: string) => setExpanded(current => new Set([...current, id]));
+  const directRooms = (agentId: string) => conversations.filter(room => !room.projectId && room.kind === "direct" && room.participants?.some(member => member.agentId === agentId));
   const [completions, setCompletions] = useState<
     Record<string, { id: string; unread: boolean }>
   >({});
@@ -96,11 +106,16 @@ export function AgentSidebar({
   const visibleAgents = agents.filter((agent) =>
     `${agent.name} ${previews[agent.id]?.message ?? ""}`
       .toLowerCase()
-      .includes(normalizedQuery),
+      .includes(normalizedQuery) || directRooms(agent.id).some(room => room.title.toLowerCase().includes(normalizedQuery)),
   );
   const visibleProjects = projects.filter((project) =>
-    project.name.toLowerCase().includes(normalizedQuery),
+    project.name.toLowerCase().includes(normalizedQuery) || conversations.some(room => room.projectId === project.id && room.title.toLowerCase().includes(normalizedQuery)),
   );
+  const groupRooms = conversations.filter(room => !room.projectId && room.kind === "group" && room.title.toLowerCase().includes(normalizedQuery));
+  const unassigned = conversations.filter(room => !room.projectId && room.kind === "direct" && !room.participants?.some(member => agents.some(agent => agent.id === member.agentId)) && room.title.toLowerCase().includes(normalizedQuery));
+  const roomButton = (room: (typeof conversations)[number]) => <button type="button" key={room.id} className="conversation-sidebar__row" aria-current={room.id === selectedConversationId && !marketplaceActive ? "page" : undefined} onClick={() => onSelectConversation?.(room.id)} title={room.title}>
+    <span aria-hidden="true">{room.kind === "group" ? "◉" : "·"}</span><span>{room.title}</span>{room.status ? <small aria-label={room.status} title={room.status}>{room.status === "Working" || room.status === "Unread" ? "•" : "!"}</small> : null}
+  </button>;
   const installedConnectors = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
@@ -117,7 +132,7 @@ export function AgentSidebar({
         <MagnifyingGlass size={16} aria-hidden="true" />
         <input
           type="search"
-          aria-label="Search projects and agents"
+          aria-label="Search conversations, projects and agents"
           placeholder="Search"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -147,12 +162,11 @@ export function AgentSidebar({
               const active =
                 project.id === selectedProjectId && !marketplaceActive;
               return (
-                <button
-                  key={project.id}
+                <div className="sidebar-project-group" key={project.id}><div className="sidebar-project-group__row"><button
                   type="button"
                   className={`project-sidebar-row${active ? " project-sidebar-row--active" : ""}`}
                   aria-current={active ? "page" : undefined}
-                  onClick={() => onSelectProject?.(project)}
+                  onClick={() => { reveal(project.id); onSelectProject?.(project); }}
                 >
                   <span
                     className="project-sidebar-row__icon"
@@ -162,9 +176,10 @@ export function AgentSidebar({
                   </span>
                   <span>
                     <strong title={project.name}>{project.name}</strong>
-                    <small>Shared with all agents</small>
+                    <small>Project team</small>
                   </span>
-                </button>
+                </button>{!collapsed ? <button type="button" className="sidebar-scope-toggle" aria-label={`Show conversations in ${project.name}`} aria-expanded={expanded.has(project.id) || Boolean(normalizedQuery)} onClick={() => toggle(project.id)}>⌄</button> : null}</div>
+                {!collapsed && (expanded.has(project.id) || normalizedQuery) ? <div className="sidebar-child-conversations" aria-label={`Conversations in ${project.name}`}>{conversations.filter(room => room.projectId === project.id && (!normalizedQuery || room.title.toLowerCase().includes(normalizedQuery) || project.name.toLowerCase().includes(normalizedQuery))).slice().reverse().map(roomButton)}</div> : null}</div>
               );
             })}
             {projects.length > 0 && visibleProjects.length === 0 ? (
@@ -175,6 +190,11 @@ export function AgentSidebar({
           </div>
         </section>
       ) : null}
+
+      {onCreateConversation || groupRooms.length ? <section className="conversation-sidebar" aria-label="Group chats">
+        <header className="agent-sidebar__agents-heading"><span>Group chats</span>{onCreateConversation ? <button className="agent-sidebar__new" type="button" onClick={() => onCreateConversation("group")} aria-label="New group chat" title="New group chat"><Plus size={17} /></button> : null}</header>
+        {!collapsed ? <div className="conversation-sidebar__list">{groupRooms.map(roomButton)}{!groupRooms.length && !normalizedQuery ? <button type="button" className="sidebar-new-conversation" onClick={() => onCreateConversation?.("group")}>Start a group chat</button> : null}</div> : null}
+      </section> : null}
 
       <div className="agent-sidebar__agents-heading">
         <span>Agents</span>
@@ -188,7 +208,7 @@ export function AgentSidebar({
           const active =
             agent.id === activeAgentId &&
             !marketplaceActive &&
-            !selectedProjectId;
+            !selectedProjectId && conversations.find(room => room.id === selectedConversationId)?.kind !== "group";
           const preview = previews[agent.id] ?? {
             message: "Start a conversation",
             time: "",
@@ -204,10 +224,9 @@ export function AgentSidebar({
           return (
             <div
               key={agent.id}
-              className={`agent-row${active ? " agent-row--active" : ""}`}
+              className="sidebar-agent-group"
               role="listitem"
-            >
-              <button
+            ><div className={`agent-row${active ? " agent-row--active" : ""}`}><button
                 className="agent-row__select"
                 type="button"
                 onClick={() => {
@@ -219,6 +238,7 @@ export function AgentSidebar({
                         }
                       : current,
                   );
+                  reveal(agent.id);
                   onSelectAgent(agent);
                 }}
                 aria-current={active ? "page" : undefined}
@@ -250,6 +270,7 @@ export function AgentSidebar({
                   >{preview.status === "attention" ? "!" : null}</span>
                 ) : null}
               </button>
+              {!collapsed && onSelectConversation ? <button type="button" className="sidebar-scope-toggle" aria-label={`Show conversations with ${agent.name}`} aria-expanded={expanded.has(agent.id) || Boolean(normalizedQuery)} onClick={() => toggle(agent.id)}>⌄</button> : null}
               <button
                 className="agent-row__edit"
                 type="button"
@@ -257,7 +278,8 @@ export function AgentSidebar({
                 aria-label={`Edit ${agent.name}`}
               >
                 <NotePencil size={14} aria-hidden="true" />
-              </button>
+              </button></div>
+              {!collapsed && onSelectConversation && (expanded.has(agent.id) || normalizedQuery) ? <div className="sidebar-child-conversations" aria-label={`Conversations with ${agent.name}`}>{directRooms(agent.id).filter(room => !normalizedQuery || room.title.toLowerCase().includes(normalizedQuery) || agent.name.toLowerCase().includes(normalizedQuery)).map(roomButton)}{onCreateConversation ? <button type="button" className="sidebar-new-conversation" onClick={() => onCreateConversation("direct", agent.id)}>+ New conversation</button> : null}</div> : null}
             </div>
           );
         })}
@@ -271,8 +293,9 @@ export function AgentSidebar({
             No agents match “{query}”.
           </p>
         ) : null}
-      </div>
+      {!collapsed && unassigned.length ? <details className="sidebar-unassigned"><summary>Unassigned history</summary><p>Choose a teammate in the conversation options to continue these older chats.</p>{unassigned.map(roomButton)}</details> : null}</div>
 
+      {activity}
       <button
         className={`agent-sidebar__connections${marketplaceActive ? " agent-sidebar__connections--active" : ""}`}
         type="button"

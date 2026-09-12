@@ -5,7 +5,7 @@ import { cancelRuntimeLocalComputer, listRuntimeLocalComputerFiles, loadRuntimeL
   previewRuntimeLocalComputerFile, stopRuntimeAppControl } from "../runtime";
 
 /** Native permission never lives in this hook. Epochs discard late UI results. */
-export function useLocalComputer({ workspaceId, agentId }: { workspaceId?: string; agentId: string }) {
+export function useLocalComputer({ workspaceId, agentId, executionOwner = true }: { workspaceId?: string; agentId: string; executionOwner?: boolean }) {
   const queries = useQueryClient();
   const instance = useId();
   const scope = useMemo(() => ({ key: `${workspaceId}:${agentId}:${instance}`, target: workspaceId ? { workspaceId, agentId } as LocalComputerTarget : null,
@@ -45,11 +45,11 @@ export function useLocalComputer({ workspaceId, agentId }: { workspaceId?: strin
     return () => {
       scope.epoch++; scope.preview++;
       if (active.current === scope) active.current = null;
-      if (scope.target && scope.node?.control.status === "active") {
+      if (executionOwner && scope.target && scope.node?.control.status === "active") {
         void cancelRuntimeLocalComputer({ ...scope.target, expectedGeneration: scope.node.generation }).catch(() => undefined);
       }
     };
-  }, [scope]);
+  }, [scope, executionOwner]);
   const files = useQuery({ queryKey: filesKey, enabled: false, retry: false, gcTime: 0, queryFn: async () => {
     const epoch = scope.epoch;
     const result = scope.target ? await listRuntimeLocalComputerFiles(scope.target) : null;

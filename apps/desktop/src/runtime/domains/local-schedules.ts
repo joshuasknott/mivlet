@@ -9,6 +9,7 @@ export type LocalScheduleStatus = "enabled" | "paused" | "cancelled";
 export interface LocalScheduleInput {
   workspaceId: string;
   id: string;
+  projectId?: string;
   agentId: string;
   providerId: string;
   model: string;
@@ -42,6 +43,7 @@ export interface LocalScheduleOccurrence {
 }
 
 export interface LocalScheduleDispatchClaim {
+  projectId?: string;
   occurrenceId: string;
   scheduleId: string;
   scheduleRevision: number;

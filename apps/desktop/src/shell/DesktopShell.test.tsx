@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("./ChatWorkspace", () => ({
-  ChatWorkspace: () => <div data-testid="chat-workspace">workspace</div>
+vi.mock("./TeammateWorkspace", () => ({
+  TeammateWorkspace: () => <div data-testid="chat-workspace">workspace</div>
 }));
 
 import { DesktopShell } from "./DesktopShell";

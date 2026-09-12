@@ -19,6 +19,7 @@ interface Props {
   showAuthor?: boolean;
   suppressLivePrompt?: boolean;
   state: NativeAgentState;
+  liveStates?: { state: NativeAgentState; agent: FableAgentProfile; suppressPrompt: boolean }[];
   presence?: AgentPresence;
   threadId?: string;
   profileName: string;
@@ -36,16 +37,19 @@ interface Props {
 export function ConversationFeed(props: Props) {
   const { state, threadId } = props;
   const live = state.currentAttemptId && state.progressThreadId === threadId;
+  const liveStates = props.liveStates ?? [{ state, agent: props.agent, suppressPrompt: Boolean(props.suppressLivePrompt) }];
   const turns = useMemo(() => conversationTurns(props.messages), [props.messages]);
   const presented = [...turns];
-  if (live) {
+  for (const liveEntry of liveStates) {
+    const state = liveEntry.state;
+    if (!state.currentAttemptId || state.progressThreadId !== threadId) continue;
     const index = presented.findIndex((turn) => turn.id === state.currentAttemptId);
     const canonical = presented[index];
     const redacted = props.messages.some((entry) => entry.message.runId === state.currentAttemptId && entry.currentRevision.state === "redacted");
     const canonicalReady = canonical && !state.running && (redacted ||
       canonical.parts.filter((part) => part.kind === "text").map((part) => part.content).join("") === state.transcript);
     const turn: ConversationTurn = {
-      id: state.currentAttemptId!, prompt: props.suppressLivePrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
+      id: state.currentAttemptId!, prompt: liveEntry.suppressPrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
       attachments: canonical?.attachments ?? props.optimisticAttachments,
       parts: canonicalReady ? canonical.parts : state.responseParts ?? (state.transcript ? [{ id: "text", kind: "text", content: state.transcript }] : []),
       startedAt: state.startedAt, endedAt: state.endedAt,
@@ -55,11 +59,13 @@ export function ConversationFeed(props: Props) {
   return <>
     {presented.map((turn) => {
       const author = props.authors?.[turn.id];
+      const liveEntry = liveStates.find(entry => entry.state.currentAttemptId === turn.id && entry.state.progressThreadId === threadId);
       return <Turn key={turn.id} turn={turn} {...props}
-        agent={author ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : props.agent)}
+        state={liveEntry?.state ?? props.state}
+        agent={author ?? liveEntry?.agent ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : props.agent)}
         onPreviewArtifact={props.requireAuthor && !author ? undefined : props.onPreviewArtifact}
         generation={props.requireAuthor && !author ? undefined : props.generation}
-        live={Boolean(live && turn.id === state.currentAttemptId)} />;
+        live={Boolean(liveEntry)} />;
     })}
     {props.optimisticPrompt && (!live || props.optimisticPrompt !== state.progressPrompt) ? <UserMessage content={props.optimisticPrompt} attachments={props.optimisticAttachments} {...props} /> : null}
     {!live && (props.approval || props.interruption) ? <div className="conversation-attention">{props.approval}{props.interruption}</div> : null}

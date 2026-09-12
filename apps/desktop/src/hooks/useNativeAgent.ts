@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isRoutineConnectorRead } from "@fable/connectors/native-api/tool-executor";
+import { isCollaborationTool } from "@fable/connectors/native-api/tools";
 import type {
   AgentTurnRequest,
   BackendAgentEvent,
@@ -134,6 +135,10 @@ export interface NativeAgentState {
 }
 
 export interface UseNativeAgentOptions {
+  /** App-owned workers must never recover journals when a view or worker mounts. */
+  recover?: boolean;
+  /** Public assistant contributions can be labelled without turning them into user authority. */
+  attributeHistory?: (conversation: HydratedConversation) => HydratedConversation;
   computer?: { workspaceId: string; agentId: string };
   contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
@@ -187,6 +192,7 @@ export interface UseNativeAgentOptions {
 }
 
 export interface NativeAgentRunControl {
+  maxTurns?: number;
   /**
    * Runs after the queued execution journal exists, before canonical user
    * persistence or provider egress. Project execution uses this boundary to
@@ -250,6 +256,8 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   contextScopeRef.current = contextScope;
   const loadConversationRef = useRef(options.loadConversation);
   loadConversationRef.current = options.loadConversation;
+  const attributeHistoryRef = useRef(options.attributeHistory);
+  attributeHistoryRef.current = options.attributeHistory;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
@@ -262,6 +270,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, [contextScopeKey]);
 
   useEffect(() => {
+    if (options.recover === false) return;
     void (async () => {
       const recovered = await recoverRuntimeExecutionAttempts(
         new Date().toISOString(),
@@ -456,7 +465,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           // must not be replayed as requests or duplicated in the transcript.
           history = continuationMessagesForModel(
             buildContinuationMessages(
-              conversation.messages.filter(
+              (attributeHistoryRef.current?.(conversation) ?? conversation).messages.filter(
                 (view) =>
                   !parentAttemptId || view.message.runId !== parentAttemptId,
               ),
@@ -875,6 +884,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           shouldCancel: shouldCancelRef.current ?? (() => false),
           contextPrefix: prepared.systemPrefix,
           permissionMode,
+          maxTurns: control?.maxTurns,
           attemptId,
           computer: options.computer,
           onRetry: () => {
@@ -1063,6 +1073,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             }
           } else if (event.type === "tool-call") {
             const needsApproval =
+              !isCollaborationTool(event.tool) &&
               !isRoutineConnectorRead(event.approval) &&
               !["connector-call", "connector-action"].includes(
                 event.approval.action.split(/\s+/)[0],

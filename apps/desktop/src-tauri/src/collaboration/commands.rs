@@ -271,7 +271,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // prior usage or make a retry of an external action automatic.
             if item.root_id == item.id {
                 item.max_turns = item.turn_count.saturating_add(6);
-                item.max_tokens = item.token_usage.saturating_add(32_000);
+                item.max_tokens = item.token_usage.saturating_add(128_000);
             }
             item.updated_at = ctx.time.into();
             ctx.work(&item)?;

@@ -261,7 +261,7 @@ export function useShellRuntime(
   );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
   // Composer drafts are persisted by their full account/workspace/agent-or-
-  // project/conversation scope in ChatWorkspace. The shell snapshot is not a
+  // durable conversation scope in the teammate workspace. The shell snapshot is not a
   // safe owner for unsent content.
   const [composerValue, setComposerValue] = useState("");
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
@@ -592,6 +592,24 @@ export function useShellRuntime(
   const persistTimerRef = useRef<number | null>(null);
   const snapshotTimerRef = useRef<number | null>(null);
   const pendingSnapshotRef = useRef<{ identity: string; workspaceId: string; snapshot: RuntimeSnapshot } | null>(null);
+  const snapshotWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const writeSnapshot = (snapshot: RuntimeSnapshot, workspaceId: string) => {
+    const identity = workspaceIdentityRef.current;
+    const next = snapshotWrites.current.catch(() => undefined).then(() => {
+      if (!identity || workspaceIdentityRef.current !== identity) throw new Error("The workspace changed before its settings could be saved.");
+      return saveRuntimeSnapshot(snapshot, workspaceId);
+    });
+    snapshotWrites.current = next;
+    return next;
+  };
+  const flushSnapshot = async () => {
+    const identity = workspaceIdentityRef.current;
+    if (!runtimeSnapshotReady || !activeWorkspaceScope || !identity || hydratedWorkspaceRef.current !== identity) throw new Error("Wait for workspace settings to load.");
+    if (snapshotTimerRef.current !== null) window.clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = null;
+    pendingSnapshotRef.current = null;
+    await writeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current), activeWorkspaceScope.workspaceId);
+  };
 
   useEffect(() => {
     if (persistTimerRef.current !== null) {
@@ -632,7 +650,7 @@ export function useShellRuntime(
       snapshotTimerRef.current = null;
       pendingSnapshotRef.current = null;
       if (workspaceIdentityRef.current !== pending.identity || hydratedWorkspaceRef.current !== pending.identity) return;
-      void saveRuntimeSnapshot(
+      void writeSnapshot(
         pending.snapshot, pending.workspaceId,
       ).catch((error) => {
         setLastAction(
@@ -653,7 +671,7 @@ export function useShellRuntime(
         const pending = pendingSnapshotRef.current;
         pendingSnapshotRef.current = null;
         if (pending && workspaceIdentityRef.current === pending.identity && hydratedWorkspaceRef.current === pending.identity) {
-          void saveRuntimeSnapshot(pending.snapshot, pending.workspaceId).catch(() => undefined);
+          void writeSnapshot(pending.snapshot, pending.workspaceId).catch(() => undefined);
         }
       }
     };
@@ -1557,7 +1575,7 @@ export function useShellRuntime(
       // Only live memories enter context: forgotten/disabled records are
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
       // switch) excludes everything.
-      memory: memoryDisabled ? [] : visibleMemory,
+      memory: memoryDisabled || context?.excludePrivateMemory ? [] : visibleMemory,
       citations: result.citations,
       authorization: {
         isSourceAuthorized: connectionIsAuthorized,
@@ -2336,6 +2354,7 @@ export function useShellRuntime(
   // Full access makes the decision automatically, through the same persisted
   // single-use authorization boundary. Other modes retain the interactive queue.
   const recordBackendToolCall = (event: {
+    allowAutomatic?: boolean;
     callId: string;
     tool: string;
     arguments: string;
@@ -2344,7 +2363,7 @@ export function useShellRuntime(
     if (event.tool === "connector-action" || event.tool === "connector-call") {
       connectorApprovalRequests.current.set(event.approval.id, event.approval);
     }
-    if (permissionModeRef.current === "full-access") {
+    if (permissionModeRef.current === "full-access" && event.allowAutomatic !== false) {
       void resolveApprovalDecision(event.approval, "once", undefined,
         event.approval.confirmationPhrase, true);
       return;
@@ -2369,7 +2388,13 @@ export function useShellRuntime(
     setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
   };
 
-  const clearBackendToolApprovals = () => {
+  const clearBackendToolApprovals = (ids?: readonly string[]) => {
+    if (ids) {
+      for (const id of ids) connectorApprovalRequests.current.delete(id);
+      setBackendToolApprovals(current => current.filter(approval => !ids.includes(approval.id)));
+      setApprovalPreviews(current => Object.fromEntries(Object.entries(current).filter(([id]) => !ids.includes(id))));
+      return;
+    }
     connectorApprovalRequests.current.clear();
     setBackendToolApprovals([]);
     setApprovalPreviews({});
@@ -2696,6 +2721,7 @@ export function useShellRuntime(
     activeThread,
     allThreads,
     agents,
+    flushSnapshot,
     activeAgentId,
     createAgent,
     updateAgent,

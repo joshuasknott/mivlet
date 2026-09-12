@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentLearningDialog } from "./AgentLearningDialog";
@@ -19,6 +19,26 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
+  it("nests direct and project conversations under their owners and keeps groups separate", () => {
+    const onSelect = vi.fn();
+    render(<AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]} previews={{}} marketplaceActive={false}
+      projects={[{ id: "project", name: "Launch" }]} conversations={[
+        { id: "private", title: "Private draft", kind: "direct", participants: [{ agentId: agent.id }] },
+        { id: "focused", title: "Shared plan", kind: "group", projectId: "project" },
+        { id: "group", title: "Review group", kind: "group" },
+      ]} onSelectConversation={onSelect} onCreateConversation={vi.fn()} onSelectProject={vi.fn()} onCreateProject={vi.fn()}
+      onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} onEditAgent={vi.fn()} onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />);
+    expect(screen.queryByRole("region", { name: "Conversations" })).toBeNull();
+    expect(within(screen.getByRole("region", { name: "Group chats" })).getByRole("button", { name: "Review group" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Private draft" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show conversations with Mira" }));
+    fireEvent.click(screen.getByRole("button", { name: "Private draft" }));
+    expect(onSelect).toHaveBeenLastCalledWith("private");
+    fireEvent.click(screen.getByRole("button", { name: "Show conversations in Launch" }));
+    const projects = screen.getByRole("region", { name: "Projects" });
+    fireEvent.click(within(projects).getByRole("button", { name: "Shared plan" }));
+    expect(onSelect).toHaveBeenLastCalledWith("focused");
+  });
   it("keeps agents reachable in collapsed navigation even after a search", () => {
     const onSelectAgent = vi.fn();
     const sidebar = (collapsed: boolean) => <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}

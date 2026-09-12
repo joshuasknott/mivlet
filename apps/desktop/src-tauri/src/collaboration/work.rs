@@ -11,7 +11,7 @@ pub(super) fn start(
     discussion: bool,
 ) -> Result<()> {
     id(&key)?;
-    let prompt = bounded(&prompt, 12_000, "Message")?;
+    let prompt = bounded(&prompt, 32_000, "Message")?;
     if let Some(existing) =
         repo::get::<Work>(ctx.conn, ctx.store, &ctx.scope.private, Kind::Work, &key)?
     {
@@ -93,7 +93,7 @@ fn new_work(
         turn_count: 0,
         token_usage: 0,
         max_turns: 12,
-        max_tokens: 64_000,
+        max_tokens: 128_000,
         run_ids: vec![],
         current_run_id: None,
         model_option_id: agent.model_id.clone(),

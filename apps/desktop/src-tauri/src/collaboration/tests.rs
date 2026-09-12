@@ -680,3 +680,124 @@ fn collaboration_sharing_requires_explicit_consent_and_layout_does_not_create_wo
         Ok(())
     });
 }
+
+#[test]
+fn collaboration_scheduled_project_research_uses_the_exact_attempt_and_records_evidence() {
+    fixture(&store(), |ctx| {
+        project(ctx, "project", "main")?;
+        group(ctx, "scheduled-result")?;
+        assert!(validate_schedule_project(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            Some("project"),
+            "outsider"
+        )
+        .is_err());
+        let payload = json!({"id":"scheduled-run","providerId":"openai","model":"fixture-model","status":"queued","transcript":"","threadId":"scheduled-result","exchanges":[{"role":"user","content":"Fixture scheduled project question"}],"turn":0,"pendingApprovalIds":[],"recoverable":true,"retryCount":0,"createdAt":TIME,"updatedAt":TIME});
+        execution_attempt::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            "scheduled-run",
+            Some("scheduled-result"),
+            "openai",
+            "fixture-model",
+            "queued",
+            0,
+            true,
+            0,
+            TIME,
+            TIME,
+            &payload,
+        )?;
+        bind_schedule(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            ctx.profiles,
+            "project",
+            "researcher",
+            "scheduled-run",
+            TIME,
+        )?;
+        bind_schedule(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            ctx.profiles,
+            "project",
+            "researcher",
+            "scheduled-run",
+            TIME,
+        )?;
+        let item = ctx.item("work-scheduled-run")?;
+        assert_eq!(item.permission_mode, "read-only");
+        assert_eq!(item.run_ids, vec!["scheduled-run"]);
+        assert_eq!(item.project_id.as_deref(), Some("project"));
+        assert_eq!(
+            ctx.room("scheduled-result")?.project_id.as_deref(),
+            Some("project")
+        );
+        output(
+            ctx,
+            "scheduled-result",
+            "scheduled-run",
+            "Fixture source-backed research result",
+        )?;
+        finish_schedule(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            ctx.profiles,
+            "scheduled-run",
+            TIME,
+        )?;
+        assert_eq!(
+            ctx.item("work-scheduled-run")?.status,
+            WorkStatus::Completed
+        );
+        assert_eq!(
+            ctx.item("work-scheduled-run")?.outputs[0].run_id,
+            "scheduled-run"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn collaboration_rejects_cross_conversation_run_binding_and_keeps_usage_on_continuation() {
+    fixture(&store(), |ctx| {
+        group(ctx, "one")?;
+        group(ctx, "two")?;
+        work::start(
+            ctx,
+            "work".into(),
+            "one".into(),
+            "lead".into(),
+            "Fixture request".into(),
+            false,
+        )?;
+        journal(ctx, "two", "wrong-run", "queued", "")?;
+        assert!(work::bind(ctx, "work", 1, "wrong-run").is_err());
+        let mut item = ctx.item("work")?;
+        item.status = WorkStatus::AwaitingUser;
+        item.token_usage = 128_005;
+        item.turn_count = 3;
+        ctx.work(&item)?;
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "work".into(),
+                expected_generation: 1,
+                reconcile: true,
+            },
+        )?;
+        let continued = ctx.item("work")?;
+        assert_eq!(continued.token_usage, 128_005);
+        assert_eq!(continued.max_tokens, 256_005);
+        assert_eq!(continued.generation, 2);
+        assert!(work::current(ctx, "work", 1, None).is_err());
+        Ok(())
+    });
+}

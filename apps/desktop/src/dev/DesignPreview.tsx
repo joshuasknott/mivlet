@@ -38,7 +38,7 @@ import { resolveCodexProvider } from "@fable/connectors/backends/codex";
 import { resolveNativeProvider } from "@fable/connectors/backends/native";
 import { OnboardingPreview } from "./OnboardingPreview";
 import { AgentAvatarPreview } from "./AgentAvatarPreview";
-import { ProjectPreview } from "./ProjectPreview";
+
 import "../styles.css";
 
 if (!import.meta.env.DEV)
@@ -672,8 +672,6 @@ createRoot(document.getElementById("root")!).render(
       <OnboardingPreview />
     ) : previewView === "avatars" ? (
       <AgentAvatarPreview />
-    ) : previewView === "projects" ? (
-      <ProjectPreview />
     ) : (
       <DesignPreview />
     )}
