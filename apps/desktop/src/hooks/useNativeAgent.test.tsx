@@ -2331,13 +2331,14 @@ describe("useNativeAgent", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // Per-provider transport routing: prove each of the five native-API providers
-  // (OpenAI, Anthropic, Gemini, xAI, OpenRouter) flows through the desktop
-  // tauriTransport and that the body handed to the Rust boundary was shaped by
-  // the correct shaper for that provider's wire family. This closes the gap
-  // where the transport bridge + shapeBodyFor routing was only exercised for
-  // openai. Each case replays that provider's own recorded fixture shape so the
-  // run completes, then asserts the captured egress body's signature.
+  // Per-provider transport routing: prove each of the six native-API providers
+  // (OpenAI, Anthropic, Gemini, xAI, OpenRouter, custom) flows through the
+  // desktop tauriTransport and that the body handed to the Rust boundary was
+  // shaped by the correct shaper for that provider's wire family. This closes
+  // the gap where the transport bridge + shapeBodyFor routing was only
+  // exercised for openai. Each case replays that provider's own recorded
+  // fixture shape so the run completes, then asserts the captured egress
+  // body's signature.
   // ---------------------------------------------------------------------------
   it.each([
     {
@@ -2403,6 +2404,24 @@ describe("useNativeAgent", () => {
       ],
       expectBody: (body: Record<string, unknown>) => {
         expect(body.model).toBe("grok-4");
+        expect(body.stream).toBe(true);
+        expect(Array.isArray(body.messages)).toBe(true);
+      },
+    },
+    {
+      name: "openrouter (openai-compat shaper)",
+      providerId: "openrouter",
+      model: "anthropic/claude-sonnet-4.6",
+      // OpenRouter chat-completions streams end with a usage chunk that repeats
+      // the finish_reason on a content-free delta (documented deviation); the
+      // loop must treat it as an accounting frame, not a second terminal event.
+      lines: [
+        'data: {"choices":[{"delta":{"content":"hi"}}]}',
+        'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}',
+        'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":7,"completion_tokens":2}}',
+      ],
+      expectBody: (body: Record<string, unknown>) => {
+        expect(body.model).toBe("anthropic/claude-sonnet-4.6");
         expect(body.stream).toBe(true);
         expect(Array.isArray(body.messages)).toBe(true);
       },

@@ -93,6 +93,7 @@ fn image_egress_rejects_tampered_missing_duplicate_or_unpaired_results_and_unsup
     for provider in [
         "custom",
         "gemini",
+        "openrouter",
         "claude",
         "antigravity",
         "cursor",
