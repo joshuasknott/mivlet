@@ -128,6 +128,7 @@ interface PendingToolCall {
   callId: string;
   tool: string;
   arguments: string;
+  continuationToken?: string;
   approval: ApprovalRequest;
 }
 
@@ -249,6 +250,7 @@ export async function* runAgentLoop(
             callId: event.callId,
             tool: event.tool,
             arguments: event.arguments,
+            continuationToken: event.continuationToken,
             approval
           });
           yield { ...event, approval };
@@ -286,7 +288,8 @@ export async function* runAgentLoop(
       toolCalls: pendingToolCalls.map((call) => ({
         callId: call.callId,
         tool: call.tool,
-        arguments: call.arguments
+        arguments: call.arguments,
+        continuationToken: call.continuationToken
       }))
     });
 

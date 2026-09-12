@@ -220,6 +220,20 @@ plugin, voice and avatar tasks requires selective reconciliation of shared rende
 files, styles and native command registration. Do not replace whole files across
 those checkouts; the existing conversation authority and Stop paths must be retained.
 
+## September 12 integration
+
+The workspace and audit changes are integrated with voice, vector avatars and
+native provider/token-plugin setup. Calls use ConversationPane and the app-lifetime
+execution service, retaining draft isolation, exact approvals and Stop. Gemini
+tool continuations preserve opaque signatures, including a separate terminal
+stream frame. OpenRouter discovery only enables models registered by native
+admission; dynamic model admission remains deferred.
+
+The earlier performance measurements above describe this PR in isolation. The
+combined feature set has an explicit additional total allowance of 96 KiB raw
+and 40 KiB gzip; startup, CSS and existing lazy route ceilings remain unchanged.
+This is a recorded feature-size increase, not a claimed speed improvement.
+
 ## References
 
 - [Cursor Projects](https://cursor.com/blog/projects): persistent purpose and a lead.

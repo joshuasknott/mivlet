@@ -3,8 +3,8 @@
  *
  * This is one adapter among equals — it implements the provider-neutral
  * {@link AgentBackend} contract for direct model APIs. Ordinary OpenAI,
- * Anthropic, xAI, DeepSeek, and custom turns use the embedded SDK host when
- * available; Gemini, OpenRouter, image turns, and browser fixtures retain
+ * Anthropic, xAI, DeepSeek, OpenRouter and other registered compatible turns use the embedded SDK host when
+ * available; Gemini, image turns, and browser fixtures retain
  * Mivlet's local loop. Both paths keep HTTP egress and credentials behind the
  * injected native boundary.
  *

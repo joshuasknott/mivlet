@@ -78,6 +78,7 @@ export class WorkspaceExecution {
   private tail: Promise<unknown> = Promise.resolve();
   private reads = new Map<string, Promise<void>>();
   private attachments = new Map<string, ComposerAttachment[]>();
+  private voiceReplies = new Map<string, (text: string) => void>();
   private stopping = new Set<string>();
   private external = new Map<string, () => Promise<void>>();
   private disposed = false;
@@ -194,9 +195,11 @@ export class WorkspaceExecution {
     prompt: string,
     discussion: boolean,
     attachments: ComposerAttachment[],
+    onVoiceText?: (text: string) => void,
   ) {
     const id = `work-${crypto.randomUUID()}`;
     this.attachments.set(id, [...attachments]);
+    if (onVoiceText) this.voiceReplies.set(id, onVoiceText);
     try {
       await this.command({
         action: "start-work",
@@ -209,8 +212,18 @@ export class WorkspaceExecution {
       return id;
     } catch (error) {
       this.attachments.delete(id);
+      this.voiceReplies.delete(id);
       throw error;
     }
+  }
+  isVoice(session: ExecutionSession) {
+    return this.voiceReplies.has(session.work.id);
+  }
+  voiceText(session: ExecutionSession, text: string) {
+    if (this.current(session)) this.voiceReplies.get(session.work.id)?.(text);
+  }
+  releaseVoice(id: string) {
+    this.voiceReplies.delete(id);
   }
   /** Conservative app limits; native providers and the computer lease still arbitrate resources. */
   admit(
@@ -424,5 +437,6 @@ export class WorkspaceExecution {
     this.approvals.cancelPending();
     this.listeners.clear();
     this.attachments.clear();
+    this.voiceReplies.clear();
   }
 }

@@ -4,6 +4,7 @@ import type {
   FableAgentProfile,
   LocalProject,
   WorkspaceView,
+  VoiceConversationPhase,
 } from "@fable/protocol";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
@@ -31,6 +32,8 @@ import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
+import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
+import { runWorkspaceVoice } from "../lib/workspace-voice";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { WorkRecovery } from "../components/projects/WorkItems";
@@ -42,6 +45,7 @@ const ApprovalPanel = lazy(() =>
     default: module.ApprovalPanel,
   })),
 );
+const VoiceConversation = lazy(() => import("../components/voice/VoiceConversation").then(module => ({ default: module.VoiceConversation })));
 const ArtifactPreview = lazy(() =>
   import("../components/conversation/ArtifactPreview").then((module) => ({
     default: module.ArtifactPreview,
@@ -79,6 +83,7 @@ export function ConversationPane({
   onSchedules,
   onComputer,
   onPlugins,
+  onProviders,
   onProjectUpdate,
   onDraftReady,
 }: {
@@ -98,6 +103,7 @@ export function ConversationPane({
   onSchedules: () => void;
   onComputer: (agentId: string) => void;
   onPlugins: (id?: string) => void;
+  onProviders: () => void;
   onProjectUpdate: (
     project: LocalProject,
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
@@ -138,6 +144,11 @@ export function ConversationPane({
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("ready");
+  const voiceToggle = useRef<HTMLButtonElement>(null);
+  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => voiceToggle.current?.focus()); };
+  useEffect(() => { setVoiceOpen(false); setVoicePhase("ready"); }, [active, room.id, recipientId, profile?.modelId, profile?.reasoningEffort]);
   const optionsRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
     const dismiss = (event: PointerEvent) => {
@@ -396,6 +407,50 @@ export function ConversationPane({
   const contextFailure = sessions.find(
     (session) => session.state?.contextFailure,
   )?.state?.contextFailure;
+  const approvalPanel = approvals.length ? (
+            <Suspense fallback={null}>
+              <div
+                className="conversation-approvals"
+                aria-label={`Approvals for ${room.title}`}
+              >
+                <ApprovalPanel
+                  compact
+                  previews={runtime.approvalPreviews}
+                  approvals={approvals}
+                  audit={runtime.approvalAudit}
+                  sessionGrants={runtime.sessionApprovalGrants}
+                  approvalRules={runtime.approvalRules}
+                  editingApprovalId={
+                    approvals.some(
+                      (approval) => approval.id === runtime.editingApprovalId,
+                    )
+                      ? runtime.editingApprovalId
+                      : null
+                  }
+                  modificationDraft={runtime.approvalModificationDraft}
+                  pendingConfirmation={
+                    runtime.pendingApprovalConfirmation &&
+                    approvals.some(
+                      (approval) =>
+                        approval.id ===
+                        runtime.pendingApprovalConfirmation?.request.id,
+                    )
+                      ? runtime.pendingApprovalConfirmation
+                      : null
+                  }
+                  confirmationText={runtime.approvalConfirmationText}
+                  onDecision={runtime.requestApprovalDecision}
+                  onStartModify={runtime.startApprovalModify}
+                  onUpdateModification={runtime.setApprovalModificationDraft}
+                  onSaveModify={runtime.saveApprovalModify}
+                  onCancelModify={runtime.clearApprovalInteraction}
+                  onUpdateConfirmation={runtime.setApprovalConfirmationText}
+                  onConfirmDecision={runtime.confirmApprovalDecision}
+                  onCancelConfirmation={runtime.clearApprovalInteraction}
+                />
+              </div>
+            </Suspense>
+          ) : null;
   if (view.kind === "artifact")
     return (
       <Suspense fallback={<p role="status">Loading file…</p>}>
@@ -420,13 +475,18 @@ export function ConversationPane({
           <ProfileAgentAvatar
             agent={displayAgent}
             iconSize={29}
-            presence={agentPresence(baseState, approvals.length > 0)}
+            presence={agentPresence(baseState, approvals.length > 0, false, { speaking: voicePhase === "speaking", listening: voicePhase === "listening" || voicePhase === "hearing" })}
           />
           <span>
             <strong>{room.title}</strong>
           </span>
         </div>
         <div className="team-conversation-actions">
+          <button type="button" ref={voiceToggle} aria-label={`Talk to ${displayAgent.name}`} aria-pressed={voiceOpen}
+            disabled={!active || (!voiceOpen && (running.length > 0 || pending || !profile))}
+            onClick={() => { if (voiceOpen) closeVoice(); else { voice.cancel(); setVoiceOpen(true); } }}>
+            <Waveform size={18} />
+          </button>
           <button
             type="button"
             aria-label={`Open ${displayAgent.name}'s computer`}
@@ -464,6 +524,15 @@ export function ConversationPane({
           </details>
         </div>
       </header>
+      {voiceOpen && active ? <Suspense fallback={<p role="status">Opening voice…</p>}><VoiceConversation
+        key={`${service.workspaceId}:${room.id}:${recipientId}:${profile?.modelId}`}
+        agent={displayAgent} modelLabel={model?.label ?? "Choose model"}
+        scope={{ workspaceId: service.workspaceId, agentId: recipientId, threadId: room.id }}
+        unavailable={!runtime.backendProviders.some(provider => provider.id === "openai" && provider.authState === "connected") ? "Connect an OpenAI API account for transcription and speech." : !model?.available ? "Connect this agent's model provider before starting voice." : undefined}
+        approvals={approvalPanel} onPhase={setVoicePhase} onClose={closeVoice}
+        onOpenProviders={() => { closeVoice(); onProviders(); }}
+        onPrompt={(text, control) => runWorkspaceVoice(service, text, control)}
+      /></Suspense> : <>
       <div
         className="conversation-pane-scroll"
         ref={scroll.scrollRef}
@@ -529,50 +598,7 @@ export function ConversationPane({
                 its provider have capacity.
               </p>
             ))}
-          {approvals.length ? (
-            <Suspense fallback={null}>
-              <div
-                className="conversation-approvals"
-                aria-label={`Approvals for ${room.title}`}
-              >
-                <ApprovalPanel
-                  compact
-                  previews={runtime.approvalPreviews}
-                  approvals={approvals}
-                  audit={runtime.approvalAudit}
-                  sessionGrants={runtime.sessionApprovalGrants}
-                  approvalRules={runtime.approvalRules}
-                  editingApprovalId={
-                    approvals.some(
-                      (approval) => approval.id === runtime.editingApprovalId,
-                    )
-                      ? runtime.editingApprovalId
-                      : null
-                  }
-                  modificationDraft={runtime.approvalModificationDraft}
-                  pendingConfirmation={
-                    runtime.pendingApprovalConfirmation &&
-                    approvals.some(
-                      (approval) =>
-                        approval.id ===
-                        runtime.pendingApprovalConfirmation?.request.id,
-                    )
-                      ? runtime.pendingApprovalConfirmation
-                      : null
-                  }
-                  confirmationText={runtime.approvalConfirmationText}
-                  onDecision={runtime.requestApprovalDecision}
-                  onStartModify={runtime.startApprovalModify}
-                  onUpdateModification={runtime.setApprovalModificationDraft}
-                  onSaveModify={runtime.saveApprovalModify}
-                  onCancelModify={runtime.clearApprovalInteraction}
-                  onUpdateConfirmation={runtime.setApprovalConfirmationText}
-                  onConfirmDecision={runtime.confirmApprovalDecision}
-                  onCancelConfirmation={runtime.clearApprovalInteraction}
-                />
-              </div>
-            </Suspense>
-          ) : null}
+          {approvalPanel}
           {contextFailure && history ? (
             <ContextRecoveryPanel
               failure={contextFailure}
@@ -691,6 +717,7 @@ export function ConversationPane({
           }
         />
       </div>
+      </>}
     </div>
   );
 }

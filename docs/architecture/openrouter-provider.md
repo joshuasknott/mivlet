@@ -31,6 +31,12 @@ headers are stored or transmitted.
 
 ## Model discovery and capabilities
 
+Native execution currently supports the registered `openai/gpt-4.1` and
+`anthropic/claude-sonnet-4.6` routes. Other discovered IDs remain unavailable:
+discovery alone does not register account-bound native execution authority.
+Dynamic native route admission, model variants and automatic routers are deferred.
+The bounded discovery parser and terminal usage-accounting fixes are retained.
+
 `GET /api/v1/models` returns the full catalog; Mivlet paginates with the
 documented `offset`/`limit` parameters and bounds the result (1,000 models,
 10 pages). The response is filtered to chat-completions routes:

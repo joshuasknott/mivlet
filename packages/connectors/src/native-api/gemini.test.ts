@@ -15,6 +15,25 @@ const request: NativeCompletionRequest = {
 };
 
 describe("gemini shaping", () => {
+  it("round-trips opaque signatures through execution when STOP arrives in a later chunk", async () => {
+    const requests: NativeCompletionRequest[] = [];
+    const transport: HttpTransport = {
+      async *stream(input) {
+        requests.push(structuredClone(input));
+        if (requests.length === 1) {
+          yield JSON.stringify({ candidates: [{ content: { parts: [{ thoughtSignature: "opaque-signed-call", functionCall: { id: "call-1", name: "read-file", args: { path: "a.md" } } }] } }] });
+          yield JSON.stringify({ candidates: [{ finishReason: "STOP" }] });
+        } else yield JSON.stringify({ candidates: [{ content: { parts: [{ text: "Done." }] }, finishReason: "STOP" }] });
+      }
+    };
+    const events: BackendAgentEvent[] = [];
+    for await (const event of runAgentLoop(transport, request, { runId: "signature-test", modelSupportsTools: true, execute: async () => "file data" })) events.push(event);
+    expect(requests).toHaveLength(2);
+    const body = shapeGeminiRequest(requests[1]) as { contents: { parts: Record<string, unknown>[] }[] };
+    expect(body.contents[1].parts).toEqual([{ thoughtSignature: "opaque-signed-call", functionCall: { id: "call-1", name: "read-file", args: { path: "a.md" } } }]);
+    expect(body.contents[2].parts).toEqual([{ functionResponse: { id: "call-1", name: "read-file", response: { output: "file data" } } }]);
+    expect(events.filter(event => event.type === "text-delta")).toEqual([{ type: "text-delta", text: "Done." }]);
+  });
   it("shapes contents with roles mapped to model/user", () => {
     const body = shapeGeminiRequest(request) as Record<string, unknown>;
     const contents = body.contents as Array<Record<string, unknown>>;
@@ -128,7 +147,7 @@ describe("gemini shaping", () => {
       { role: "tool", content: "file contents", toolCallId: "provider-call-7", toolName: "read-file" },
     ] })).toMatchObject({ contents: [
       { parts: [{ functionCall: { id: "provider-call-7", name: "read-file" } }] },
-      { parts: [{ text: "file contents" }, { functionResponse: { id: "provider-call-7", name: "read-file" } }] },
+      { parts: [{ functionResponse: { id: "provider-call-7", name: "read-file" } }] },
     ] });
   });
 

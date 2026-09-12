@@ -1971,6 +1971,9 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
                 out.push(DiscoveredModel {
                     id: id.into(),
                     available: true,
+                    label: None,
+                    capabilities: None,
+                    reasoning: None,
                 });
             }
         }
@@ -2039,7 +2042,8 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
                 }
                 out.push(DiscoveredModel {
                     id: id.to_string(),
-                    available: true,
+                    available: crate::backends::native_provider_route_reason(provider_id, id)
+                        .is_ok(),
                     label: openrouter_label(model),
                     capabilities: openrouter_capabilities(model),
                     reasoning: openrouter_reasoning(model),

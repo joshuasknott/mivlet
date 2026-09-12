@@ -255,6 +255,7 @@ export function ExecutionWorker({
         const instructions = [
           agentExecutionInstructions(session.profile),
           CONVERSATION_STYLE_INSTRUCTIONS,
+          service.isVoice(session) ? "This is a voice conversation. Reply concisely in natural spoken sentences; keep normal tool approvals and never speak private reasoning." : "",
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
           builtinPluginInstructions(
             session.work.prompt,
@@ -281,6 +282,7 @@ export function ExecutionWorker({
           undefined,
           {
             maxTurns: 6,
+            onTextDelta: (text) => service.voiceText(session, text),
             canonicalUserMessage:
               session.work.parentId || session.work.runIds.length > 0
                 ? "suppress"

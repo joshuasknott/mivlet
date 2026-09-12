@@ -61,16 +61,16 @@ const CATALOGUE: Record<string, Record<string, ModelCapabilities>> = {
       maxOutputTokens: 65_536,
       streaming: true,
       tools: true,
-      vision: true,
+      vision: false,
       reasoning: true,
       structuredOutput: true
     },
     "gemini-2.5-pro": {
-      contextWindow: 2_000_000,
+      contextWindow: 1_000_000,
       maxOutputTokens: 65_536,
       streaming: true,
       tools: true,
-      vision: true,
+      vision: false,
       reasoning: true,
       structuredOutput: true
     }

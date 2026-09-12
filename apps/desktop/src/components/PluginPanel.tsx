@@ -102,7 +102,7 @@ export function PluginPanel({
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const matchesReadiness = (entry: MarketplaceConnectorEntry) => {
     const connector = manifestById.get(entry.id);
-    const usable = Boolean(connector || remoteConnectorFor(entry.id));
+    const usable = Boolean(connector || remoteConnectorFor(entry.id) || tokenPluginFor(entry.id));
     if (readiness === "planned") return !usable;
     if (readiness === "connected") return connector?.status === "connected" && ["connected", "syncing"].includes(resolveDetailedStatus(connector).className);
     if (readiness === "attention") return !!connector && ["expired", "revoked", "failed", "unavailable", "permission-limited", "unverified", "configuration-required", "needs-auth"].includes(resolveDetailedStatus(connector).className);

@@ -1,7 +1,7 @@
 /**
  * Gemini generateContent shaping + SSE parsing for the Google AI API key path.
  *
- * Gemini streams JSON-per-line (not SSE `data:` frames) and models tools as
+ * Gemini streams SSE JSON payloads and models tools as
  * `functionCall` parts. Compliance: no Google AI Pro/Ultra subscription reuse;
  * Vertex AI routing is a future extension.
  *
@@ -19,6 +19,7 @@ interface GeminiPart {
   text?: string;
   /** Gemini 3 models may attach thinking metadata; never rendered as text. */
   thought?: boolean;
+  thoughtSignature?: string;
   functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
 }
 interface GeminiChunk {
@@ -54,15 +55,17 @@ function blockedError(reason: string): Extract<BackendAgentEvent, { type: "error
 
 /** Shape a normalized request into the Gemini generateContent body. */
 export function shapeGeminiRequest(request: NativeCompletionRequest): unknown {
+  if (request.messages.some(message => message.images?.length)) throw new Error("Gemini image delivery is not supported by this route.");
   const contents = request.messages
     .filter((message) => message.role !== "system")
     .map((message) => {
       const role = message.role === "assistant" ? "model" : "user";
       const parts: Array<GeminiPart | Record<string, unknown>> = [];
-      if (message.content) parts.push({ text: message.content });
+      if (message.content && message.role !== "tool") parts.push({ text: message.content });
       if (message.role === "assistant") {
         for (const call of message.toolCalls ?? []) {
           parts.push({
+            ...(call.continuationToken ? { thoughtSignature: call.continuationToken } : {}),
             functionCall: {
               id: call.callId,
               name: call.tool,
@@ -151,6 +154,7 @@ export function parseGeminiLine(
         callId: part.functionCall.id ?? nextCallId(),
         tool: part.functionCall.name,
         arguments: args,
+        continuationToken: part.thoughtSignature,
         approval: buildToolApproval(providerId, part.functionCall.name, args)
       });
     }
@@ -169,7 +173,7 @@ export function parseGeminiLine(
   }
   if (candidate?.finishReason) {
     const reason = candidate.finishReason;
-    if (BLOCKED_FINISH_REASONS.has(reason)) {
+    if (BLOCKED_FINISH_REASONS.has(reason) || !["STOP", "MAX_TOKENS"].includes(reason)) {
       events.push(blockedError(reason));
       events.push({ type: "done", finishReason: "error" });
     } else {
@@ -199,10 +203,16 @@ export async function* streamGeminiEvents(
   const streamId = crypto.randomUUID();
   let callIndex = 0;
   const nextCallId = () => `gemini-${streamId}-${callIndex++}`;
+  let hasCalls = false;
+  let failed = false;
   for await (const chunk of transport.stream(request)) {
     for (const line of splitLines(chunk)) {
       for (const event of parseGeminiLine(request.providerId, line, nextCallId)) {
-        yield event;
+        if (event.type === "tool-call") hasCalls = true;
+        if (event.type === "error") failed = true;
+        if (event.type === "done") {
+          yield { ...event, finishReason: failed ? "error" : event.finishReason === "stop" && hasCalls ? "tool-calls" : event.finishReason };
+        } else yield event;
       }
     }
   }

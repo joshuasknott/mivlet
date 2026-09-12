@@ -93,7 +93,6 @@ describe("provider families", () => {
       "deepseek",
       "openai",
       "opencode",
-      "openrouter",
       "xai",
     ].sort());
     expect(

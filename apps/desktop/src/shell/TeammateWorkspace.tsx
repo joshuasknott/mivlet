@@ -930,6 +930,7 @@ function ActiveWorkspace({
                         }
                         onComputer={setComputer}
                         onPlugins={(id) => setMarketplace({ id })}
+                        onProviders={() => { setSettingsTab("providers"); setSettings(true); }}
                         onProjectUpdate={updateProject}
                         onDraftReady={(append) => {
                           appendDraft.current = append;

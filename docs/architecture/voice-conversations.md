@@ -81,12 +81,11 @@ Stop. Fixtures and local test passes do not establish that live acceptance.
 API reference: [OpenAI speech generation](https://developers.openai.com/api/docs/guides/text-to-speech)
 and [AudioWorkletNode](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletNode).
 
-## Pending shell integration
+## Workspace integration
 
-This implementation currently enters agent execution through `ChatWorkspace`
-and `useNativeAgent`. PR #49 replaces that shell with `ConversationPane` and
-`ExecutionWorker`. Its integration must explicitly carry over the call entry,
-scope/route fences, untouched drafts, durable text callback, approval pause and
-abort/Stop bridge. The speech controller, native authority and call view can be
-reused, but a successful check of this checkout does not verify that replacement
-shell. Keep that adaptation as a deliberate integration step when PR #49 lands.
+ConversationPane opens the call in its active view. The workspace execution
+service owns each voice exchange and the headless ExecutionWorker forwards
+assistant text only after its durable checkpoint. Voice never submits the draft
+or its attachments. Leaving the view, changing recipient/model, or ending the
+call aborts its exchange through the existing Stop path. Other conversations
+remain independent. The call displays the same exact approval panel as chat.
