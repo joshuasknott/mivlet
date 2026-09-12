@@ -220,6 +220,7 @@ impl Store {
         }
         let schema_result = (|| -> Result<()> {
             conn.execute_batch(SCHEMA_V1)?;
+            conn.execute_batch(crate::store::schema::SCHEMA_V41_TO_V42)?;
             conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?;
             conn.execute(
                 "INSERT OR IGNORE INTO workspace(id,name,created_at,updated_at)

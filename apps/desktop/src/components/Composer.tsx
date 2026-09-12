@@ -1,4 +1,4 @@
-import { ChangeEvent, FormEvent, RefObject, type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, RefObject, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
 import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
@@ -43,12 +43,14 @@ export function Composer({
   models,
   selectedModelId,
   selectedModelLabel,
+  modelScope,
   selectedReasoningEffort,
   onSelectReasoningEffort,
   placeholder = "Ask anything…",
   onSelectModel,
   inThread = false,
   isWorking = false,
+  allowQueue = false,
   onStop,
   connectedConnectors = [],
   attachments = [],
@@ -86,12 +88,15 @@ export function Composer({
   selectedModelId: string;
   /** Label to show on the model chip when a model is selected. */
   selectedModelLabel: string;
+  modelScope?: string;
   selectedReasoningEffort?: string;
   onSelectReasoningEffort?: (effort: string | undefined) => void;
   placeholder?: string;
   onSelectModel: (modelId: string) => void;
   inThread?: boolean;
   isWorking?: boolean;
+  /** Keep steering available while another assignment owns the response. */
+  allowQueue?: boolean;
   onStop?: () => void;
   connectedConnectors?: { id: string; name: string; status: string }[];
   attachments?: ComposerAttachment[];
@@ -101,6 +106,7 @@ export function Composer({
   compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
+  const voiceId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const addTrigger = useRef<HTMLButtonElement>(null);
   const closeExternalMenus = () => { if (addMenuOpen) onToggleAddMenu(); };
@@ -148,6 +154,7 @@ export function Composer({
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
   const hasComposerText = composerValue.trim().length > 0;
+  const showStop = isWorking && (!allowQueue || !hasComposerText);
   const currentToken = useMemo(() => {
     const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
     if (!match) return null;
@@ -293,7 +300,6 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-control-group">
-            {recipientControl}
             <div className="composer-control-anchor">
               <button
                 ref={addTrigger}
@@ -335,13 +341,14 @@ export function Composer({
             </div>
 
 
-            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
-              label={selectedModelLabel} effort={selectedReasoningEffort} onSelect={onSelectModel}
-              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
-              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
+            {recipientControl}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
+            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
+              label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
+              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
             {!isWorking && (!hasComposerText || voiceListening || voiceTransitioning) ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
@@ -356,7 +363,7 @@ export function Composer({
                     aria-pressed={voiceListening}
                     aria-busy={voiceTransitioning}
                     aria-disabled={voiceUnavailable || voiceTransitioning}
-                    aria-describedby="dictation-status dictation-disclosure"
+                    aria-describedby={`${voiceId}-status ${voiceId}-disclosure`}
                   >
                     {voiceListening ? (
                       <Stop size={15} weight="fill" />
@@ -381,13 +388,13 @@ export function Composer({
               </div>
             ) : null}
               {isWorking || (hasComposerText && !voiceListening && !voiceTransitioning) ? <button
-                className={`send-button${isWorking ? " send-button--stop" : ""}`}
-                type={isWorking ? "button" : "submit"}
-                aria-label={isWorking ? "Stop response" : "Send prompt"}
-                onClick={isWorking ? onStop : undefined}
-                disabled={!isWorking && (!hasComposerText || voiceListening || voiceTransitioning)}
+                className={`send-button${showStop ? " send-button--stop" : ""}`}
+                type={showStop ? "button" : "submit"}
+                aria-label={showStop ? "Stop response" : "Send prompt"}
+                onClick={showStop ? onStop : undefined}
+                disabled={!showStop && (!hasComposerText || voiceListening || voiceTransitioning)}
               >
-                {isWorking ? (
+                {showStop ? (
                   <Stop size={14} weight="fill" />
                 ) : (
                   <PaperPlaneTilt size={20} />
@@ -405,7 +412,7 @@ export function Composer({
             aria-atomic="true"
           >
             <span className="voice-feedback__indicator" aria-hidden="true" />
-            <span id="dictation-status">{voiceMessage}</span>
+            <span id={`${voiceId}-status`}>{voiceMessage}</span>
             {voiceTerminal ? (
               <button type="button" onClick={onDismissVoice}>
                 Dismiss
@@ -413,11 +420,11 @@ export function Composer({
             ) : null}
           </div>
         ) : (
-          <span id="dictation-status" className="sr-only">
+          <span id={`${voiceId}-status`} className="sr-only">
             {voiceMessage}
           </span>
         )}
-        <span id="dictation-disclosure" className="sr-only">
+        <span id={`${voiceId}-disclosure`} className="sr-only">
           {voiceDisclosure}
         </span>
         {importStatus ? <div className="composer-status" role="status">{importStatus}</div> : null}

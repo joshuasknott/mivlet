@@ -432,6 +432,7 @@ fn update_at(
     row.payload = serde_json::to_value(payload)
         .map_err(|_| StoreError::Invalid("The project could not be encoded.".into()))?;
     repo::replace_project(tx, store, &scope.private, request.expected_revision, &row)?;
+    crate::collaboration::project_changed(tx, store, scope, &row.id, now, false)?;
     project_from_row(scope, row)
 }
 
@@ -473,6 +474,7 @@ fn archive_at(
     row.updated_at = now.into();
     row.archived_at = Some(now.into());
     repo::replace_project(tx, store, &scope.private, request.expected_revision, &row)?;
+    crate::collaboration::project_changed(tx, store, scope, &row.id, now, true)?;
     project_from_row(scope, row)
 }
 

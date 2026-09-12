@@ -22,7 +22,7 @@ const PANEL_MAX_HEIGHT = 400;
 const PANEL_MIN_HEIGHT = 96;
 const FLIP_BELOW_THRESHOLD = 176;
 
-export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false }: {
+export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false, scopeLabel }: {
   models: ProviderModelOption[];
   selectedId: string;
   label: string;
@@ -32,6 +32,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   open: boolean;
   onOpenChange: (open: boolean) => void;
   allowAutomatic?: boolean;
+  scopeLabel?: string;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -150,13 +151,15 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   return <div className="composer-control-anchor composer-control-anchor--model" ref={root}
     onKeyDown={navigate} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onOpenChange(false); }}>
     <button ref={trigger} type="button" className={`composer-model${open ? " composer-trigger--open" : ""}`}
-      aria-label="Select model" aria-haspopup="dialog" aria-controls={open ? panelId : undefined} aria-expanded={open}
+      aria-label={`Select model: ${label}${currentEffort ? `, ${effortLabel(currentEffort)}` : ""}`} title={scopeLabel}
+      aria-haspopup="dialog" aria-controls={open ? panelId : undefined} aria-expanded={open}
       onClick={() => { if (!open) { setView("effort"); setQuery(""); setProvider(""); } onOpenChange(!open); }}>
       <span>{label}</span>
       {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
     {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}`} role="dialog" aria-label="Model and reasoning">
+      {scopeLabel ? <p className="model-picker__scope">{scopeLabel}</p> : null}
       {showEffort ? <div className="model-picker__effort-view">
         <div className="model-picker__summary">
           <ProviderIcon provider={selected!.providerId} size={20} />
@@ -174,7 +177,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
             disabled={levels.length < 2} onChange={(event) => onSelectEffort?.(levels[Number(event.target.value)])} />
           <div className="model-picker__ticks" aria-hidden="true">{levels.map((level) => <i key={level} />)}</div>
         </div>
-        <div className="model-picker__scale" aria-hidden="true"><span>{effortLabel(levels[0])}</span><span>{effortLabel(levels[levels.length - 1])}</span></div>
+        <div className="model-picker__scale" role="group" aria-label="Reasoning levels">{levels.map(level => <button type="button" key={level} aria-pressed={level === currentEffort} onClick={() => onSelectEffort?.(level)}>{effortLabel(level)}</button>)}</div>
       </div> : <div className="model-picker__browse">
         <div className="model-picker__toolbar">
           {levels.length > 0 ? <button type="button" aria-label="Back to reasoning" onClick={() => setView("effort")}><CaretLeft size={16} /></button> : null}

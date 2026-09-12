@@ -1,6 +1,5 @@
 import { listVerifiedConnectorStatuses as listRuntimeConnectorStatuses } from "../lib/load-connector-connections";
 import {
-  ChangeEvent,
   useCallback,
   useEffect,
   useMemo,
@@ -29,7 +28,6 @@ import type {
   PermissionMode,
   PreparedExecutionContext,
   RuntimeSnapshot,
-  ThreadSummary,
   IdentityStatus,
   AccountWorkspaceStatus,
 } from "@fable/protocol";
@@ -47,7 +45,6 @@ import {
   listBackendProviders,
   mergeDiscoveredModels,
   resolveCapabilities,
-  SUPPORTED_LOCAL_FILE_EXTENSIONS,
   normalizeCustomApprovalSettings,
   resolvePermissionModeFromCustom,
   type ToolApprovalGate,
@@ -72,7 +69,6 @@ import {
   resolveProviderModelOption,
 } from "../lib/provider-models";
 import {
-  chatThreads,
   connectors,
   knowledgeSources,
 } from "../data/workspace";
@@ -130,19 +126,15 @@ import {
 } from "../lib/constants";
 import {
   EMPTY_APPROVAL_MODIFICATION,
-  type WorkspacePage,
   type ApprovalModificationDraft,
   type PendingApprovalConfirmation,
   type PersistedShellState,
-  type ComposerAttachment,
 } from "../lib/types";
 import {
   mergeKnowledgeSources,
   prependAuditEntry,
   readFileAsText,
-  toSlug,
 } from "../lib/helpers";
-import { prepareComposerImage } from "../lib/composer-images";
 import {
   resolveApprovalFallback,
 } from "../lib/approval-fallbacks";
@@ -186,7 +178,7 @@ export type {
 /**
  * Owns all workspace shell state and the runtime-backed effects (snapshot
  * recovery, approval audit/rules, imported knowledge, memory). Returns the
- * state and callbacks the root component needs to render the shell, composer,
+ * state and callbacks the root component needs to render workspace settings
  * and context views.
  */
 
@@ -260,14 +252,10 @@ export function useShellRuntime(
     [],
   );
   const [activeItem, setActiveItem] = useState(initialState.activeItem);
-  // Composer drafts are persisted by their full account/workspace/agent-or-
-  // project/conversation scope in ChatWorkspace. The shell snapshot is not a
-  // safe owner for unsent content.
-  const [composerValue, setComposerValue] = useState("");
+
   const [voiceEnabled, setVoiceEnabled] = useState(initialState.voiceEnabled);
   const [voiceProvider, setVoiceProvider] = useState<"browser" | "openai">(initialState.voiceProvider === "openai" ? "openai" : "browser");
-  const [toolPickerOpen, setToolPickerOpen] = useState(false);
-  const [commandOpen, setCommandOpen] = useState(false);
+
   const [lastAction, setLastAction] = useState("Workspace ready");
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>(() =>
     hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS,
@@ -342,9 +330,7 @@ export function useShellRuntime(
     LocalFileImport[]
   >(initialState.importedKnowledgeSources);
   const [importStatus, setImportStatus] = useState<string | null>(null);
-  const [composerAttachments, setComposerAttachments] = useState<
-    ComposerAttachment[]
-  >([]);
+
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
   const connectorScopeRef = useRef(workspaceScopeGeneration);
@@ -389,7 +375,7 @@ export function useShellRuntime(
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
   const [runtimeSnapshotReady, setRuntimeSnapshotReady] = useState(false);
   const [runtimeSnapshotError, setRuntimeSnapshotError] = useState<string | null>(null);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
   // Agent-runtime backends. The Rust credential boundary resolves auth state
   // + capabilities; outside Tauri the preview registry is used so the onboarding
   // shell stays testable. Preview connections remain visibly synthetic, while
@@ -436,15 +422,7 @@ export function useShellRuntime(
     useState<CustomApprovalSettings>(
       normalizeCustomApprovalSettings(initialState.customApprovalSettings),
     );
-  const composerRef = useRef<import("../components/ComposerInput").ComposerInputHandle>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const allThreads = useMemo(() => chatThreads, []);
-  const activeThread = allThreads.find((thread) => thread.id === activeItem);
-  const activeUtility = activeItem === "Settings" ? "Settings" : undefined;
-  const activePage: WorkspacePage | null =
-    activeItem === "Profile" || activeItem === "Settings" ? activeItem : null;
-  const isChatView = activePage === null;
   const workspaceKnowledgeSources = useMemo(
     () =>
       mergeKnowledgeSources(hasTauriRuntime() ? [] : knowledgeSources, [
@@ -557,7 +535,6 @@ export function useShellRuntime(
       approvalRules,
       agents,
       activeAgentId,
-      composerValue,
       connectedBackendIds,
       onboardingDismissed,
       onboardingVersion,
@@ -576,22 +553,34 @@ export function useShellRuntime(
     ],
   );
 
-  // Keep the latest persisted snapshot in a ref so the debounced persistence
-  // effects below always write the most recent state. Composer typing flips
-  // `composerValue` (a shellState dependency) on every keystroke; without
-  // debouncing that triggered a synchronous localStorage write AND a Rust
-  // snapshot save per key. Coalescing into a single trailing write keeps the
-  // draft-restoration behavior identical while removing per-keystroke I/O from
-  // the render path.
+  // Coalesce account and settings changes into one trailing native write.
+  // Conversation drafts have their own scoped writer and never enter this snapshot.
   const shellStateRef = useRef(shellState);
   shellStateRef.current = shellState;
   // Track whether a debounced localStorage write is still pending so an unmount
-  // flush can guarantee the final state lands in storage (tests and real
-  // teardowns rely on the draft being persisted). Rapid changes simply reset
+  // flush can guarantee the final settings land in storage. Rapid changes reset
   // the timer; only the trailing write fires.
   const persistTimerRef = useRef<number | null>(null);
   const snapshotTimerRef = useRef<number | null>(null);
   const pendingSnapshotRef = useRef<{ identity: string; workspaceId: string; snapshot: RuntimeSnapshot } | null>(null);
+  const snapshotWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const writeSnapshot = (snapshot: RuntimeSnapshot, workspaceId: string) => {
+    const identity = workspaceIdentityRef.current;
+    const next = snapshotWrites.current.catch(() => undefined).then(() => {
+      if (!identity || workspaceIdentityRef.current !== identity) throw new Error("The workspace changed before its settings could be saved.");
+      return saveRuntimeSnapshot(snapshot, workspaceId);
+    });
+    snapshotWrites.current = next;
+    return next;
+  };
+  const flushSnapshot = async () => {
+    const identity = workspaceIdentityRef.current;
+    if (!runtimeSnapshotReady || !activeWorkspaceScope || !identity || hydratedWorkspaceRef.current !== identity) throw new Error("Wait for workspace settings to load.");
+    if (snapshotTimerRef.current !== null) window.clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = null;
+    pendingSnapshotRef.current = null;
+    await writeSnapshot(shellStateToRuntimeSnapshot(shellStateRef.current), activeWorkspaceScope.workspaceId);
+  };
 
   useEffect(() => {
     if (persistTimerRef.current !== null) {
@@ -620,8 +609,8 @@ export function useShellRuntime(
       return;
     }
 
-    // Debounced to coalesce rapid shellState changes (notably composer typing)
-    // into a single trailing snapshot save. Bind both the captured draft and
+    // Debounced to coalesce rapid profile and workspace setting changes
+    // into a single trailing snapshot save. Bind both the captured snapshot and
     // its owner/workspace so a later scope cannot receive this write.
     if (snapshotTimerRef.current !== null) {
       window.clearTimeout(snapshotTimerRef.current);
@@ -632,7 +621,7 @@ export function useShellRuntime(
       snapshotTimerRef.current = null;
       pendingSnapshotRef.current = null;
       if (workspaceIdentityRef.current !== pending.identity || hydratedWorkspaceRef.current !== pending.identity) return;
-      void saveRuntimeSnapshot(
+      void writeSnapshot(
         pending.snapshot, pending.workspaceId,
       ).catch((error) => {
         setLastAction(
@@ -653,7 +642,7 @@ export function useShellRuntime(
         const pending = pendingSnapshotRef.current;
         pendingSnapshotRef.current = null;
         if (pending && workspaceIdentityRef.current === pending.identity && hydratedWorkspaceRef.current === pending.identity) {
-          void saveRuntimeSnapshot(pending.snapshot, pending.workspaceId).catch(() => undefined);
+          void writeSnapshot(pending.snapshot, pending.workspaceId).catch(() => undefined);
         }
       }
     };
@@ -685,9 +674,7 @@ export function useShellRuntime(
       approvalGateRef.current?.cancelPending();
       scopeResetRef.current?.();
       setActiveItem(defaultShellState.activeItem);
-      setComposerValue(defaultShellState.composerValue);
-      setToolPickerOpen(false);
-      setCommandOpen(false);
+
       setRuntimeSnapshotReady(false);
       setApprovalAudit([]);
       setActionHistory([]);
@@ -706,7 +693,7 @@ export function useShellRuntime(
       setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
       setImportStatus(null);
-      setComposerAttachments([]);
+
       setConnectorImportedSources([]);
       setConnectorManifests(connectors);
       setConnectorAccounts({});
@@ -731,7 +718,7 @@ export function useShellRuntime(
           defaultShellState,
         );
         setActiveItem(recovered.activeItem);
-        setComposerValue("");
+
         setVoiceEnabled(recovered.voiceEnabled);
         setVoiceProvider(recovered.voiceProvider === "openai" ? "openai" : "browser");
         setApprovalAudit(recovered.approvalAudit);
@@ -1270,23 +1257,11 @@ export function useShellRuntime(
     [backendProviders, runModelDiscovery],
   );
 
-  const focusComposer = (value: string) => {
-    window.requestAnimationFrame(() => {
-      composerRef.current?.focus();
-      composerRef.current?.setSelectionRange(value.length, value.length);
-    });
-  };
-
   const toggleVoice = () => {
     setVoiceEnabled((enabled) => {
       setLastAction(enabled ? "Voice paused" : "Voice ready");
       return !enabled;
     });
-  };
-
-  const triggerAttach = () => {
-    setImportStatus("Choose files or images to attach.");
-    fileInputRef.current?.click();
   };
 
   const addImportedKnowledgeSource = (source: LocalFileImport) => {
@@ -1366,91 +1341,6 @@ export function useShellRuntime(
     }
   };
 
-  const supportedKnowledgeExtensions = useMemo(
-    () =>
-      new Set(
-        SUPPORTED_LOCAL_FILE_EXTENSIONS.map((extension) =>
-          extension.toLowerCase(),
-        ),
-      ),
-    [],
-  );
-
-  const attachmentIdFor = (file: File) =>
-    `attachment-${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${toSlug(file.name)}`;
-
-  const isKnowledgeAttachment = (file: File) => {
-    const extension = file.name.split(".").pop()?.toLowerCase();
-    return Boolean(extension && supportedKnowledgeExtensions.has(extension));
-  };
-
-  const updateComposerAttachment = (
-    id: string,
-    patch: Partial<ComposerAttachment>,
-  ) => {
-    setComposerAttachments((current) =>
-      current.map((attachment) =>
-        attachment.id === id ? { ...attachment, ...patch } : attachment,
-      ),
-    );
-  };
-
-  const addComposerAttachment = async (file: File) => {
-    const id = attachmentIdFor(file);
-    const attachment: ComposerAttachment = {
-      id,
-      name: file.name,
-      type: file.type,
-      sizeBytes: file.size,
-      status: file.type.startsWith("image/") ? "Previewing" : "Attached",
-    };
-    setComposerAttachments((current) => [attachment, ...current].slice(0, 12));
-
-    if (file.type.startsWith("image/")) {
-      try {
-        const imageInput = await prepareComposerImage(file, id);
-        updateComposerAttachment(id, {
-          previewUrl: imageInput.dataUrl,
-          imageInput,
-          status: "Attached",
-        });
-      } catch (error) {
-        updateComposerAttachment(id, {
-          status:
-            error instanceof Error ? error.message : "Preview unavailable",
-        });
-      }
-      setImportStatus(`${file.name} attached.`);
-      return;
-    }
-
-    if (isKnowledgeAttachment(file)) {
-      updateComposerAttachment(id, { status: "Indexing" });
-      const imported = await importLocalKnowledgeFile(file, file.name, (sourceId) => updateComposerAttachment(id, { sourceId }));
-      updateComposerAttachment(id, {
-        status: imported ? "Attached" : "Could not read file",
-      });
-      return;
-    }
-
-    setImportStatus(`${file.name} attached.`);
-  };
-
-  const handleComposerAttachmentChange = (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const files = Array.from(event.currentTarget.files ?? []);
-    event.currentTarget.value = "";
-    if (files.length === 0) return;
-    void Promise.all(files.map((file) => addComposerAttachment(file)));
-  };
-
-  const removeComposerAttachment = (attachmentId: string) => {
-    setComposerAttachments((current) =>
-      current.filter((attachment) => attachment.id !== attachmentId),
-    );
-  };
-
   const connectionIsAuthorized = (
     connectorId: string,
     _account?: string,
@@ -1522,7 +1412,7 @@ export function useShellRuntime(
   ): Promise<PreparedExecutionContext> => {
     const attemptId = createExecutionAttemptId();
     const assembledAt = new Date().toISOString();
-    const scope = knowledgeScopeForRun(context?.threadId ?? activeThread?.id);
+    const scope = knowledgeScopeForRun(context?.threadId);
     const audience = privateRunAudience(accountWorkspaceStatus);
     const selectedMemory = selectMemoryForRun(managedMemoryRecords);
     // Native records must already carry canonical ownership from migration.
@@ -1557,7 +1447,7 @@ export function useShellRuntime(
       // Only live memories enter context: forgotten/disabled records are
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
       // switch) excludes everything.
-      memory: memoryDisabled ? [] : visibleMemory,
+      memory: memoryDisabled || context?.excludePrivateMemory ? [] : visibleMemory,
       citations: result.citations,
       authorization: {
         isSourceAuthorized: connectionIsAuthorized,
@@ -1682,27 +1572,6 @@ export function useShellRuntime(
           : "Mivlet could not export memory.",
       );
     }
-  };
-
-  const openThread = (thread: ThreadSummary, label: string) => {
-    setActiveItem(thread.id);
-    setMobileNavOpen(false);
-    setLastAction(`Opened ${label}: ${thread.title}`);
-  };
-
-  const startNewChat = () => {
-    setActiveItem("new-chat");
-    setComposerValue("");
-    setMobileNavOpen(false);
-    setLastAction("New chat ready");
-    focusComposer("");
-  };
-
-  const useConnector = (connector: ConnectorManifest) => {
-    const prompt = `${composerValue}${composerValue && !/\s$/.test(composerValue) ? " " : ""}@${connector.id} `;
-    setComposerValue(prompt);
-    setLastAction(`${connector.name} is ready in the composer`);
-    focusComposer(prompt);
   };
 
   const replaceConnectorManifest = (manifest: ConnectorManifest) => {
@@ -2336,6 +2205,7 @@ export function useShellRuntime(
   // Full access makes the decision automatically, through the same persisted
   // single-use authorization boundary. Other modes retain the interactive queue.
   const recordBackendToolCall = (event: {
+    allowAutomatic?: boolean;
     callId: string;
     tool: string;
     arguments: string;
@@ -2344,7 +2214,7 @@ export function useShellRuntime(
     if (event.tool === "connector-action" || event.tool === "connector-call") {
       connectorApprovalRequests.current.set(event.approval.id, event.approval);
     }
-    if (permissionModeRef.current === "full-access") {
+    if (permissionModeRef.current === "full-access" && event.allowAutomatic !== false) {
       void resolveApprovalDecision(event.approval, "once", undefined,
         event.approval.confirmationPhrase, true);
       return;
@@ -2369,7 +2239,13 @@ export function useShellRuntime(
     setLastAction(`Tool call from ${event.approval.service}: ${event.tool}`);
   };
 
-  const clearBackendToolApprovals = () => {
+  const clearBackendToolApprovals = (ids?: readonly string[]) => {
+    if (ids) {
+      for (const id of ids) connectorApprovalRequests.current.delete(id);
+      setBackendToolApprovals(current => current.filter(approval => !ids.includes(approval.id)));
+      setApprovalPreviews(current => Object.fromEntries(Object.entries(current).filter(([id]) => !ids.includes(id))));
+      return;
+    }
     connectorApprovalRequests.current.clear();
     setBackendToolApprovals([]);
     setApprovalPreviews({});
@@ -2388,14 +2264,6 @@ export function useShellRuntime(
     connectedBackendIds.length === 0 ||
     !onboardingDismissed ||
     onboardingVersion < CURRENT_ONBOARDING_VERSION;
-
-  const runCommand = (command: string) => {
-    const prompt = `${command} `;
-    setComposerValue(prompt);
-    setCommandOpen(false);
-    setLastAction(`${command} command ready`);
-    focusComposer(prompt);
-  };
 
   // Composer picker bindings: the model picker drives request.model on the next
   // agent run; the approval preset maps its label onto a PermissionMode that
@@ -2665,14 +2533,6 @@ export function useShellRuntime(
     }
   };
 
-  const selectAgent = (agentId: string) => {
-    const selected = agents.find((agent) => agent.id === agentId);
-    if (!selected) return;
-    setActiveAgentId(agentId);
-    setActiveItem(agentId);
-    selectModel(selected.modelId);
-  };
-
   const removeAgent = (agentId: string) => {
     if (agents.length <= 1) return;
     const remaining = agents.filter((agent) => agent.id !== agentId);
@@ -2690,37 +2550,23 @@ export function useShellRuntime(
   return {
     activeItem,
     setActiveItem,
-    activeUtility,
-    activePage,
-    isChatView,
-    activeThread,
-    allThreads,
+
     agents,
+    flushSnapshot,
     activeAgentId,
     createAgent,
     updateAgent,
     removeAgent,
-    selectAgent,
-    composerValue,
-    setComposerValue,
+
     voiceEnabled,
     setVoiceEnabled,
     voiceProvider,
     setVoiceProvider,
     toggleVoice,
     setImportStatus,
-    triggerAttach,
-    toolPickerOpen,
-    commandOpen,
+
     importStatus,
-    composerAttachments,
-    composerRef,
-    fileInputRef,
-    removeComposerAttachment,
-    handleComposerAttachmentChange,
-    focusComposer,
-    useConnector,
-    runCommand,
+
     connectorManifests,
     refreshConnectorStatuses,
     connectorAccounts,
@@ -2810,10 +2656,7 @@ export function useShellRuntime(
     clearBackendToolApprovals,
     dismissOnboarding,
     lastAction,
-    mobileNavOpen,
-    setMobileNavOpen,
-    startNewChat,
-    openThread,
+
     setLastAction,
   };
 }

@@ -46,8 +46,8 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
         const connection = await openConnectorTools(workspaceId, serverId);
         try { if (!cancelled) setDiscovery(connection.discovery); }
         finally { await connection.client.close().catch(() => undefined); }
-      }).catch(() => {
-        if (!cancelled) setNotice("Connect again to restore access.");
+      }).catch((error) => {
+        if (!cancelled) { setNotice(connectorErrorMessage(error)); setFailed(true); }
       }).finally(() => { if (!cancelled) setBusy(false); });
     }
     return () => { cancelled = true; mounted.current = false; };
@@ -91,6 +91,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
       })}>Disconnect</button> : null}
     </div>
     {notice ? <p className="connector-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
+    {!connected && preset.prerequisite ? <p className="connector-detail__notice">{preset.prerequisite}</p> : null}
     <PluginOverview id={entry.id} access={connected ? "Uses your connected account permissions" : "Chosen when you connect"} onExample={connected && !disabled && onUseConnector ? (prompt) => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" }, prompt) : undefined} />
     <p className="connector-detail__hint">Read access is included when you connect. Actions follow your workspace approval preference.</p>
     <details className="connector-guide"><summary>About this connection</summary>

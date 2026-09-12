@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentLearningDialog } from "./AgentLearningDialog";
@@ -19,16 +19,102 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
+  it("opens projects and agents directly and shows group avatars without nested history", () => {
+    const onSelect = vi.fn(),
+      onSelectAgent = vi.fn(),
+      onSelectProject = vi.fn();
+    render(
+      <AgentSidebar
+        agents={[agent]}
+        activeAgentId={agent.id}
+        profileName="Local"
+        connectors={[]}
+        previews={{}}
+        marketplaceActive={false}
+        projects={[{ id: "project", name: "Launch", threadId: "main" }]}
+        conversations={[
+          {
+            id: "private",
+            title: "Private draft",
+            kind: "direct",
+            participants: [{ agentId: agent.id }],
+          },
+          {
+            id: "focused",
+            title: "Shared plan",
+            kind: "group",
+            projectId: "project",
+          },
+          {
+            id: "group",
+            title: "Review group",
+            kind: "group",
+            participants: [
+              { agentId: agent.id, name: "Mira" },
+              { agentId: "missing", name: "Former teammate" },
+            ],
+          },
+        ]}
+        onSelectConversation={onSelect}
+        onCreateConversation={vi.fn()}
+        onSelectProject={onSelectProject}
+        onCreateProject={vi.fn()}
+        onSelectAgent={onSelectAgent}
+        onCreateAgent={vi.fn()}
+        onEditAgent={vi.fn()}
+        onOpenMarketplace={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenUsage={vi.fn()}
+        onSignOut={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("region", { name: "Group chats" })).toBeNull();
+    const group = screen.getByRole("button", { name: /Review group/ });
+    expect(within(group).getByLabelText("Mira, Former teammate")).toBeVisible();
+    fireEvent.click(group);
+    expect(onSelect).toHaveBeenLastCalledWith("group", false);
+    fireEvent.click(screen.getByRole("button", { name: "Mira" }));
+    expect(onSelectAgent).toHaveBeenCalledWith(agent);
+    fireEvent.click(screen.getByRole("button", { name: "Launch" }));
+    expect(onSelectProject).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "project" }),
+    );
+    expect(screen.queryByRole("button", { name: "Private draft" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Shared plan" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Show conversations/ }),
+    ).toBeNull();
+  });
   it("keeps agents reachable in collapsed navigation even after a search", () => {
     const onSelectAgent = vi.fn();
-    const sidebar = (collapsed: boolean) => <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
-      previews={{}} marketplaceActive={false} onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()} onEditAgent={vi.fn()}
-      onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} collapsed={collapsed} onToggleCollapsed={vi.fn()} />;
+    const sidebar = (collapsed: boolean) => (
+      <AgentSidebar
+        agents={[agent]}
+        activeAgentId={agent.id}
+        profileName="Local"
+        connectors={[]}
+        previews={{}}
+        marketplaceActive={false}
+        onSelectAgent={onSelectAgent}
+        onCreateAgent={vi.fn()}
+        onEditAgent={vi.fn()}
+        onOpenMarketplace={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onOpenUsage={vi.fn()}
+        onSignOut={vi.fn()}
+        collapsed={collapsed}
+        onToggleCollapsed={vi.fn()}
+      />
+    );
     const view = render(sidebar(false));
-    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "No match" } });
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "No match" },
+    });
     expect(screen.queryByRole("button", { name: /^Mira/ })).toBeNull();
     view.rerender(sidebar(true));
-    expect(screen.getByRole("button", { name: "Expand navigation" })).toHaveAttribute("aria-expanded", "false");
+    expect(
+      screen.getByRole("button", { name: "Expand navigation" }),
+    ).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(screen.getByRole("button", { name: "Mira" }));
     expect(onSelectAgent).toHaveBeenCalledWith(agent);
   });
@@ -50,10 +136,14 @@ describe("quiet agent surface", () => {
     expect(screen.getByRole("status", { name: "Waiting for provider" })).toHaveClass("agent-status--service");
     expect(screen.getByRole("status", { name: "Waiting for provider" })).not.toHaveClass("agent-status--working");
     rerender(sidebar("done"));
-    expect(screen.getByRole("status", { name: "New completed work" })).toHaveClass("agent-status--unread");
+    expect(
+      screen.getByRole("status", { name: "New completed work" }),
+    ).toHaveClass("agent-status--unread");
     rerender(sidebar("idle"));
-    expect(screen.getByRole("status", { name: "New completed work" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Mira.*Draft/ }));
+    expect(
+      screen.getByRole("status", { name: "New completed work" }),
+    ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Mira" }));
     expect(onSelectAgent).toHaveBeenCalledOnce();
     rerender(sidebar("done"));
     expect(screen.queryByRole("status")).toBeNull();
@@ -63,7 +153,9 @@ describe("quiet agent surface", () => {
     rerender(sidebar("blocked", "turn-2"));
     expect(screen.queryByRole("status")).toBeNull();
     rerender(sidebar("done", "turn-2"));
-    expect(screen.getByRole("status", { name: "New completed work" })).toBeVisible();
+    expect(
+      screen.getByRole("status", { name: "New completed work" }),
+    ).toBeVisible();
   });
 
   it("keeps agent switching and settings in the sidebar without product navigation", () => {
@@ -94,7 +186,8 @@ describe("quiet agent surface", () => {
       />,
     );
 
-    expect(screen.getByText("Draft launch copy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mira" })).toBeVisible();
+    expect(screen.queryByText("Draft launch copy")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();

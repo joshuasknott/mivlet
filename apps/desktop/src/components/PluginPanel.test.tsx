@@ -51,6 +51,21 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it("filters ready connections separately from missing authorization and unhealthy connections", () => {
+    const props = { manifests: [gmail, github], accounts: {}, onUseConnector: vi.fn(), onConnect: vi.fn(), onDisconnect: vi.fn(), onRefresh: vi.fn(), onSelect: vi.fn(), onSwitchAccount: vi.fn() };
+    const view = render(<PluginPanel {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+    expect(screen.getAllByRole("button", { name: "Manage Gmail" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
+    expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Connect GitHub" }).length).toBeGreaterThan(0);
+    view.rerender(<PluginPanel {...props} manifests={[{ ...gmail, health: { ...gmail.health!, state: "error", summary: "Connection expired." } }, github]} />);
+    expect(screen.getAllByRole("button", { name: "Reconnect Gmail" }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+    expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect Gmail" })).toBeNull();
+  });
   it("prepares a connected plugin example without starting a connection or action", async () => {
     const user = userEvent.setup();
     const onUse = vi.fn();

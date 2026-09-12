@@ -77,6 +77,17 @@ a deployed or production-validated service.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
+- Each named agent can have multiple private conversations. Standalone groups
+  and optional projects use selected participants, an existing agent as lead or
+  facilitator, bounded assignments, attributed results and inspectable decisions.
+  Group delegation uses the Codex and native API routes that bridge Mivlet tools;
+  provider-owned routes without that bridge remain unavailable for group work.
+- Conversation tabs and two-pane splits arrange durable conversations and
+  supported artifacts. Closing a tab leaves work running and discoverable in
+  Activity. Projects contain focused chats, shared files and occurrence-tracked
+  local research schedules. Work runs while the app is open and Windows is awake;
+  interrupted work requires review before continuation. See the
+  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md).
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Agents can create bounded passive DOCX files and XLSX workbooks

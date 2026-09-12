@@ -12,6 +12,7 @@ export interface ComposerScope {
 interface ComposerContent {
   text: string;
   attachments: ComposerAttachment[];
+  recipientId?: string;
 }
 interface Entry {
   scope: ComposerScope;
@@ -20,12 +21,21 @@ interface Entry {
   revision: number;
   error: string;
   timer?: ReturnType<typeof setTimeout>;
+  loading?: boolean;
+  submitting?: boolean;
 }
 const empty = (): ComposerContent => ({ text: "", attachments: [] });
-export const composerScopeKey = (scope: ComposerScope) => `composer-v1:${JSON.stringify([
+const legacyComposerScopeKey = (scope: ComposerScope) => `composer-v1:${JSON.stringify([
   scope.workspaceId, scope.accountId, scope.projectId ? "project" : "agent",
   scope.projectId ?? scope.agentId, scope.threadId ?? "new",
 ])}`;
+export const composerScopeKey = (scope: ComposerScope) => scope.threadId
+  ? `composer-v2:${JSON.stringify([scope.workspaceId, scope.accountId, scope.threadId])}`
+  : legacyComposerScopeKey(scope);
+
+// One conversation draft, including transient attachments, across both panes.
+const sharedEntries = new Map<string, Entry>();
+const subscribers = new Set<() => void>();
 
 // Shared across remounts: a read/clear must not overtake an older in-flight save.
 const writes = new Map<string, Promise<unknown>>();
@@ -54,14 +64,14 @@ function decode(content: string): ComposerContent {
 
 /** One owner for text, attachments, and previously submitted source references. */
 export function useScopedComposer(scope?: ComposerScope) {
-  const entries = useRef(new Map<string, Entry>());
+  const entries = useRef(sharedEntries);
   const identity = scope ? JSON.stringify([scope.workspaceId, scope.accountId]) : "";
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   const key = scope ? composerScopeKey(scope) : "";
   const [, render] = useState(0);
   const mounted = useRef(true);
-  const repaint = () => { if (mounted.current) render((n) => n + 1); };
+  const repaint = () => { for (const notify of subscribers) notify(); };
   const allowed = (entry: Entry) => currentIdentity.current === JSON.stringify([entry.scope.workspaceId, entry.scope.accountId]);
   const persist = (entry: Entry) => {
     clearTimeout(entry.timer);
@@ -85,15 +95,19 @@ export function useScopedComposer(scope?: ComposerScope) {
   }
   useEffect(() => {
     mounted.current = true;
+    const notify = () => { if (mounted.current) render(n => n + 1); };
+    subscribers.add(notify);
     return () => {
       mounted.current = false;
+      subscribers.delete(notify);
       for (const pending of entries.current.values()) if (pending.timer) void persist(pending).catch(() => undefined);
     };
   }, []);
   useEffect(() => {
     if (!entry) return;
     const target = entry;
-    if (!target.ready) {
+    if (!target.ready && !target.loading) {
+      target.loading = true;
       void serialize(key, async () => {
         // Bind this load to the entry state at the moment it actually runs.
         // A load re-queued by a rapid switch-back must not apply once the
@@ -102,6 +116,8 @@ export function useScopedComposer(scope?: ComposerScope) {
         try {
           const draft = await loadRuntimeConversationDraft(key, target.scope.workspaceId, target.scope.threadId);
           if (draft || !target.scope.threadId) return { ok: true as const, ...anchor, draft, legacy: false };
+          const scopedLegacy = await loadRuntimeConversationDraft(legacyComposerScopeKey(target.scope), target.scope.workspaceId, target.scope.threadId);
+          if (scopedLegacy) return { ok: true as const, ...anchor, draft: scopedLegacy, legacy: false };
           // Thread ownership is already validated by the native repository, so a
           // pre-scoping thread draft can be migrated safely. The old global
           // new-thread slot is deliberately never imported into an agent/project.
@@ -111,6 +127,7 @@ export function useScopedComposer(scope?: ComposerScope) {
           return { ok: false as const, ...anchor, error };
         }
       }).then((result) => {
+        target.loading = false;
         if (!allowed(target) || result.readyAtStart) return;
         if (result.ok) {
           if (target.revision === result.revisionAtStart) target.content = result.draft
@@ -125,7 +142,7 @@ export function useScopedComposer(scope?: ComposerScope) {
           target.error = result.error instanceof Error ? result.error.message : "Could not load this draft.";
         }
         repaint();
-      });
+      }).catch(error => { target.loading = false; target.ready = true; target.error = error instanceof Error ? error.message : "Could not restore this draft."; repaint(); });
     }
     return () => { if (target.timer) void persist(target).catch(() => undefined); };
   }, [key]);
@@ -139,10 +156,16 @@ export function useScopedComposer(scope?: ComposerScope) {
   };
   return {
     key,
+    revision: entry?.revision ?? 0,
+    submitting: Boolean(entry?.submitting),
+    beginSubmission: () => { if (!entry?.ready || entry.submitting) return false; entry.submitting = true; repaint(); return true; },
+    endSubmission: () => { if (entry) { entry.submitting = false; repaint(); } },
     ready: Boolean(entry?.ready),
     error: entry?.error ?? "",
     text: entry?.ready ? entry.content.text : "",
     attachments: entry?.ready ? entry.content.attachments : [],
+    recipientId: entry?.content.recipientId,
+    setRecipient: (recipientId: string) => mutate(content => ({ ...content, recipientId })),
     setText: (text: string) => mutate((content) => ({ ...content, text })),
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
@@ -161,9 +184,10 @@ export function useScopedComposer(scope?: ComposerScope) {
       entries.current.set(destinationKey, destination);
       await persist(destination);
     },
-    consume: async () => {
+    consume: async (expectedRevision?: number) => {
       const attachments = entry?.content.attachments ?? [];
-      mutate(() => empty());
+      if (expectedRevision !== undefined && entry?.revision !== expectedRevision) return attachments;
+      mutate(content => ({ ...empty(), recipientId: content.recipientId }));
       if (entry) await persist(entry);
       return attachments;
     },

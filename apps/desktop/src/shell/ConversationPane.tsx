@@ -1,0 +1,696 @@
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  ConversationRoom,
+  FableAgentProfile,
+  LocalProject,
+  WorkspaceView,
+} from "@fable/protocol";
+import type { ShellRuntime } from "../hooks/useShellRuntime";
+import type { NativeAgentState } from "../hooks/useNativeAgent";
+import { useScopedComposer } from "../hooks/useScopedComposer";
+import { useComposerVoice } from "../hooks/useComposerVoice";
+import { useConversationScroll } from "../hooks/useConversationScroll";
+import { useLocalComputer } from "../hooks/useLocalComputer";
+import {
+  activeWork,
+  type WorkspaceExecution,
+  type WorkspaceExecutionState,
+} from "../lib/workspace-execution";
+import { insertDictation } from "../lib/insert-dictation";
+import { prepareComposerImage } from "../lib/composer-images";
+import { prepareReadableComposerAttachment } from "../lib/composer-attachments";
+import { builtinPluginMentions } from "../lib/builtin-plugins";
+import { importRuntimeRepository } from "../runtime/domains/local-computer";
+import { composerModelsFor } from "./composer-models";
+import { Composer } from "../components/Composer";
+import { RecipientPicker } from "../components/conversation/RecipientPicker";
+import type { ComposerInputHandle } from "../components/ComposerInput";
+import type { ComposerAttachment } from "../lib/types";
+import { ConversationFeed } from "../components/conversation/ConversationFeed";
+import { ProfileAgentAvatar } from "../components/agents/agent-icons";
+import { agentPresence } from "../lib/agent-presence";
+import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
+import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
+import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
+import { buildConversationHandoff } from "../lib/conversation-handoff";
+import { WorkRecovery } from "../components/projects/WorkItems";
+import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
+import type { ConversationTurn } from "../lib/conversation-presentation";
+
+const ApprovalPanel = lazy(() =>
+  import("../components/ApprovalPanel").then((module) => ({
+    default: module.ApprovalPanel,
+  })),
+);
+const ArtifactPreview = lazy(() =>
+  import("../components/conversation/ArtifactPreview").then((module) => ({
+    default: module.ArtifactPreview,
+  })),
+);
+
+export const idleAgentState: NativeAgentState = {
+  transcript: "",
+  usage: null,
+  running: false,
+  lastError: null,
+  status: "idle",
+  recoverableAttempts: [],
+  contextReceipts: {},
+  providerRoutes: {},
+  usageReceipts: {},
+  currentAttemptId: null,
+  noTransport: false,
+};
+
+export function ConversationPane({
+  view,
+  room,
+  project,
+  runtime,
+  service,
+  state,
+  active,
+  profileName,
+  onClose,
+  onArtifact,
+  onEdit,
+  onPlace,
+  onNew,
+  onSchedules,
+  onComputer,
+  onPlugins,
+  onProjectUpdate,
+  onDraftReady,
+}: {
+  view: WorkspaceView;
+  room: ConversationRoom;
+  project?: LocalProject;
+  runtime: ShellRuntime;
+  service: WorkspaceExecution;
+  state: WorkspaceExecutionState;
+  active: boolean;
+  profileName: string;
+  onClose: () => void;
+  onArtifact: (output: string, agentId: string) => void;
+  onEdit: () => void;
+  onPlace: () => void;
+  onNew: (draft?: string) => Promise<string | void>;
+  onSchedules: () => void;
+  onComputer: (agentId: string) => void;
+  onPlugins: (id?: string) => void;
+  onProjectUpdate: (
+    project: LocalProject,
+    patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
+  ) => Promise<void>;
+  onDraftReady: (append: (text: string) => void) => void;
+}) {
+  const owner = runtime.accountWorkspaceStatus.activeContextOwner;
+  const composer = useScopedComposer({
+    workspaceId: service.workspaceId,
+    accountId: `${owner?.internalUserId}:${owner?.memberId ?? ""}`,
+    agentId: room.facilitatorId ?? "unavailable",
+    projectId: room.projectId,
+    threadId: room.id,
+  });
+  const recipient = composer.recipientId ?? room.facilitatorId ?? "";
+  const recipientId =
+    recipient === "discussion" ? (room.facilitatorId ?? "") : recipient;
+  const profile = runtime.agents.find((agent) => agent.id === recipientId);
+  const displayAgent: FableAgentProfile = profile ?? {
+    ...(runtime.agents[0] ?? {
+      instructions: "",
+      modelId: "",
+      permissionLabel: "Ask Me",
+      icon: "sparkle",
+    }),
+    id: recipientId || "unavailable",
+    name:
+      room.participants.find((member) => member.agentId === recipientId)
+        ?.name ?? "Unavailable teammate",
+  };
+  const localComputer = useLocalComputer({
+    workspaceId: service.workspaceId,
+    agentId: view.kind === "artifact" ? view.agentId : displayAgent.id,
+    executionOwner: false,
+  });
+  const composerRef = useRef<ComposerInputHandle>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [addOpen, setAddOpen] = useState(false);
+  const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
+  const optionsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) optionsRef.current.open = false;
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, []);
+  const submission = useRef(false);
+  const currentComposer = useRef(composer);
+  currentComposer.current = composer;
+  const focus = () => requestAnimationFrame(() => composerRef.current?.focus());
+  const voice = useComposerVoice(
+    runtime,
+    `${service.workspaceId}:${view.id}`,
+    (text) => {
+      const handle = composerRef.current;
+      const draft = currentComposer.current;
+      const insertion = insertDictation(
+        draft.text,
+        text,
+        handle?.selectionStart,
+        handle?.selectionEnd,
+      );
+      draft.setText(insertion.value);
+      requestAnimationFrame(() => {
+        handle?.focus();
+        handle?.setSelectionRange(insertion.caret, insertion.caret);
+      });
+    },
+    () => {
+      if (active) focus();
+    },
+  );
+  useEffect(() => {
+    if (!active && voice.isBusy) voice.cancel();
+  }, [active]);
+  useEffect(() => {
+    if (active && composer.ready)
+      onDraftReady((text) => {
+        const draft = currentComposer.current;
+        draft.setText(
+          `${draft.text}${draft.text && !/\s$/.test(draft.text) ? " " : ""}${text}`,
+        );
+        focus();
+      });
+  }, [active, composer.ready, room.id]);
+  useEffect(() => {
+    void service.loadHistory(room.id).catch((error) => service.report(error));
+  }, [room.id, service]);
+  const history = state.histories[room.id];
+  const sessions = state.sessions.filter(
+    (session) => session.work.conversationId === room.id && !session.cancelled,
+  );
+  const work = state.data.work.filter(
+    (work) => work.conversationId === room.id,
+  );
+  const running = work.filter(activeWork);
+  const pendingTurns: ConversationTurn[] = work.filter(item => !item.parentId && !item.runIds.length).map(item => ({
+    id: item.id, prompt: item.userRequest || item.prompt, startedAt: item.createdAt, endedAt: item.updatedAt,
+    parts: item.status === "failed" ? [{ id: `${item.id}-error`, kind: "notice", error: true, content: item.reason || "This request could not start." }] : [],
+  }));
+  const recovery = work.filter(item => !item.parentId && ["failed", "blocked", "awaiting-user", "cancelled"].includes(item.status));
+  const liveStates = sessions
+    .filter((session) => session.state)
+    .map((session) => ({
+      state: session.state!,
+      agent: session.profile,
+      suppressPrompt: Boolean(
+        session.work.parentId || session.work.runIds.length > 0,
+      ),
+    }));
+  const baseState = liveStates[0]?.state ?? idleAgentState;
+  const scroll = useConversationScroll(
+    `${service.workspaceId}:${view.id}`,
+    `${state.revision}:${history?.messages.length}`,
+    true,
+  );
+  const models = useMemo(
+    () => composerModelsFor(undefined, runtime.modelOptions),
+    [runtime.modelOptions],
+  );
+  const model = models.find((model) => model.id === profile?.modelId);
+  const approvals = active
+    ? runtime.openApprovals.filter((approval) =>
+        sessions.some((session) => session.approvalIds.has(approval.id)),
+      )
+    : [];
+  const authors: Record<string, FableAgentProfile> = Object.fromEntries(
+    state.data.authors
+      .filter((author) => author.conversationId === room.id)
+      .map((author) => [
+        author.runId,
+        {
+          ...(runtime.agents.find((agent) => agent.id === author.agentId) ??
+            displayAgent),
+          id: author.agentId,
+          name: author.name,
+          avatarSeed:
+            runtime.agents.find((agent) => agent.id === author.agentId)
+              ?.avatarSeed ?? `blob-v1:${author.agentId}`,
+        },
+      ]),
+  );
+  for (const item of work) {
+    authors[item.id] = { ...(runtime.agents.find(agent => agent.id === item.agentId) ?? displayAgent), id: item.agentId, name: item.agentName };
+  }
+  const connected = [
+    // Capability mentions are inserted only from the current native snapshot.
+    ...builtinPluginMentions(localComputer.node?.plugins),
+    ...runtime.connectorManifests
+      .filter(
+        (connector) =>
+          connector.status === "connected" && connector.id !== "local-files",
+      )
+      .map((connector) => ({
+        id: connector.id,
+        name: connector.name,
+        status: connector.status,
+      })),
+  ];
+  const send = async () => {
+    const prompt = composer.text.trim();
+    if (!composer.ready || !prompt || submission.current || voice.isBusy)
+      return;
+    if (
+      !profile ||
+      !room.participants.some((member) => member.agentId === profile.id)
+    ) {
+      setError("Choose an available participant before sending.");
+      return;
+    }
+    if (
+      composer.attachments.some(
+        (attachment) =>
+          !attachment.imageInput &&
+          !attachment.sourceId &&
+          !attachment.transientBytes,
+      )
+    ) {
+      setError("Reattach the unavailable file or remove it before sending.");
+      return;
+    }
+    if (!composer.beginSubmission()) return;
+    submission.current = true;
+    setPending(true);
+    setError("");
+    try {
+      await runtime.flushSnapshot();
+      await service.refresh();
+      if (mentionedBuiltinPlugins(prompt).length) await localComputer.prepareForTool("read-file");
+      if (project) {
+        const sourceIds = composer.attachments.flatMap((attachment) =>
+          attachment.sourceId ? [attachment.sourceId] : [],
+        );
+        if (sourceIds.some((id) => !project.knowledgeSourceIds.includes(id)))
+          await onProjectUpdate(project, {
+            name: project.name,
+            instructions: project.instructions,
+            knowledgeSourceIds: [
+              ...new Set([...project.knowledgeSourceIds, ...sourceIds]),
+            ],
+          });
+      }
+      await service.submit(
+        room.id,
+        profile.id,
+        prompt,
+        recipient === "discussion",
+        composer.attachments,
+      );
+      await composer.consume(composer.revision);
+      scroll.toLatest();
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : "Could not send this message.",
+      );
+    } finally {
+      submission.current = false;
+      composer.endSubmission();
+      setPending(false);
+    }
+  };
+  const importFiles = (files: File[]) => {
+    const target = composer;
+    for (const file of files.slice(
+      0,
+      Math.max(0, 12 - composer.attachments.length),
+    )) {
+      const id = `attachment-${crypto.randomUUID()}`;
+      const item: ComposerAttachment = {
+        id,
+        name: file.name,
+        type: file.type || "application/octet-stream",
+        sizeBytes: file.size,
+        status: "Preparing…",
+      };
+      target.setAttachments((current) => [...current, item]);
+      const preparation = file.type.startsWith("image/")
+        ? prepareComposerImage(file, id).then((imageInput) => ({
+            imageInput,
+            previewUrl: imageInput.dataUrl,
+            status: "Image input · transient",
+          }))
+        : prepareReadableComposerAttachment(file, runtime.importKnowledgeFile);
+      void preparation
+        .then((result) =>
+          target.setAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === id ? { ...attachment, ...result } : attachment,
+            ),
+          ),
+        )
+        .catch((error) =>
+          target.setAttachments((current) =>
+            current.map((attachment) =>
+              attachment.id === id
+                ? {
+                    ...attachment,
+                    status:
+                      error instanceof Error
+                        ? error.message
+                        : "Could not read file",
+                  }
+                : attachment,
+            ),
+          ),
+        );
+    }
+  };
+  const importRepository = async () => {
+    if (pending || !profile) return;
+    setPending(true);
+    setError("");
+    const draft = composer;
+    try {
+      const node = await localComputer.prepareForTool("read-file");
+      const receipt = await importRuntimeRepository(
+        { workspaceId: service.workspaceId, agentId: profile.id },
+        node.generation,
+      );
+      if (receipt)
+        draft.setText(
+          `${draft.text}${draft.text ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. This private snapshot is not connected to an execution runtime. Do not claim to run builds, tests or Git commands without a separately configured and approved execution environment.`,
+        );
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Could not import this repository.",
+      );
+    } finally {
+      setPending(false);
+    }
+  };
+  const contextFailure = sessions.find(
+    (session) => session.state?.contextFailure,
+  )?.state?.contextFailure;
+  if (view.kind === "artifact")
+    return (
+      <Suspense fallback={<p role="status">Loading file…</p>}>
+        <ArtifactPreview
+          embedded
+          output={view.output}
+          workspaceId={service.workspaceId}
+          agentId={view.agentId}
+          generation={
+            localComputer.node?.agentId === view.agentId
+              ? localComputer.node.generation
+              : undefined
+          }
+          onClose={onClose}
+        />
+      </Suspense>
+    );
+  return (
+    <div className="conversation-pane-content">
+      <header className="team-conversation-header">
+        <div className="team-conversation-identity">
+          <ProfileAgentAvatar
+            agent={displayAgent}
+            iconSize={29}
+            presence={agentPresence(baseState, approvals.length > 0)}
+          />
+          <span>
+            <strong>{room.title}</strong>
+          </span>
+        </div>
+        <div className="team-conversation-actions">
+          <button
+            type="button"
+            aria-label={`Open ${displayAgent.name}'s computer`}
+            onClick={() => onComputer(displayAgent.id)}
+          >
+            <Desktop size={18} />
+          </button>
+          <details ref={optionsRef} onKeyDown={(event) => {
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
+          }}>
+            <summary aria-label="Conversation options">
+              <DotsThree size={22} />
+            </summary>
+            <div onClick={() => { if (optionsRef.current) optionsRef.current.open = false; }}>
+              <button type="button" onClick={() => void onNew()}>
+                New conversation
+              </button>
+              <button type="button" onClick={onEdit}>
+                Edit{" "}
+                {project
+                  ? "project"
+                  : room.kind === "group"
+                    ? "participants and title"
+                    : "conversation"}
+              </button>
+              {!project ? (
+                <button type="button" onClick={onPlace}>
+                  Place in project…
+                </button>
+              ) : null}
+              <button type="button" onClick={onSchedules}>
+                Schedules
+              </button>
+            </div>
+          </details>
+        </div>
+      </header>
+      <div
+        className="conversation-pane-scroll"
+        ref={scroll.scrollRef}
+        onScroll={scroll.onScroll}
+        onWheel={scroll.pauseFollowing}
+      >
+        <div className="conversation-pane-messages" ref={scroll.contentRef}>
+          {history === undefined ? (
+            <p className="team-empty" role="status">
+              Loading conversation…
+            </p>
+          ) : !history?.messages.length && !liveStates.length && !pendingTurns.length ? (
+            <div className="team-conversation-welcome">
+              <h1>
+                {room.kind === "group"
+                  ? "Message the team"
+                  : `Message ${displayAgent.name}`}
+              </h1>
+            </div>
+          ) : null}
+          <ConversationFeed
+            messages={history?.messages ?? []}
+            agent={displayAgent}
+            authors={authors}
+            requireAuthor
+            showAuthor
+            state={idleAgentState}
+            liveStates={liveStates}
+            threadId={room.id}
+            profileName={profileName}
+            connectors={runtime.connectorManifests}
+            optimisticPrompt=""
+            pendingTurns={pendingTurns}
+            onOpenWorkspaceFiles={onComputer}
+            decisionEvents={state.data.facts.filter(fact => fact.projectId === room.projectId && fact.conversationId === room.id && fact.confidence === "confirmed" && fact.status !== "forgotten")}
+            workspaceId={service.workspaceId}
+            generation={localComputer.node?.generation}
+            onPreviewArtifact={(output, authorId) =>
+              onArtifact(output, authorId ?? displayAgent.id)
+            }
+            onOpenConnector={onPlugins}
+            onReusePrompt={(prompt, intent) => {
+              composer.setText(prompt);
+              setError(intent === "retry" ? "Review this request before sending again. Check any previous external actions and reattach files if needed." : "Editing a new message. The original and any actions already taken remain in the conversation; reattach files if needed.");
+              focus();
+            }}
+          />
+          {recovery.map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Recovery for ${item.agentName}'s request`}>
+            {item.runIds.length ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
+            <WorkRecovery item={item} service={service} />
+            <button type="button" onClick={() => { composer.setText(item.userRequest || item.prompt); focus(); }}>Restore request to composer</button>
+            {/computer|runtime|plugin/i.test(item.reason ?? "") ? <button type="button" onClick={() => onComputer(item.agentId)}>Check Computer Use</button> : /provider|connect|model/i.test(item.reason ?? "") ? <button type="button" onClick={() => onPlugins()}>Check connections</button> : null}
+          </div>)}
+          {running
+            .filter(
+              (item) =>
+                item.status === "queued" &&
+                !sessions.some((session) => session.work.id === item.id),
+            )
+            .map((item) => (
+              <p className="conversation-attention" key={item.id} role="status">
+                Queued for {item.agentName}. It starts when this teammate and
+                its provider have capacity.
+              </p>
+            ))}
+          {approvals.length ? (
+            <Suspense fallback={null}>
+              <div
+                className="conversation-approvals"
+                aria-label={`Approvals for ${room.title}`}
+              >
+                <ApprovalPanel
+                  compact
+                  previews={runtime.approvalPreviews}
+                  approvals={approvals}
+                  audit={runtime.approvalAudit}
+                  sessionGrants={runtime.sessionApprovalGrants}
+                  approvalRules={runtime.approvalRules}
+                  editingApprovalId={
+                    approvals.some(
+                      (approval) => approval.id === runtime.editingApprovalId,
+                    )
+                      ? runtime.editingApprovalId
+                      : null
+                  }
+                  modificationDraft={runtime.approvalModificationDraft}
+                  pendingConfirmation={
+                    runtime.pendingApprovalConfirmation &&
+                    approvals.some(
+                      (approval) =>
+                        approval.id ===
+                        runtime.pendingApprovalConfirmation?.request.id,
+                    )
+                      ? runtime.pendingApprovalConfirmation
+                      : null
+                  }
+                  confirmationText={runtime.approvalConfirmationText}
+                  onDecision={runtime.requestApprovalDecision}
+                  onStartModify={runtime.startApprovalModify}
+                  onUpdateModification={runtime.setApprovalModificationDraft}
+                  onSaveModify={runtime.saveApprovalModify}
+                  onCancelModify={runtime.clearApprovalInteraction}
+                  onUpdateConfirmation={runtime.setApprovalConfirmationText}
+                  onConfirmDecision={runtime.confirmApprovalDecision}
+                  onCancelConfirmation={runtime.clearApprovalInteraction}
+                />
+              </div>
+            </Suspense>
+          ) : null}
+          {contextFailure && history ? (
+            <ContextRecoveryPanel
+              failure={contextFailure}
+              onPrepareHandoff={() => {
+                const text = buildConversationHandoff({
+                  thread: history.thread,
+                  messages: history.messages,
+                  failedPrompt: contextFailure.requestPrompt,
+                });
+                void onNew(text);
+              }}
+            />
+          ) : null}
+          {error || composer.error ? (
+            <p className="conversation-attention" role="alert">
+              {error || composer.error}
+            </p>
+          ) : null}
+        </div>
+      </div>
+      <div className="conversation-pane-composer">
+        {scroll.showLatest ? (
+          <button
+            type="button"
+            className="conversation-jump"
+            onClick={scroll.toLatest}
+          >
+            Jump to latest
+          </button>
+        ) : null}
+        <Composer
+          composerRef={composerRef}
+          fileInputRef={fileInput}
+          composerValue={composer.text}
+          onComposerChange={composer.setText}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
+          }}
+          voiceStatus={voice.state.status}
+          voiceMessage={voice.state.message}
+          voiceCanStart={voice.canStart}
+          voiceDisclosure={voice.processingDisclosure}
+          voiceReview={voice.review}
+          onAuthorizeVoice={() => void voice.authorize()}
+          onStartVoice={() => void voice.start()}
+          onStopVoice={() => void voice.stop()}
+          onCancelVoice={voice.cancel}
+          onDismissVoice={voice.dismiss}
+          onAttach={() => fileInput.current?.click()}
+          onImportRepository={() => void importRepository()}
+          addMenuOpen={addOpen}
+          onToggleAddMenu={() => { if (optionsRef.current) optionsRef.current.open = false; setAddOpen(!addOpen); }}
+          onOpenTool={() => onPlugins()}
+          onRunCommand={composer.setText}
+          onFileChange={(event) => {
+            importFiles([...(event.currentTarget.files ?? [])]);
+            event.currentTarget.value = "";
+          }}
+          models={models}
+          selectedModelId={model?.id ?? profile?.modelId ?? ""}
+          selectedModelLabel={model?.label ?? "Choose model"}
+          modelScope={recipient === "discussion" ? `${displayAgent.name} leads this discussion using this model. Other participants use their own saved models if invited.` : `Model for ${displayAgent.name}. Changes apply to this agent's future requests.`}
+          selectedReasoningEffort={profile?.reasoningEffort}
+          onSelectReasoningEffort={(effort) => {
+            if (profile)
+              runtime.updateAgent(profile.id, { reasoningEffort: effort });
+          }}
+          onSelectModel={(modelId) => {
+            if (profile) runtime.updateAgent(profile.id, { modelId });
+          }}
+          placeholder={
+            room.kind === "group"
+              ? "Message the group…"
+              : `Message ${displayAgent.name}…`
+          }
+          inThread
+          isWorking={running.length > 0}
+          allowQueue
+          onStop={() => {
+            const item =
+              [...running].reverse().find((item) => !item.parentId) ??
+              running.at(-1);
+            if (item)
+              void service
+                .stop(item.id)
+                .catch((error) => service.report(error));
+          }}
+          connectedConnectors={connected}
+          attachments={composer.attachments}
+          onRemoveAttachment={(id) =>
+            composer.setAttachments((current) =>
+              current.filter((item) => item.id !== id),
+            )
+          }
+          importStatus={pending ? "Saving message and context…" : undefined}
+          recipientControl={
+            room.kind === "group" ? (
+              <RecipientPicker
+                value={recipient}
+                onChange={composer.setRecipient}
+                options={[
+                  ...room.participants.map((member) => ({
+                    id: member.agentId,
+                    name:
+                      member.name +
+                      (member.agentId === room.facilitatorId ? " · Lead" : ""),
+                    disabled: !runtime.agents.some(
+                      (agent) => agent.id === member.agentId,
+                    ),
+                  })),
+                  { id: "discussion", name: "Team discussion", description: "The lead invites relevant contributions; each teammate uses its own model." },
+                ]}
+              />
+            ) : undefined
+          }
+        />
+      </div>
+    </div>
+  );
+}

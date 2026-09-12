@@ -196,7 +196,7 @@ export function AgentEditor({
               <ModelPicker models={models} selectedId={draft.modelId} label={models.find((model) => model.id === draft.modelId)?.label ?? (draft.modelId ? "Unavailable model" : "Automatic")}
                 effort={draft.reasoningEffort} onSelect={(modelId) => setDraft({ ...draft, modelId, reasoningEffort: undefined })}
                 onSelectEffort={(reasoningEffort) => setDraft({ ...draft, reasoningEffort })} open={modelOpen} onOpenChange={setModelOpen} allowAutomatic />
-              <small>Automatic uses an available connected model.</small>
+              <small>{draft.modelId ? "This model and reasoning setting apply to this agent's future requests." : "Automatic uses an available connected model."}</small>
             </div>
           </div>
 

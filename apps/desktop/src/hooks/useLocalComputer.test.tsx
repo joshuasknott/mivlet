@@ -1,4 +1,4 @@
-import type { PropsWithChildren } from "react";
+import { StrictMode, type PropsWithChildren } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,36 @@ const hook=()=>renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentI
 beforeEach(()=>{vi.resetAllMocks();mocks.load.mockResolvedValue(node());mocks.files.mockResolvedValue(null);mocks.preview.mockResolvedValue(null);mocks.stop.mockResolvedValue(undefined);mocks.cancel.mockResolvedValue(null);});
 afterEach(()=>{cleanup();vi.useRealTimers();});
 describe("native local computer",()=>{
+  it("loads capabilities after a development StrictMode remount without cancelling idle control",async()=>{
+    const Provider=wrapper();
+    const {result}=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:({children}:PropsWithChildren)=><StrictMode><Provider>{children}</Provider></StrictMode>});
+    await waitFor(()=>expect(result.current.node?.plugins?.computer).toBe(true));
+    await act(async()=>{await expect(result.current.prepareForTool("read-file")).resolves.toMatchObject({computerId:"computer-a"});});
+    expect(mocks.cancel).not.toHaveBeenCalled();
+  });
+  it("joins an initial status query when execution immediately requests capabilities",async()=>{
+    const pending=deferred<LocalComputerSnapshot>(); mocks.load.mockReturnValue(pending.promise);
+    const {result}=hook(); let prepared!:Promise<LocalComputerSnapshot>;
+    act(()=>{prepared=result.current.prepareForTool("read-file");});
+    expect(mocks.load).toHaveBeenCalledOnce();
+    await act(async()=>{pending.resolve(node());expect(await prepared).toMatchObject({plugins:{computer:true}});});
+    await waitFor(()=>expect(result.current.node?.plugins?.computer).toBe(true));
+  });
+  it("distinguishes missing capabilities from a disabled plugin",async()=>{
+    const {result}=hook();await waitFor(()=>expect(result.current.node).not.toBeNull());
+    mocks.load.mockResolvedValue(null);
+    await expect(result.current.prepareForTool("read-file")).rejects.toThrow("Computer status is unavailable");
+    mocks.load.mockResolvedValue(node({plugins:{computer:false}}));
+    await expect(result.current.prepareForTool("read-file")).rejects.toThrow("Enable Computer Use");
+  });
+  it("shows a manual refresh failure and recovers when the runtime responds",async()=>{
+    const {result}=hook();await waitFor(()=>expect(result.current.node).not.toBeNull());
+    mocks.load.mockRejectedValueOnce(new Error("The native runtime has disconnected."));
+    await act(async()=>{await expect(result.current.refresh()).rejects.toThrow("native runtime has disconnected");});
+    expect(result.current.node).toBeNull();expect(result.current.error).toBe("The native runtime has disconnected.");
+    await act(async()=>{await result.current.refresh();});
+    expect(result.current.node?.plugins?.computer).toBe(true);expect(result.current.error).toBeNull();
+  });
   it("backs off idle status reads to thirty seconds without capturing images",async()=>{
     vi.useFakeTimers();hook();await act(async()=>{await vi.advanceTimersByTimeAsync(50);});expect(mocks.load).toHaveBeenCalledOnce();
     await act(async()=>{await vi.advanceTimersByTimeAsync(29_000);});expect(mocks.load).toHaveBeenCalledOnce();

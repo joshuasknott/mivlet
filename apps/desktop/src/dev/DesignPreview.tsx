@@ -39,7 +39,6 @@ import { resolveNativeProvider } from "@fable/connectors/backends/native";
 import { additionalNativeProviderCatalog } from "@fable/connectors/backends/additional-native";
 import { OnboardingPreview } from "./OnboardingPreview";
 import { AgentAvatarPreview } from "./AgentAvatarPreview";
-import { ProjectPreview } from "./ProjectPreview";
 import { VoiceConversationPreview } from "./VoiceConversationPreview";
 import "../styles.css";
 
@@ -163,14 +162,6 @@ function DesignPreview() {
       pinned: true,
     },
   ]);
-  const [previewConversations, setPreviewConversations] = useState(() =>
-    new URLSearchParams(window.location.search).get("view") === "conversations"
-      ? [
-          { id: "preview-one", title: "Plan my week", time: "17:04" },
-          { id: "preview-two", title: "Find my latest email", time: "16:32" },
-        ]
-      : [],
-  );
   const [showApproval, setShowApproval] = useState(
     new URLSearchParams(window.location.search).get("view") === "approval",
   );
@@ -549,21 +540,10 @@ function DesignPreview() {
         ) : null}
         {rail && page === "chat" && !artifactPreview ? (
           <LiveWorkRail
-            conversations={previewConversations}
-            onDeleteConversation={(id) =>
-              setPreviewConversations((items) =>
-                items.filter((item) => item.id !== id),
-              )
-            }
             agentName={agent.name}
             localComputer={localComputer}
             hostedComputer={hostedComputer}
             onClose={() => { setRail(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-work-panel-toggle]")?.focus()); }}
-            onNewConversation={() => {
-              setMessage("");
-              composerRef.current?.focus();
-            }}
-            onSelectConversation={noop}
           />
         ) : null}
         <AgentEditor
@@ -679,8 +659,6 @@ previewRoot.render(
       <AgentAvatarPreview />
     ) : previewView === "voice" ? (
       <VoiceConversationPreview />
-    ) : previewView === "projects" ? (
-      <ProjectPreview />
     ) : (
       <DesignPreview />
     )}

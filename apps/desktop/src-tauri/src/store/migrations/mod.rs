@@ -174,6 +174,7 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // 40 -> 41: add empty member-private shared project rooms and their
             // run-author ledger. Legacy project rows are deliberately ignored.
             40 => conn.execute_batch(crate::store::schema::SCHEMA_V40_TO_V41)?,
+            41 => conn.execute_batch(crate::store::schema::SCHEMA_V41_TO_V42)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."

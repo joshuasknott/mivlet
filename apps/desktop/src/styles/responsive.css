@@ -115,7 +115,7 @@
     gap: 7px;
   }
 
-  .composer-control-anchor {
+  .composer-control-anchor:not(.composer-control-anchor--model) {
     position: static;
   }
 
@@ -150,6 +150,7 @@
   .composer-control-anchor--model .composer-menu {
     right: 12px;
     left: 12px;
+    bottom: calc(100% + 6px);
   }
 
   .composer-menu {
@@ -163,7 +164,7 @@
     z-index: 20;
   }
 
-  .composer-glow--new-thread .composer-menu {
+  .composer-glow--new-thread .composer-menu:not(.model-picker) {
     top: auto;
     bottom: 104px;
     border-radius: 16px;
@@ -243,7 +244,7 @@
 
 @media (max-width: 700px) {
   .desktop-frame--agents { display: grid; overflow: hidden; }
-  .desktop-frame--agents .composer-preferences-anchor, .desktop-frame--agents .composer-control-anchor { position: static; }
+  .desktop-frame--agents .composer-preferences-anchor, .desktop-frame--agents .composer-control-anchor:not(.composer-control-anchor--model) { position: static; }
   .desktop-frame--agents .composer { position: relative; }
   .desktop-frame--agents .composer-preferences { position: absolute; inset: auto 0 calc(100% + 8px); width: auto; max-height: min(65dvh, 500px); }
   .desktop-frame--agents .composer-preferences .composer-menu { position: static; inset: auto; width: 100%; }

@@ -20,6 +20,9 @@ export interface ConversationTurn {
 
 /** Presentation only. Tool labels never confer execution authority. */
 const toolLabels: Record<string, [string, string]> = {
+  "teammate-assign": ["Handing work to a teammate", "Assigned to a teammate"],
+  "project-record": ["Recording project context", "Recorded project context"],
+  "team-await-user": ["Pausing for your input", "Waiting for your input"],
   "google-drive-read": ["Reading Google Drive", "Read Google Drive"],
   "gmail-read": ["Reading Gmail", "Read Gmail"],
   "google-calendar-read": ["Reading Google Calendar", "Read Google Calendar"],
@@ -156,4 +159,5 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
 export const CONVERSATION_STYLE_INSTRUCTIONS = `Conversation style:
 Keep the conversation calm, direct and concise. For multi-step work, briefly explain your approach before acting. Send another short update only when you have a useful finding, a material decision, a delay to explain, or need the user's help. Do not narrate each tool call; Mivlet displays recorded actions separately. For simple questions, answer directly.
 Summarize relevant decisions and evidence without exposing private chain-of-thought or inventing reasoning traces. Never claim an action succeeded before its result confirms it.
+Preserve the units and currency stated in source data. If no currency is specified, report the number without adding a currency symbol; ask only if a currency-dependent decision requires it. Do not invent file creation or read-back evidence. A file is delivered only when a successful publication tool returns a real artifact, or an available file tool verifies its path and contents. If file tools are unavailable, provide the content in the answer and state that no file was created.
 Finish with the result, any files produced, and material limitations. If a tool failed, distinguish recovered attempts from work you could not complete. If a source is paginated or text is shortened, state the coverage accurately; never imply you read the entire source from one partial page. Do not repeatedly parse or repair tool output: use its documented fields and continuation token, or report the concrete limitation. Use readable Markdown when useful. When interrupted, explain what is complete and what remains. Do not repeat consequential actions with an uncertain outcome without checking their current state. Ask for sign-in or control only when needed and explain the next action.`;

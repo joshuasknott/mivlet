@@ -197,6 +197,7 @@ pub fn conversation_append_message(input: AppendMessage) -> Result<message::Mess
     let at = input.checkpointed_at.unwrap_or_else(now);
     store
         .transaction(|tx| {
+            crate::collaboration::ensure_run_current(tx, store, input.run_id.as_deref())?;
             message::append(
                 tx,
                 store,
@@ -227,6 +228,7 @@ pub fn conversation_revise_message(input: ReviseMessage) -> Result<message::Mess
     let at = input.checkpointed_at.unwrap_or_else(now);
     store
         .transaction(|tx| {
+            crate::collaboration::ensure_run_current(tx, store, input.run_id.as_deref())?;
             message::revise(
                 tx,
                 store,
