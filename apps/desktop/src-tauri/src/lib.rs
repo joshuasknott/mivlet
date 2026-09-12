@@ -2,7 +2,7 @@
 //!
 //! The native shell owns local encrypted storage, provider and connector
 //! boundaries, approvals, conversations, and optional local or hosted
-//! computers. Product orchestration lives nowhere in this crate.
+//! computers, and durable coordination authority.
 
 #![allow(
     clippy::large_enum_variant,
@@ -20,6 +20,7 @@ mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
 mod codex_app_server;
+mod collaboration;
 mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
@@ -88,6 +89,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
+            if let Some(store) = store::try_global() {
+                collaboration::recover(store).map_err(|error| {
+                    std::io::Error::other(format!("Coordination recovery failed: {error:?}"))
+                })?;
+            }
             // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
             let _ = connector_auth::provision_connector_configuration();
             let computers =
@@ -145,6 +151,8 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
             local_projects::local_project_create,
+            collaboration::collaboration_load,
+            collaboration::collaboration_command,
             local_projects::local_project_list,
             local_projects::local_project_update,
             local_projects::local_project_archive,

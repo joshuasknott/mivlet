@@ -95,6 +95,7 @@ impl LocalScheduleTrigger {
 pub struct CreateLocalScheduleRequest {
     pub workspace_id: String,
     pub id: String,
+    pub project_id: Option<String>,
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
@@ -110,6 +111,7 @@ pub struct UpdateLocalScheduleRequest {
     pub workspace_id: String,
     pub id: String,
     pub expected_revision: i64,
+    pub project_id: Option<String>,
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
@@ -150,6 +152,7 @@ struct SchedulePayload {
     prompt_revision: i64,
     timezone: String,
     trigger: LocalScheduleTrigger,
+    project_id: Option<String>,
     agent_id: String,
     provider_id: String,
     model: String,
@@ -164,6 +167,7 @@ struct OccurrencePayload {
     prompt_revision: i64,
     timezone: String,
     trigger: LocalScheduleTrigger,
+    project_id: Option<String>,
     agent_id: String,
     provider_id: String,
     model: String,
@@ -177,6 +181,7 @@ struct OccurrencePayload {
 #[serde(rename_all = "camelCase")]
 pub struct LocalSchedule {
     pub id: String,
+    pub project_id: Option<String>,
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
@@ -240,6 +245,7 @@ pub struct LocalScheduleClaim {
     pub scheduled_for: String,
     pub claim_token: String,
     pub lease_expires_at: String,
+    pub project_id: Option<String>,
     pub agent_id: String,
     pub provider_id: String,
     pub model: String,
@@ -483,6 +489,7 @@ pub fn local_schedule_dispatch_claim(
 
 #[tauri::command]
 pub fn local_schedule_dispatch_bind(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     coordinator: tauri::State<'_, LocalScheduleDispatchCoordinator>,
     request: BindLocalScheduleDispatchRequest,
@@ -513,6 +520,13 @@ pub fn local_schedule_dispatch_bind(
         Utc::now(),
     )
     .map_err(|error| error.to_string())?;
+    record_project_occurrence(
+        app,
+        &request.workspace_id,
+        &request.occurrence_id,
+        &request.attempt_id,
+        false,
+    )?;
     dispatch.attempt_id = Some(request.attempt_id);
     dispatch.lease_expires_at = lease.clone();
     Ok(lease)
@@ -556,6 +570,7 @@ pub fn local_schedule_dispatch_renew(
 
 #[tauri::command]
 pub fn local_schedule_dispatch_finish(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     coordinator: tauri::State<'_, LocalScheduleDispatchCoordinator>,
     request: FinishLocalScheduleDispatchRequest,
@@ -588,6 +603,13 @@ pub fn local_schedule_dispatch_finish(
         Utc::now(),
     )
     .map_err(|error| error.to_string())?;
+    record_project_occurrence(
+        app,
+        &request.workspace_id,
+        &request.occurrence_id,
+        &request.attempt_id,
+        true,
+    )?;
     *active = None;
     Ok(())
 }
@@ -637,6 +659,46 @@ pub fn local_schedule_dispatch_abandon(
         .map_err(|error| error.to_string())?;
     *active = None;
     Ok(())
+}
+
+fn record_project_occurrence(
+    app: tauri::AppHandle,
+    workspace: &str,
+    occurrence: &str,
+    run: &str,
+    finished: bool,
+) -> Result<(), String> {
+    let profiles = crate::collaboration::native_profiles(app, workspace)?;
+    let store = global_store()?;
+    store
+        .transaction(|conn| {
+            let scope = authorized_scope::resolve(conn, Some(workspace), None, ScopeAccess::Write)?;
+            let row = repo::get_occurrence(conn, store, &scope.private, occurrence)?
+                .ok_or_else(|| StoreError::Invalid("The occurrence is unavailable.".into()))?;
+            let payload: OccurrencePayload = serde_json::from_value(row.payload)
+                .map_err(|_| StoreError::Invalid("The occurrence context is invalid.".into()))?;
+            if let Some(project) = payload.project_id {
+                let time = timestamp(Utc::now());
+                if finished {
+                    crate::collaboration::finish_schedule(
+                        conn, store, &scope, &profiles, run, &time,
+                    )?;
+                } else {
+                    crate::collaboration::bind_schedule(
+                        conn,
+                        store,
+                        &scope,
+                        &profiles,
+                        &project,
+                        &payload.agent_id,
+                        run,
+                        &time,
+                    )?;
+                }
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn validate_dispatch_identity(
@@ -692,6 +754,13 @@ fn create_at(
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
     validate_prompt(&request.prompt)?;
+    crate::collaboration::validate_schedule_project(
+        tx,
+        store,
+        scope,
+        request.project_id.as_deref(),
+        &request.agent_id,
+    )?;
     if request.status == LocalScheduleStatus::Cancelled {
         return Err(StoreError::Invalid(
             "A new local schedule cannot start cancelled.".into(),
@@ -716,6 +785,7 @@ fn create_at(
         prompt_revision: 1,
         timezone: request.timezone,
         trigger: request.trigger,
+        project_id: request.project_id.clone(),
         agent_id: request.agent_id.clone(),
         provider_id: request.provider_id.clone(),
         model: request.model.clone(),
@@ -747,6 +817,13 @@ fn update_at(
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
     validate_prompt(&request.prompt)?;
+    crate::collaboration::validate_schedule_project(
+        tx,
+        store,
+        scope,
+        request.project_id.as_deref(),
+        &request.agent_id,
+    )?;
     validate_trigger(&request.trigger)?;
     let mut row = repo::get_schedule(tx, store, &scope.private, &request.id)?
         .ok_or_else(|| StoreError::Invalid("The local schedule was not found.".into()))?;
@@ -776,6 +853,7 @@ fn update_at(
         prompt_revision,
         timezone: request.timezone,
         trigger: request.trigger,
+        project_id: request.project_id.clone(),
         agent_id: request.agent_id.clone(),
         provider_id: request.provider_id.clone(),
         model: request.model.clone(),
@@ -897,6 +975,7 @@ fn claim_due_after_capacity_matching(
             prompt_revision: schedule.prompt_revision,
             timezone: schedule.timezone.clone(),
             trigger: schedule.trigger.clone(),
+            project_id: schedule.project_id.clone(),
             agent_id: schedule.agent_id.clone(),
             provider_id: schedule.provider_id.clone(),
             model: schedule.model.clone(),
@@ -941,6 +1020,7 @@ fn claim_due_after_capacity_matching(
             scheduled_for: timestamp(slot.instant),
             claim_token,
             lease_expires_at,
+            project_id: schedule.project_id,
             agent_id: schedule.agent_id,
             provider_id: schedule.provider_id,
             model: schedule.model,
@@ -1040,6 +1120,7 @@ fn schedule_from_row(row: ScheduleRow) -> crate::store::Result<LocalSchedule> {
     let payload = decode_schedule_payload(&row)?;
     Ok(LocalSchedule {
         id: row.id,
+        project_id: payload.project_id,
         agent_id: row.agent_id,
         provider_id: payload.provider_id,
         model: payload.model,
@@ -1440,6 +1521,7 @@ mod tests {
         CreateLocalScheduleRequest {
             workspace_id: "workspace-1".into(),
             id: "schedule-1".into(),
+            project_id: None,
             agent_id: "agent-research".into(),
             provider_id: "openai".into(),
             model: "gpt-5".into(),
@@ -2133,6 +2215,7 @@ mod tests {
             workspace_id: "workspace-1".into(),
             id: created.id.clone(),
             expected_revision: created.revision,
+            project_id: created.project_id.clone(),
             agent_id: created.agent_id.clone(),
             provider_id: created.provider_id.clone(),
             model: created.model.clone(),

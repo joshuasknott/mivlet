@@ -9,7 +9,30 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 41;
+pub const CURRENT_SCHEMA_VERSION: u32 = 42;
+
+/// Typed coordination records use one encrypted repository. Relationship keys
+/// are query-safe; prompts, names, membership, provenance and layout are sealed.
+/// Existing v41 projects, threads, files and immutable authors are untouched.
+pub const SCHEMA_V41_TO_V42: &str = r#"
+CREATE TABLE IF NOT EXISTS collaboration_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('conversation','author','team','work','fact','layout','receipt')),
+  id TEXT NOT NULL,
+  conversation_id TEXT REFERENCES thread(id) ON DELETE CASCADE,
+  project_id TEXT,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,kind,id),
+  FOREIGN KEY(workspace_id,owner_subject,project_id)
+    REFERENCES local_project(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_collaboration_conversation
+  ON collaboration_record(workspace_id,owner_subject,conversation_id,kind);
+CREATE INDEX IF NOT EXISTS idx_collaboration_project
+  ON collaboration_record(workspace_id,owner_subject,project_id,kind);
+"#;
 
 /// Forward schema step `v40 -> v41`: adds the small member-private shared
 /// project room and its immutable run-author ledger. It does not reuse or infer

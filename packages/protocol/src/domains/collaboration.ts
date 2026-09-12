@@ -1,0 +1,150 @@
+/** Installation-private coordination. These records grant no tool authority. */
+export type WorkStatus = "queued" | "running" | "waiting" | "blocked" | "awaiting-approval" | "awaiting-user" | "completed" | "failed" | "cancelled";
+
+export interface ConversationParticipant {
+  agentId: string;
+  /** Name retained when the profile is later removed or renamed. */
+  name: string;
+}
+
+export interface ConversationRoom {
+  id: string;
+  workspaceId: string;
+  kind: "direct" | "group";
+  title: string;
+  projectId?: string;
+  facilitatorId?: string;
+  participants: ConversationParticipant[];
+  revision: number;
+  generation: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConversationAuthor extends ConversationParticipant {
+  runId: string;
+  conversationId: string;
+}
+
+export interface ProjectTeam {
+  projectId: string;
+  leadAgentId?: string;
+  participantIds: string[];
+  revision: number;
+}
+
+export interface WorkOutput {
+  runId: string;
+  conversationId: string;
+  text: string;
+  /** An agent report is evidence of the report, not a verified external outcome. */
+  evidence: "agent-report";
+  createdAt: string;
+}
+
+export interface CollaborationWorkItem {
+  permissionMode: import("./approvals").PermissionMode;
+  id: string;
+  workspaceId: string;
+  conversationId: string;
+  projectId?: string;
+  rootId: string;
+  parentId?: string;
+  agentId: string;
+  agentName: string;
+  prompt: string;
+  /** Original user instruction retained separately from delegated contributions. */
+  userRequest: string;
+  status: WorkStatus;
+  reason?: string;
+  dependencies: string[];
+  waitingFor: string[];
+  prerequisites: string[];
+  awaitingUser: boolean;
+  generation: number;
+  conversationGeneration: number;
+  contextRevision: number;
+  depth: number;
+  turnCount: number;
+  tokenUsage: number;
+  maxTurns: number;
+  maxTokens: number;
+  runIds: string[];
+  currentRunId?: string;
+  /** Captured route is immutable for an admitted assignment. */
+  modelOptionId: string;
+  outputs: WorkOutput[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProjectFact {
+  id: string;
+  projectId: string;
+  kind: "fact" | "decision";
+  text: string;
+  confidence: "confirmed" | "inference" | "external-observation";
+  status: "current" | "superseded" | "stale" | "forgotten";
+  conversationId: string;
+  runId?: string;
+  source: string;
+  supersedesId?: string;
+  createdAt: string;
+}
+
+export type WorkspaceView = {
+  id: string;
+  conversationId: string;
+  kind: "conversation";
+} | {
+  id: string;
+  conversationId: string;
+  kind: "artifact";
+  agentId: string;
+  output: string;
+  title: string;
+};
+
+export interface ConversationLayout {
+  version: 1;
+  panes: [string[], string[]];
+  views: WorkspaceView[];
+  active: [string | null, string | null];
+  activePane: 0 | 1;
+  split: boolean;
+  ratio: number;
+  closed: WorkspaceView[];
+}
+
+export interface CollaborationSnapshot {
+  conversations: ConversationRoom[];
+  authors: ConversationAuthor[];
+  teams: ProjectTeam[];
+  work: CollaborationWorkItem[];
+  facts: ProjectFact[];
+  layout: ConversationLayout | null;
+}
+
+/** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
+export type CollaborationCommand =
+  | { action: "create-conversation"; id: string; title: string; kind: ConversationRoom["kind"]; participantIds: string[]; facilitatorId: string; projectId?: string }
+  | { action: "update-conversation"; id: string; expectedRevision: number; title: string; participantIds: string[]; facilitatorId: string; shareHistory: boolean }
+  | { action: "place-conversation"; id: string; expectedRevision: number; projectId: string; shareHistory: true }
+  | { action: "update-team"; projectId: string; expectedRevision: number; leadAgentId: string; participantIds: string[]; shareHistory: boolean }
+  | { action: "start-work"; id: string; conversationId: string; agentId: string; prompt: string; discussion: boolean }
+  | { action: "bind-work"; id: string; generation: number; runId: string }
+  | { action: "check-work"; id: string; generation: number; runId: string }
+  | { action: "finish-work"; id: string; generation: number; runId: string; status: "completed" | "failed" | "cancelled" | "awaiting-user"; reason?: string }
+  | { action: "stop-work"; id: string }
+  | { action: "stop-project"; projectId: string }
+  | { action: "continue-work"; id: string; expectedGeneration: number; reconcile: true }
+  | { action: "work-status"; id: string; generation: number; status: "awaiting-approval" | "running" | "failed"; reason?: string }
+  | { action: "agent-command"; id: string; generation: number; runId: string; callId: string; command: CollaborationAgentCommand }
+  | { action: "save-fact"; projectId: string; conversationId: string; id: string; kind: ProjectFact["kind"]; text: string; source: string; supersedesId?: string }
+  | { action: "change-fact"; id: string; projectId: string; status: "stale" | "forgotten" }
+  | { action: "save-layout"; layout: ConversationLayout };
+
+export type CollaborationAgentCommand =
+  | { kind: "delegate"; agentId: string; prompt: string; title: string; dependencies: string[]; focused: boolean }
+  | { kind: "record-fact"; text: string; factKind: ProjectFact["kind"]; source: string; confidence: "inference" | "external-observation"; supersedesId?: string }
+  | { kind: "await-user"; reason: string };
