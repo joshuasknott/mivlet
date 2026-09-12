@@ -58,7 +58,10 @@ export function attachmentMessageMetadata(
 
 export async function prepareExecutionAttachments(
   attachments: readonly ComposerAttachment[],
-  localComputer: ReturnType<typeof useLocalComputer>,
+  localComputer: Pick<
+    ReturnType<typeof useLocalComputer>,
+    "refresh" | "prepareForTool" | "refreshFiles"
+  >,
   workspaceId: string,
   agentId: string,
   isCurrent: () => boolean,
@@ -71,8 +74,20 @@ export async function prepareExecutionAttachments(
     (attachment) =>
       attachment.transientBytes && !attachment.type.startsWith("image/"),
   );
-  if (!stageable.length)
-    return { attachments: [...attachments], node: localComputer.node };
+  if (!stageable.length) {
+    // Headless workers mount immediately before dispatch. The hook's first
+    // render may still be loading, so resolve capabilities for this execution.
+    const node = await localComputer.refresh().catch(() => null);
+    return {
+      attachments: [...attachments],
+      node:
+        isCurrent() &&
+        node?.workspaceId === workspaceId &&
+        node.agentId === agentId
+          ? node
+          : null,
+    };
+  }
   let node;
   try {
     node = await localComputer.prepareForTool("read-file");

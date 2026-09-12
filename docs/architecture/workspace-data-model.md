@@ -10,6 +10,13 @@ must not replace that local authority implicitly.
   require a project.
 - A thread belongs to one workspace and may point to one project.
 - Messages and their immutable revisions belong to a thread.
+- A named agent profile is independent of its private conversation IDs. A
+  conversation record adds selected participants and a facilitator to a thread.
+  A project team assigns its lead to an existing agent and owns multiple related
+  conversations. Work and facts persist separately from chat history.
+- View layout stores conversation and artifact references under the current
+  workspace member. Closing, splitting or restoring a view does not dispatch or
+  cancel work. App-lifetime execution retains its own exact conversation scope.
 - A `run` row is an internal execution attempt for one provider turn. It exists
   for interruption, cancellation, approval binding, and safe retry; it is not a
   top-level product object or navigation destination.
@@ -40,6 +47,13 @@ must not replace that local authority implicitly.
 
 The `default` workspace ID is local compatibility state, not an authentication
 or remote-tenancy rule.
+
+Group context includes only its shared transcript, explicit references and
+bounded project records; it excludes private general-memory retrieval. Adding
+participants or placing a private conversation into a project requires explicit
+history sharing. Confirmed corrections invalidate related active work. Native
+work generations and immutable author records fence provider callbacks. See the
+[coordination decision](../adr/2026-09-12-teammates-conversations-projects.md).
 
 ## Repository guidance
 

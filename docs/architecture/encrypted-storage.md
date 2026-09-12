@@ -19,11 +19,13 @@ credential-store service and is never silently replaced if missing or invalid.
 
 ## Current schema
 
-Schema v40 retains the local conversation product:
+Schema v42 retains the local conversation product:
 
 - workspace, optional project context, threads, messages, and message revisions;
 - the minimal internal `run` execution attempt plus tool calls and approvals;
 - member-private local schedule definitions and an encrypted occurrence ledger;
+- member-private conversation membership, immutable authors, project teams,
+  work items, fact provenance and view layout in `collaboration_record`;
 - audit history and preferences;
 - provider and Connection metadata, connector cache/settings, and migration
   quarantine;
@@ -44,6 +46,15 @@ details stay encrypted; query columns contain only private scope, opaque route
 and agent ids, states, revisions, timestamps, and one-way claim/slot
 fingerprints. A stored or claimed occurrence is not evidence that execution
 started or completed.
+
+The v41 to v42 migration adds `collaboration_record` without rewriting existing
+threads, message revisions, attachments, project references or authors. Native
+adoption preserves each old project's original thread. New rows seal their
+payload with AAD `collaboration:{workspace}:{owner}:{kind}:{id}`; only opaque
+scope, kind and relationship keys remain queryable. Conversation and project
+deletion cascade to their records. Full database backups and local-data deletion
+include the table; plaintext knowledge exports and remote sync do not. No
+credentials, approval grants or restored computer leases enter these records.
 
 Startup fails closed when the database is structurally corrupt, has unresolved
 foreign-key violations, or carries a schema newer than the binary understands.

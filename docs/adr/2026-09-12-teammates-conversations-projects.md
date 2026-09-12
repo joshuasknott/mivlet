@@ -1,6 +1,7 @@
 # Teammates, conversations, and coordinated local projects
 
-Status: Implementation in progress. Verification is recorded in the feature PR.
+Status: Integrated locally. PR #49 remains draft pending the compressed bundle
+budget and remaining live artifact acceptance. No deployment or merge is included.
 
 ## Decision
 
@@ -30,10 +31,23 @@ private conversations, or access another agent's computer files.
 Assignments and transitions persist before dispatch. Native checks bind attempts to
 the exact live work item and immutable author, reject duplicate dispatch and stale
 callbacks, and enforce membership, dependency, depth, turn and usage limits. Provider
-capacity queues are visible; an agent has one active execution at a time. Native
-Windows control retains its installation-wide exact window lease. Stop invalidates
-work before cancellation and prevents follow-up dispatch. Work in other conversations
+capacity queues are visible; an agent has one active execution at a time. The app
+admits three executions globally and at most two on a bridged Codex/native API
+provider. Other provider-owned routes serialize; group tools require the existing
+Codex or native API response bridge. Native Windows control retains its
+installation-wide exact window lease. Stop freezes dispatch and streams, revokes
+computer control, flushes accepted output and then invalidates native generations.
+Late callbacks cannot dispatch follow-up work. Work in other conversations
 continues. The lead is free to accept steering while its children execute.
+
+Each exchange permits twelve execution turns, twelve work items, four children
+per assignment and delegation depth two. Each execution uses at most six provider
+steps and requests a 2,048-token output ceiling where the provider supports it.
+The root stops further dispatch after 128,000 reported input/output tokens; this
+is an admission budget, not a billing guarantee for an already running request.
+Unknown usage reserves 8,000 tokens. An explicit continuation retains usage and
+adds six execution turns and 128,000 tokens. A continuation must use saved results
+and reconcile uncertain effects instead of repeating prior actions.
 
 ## Context and durable records
 
@@ -80,6 +94,31 @@ Mivlet needs only two panes, accessible reorder/move/resize controls, and quiet 
 A local reducer avoids adding arbitrary docking, popouts, module configuration and
 bundle weight. Both approaches are browser DOM compatible with Tauri WebView2; native
 acceptance must still be measured. Existing performance ceilings are unchanged.
+
+## Acceptance evidence (2026-09-12)
+
+The native development app used a separate encrypted copy of the local workspace;
+its enabled schedules were paused before launch. The installed app and original
+checkout were preserved. These checks are not signed-installer acceptance.
+
+| Scenario | Evidence |
+| --- | --- |
+| Separate private conversations | Two real Codex conversations with the same agent retained different history, responses and unsent drafts. A marker in A was absent from B. Closing/reopening A retained its draft. |
+| Standalone group | Chief of Staff assigned Researcher a capacity calculation, received the actual provider result and synthesized 72 places and 8 waiting-list places. Product was not dispatched. |
+| Project coordination | Chief delegated capacity and catering to Researcher and Product in distinct focused conversations. Both real executions returned results; the lead synthesized them and requested the unresolved venue dependency. A user steering message was accepted. |
+| Shared correction | A user-confirmed budget from the catering conversation was superseded from GBP500 to GBP450. The lead's next real response compared the current decision with the saved GBP482 result and reported a GBP32 shortfall. |
+| Views and layout | Native tabs, keyboard reorder, duplicate conversation views, pointer/keyboard divider resize, close/reopen and reload were inspected. Duplicate views shared one draft/history. Narrow native windows showed one pane and accessible navigation, then restored the desktop split. |
+| Hidden work and Stop | A real running response continued after its last tab closed, stayed discoverable in Activity and cancelled from its Stop button. Reopening showed the stopped response without a follow-up run. |
+| Recovery and failure | Native restart restored a paused exchange and explicit continuation completed it. Deterministic fixtures cover interruption during active work, no replay, denial, budgets, resource contention, missing providers and stale callbacks. |
+| Migration and membership | Native adoption retained legacy history in the encrypted QA copy. Deterministic v41-to-v42 fixtures verify original ciphertext/thread/authorship preservation; membership and scope fixtures reject stale/cross-conversation work. |
+| Artifact preview and schedules | Scoped artifact preview and project schedule binding have deterministic coverage. Live artifact publication was unavailable because Computer Use was disabled in the QA profile; the model and inspector reported that prerequisite. No always-on or hosted execution was tested. |
+
+The final production build is 1,078,721 raw JS/CSS bytes and 311,064 gzip bytes.
+Raw total, initial entry (396,191 bytes), CSS and named route ceilings pass. The
+compressed total exceeds the unchanged 300,382-byte ceiling by 10,682 bytes
+(10.4 KiB), so full performance readiness is not claimed. Superseded global
+composer, sequential project and computer-rail conversation code was removed;
+no dependency, licence exception or budget increase was added to pass the gate.
 
 ## References
 

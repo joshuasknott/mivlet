@@ -36,6 +36,7 @@
   min-height: 0;
 }
 .conversation-pane {
+  container: conversation-pane / inline-size;
   min-width: 0;
   min-height: 0;
   display: flex;
@@ -304,6 +305,34 @@
 }
 .conversation-pane-composer .composer-control-group {
   min-width: 0;
+}
+@container conversation-pane (max-width: 480px) {
+  .conversation-pane-messages {
+    padding-inline: 16px;
+  }
+  .conversation-pane-composer {
+    padding-inline: 12px;
+  }
+  .conversation-pane-composer .composer-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: end;
+  }
+  .conversation-pane-composer .composer-control-group {
+    flex-wrap: wrap;
+    max-width: 100%;
+  }
+  .conversation-pane-composer .composer-control-anchor,
+  .conversation-pane-composer .composer-model {
+    max-width: 100%;
+  }
+  .team-recipient {
+    flex-basis: 100%;
+  }
+  .team-recipient select {
+    min-width: 0;
+    max-width: calc(100% - 22px);
+  }
 }
 .conversation-sharing {
   text-align: center;

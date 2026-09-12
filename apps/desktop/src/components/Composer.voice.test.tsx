@@ -142,10 +142,11 @@ describe("Composer dictation controls", () => {
         name: `State: ${status}`
       });
       expect(explanation).toHaveAttribute("aria-disabled", "true");
-      expect(explanation).toHaveAttribute(
-        "aria-describedby",
-        "dictation-status dictation-disclosure"
-      );
+      const descriptions = explanation.getAttribute("aria-describedby")!.split(" ");
+      expect(descriptions).toHaveLength(2);
+      expect(descriptions.map(id => document.getElementById(id)?.textContent)).toEqual([
+        `State: ${status}`, "Mivlet does not retain raw audio."
+      ]);
       expect(screen.getByLabelText("Universal composer")).toBeEnabled();
     }
   );

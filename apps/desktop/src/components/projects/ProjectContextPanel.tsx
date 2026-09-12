@@ -184,6 +184,7 @@ export function ProjectContextPanel({
             Files & references <small>{files.length}</small>
           </summary>
           <ProjectFiles
+            compact
             files={files}
             eligibleSources={references.map((source) => ({
               sourceId: source.id,

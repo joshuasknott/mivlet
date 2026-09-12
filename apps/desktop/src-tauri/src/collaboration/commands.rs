@@ -309,7 +309,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
             work::wake_waiters(ctx)?;
         }
-        Command::AgentCommand {
+        Command::AgentAction {
             id,
             generation,
             run_id,

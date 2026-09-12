@@ -338,9 +338,12 @@ export function PaneDivider({
       }}
       onPointerMove={(event) => {
         if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
-        const bounds =
-          event.currentTarget.parentElement?.getBoundingClientRect();
-        if (bounds) onResize((event.clientX - bounds.left) / bounds.width);
+        // The immediate wrapper uses display:contents and has no layout box.
+        const bounds = event.currentTarget
+          .closest(".conversation-panes")
+          ?.getBoundingClientRect();
+        if (bounds && bounds.width > 0)
+          onResize((event.clientX - bounds.left) / bounds.width);
       }}
       onPointerUp={(event) => {
         if (event.currentTarget.hasPointerCapture(event.pointerId))

@@ -6,8 +6,6 @@ import { File } from "@phosphor-icons/react/dist/csr/File";
 import { FolderOpen } from "@phosphor-icons/react/dist/csr/FolderOpen";
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { NativeComputerPanel } from "./NativeComputerPanel";
 import type { useLocalComputer } from "../../hooks/useLocalComputer";
 import { useRef, useState, type FormEvent } from "react";
@@ -19,12 +17,6 @@ export function LiveWorkRail({
   localComputer,
   hostedComputer,
   screenPreviewUrl,
-  conversations = [],
-  activeConversationId,
-  conversationBusy = false,
-  onNewConversation,
-  onSelectConversation,
-  onDeleteConversation,
   onClose
 }: {
   agentName: string;
@@ -49,12 +41,6 @@ export function LiveWorkRail({
     onRefreshBrowser: () => Promise<unknown>;
   };
   screenPreviewUrl?: string;
-  conversations?: { id: string; title: string; time: string }[];
-  activeConversationId?: string;
-  conversationBusy?: boolean;
-  onNewConversation?: () => void;
-  onSelectConversation?: (id: string) => void;
-  onDeleteConversation?: (id: string) => void;
   onClose: () => void;
 }) {
   const [screenOpen, setScreenOpen] = useState(false);
@@ -194,11 +180,6 @@ export function LiveWorkRail({
         ) : null}
         {hostedComputer.browserError ? <small className="hosted-browser-launcher__error" role="alert">{hostedComputer.browserError}</small> : null}
       </section> : null}
-
-      <section className="rail-conversations" aria-labelledby="rail-conversations-title">
-        <header><h2 id="rail-conversations-title">Conversations</h2><button type="button" onClick={() => onNewConversation?.()} disabled={conversationBusy || !onNewConversation} aria-label="New conversation"><Plus size={18} /></button></header>
-        {conversations.length ? <ul>{conversations.map((conversation) => <li key={conversation.id}><button type="button" disabled={conversationBusy} aria-current={activeConversationId === conversation.id ? "page" : undefined} onClick={() => onSelectConversation?.(conversation.id)}><span>{conversation.title}</span><time>{conversation.time}</time></button>{onDeleteConversation ? <button className="rail-conversation-delete" type="button" disabled={conversationBusy} onClick={() => onDeleteConversation(conversation.id)} aria-label={`Delete conversation: ${conversation.title}`} title="Delete conversation"><Trash size={15} aria-hidden="true" /></button> : null}</li>)}</ul> : <p>Your saved conversations will appear here.</p>}
-      </section>
 
       {screenOpen && screenPreviewUrl ? (
         <div ref={screenDialogRef} className="live-screen-modal" role="dialog" aria-modal="true" aria-label={`${agentName}'s screen`} tabIndex={-1}>

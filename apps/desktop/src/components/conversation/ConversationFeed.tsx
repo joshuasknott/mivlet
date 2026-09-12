@@ -62,7 +62,7 @@ export function ConversationFeed(props: Props) {
       const liveEntry = liveStates.find(entry => entry.state.currentAttemptId === turn.id && entry.state.progressThreadId === threadId);
       return <Turn key={turn.id} turn={turn} {...props}
         state={liveEntry?.state ?? props.state}
-        agent={author ?? liveEntry?.agent ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : props.agent)}
+        agent={author ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : liveEntry?.agent ?? props.agent)}
         onPreviewArtifact={props.requireAuthor && !author ? undefined : props.onPreviewArtifact}
         generation={props.requireAuthor && !author ? undefined : props.generation}
         live={Boolean(liveEntry)} />;

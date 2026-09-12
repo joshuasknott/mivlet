@@ -293,7 +293,8 @@ pub enum Command {
         status: WorkStatus,
         reason: Option<String>,
     },
-    AgentCommand {
+    #[serde(rename = "agent-command")]
+    AgentAction {
         id: String,
         generation: u32,
         run_id: String,

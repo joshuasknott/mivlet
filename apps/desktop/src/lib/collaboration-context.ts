@@ -61,7 +61,7 @@ export function collaborationContext(
     );
   if (work.outputs.length)
     parts.push(
-      `Your earlier public results for this task. Continue from these; never repeat an external action merely because a fresh turn started:\n${boundedJson(work.outputs.slice(-2), 5000)}`,
+      `This is a continuation of the existing request, not a new request to repeat its initial steps. Use the completed delegated results above to synthesize your answer. Do not assign the same question again with different wording. Only request a further review if a specific unresolved issue requires it. Your earlier public results follow; never repeat an external action merely because a fresh turn started:\n${boundedJson(work.outputs.slice(-2), 5000)}`,
     );
   if (project) {
     const team = data.teams.find((team) => team.projectId === project.id);

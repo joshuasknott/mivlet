@@ -586,14 +586,16 @@ function ActiveWorkspace({
         (work) => work.conversationId === room.id,
       );
       const latest = work.at(-1);
+      const needsInput = work.some((item) =>
+        ["awaiting-user", "blocked"].includes(item.status),
+      );
       return [
         room.id,
         work.some((work) => work.status === "awaiting-approval")
           ? "Approval needed"
           : work.some(activeWork)
             ? "Working"
-            : latest &&
-                ["awaiting-user", "failed", "blocked"].includes(latest.status)
+            : needsInput || latest?.status === "failed"
               ? "Needs attention"
               : latest?.outputs.at(-1)?.runId &&
                   seen.current.get(room.id) !== latest.outputs.at(-1)?.runId

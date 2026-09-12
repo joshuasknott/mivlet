@@ -160,10 +160,12 @@ export function ConversationPane({
         handle?.setSelectionRange(insertion.caret, insertion.caret);
       });
     },
-    focus,
+    () => {
+      if (active) focus();
+    },
   );
   useEffect(() => {
-    if (!active) voice.cancel();
+    if (!active && voice.isBusy) voice.cancel();
   }, [active]);
   useEffect(() => {
     if (active && composer.ready)

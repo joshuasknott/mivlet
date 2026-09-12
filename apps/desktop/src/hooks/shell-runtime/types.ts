@@ -1,7 +1,3 @@
-import type * as React from "react";
-import type {
-  ChangeEvent,
-} from "react";
 import type {
   AccountWorkspaceStatus,
   ActionHistoryEvent,
@@ -22,7 +18,6 @@ import type {
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
-  ThreadSummary,
 } from "@fable/protocol";
 import type {
   ToolApprovalGate,
@@ -38,9 +33,7 @@ import type {
 } from "../../lib/agent-run";
 import type {
   ApprovalModificationDraft,
-  ComposerAttachment,
   PendingApprovalConfirmation,
-  WorkspacePage,
 } from "../../lib/types";
 
 export interface ShellRuntime {
@@ -48,38 +41,24 @@ export interface ShellRuntime {
   // navigation
   activeItem: string;
   setActiveItem: (value: string) => void;
-  activeUtility: string | undefined;
-  activePage: WorkspacePage | null;
-  isChatView: boolean;
-  activeThread: ThreadSummary | undefined;
-  allThreads: ThreadSummary[];
+
   agents: FableAgentProfile[];
   activeAgentId: string;
   createAgent: (input: Omit<FableAgentProfile, "id" | "threadId">) => FableAgentProfile;
   updateAgent: (agentId: string, patch: Partial<Omit<FableAgentProfile, "id">>) => void;
   removeAgent: (agentId: string) => void;
-  selectAgent: (agentId: string) => void;
-  // composer
-  composerValue: string;
-  setComposerValue: (value: string) => void;
+
+  // voice and imports
+
   voiceEnabled: boolean;
   voiceProvider: "browser" | "openai";
   setVoiceProvider: (provider: "browser" | "openai") => void;
   setVoiceEnabled: (enabled: boolean) => void;
   toggleVoice: () => void;
   setImportStatus: (status: string | null) => void;
-  triggerAttach: () => void;
-  toolPickerOpen: boolean;
-  commandOpen: boolean;
+
   importStatus: string | null;
-  composerAttachments: ComposerAttachment[];
-  composerRef: React.MutableRefObject<import("../../components/ComposerInput").ComposerInputHandle | null>;
-  fileInputRef: React.MutableRefObject<HTMLInputElement | null>;
-  removeComposerAttachment: (attachmentId: string) => void;
-  handleComposerAttachmentChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  focusComposer: (value: string) => void;
-  useConnector: (connector: ConnectorManifest) => void;
-  runCommand: (command: string) => void;
+
   // connected apps
   connectorManifests: ConnectorManifest[];
   refreshConnectorStatuses: () => Promise<ConnectorManifest[] | null>;
@@ -239,10 +218,7 @@ export interface ShellRuntime {
   dismissOnboarding: () => void;
   // shell-level status
   lastAction: string;
-  mobileNavOpen: boolean;
-  setMobileNavOpen: (open: boolean | ((open: boolean) => boolean)) => void;
-  startNewChat: () => void;
-  openThread: (thread: ThreadSummary, label: string) => void;
+
   setLastAction: (action: string) => void;
 }
 

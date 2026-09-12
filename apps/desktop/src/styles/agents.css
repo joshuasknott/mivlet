@@ -433,25 +433,6 @@
 
 .live-rail__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 14px; }
 .live-rail__header strong { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-conversations { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
-.rail-conversations > header { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 12px; }
-.rail-conversations h2 { margin: 0; color: var(--ink-muted); font-size: 12px; font-weight: 400; }
-.rail-conversations > header button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; color: var(--ink-muted); background: transparent; border: 0; border-radius: 9px; }
-.rail-conversations ul { margin: 0; padding: 0; list-style: none; }
-.rail-conversations li button { display: flex; justify-content: space-between; align-items: baseline; gap: 14px; width: 100%; min-height: 42px; padding: 10px 7px; text-align: left; color: var(--ink); background: transparent; border: 0; border-radius: 8px; font-size: 12px; }
-.rail-conversations li button:hover, .rail-conversations li button[aria-current="page"], .rail-conversations > header button:hover { background: var(--surface-hover); }
-.rail-conversations li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rail-conversations time { flex-shrink: 0; color: var(--ink-muted); font-size: 10px; }
-.rail-conversations li { display: flex; align-items: center; gap: 2px; }
-.rail-conversations li > button:first-child { min-width: 0; flex: 1; }
-.rail-conversations li .rail-conversation-delete { flex: 0 0 32px; width: 32px; padding: 0; justify-content: center; align-items: center; color: var(--ink-muted); opacity: 0; pointer-events: none; }
-.rail-conversations li:hover .rail-conversation-delete, .rail-conversations li:has(> button:focus-visible) .rail-conversation-delete { opacity: 1; pointer-events: auto; }
-.rail-conversations li .rail-conversation-delete:hover:not(:disabled) { color: var(--destructive); }
-.rail-conversations li button:disabled { opacity: .45; cursor: default; }
-.rail-conversations li .rail-conversation-delete:disabled { opacity: 0; pointer-events: none; }
-.rail-conversations li:hover .rail-conversation-delete:disabled, .rail-conversations li:has(> button:focus-visible) .rail-conversation-delete:disabled { opacity: .45; }
-.rail-conversations li button:focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
-.rail-conversations > p { color: var(--ink-muted); font-size: 12px; line-height: 1.6; }
 .agent-editor__skills { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 42px; margin-top: 10px; padding: 0 12px; color: var(--ink); background: var(--surface-hover); border: 0; border-radius: 11px; }
 .agent-editor__skills span { color: var(--ink-muted); }
 

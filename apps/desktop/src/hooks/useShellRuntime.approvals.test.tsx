@@ -131,12 +131,12 @@ describe("approval queue workspace hydration", () => {
     mocks.loadSnapshot.mockRejectedValueOnce(new Error("Saved workspace temporarily unavailable."));
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.runtimeSnapshotError).toContain("temporarily unavailable"));
-    act(() => result.current.setComposerValue("must not overwrite saved data"));
+    act(() => result.current.setVoiceEnabled(false));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
     expect(mocks.saveSnapshot).not.toHaveBeenCalled();
     mocks.loadSnapshot.mockResolvedValue({ ...shellStateToRuntimeSnapshot(defaultShellState), composerDraft: "recovered draft" });
     await act(async () => { await result.current.reconcileAccountWorkspace(); });
-    await waitFor(() => expect(result.current.composerValue).toBe(""));
+    await waitFor(() => expect(result.current.voiceEnabled).toBe(true));
     expect(result.current.runtimeSnapshotError).toBeNull();
     await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalled());
     expect(mocks.saveSnapshot.mock.calls[0]).toMatchObject([{ composerDraft: "" }, "local-default"]);
@@ -147,13 +147,13 @@ describe("approval queue workspace hydration", () => {
     await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
     await act(async () => {});
     mocks.saveSnapshot.mockClear();
-    act(() => result.current.setComposerValue("old private draft"));
+    act(() => result.current.updateAgent(result.current.agents[0].id, { instructions: "old private instructions" }));
     mocks.status = change === "workspace"
       ? { ...mocks.status!, activeWorkspace: { ...mocks.status!.activeWorkspace, localWorkspaceId: "workspace-b" } }
       : { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
     await act(async () => { await result.current.reconcileAccountWorkspace(); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
-    expect(mocks.saveSnapshot.mock.calls.some(([snapshot]) => snapshot.composerDraft === "old private draft")).toBe(false);
+    expect(mocks.saveSnapshot.mock.calls.some(([snapshot]) => (snapshot.agents ?? []).some((agent) => agent.instructions === "old private instructions"))).toBe(false);
     expect(mocks.saveSnapshot).toHaveBeenCalled();
     expect(mocks.saveSnapshot.mock.calls.every(([, workspaceId]) => workspaceId === mocks.status!.activeWorkspace.localWorkspaceId)).toBe(true);
   });
