@@ -243,7 +243,7 @@ export function AgentSidebar({
                 </span>
                 {preview.status === "running" || preview.status === "attention" || completions[agent.id]?.unread ? (
                   <span
-                    className={`agent-status agent-status--${preview.status === "attention" ? "attention" : preview.status === "running" ? "working" : "unread"}`}
+                    className={`agent-status agent-status--${preview.status === "attention" ? "attention" : preview.status === "running" ? presence === "service" ? "service" : "working" : "unread"}`}
                     role="status"
                     aria-label={preview.status !== "idle" ? PRESENCE_LABELS[presence] : "New completed work"}
                     title={preview.status !== "idle" ? PRESENCE_LABELS[presence] : "New completed work"}

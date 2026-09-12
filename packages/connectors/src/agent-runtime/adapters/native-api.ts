@@ -29,6 +29,7 @@ import { validateReasoningEffort } from "../../native-api/reasoning";
 import type { BackendDeps, AgentBackend, TransportHandlers } from "../contract";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 import { createEmbeddedBackend } from "./embedded";
+import { isEmbeddedNativeProvider } from "../../backends/catalog";
 
 /** One bound native request, keyed by the runtime execution id. */
 interface ActiveRun {
@@ -64,7 +65,7 @@ export function createNativeApiBackend(
     }
     // Keep the audited transient user-image wire route until its SDK admission
     // contract is verified. Ordinary turns and native computer tools use OpenCode.
-    if (embedded && ["openai", "anthropic", "xai", "deepseek", "custom"].includes(provider.id)
+    if (embedded && isEmbeddedNativeProvider(provider.id)
       && !request.messages.some(message => message.images?.length)) {
       return embedded.run(request, options);
     }

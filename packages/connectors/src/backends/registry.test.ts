@@ -19,6 +19,18 @@ describe("provider registry", () => {
       "deepseek",
       "cursor",
       "opencode",
+      "alibaba",
+      "moonshot",
+      "zai",
+      "groq",
+      "together",
+      "fireworks",
+      "cerebras",
+      "mistral",
+      "openrouter",
+      "nvidia",
+      "siliconflow",
+      "cohere",
       "custom",
     ]);
     expect(listBackendProviders().map((provider) => provider.id)).toEqual(

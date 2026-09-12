@@ -2,7 +2,7 @@
 import { writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { collectAssets, formatBytes, formatMs } from "./assets.mjs";
 import { formatViolationReport, runBudgetCheck } from "./budget-check.mjs";
 

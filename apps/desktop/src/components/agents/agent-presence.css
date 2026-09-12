@@ -1,34 +1,74 @@
-/* Expressions carry meaning without motion. Shell colour never changes with status. */
+/* State expressions are static first; only visible active-conversation avatars move.
+   No transform transitions: Stop / human control cancels movement in the same frame. */
 .agent-avatar { position: relative; }
-.agent-avatar__filter { position: absolute; pointer-events: none; }
-.agent-avatar__character { position: relative; display: block; width: 100%; height: 100%; transform-origin: 50% 70%; }
-.agent-avatar__character > img { display: block; }
-.agent-avatar .agent-avatar__face { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; color: var(--eye-colour); fill: none; stroke: currentColor; stroke-width: 3.8; stroke-linecap: round; stroke-linejoin: round; }
-.agent-avatar__eyes { transform-box: fill-box; transform-origin: center; }
-.agent-avatar[data-expression="unavailable"] .agent-avatar__eyes { opacity: .6; }
-.agent-avatar[data-expression="service"] .agent-avatar__eyes { opacity: .8; }
-.agent-avatar--generated[data-motion="expressive"] { --presence-tilt: -3deg; --presence-duration: 5.8s; }
-.agent-avatar--generated[data-character="2"] { --presence-tilt: -1deg; --presence-duration: 7s; }
-.agent-avatar--generated[data-character="3"] { --presence-tilt: 2deg; --presence-duration: 6.8s; }
-.agent-avatar--generated[data-character="4"] { --presence-tilt: -4deg; --presence-duration: 5.2s; }
-.agent-avatar--generated[data-character="5"] { --presence-tilt: -4deg; --presence-duration: 6.6s; }
-.agent-avatar--generated[data-character="6"] { --presence-tilt: 4deg; --presence-duration: 6s; }
-.agent-avatar--generated[data-character="7"] { --presence-tilt: -1deg; --presence-duration: 7.5s; }
-.agent-avatar--generated[data-motion="expressive"][data-expression="idle"] .agent-avatar__eyes { animation: presence-blink 8s ease-in-out infinite; }
-.agent-avatar--generated[data-motion="expressive"][data-expression="thinking"] .agent-avatar__character,
-.agent-avatar--generated[data-motion="expressive"][data-expression="working"] .agent-avatar__character { animation: presence-focus var(--presence-duration) ease-in-out infinite; }
-.agent-avatar--generated[data-motion="expressive"][data-character="1"][data-expression="working"] .agent-avatar__pupil { transform-box: fill-box; transform-origin: center; animation: presence-lens 4s ease-in-out infinite; }
-.agent-avatar--generated[data-motion="expressive"][data-expression="received"] .agent-avatar__character,
-.agent-avatar--generated[data-motion="expressive"][data-expression="waiting"] .agent-avatar__character,
-.agent-avatar--generated[data-motion="expressive"][data-expression="input"] .agent-avatar__character { animation: presence-attention 350ms ease-out both; }
-.agent-avatar--generated[data-motion="expressive"][data-expression="done"] .agent-avatar__character { animation: presence-nod 500ms ease-out both; }
-.agent-avatar[data-motion="expressive"] .agent-avatar__voice { animation: presence-voice 650ms ease-in-out infinite alternate; transform-origin: 50% 77%; stroke-width: 2; }
-@keyframes presence-blink { 0%, 43%, 47%, 100% { transform: scaleY(1); } 45% { transform: scaleY(.15); } }
-@keyframes presence-focus { 0%, 15%, 55%, 100% { transform: rotate(0); } 30%, 40% { transform: rotate(var(--presence-tilt)); } }
-@keyframes presence-lens { 0%, 65%, 100% { transform: scale(1); } 30%, 45% { transform: scale(.7); } }
-@keyframes presence-attention { 0% { transform: translateY(0); } 45% { transform: translateY(-2%); } 100% { transform: translateY(0); } }
-@keyframes presence-nod { 0%, 100% { transform: rotate(0); } 45% { transform: rotate(3deg); } }
-@keyframes presence-voice { from { transform: scaleY(.65); } to { transform: scaleY(1); } }
+.agent-avatar__svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.agent-avatar__head { transform-origin: 50px 68px; }
+.agent-avatar__accessory { transform-origin: 50px 36px; }
+.agent-avatar__gaze { transform-origin: 50px 60px; }
+.agent-avatar__eyes { fill: none; stroke: currentColor; stroke-width: 3.6; stroke-linecap: round; stroke-linejoin: round; }
+.agent-avatar__eye ellipse, .agent-avatar__pupil { fill: currentColor; stroke: none; }
+.agent-avatar__mouth { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; transform-box: fill-box; transform-origin: center; }
+.agent-avatar--generated { --avatar-inclination: -2deg; --avatar-focus-duration: 7.4s; --avatar-glance: -1.5px; }
+.agent-avatar--generated[data-character="1"] { --avatar-inclination: -1.5deg; --avatar-focus-duration: 6.8s; }
+.agent-avatar--generated[data-character="2"] { --avatar-inclination: 1.5deg; --avatar-focus-duration: 8.2s; --avatar-glance: 1.5px; }
+.agent-avatar--generated[data-character="3"] { --avatar-inclination: 2deg; --avatar-focus-duration: 7s; }
+.agent-avatar--generated[data-character="4"] { --avatar-inclination: -1deg; --avatar-focus-duration: 6.6s; }
+.agent-avatar--generated[data-character="5"] { --avatar-inclination: -2.5deg; --avatar-focus-duration: 8.6s; }
+.agent-avatar--generated[data-character="6"] { --avatar-inclination: 2deg; --avatar-focus-duration: 8s; --avatar-glance: 1.5px; }
+.agent-avatar--generated[data-character="7"] { --avatar-inclination: -1deg; --avatar-focus-duration: 7.8s; }
+
+/* Readable at sidebar sizes, including reduced motion. */
+.agent-avatar[data-expression="thinking"] .agent-avatar__head { transform: rotate(var(--avatar-inclination)); }
+.agent-avatar[data-expression="thinking"] .agent-avatar__gaze { transform: translate(var(--avatar-glance), -1px); }
+.agent-avatar[data-expression="working"] .agent-avatar__gaze { transform: translateY(1px); }
+.agent-avatar[data-expression="waiting"] .agent-avatar__gaze,
+.agent-avatar[data-expression="input"] .agent-avatar__gaze,
+.agent-avatar[data-expression="listening"] .agent-avatar__gaze { transform: translateY(-1px); }
+.agent-avatar[data-expression="service"] .agent-avatar__gaze { opacity: .7; transform: translateY(2px); }
+.agent-avatar[data-expression="unavailable"] .agent-avatar__gaze { opacity: .55; }
+.agent-avatar[data-expression="blocked"] .agent-avatar__head { transform: rotate(-1.5deg); }
+.agent-avatar[data-expression="human"] .agent-avatar__head { transform: translateY(2px) rotate(-3deg); }
+.agent-avatar[data-expression="human"] .agent-avatar__gaze { transform: translateX(-2px); }
+.agent-avatar[data-expression="paused"] .agent-avatar__gaze { opacity: .7; }
+
+/* Thinking observes; working makes a small deliberate forward focus. Long rests
+   between gestures avoid a loading-spinner cadence. Idle has no repeating loop. */
+.agent-avatar[data-animate="true"][data-expression="thinking"] .agent-avatar__gaze { animation: avatar-consider var(--avatar-focus-duration) ease-in-out infinite; }
+.agent-avatar[data-animate="true"][data-expression="working"] .agent-avatar__head { animation: avatar-work var(--avatar-focus-duration) ease-in-out infinite; }
+.agent-avatar[data-animate="true"][data-expression="working"] .agent-avatar__accessory { animation: avatar-tool var(--avatar-focus-duration) ease-in-out infinite; }
+.agent-avatar[data-character="1"][data-animate="true"][data-expression="working"] .agent-avatar__pupil { animation: avatar-lens var(--avatar-focus-duration) ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
+.agent-avatar[data-character="4"] .agent-avatar__accessory { transform-origin: 50px 60px; }
+.agent-avatar[data-animate="true"][data-expression="received"] .agent-avatar__head,
+.agent-avatar[data-animate="true"][data-entrance="waiting"] .agent-avatar__head,
+.agent-avatar[data-animate="true"][data-entrance="input"] .agent-avatar__head { animation: avatar-attend 420ms cubic-bezier(.2,.7,.3,1) both; }
+.agent-avatar[data-animate="true"][data-expression="done"] .agent-avatar__head { animation: avatar-acknowledge 560ms ease-in-out both; }
+.agent-avatar[data-animate="true"][data-expression="speaking"] .agent-avatar__mouth { animation: avatar-speak 700ms ease-in-out infinite alternate; }
+
+@keyframes avatar-consider {
+  0%, 18%, 72%, 100% { transform: translate(var(--avatar-glance), -1px); }
+  32%, 49% { transform: translate(0, -2px); }
+}
+@keyframes avatar-work {
+  0%, 15%, 52%, 100% { transform: translateY(0); }
+  27%, 38% { transform: translateY(.9px) rotate(.7deg); }
+}
+@keyframes avatar-tool {
+  0%, 20%, 55%, 100% { transform: rotate(0); }
+  30%, 40% { transform: rotate(var(--avatar-inclination)); }
+}
+@keyframes avatar-lens {
+  0%, 20%, 55%, 100% { transform: scale(1); }
+  30%, 40% { transform: scale(.78); }
+}
+@keyframes avatar-attend {
+  0%, 100% { transform: translateY(0); }
+  42% { transform: translateY(-1.8px); }
+}
+@keyframes avatar-acknowledge {
+  0%, 100% { transform: rotate(0); }
+  42% { transform: translateY(1px) rotate(2deg); }
+}
+@keyframes avatar-speak { from { transform: scaleY(.65); } to { transform: scaleY(1.15); } }
 @media (prefers-reduced-motion: reduce) {
   .agent-avatar *, .agent-avatar *::before, .agent-avatar *::after { animation: none !important; transition: none !important; }
 }

@@ -6,7 +6,7 @@ import { ContextRecoveryPanel } from "../components/conversation/ContextRecovery
 import { useConversationScroll } from "../hooks/useConversationScroll";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../lib/conversation-presentation";
 import { useMediaQuery } from "../hooks/useMediaQuery";
-import { agentPresence, presenceLabel } from "../lib/agent-presence";
+import { agentPresence, isPresenceScopeCurrent, presenceLabel } from "../lib/agent-presence";
 import {
   lazy,
   Suspense,
@@ -17,7 +17,6 @@ import {
   useState,
   type ChangeEvent,
 } from "react";
-import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import type { FableAgentProfile, LocalComputerSnapshot, Spine } from "@fable/protocol";
 import { SettingsModal } from "../components/settings/SettingsModal";
@@ -27,6 +26,9 @@ import {
 } from "../components/agents/AgentSidebar";
 import { AgentWelcome } from "../components/agents/AgentWelcome";
 import { AgentWorkspaceHeader } from "../components/agents/AgentWorkspaceHeader";
+import type { VoiceConversationPhase } from "@fable/protocol";
+import type { VoicePromptControl } from "@fable/connectors/voice";
+const VoiceConversation = lazy(() => import("../components/voice/VoiceConversation").then((module) => ({ default: module.VoiceConversation })));
 
 import { Composer } from "../components/Composer";
 
@@ -157,6 +159,9 @@ function compactTime(value?: string) {
 /** The Mivlet desktop product: named teammates, one durable conversation, and bounded tools. */
 export function ChatWorkspace() {
   const [selectedThreadId, setSelectedThreadId] = useState<string>();
+  const [voiceConversationOpen, setVoiceConversationOpen] = useState(false);
+  const pendingVoiceThread = useRef<string | undefined>(undefined);
+  const [conversationVoicePhase, setConversationVoicePhase] = useState<VoiceConversationPhase>("ready");
   const [selectedProjectId, setSelectedProjectId] = useState<string>();
   const [projectExecutor, setProjectExecutor] = useState<ProjectContribution>();
   const [projectRecipient, setProjectRecipient] = useState("all");
@@ -467,9 +472,13 @@ export function ChatWorkspace() {
   );
 
   const submissionPending = useRef(false);
+  const voiceRouteKey = `${workspaceId}:${activeAgent?.id}:${selectedThreadId}:${selectedModelOptionId}`;
+  const voiceRouteRef = useRef(voiceRouteKey);
+  voiceRouteRef.current = voiceRouteKey;
   const executePrompt = useCallback(
-    async (prompt: string, batch?: NonNullable<typeof projectBatch>) => {
-      if (!activeAgent || !selectedThreadId || agent.state.running || submissionPending.current || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
+    async (prompt: string, batch?: NonNullable<typeof projectBatch>, voiceControl?: VoicePromptControl) => {
+      if (voiceControl && (voiceControl.signal.aborted || voiceRouteRef.current !== voiceRouteKey || voiceControl.scope.workspaceId !== workspaceId || voiceControl.scope.agentId !== activeAgent?.id || voiceControl.scope.threadId !== selectedThreadId)) return;
+      if (!activeAgent || !selectedThreadId || agent.getActiveAttemptId() || submissionPending.current || !runtime.runtimeSnapshotReady || runtime.runtimeSnapshotError) return;
       if (selectedProjectId && !batch) { setSubmissionError("Send this message from the project composer."); return; }
       const contribution = batch?.contributions[batch.index];
       const connected = contribution ? runtime.backendProviders.find((provider) => provider.id === contribution.providerId && provider.authState === "connected") : runtime.connectedAgentBackend;
@@ -498,7 +507,7 @@ export function ChatWorkspace() {
         setSubmissionError(message);
         return;
       }
-      const turnAttachments = batch?.attachments ?? composerAttachments;
+      const turnAttachments = voiceControl ? [] : batch?.attachments ?? composerAttachments;
       const imageInputs = composerImageInputs(turnAttachments);
       const selectedModel = composerModels.find((model) => model.id === runModelOptionId);
       if (!imageInputs.ok || (imageInputs.images.length > 0 && (connected.backendType !== "codex-app-server" || connected.authState !== "connected" || selectedModel?.capabilities?.vision !== true))) {
@@ -507,7 +516,7 @@ export function ChatWorkspace() {
       }
       submissionPending.current = true;
       const submissionEpoch = ++submissionEpochRef.current;
-      const submissionIsCurrent = () => submissionEpochRef.current === submissionEpoch && projectIsCurrent();
+      const submissionIsCurrent = () => submissionEpochRef.current === submissionEpoch && projectIsCurrent() && (!voiceControl || (!voiceControl.signal.aborted && voiceRouteRef.current === voiceRouteKey));
       setSubmissionBusy(true);
       setSubmissionStatus("");
       setSubmissionError("");
@@ -516,6 +525,13 @@ export function ChatWorkspace() {
       resetCancellation();
       let stagedBatch: { computerId: string; batchId: string } | undefined;
       let attachmentBatchAdopted = false;
+      let voiceCancellation: Promise<unknown> | undefined;
+      const cancelVoiceTurn = () => {
+        submissionEpochRef.current++;
+        voiceCancellation = stopCurrentWork(true, stagingNodeRef.current ?? undefined);
+        void voiceCancellation.catch(() => undefined);
+      };
+      voiceControl?.signal.addEventListener("abort", cancelVoiceTurn, { once: true });
       try {
         if (!submissionIsCurrent()) return;
         const attachmentStage = await stageAttachmentsForRun(turnAttachments, activeAgent.id, submissionIsCurrent);
@@ -533,7 +549,7 @@ export function ChatWorkspace() {
         const projectInstructions = batch ? `Shared project: ${batch.project.name}\nYou are ${activeAgent.name}. This conversation is shared with the user's agents. Read the recorded conversation before acting and identify your own contribution. Files available as context are the project sources explicitly supplied to this response. Other agents' computers and private files are not accessible through your computer tools.\n\nProject instructions:\n${batch.project.instructions}` : "";
         const tools = conversationToolsForModel(connectorTools, computerToolsReady(computerNode), connected, selectedModel, computerNode?.plugins, imageApiConnected, computerNode?.runtimeAvailable === true);
         const pluginInstructions = builtinPluginInstructions(prompt, computerNode?.plugins, tools.map((tool) => tool.name));
-        const instructions = [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, COMPUTER_WORK_INSTRUCTIONS, pluginInstructions, projectInstructions, attachmentRunInstructions(runAttachments)].filter(Boolean).join("\n\n");
+        const instructions = [agentExecutionInstructions(activeAgent), CONVERSATION_STYLE_INSTRUCTIONS, voiceControl ? "This is a live voice conversation. Reply naturally in a few concise spoken sentences, then let the user respond. Avoid Markdown, lists, raw URLs and reading code aloud. Keep detailed work in the conversation and files. Use the same tools and approval rules as usual. Never interpret speech as approval of a pending tool action; the user must use Mivlet's approval controls." : "", COMPUTER_WORK_INSTRUCTIONS, pluginInstructions, projectInstructions, attachmentRunInstructions(runAttachments)].filter(Boolean).join("\n\n");
         const preparedContext = await runtime.assembleConversationContext(prompt, {
           threadId: selectedThreadId,
           allowedConnectorIds: connectorIds,
@@ -559,10 +575,11 @@ export function ChatWorkspace() {
           runtime.permissionMode,
           batch?.retryAttempt?.id,
           {
+            onTextDelta: voiceControl?.onText,
             attachments: attachmentMessageMetadata(runAttachments, Boolean(batch)),
             afterAttemptQueued: async ({ attemptId, threadId }) => {
               attachmentBatchAdopted = true;
-              if (!batch || batch.index === 0) await composer.consume();
+              if (!voiceControl && (!batch || batch.index === 0)) await composer.consume();
               if (!batch) return;
               if (!projectIsCurrent() || threadId !== batch.project.threadId) throw new Error("The project changed before this response started.");
               const author = await bindLocalProjectRunAuthor({ workspaceId: batch.workspaceId, projectId: batch.project.id, expectedRevision: batch.project.revision, runId: attemptId, agentId: activeAgent.id, threadId });
@@ -576,7 +593,7 @@ export function ChatWorkspace() {
         );
         // The consumed attachment set is bound to this submitted turn and
         // cannot appear in a later scope.
-        if ((!outcome || outcome.status === "failed") && !currentRepositoryDraft.current.trim()) {
+        if (!voiceControl && (!outcome || outcome.status === "failed") && !currentRepositoryDraft.current.trim()) {
           setComposerValue(batch?.prompt ?? prompt);
         }
         return outcome?.status;
@@ -587,8 +604,10 @@ export function ChatWorkspace() {
             : "Mivlet could not complete that response.";
         agent.reportError(message);
         setSubmissionError(message);
-        if (!currentRepositoryDraft.current.trim()) setComposerValue(batch?.prompt ?? prompt);
+        if (!voiceControl && !currentRepositoryDraft.current.trim()) setComposerValue(batch?.prompt ?? prompt);
       } finally {
+        voiceControl?.signal.removeEventListener("abort", cancelVoiceTurn);
+        await voiceCancellation?.catch(() => undefined);
         if (stagedBatch && !attachmentBatchAdopted) {
           await discardRuntimeLocalComputerAttachmentBatch({
             workspaceId,
@@ -640,8 +659,16 @@ export function ChatWorkspace() {
       selectedReasoningEffort,
       selectedThreadId,
       selectedProjectId,
+      stopCurrentWork,
+      voiceRouteKey,
     ],
   );
+
+  useEffect(() => {
+    setVoiceConversationOpen(Boolean(pendingVoiceThread.current && pendingVoiceThread.current === selectedThreadId));
+    pendingVoiceThread.current = undefined;
+    setConversationVoicePhase("ready");
+  }, [workspaceId, activeAgent?.id, selectedProjectId, selectedThreadId, selectedModelOptionId]);
 
   useEffect(() => {
     if (!queuedPrompt || queuedPrompt.threadId !== selectedThreadId) return;
@@ -959,11 +986,18 @@ export function ChatWorkspace() {
       thread,
     ]),
   );
-  const computerToolActive = agent.state.responseParts?.some((part) => part.kind === "tool" && part.state === "running" && (part.tool.startsWith("local-") || part.tool === "run-shell"));
-  const activePresence = agentPresence(agent.state, runtime.openApprovals.length > 0, Boolean(queuedPrompt), {
-    computerController: localComputer.node?.control.status === "active" && computerToolActive ? localComputer.controller : undefined,
+  const presenceScopeCurrent = isPresenceScopeCurrent(agent.state, { agentId: activeAgent.id, threadId: selectedThreadId });
+  const voicePresentationActive = voiceConversationOpen && !["ready", "error", "ended"].includes(conversationVoicePhase);
+  const presenceState = presenceScopeCurrent && !(voicePresentationActive && !agent.state.running && !submissionBusy)
+    ? agent.state : { running: false, status: "idle" as const, transcript: "", activity: "", lastError: null, responseParts: [] };
+  const activeApprovalCount = presenceScopeCurrent ? runtime.openApprovals.length : 0;
+  const computerScopeCurrent = presenceScopeCurrent && localComputer.node?.workspaceId === workspaceId && localComputer.node?.agentId === activeAgent.id;
+  const computerToolActive = presenceScopeCurrent && agent.state.responseParts?.some((part) => part.kind === "tool" && part.state === "running" && (part.tool.startsWith("local-") || part.tool === "run-shell"));
+  const activePresence = agentPresence(presenceState, activeApprovalCount > 0, queuedPrompt?.threadId === selectedThreadId && Boolean(queuedPrompt), {
+    computerController: computerScopeCurrent && localComputer.node?.control.status === "active" && (localComputer.controller === "human" || computerToolActive) ? localComputer.controller : undefined,
     providerUnavailable: runtime.runtimeSnapshotReady && !runtime.connectedAgentBackend,
-    listening: voice.state.status === "listening",
+    listening: voice.state.status === "listening" || (voiceConversationOpen && (conversationVoicePhase === "listening" || conversationVoicePhase === "hearing")),
+    speaking: voiceConversationOpen && conversationVoicePhase === "speaking",
   });
   const previews = Object.fromEntries(
     runtime.agents.map((profile) => {
@@ -1020,7 +1054,7 @@ export function ChatWorkspace() {
   })) : undefined;
   const screenPreviewUrl =
     hostedBrowser.snapshot?.previewDataUrl;
-  const approvalPanel = runtime.openApprovals.length ? (
+  const approvalPanel = activeApprovalCount ? (
     <Suspense fallback={null}>
       <ApprovalPanel
         compact
@@ -1146,17 +1180,32 @@ export function ChatWorkspace() {
       <section className="workspace agent-workspace" hidden={isPhone && !mobileConversation}>
         <AgentWorkspaceHeader
           agent={activeAgent}
+          onVoice={() => { if (voiceConversationOpen) closeVoiceConversation(); else void openVoiceConversation(); }}
+          voiceOpen={voiceConversationOpen}
           onSchedules={() => openSchedules(activeAgent.id)}
-          attentionCount={runtime.openApprovals.length}
+          attentionCount={activeApprovalCount}
           presence={activePresence}
-          activity={agent.state.activity}
-          computerActive={Boolean(localComputer.node?.control.status === "active" || hostedBrowser.opening)}
+          activityKey={`${workspaceId}:${activeAgent.id}:${selectedThreadId ?? "none"}:${presenceScopeCurrent ? agent.state.startedAt ?? agent.state.currentAttemptId ?? "idle" : "idle"}`}
+          activity={presenceScopeCurrent ? agent.state.activity : undefined}
+          computerActive={Boolean(presenceScopeCurrent && ((computerScopeCurrent && localComputer.node?.control.status === "active") || hostedBrowser.opening))}
           onBack={isPhone ? () => { setMobileConversation(false); setWorkPanelOpen(false); window.requestAnimationFrame(() => document.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.focus()); } : undefined}
           panelOpen={workPanelOpen && !artifactPreview}
           onTogglePanel={() => { if (artifactPreview) { setArtifactPreview(null); setWorkPanelOpen(true); } else setWorkPanelOpen((open) => !open); }}
         />
 
-        {renderConversation()}
+        {voiceConversationOpen && workspaceId && selectedThreadId ? <Suspense fallback={<div className="empty-state" role="status">Opening voice…</div>}><VoiceConversation
+          key={`${workspaceId}:${activeAgent.id}:${selectedThreadId}:${selectedModelOptionId}`}
+          agent={activeAgent} modelLabel={selectedModelLabel}
+          scope={{ workspaceId, agentId: activeAgent.id, threadId: selectedThreadId }}
+          unavailable={!hasNativeRuntimeAdapter() ? "Voice conversations need the Mivlet desktop app." : !runtime.backendProviders.some((provider) => provider.id === "openai" && provider.backendType === "native-api" && provider.authState === "connected") ? "Connect an OpenAI API account for speech. This is separate from a ChatGPT subscription." : !runtime.connectedAgentBackend ? "Connect your agent's model provider to start voice." : undefined}
+          approvals={approvalPanel}
+          onPrompt={async (text, control) => {
+            const status = await executePrompt(text, undefined, control);
+            if (!control.signal.aborted && status !== "completed") throw new Error("The agent could not finish that response. Return to chat to review the details.");
+          }}
+          onPhase={setConversationVoicePhase} onClose={closeVoiceConversation}
+          onOpenProviders={() => { closeVoiceConversation(); setSettingsTab("providers"); setSettingsOpen(true); }}
+        /></Suspense> : renderConversation()}
       </section>
       )}
 
@@ -1520,5 +1569,34 @@ export function ChatWorkspace() {
         insertion.caret,
       );
     });
+  }
+
+  function closeVoiceConversation() {
+    setVoiceConversationOpen(false);
+    setConversationVoicePhase("ready");
+    window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-voice-toggle]")?.focus());
+  }
+
+  async function openVoiceConversation() {
+    if (agent.state.running || submissionPending.current || navigationPending.current) {
+      setSubmissionError("Wait for the current response to finish before starting voice.");
+      return;
+    }
+    voice.reset();
+    if (selectedThreadId) { setVoiceConversationOpen(true); return; }
+    const capturedScope = composerNavigationScope.current;
+    navigationPending.current = true;
+    try {
+      const thread = await startScopedConversation({
+        scope: capturedScope, currentScope: () => composerNavigationScope.current,
+        createThread: () => durableConversation.createThread({ authorityScope: { authority: "local", visibility: "member-private", ownerMemberId: "current-member" as never }, title: "Voice conversation" }),
+        moveDraft: composer.moveToThread,
+      });
+      if (!thread) return;
+      runtime.updateAgent(capturedScope.agentId, { threadId: thread.id });
+      pendingVoiceThread.current = thread.id;
+      setSelectedThreadId(thread.id);
+    } catch (error) { setSubmissionError(error instanceof Error ? error.message : "Could not open voice."); }
+    finally { navigationPending.current = false; }
   }
 }

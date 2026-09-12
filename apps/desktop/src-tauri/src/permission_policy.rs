@@ -75,6 +75,7 @@ pub(crate) fn effect_for_tool(tool: &str) -> Option<&'static str> {
         }
         "connection-read"
         | "github-read"
+        | "plugin-read"
         | "vercel-read"
         | "linear-read"
         | "google-drive-read"

@@ -152,7 +152,6 @@
 
 .agent-avatar svg { display: block; }
 .agent-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
-.agent-avatar--generated img { border-radius: 0; }
 
 .agent-row__copy,
 .agent-row__line {
@@ -219,6 +218,7 @@
   animation: agent-status-spin 850ms linear infinite;
 }
 .agent-status--unread { background: var(--accent, var(--ink-muted)); }
+.agent-status--service { border: 1px solid var(--ink-muted); background: transparent; }
 @keyframes agent-status-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .agent-status--working { animation: none; }

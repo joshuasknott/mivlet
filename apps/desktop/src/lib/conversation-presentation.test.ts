@@ -28,6 +28,66 @@ describe("conversation presentation", () => {
     item.currentRevision = { ...item.currentRevision, state: "redacted", content: undefined, redaction: { reason: "user-request" } } as ConversationMessageView["currentRevision"];
     expect(JSON.stringify(conversationTurns([item]))).not.toContain("secret");
   });
+  it("keeps interleaved tools in call order when results arrive in reverse order", () => {
+    const messages = [
+      view("one", "tool", 1, '{"connectorId":"github"}', { phase: "call", toolCallId: "first", toolName: "connector-call" }),
+      view("one", "assistant", 2, "Checking another file."),
+      view("one", "tool", 3, "{}", { phase: "call", toolCallId: "second", toolName: "read-file" }),
+      view("one", "tool", 4, "Second result", { phase: "result", toolCallId: "second", toolName: "read-file", outcome: "failed" }),
+      view("one", "tool", 5, "First result", { phase: "result", toolCallId: "first", toolName: "connector-call", outcome: "succeeded" }),
+    ];
+    const original = JSON.stringify(messages);
+    const turns = conversationTurns(messages);
+    expect(turns[0].parts).toEqual([
+      { id: "first", kind: "tool", tool: "connector-call", connectorId: "github", content: "First result", state: "succeeded" },
+      { id: "one-2", kind: "text", content: "Checking another file." },
+      { id: "second", kind: "tool", tool: "read-file", content: "Second result", state: "failed" },
+    ]);
+    expect(JSON.stringify(messages)).toBe(original);
+    expect(conversationTurns(messages)).toEqual(turns);
+  });
+  it("updates all matching records when a transcript repeats a call ID", () => {
+    const turns = conversationTurns([
+      view("one", "tool", 1, "Earlier result", { phase: "result", toolCallId: "same", toolName: "read-file", outcome: "succeeded" }),
+      view("one", "tool", 2, "{}", { phase: "call", toolCallId: "same", toolName: "read-file" }),
+      view("one", "tool", 3, "Latest result", { phase: "result", toolCallId: "same", toolName: "read-file", outcome: "failed" }),
+    ]);
+    expect(turns[0].parts).toEqual([
+      { id: "same", kind: "tool", tool: "unknown-tool", content: "Latest result", state: "failed" },
+      { id: "same", kind: "tool", tool: "read-file", content: "Latest result", state: "failed" },
+    ]);
+  });
+  it("does not pair an orphan result with a call in an earlier turn", () => {
+    const turns = conversationTurns([
+      view("one", "tool", 1, "{}", { phase: "call", toolCallId: "same", toolName: "read-file" }),
+      view("two", "tool", 2, "Later result", { phase: "result", toolCallId: "same", toolName: "read-file", outcome: "succeeded" }),
+    ]);
+    expect(turns[0].parts[0]).toMatchObject({ content: "", state: "running" });
+    expect(turns[1].parts[0]).toMatchObject({ tool: "unknown-tool", content: "Later result" });
+  });
+  it("resets tool pairing when a new prompt splits a repeated run ID", () => {
+    const turns = conversationTurns([
+      view("one", "user", 1, "First prompt"),
+      view("one", "tool", 2, "{}", { phase: "call", toolCallId: "same", toolName: "read-file" }),
+      view("one", "user", 3, "Second prompt"),
+      view("one", "tool", 4, "Result", { phase: "result", toolCallId: "same", toolName: "read-file", outcome: "succeeded" }),
+    ]);
+    expect(turns).toHaveLength(2);
+    expect(turns[0].parts[0]).toMatchObject({ content: "", state: "running" });
+    expect(turns[1].parts[0]).toMatchObject({ tool: "unknown-tool", content: "Result" });
+  });
+  it("does not apply a redacted result to a visible call", () => {
+    const result = view("one", "tool", 2, "secret", { phase: "result", toolCallId: "call", toolName: "read-file", outcome: "succeeded" });
+    result.currentRevision = { ...result.currentRevision, state: "redacted", content: undefined, redaction: { reason: "user-request" } } as ConversationMessageView["currentRevision"];
+    const turns = conversationTurns([
+      view("one", "tool", 1, "{}", { phase: "call", toolCallId: "call", toolName: "read-file" }),
+      result,
+    ]);
+    expect(turns[0].parts).toEqual([
+      { id: "call", kind: "tool", tool: "read-file", content: "", state: "running" },
+      { id: "one-2", kind: "text", content: "This message was removed." },
+    ]);
+  });
   it("keeps live text on either side of an action and updates the action in place", () => {
     let parts = appendResponseText([], "First ");
     parts = appendResponseText(parts, "update.");

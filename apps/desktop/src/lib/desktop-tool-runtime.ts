@@ -104,9 +104,9 @@ export function createDesktopToolExecutor(
     let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
-    const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
+    const nativeConnector = toolName === "plugin-read" && typeof parsed.connectorId === "string" ? parsed.connectorId : CONNECTOR_READ_TOOLS[toolName];
     const checkConnectorAccess = () => {
-      if (nativeConnector && options.connectorAccessCurrent && !options.connectorAccessCurrent(nativeConnector)) {
+      if (nativeConnector && (options.connectorAccessCurrent ? !options.connectorAccessCurrent(nativeConnector) : toolName === "plugin-read" && !options.connectorIds?.includes(nativeConnector))) {
         throw new Error("Mention this connected app in your message or select it in the agent's connections.");
       }
     };

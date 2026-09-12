@@ -11,6 +11,7 @@ import { createApprovalGate } from "@fable/connectors";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
+import { agentPresence } from "../lib/agent-presence";
 import { useNativeAgent } from "./useNativeAgent";
 
 // This suite retains the direct wire-family and provider-owned runtime coverage.
@@ -284,6 +285,32 @@ describe("useNativeAgent", () => {
     vi.clearAllMocks();
     resetLineState();
     removeDesktopRuntime();
+  });
+
+  it("delivers voice text only after the matching durable assistant checkpoint", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("Hello. "), openAiChunk("Ready."), finishStop];
+    const events: string[] = [];
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()], threadId: "thread-1",
+      createDurableRunWriter: () => ({ record: vi.fn(async () => {}), checkpointAssistant: async (text) => { events.push(`saved:${text}`); } }),
+    }));
+    await act(async () => { await result.current.run(baseRequest, undefined, undefined, undefined, { onTextDelta: (text) => events.push(`voice:${text}`) }); });
+    expect(events).toContain("voice:Hello. ");
+    expect(events.indexOf("saved:Hello. ")).toBeLessThan(events.indexOf("voice:Hello. "));
+    expect(events.indexOf("saved:Hello. Ready.")).toBeLessThan(events.indexOf("voice:Ready."));
+  });
+
+  it("does not speak a reply that failed its durable checkpoint", async () => {
+    installDesktopRuntime(); mocks.lines = [openAiChunk("Unsaved reply."), finishStop];
+    const onTextDelta = vi.fn();
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()], threadId: "thread-1",
+      createDurableRunWriter: () => ({ record: vi.fn(async () => {}), checkpointAssistant: async () => { throw new Error("Disk unavailable"); } }),
+    }));
+    await act(async () => { await result.current.run(baseRequest, undefined, undefined, undefined, { onTextDelta }); });
+    expect(onTextDelta).not.toHaveBeenCalled();
+    expect(result.current.state.status).toBe("failed");
   });
 
   it("continues from local conversation history without duplicating it in storage", async () => {
@@ -970,6 +997,28 @@ describe("useNativeAgent", () => {
         }),
       }),
     );
+  });
+
+  it("clears completed presentation when the selected agent scope changes", async () => {
+    installDesktopRuntime();
+    mocks.codexEvents = [{ type: "done", finishReason: "stop" }];
+    const { result, rerender } = renderHook(
+      ({ agentId }) => useNativeAgent({
+        providers: [connectedCodexProvider()],
+        threadId: "thread-a",
+        computer: { workspaceId: "workspace-1", agentId },
+      }),
+      { initialProps: { agentId: "agent-a" } },
+    );
+    await act(async () => { await result.current.run(baseRequest); });
+    expect(result.current.state.status).toBe("completed");
+    expect(result.current.state.progressAgentId).toBe("agent-a");
+
+    rerender({ agentId: "agent-b" });
+    await waitFor(() => expect(result.current.state.status).toBe("idle"));
+    expect(result.current.state.currentAttemptId).toBeNull();
+    expect(result.current.state.progressAgentId).toBeUndefined();
+    expect(result.current.state.transcript).toBe("");
   });
 
   it("persists image metadata without transient pixels", async () => {
@@ -1768,6 +1817,39 @@ describe("useNativeAgent", () => {
     await act(async () => {
       await runPromise.catch(() => {});
     });
+  });
+
+  it("marks a stop immediately while the final durable checkpoint is pending", async () => {
+    installDesktopRuntime();
+    mocks.lines = [openAiChunk("partial")];
+    mocks.emitDone = false;
+    let releaseCheckpoint!: () => void;
+    let checkpointStarted = false;
+    const checkpointAssistant = vi.fn(async () => {
+      if (checkpointStarted) return;
+      checkpointStarted = true;
+      await new Promise<void>((resolve) => { releaseCheckpoint = resolve; });
+    });
+    const { result } = renderHook(() => useNativeAgent({
+      providers: [connectedOpenAiProvider()],
+      threadId: "thread-stop",
+      createDurableRunWriter: () => ({ checkpointAssistant, record: vi.fn(async () => {}) }),
+    }));
+    let runPromise!: Promise<ExecutionAttempt | undefined>;
+    act(() => { runPromise = result.current.run(baseRequest); });
+    await waitFor(() => expect(result.current.state.transcript).toBe("partial"));
+
+    let cancelPromise!: Promise<unknown>;
+    act(() => { cancelPromise = result.current.cancel(); });
+    await waitFor(() => expect(result.current.state.stopRequested).toBe(true));
+    expect(result.current.state.running).toBe(true);
+    expect(agentPresence(result.current.state, false, false, { awaitingInput: true, listening: true, speaking: true })).toBe("paused");
+
+    releaseCheckpoint();
+    mocks.onLine?.("[DONE]");
+    await act(async () => { await cancelPromise; await runPromise.catch(() => {}); });
+    expect(result.current.state.running).toBe(false);
+    expect(result.current.state.status).toBe("cancelled");
   });
 
   it("keeps a final Stop persistence failure visible", async () => {

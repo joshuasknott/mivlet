@@ -182,7 +182,7 @@ describe("Connector Connection selection", () => {
     ).toBeVisible();
   });
 
-  it("keeps planned catalogue entries visibly unavailable", async () => {
+  it("offers explicit token setup for formerly planned plugins", async () => {
     const user = userEvent.setup();
     render(
       <PluginPanel
@@ -198,13 +198,13 @@ describe("Connector Connection selection", () => {
     );
 
     await user.click(
-      screen.getAllByRole("button", { name: "Outlook is planned" })[0],
+      screen.getAllByRole("button", { name: "Connect Outlook" })[0],
     );
 
     expect(screen.getByRole("dialog", { name: "Outlook" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Planned");
+    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Microsoft Graph delegated access token");
     expect(
-      screen.getByRole("button", { name: "Not available yet" }),
+      screen.getByRole("button", { name: "Verify and connect" }),
     ).toBeDisabled();
   });
 });

@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter};
 use url::{Host, Url};
 
 pub(crate) mod computer;
+#[cfg(test)]
+mod providers_tests;
 
 /// Which wire family a native provider speaks (selects endpoint + auth header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +56,78 @@ struct OpenAiCompatProfile {
 /// verification and discovery are unsupported, while chat execution remains
 /// available through the curated model fallback.
 const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
+    OpenAiCompatProfile {
+        id: "alibaba",
+        chat_endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        models_endpoint: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "moonshot",
+        chat_endpoint: "https://api.moonshot.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.moonshot.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "zai",
+        chat_endpoint: "https://api.z.ai/api/paas/v4/chat/completions",
+        models_endpoint: Some("https://api.z.ai/api/paas/v4/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "groq",
+        chat_endpoint: "https://api.groq.com/openai/v1/chat/completions",
+        models_endpoint: Some("https://api.groq.com/openai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "together",
+        chat_endpoint: "https://api.together.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.together.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "fireworks",
+        chat_endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
+        models_endpoint: Some("https://api.fireworks.ai/inference/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "cerebras",
+        chat_endpoint: "https://api.cerebras.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.cerebras.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "mistral",
+        chat_endpoint: "https://api.mistral.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.mistral.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "openrouter",
+        chat_endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        models_endpoint: Some("https://openrouter.ai/api/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "nvidia",
+        chat_endpoint: "https://integrate.api.nvidia.com/v1/chat/completions",
+        models_endpoint: Some("https://integrate.api.nvidia.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "siliconflow",
+        chat_endpoint: "https://api.siliconflow.com/v1/chat/completions",
+        models_endpoint: Some("https://api.siliconflow.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "cohere",
+        chat_endpoint: "https://api.cohere.ai/compatibility/v1/chat/completions",
+        models_endpoint: Some("https://api.cohere.ai/v1/models?endpoint=chat"),
+        auth_required: true,
+    },
     OpenAiCompatProfile {
         id: "openai",
         chat_endpoint: "https://api.openai.com/v1/chat/completions",
@@ -232,8 +306,70 @@ fn configured_custom_provider_result(credential: &str) -> Result<BackendVerifyRe
 pub(crate) fn validate_native_credential(provider_id: &str, secret: &str) -> Result<(), String> {
     match provider_id {
         "custom" => parse_custom_provider_credential(secret).map(|_| ()),
+        "alibaba" => parse_alibaba_credential(secret).map(|_| ()),
         _ => Ok(()),
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AlibabaCredential {
+    version: u8,
+    base_url: String,
+    api_key: String,
+}
+
+fn parse_alibaba_credential(secret: &str) -> Result<AlibabaCredential, String> {
+    let mut credential: AlibabaCredential = serde_json::from_str(secret)
+        .map_err(|_| "Enter an Alibaba API key and Model Studio endpoint.".to_string())?;
+    if credential.version != 1
+        || credential.api_key.trim().is_empty()
+        || credential.api_key.chars().any(char::is_control)
+    {
+        return Err("The Alibaba API credential is invalid.".into());
+    }
+    credential.base_url = normalize_alibaba_base_url(&credential.base_url)?;
+    Ok(credential)
+}
+
+fn normalize_alibaba_base_url(raw: &str) -> Result<String, String> {
+    let base = normalize_custom_base_url(raw)?;
+    let url = Url::parse(&base).map_err(|_| "The Model Studio endpoint is invalid.")?;
+    let host = url.host_str().unwrap_or_default();
+    let legacy = [
+        "dashscope-intl.aliyuncs.com",
+        "dashscope.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+        "cn-hongkong.dashscope.aliyuncs.com",
+    ]
+    .contains(&host);
+    let workspace = [
+        "cn-beijing",
+        "ap-southeast-1",
+        "cn-hongkong",
+        "ap-northeast-1",
+    ]
+    .iter()
+    .any(|region| {
+        host.strip_suffix(&format!(".{region}.maas.aliyuncs.com"))
+            .is_some_and(|id| {
+                !id.is_empty()
+                    && id.len() <= 63
+                    && !id.starts_with('-')
+                    && !id.ends_with('-')
+                    && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+            })
+    });
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || url.path() != "/compatible-mode/v1"
+        || (!legacy && !workspace)
+    {
+        return Err(
+            "Use the official Alibaba Model Studio endpoint for your region and workspace.".into(),
+        );
+    }
+    Ok(base)
 }
 
 fn resolve_provider_connection(
@@ -241,6 +377,14 @@ fn resolve_provider_connection(
     credential: &str,
     model: &str,
 ) -> Result<ResolvedProviderConnection, String> {
+    if provider_id == "alibaba" {
+        let config = parse_alibaba_credential(credential)?;
+        return Ok(ResolvedProviderConnection {
+            chat_endpoint: format!("{}/chat/completions", config.base_url),
+            models_endpoint: Some(format!("{}/models", config.base_url)),
+            auth_header: Some(("Authorization".into(), format!("Bearer {}", config.api_key))),
+        });
+    }
     if provider_id == "custom" {
         let custom = parse_custom_provider_credential(credential)?;
         if model != "model-discovery" && model != custom.model_id {
@@ -291,6 +435,44 @@ fn shape_deepseek_egress_body(body: &mut serde_json::Value) -> Result<(), String
     }
     body["thinking"] = serde_json::json!({ "type": "disabled" });
     Ok(())
+}
+
+/// Vendor-specific options are enforced once, after either SDK or wire shaping.
+/// Unbridged reasoning state must never make a later tool turn invalid.
+fn shape_provider_egress_body(
+    provider_id: &str,
+    body: &mut serde_json::Value,
+) -> Result<(), String> {
+    if provider_id == "deepseek" {
+        return shape_deepseek_egress_body(body);
+    }
+    if is_additional_native_provider(provider_id) {
+        if body.get("reasoning_effort").is_some()
+            || body.get("reasoning").is_some()
+            || body
+                .pointer("/thinking/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("enabled")
+            || body
+                .get("enable_thinking")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        {
+            return Err("Reasoning controls are not supported by this provider route.".into());
+        }
+        match provider_id {
+            "alibaba" => body["enable_thinking"] = serde_json::json!(false),
+            "moonshot" | "zai" => body["thinking"] = serde_json::json!({ "type": "disabled" }),
+            "openrouter" => body["provider"] = serde_json::json!({ "require_parameters": true }),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_additional_native_provider(provider_id: &str) -> bool {
+    openai_compat_profile(provider_id).is_some()
+        && !matches!(provider_id, "openai" | "xai" | "deepseek")
 }
 
 /// Additional headers a provider requires beyond auth (e.g. anthropic-version).
@@ -967,7 +1149,25 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "xai", "deepseek", "custom"];
+pub(crate) const NATIVE_PROVIDER_IDS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "xai",
+    "deepseek",
+    "alibaba",
+    "moonshot",
+    "zai",
+    "groq",
+    "together",
+    "fireworks",
+    "cerebras",
+    "mistral",
+    "openrouter",
+    "nvidia",
+    "siliconflow",
+    "cohere",
+    "custom",
+];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1109,9 +1309,7 @@ pub(crate) async fn stream_completion(
     // shaper or the pinned SDK. This single egress choke point covers both the
     // embedded host and the local wire route: unsupported options fail closed
     // and every DeepSeek request runs the documented non-thinking mode.
-    if request.provider_id == "deepseek" {
-        shape_deepseek_egress_body(&mut body)?;
-    }
+    shape_provider_egress_body(&request.provider_id, &mut body)?;
 
     let observation_started = Instant::now();
     let credential = require_key(&request.provider_id)?;
@@ -1574,6 +1772,36 @@ fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -
 ///   - Gemini: `{ "models": [{ "name": "models/gemini-...", "supportedGenerationMethods": [...] }] }`
 pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<DiscoveredModel> {
     let mut out = Vec::new();
+    if provider_id == "cohere" {
+        if let Some(models) = body.get("models").and_then(serde_json::Value::as_array) {
+            for model in models.iter().take(MAX_DISCOVERED_MODELS) {
+                let id = model
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if id.is_empty()
+                    || model
+                        .get("is_deprecated")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    || !model
+                        .get("endpoints")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|endpoints| {
+                            endpoints.iter().any(|endpoint| endpoint == "chat")
+                        })
+                {
+                    continue;
+                }
+                out.push(DiscoveredModel {
+                    id: id.into(),
+                    available: true,
+                });
+            }
+        }
+        return out;
+    }
     if provider_kind(provider_id) == ProviderKind::Gemini {
         if let Some(models) = body.get("models").and_then(|v| v.as_array()) {
             for model in models {
@@ -1605,7 +1833,12 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
         return out;
     }
 
-    if let Some(data) = body.get("data").and_then(|v| v.as_array()) {
+    // Together also documents a top-level array of model records.
+    if let Some(data) = body.get("data").and_then(|v| v.as_array()).or_else(|| {
+        (provider_id == "together")
+            .then(|| body.as_array())
+            .flatten()
+    }) {
         for model in data {
             if out.len() >= MAX_DISCOVERED_MODELS {
                 break;
@@ -1631,6 +1864,13 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
 }
 
 fn discovery_cursor(provider_id: &str, body: &serde_json::Value) -> Option<String> {
+    if provider_id == "cohere" {
+        return body
+            .get("next_page_token")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+    }
     if provider_kind(provider_id) == ProviderKind::Gemini {
         return body
             .get("nextPageToken")
@@ -1693,6 +1933,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
     let mut cursor: Option<String> = None;
@@ -1710,6 +1951,8 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
                 "pageToken"
             } else if provider_kind(&provider_id) == ProviderKind::Anthropic {
                 "after_id"
+            } else if provider_id == "cohere" {
+                "page_token"
             } else {
                 "after"
             };
@@ -1791,6 +2034,34 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     })
 }
 
+fn credential_verification_body(provider_id: &str) -> Result<Option<serde_json::Value>, String> {
+    if !is_additional_native_provider(provider_id) {
+        return Ok(None);
+    }
+    let model = crate::backends::native_verification_model(provider_id)
+        .ok_or("The provider has no verification model.")?;
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": "Reply OK." }],
+        "max_tokens": 16,
+        "stream": false
+    });
+    shape_provider_egress_body(provider_id, &mut body)?;
+    Ok(Some(body))
+}
+
+fn verification_response_valid(body: &serde_json::Value) -> bool {
+    body.get("error").is_none_or(serde_json::Value::is_null)
+        && matches!(
+            body.pointer("/choices/0/finish_reason")
+                .and_then(serde_json::Value::as_str),
+            Some("stop" | "length")
+        )
+        && body
+            .pointer("/choices/0/message")
+            .is_some_and(serde_json::Value::is_object)
+}
+
 /// Verify a stored native-API credential by hit-testing it against the
 /// provider's list-models endpoint. The key never crosses into JavaScript —
 /// Rust looks it up via the credential boundary, adds the auth header, and
@@ -1855,10 +2126,17 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
 
-    let mut request = client.get(&url);
+    // Model catalogues can be public (for example OpenRouter). New direct routes
+    // validate actual model access with one bounded inference request instead.
+    let mut request = if let Some(body) = credential_verification_body(&provider_id)? {
+        client.post(&connection.chat_endpoint).json(&body)
+    } else {
+        client.get(&url)
+    };
     if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
         request = request.header(auth_name.as_str(), auth_value.as_str());
     }
@@ -1866,7 +2144,7 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         request = request.header(name, value);
     }
 
-    let response = match request.send().await {
+    let mut response = match request.send().await {
         Ok(response) => response,
         Err(_) => {
             return Ok(BackendVerifyResult {
@@ -1880,6 +2158,36 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
     };
 
     let status = response.status();
+    if status.is_success() && is_additional_native_provider(&provider_id) {
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Could not read the provider verification response.".to_string())?
+        {
+            if bytes.len().saturating_add(chunk.len()) > 65_536 {
+                return Ok(BackendVerifyResult {
+                    provider_id,
+                    outcome: "failed".into(),
+                    message: Some(
+                        "The provider verification response exceeded the supported size.".into(),
+                    ),
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !serde_json::from_slice::<serde_json::Value>(&bytes)
+            .is_ok_and(|body| verification_response_valid(&body))
+        {
+            return Ok(BackendVerifyResult {
+                provider_id,
+                outcome: "failed".into(),
+                message: Some(
+                    "The provider did not return a valid model verification response.".into(),
+                ),
+            });
+        }
+    }
     let outcome = verify_outcome_for_status(status);
     let message = if outcome == "auth-failed" {
         Some(format!(
@@ -2077,12 +2385,15 @@ mod transport_policy_tests {
             models_endpoint_for("xai").unwrap(),
             "https://api.x.ai/v1/models"
         );
-        assert!(models_endpoint_for("openrouter").is_err());
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
     }
 
     #[test]
     fn native_allowlist_and_fixed_profile_table_are_complete_and_unique() {
-        let native: HashSet<&str> = NATIVE_PROVIDER_IDS.into_iter().collect();
+        let native: HashSet<&str> = NATIVE_PROVIDER_IDS.iter().copied().collect();
         assert_eq!(native.len(), NATIVE_PROVIDER_IDS.len());
         let profiled: HashSet<&str> = OPENAI_COMPAT_PROFILES
             .iter()

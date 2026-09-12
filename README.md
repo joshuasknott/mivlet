@@ -36,6 +36,15 @@ a deployed or production-validated service.
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Dictation and send have separate
   controls below the message text.
+- Voice conversations with the selected named agent: automatic speech turns,
+  sentence-by-sentence spoken replies, captions, mute, interruption, and End.
+  Open the waveform button in an agent conversation. Speech requires a separate
+  OpenAI API connection and explicit per-call consent; the selected agent/model
+  still owns reasoning and tools. Microphone interruption requires confirmed
+  echo cancellation; an Interrupt button is always available during replies.
+  Calls retain normal tool approvals and stop on conversation/model changes.
+  Raw audio is transient. See [voice architecture](docs/architecture/voice-conversations.md)
+  for limits and the remaining live-audio acceptance checks.
 - First-run setup with Google-first account sign-in, a verified model-provider
   connection, and optional app connectors. The default Chief of Staff appears
   only after setup is complete.
@@ -45,8 +54,9 @@ a deployed or production-validated service.
   Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
   protocol; and OpenCode runs behind a Mivlet-owned authenticated loopback
   server. All six provider-owned routes mediate consequential actions through
-  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI, DeepSeek
-  and custom API turns use the bundled OpenCode V2 embedded host, with native
+  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI, DeepSeek,
+  Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq, Together, Fireworks, Cerebras,
+  Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere and custom API turns use the bundled OpenCode V2 embedded host, with native
   credential custody and Mivlet tool approvals. DeepSeek runs its documented
   non-thinking mode; its thinking-mode `reasoning_content` round-trip is not
   bridged, so reasoning levels are not advertised and screenshot delivery stays
@@ -58,7 +68,10 @@ a deployed or production-validated service.
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
 - Provider and plugin-style Connections, including connector and MCP
-  boundaries. The official MCP SDK owns negotiation and discovery in the bundled
+  boundaries. The 13 formerly planned plugins now offer bounded native reads
+  with provider-issued API credentials; see [plugin capabilities and setup](docs/product/connectors.md#native-token-plugins).
+  These token plugins require manual renewal and do not yet support writes or knowledge sync.
+  The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
 - Agent instructions travel as model context rather than appearing in user

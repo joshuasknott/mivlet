@@ -13,7 +13,9 @@ later back more than one named account without widening the conversation shell.
 
 The built-in catalogue contains account routes for ChatGPT/Codex, Claude,
 Google Antigravity, Grok, Cursor, and OpenCode, followed by direct OpenAI,
-Anthropic, xAI, DeepSeek, and custom OpenAI-compatible connections. Provider families
+Anthropic, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq, Together,
+Fireworks, Cerebras, Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere, and custom
+OpenAI-compatible connections. Provider families
 group an account route with its advanced API-key fallback.
 
 Configuration and execution use separate registries. The provider-driver
@@ -46,7 +48,7 @@ verified installation and account-scoped profile lifecycle.
 
 ### Embedded direct API execution (2026-09-10)
 
-Direct OpenAI, Anthropic, xAI, DeepSeek and custom OpenAI-compatible text/tool turns use
+Direct API text/tool turns for the registered native provider catalogue use
 `packages/agent-host`, pinned to OpenCode V2 SDK/plugin `0.0.0-dev-19449`.
 This is the embedded SDK, separate from the retained OpenCode account/CLI route.
 OpenCode alone owns the model/tool loop for these turns. Its native provider
@@ -62,6 +64,15 @@ fetches. Mivlet supplies context budgets and canonical history. Each attempt has
 an in-memory SDK database and an isolated temporary configuration directory.
 Cancellation fences callbacks and terminates the child; startup requires the
 bundled Windows host and its verified manifest.
+
+The September 12 catalogue expansion uses the same native bridge and embedded
+host. Public lists are not credential probes: each new provider verifies a bounded
+chat request to its default curated model. Vendor options are enforced at native
+egress as well as request shaping. Alibaba stores its endpoint alongside the key
+and accepts only official regional/workspace Model Studio hosts. New model
+discoveries remain conservative until their exact IDs have audited tool support.
+Synthetic function-call round trips cover all 12 new routes through the actual
+bundled Windows executable; they do not establish paid live-provider acceptance.
 
 User-image turns and remaining wire families retain the existing visual/direct
 adapter. This preserves capabilities whose SDK admission contract is not yet

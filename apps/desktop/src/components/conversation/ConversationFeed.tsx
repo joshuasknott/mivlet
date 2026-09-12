@@ -5,7 +5,7 @@ import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { conversationTurns, toolActivity, toolFailureSummary, type ConversationTurn, type ResponsePart } from "../../lib/conversation-presentation";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
-import { agentPresence, type AgentPresence } from "../../lib/agent-presence";
+import { agentPresence, isPresenceScopeCurrent, type AgentPresence } from "../../lib/agent-presence";
 import { ConnectorMentionText } from "../ConnectorMention";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
@@ -35,7 +35,11 @@ interface Props {
 
 export function ConversationFeed(props: Props) {
   const { state, threadId } = props;
-  const live = state.currentAttemptId && state.progressThreadId === threadId;
+  const live = Boolean(
+    state.currentAttemptId &&
+      state.progressThreadId === threadId &&
+      isPresenceScopeCurrent(state, { agentId: props.agent.id, threadId }),
+  );
   const turns = useMemo(() => conversationTurns(props.messages), [props.messages]);
   const presented = [...turns];
   if (live) {
@@ -111,7 +115,7 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
   return <section className="conversation-turn">
     {turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} {...props} /> : null}
     <article className="conversation-response" aria-label={`${props.agent.name}'s response`}>
-      {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header> : null}
+      {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} activityKey={`${props.agent.id}:${turn.id}`} /><strong>{props.agent.name}</strong></header> : null}
       {hasActivity ? <details className="turn-activity" open={expanded}>
         <summary onClick={(event) => { event.preventDefault(); setDisclosure({ running, open: !expanded }); }}>
           <span>{label}</span>

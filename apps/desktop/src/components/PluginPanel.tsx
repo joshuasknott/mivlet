@@ -1,4 +1,6 @@
 import { PluginOverview } from "./marketplace/PluginOverview";
+import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
+import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
 import { useMemo, useRef, useState } from "react";
 import { BuiltinPlugins } from "./marketplace/BuiltinPlugins";
 import { builtinPluginEntries } from "../lib/builtin-plugins";
@@ -164,7 +166,7 @@ export function PluginPanel({
   ) => {
     const connector = manifestById.get(entry.id);
     const remote = remoteConnectorFor(entry.id);
-    const connectable = Boolean(connector || remote);
+    const connectable = Boolean(connector || remote || tokenPluginFor(entry.id));
     const connected = connector?.status === "connected";
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const needsReconnect =
@@ -332,7 +334,9 @@ export function PluginPanel({
             >
               <X size={17} />
             </button>
-            {(useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
+            {tokenPluginFor(selectedEntry.id) ? (
+              <TokenPluginDetails key={`${workspaceId}-${selectedEntry.id}`} plugin={tokenPluginFor(selectedEntry.id)!} connector={selectedConnector} workspaceId={workspaceId} onUseConnector={onUseConnector} onDisconnect={onDisconnect} accounts={accounts[selectedEntry.id]} onSwitchAccount={onSwitchAccount} titleId={`connector-detail-${selectedEntry.id}`} />
+            ) : (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
                 titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} onSaved={() => { if (workspaceId) connectorConnectionsChanged(workspaceId); }} />
             ) : selectedConnector ? (

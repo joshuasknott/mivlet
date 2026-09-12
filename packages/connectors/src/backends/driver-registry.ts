@@ -7,6 +7,7 @@ import { resolveAntigravityProvider } from "./antigravity";
 import { resolveCodexProvider } from "./codex";
 import { resolveManagedProvider } from "./managed";
 import { resolveNativeProvider } from "./native";
+import { additionalNativeProviderCatalog } from "./additional-native";
 
 export interface ProviderDriverDefinition {
   driverKind: ProviderDriverKind;
@@ -102,6 +103,13 @@ export const BUILT_IN_PROVIDER_DRIVERS: readonly ProviderDriverDefinition[] = [
     createProvider: (authState = "install-required") =>
       resolveManagedProvider("opencode", authState),
   },
+  ...additionalNativeProviderCatalog.map((entry): ProviderDriverDefinition => ({
+    driverKind: "native-api",
+    defaultInstanceId: entry.providerId,
+    familyId: entry.providerId,
+    category: "api",
+    createProvider: (authState = "needs-auth") => resolveNativeProvider(entry.providerId, authState),
+  })),
   {
     driverKind: "native-api",
     defaultInstanceId: "custom",

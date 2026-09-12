@@ -105,7 +105,6 @@ export function AgentEditor({
   const [imagePending, setImagePending] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  const [previewPresence, setPreviewPresence] = useState<"idle" | "thinking">("idle");
   useModalFocusTrap({ active: open, containerRef: modalRef, initialFocusRef: nameRef, onClose });
 
   useEffect(() => {
@@ -143,7 +142,7 @@ export function AgentEditor({
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__identity">
-            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} motion="expressive" presence={previewPresence} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
@@ -152,8 +151,6 @@ export function AgentEditor({
             <div className="agent-shape-picker" role="group" aria-label="Character shape">
               {AVATAR_SHAPES.map((shape, index) => <button key={shape} type="button" aria-label={`${shape} character`}
                 aria-pressed={!draft.iconImageDataUrl && avatarVariant(draft.avatarSeed ?? "") === index}
-                onMouseEnter={() => setPreviewPresence("thinking")} onMouseLeave={() => setPreviewPresence("idle")}
-                onFocus={() => setPreviewPresence("thinking")} onBlur={() => setPreviewPresence("idle")}
                 onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined, iconColor: AVATAR_COLOURS[index], avatarSeed: `robot-v3:${index}:${crypto.randomUUID()}` }); }}>
                 <AgentAvatar seed={`robot-v3:${index}:preview`} color={AVATAR_COLOURS[index]} iconSize={40} />
               </button>)}

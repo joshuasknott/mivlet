@@ -19,7 +19,6 @@
 
 import type {
   CitationRanking,
-  CitationRanking as RankingType,
   ContextRecordAuthorityScope,
   KnowledgeCitation,
   KnowledgeScope,
@@ -494,5 +493,3 @@ function round(value: number): number {
 function compareText(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
-
-export type { RankingType };

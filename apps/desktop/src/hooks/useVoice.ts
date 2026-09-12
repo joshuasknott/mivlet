@@ -5,7 +5,7 @@ import {
   type SpeechToTextSession,
   type SpeechRecordingReview
 } from "@fable/connectors/voice";
-import type { VoiceCapability, VoiceInputState } from "@fable/protocol";
+import type { VoiceInputState } from "@fable/protocol";
 
 export type VoiceStatus = VoiceInputState["status"];
 export type VoiceState = VoiceInputState;

@@ -139,6 +139,7 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "connection-read":
     case "connector-tools":
     case "github-read":
+    case "plugin-read":
     case "vercel-read":
     case "linear-read":
     case "google-drive-read":

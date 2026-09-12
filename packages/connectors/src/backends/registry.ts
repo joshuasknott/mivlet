@@ -2,6 +2,7 @@
 
 import type { BackendProvider } from "@fable/protocol";
 import { BUILT_IN_PROVIDER_DRIVERS } from "./driver-registry";
+import { additionalNativeProviderCatalog } from "./additional-native";
 
 export const BACKEND_PROVIDER_IDS = [
   "codex",
@@ -14,6 +15,7 @@ export const BACKEND_PROVIDER_IDS = [
   "deepseek",
   "cursor",
   "opencode",
+  ...additionalNativeProviderCatalog.map(entry => entry.providerId),
   "custom"
 ] as const;
 

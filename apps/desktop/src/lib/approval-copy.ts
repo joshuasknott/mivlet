@@ -3,11 +3,9 @@ import type {
   ApprovalGrant,
   ApprovalRequest,
   ApprovalRiskLevel,
-  CustomApprovalSettings,
   PermissionMode
 } from "@fable/protocol";
 import {
-  PERMISSION_PROFILES,
   permissionDescriptionFor,
   permissionLabelFor
 } from "./agent-run";
@@ -199,40 +197,4 @@ export function highRiskExplanation(
     whatItUnlocks,
     note
   };
-}
-
-/** Convenience re-export so callers can list profiles without a second import. */
-export const APPROVAL_PROFILES = PERMISSION_PROFILES;
-
-export const CUSTOM_APPROVAL_SECTION = {
-  heading: "Choose what Mivlet can help with",
-  intro: "Turn on only the kinds of work you want Mivlet to prepare.",
-  reassurance: "Mivlet still asks before risky actions and before any change is applied."
-} as const;
-
-export const CUSTOM_APPROVAL_TOGGLES: Record<
-  keyof CustomApprovalSettings,
-  { label: string; helper: string }
-> = {
-  allowSmallLocalEdits: {
-    label: "Let Mivlet prepare small local edits",
-    helper: "You still approve each change before it is applied."
-  },
-  allowPowerfulCommands: {
-    label: "Let Mivlet use powerful commands",
-    helper: "Risky or hard-to-undo actions always ask first."
-  }
-};
-
-export const CUSTOM_APPROVAL_TOGGLE_ORDER: (keyof CustomApprovalSettings)[] = [
-  "allowSmallLocalEdits",
-  "allowPowerfulCommands"
-];
-
-export function customApprovalToggleLabel(key: keyof CustomApprovalSettings): string {
-  return CUSTOM_APPROVAL_TOGGLES[key].label;
-}
-
-export function customApprovalToggleHelper(key: keyof CustomApprovalSettings): string {
-  return CUSTOM_APPROVAL_TOGGLES[key].helper;
 }

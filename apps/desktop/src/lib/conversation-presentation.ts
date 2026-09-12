@@ -94,6 +94,10 @@ export function resolveResponseTool(parts: ResponsePart[], callId: string, outpu
 /** Pair call/result by run and call id, preserving conversational chronology. */
 export function conversationTurns(messages: ConversationMessageView[]): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
+  // These parts belong to this reconstruction, so results can update them
+  // without scanning or copying the whole turn. Keep duplicate call IDs paired.
+  type ToolPart = Extract<ResponsePart, { kind: "tool" }>;
+  const toolsByCallId = new Map<string, ToolPart[]>();
   for (const { message, currentRevision: revision } of messages) {
     const content = revision.state === "redacted" ? "This message was removed." : revision.content;
     const previous = turns.at(-1);
@@ -102,6 +106,7 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
     if (!turn || turn.id !== id || (message.kind === "user" && turn.prompt !== undefined)) {
       turn = { id, parts: [], startedAt: message.createdAt };
       turns.push(turn);
+      toolsByCallId.clear();
     }
     turn.endedAt = revision.checkpointedAt;
     if (message.kind === "user") {
@@ -116,8 +121,29 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
     }
     else if (revision.state === "redacted" || message.kind === "assistant") turn.parts.push({ id: message.id, kind: "text", content });
     else if (message.kind === "tool") {
-      if (message.detail.phase === "call") turn.parts.push({ id: message.detail.toolCallId, kind: "tool", tool: message.detail.toolName, ...(toolConnectorId(message.detail.toolName, content) ? { connectorId: toolConnectorId(message.detail.toolName, content) } : {}), content: "", state: "running" });
-      else turn.parts = resolveResponseTool(turn.parts, message.detail.toolCallId, content, message.detail.outcome === "succeeded");
+      const callId = message.detail.toolCallId;
+      const matchingParts = toolsByCallId.get(callId);
+      const isCall = message.detail.phase === "call";
+      const state = isCall ? "running" : message.detail.outcome === "succeeded" ? "succeeded" : "failed";
+      if (!isCall && matchingParts) {
+        for (const part of matchingParts) {
+          part.content = content;
+          part.state = state;
+        }
+      } else {
+        const connectorId = isCall ? toolConnectorId(message.detail.toolName, content) : undefined;
+        const part: ToolPart = {
+          id: callId,
+          kind: "tool",
+          tool: isCall ? message.detail.toolName : "unknown-tool",
+          ...(connectorId ? { connectorId } : {}),
+          content: isCall ? "" : content,
+          state,
+        };
+        turn.parts.push(part);
+        if (matchingParts) matchingParts.push(part);
+        else toolsByCallId.set(callId, [part]);
+      }
     } else if (message.kind === "error" || message.kind === "interruption") {
       turn.parts.push({ id: message.id, kind: "notice", content, error: message.kind === "error" });
     } else if (message.kind === "approval" && message.detail.phase === "decision" && message.detail.decision === "denied") {

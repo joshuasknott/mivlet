@@ -29,6 +29,12 @@ const prodConfigPath = join(desktopRoot, "src-tauri", "tauri.conf.json");
 const devConfigPath = join(desktopRoot, "src-tauri", "tauri.dev.conf.json");
 
 describe("tauri csp config (production)", () => {
+  it("allows temporary voice playback without renderer network egress", () => {
+    const { csp } = loadCsp(prodConfigPath);
+    expect(csp["media-src"]).toBe("'self' blob:");
+    expect(csp["connect-src"]).not.toMatch(/openai|https:/);
+    expect(csp["script-src"]).toBe("'self'");
+  });
   it("defines a production CSP (not null)", () => {
     const { csp } = loadCsp(prodConfigPath);
     expect(csp).toBeTruthy();
@@ -121,12 +127,13 @@ describe("tauri csp config (production)", () => {
     const { csp } = loadCsp(prodConfigPath);
     const cspObj = csp as Record<string, string | string[]>;
     const allowed = Object.keys(cspObj).sort();
-    // Restrictive set only; no extra like media-src, worker-src, frame-src etc unless evidenced
+    // Voice playback uses temporary local media; no extra network/worker/frame directives.
     const expected = [
       "connect-src",
       "default-src",
       "font-src",
       "img-src",
+      "media-src",
       "object-src",
       "script-src",
       "style-src"

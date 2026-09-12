@@ -475,7 +475,8 @@ export function useShellAgentController({
       includePendingSubmission = false,
       computerOverride?: LocalComputerSnapshot,
     ) => {
-      if (!agent.state.running && !includePendingSubmission) return false;
+      const hasActiveAttempt = Boolean(agent.getActiveAttemptId());
+      if (!hasActiveAttempt && !includePendingSubmission) return false;
       cancelRequestedRef.current = true;
       const computer = computerOverride
         ? {
@@ -499,13 +500,13 @@ export function useShellAgentController({
             })
           : Promise.resolve(null);
       const results = await Promise.allSettled([
-        agent.state.running ? agent.cancel() : Promise.resolve(),
+        hasActiveAttempt ? agent.cancel() : Promise.resolve(),
         cancellation,
       ]);
       await localComputer.refresh().catch(() => undefined);
       const failed = results.find((result) => result.status === "rejected");
       if (failed?.status === "rejected") throw failed.reason;
-      return agent.state.running || includePendingSubmission;
+      return hasActiveAttempt || includePendingSubmission;
     },
     resetCancellation: () => {
       cancelRequestedRef.current = false;

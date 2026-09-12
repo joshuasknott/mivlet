@@ -1,6 +1,7 @@
 /** Honest capability fallback for the direct providers Mivlet currently ships. */
 
 import type { BackendModel, ModelCapabilities } from "@fable/protocol";
+import { additionalModelCapabilities, additionalNativeProviderCatalog } from "../backends/additional-native";
 
 export const MAX_TOKENS_DEFAULT = 2_048;
 
@@ -126,14 +127,15 @@ export function catalogueCapabilities(
   providerId: string,
   modelId: string
 ): ModelCapabilities | undefined {
-  return CATALOGUE[providerId]?.[modelId];
+  return CATALOGUE[providerId]?.[modelId] ?? additionalModelCapabilities(providerId, modelId);
 }
 
 /** Conservative ceilings for new models returned by live discovery. */
 export function defaultDiscoveredCapabilities(
   providerId: string
 ): ModelCapabilities | undefined {
-  if (!["openai", "anthropic", "gemini", "xai", "deepseek"].includes(providerId)) {
+  if (!["openai", "anthropic", "gemini", "xai", "deepseek"].includes(providerId)
+    && !additionalNativeProviderCatalog.some(entry => entry.providerId === providerId)) {
     return undefined;
   }
   return {

@@ -86,7 +86,7 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 11] = [
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 23] = [
     "codex",
     "openai",
     "claude",
@@ -97,6 +97,18 @@ pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 11] = [
     "deepseek",
     "cursor",
     "opencode",
+    "alibaba",
+    "moonshot",
+    "zai",
+    "groq",
+    "together",
+    "fireworks",
+    "cerebras",
+    "mistral",
+    "openrouter",
+    "nvidia",
+    "siliconflow",
+    "cohere",
     "custom",
 ];
 /// Marker that backend credential storage is pre-release. Now that the OS
@@ -110,7 +122,7 @@ pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
 // Supported connector vocabularies.
-pub const SUPPORTED_CONNECTOR_IDS: [&str; 8] = [
+pub const SUPPORTED_CONNECTOR_IDS: [&str; 21] = [
     "github",
     "vercel",
     "google-drive",
@@ -119,6 +131,19 @@ pub const SUPPORTED_CONNECTOR_IDS: [&str; 8] = [
     "slack",
     "google-calendar",
     "linear",
+    "outlook",
+    "microsoft-teams",
+    "zoom",
+    "linkedin",
+    "instagram",
+    "youtube",
+    "google-ads",
+    "meta-ads",
+    "shopify",
+    "docusign",
+    "greenhouse",
+    "lever",
+    "workday",
 ];
 pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "needs-auth",

@@ -34,10 +34,10 @@ describe("quiet agent surface", () => {
   });
   it("shows work in progress, then a completion dot until selected, and rearms for the next task", () => {
     const onSelectAgent = vi.fn();
-    const sidebar = (presence: "idle" | "working" | "done" | "waiting" | "blocked", completionId = "turn-1") => (
+    const sidebar = (presence: "idle" | "working" | "service" | "done" | "waiting" | "blocked", completionId = "turn-1") => (
       <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
         marketplaceActive={false} previews={{ [agent.id]: { message: "Draft", time: "", presence,
-          status: presence === "working" ? "running" : "idle", completionId } }}
+          status: presence === "working" || presence === "service" ? "running" : "idle", completionId } }}
         onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()} onEditAgent={vi.fn()}
         onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />
     );
@@ -46,6 +46,9 @@ describe("quiet agent surface", () => {
     expect(screen.queryByRole("status")).toBeNull();
     rerender(sidebar("working"));
     expect(screen.getByRole("status", { name: "Working" })).toHaveClass("agent-status--working");
+    rerender(sidebar("service"));
+    expect(screen.getByRole("status", { name: "Waiting for provider" })).toHaveClass("agent-status--service");
+    expect(screen.getByRole("status", { name: "Waiting for provider" })).not.toHaveClass("agent-status--working");
     rerender(sidebar("done"));
     expect(screen.getByRole("status", { name: "New completed work" })).toHaveClass("agent-status--unread");
     rerender(sidebar("idle"));
@@ -165,7 +168,8 @@ describe("quiet agent surface", () => {
     );
 
     expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.queryByText("Finished")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Finished");
+    expect(screen.getByRole("status")).toHaveClass("sr-only");
     expect(screen.queryByRole("button", { name: /Learned work/i })).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", {

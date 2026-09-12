@@ -76,15 +76,31 @@ failure and stop/continue. Select a fixture with `?conversation=stream`,
 `?conversation=context` shows the context-budget diagnostics and continuation action.
 Fixture controls stay out of the conversation. It does not call a provider or establish live acceptance.
 
-`?view=avatars` shows the eight production robot shells at 112, 32 and 18 px,
-with state, colour and background controls. Test the editor at 390 px and desktop
-widths. The sidebar stays still; the active conversation and picker allow gentle
-motion. Reduced motion disables all avatar animations. A newly completed turn
-settles after one brief expression; restored completion does not replay it.
-Runtime presence uses approvals, execution status, confirmed dictation listening,
-provider availability and relevant computer control. Speaking and explicit-input
-expressions are previewable contracts only until those runtime events exist;
-text streaming and question marks must never stand in for them.
+`?view=avatars` is the focused avatar QA board. It renders all eight vector
+characters on light and dark surfaces, at sidebar (36px; 44px on narrow
+layouts), header (36px), feed (28px), editor (80px), compact (18px), and large
+inspection sizes. Use the
+native-colour default or enable the custom colour field, state gallery, and
+uploaded portrait control to check saved identity, recolouring,
+and custom image preservation. The realistic sequence, identity buttons, Stop
+now control, and remounted completion card are explicitly simulated; they do not
+call a provider or claim a live runtime event. The sidebar-sized samples use
+quiet motion while header, feed and large active samples use expressive motion.
+Idle stays still; thinking uses a slow glance, working uses a small forward focus
+and accessory movement, and attention/completion gestures run once and settle.
+Provider waiting, stopped work and human control use static expressions. Scope
+keys fence agent/conversation/attempt changes; mounting finished history never
+replays acknowledgement. Offscreen and hidden-document avatars have no running
+animation; reduced motion keeps the expressions without timelines.
+Runtime presence still comes from approvals, execution
+status, confirmed dictation listening, provider availability, and relevant
+computer control. Speaking and explicit-input expressions require confirmed
+runtime events; voice conversations now use the audio element's playback event
+for speaking. Text streaming and question marks must never stand in for those
+events. `?view=voice` previews the production call
+view, including mute, captions, approval and error states, without audio or API
+calls. See [voice conversations](../architecture/voice-conversations.md) for its
+focused checks and separate live-audio acceptance.
 Conversation regressions cover ordered durable segments, call/result pairing,
 redaction, scroll following, safe Markdown and preview scope changes. Native
 tests cover bounded previews, public-summary persistence and external link schemes.
