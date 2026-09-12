@@ -51,6 +51,21 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it("filters ready connections separately from missing authorization and unhealthy connections", () => {
+    const props = { manifests: [gmail, github], accounts: {}, onUseConnector: vi.fn(), onConnect: vi.fn(), onDisconnect: vi.fn(), onRefresh: vi.fn(), onSelect: vi.fn(), onSwitchAccount: vi.fn() };
+    const view = render(<PluginPanel {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+    expect(screen.getAllByRole("button", { name: "Manage Gmail" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
+    expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Connect GitHub" }).length).toBeGreaterThan(0);
+    view.rerender(<PluginPanel {...props} manifests={[{ ...gmail, health: { ...gmail.health!, state: "error", summary: "Connection expired." } }, github]} />);
+    expect(screen.getAllByRole("button", { name: "Reconnect Gmail" }).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+    expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reconnect Gmail" })).toBeNull();
+  });
   it("prepares a connected plugin example without starting a connection or action", async () => {
     const user = userEvent.setup();
     const onUse = vi.fn();
@@ -182,7 +197,7 @@ describe("Connector Connection selection", () => {
     ).toBeVisible();
   });
 
-  it("keeps planned catalogue entries visibly unavailable", async () => {
+  it("offers explicit token setup for formerly planned plugins", async () => {
     const user = userEvent.setup();
     render(
       <PluginPanel
@@ -198,13 +213,13 @@ describe("Connector Connection selection", () => {
     );
 
     await user.click(
-      screen.getAllByRole("button", { name: "Outlook is planned" })[0],
+      screen.getAllByRole("button", { name: "Connect Outlook" })[0],
     );
 
     expect(screen.getByRole("dialog", { name: "Outlook" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Planned");
+    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Microsoft Graph delegated access token");
     expect(
-      screen.getByRole("button", { name: "Not available yet" }),
+      screen.getByRole("button", { name: "Verify and connect" }),
     ).toBeDisabled();
   });
 });

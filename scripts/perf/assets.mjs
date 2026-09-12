@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { extname, join, relative } from "node:path";
 
 /**
@@ -44,13 +44,12 @@ export async function collectAssets(distDir, repoRoot) {
   for (const file of files) {
     const extension = extname(file).toLowerCase();
     if (extension !== ".js" && extension !== ".css") continue;
-    const info = await stat(file);
     const data = await readFile(file);
     assets.push({
       path: relative(repoRoot, file).replaceAll("\\", "/"),
       fileName: file.split(/[/\\]/).at(-1),
       type: extension.slice(1),
-      bytes: info.size,
+      bytes: data.byteLength,
       gzipBytes: gzipSync(data).byteLength
     });
   }

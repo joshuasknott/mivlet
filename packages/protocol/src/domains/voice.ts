@@ -1,4 +1,4 @@
-/** Provider-neutral dictation contracts. Dictation only fills the composer. */
+/** Provider-neutral speech contracts. Dictation only fills the composer. */
 export type VoiceProviderKind = "local" | "remote";
 
 export interface VoiceProviderDescriptor {
@@ -47,3 +47,36 @@ export interface VoiceInputState {
 
 /** @deprecated Use VoiceInputState. */
 export type VoiceRecordingState = VoiceInputState["status"];
+
+/** A call authorizes speech processing only; it never grants agent tool authority. */
+export interface VoiceConversationScope {
+  workspaceId: string;
+  agentId: string;
+  threadId: string;
+}
+
+export interface VoiceConversationSession extends VoiceConversationScope {
+  sessionId: string;
+  expiresAt: string;
+}
+
+export type ConversationVoice = "marin" | "cedar" | "coral" | "sage";
+
+export interface VoiceConversationRequest {
+  session: VoiceConversationSession;
+  generation: number;
+  requestId: string;
+}
+
+export type VoiceConversationPhase = "ready" | "connecting" | "listening" | "hearing" | "transcribing" | "thinking" | "speaking" | "paused" | "error" | "ended";
+
+export interface VoiceConversationState {
+  phase: VoiceConversationPhase;
+  muted: boolean;
+  userCaption: string;
+  agentCaption: string;
+  error: string | null;
+  startedAt: number | null;
+  voiceInterruptionAvailable: boolean;
+  generation: number;
+}

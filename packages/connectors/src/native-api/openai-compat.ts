@@ -58,7 +58,7 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
     stream_options: { include_usage: true },
     // DeepSeek never receives a reasoning_effort: thinking mode is disabled for
     // this route (see below) and the field would flip it back on at the API.
-    ...(request.reasoningEffort && request.providerId !== "deepseek"
+    ...(request.reasoningEffort && ["openai", "xai", "custom"].includes(request.providerId)
       ? { reasoning_effort: request.reasoningEffort }
       : {}),
     // DeepSeek thinking mode defaults to enabled and emits `reasoning_content`
@@ -68,7 +68,9 @@ export function shapeOpenAiRequest(request: NativeCompletionRequest): unknown {
     // field, so DeepSeek runs in the documented non-thinking mode; the Rust
     // egress boundary enforces the same shape for the embedded host. Reasoning
     // levels are therefore not advertised and fail closed if requested.
-    ...(request.providerId === "deepseek" ? { thinking: { type: "disabled" } } : {}),
+    ...(["deepseek", "moonshot", "zai"].includes(request.providerId) ? { thinking: { type: "disabled" } } : {}),
+    ...(request.providerId === "alibaba" ? { enable_thinking: false } : {}),
+    ...(request.providerId === "openrouter" ? { provider: { require_parameters: true } } : {}),
     ...(request.tools.length > 0
       ? {
           tools: request.tools.map((tool) => ({
@@ -88,11 +90,12 @@ interface OpenAiStreamState {
   toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
 }
 
-function newOpenAiStreamState(): OpenAiStreamState {
+/** Create fresh per-stream state. */
+export function newOpenAiStreamState(): OpenAiStreamState {
   return { toolCalls: new Map() };
 }
 
-function parseOpenAiStreamLine(
+export function parseOpenAiStreamLine(
   providerId: string,
   line: string,
   state: OpenAiStreamState

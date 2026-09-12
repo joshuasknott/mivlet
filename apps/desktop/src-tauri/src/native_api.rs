@@ -23,6 +23,8 @@ use tauri::{AppHandle, Emitter};
 use url::{Host, Url};
 
 pub(crate) mod computer;
+#[cfg(test)]
+mod providers_tests;
 
 /// Which wire family a native provider speaks (selects endpoint + auth header).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,6 +56,78 @@ struct OpenAiCompatProfile {
 /// verification and discovery are unsupported, while chat execution remains
 /// available through the curated model fallback.
 const OPENAI_COMPAT_PROFILES: &[OpenAiCompatProfile] = &[
+    OpenAiCompatProfile {
+        id: "alibaba",
+        chat_endpoint: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1/chat/completions",
+        models_endpoint: Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "moonshot",
+        chat_endpoint: "https://api.moonshot.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.moonshot.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "zai",
+        chat_endpoint: "https://api.z.ai/api/paas/v4/chat/completions",
+        models_endpoint: Some("https://api.z.ai/api/paas/v4/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "groq",
+        chat_endpoint: "https://api.groq.com/openai/v1/chat/completions",
+        models_endpoint: Some("https://api.groq.com/openai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "together",
+        chat_endpoint: "https://api.together.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.together.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "fireworks",
+        chat_endpoint: "https://api.fireworks.ai/inference/v1/chat/completions",
+        models_endpoint: Some("https://api.fireworks.ai/inference/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "cerebras",
+        chat_endpoint: "https://api.cerebras.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.cerebras.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "mistral",
+        chat_endpoint: "https://api.mistral.ai/v1/chat/completions",
+        models_endpoint: Some("https://api.mistral.ai/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "openrouter",
+        chat_endpoint: "https://openrouter.ai/api/v1/chat/completions",
+        models_endpoint: Some("https://openrouter.ai/api/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "nvidia",
+        chat_endpoint: "https://integrate.api.nvidia.com/v1/chat/completions",
+        models_endpoint: Some("https://integrate.api.nvidia.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "siliconflow",
+        chat_endpoint: "https://api.siliconflow.com/v1/chat/completions",
+        models_endpoint: Some("https://api.siliconflow.com/v1/models"),
+        auth_required: true,
+    },
+    OpenAiCompatProfile {
+        id: "cohere",
+        chat_endpoint: "https://api.cohere.ai/compatibility/v1/chat/completions",
+        models_endpoint: Some("https://api.cohere.ai/v1/models?endpoint=chat"),
+        auth_required: true,
+    },
     OpenAiCompatProfile {
         id: "openai",
         chat_endpoint: "https://api.openai.com/v1/chat/completions",
@@ -232,8 +306,70 @@ fn configured_custom_provider_result(credential: &str) -> Result<BackendVerifyRe
 pub(crate) fn validate_native_credential(provider_id: &str, secret: &str) -> Result<(), String> {
     match provider_id {
         "custom" => parse_custom_provider_credential(secret).map(|_| ()),
+        "alibaba" => parse_alibaba_credential(secret).map(|_| ()),
         _ => Ok(()),
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AlibabaCredential {
+    version: u8,
+    base_url: String,
+    api_key: String,
+}
+
+fn parse_alibaba_credential(secret: &str) -> Result<AlibabaCredential, String> {
+    let mut credential: AlibabaCredential = serde_json::from_str(secret)
+        .map_err(|_| "Enter an Alibaba API key and Model Studio endpoint.".to_string())?;
+    if credential.version != 1
+        || credential.api_key.trim().is_empty()
+        || credential.api_key.chars().any(char::is_control)
+    {
+        return Err("The Alibaba API credential is invalid.".into());
+    }
+    credential.base_url = normalize_alibaba_base_url(&credential.base_url)?;
+    Ok(credential)
+}
+
+fn normalize_alibaba_base_url(raw: &str) -> Result<String, String> {
+    let base = normalize_custom_base_url(raw)?;
+    let url = Url::parse(&base).map_err(|_| "The Model Studio endpoint is invalid.")?;
+    let host = url.host_str().unwrap_or_default();
+    let legacy = [
+        "dashscope-intl.aliyuncs.com",
+        "dashscope.aliyuncs.com",
+        "dashscope-us.aliyuncs.com",
+        "cn-hongkong.dashscope.aliyuncs.com",
+    ]
+    .contains(&host);
+    let workspace = [
+        "cn-beijing",
+        "ap-southeast-1",
+        "cn-hongkong",
+        "ap-northeast-1",
+    ]
+    .iter()
+    .any(|region| {
+        host.strip_suffix(&format!(".{region}.maas.aliyuncs.com"))
+            .is_some_and(|id| {
+                !id.is_empty()
+                    && id.len() <= 63
+                    && !id.starts_with('-')
+                    && !id.ends_with('-')
+                    && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-')
+            })
+    });
+    if url.scheme() != "https"
+        || url.port().is_some()
+        || url.path() != "/compatible-mode/v1"
+        || (!legacy && !workspace)
+    {
+        return Err(
+            "Use the official Alibaba Model Studio endpoint for your region and workspace.".into(),
+        );
+    }
+    Ok(base)
 }
 
 fn resolve_provider_connection(
@@ -241,6 +377,14 @@ fn resolve_provider_connection(
     credential: &str,
     model: &str,
 ) -> Result<ResolvedProviderConnection, String> {
+    if provider_id == "alibaba" {
+        let config = parse_alibaba_credential(credential)?;
+        return Ok(ResolvedProviderConnection {
+            chat_endpoint: format!("{}/chat/completions", config.base_url),
+            models_endpoint: Some(format!("{}/models", config.base_url)),
+            auth_header: Some(("Authorization".into(), format!("Bearer {}", config.api_key))),
+        });
+    }
     if provider_id == "custom" {
         let custom = parse_custom_provider_credential(credential)?;
         if model != "model-discovery" && model != custom.model_id {
@@ -291,6 +435,44 @@ fn shape_deepseek_egress_body(body: &mut serde_json::Value) -> Result<(), String
     }
     body["thinking"] = serde_json::json!({ "type": "disabled" });
     Ok(())
+}
+
+/// Vendor-specific options are enforced once, after either SDK or wire shaping.
+/// Unbridged reasoning state must never make a later tool turn invalid.
+fn shape_provider_egress_body(
+    provider_id: &str,
+    body: &mut serde_json::Value,
+) -> Result<(), String> {
+    if provider_id == "deepseek" {
+        return shape_deepseek_egress_body(body);
+    }
+    if is_additional_native_provider(provider_id) {
+        if body.get("reasoning_effort").is_some()
+            || body.get("reasoning").is_some()
+            || body
+                .pointer("/thinking/type")
+                .and_then(serde_json::Value::as_str)
+                == Some("enabled")
+            || body
+                .get("enable_thinking")
+                .and_then(serde_json::Value::as_bool)
+                == Some(true)
+        {
+            return Err("Reasoning controls are not supported by this provider route.".into());
+        }
+        match provider_id {
+            "alibaba" => body["enable_thinking"] = serde_json::json!(false),
+            "moonshot" | "zai" => body["thinking"] = serde_json::json!({ "type": "disabled" }),
+            "openrouter" => body["provider"] = serde_json::json!({ "require_parameters": true }),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn is_additional_native_provider(provider_id: &str) -> bool {
+    openai_compat_profile(provider_id).is_some()
+        && !matches!(provider_id, "openai" | "xai" | "deepseek")
 }
 
 /// Additional headers a provider requires beyond auth (e.g. anthropic-version).
@@ -407,6 +589,7 @@ struct OpenAiCompatibleTerminalObservation {
     /// emits a separate usage-only chunk; this flag accepts the DeepSeek shape
     /// while keeping the shared shape strict.
     usage_rides_terminal_chunk: bool,
+    repeated_finish_usage: bool,
 }
 
 impl OpenAiCompatibleTerminalObservation {
@@ -415,6 +598,7 @@ impl OpenAiCompatibleTerminalObservation {
             capture_output,
             cumulative_output: false,
             usage_rides_terminal_chunk: provider_id == "deepseek",
+            repeated_finish_usage: provider_id == "openrouter",
             ..Self::default()
         }
     }
@@ -433,6 +617,27 @@ impl OpenAiCompatibleTerminalObservation {
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
             .is_some();
+        // OpenRouter repeats the terminal reason in its one final accounting
+        // frame. Accept only a content-free frame with the same reason and
+        // usage; later content, conflicting reasons and duplicate usage fail.
+        let accounting_frame = self.repeated_finish_usage
+            && terminal_was_seen
+            && !usage_was_seen
+            && value.get("usage").is_some_and(|usage| !usage.is_null())
+            && value
+                .pointer("/choices/0/finish_reason")
+                .and_then(serde_json::Value::as_str)
+                == self.finish_reason.as_deref()
+            && value
+                .pointer("/choices/0/delta")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|delta| {
+                    delta.iter().all(|(key, value)| match key.as_str() {
+                        "content" => value.is_null() || value.as_str() == Some(""),
+                        "role" => value.is_null() || value.as_str() == Some("assistant"),
+                        _ => false,
+                    })
+                });
         self.saw_payload = true;
         if value.get("error").is_some_and(|error| !error.is_null()) {
             self.provider_error = true;
@@ -486,7 +691,7 @@ impl OpenAiCompatibleTerminalObservation {
         let content = value
             .pointer("/choices/0/delta/content")
             .and_then(serde_json::Value::as_str);
-        if terminal_was_seen && content.is_some() {
+        if terminal_was_seen && content.is_some() && !accounting_frame {
             self.provider_error = true;
         }
         if self.capture_output {
@@ -500,7 +705,7 @@ impl OpenAiCompatibleTerminalObservation {
             .pointer("/choices/0/finish_reason")
             .and_then(serde_json::Value::as_str)
         {
-            if terminal_was_seen {
+            if terminal_was_seen && !accounting_frame {
                 self.provider_error = true;
             } else {
                 self.finish_reason = Some(reason.to_string());
@@ -960,6 +1165,7 @@ pub fn missing_key_message(provider_id: &str) -> String {
     match provider_id {
         "custom" => "Add a custom OpenAI-compatible endpoint to connect.".to_string(),
         "deepseek" => "Add a DeepSeek API key to connect.".to_string(),
+        "gemini" => "Add a Gemini API key to connect.".to_string(),
         _ => format!("Add an {provider_id} API key to connect."),
     }
 }
@@ -967,7 +1173,26 @@ pub fn missing_key_message(provider_id: &str) -> String {
 const EVENT_CHANNEL_PREFIX: &str = "arden://backend/";
 const MAX_ATTEMPTS: usize = 3;
 const MAX_STREAM_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
-const NATIVE_PROVIDER_IDS: [&str; 5] = ["openai", "anthropic", "xai", "deepseek", "custom"];
+pub(crate) const NATIVE_PROVIDER_IDS: &[&str] = &[
+    "openai",
+    "anthropic",
+    "gemini",
+    "xai",
+    "deepseek",
+    "alibaba",
+    "moonshot",
+    "zai",
+    "groq",
+    "together",
+    "fireworks",
+    "cerebras",
+    "mistral",
+    "openrouter",
+    "nvidia",
+    "siliconflow",
+    "cohere",
+    "custom",
+];
 
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1109,9 +1334,7 @@ pub(crate) async fn stream_completion(
     // shaper or the pinned SDK. This single egress choke point covers both the
     // embedded host and the local wire route: unsupported options fail closed
     // and every DeepSeek request runs the documented non-thinking mode.
-    if request.provider_id == "deepseek" {
-        shape_deepseek_egress_body(&mut body)?;
-    }
+    shape_provider_egress_body(&request.provider_id, &mut body)?;
 
     let observation_started = Instant::now();
     let credential = require_key(&request.provider_id)?;
@@ -1521,12 +1744,25 @@ pub fn models_endpoint_for(provider_id: &str) -> Result<String, String> {
 }
 
 /// A discovered model id surfaced back to JavaScript. No capability data is
-/// invented here — the TS merge step attaches catalogue capabilities where known.
+/// invented here — the TS merge step attaches catalogue capabilities where
+/// known, and OpenRouter discovery carries the model's own bounded metadata.
 #[derive(Debug, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveredModel {
     pub id: String,
     pub available: bool,
+    /// Provider-reported display name (OpenRouter `name`), bounded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    /// Provider-reported capabilities mapped into the Mivlet capability
+    /// vocabulary, bounded and validated by this boundary. Only fields the
+    /// provider metadata substantiates are present; unknown stays absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<serde_json::Value>,
+    /// Provider-reported reasoning levels mapped into the Mivlet reasoning
+    /// contract, bounded and validated by this boundary.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<serde_json::Value>,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -1565,15 +1801,184 @@ fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -
     .any(|marker| normalized.contains(marker))
 }
 
+/// OpenRouter reasoning-effort vocabulary (documented `ReasoningEffort` enum).
+const OPENROUTER_REASONING_EFFORTS: [&str; 7] =
+    ["max", "xhigh", "high", "medium", "low", "minimal", "none"];
+
+/// Bounds accepted by the embedded host context budget validation.
+const OPENROUTER_CONTEXT_MIN: u64 = 1_024;
+const OPENROUTER_CONTEXT_MAX: u64 = 2_000_000;
+
+/// Map OpenRouter model metadata into Mivlet's bounded capability vocabulary.
+///
+/// Truth rules (sources: openrouter.ai/docs/api/api-reference/models and the
+/// live GET /api/v1/models shape):
+///   - contextWindow from `context_length` (bounded; absent when unknown).
+///   - tools only when `supported_parameters` lists both `tools` and
+///     `tool_choice` — a model without tool support never inherits it.
+///   - structuredOutput only when `structured_outputs` is listed.
+///   - vision is deliberately never advertised: the OpenRouter metadata lists
+///     `image` input for many models, but Mivlet's OpenRouter route has no
+///     verified image-egress protocol (native screenshot delivery and image
+///     turns both fail closed on this route).
+///   - reasoning is advertised only when the `reasoning` object and
+///     `reasoning_effort` parameter are both present (see
+///     [`openrouter_reasoning`]).
+///
+/// Unknown metadata produces no field — unknown is never treated as capable.
+fn openrouter_capabilities(model: &serde_json::Value) -> Option<serde_json::Value> {
+    let context = model
+        .get("context_length")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| (OPENROUTER_CONTEXT_MIN..=OPENROUTER_CONTEXT_MAX).contains(value));
+    let parameters = model
+        .get("supported_parameters")
+        .and_then(serde_json::Value::as_array);
+    let supports = |name: &str| {
+        parameters.is_some_and(|list| list.iter().any(|entry| entry.as_str() == Some(name)))
+    };
+    let tools = supports("tools") && supports("tool_choice");
+    let structured = supports("structured_outputs");
+    let mut capabilities = serde_json::json!({ "streaming": true });
+    if let Some(context) = context {
+        capabilities["contextWindow"] = serde_json::json!(context);
+    }
+    if tools {
+        capabilities["tools"] = serde_json::json!(true);
+    }
+    if structured {
+        capabilities["structuredOutput"] = serde_json::json!(true);
+    }
+    if openrouter_reasoning(model).is_some() {
+        capabilities["reasoning"] = serde_json::json!(true);
+    }
+    Some(capabilities)
+}
+
+/// Map OpenRouter `reasoning` metadata into the Mivlet reasoning contract.
+/// Only models that list `reasoning_effort` as a supported parameter and carry
+/// a non-empty allowlist of recognized effort levels advertise levels; a
+/// `null` allowlist ("all gateway effort values accepted") stays unadvertised
+/// so Mivlet never rejects a valid level it does not know.
+fn openrouter_reasoning(model: &serde_json::Value) -> Option<serde_json::Value> {
+    let reasoning = model.get("reasoning")?;
+    if reasoning.is_null() {
+        return None;
+    }
+    let supports = |name: &str| {
+        model
+            .get("supported_parameters")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|list| list.iter().any(|entry| entry.as_str() == Some(name)))
+    };
+    if !supports("reasoning_effort") {
+        return None;
+    }
+    let efforts: Vec<String> = reasoning
+        .get("supported_efforts")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .filter(|effort| OPENROUTER_REASONING_EFFORTS.contains(effort))
+        .take(8)
+        .map(str::to_string)
+        .collect();
+    if efforts.is_empty() {
+        return None;
+    }
+    let default = reasoning
+        .get("default_effort")
+        .and_then(serde_json::Value::as_str)
+        .filter(|effort| efforts.iter().any(|known| known == effort))
+        .map(str::to_string);
+    let mut result = serde_json::json!({ "supportedEfforts": efforts });
+    if let Some(default) = default {
+        result["defaultEffort"] = serde_json::json!(default);
+    }
+    Some(result)
+}
+
+/// Bounded display name from OpenRouter `name`, or None when absent/unclean.
+fn openrouter_label(model: &serde_json::Value) -> Option<String> {
+    let label = model
+        .get("name")
+        .and_then(serde_json::Value::as_str)?
+        .trim();
+    if label.is_empty() || label.chars().count() > 240 {
+        return None;
+    }
+    Some(label.to_string())
+}
+
+/// A `~` "latest alias" entry resolves to a different model over time and has
+/// no stable identity of its own; only the canonical rows are surfaced.
+fn is_openrouter_alias(model: &serde_json::Value, id: &str) -> bool {
+    id.starts_with('~')
+        || model
+            .get("alias_target")
+            .is_some_and(|target| !target.is_null())
+}
+
+/// OpenRouter chat-completions models produce text; non-text output rows
+/// (image/embedding/audio generation) have no chat-completions route.
+fn is_openrouter_text_output(model: &serde_json::Value) -> bool {
+    model
+        .get("architecture")
+        .and_then(|architecture| architecture.get("output_modalities"))
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|modalities| {
+            modalities
+                .iter()
+                .any(|modality| modality.as_str() == Some("text"))
+        })
+}
+
 /// Extract model ids from a list-models JSON body across provider shapes. Pure
 /// helper so the per-provider parsing contract is unit-tested without a socket.
 ///
 /// Recognized shapes:
-///   - OpenAI / xAI / OpenRouter: `{ "data": [{ "id": "..." }] }`
+///   - OpenAI / xAI: `{ "data": [{ "id": "..." }] }`
+///   - OpenRouter: `{ "data": [{ "id", "name", "context_length",
+///     "architecture", "supported_parameters", "reasoning" }] }` — the same
+///     `data` array, with bounded per-model capability metadata attached and
+///     unstable `~` alias rows and non-text-output rows filtered out.
 ///   - Anthropic: `{ "data": [{ "id": "..." }] }`
 ///   - Gemini: `{ "models": [{ "name": "models/gemini-...", "supportedGenerationMethods": [...] }] }`
 pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<DiscoveredModel> {
     let mut out = Vec::new();
+    if provider_id == "cohere" {
+        if let Some(models) = body.get("models").and_then(serde_json::Value::as_array) {
+            for model in models.iter().take(MAX_DISCOVERED_MODELS) {
+                let id = model
+                    .get("name")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("")
+                    .trim();
+                if id.is_empty()
+                    || model
+                        .get("is_deprecated")
+                        .and_then(serde_json::Value::as_bool)
+                        == Some(true)
+                    || !model
+                        .get("endpoints")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|endpoints| {
+                            endpoints.iter().any(|endpoint| endpoint == "chat")
+                        })
+                {
+                    continue;
+                }
+                out.push(DiscoveredModel {
+                    id: id.into(),
+                    available: true,
+                    label: None,
+                    capabilities: None,
+                    reasoning: None,
+                });
+            }
+        }
+        return out;
+    }
     if provider_kind(provider_id) == ProviderKind::Gemini {
         if let Some(models) = body.get("models").and_then(|v| v.as_array()) {
             for model in models {
@@ -1598,6 +2003,9 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
                     out.push(DiscoveredModel {
                         id,
                         available: true,
+                        label: None,
+                        capabilities: None,
+                        reasoning: None,
                     });
                 }
             }
@@ -1605,7 +2013,12 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
         return out;
     }
 
-    if let Some(data) = body.get("data").and_then(|v| v.as_array()) {
+    // Together also documents a top-level array of model records.
+    if let Some(data) = body.get("data").and_then(|v| v.as_array()).or_else(|| {
+        (provider_id == "together")
+            .then(|| body.as_array())
+            .flatten()
+    }) {
         for model in data {
             if out.len() >= MAX_DISCOVERED_MODELS {
                 break;
@@ -1621,9 +2034,28 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
             if !is_generation_model(provider_id, model, id) {
                 continue;
             }
+            if provider_id == "openrouter" {
+                // Unstable aliases and non-chat output rows are not selectable
+                // routes for Mivlet's chat-completions transport.
+                if is_openrouter_alias(model, id) || !is_openrouter_text_output(model) {
+                    continue;
+                }
+                out.push(DiscoveredModel {
+                    id: id.to_string(),
+                    available: crate::backends::native_provider_route_reason(provider_id, id)
+                        .is_ok(),
+                    label: openrouter_label(model),
+                    capabilities: openrouter_capabilities(model),
+                    reasoning: openrouter_reasoning(model),
+                });
+                continue;
+            }
             out.push(DiscoveredModel {
                 id: id.to_string(),
                 available: true,
+                label: None,
+                capabilities: None,
+                reasoning: None,
             });
         }
     }
@@ -1631,12 +2063,37 @@ pub fn parse_models_body(provider_id: &str, body: &serde_json::Value) -> Vec<Dis
 }
 
 fn discovery_cursor(provider_id: &str, body: &serde_json::Value) -> Option<String> {
+    if provider_id == "cohere" {
+        return body
+            .get("next_page_token")
+            .and_then(serde_json::Value::as_str)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+    }
     if provider_kind(provider_id) == ProviderKind::Gemini {
         return body
             .get("nextPageToken")
             .and_then(|value| value.as_str())
             .map(str::to_string)
             .filter(|value| !value.is_empty());
+    }
+    if provider_id == "openrouter" {
+        // OpenRouter paginates with `links.next` (e.g. "/api/v1/models?offset=500&limit=500").
+        // Only the bounded offset value is trusted; the path itself is pinned
+        // to the known models endpoint.
+        let next = body
+            .get("links")
+            .and_then(|links| links.get("next"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let offset = next
+            .strip_prefix("/api/v1/models?offset=")
+            .or_else(|| next.strip_prefix("?offset="));
+        return offset
+            .and_then(|rest| rest.split('&').next())
+            .filter(|value| !value.is_empty() && value.len() <= 20)
+            .map(str::to_string)
+            .filter(|value| value.chars().all(|character| character.is_ascii_digit()));
     }
     if body.get("has_more").and_then(|value| value.as_bool()) != Some(true) {
         return None;
@@ -1674,6 +2131,9 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
             models: vec![DiscoveredModel {
                 id: custom.model_id,
                 available: true,
+                label: None,
+                capabilities: None,
+                reasoning: None,
             }],
             message: Some("Using the model ID configured for this custom endpoint.".to_string()),
         });
@@ -1693,6 +2153,7 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(20))
         .timeout(Duration::from_secs(30))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
     let mut cursor: Option<String> = None;
@@ -1708,8 +2169,13 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
         if let Some(cursor_value) = cursor.as_deref() {
             let key = if provider_kind(&provider_id) == ProviderKind::Gemini {
                 "pageToken"
+            } else if provider_id == "openrouter" {
+                // OpenRouter paginates with an offset into the full catalog.
+                "offset"
             } else if provider_kind(&provider_id) == ProviderKind::Anthropic {
                 "after_id"
+            } else if provider_id == "cohere" {
+                "page_token"
             } else {
                 "after"
             };
@@ -1791,6 +2257,34 @@ pub async fn list_backend_models(provider_id: String) -> Result<ModelDiscoveryRe
     })
 }
 
+fn credential_verification_body(provider_id: &str) -> Result<Option<serde_json::Value>, String> {
+    if !is_additional_native_provider(provider_id) {
+        return Ok(None);
+    }
+    let model = crate::backends::native_verification_model(provider_id)
+        .ok_or("The provider has no verification model.")?;
+    let mut body = serde_json::json!({
+        "model": model,
+        "messages": [{ "role": "user", "content": "Reply OK." }],
+        "max_tokens": 16,
+        "stream": false
+    });
+    shape_provider_egress_body(provider_id, &mut body)?;
+    Ok(Some(body))
+}
+
+fn verification_response_valid(body: &serde_json::Value) -> bool {
+    body.get("error").is_none_or(serde_json::Value::is_null)
+        && matches!(
+            body.pointer("/choices/0/finish_reason")
+                .and_then(serde_json::Value::as_str),
+            Some("stop" | "length")
+        )
+        && body
+            .pointer("/choices/0/message")
+            .is_some_and(serde_json::Value::is_object)
+}
+
 /// Verify a stored native-API credential by hit-testing it against the
 /// provider's list-models endpoint. The key never crosses into JavaScript —
 /// Rust looks it up via the credential boundary, adds the auth header, and
@@ -1855,10 +2349,17 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(20))
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| "Mivlet could not initialize the provider client.".to_string())?;
 
-    let mut request = client.get(&url);
+    // Model catalogues can be public (for example OpenRouter). New direct routes
+    // validate actual model access with one bounded inference request instead.
+    let mut request = if let Some(body) = credential_verification_body(&provider_id)? {
+        client.post(&connection.chat_endpoint).json(&body)
+    } else {
+        client.get(&url)
+    };
     if let Some((auth_name, auth_value)) = connection.auth_header.as_ref() {
         request = request.header(auth_name.as_str(), auth_value.as_str());
     }
@@ -1866,7 +2367,7 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
         request = request.header(name, value);
     }
 
-    let response = match request.send().await {
+    let mut response = match request.send().await {
         Ok(response) => response,
         Err(_) => {
             return Ok(BackendVerifyResult {
@@ -1880,6 +2381,36 @@ pub async fn verify_backend_credential(provider_id: String) -> Result<BackendVer
     };
 
     let status = response.status();
+    if status.is_success() && is_additional_native_provider(&provider_id) {
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| "Could not read the provider verification response.".to_string())?
+        {
+            if bytes.len().saturating_add(chunk.len()) > 65_536 {
+                return Ok(BackendVerifyResult {
+                    provider_id,
+                    outcome: "failed".into(),
+                    message: Some(
+                        "The provider verification response exceeded the supported size.".into(),
+                    ),
+                });
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        if !serde_json::from_slice::<serde_json::Value>(&bytes)
+            .is_ok_and(|body| verification_response_valid(&body))
+        {
+            return Ok(BackendVerifyResult {
+                provider_id,
+                outcome: "failed".into(),
+                message: Some(
+                    "The provider did not return a valid model verification response.".into(),
+                ),
+            });
+        }
+    }
     let outcome = verify_outcome_for_status(status);
     let message = if outcome == "auth-failed" {
         Some(format!(
@@ -2061,6 +2592,24 @@ mod transport_policy_tests {
     }
 
     #[test]
+    fn gemini_is_admitted_to_egress_discovery_and_verification() {
+        assert!(NATIVE_PROVIDER_IDS.contains(&"gemini"));
+        assert_eq!(
+            auth_header_for("gemini", "test-key"),
+            ("x-goog-api-key".to_string(), "test-key".to_string())
+        );
+        assert!(endpoint_for("gemini").contains("generativelanguage.googleapis.com"));
+        assert_eq!(
+            missing_key_message("gemini"),
+            "Add a Gemini API key to connect."
+        );
+        assert_eq!(
+            missing_key_message("anthropic"),
+            "Add an anthropic API key to connect."
+        );
+    }
+
+    #[test]
     fn models_endpoints_point_at_each_provider_list_route() {
         assert_eq!(
             models_endpoint_for("openai").unwrap(),
@@ -2077,12 +2626,16 @@ mod transport_policy_tests {
             models_endpoint_for("xai").unwrap(),
             "https://api.x.ai/v1/models"
         );
-        assert!(models_endpoint_for("openrouter").is_err());
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert!(models_endpoint_for("unknown").is_err());
     }
 
     #[test]
     fn native_allowlist_and_fixed_profile_table_are_complete_and_unique() {
-        let native: HashSet<&str> = NATIVE_PROVIDER_IDS.into_iter().collect();
+        let native: HashSet<&str> = NATIVE_PROVIDER_IDS.iter().copied().collect();
         assert_eq!(native.len(), NATIVE_PROVIDER_IDS.len());
         let profiled: HashSet<&str> = OPENAI_COMPAT_PROFILES
             .iter()
@@ -2211,6 +2764,229 @@ mod transport_policy_tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["gpt-5", "gpt-4.1"]);
         assert!(models.iter().all(|m| m.available));
+    }
+
+    #[test]
+    fn openrouter_profile_uses_bearer_auth_and_documented_endpoints() {
+        assert_eq!(
+            endpoint_for("openrouter"),
+            "https://openrouter.ai/api/v1/chat/completions"
+        );
+        assert_eq!(
+            models_endpoint_for("openrouter").unwrap(),
+            "https://openrouter.ai/api/v1/models"
+        );
+        assert_eq!(
+            auth_header_for("openrouter", "sk-test"),
+            ("Authorization".to_string(), "Bearer sk-test".to_string())
+        );
+        assert!(extra_headers("openrouter").is_empty());
+        assert!(
+            resolve_provider_connection("openrouter", "sk-test", "openai/gpt-4.1")
+                .unwrap()
+                .auth_header
+                .is_some()
+        );
+    }
+
+    fn openrouter_model(id: &str, overrides: serde_json::Value) -> serde_json::Value {
+        let mut model = serde_json::json!({
+            "id": id,
+            "canonical_slug": id,
+            "name": "Fixture Model",
+            "context_length": 200_000,
+            "architecture": { "input_modalities": ["text"], "output_modalities": ["text"] },
+            "supported_parameters": ["max_tokens", "tools", "tool_choice", "structured_outputs", "reasoning_effort"],
+            "top_provider": { "max_completion_tokens": 32_768, "is_moderated": false },
+        });
+        if let Some(object) = model.as_object_mut() {
+            for (key, value) in overrides.as_object().expect("overrides must be an object") {
+                object.insert(key.clone(), value.clone());
+            }
+        }
+        model
+    }
+
+    #[test]
+    fn openrouter_discovery_maps_bounded_capabilities_from_provider_metadata() {
+        let body = serde_json::json!({
+            "data": [
+                openrouter_model("anthropic/claude-sonnet-4.6", serde_json::json!({
+                    "reasoning": { "mandatory": false, "default_enabled": true, "supported_efforts": ["max", "high", "medium", "low"], "default_effort": "medium" },
+                    "architecture": { "input_modalities": ["text", "image"], "output_modalities": ["text"] },
+                })),
+                openrouter_model("deepseek/deepseek-chat:free", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "reasoning_effort", "reasoning"],
+                    "reasoning": { "mandatory": false, "default_enabled": true, "supported_efforts": null },
+                })),
+                openrouter_model("mystery/unlisted", serde_json::json!({
+                    "supported_parameters": ["max_tokens"],
+                    "context_length": null,
+                })),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        assert_eq!(models.len(), 3);
+
+        let capable = models
+            .iter()
+            .find(|model| model.id == "anthropic/claude-sonnet-4.6")
+            .unwrap();
+        assert_eq!(capable.label.as_deref(), Some("Fixture Model"));
+        let capabilities = capable.capabilities.as_ref().unwrap();
+        assert_eq!(capabilities["streaming"], true);
+        assert_eq!(capabilities["contextWindow"], 200_000);
+        assert_eq!(capabilities["tools"], true);
+        assert_eq!(capabilities["structuredOutput"], true);
+        assert_eq!(capabilities["reasoning"], true);
+        // Image input is documented for this model, but the Mivlet route has no
+        // verified image-egress protocol: vision is never advertised.
+        assert!(capabilities.get("vision").is_none());
+        let reasoning = capable.reasoning.as_ref().unwrap();
+        assert_eq!(
+            reasoning["supportedEfforts"],
+            serde_json::json!(["max", "high", "medium", "low"])
+        );
+        assert_eq!(reasoning["defaultEffort"], "medium");
+
+        // A null effort allowlist means "all gateway efforts accepted"; Mivlet
+        // does not advertise a level list it could not validate, so reasoning
+        // stays entirely unknown for this model.
+        let unrestricted = models
+            .iter()
+            .find(|model| model.id == "deepseek/deepseek-chat:free")
+            .unwrap();
+        assert!(unrestricted.reasoning.is_none());
+        assert!(unrestricted
+            .capabilities
+            .as_ref()
+            .unwrap()
+            .get("reasoning")
+            .is_none());
+
+        // Unknown metadata stays unknown: only streaming is claimed.
+        let unknown = models
+            .iter()
+            .find(|model| model.id == "mystery/unlisted")
+            .unwrap();
+        assert_eq!(
+            unknown.capabilities.as_ref().unwrap(),
+            &serde_json::json!({ "streaming": true })
+        );
+        assert!(unknown.reasoning.is_none());
+    }
+
+    #[test]
+    fn openrouter_discovery_rejects_unstable_aliases_and_non_chat_output_rows() {
+        let body = serde_json::json!({
+            "data": [
+                // "Latest alias" rows resolve to a different model over time.
+                openrouter_model("~openai/gpt-sol-latest", serde_json::json!({
+                    "alias_target": { "name": "OpenAI: GPT Sol", "slug": "openai/gpt-5.6-sol" },
+                })),
+                openrouter_model("openai/gpt-sol-latest", serde_json::json!({
+                    "alias_target": { "name": "OpenAI: GPT Sol", "slug": "openai/gpt-5.6-sol" },
+                })),
+                // Image-output rows have no chat-completions route.
+                openrouter_model("openai/gpt-image-1", serde_json::json!({
+                    "architecture": { "input_modalities": ["text"], "output_modalities": ["image"] },
+                })),
+                // Embedding rows are filtered by the generation-model markers.
+                openrouter_model("openai/text-embedding-3-large", serde_json::json!({
+                    "architecture": { "input_modalities": ["text"], "output_modalities": ["embeddings"] },
+                })),
+                openrouter_model("openai/gpt-4.1", serde_json::json!({})),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].id, "openai/gpt-4.1");
+    }
+
+    #[test]
+    fn openrouter_tools_require_both_tool_parameters_and_reasoning_requires_effort_parameter() {
+        let body = serde_json::json!({
+            "data": [
+                openrouter_model("provider/tools-only", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tools"],
+                })),
+                openrouter_model("provider/tool-choice-only", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tool_choice"],
+                })),
+                openrouter_model("provider/reasoning-no-param", serde_json::json!({
+                    "supported_parameters": ["max_tokens", "tools", "tool_choice"],
+                    "reasoning": { "mandatory": false, "supported_efforts": ["high", "low"], "default_effort": "low" },
+                })),
+                openrouter_model("provider/out-of-bound-context", serde_json::json!({
+                    "context_length": 20_000_000,
+                })),
+            ]
+        });
+        let models = parse_models_body("openrouter", &body);
+        let by_id: std::collections::HashMap<&str, &DiscoveredModel> = models
+            .iter()
+            .map(|model| (model.id.as_str(), model))
+            .collect();
+        assert_eq!(
+            by_id["provider/tools-only"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("tools"),
+            None
+        );
+        assert_eq!(
+            by_id["provider/tool-choice-only"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("tools"),
+            None
+        );
+        // Reasoning requires the `reasoning_effort` parameter in addition to
+        // the reasoning object; without it no effort levels are advertised.
+        assert_eq!(by_id["provider/reasoning-no-param"].reasoning, None);
+        assert_eq!(
+            by_id["provider/reasoning-no-param"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("reasoning"),
+            None
+        );
+        // Out-of-bound context metadata is dropped, not trusted.
+        assert_eq!(
+            by_id["provider/out-of-bound-context"]
+                .capabilities
+                .as_ref()
+                .unwrap()
+                .get("contextWindow"),
+            None
+        );
+    }
+
+    #[test]
+    fn openrouter_discovery_cursor_follows_only_bounded_offset_links() {
+        let with_offset =
+            serde_json::json!({ "links": { "next": "/api/v1/models?offset=500&limit=500" } });
+        assert_eq!(
+            discovery_cursor("openrouter", &with_offset).as_deref(),
+            Some("500")
+        );
+        let bare_offset = serde_json::json!({ "links": { "next": "?offset=100" } });
+        assert_eq!(
+            discovery_cursor("openrouter", &bare_offset).as_deref(),
+            Some("100")
+        );
+        for hostile in [
+            serde_json::json!({ "links": { "next": "https://evil.example/models?offset=500" } }),
+            serde_json::json!({ "links": { "next": "/api/v1/models?offset=abc" } }),
+            serde_json::json!({ "links": { "next": null } }),
+            serde_json::json!({ "links": {} }),
+            serde_json::json!({}),
+        ] {
+            assert_eq!(discovery_cursor("openrouter", &hostile), None);
+        }
     }
 
     #[test]
@@ -2585,5 +3361,57 @@ mod deepseek_egress_tests {
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["deepseek-flash", "deepseek-v4-pro"]);
         assert!(models.iter().all(|m| m.available));
+    }
+}
+
+#[cfg(test)]
+mod openrouter_accounting_tests {
+    use super::*;
+
+    fn terminal_usage(reason: &str, content: &str) -> String {
+        serde_json::json!({
+            "choices": [{"index": 0, "delta": {"content": content, "role": "assistant"}, "finish_reason": reason}],
+            "usage": {"prompt_tokens": 7, "completion_tokens": 2}
+        }).to_string()
+    }
+
+    fn finished(provider: &str) -> OpenAiCompatibleTerminalObservation {
+        let mut observed = OpenAiCompatibleTerminalObservation::new_for_provider(provider, true);
+        observed.observe(r#"{"choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}"#);
+        observed.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        observed
+    }
+
+    #[test]
+    fn accepts_documented_openrouter_accounting_frame() {
+        let mut observed = finished("openrouter");
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(observed.clean_stop());
+        assert_eq!(observed.output, "Hello");
+        assert_eq!(observed.usage, Some((7, 2)));
+        observed.observe(&terminal_usage("stop", ""));
+        assert!(
+            !observed.clean_stop(),
+            "duplicate accounting frame must fail"
+        );
+    }
+
+    #[test]
+    fn accounting_exception_rejects_content_conflicts_and_other_providers() {
+        for (provider, reason, content) in [
+            ("openrouter", "stop", "late"),
+            ("openrouter", "length", ""),
+            ("openai", "stop", ""),
+        ] {
+            let mut observed = finished(provider);
+            observed.observe(&terminal_usage(reason, content));
+            assert!(!observed.clean_stop());
+        }
+        let mut early = OpenAiCompatibleTerminalObservation::new_for_provider("openrouter", true);
+        early.observe(&terminal_usage("stop", ""));
+        assert!(!early.clean_stop());
+        let mut no_usage = finished("openrouter");
+        no_usage.observe(r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#);
+        assert!(!no_usage.clean_stop());
     }
 }

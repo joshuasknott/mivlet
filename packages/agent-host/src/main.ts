@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type { HostInput } from "./host";
+import { isEmbeddedNativeProvider } from "@fable/connectors/backends/catalog";
 
 // Rust supplies a fresh private working directory and a cleared environment.
 // These assignments precede SDK module evaluation, including global services.
@@ -28,7 +29,7 @@ function stop() {
 }
 async function start(input: HostInput) {
   try {
-    if (!["openai", "anthropic", "xai", "deepseek", "custom"].includes(input.providerId)
+    if (!isEmbeddedNativeProvider(input.providerId)
       || !input.request || input.request.messages.some(message => message.images?.length)
       || !Number.isInteger(input.maxTurns) || input.maxTurns < 1 || input.maxTurns > 32
       || !Number.isInteger(input.maxToolCalls) || input.maxToolCalls < 1 || input.maxToolCalls > 80

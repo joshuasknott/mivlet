@@ -6,6 +6,7 @@ import type {
 } from "@fable/protocol";
 
 export type PermissionEffect =
+  | "coordination"
   | "local-read"
   | "local-write"
   | "delete"
@@ -50,6 +51,7 @@ const MODE_FOR_PROFILE: Record<PermissionProfileId, PermissionMode> = {
 };
 
 const READ_ONLY_ALLOWED = new Set<PermissionEffect>([
+  "coordination",
   "local-read",
   "connector-read",
   "web-fetch",
@@ -113,6 +115,10 @@ export function normalizePermissionProfile(input: {
 
 export function effectForTool(toolName: string): PermissionEffect | null {
   switch (toolName) {
+    case "teammate-assign":
+    case "project-record":
+    case "team-await-user":
+      return "coordination";
     case "read-file":
     case "computer-artifact":
       return "local-read";
@@ -139,6 +145,7 @@ export function effectForTool(toolName: string): PermissionEffect | null {
     case "connection-read":
     case "connector-tools":
     case "github-read":
+    case "plugin-read":
     case "vercel-read":
     case "linear-read":
     case "google-drive-read":

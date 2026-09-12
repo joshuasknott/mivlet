@@ -4,11 +4,9 @@ import { listSupportedConnectors } from "@fable/connectors";
 import type {
   KnowledgeSource,
   MemoryRecord,
-  ThreadSummary,
-  WorkspaceDirective
+  ThreadSummary
 } from "@fable/protocol";
 
-export const workspaceDirectives: WorkspaceDirective[] = [];
 export const connectors = listSupportedConnectors();
 export const chatThreads: ThreadSummary[] = [];
 export const knowledgeSources: KnowledgeSource[] = [];

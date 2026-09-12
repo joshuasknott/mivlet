@@ -1528,6 +1528,110 @@ pub(crate) async fn complete_auth(
     commit_prepared_auth(app, connector_id, scope, &secret_store, prepared)
 }
 
+pub(crate) async fn connect_token_plugin(
+    app: &tauri::AppHandle,
+    connector_id: &str,
+    credential: crate::token_plugins::Credential,
+    scope: &crate::authorized_scope::AuthorizedCommandScope,
+) -> Result<ConnectorAuthResult, ConnectorCommandError> {
+    let secret_store = NativeConnectorSecretStore;
+    let durable_store = crate::store::try_global().ok_or_else(|| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Mivlet's encrypted store is not initialized.",
+            false,
+        )
+    })?;
+    let selection = durable_store
+        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, scope, connector_id))
+        .map_err(|_| {
+            command_error(
+                "unknown",
+                connector_id,
+                "Could not inspect the selected connection.",
+                false,
+            )
+        })?;
+    let (credential, account) = crate::token_plugins::prepare(connector_id, credential).await?;
+    let tokens = StoredTokenSet {
+        access_token: serde_json::to_string(&credential).map_err(|_| {
+            command_error(
+                "unknown",
+                connector_id,
+                "Could not encode plugin credentials.",
+                false,
+            )
+        })?,
+        refresh_token: None,
+        token_type: "native-plugin".into(),
+        expires_at: None,
+        scopes: vec!["token-read".into()],
+        revocation_endpoint: None,
+        token_endpoint: None,
+        handoff_endpoint: None,
+        client_id: String::new(),
+        brokered: false,
+    };
+    let credential_ref = native_connector_credential_ref(connector_id, &account.id);
+    let previous_secret = secret_store
+        .get(&credential_ref)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    let encoded_tokens = serde_json::to_string(&tokens).map_err(|_| {
+        command_error(
+            "unknown",
+            connector_id,
+            "Could not encode plugin credentials.",
+            false,
+        )
+    })?;
+    let prepared = (
+        tokens,
+        account,
+        credential_ref.clone(),
+        CredentialRollback {
+            credential_ref,
+            previous_secret,
+        },
+        encoded_tokens,
+    );
+    let path = connector_connections_path(app)
+        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
+    commit_prepared_auth_state(
+        &path,
+        durable_store,
+        connector_id,
+        scope,
+        &secret_store,
+        prepared,
+        || {
+            let current = durable_store
+                .with_conn(|tx| {
+                    crate::store::repos::connection_selection::get(tx, scope, connector_id)
+                })
+                .map_err(|_| {
+                    command_error(
+                        "unknown",
+                        connector_id,
+                        "Could not inspect the selected connection.",
+                        false,
+                    )
+                })?;
+            if selection.as_ref().map(|s| (&s.connection_id, s.revision))
+                != current.as_ref().map(|s| (&s.connection_id, s.revision))
+            {
+                return Err(command_error(
+                    "conflict",
+                    connector_id,
+                    "The selected connection changed while validating this token. Connect again.",
+                    true,
+                ));
+            }
+            Ok(())
+        },
+    )
+}
+
 fn commit_prepared_auth(
     app: &tauri::AppHandle,
     connector_id: &str,

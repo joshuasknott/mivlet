@@ -7,6 +7,7 @@ import {
   safeConversationLink,
 } from "../../lib/safe-output";
 import { getRuntimeAdapter, hasNativeRuntimeAdapter } from "../../runtime/adapters/select";
+import { CopyButton } from "../CopyButton";
 
 type StandardToken = Tokens.Space | Tokens.Code | Tokens.Blockquote | Tokens.HTML | Tokens.Heading | Tokens.Hr | Tokens.List | Tokens.Paragraph | Tokens.Table | Tokens.Strong | Tokens.Em | Tokens.Codespan | Tokens.Br | Tokens.Del | Tokens.Link | Tokens.Image | Tokens.Text | Tokens.Escape | Tokens.Def;
 
@@ -30,7 +31,7 @@ function renderTokens(tokens: Token[], depth = 0): ReactNode {
       case "em": node = <em>{renderTokens(token.tokens, depth + 1)}</em>; break;
       case "del": node = <del>{renderTokens(token.tokens, depth + 1)}</del>; break;
       case "codespan": node = <code>{token.text}</code>; break;
-      case "code": node = <pre tabIndex={0}><code>{token.text}</code></pre>; break;
+      case "code": node = <div className="message-code"><header><span>{token.lang?.split(/\s/)[0]?.slice(0, 32) || "Text"}</span><CopyButton text={token.text} label="Copy code" /></header><pre tabIndex={0}><code>{token.text}</code></pre></div>; break;
       case "br": node = <br />; break;
       case "hr": node = <hr />; break;
       case "blockquote": node = <blockquote>{renderTokens(token.tokens, depth + 1)}</blockquote>; break;

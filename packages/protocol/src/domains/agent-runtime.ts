@@ -524,6 +524,8 @@ export interface NativeToolCall {
   callId: string;
   tool: string;
   arguments: string;
+  /** Opaque provider continuation, transient within one adapter run only. */
+  continuationToken?: string;
 }
 
 /** A tool the loop advertises to the model (Fable-owned, from the registry). */
@@ -587,6 +589,8 @@ export type BackendAgentEvent =
       callId: string;
       tool: string;
       arguments: string;
+      /** Opaque provider continuation; never presentation or approval authority. */
+      continuationToken?: string;
       approval: ApprovalRequest;
     }
   | { type: "tool-result"; callId: string; ok: boolean; output: string }

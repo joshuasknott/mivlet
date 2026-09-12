@@ -36,6 +36,15 @@ a deployed or production-validated service.
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Dictation and send have separate
   controls below the message text.
+- Voice conversations with the selected named agent: automatic speech turns,
+  sentence-by-sentence spoken replies, captions, mute, interruption, and End.
+  Open the waveform button in an agent conversation. Speech requires a separate
+  OpenAI API connection and explicit per-call consent; the selected agent/model
+  still owns reasoning and tools. Microphone interruption requires confirmed
+  echo cancellation; an Interrupt button is always available during replies.
+  Calls retain normal tool approvals and stop on conversation/model changes.
+  Raw audio is transient. See [voice architecture](docs/architecture/voice-conversations.md)
+  for limits and the remaining live-audio acceptance checks.
 - First-run setup with Google-first account sign-in, a verified model-provider
   connection, and optional app connectors. The default Chief of Staff appears
   only after setup is complete.
@@ -45,12 +54,13 @@ a deployed or production-validated service.
   Cursor and Grok run through ACP; Claude uses its bidirectional Agent SDK
   protocol; and OpenCode runs behind a Mivlet-owned authenticated loopback
   server. All six provider-owned routes mediate consequential actions through
-  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI, DeepSeek
-  and custom API turns use the bundled OpenCode V2 embedded host, with native
+  Mivlet's one-time approval boundary. Direct OpenAI, Anthropic, xAI, DeepSeek,
+  Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq, Together, Fireworks, Cerebras,
+  Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere and custom API turns use the bundled OpenCode V2 embedded host, with native
   credential custody and Mivlet tool approvals. DeepSeek runs its documented
   non-thinking mode; its thinking-mode `reasoning_content` round-trip is not
   bridged, so reasoning levels are not advertised and screenshot delivery stays
-  disabled. User-image turns retain the audited visual
+  disabled. Direct Gemini uses the native Gemini wire adapter with API-key custody. User-image turns retain the audited visual
   wire route; other provider-specific wire adapters remain separate. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.
@@ -58,12 +68,26 @@ a deployed or production-validated service.
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
 - Provider and plugin-style Connections, including connector and MCP
-  boundaries. The official MCP SDK owns negotiation and discovery in the bundled
+  boundaries. The 13 formerly planned plugins now offer bounded native reads
+  with provider-issued API credentials; see [plugin capabilities and setup](docs/product/connectors.md#native-token-plugins).
+  These token plugins require manual renewal and do not yet support writes or knowledge sync.
+  The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
+- Each named agent can have multiple private conversations. Standalone groups
+  and optional projects use selected participants, an existing agent as lead or
+  facilitator, bounded assignments, attributed results and inspectable decisions.
+  Group delegation uses the Codex and native API routes that bridge Mivlet tools;
+  provider-owned routes without that bridge remain unavailable for group work.
+- Conversation tabs and two-pane splits arrange durable conversations and
+  supported artifacts. Closing a tab leaves work running and discoverable in
+  Activity. Projects contain focused chats, shared files and occurrence-tracked
+  local research schedules. Work runs while the app is open and Windows is awake;
+  interrupted work requires review before continuation. See the
+  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md).
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Agents can create bounded passive DOCX files and XLSX workbooks

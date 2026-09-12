@@ -1,5 +1,6 @@
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
+import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import type { FableAgentProfile } from "@fable/protocol";
 import { ProfileAgentAvatar } from "./agent-icons";
@@ -15,6 +16,9 @@ export function AgentWorkspaceHeader({
   activity,
   computerActive = false,
   onSchedules,
+  onVoice,
+  voiceOpen = false,
+  activityKey,
 }: {
   agent: FableAgentProfile;
   attentionCount: number;
@@ -25,18 +29,22 @@ export function AgentWorkspaceHeader({
   activity?: string;
   computerActive?: boolean;
   onSchedules?: () => void;
+  onVoice?: () => void;
+  voiceOpen?: boolean;
+  activityKey?: string;
 }) {
   return (
     <header className="agent-workspace-header">
       {onBack ? <button className="agent-workspace-header__back" type="button" onClick={onBack} aria-label="Back to agents"><CaretLeft size={20} /></button> : null}
       <div className="agent-workspace-header__identity">
-        <ProfileAgentAvatar agent={agent} iconSize={36} presence={presence} motion="expressive" />
+        <ProfileAgentAvatar agent={agent} iconSize={36} presence={presence} activityKey={activityKey} motion="expressive" />
         <div className="agent-workspace-header__copy">
           <strong>{agent.name}</strong>
-          {presence !== "idle" && presence !== "done" ? <span className="agent-workspace-header__presence" data-presence={presence} role="status" title={presenceLabel(presence, activity)}>{presenceLabel(presence, activity)}</span> : null}
+          {presence !== "idle" && presence !== "done" ? <span className="agent-workspace-header__presence" data-presence={presence} role="status" title={presenceLabel(presence, activity)}>{presenceLabel(presence, activity)}</span> : <span className="sr-only" role="status">{presenceLabel(presence, activity)}</span>}
         </div>
       </div>
       <div className="agent-workspace-header__actions">
+        {onVoice ? <button type="button" data-voice-toggle className={voiceOpen ? "is-active" : ""} onClick={onVoice} aria-label={voiceOpen ? "End voice conversation" : "Start voice conversation"} aria-pressed={voiceOpen} title="Voice conversation"><Waveform size={19} /></button> : null}
         {onSchedules ? <WorkspaceMenu onSchedules={onSchedules} /> : null}
         <button
           type="button"

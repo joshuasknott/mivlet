@@ -2,7 +2,7 @@
 //!
 //! The native shell owns local encrypted storage, provider and connector
 //! boundaries, approvals, conversations, and optional local or hosted
-//! computers. Product orchestration lives nowhere in this crate.
+//! computers, and durable coordination authority.
 
 #![allow(
     clippy::large_enum_variant,
@@ -20,6 +20,7 @@ mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
 mod codex_app_server;
+mod collaboration;
 mod collaboration_connectors;
 mod connector_api;
 mod connector_approvals;
@@ -50,6 +51,7 @@ mod memory;
 mod models;
 mod native_api;
 mod native_speech;
+mod native_voice;
 mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
@@ -57,6 +59,7 @@ mod permission_policy;
 mod product_spine_parity;
 mod snapshot;
 mod store;
+mod token_plugins;
 pub mod tools;
 mod window_controls;
 
@@ -88,6 +91,11 @@ pub fn run() {
             let handle = app.handle().clone();
             let app_data = paths::app_data_dir(&handle)?;
             store::initialize(&app_data)?;
+            if let Some(store) = store::try_global() {
+                collaboration::recover(store).map_err(|error| {
+                    std::io::Error::other(format!("Coordination recovery failed: {error:?}"))
+                })?;
+            }
             // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
             let _ = connector_auth::provision_connector_configuration();
             let computers =
@@ -138,6 +146,7 @@ pub fn run() {
             local_schedules::local_schedule_update,
             local_schedules::local_schedule_set_status,
             local_schedules::local_schedule_list,
+            local_schedules::local_schedule_preview,
             local_schedules::local_schedule_occurrence_list,
             local_schedules::local_schedule_dispatch_claim,
             local_schedules::local_schedule_dispatch_bind,
@@ -145,6 +154,8 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
             local_projects::local_project_create,
+            collaboration::collaboration_load,
+            collaboration::collaboration_command,
             local_projects::local_project_list,
             local_projects::local_project_update,
             local_projects::local_project_archive,
@@ -184,6 +195,12 @@ pub fn run() {
             native_speech::native_speech_prepare_recording,
             native_speech::native_speech_cancel_recording,
             native_speech::native_speech_transcribe_recording,
+            native_voice::native_voice_start,
+            native_voice::native_voice_heartbeat,
+            native_voice::native_voice_interrupt,
+            native_voice::native_voice_end,
+            native_voice::native_voice_transcribe,
+            native_voice::native_voice_speak,
             snapshot::load_runtime_snapshot,
             snapshot::save_runtime_snapshot,
             backends::list_backends,
@@ -230,6 +247,7 @@ pub fn run() {
             connector_sync::cancel_connector_sync,
             connectors::search_connector,
             connectors::read_connector_capability,
+            connectors::connect_token_plugin,
             connectors::import_connector_item,
             connectors::list_connector_knowledge_sources,
             connectors::set_connector_knowledge_source_disabled,

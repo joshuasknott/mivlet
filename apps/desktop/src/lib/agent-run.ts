@@ -118,6 +118,8 @@ export interface BuildContextPrefixForRunInput {
 
 /** Optional agent-level filters applied before retrieval. */
 export interface KnowledgeRunContext {
+  /** Shared rooms do not inherit private conversational memory. */
+  excludePrivateMemory?: boolean;
   /** Canonical conversation being assembled; avoids the legacy shell thread. */
   threadId?: string;
   /** Exact connected accounts this teammate may read from; grants nothing. */

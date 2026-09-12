@@ -34,6 +34,14 @@ const connect = async () => {
   fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 };
 describe("official connector setup", () => {
+  it("preserves the cause when a saved connection cannot restore access", async () => {
+    api.list.mockResolvedValue([{ id: "marketplace-notion" }]);
+    api.open.mockRejectedValue(new Error("Authorization expired. Sign in again."));
+    show();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Authorization expired. Sign in again.");
+    expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
+    expect(api.auth).not.toHaveBeenCalled();
+  });
   it("connects with one click and enables discovered tools after sign-in", async () => {
     show(); await connect(); await screen.findByText("Connected");
     expect(api.commit).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", endpoint: "https://mcp.notion.com/mcp" }), expect.objectContaining({ decision: "once", confirmationText: "approve" }));

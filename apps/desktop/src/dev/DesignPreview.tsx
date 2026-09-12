@@ -36,9 +36,10 @@ import {
 } from "../hooks/shell-runtime/defaults";
 import { resolveCodexProvider } from "@fable/connectors/backends/codex";
 import { resolveNativeProvider } from "@fable/connectors/backends/native";
+import { additionalNativeProviderCatalog } from "@fable/connectors/backends/additional-native";
 import { OnboardingPreview } from "./OnboardingPreview";
 import { AgentAvatarPreview } from "./AgentAvatarPreview";
-import { ProjectPreview } from "./ProjectPreview";
+import { VoiceConversationPreview } from "./VoiceConversationPreview";
 import "../styles.css";
 
 if (!import.meta.env.DEV)
@@ -161,14 +162,6 @@ function DesignPreview() {
       pinned: true,
     },
   ]);
-  const [previewConversations, setPreviewConversations] = useState(() =>
-    new URLSearchParams(window.location.search).get("view") === "conversations"
-      ? [
-          { id: "preview-one", title: "Plan my week", time: "17:04" },
-          { id: "preview-two", title: "Find my latest email", time: "16:32" },
-        ]
-      : [],
-  );
   const [showApproval, setShowApproval] = useState(
     new URLSearchParams(window.location.search).get("view") === "approval",
   );
@@ -232,6 +225,7 @@ function DesignPreview() {
       resolveNativeProvider("openai", "needs-auth"),
       resolveNativeProvider("anthropic", "needs-auth"),
       resolveNativeProvider("xai", "needs-auth"),
+      ...additionalNativeProviderCatalog.map(({ providerId }) => resolveNativeProvider(providerId, "needs-auth")),
     ].filter((provider) => provider !== null),
     checkBackendConnection: unavailable,
     connectBackendWithVerify: unavailable,
@@ -546,21 +540,10 @@ function DesignPreview() {
         ) : null}
         {rail && page === "chat" && !artifactPreview ? (
           <LiveWorkRail
-            conversations={previewConversations}
-            onDeleteConversation={(id) =>
-              setPreviewConversations((items) =>
-                items.filter((item) => item.id !== id),
-              )
-            }
             agentName={agent.name}
             localComputer={localComputer}
             hostedComputer={hostedComputer}
             onClose={() => { setRail(false); window.requestAnimationFrame(() => document.querySelector<HTMLButtonElement>("[data-work-panel-toggle]")?.focus()); }}
-            onNewConversation={() => {
-              setMessage("");
-              composerRef.current?.focus();
-            }}
-            onSelectConversation={noop}
           />
         ) : null}
         <AgentEditor
@@ -666,14 +649,16 @@ function DesignPreview() {
 
 const previewQueryClient = new QueryClient();
 const previewView = new URLSearchParams(window.location.search).get("view");
-createRoot(document.getElementById("root")!).render(
+const previewRoot = createRoot(document.getElementById("root")!);
+import.meta.hot?.dispose(() => previewRoot.unmount());
+previewRoot.render(
   <QueryClientProvider client={previewQueryClient}>
     {previewView === "onboarding" ? (
       <OnboardingPreview />
     ) : previewView === "avatars" ? (
       <AgentAvatarPreview />
-    ) : previewView === "projects" ? (
-      <ProjectPreview />
+    ) : previewView === "voice" ? (
+      <VoiceConversationPreview />
     ) : (
       <DesignPreview />
     )}

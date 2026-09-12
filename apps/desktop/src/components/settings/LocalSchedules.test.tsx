@@ -3,10 +3,11 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalSchedules } from "./LocalSchedules";
 import type { SettingsRuntime } from "./settings-runtime";
-import { createLocalSchedule, listLocalSchedules, listLocalScheduleOccurrences, setLocalScheduleStatus, updateLocalSchedule, type LocalSchedule } from "../../runtime/domains/local-schedules";
+import { createLocalSchedule, listLocalSchedules, listLocalScheduleOccurrences, setLocalScheduleStatus, updateLocalSchedule, previewLocalSchedule, type LocalSchedule } from "../../runtime/domains/local-schedules";
 
 vi.mock("../../runtime/domains/local-schedules", () => ({
   createLocalSchedule: vi.fn(), listLocalSchedules: vi.fn(),
+  previewLocalSchedule: vi.fn(),
   listLocalScheduleOccurrences: vi.fn(), setLocalScheduleStatus: vi.fn(), updateLocalSchedule: vi.fn(),
 }));
 
@@ -26,12 +27,29 @@ function mount(value = runtime(), initialAgentId?: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(listLocalSchedules).mockResolvedValue([]);
+  vi.mocked(previewLocalSchedule).mockResolvedValue("2030-09-07T08:00:00Z");
   vi.mocked(listLocalScheduleOccurrences).mockResolvedValue([]);
   vi.mocked(createLocalSchedule).mockResolvedValue(schedule);
   vi.mocked(setLocalScheduleStatus).mockResolvedValue(schedule);
   vi.mocked(updateLocalSchedule).mockResolvedValue(schedule);
 });
 describe("Local schedules", () => {
+  it("saves the displayed effort and previews the selected timezone through the native scheduler", async () => {
+    const value = runtime();
+    value.agents[0].reasoningEffort = "low";
+    value.allModelOptions.forEach(model => { model.reasoning = { supportedEfforts: ["low", "medium", "high"], defaultEffort: "medium" }; });
+    mount(value, "agent");
+    await waitFor(() => expect(screen.getByRole("button", { name: "New schedule" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
+    expect(screen.getByLabelText("Reasoning effort")).toHaveValue("low");
+    fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Europe/London" } });
+    fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "medium" } });
+    fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Research fixture" } });
+    await screen.findByText(/Next run:/);
+    expect(previewLocalSchedule).toHaveBeenCalledWith({ timezone: "Europe/London", trigger: { kind: "daily", localTime: "09:00" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
+    await waitFor(() => expect(createLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ reasoningEffort: "medium" })));
+  });
   it("opens on the current agent, prefills new schedules, and can show every agent", async () => {
     vi.mocked(listLocalSchedules).mockResolvedValue([schedule, { ...schedule, id: "other", agentId: "other", prompt: "Another agent's research" }]);
     mount(runtime(), "agent");
@@ -50,6 +68,7 @@ describe("Local schedules", () => {
     fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agent" } });
     fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Find primary sources on rainfall" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save schedule" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
     await waitFor(() => expect(createLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace", agentId: "agent", providerId: "codex", model: "new-model", prompt: "Find primary sources on rainfall", status: "enabled" })));
     await screen.findByText("The schedule changed. Refresh and try again.");
@@ -60,6 +79,7 @@ describe("Local schedules", () => {
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Updated research" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save schedule" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
     await waitFor(() => expect(updateLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: "schedule", expectedRevision: 4, model: "original", prompt: "Updated research" })));
     await waitFor(() => expect(screen.queryByLabelText("Research task")).toBeNull());

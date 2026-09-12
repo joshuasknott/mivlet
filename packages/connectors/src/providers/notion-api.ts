@@ -1,9 +1,29 @@
 import type { ConnectorAccountSummary, ConnectorCapability, ConnectorPage, ConnectorTokenSet } from "@fable/protocol";
-import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
+import type { ConnectorAdapter, ConnectorRequest } from "../sdk";
 import { ProviderHttpClient, oauthClient, page, type FetchLike, type JsonObject, type OAuthClientOptions } from "./http";
 
 const API = "https://api.notion.com/v1/";
+
+/**
+ * Pinned API version for the unchanged page/block/search surface and single
+ * data source database queries. Notion still supports this version (no
+ * retirement plan is published) and it preserves the pre-2025 `database` object
+ * shape that search results, page reads, block reads, and single-data-source
+ * database queries rely on. See https://developers.notion.com/reference/versioning
+ */
 const VERSION = "2022-06-28";
+
+/**
+ * Minimum version that supports Notion's multi-source databases. When a
+ * database has more than one data source, Notion rejects a query by the
+ * database (container) id with a 400 `validation_error` whose
+ * `additional_data.minimum_api_version` is `2025-09-03`. The data source query
+ * path therefore needs this version — never `2022-06-28`. It stays below the
+ * `2026-03-11` version that renames `archived` to `in_trash`, so the `archived`
+ * field read by `normalizeNotionObject` keeps working unchanged.
+ * See https://developers.notion.com/guides/get-started/upgrade-guide-2025-09-03
+ */
+const DATA_SOURCE_VERSION = "2025-09-03";
 
 const notionCapabilities: Array<[string, "read" | "write", boolean]> = [
   ["notion.search", "read", false], ["notion.page.read", "read", false], ["notion.blocks.read", "read", false],
@@ -42,17 +62,17 @@ export function createNotionAdapter(options: NotionAdapterOptions): ConnectorAda
     async read(request, tokens) { return readNotion(http, request, tokens); },
     async write(request, tokens) {
       const i = request.input;
-      const routes: Record<string, [string, string, unknown]> = {
-        "notion.page.create": ["POST", "pages", i], "notion.database-entry.create": ["POST", "pages", i],
-        "notion.page.update": ["PATCH", `pages/${required(i, "pageId")}`, i.patch ?? i],
-        "notion.blocks.append": ["PATCH", `blocks/${required(i, "blockId")}/children`, { children: i.children }],
-        "notion.block.update": ["PATCH", `blocks/${required(i, "blockId")}`, i.patch ?? i],
-        "notion.block.delete": ["DELETE", `blocks/${required(i, "blockId")}`, undefined],
-        "notion.comment.create": ["POST", "comments", i]
+      const routes: Record<string, () => [string, string, unknown]> = {
+        "notion.page.create": () => ["POST", "pages", i], "notion.database-entry.create": () => ["POST", "pages", i],
+        "notion.page.update": () => ["PATCH", `pages/${required(i, "pageId")}`, i.patch ?? i],
+        "notion.blocks.append": () => ["PATCH", `blocks/${required(i, "blockId")}/children`, { children: i.children }],
+        "notion.block.update": () => ["PATCH", `blocks/${required(i, "blockId")}`, i.patch ?? i],
+        "notion.block.delete": () => ["DELETE", `blocks/${required(i, "blockId")}`, undefined],
+        "notion.comment.create": () => ["POST", "comments", i]
       };
-      const route = routes[request.capability]; if (!route) throw new Error(`Unsupported Notion write capability: ${request.capability}`);
+      const route = routes[request.capability]?.(); if (!route) throw new Error(`Unsupported Notion write capability: ${request.capability}`);
       const { data } = await http.request<JsonObject>({ method: route[0], path: route[1], body: route[2], signal: request.signal, headers: version() }, tokens);
-      return data;
+      return writeResult(data, request.capability);
     }
   };
 }
@@ -71,7 +91,8 @@ async function readNotion(http: ProviderHttpClient, request: ConnectorRequest, t
     return page(result.results.map(normalizeNotionObject), result.nextCursor, headers);
   }
   if (request.capability === "notion.database.query") {
-    const { data, headers } = await http.request<unknown>({ method: "POST", path: `databases/${required(input, "databaseId")}/query`, signal: request.signal, headers: version(), body: { ...(input.filter ? { filter: input.filter } : {}), ...(input.sorts ? { sorts: input.sorts } : {}), ...(request.cursor ? { start_cursor: request.cursor } : {}), page_size: input.pageSize ?? 100 } }, tokens);
+    const { path, versionHeader, body } = databaseQuery(input, request.cursor);
+    const { data, headers } = await http.request<unknown>({ method: "POST", path, signal: request.signal, headers: versionHeader, body }, tokens);
     const result = notionListResponse(data);
     return page(result.results.map(normalizeNotionObject), result.nextCursor, headers);
   }
@@ -80,6 +101,25 @@ async function readNotion(http: ProviderHttpClient, request: ConnectorRequest, t
 
 async function call(http: ProviderHttpClient, path: string, tokens: ConnectorTokenSet, request: ConnectorRequest) { return (await http.request<JsonObject>({ path, signal: request.signal, headers: version() }, tokens)).data; }
 function version() { return { "notion-version": VERSION }; }
+function databaseQuery(input: Record<string, unknown>, cursor?: string) {
+  const source = input.dataSourceId !== undefined;
+  const id = required(input, source ? "dataSourceId" : "databaseId");
+  return {
+    path: `${source ? "data_sources" : "databases"}/${encodeURIComponent(id)}/query`,
+    versionHeader: { "notion-version": source ? DATA_SOURCE_VERSION : VERSION },
+    body: {
+      ...(input.filter ? { filter: input.filter } : {}),
+      ...(input.sorts ? { sorts: input.sorts } : {}),
+      ...(cursor ? { start_cursor: cursor } : {}),
+      page_size: input.pageSize ?? 100,
+    },
+  };
+}
+function writeResult(value: unknown, capability: string): JsonObject {
+  const result = record(value, "write response");
+  if (result.object === "error") throw new Error(`Notion could not complete ${capability}.`);
+  return result;
+}
 function required(input: Record<string, unknown>, key: string) { const value = input[key]; if (typeof value !== "string" || !value) throw new Error(`Notion ${key} is required.`); return value; }
 function one(value: JsonObject): ConnectorPage<JsonObject> { return { items: [value] }; }
 function record(value: unknown, label: string): JsonObject {

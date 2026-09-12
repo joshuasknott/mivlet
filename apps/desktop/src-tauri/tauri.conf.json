@@ -17,8 +17,8 @@
         "decorations": false,
         "width": 1440,
         "height": 1024,
-        "minWidth": 1024,
-        "minHeight": 720
+        "minWidth": 640,
+        "minHeight": 600
       }
     ],
     "security": {
@@ -28,6 +28,7 @@
         "connect-src": "ipc: http://ipc.localhost",
         "font-src": "'self'",
         "img-src": "'self' data:",
+        "media-src": "'self' blob:",
         "style-src": "'self' 'unsafe-inline'",
         "object-src": "'none'"
       }

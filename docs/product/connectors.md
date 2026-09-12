@@ -21,7 +21,7 @@ remote connector sign-in.
 
 ## Model providers
 
-The supported catalogue is intentionally small:
+The catalogue includes provider-owned account runtimes and metered direct APIs:
 
 | Connection | Method                             | Runtime                                |
 | ---------- | ---------------------------------- | -------------------------------------- |
@@ -35,6 +35,10 @@ The supported catalogue is intentionally small:
 | OpenCode   | Existing OpenCode provider config  | Mivlet-owned loopback server           |
 | xAI        | API key                            | Embedded OpenCode host, native keys    |
 | DeepSeek   | API key                            | Embedded OpenCode host, non-thinking mode |
+| Alibaba / Qwen | Model Studio API key and regional/workspace endpoint | Embedded OpenCode host, non-thinking mode |
+| Moonshot / Kimi, Z.ai / GLM | API key | Embedded OpenCode host, non-thinking mode |
+| Groq, Together, Fireworks, Cerebras | API key | Embedded OpenCode host, native keys |
+| Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere | API key | Embedded OpenCode host, native keys |
 | Custom API | API key, HTTPS base URL, and model | Embedded OpenCode host, native keys    |
 
 Codex owns its browser session. Antigravity owns its Google session in an
@@ -64,11 +68,21 @@ requires the official Codex desktop app components. Direct API turns start only
 when the bundled OpenCode host and its verified manifest are present; packaged
 builds include both.
 
+New direct providers use a short chat request (at most 16 output tokens) to
+verify credentials and access to the default curated model. This can incur a
+small provider charge; a public model-list response does not establish access.
+Discovery preserves vendor pagination and response formats, while only curated,
+audited model IDs advertise tools. The new routes currently expose text and
+tools; vision, reasoning controls and structured output remain unavailable.
+OpenRouter requires an upstream route that supports the requested parameters.
+Alibaba credentials are bound to an allowlisted official regional or workspace
+Model Studio endpoint, so a key is never redirected to another host.
+
 ## Service connectors
 
-Local Files is available through the native file boundary. The remote
-connector catalogue contains GitHub, Vercel, Google Drive, Notion, Gmail,
-Slack, Google Calendar, and Linear. These integrations are
+Local Files is available through the native file boundary. The OAuth connector
+catalogue contains GitHub, Vercel, Google Drive, Notion, Gmail,
+Slack, Google Calendar, and Linear, alongside the native token plugins below. These integrations are
 configuration-gated source code, not evidence of a deployed or provider-
 certified service.
 
@@ -76,6 +90,46 @@ certified service.
 | ------------------------------------- | ---------------------------------- |
 | Google Drive, Gmail, Calendar         | Public desktop OAuth with PKCE     |
 | GitHub, Vercel, Linear, Notion, Slack | Separate confidential OAuth broker |
+| Outlook, Teams, Zoom, LinkedIn, Instagram, YouTube, Google Ads, Meta Ads, Shopify, Docusign, Greenhouse, Lever, Workday | Provider-issued API access token or API key, verified and stored by native Rust |
+
+### Native token plugins
+
+The 13 formerly planned integrations have a deliberately bounded first release.
+Their setup pages identify permissions and account prerequisites, clear submitted
+secret fields, and enable chat only after an authenticated read succeeds. Native
+Rust stores credentials in the OS secure store and rechecks the selected
+Connection before egress and before returning results. The `plugin-read` tool
+is offered only for selected connected apps and names their implemented operations.
+There is no arbitrary URL, query language, mutation, or shell endpoint.
+
+| Plugin | Implemented reads | Official setup/API reference |
+| --- | --- | --- |
+| Outlook | Mail list/search, message content, events | [Microsoft Graph](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) |
+| Microsoft Teams | Chats and chat messages | [Graph chats](https://learn.microsoft.com/en-us/graph/api/chat-list?view=graph-rest-1.0) |
+| Zoom | Meetings, meeting details, recording metadata | [Zoom Meetings API](https://developers.zoom.us/docs/api/meetings/) |
+| LinkedIn | Basic profile for the authenticated member | [LinkedIn OpenID Connect](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2) |
+| Instagram | Professional account profile, media, comments | [Instagram API with Facebook Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/) |
+| YouTube | Own channels, playlist items, video details, comment threads | [YouTube Data API v3](https://developers.google.com/youtube/v3/docs/) |
+| Google Ads | Accessible customers and campaign performance | [Google Ads REST authorization](https://developers.google.com/google-ads/api/rest/auth) |
+| Meta Ads | Ad accounts, campaigns, performance insights | [Marketing API](https://developers.facebook.com/docs/marketing-api/) |
+| Shopify | Products and accessible orders | [Admin GraphQL API](https://shopify.dev/docs/api/admin-graphql) |
+| Docusign | Envelopes, status changes, recipients | [Account discovery](https://developers.docusign.com/platform/auth/user-info/) |
+| Greenhouse | Jobs, candidates, applications | [Harvest v3 OAuth](https://harvestdocs.greenhouse.io/docs/authentication), [pagination](https://harvestdocs.greenhouse.io/docs/pagination) |
+| Lever | Opportunities, opportunity details, users | [Lever API](https://hire.lever.co/developer/documentation) |
+| Workday | Worker list and worker details | [Workday REST fundamentals](https://developer.workday.com/documentation/GUID-85810465-bcfb-4fdf-a26d-55eaff3968a8-enHYPHENus/) |
+
+These plugins do not yet renew tokens, start OAuth sign-in, import/sync knowledge,
+or perform writes. Supply a current provider-issued access token (a Lever API key
+for Lever); an API subscription, approved application, tenant administrator grant,
+or vendor review may be required. Extra operations can require permissions beyond
+the connection probe. LinkedIn's basic OIDC permissions do not provide general
+feed, messaging or recruiting access. Instagram requires a Business or Creator
+account linked through Facebook Login. Google Ads also needs a developer token.
+Shopify and Workday use allowlisted tenant hosts; Docusign discovers and validates
+the account's regional API host. Secrets never enter tool input or result metadata.
+Redirects are disabled, responses are bounded, and secret-bearing response fields
+and tokenized URL parameters are removed. Local fixture tests establish transport
+and authorization behavior, not a live connection to these providers.
 
 Google needs `FABLE_GOOGLE_OAUTH_CLIENT_ID` and
 `FABLE_GOOGLE_OAUTH_CLIENT_SECRET`; the secret is provisioned from the ignored local

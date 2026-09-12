@@ -82,3 +82,23 @@
   .artifact-preview { position: fixed; inset: 0; z-index: 100; width: 100%; height: 100dvh; border: 0; }
 }
 .desktop-frame--agents .conversation-scroll { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+.message-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 8px; color: var(--ink-muted); font-size: 10px; }
+.message-actions button, .copy-control button { border: 0; background: transparent; color: var(--ink-muted); font: inherit; padding: 5px 0; cursor: pointer; }
+.message-actions button:hover, .copy-control button:hover { color: var(--ink); }
+.copy-control { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.message-code { min-width: 0; margin-block: 12px; }
+.message-code > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 11px; color: var(--ink-muted); }
+.message-code > pre { margin-top: 0; border-radius: 0 0 8px 8px; }
+.conversation-recovery { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
+.conversation-recovery > p, .conversation-recovery > details { flex: 1 1 100%; }
+.work-recovery form { display: grid; gap: 10px; font-size: 12px; line-height: 1.6; }
+.work-recovery form label { display: flex; gap: 8px; align-items: flex-start; }
+.work-recovery form input { flex: none; margin-top: 4px; }
+.conversation-context-event { margin: 16px 0; padding: 10px 12px; border-left: 2px solid var(--line); color: var(--ink-muted); font-size: var(--text-12); }
+.conversation-context-event summary { cursor: pointer; }
+.conversation-context-event time { margin-left: 8px; }
+.conversation-context-event p { color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .message-actions button, .copy-control button, .work-recovery button { min-width: 44px; min-height: 44px; }
+  .work-recovery summary, .conversation-context-event summary { min-height: 44px; padding-block: 8px; }
+}

@@ -48,7 +48,7 @@ const catalogueProviders: BackendProvider[] = [
 ];
 
 function renderCatalogue(providers = catalogueProviders) {
-  const onConnect = vi.fn(async (providerId: string) => ({
+  const onConnect = vi.fn(async (providerId: string, _secret: string) => ({
     providerId,
     outcome: "ready" as const,
   }));
@@ -74,6 +74,18 @@ describe("provider families", () => {
   it("groups every built-in account driver with its advanced connection route", () => {
     const families = buildProviderFamilies(listBackendProviders());
     expect(families.map((family) => family.id).sort()).toEqual([
+      "alibaba",
+      "moonshot",
+      "zai",
+      "groq",
+      "together",
+      "fireworks",
+      "cerebras",
+      "mistral",
+      "openrouter",
+      "nvidia",
+      "siliconflow",
+      "cohere",
       "anthropic",
       "antigravity",
       "cursor",
@@ -82,7 +94,7 @@ describe("provider families", () => {
       "openai",
       "opencode",
       "xai",
-    ]);
+    ].sort());
     expect(
       families
         .find((family) => family.id === "anthropic")
@@ -144,6 +156,25 @@ describe("provider families", () => {
 });
 
 describe("ProviderCatalogue", () => {
+  it("finds Qwen and passes Alibaba's endpoint and key together to native verification", async () => {
+    const user = userEvent.setup();
+    const { onConnect } = renderCatalogue(listBackendProviders());
+    await user.click(screen.getByRole("button", { name: "Show all providers" }));
+    await user.type(screen.getByRole("searchbox"), "qwen");
+    await user.click(screen.getByRole("button", { name: /Alibaba \/ Qwen,/ }));
+    const dialog = screen.getByRole("dialog", { name: "Alibaba / Qwen" });
+    await user.click(within(dialog).getByRole("button", { name: /API key/ }));
+    const key = within(dialog).getByLabelText("API key for alibaba / qwen");
+    const endpoint = within(dialog).getByLabelText("Alibaba Model Studio endpoint");
+    fireEvent.change(key, { target: { value: "private-qwen-key" } });
+    fireEvent.change(endpoint, { target: { value: "https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" } });
+    await user.click(within(dialog).getByRole("button", { name: "Add key & connect" }));
+    await waitFor(() => expect(onConnect).toHaveBeenCalled());
+    expect(onConnect.mock.calls[0][0]).toBe("alibaba");
+    expect(JSON.parse(onConnect.mock.calls[0][1])).toEqual({ version: 1, apiKey: "private-qwen-key", baseUrl: "https://workspace.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" });
+    expect(key).toHaveValue("");
+    expect(dialog).not.toHaveTextContent("private-qwen-key");
+  });
   it("shows only the four quiet account-first families initially", () => {
     const { container } = renderCatalogue();
     const visible = Array.from(

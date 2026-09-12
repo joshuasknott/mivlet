@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ConnectorManifest, FableAgentProfile, Spine } from "@fable/protocol";
+import type { ConnectorManifest, FableAgentProfile, ProjectFact, Spine } from "@fable/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { conversationTurns, toolActivity, toolFailureSummary, type ConversationTurn, type ResponsePart } from "../../lib/conversation-presentation";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
-import { agentPresence, type AgentPresence } from "../../lib/agent-presence";
+import { agentPresence, isPresenceScopeCurrent, type AgentPresence } from "../../lib/agent-presence";
 import { ConnectorMentionText } from "../ConnectorMention";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
+import { CopyButton } from "../CopyButton";
 import "./conversation.css";
 
 interface Props {
@@ -19,11 +20,14 @@ interface Props {
   showAuthor?: boolean;
   suppressLivePrompt?: boolean;
   state: NativeAgentState;
+  liveStates?: { state: NativeAgentState; agent: FableAgentProfile; suppressPrompt: boolean }[];
   presence?: AgentPresence;
   threadId?: string;
   profileName: string;
   connectors: ConnectorManifest[];
   optimisticPrompt: string;
+  pendingTurns?: ConversationTurn[];
+  decisionEvents?: ProjectFact[];
   optimisticAttachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
   workspaceId: string;
   generation?: number;
@@ -31,48 +35,72 @@ interface Props {
   interruption?: ReactNode;
   onPreviewArtifact?: (output: string, authorId?: string) => void;
   onOpenConnector?: (connectorId: string) => void;
+  onReusePrompt?: (prompt: string, intent: "edit" | "retry") => void;
+  onOpenWorkspaceFiles?: (agentId: string) => void;
 }
 
 export function ConversationFeed(props: Props) {
   const { state, threadId } = props;
-  const live = state.currentAttemptId && state.progressThreadId === threadId;
+  const live = Boolean(
+    state.currentAttemptId &&
+      state.progressThreadId === threadId &&
+      isPresenceScopeCurrent(state, { agentId: props.agent.id, threadId }),
+  );
+  const liveStates = props.liveStates ?? [{ state, agent: props.agent, suppressPrompt: Boolean(props.suppressLivePrompt) }];
   const turns = useMemo(() => conversationTurns(props.messages), [props.messages]);
   const presented = [...turns];
-  if (live) {
+  for (const liveEntry of liveStates) {
+    const state = liveEntry.state;
+    if (!state.currentAttemptId || state.progressThreadId !== threadId || !isPresenceScopeCurrent(state, { agentId: liveEntry.agent.id, threadId })) continue;
     const index = presented.findIndex((turn) => turn.id === state.currentAttemptId);
     const canonical = presented[index];
     const redacted = props.messages.some((entry) => entry.message.runId === state.currentAttemptId && entry.currentRevision.state === "redacted");
     const canonicalReady = canonical && !state.running && (redacted ||
       canonical.parts.filter((part) => part.kind === "text").map((part) => part.content).join("") === state.transcript);
     const turn: ConversationTurn = {
-      id: state.currentAttemptId!, prompt: props.suppressLivePrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
+      id: state.currentAttemptId!, prompt: liveEntry.suppressPrompt ? undefined : state.progressPrompt ?? props.optimisticPrompt,
       attachments: canonical?.attachments ?? props.optimisticAttachments,
       parts: canonicalReady ? canonical.parts : state.responseParts ?? (state.transcript ? [{ id: "text", kind: "text", content: state.transcript }] : []),
       startedAt: state.startedAt, endedAt: state.endedAt,
     };
     if (index < 0) presented.push(turn); else presented[index] = { ...turn, prompt: canonical.prompt ?? turn.prompt };
   }
+  for (const turn of props.pendingTurns ?? []) {
+    if (presented.some((entry) => entry.id === turn.id)) continue;
+    const index = presented.findIndex(entry => entry.startedAt && turn.startedAt && entry.startedAt > turn.startedAt);
+    if (index < 0) presented.push(turn); else presented.splice(index, 0, turn);
+  }
+  const entries: ({ turn: ConversationTurn } | { fact: ProjectFact })[] = presented.map(turn => ({ turn }));
+  for (const fact of props.decisionEvents ?? []) {
+    const index = entries.findIndex(entry => "turn" in entry && entry.turn.startedAt && entry.turn.startedAt > fact.createdAt);
+    if (index < 0) entries.push({ fact }); else entries.splice(index, 0, { fact });
+  }
   return <>
-    {presented.map((turn) => {
+    {entries.map((entry) => {
+      if ("fact" in entry) { const fact = entry.fact; return <aside key={`fact-${fact.id}`} className="conversation-context-event" aria-label={`Confirmed project ${fact.kind}`}><details><summary>{fact.kind === "decision" ? "Decision confirmed" : "Fact confirmed"}{fact.status !== "current" ? ` · ${fact.status}` : ""} <MessageTime value={fact.createdAt} /></summary><p>{fact.text}</p><small>{fact.source}</small></details></aside>; }
+      const { turn } = entry;
       const author = props.authors?.[turn.id];
+      const liveEntry = liveStates.find(entry => entry.state.currentAttemptId === turn.id && entry.state.progressThreadId === threadId);
       return <Turn key={turn.id} turn={turn} {...props}
-        agent={author ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : props.agent)}
+        state={liveEntry?.state ?? props.state}
+        agent={author ?? (props.requireAuthor ? { ...props.agent, id: "unavailable-author", name: "Agent", avatarSeed: "blob-v1:unavailable-author", iconImageDataUrl: undefined } : liveEntry?.agent ?? props.agent)}
         onPreviewArtifact={props.requireAuthor && !author ? undefined : props.onPreviewArtifact}
         generation={props.requireAuthor && !author ? undefined : props.generation}
-        live={Boolean(live && turn.id === state.currentAttemptId)} />;
+        live={Boolean(liveEntry)} />;
     })}
     {props.optimisticPrompt && (!live || props.optimisticPrompt !== state.progressPrompt) ? <UserMessage content={props.optimisticPrompt} attachments={props.optimisticAttachments} {...props} /> : null}
     {!live && (props.approval || props.interruption) ? <div className="conversation-attention">{props.approval}{props.interruption}</div> : null}
   </>;
 }
 
-function UserMessage({ content, profileName, connectors, attachments }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[] }) {
+function UserMessage({ content, profileName, connectors, attachments, timestamp, onReusePrompt }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[]; timestamp?: string; onReusePrompt?: Props["onReusePrompt"] }) {
   return <article className="conversation-message conversation-message--user" aria-label={`${profileName}'s message`}>
     <p><ConnectorMentionText text={content} connectors={connectors} /></p>
     {attachments?.length ? <ul className="conversation-message__attachments" aria-label="Attached files">{attachments.map((attachment) => <li key={attachment.id}>
       <strong>{attachment.name}</strong>
-      <small>{attachment.availability === "workspace-file" && attachment.relativePath ? attachment.relativePath : attachment.availability === "project-file" ? "Project file" : attachment.availability === "image-input" ? "Image input" : "Knowledge context"}</small>
+      <small>{attachment.availability === "workspace-file" && attachment.relativePath ? attachment.relativePath : attachment.availability === "project-file" ? "Saved to this project" : attachment.availability === "image-input" ? "Image for this message" : "Text for this conversation"}</small>
     </li>)}</ul> : null}
+    <footer className="message-actions"><MessageTime value={timestamp} /><CopyButton text={content} label="Copy message" />{onReusePrompt ? <button type="button" onClick={() => onReusePrompt(content, "edit")}>Edit & resend</button> : null}</footer>
   </article>;
 }
 
@@ -103,15 +131,16 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
   const hasActivity = work.length > 0 || Boolean(summary) || running;
   const outputs = turn.parts.filter((part) => part.kind === "tool" && part.state === "succeeded" && parseComputerArtifact(part.content));
   const files = outputs.filter((part, index) => outputs.findIndex((other) => parseComputerArtifact(other.content)?.id === parseComputerArtifact(part.content)?.id) === index);
+  const savedFile = turn.parts.some(part => part.kind === "tool" && part.state === "succeeded" && ["write-file", "create-document", "create-spreadsheet"].includes(part.tool));
   const stopped = live && props.state.status === "cancelled";
   const label = running ? props.approval ? "Waiting for your approval" : "Working" : stopped ? "Stopped" : elapsed > 0 ? `Worked for ${duration}` : "Worked";
   const currentTool = [...turn.parts].reverse().find((part) => part.kind === "tool" && part.state === "running");
   const activity = props.state.activity || (currentTool?.kind === "tool" ? toolActivity(currentTool.tool, "running") : "");
-  if (!turn.parts.length && !running && !live) return turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} {...props} /> : null;
+  if (!turn.parts.length && !running && !live) return turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} timestamp={turn.startedAt} {...props} /> : null;
   return <section className="conversation-turn">
-    {turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} {...props} /> : null}
+    {turn.prompt ? <UserMessage content={turn.prompt} attachments={turn.attachments} timestamp={turn.startedAt} {...props} /> : null}
     <article className="conversation-response" aria-label={`${props.agent.name}'s response`}>
-      {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} /><strong>{props.agent.name}</strong></header> : null}
+      {props.showAuthor !== false || props.requireAuthor ? <header className="conversation-response__author"><ProfileAgentAvatar agent={props.agent} iconSize={28} motion={live ? "expressive" : "quiet"} presence={live ? props.presence ?? agentPresence(props.state, Boolean(props.approval)) : "idle"} activityKey={`${props.agent.id}:${turn.id}`} /><strong>{props.agent.name}</strong></header> : null}
       {hasActivity ? <details className="turn-activity" open={expanded}>
         <summary onClick={(event) => { event.preventDefault(); setDisclosure({ running, open: !expanded }); }}>
           <span>{label}</span>
@@ -128,9 +157,16 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
       {notices.map((part) => <Part key={`${part.kind}:${part.id}`} part={part} running={false} />)}
       {files.length ? <div className="turn-files" aria-label="Files from this response">{files.map((part) => <ComputerArtifacts key={part.id} output={part.content}
         workspaceId={props.workspaceId} agentId={props.agent.id} expectedGeneration={props.generation} onPreview={props.onPreviewArtifact ? (output) => props.onPreviewArtifact!(output, props.agent.id) : undefined} />)}</div> : null}
+      {savedFile && !files.length && props.onOpenWorkspaceFiles && props.agent.id !== "unavailable-author" ? <p className="turn-notice">A file was saved in this agent's workspace. <button type="button" onClick={() => props.onOpenWorkspaceFiles!(props.agent.id)}>Open workspace files</button></p> : null}
+      {!running ? <footer className="message-actions"><MessageTime value={endedAt ?? startedAt} />{turn.parts.some(part => part.kind === "text") ? <CopyButton text={turn.parts.filter(part => part.kind === "text").map(part => part.content).join("\n\n")} label="Copy response" /> : null}{turn.prompt && props.onReusePrompt ? <button type="button" onClick={() => props.onReusePrompt!(turn.prompt!, "retry")}>Retry…</button> : null}</footer> : null}
       {live ? <>{props.approval ? <div className="conversation-attention">{props.approval}</div> : null}{props.interruption}</> : null}
     </article>
   </section>;
+}
+
+function MessageTime({ value }: { value?: string }) {
+  if (!value || !Number.isFinite(Date.parse(value))) return null;
+  return <time dateTime={value} title={new Date(value).toLocaleString()}>{new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</time>;
 }
 
 function Part({ part, running, onOpenConnector }: { part: ResponsePart; running: boolean; onOpenConnector?: (connectorId: string) => void }) {

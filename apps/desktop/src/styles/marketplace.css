@@ -87,11 +87,11 @@
 }
 
 .marketplace-installed-connector {
-  display: grid;
-  justify-items: center;
-  width: 40px;
-  gap: 0;
-  padding: 3px;
+  display: flex;
+  align-items: center;
+  max-width: 100%;
+  gap: 8px;
+  padding: 5px 9px 5px 5px;
   color: var(--ink);
   background: transparent;
   border: 0;
@@ -129,8 +129,13 @@
 }
 
 .marketplace-installed-connector > span:last-child {
-  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  display: flex; align-items: center; gap: 6px; text-align: left;
 }
+
+.marketplace-readiness { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 24px; }
+.marketplace-readiness button { padding: 7px 11px; color: var(--ink-muted); background: transparent; border: 1px solid var(--line); border-radius: 8px; }
+.marketplace-readiness button[aria-pressed="true"] { background: var(--surface-hover); color: var(--ink); }
+@media (max-width: 700px) { .marketplace-readiness button { min-height: 44px; } }
 
 .marketplace-installed-connector i {
   width: 6px;
@@ -438,3 +443,30 @@
 }
 .connector-detail pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .connector-detail input:not([type="checkbox"]), .connector-detail textarea, .connector-detail select { box-sizing: border-box; max-width: 100%; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.token-plugin-form {
+  display: grid;
+  gap: 16px;
+  margin-block: 22px;
+}
+.token-plugin-form label {
+  display: grid;
+  gap: 7px;
+  font-size: 13px;
+}
+.token-plugin-form input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border, #444);
+  border-radius: 8px;
+}
+.token-plugin-form .connector-detail__actions {
+  grid-column: 1;
+  grid-row: auto;
+  flex-direction: row;
+}
+.token-plugin-form .connector-detail__actions button { min-height: 44px; }

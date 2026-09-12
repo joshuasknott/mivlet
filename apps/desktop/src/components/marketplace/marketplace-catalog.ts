@@ -1,3 +1,5 @@
+import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
+
 export interface MarketplaceConnectorEntry {
   id: string;
   name: string;
@@ -41,7 +43,7 @@ const entry = (
 ): MarketplaceConnectorEntry => ({
   id,
   name,
-  description,
+  description: tokenPluginFor(id)?.description ?? description,
   icon,
   ...(recommended ? { recommended: true } : {}),
 });

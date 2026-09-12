@@ -18,6 +18,7 @@ import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
 import { enabledFableProviders } from "../../lib/provider-availability";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { ProviderIcon } from "../ProviderIcon";
+import { additionalNativeProviderCatalog, providerEndpointSetup } from "@fable/connectors/backends/additional-native";
 
 export const FEATURED_PROVIDER_FAMILY_IDS = [
   "openai",
@@ -73,6 +74,9 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     iconProvider: "xai",
     aliases: ["xAI", "Grok", "Grok Build"],
   },
+  alibaba: { label: "Alibaba / Qwen", iconProvider: "alibaba", aliases: ["Qwen", "Alibaba", "DashScope", "Model Studio"] },
+  moonshot: { label: "Moonshot / Kimi", iconProvider: "moonshot", aliases: ["Moonshot", "Kimi"] },
+  zai: { label: "Z.ai / GLM", iconProvider: "zai", aliases: ["Z.ai", "Zhipu", "GLM"] },
   custom: {
     label: "Custom provider",
     iconProvider: "custom",
@@ -523,6 +527,7 @@ function ProviderConnectionModal({
   const customBaseUrlRef = useRef<HTMLInputElement>(null);
   const customModelRef = useRef<HTMLInputElement>(null);
   const customKeyRef = useRef<HTMLInputElement>(null);
+  const providerEndpointRef = useRef<HTMLInputElement>(null);
   const selectedMethod = family.methods.find(
     (method) => method.id === selectedMethodId,
   );
@@ -761,7 +766,13 @@ function ProviderConnectionModal({
                     });
                     return;
                   }
-                  void connect(selectedMethod.provider.id, secret, () => {
+                  const endpoint = providerEndpointSetup(selectedMethod.provider.id);
+                  const credential = endpoint ? JSON.stringify({
+                    version: 1,
+                    baseUrl: providerEndpointRef.current?.value.trim() ?? "",
+                    apiKey: secret,
+                  }) : secret;
+                  void connect(selectedMethod.provider.id, credential, () => {
                     if (keyInputRef.current) keyInputRef.current.value = "";
                   });
                 }}
@@ -778,6 +789,26 @@ function ProviderConnectionModal({
                     disabled={pending}
                   />
                 </label>
+                {providerEndpointSetup(selectedMethod.provider.id) ? (
+                  <label>
+                    <span>Model Studio endpoint</span>
+                    <input
+                      ref={providerEndpointRef}
+                      type="url"
+                      aria-label="Alibaba Model Studio endpoint"
+                      defaultValue={providerEndpointSetup(selectedMethod.provider.id)?.defaultValue}
+                      placeholder={providerEndpointSetup(selectedMethod.provider.id)?.placeholder}
+                      autoComplete="off"
+                      spellCheck={false}
+                      required
+                      disabled={pending}
+                    />
+                    <small>{providerEndpointSetup(selectedMethod.provider.id)?.description}</small>
+                  </label>
+                ) : null}
+                {additionalNativeProviderCatalog.some(entry => entry.providerId === selectedMethod.provider.id) ? (
+                  <small>Connecting sends a short model request to verify access, with a limit of 16 output tokens.</small>
+                ) : null}
                 <button
                   type="submit"
                   className="provider-method-form__primary"

@@ -1,3 +1,4 @@
+import { tokenPluginDefinitions } from "./providers/token-plugins";
 import type {
   ConnectorManifest,
   ConnectorPermission,
@@ -12,7 +13,20 @@ export const SUPPORTED_CONNECTOR_IDS = [
   "gmail",
   "slack",
   "google-calendar",
-  "linear"
+  "linear",
+  "outlook",
+  "microsoft-teams",
+  "zoom",
+  "linkedin",
+  "instagram",
+  "youtube",
+  "google-ads",
+  "meta-ads",
+  "shopify",
+  "docusign",
+  "greenhouse",
+  "lever",
+  "workday"
 ] as const satisfies readonly SupportedConnectorId[];
 
 const NOT_CHECKED = "Not checked";
@@ -185,7 +199,12 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("comments:create", "Create comments", "write", false)
     ],
     setupMessage: "Create a Linear OAuth application and configure the Mivlet auth broker."
-  })
+  }),
+  ...tokenPluginDefinitions.map((plugin) => disconnectedConnector({
+    id: plugin.id, name: plugin.name, authMode: "api-token", permissions: [plugin.description],
+    scopes: [permission("token-read", "Read operations permitted by this token", "read", true)],
+    setupMessage: plugin.setup,
+  })),
 ];
 
 export function listSupportedConnectors(): ConnectorManifest[] {

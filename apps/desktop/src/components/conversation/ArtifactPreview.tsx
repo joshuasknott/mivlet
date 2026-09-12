@@ -5,8 +5,8 @@ import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
-export function ArtifactPreview({ output, workspaceId, agentId, generation, onClose }: {
-  output: string; workspaceId: string; agentId: string; generation?: number; onClose: () => void;
+export function ArtifactPreview({ output, workspaceId, agentId, generation, onClose, embedded = false }: {
+  output: string; workspaceId: string; agentId: string; generation?: number; onClose: () => void; embedded?: boolean;
 }) {
   const artifact = parseComputerArtifact(output);
   const [preview, setPreview] = useState<LocalComputerArtifactPreview | null>(null);
@@ -15,8 +15,8 @@ export function ArtifactPreview({ output, workspaceId, agentId, generation, onCl
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 900px)").matches);
   const panel = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
-  useModalFocusTrap({ active: narrow, containerRef: panel, initialFocusRef: close, onClose });
-  useEffect(() => { close.current?.focus(); }, []);
+  useModalFocusTrap({ active: narrow && !embedded, containerRef: panel, initialFocusRef: close, onClose });
+  useEffect(() => { if (!embedded) close.current?.focus(); }, []);
   useEffect(() => {
     const media = window.matchMedia("(max-width: 900px)");
     const change = () => setNarrow(media.matches);
@@ -34,8 +34,8 @@ export function ArtifactPreview({ output, workspaceId, agentId, generation, onCl
     return () => { cancelled = true; };
   }, [artifact?.id, workspaceId, agentId, generation]);
   if (!artifact) return null;
-  return <aside ref={panel} className="artifact-preview" role={narrow ? "dialog" : "complementary"}
-    aria-modal={narrow || undefined} aria-label={`${artifact.title} preview`} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
+  return <aside ref={panel} className={`artifact-preview${embedded ? " artifact-preview--embedded" : ""}`} role={narrow && !embedded ? "dialog" : "complementary"}
+    aria-modal={narrow && !embedded || undefined} aria-label={`${artifact.title} preview`} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
     <header><div><h2>{artifact.title}</h2></div><button type="button" ref={close} onClick={onClose} aria-label="Close file preview">×</button></header>
     <div className="artifact-preview__body">
       {loading ? <p role="status">Loading your file…</p> : error ? <p role="alert">{error}</p> : preview?.text !== null && preview?.text !== undefined ? <>

@@ -37,6 +37,7 @@ export interface ScheduledResearchRunInput {
   scheduleId: string;
   occurrenceId: string;
   prompt: string;
+  projectContext?: string;
   providerId: string;
   model: string;
   agent: FableAgentProfile;
@@ -134,6 +135,7 @@ export class AgentRunService {
     const contextPrefix = [
       agentExecutionInstructions(input.agent),
       SCHEDULED_RESEARCH_INSTRUCTIONS,
+      input.projectContext,
     ]
       .filter(Boolean)
       .join("\n\n");
@@ -405,6 +407,7 @@ export class AgentRunService {
         }
       }
     } catch (error) {
+      await backend.cancel(input.attemptId).catch(() => undefined);
       failure =
         error instanceof Error ? error.message : "Scheduled research failed.";
     }

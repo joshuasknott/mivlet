@@ -26,21 +26,42 @@ vi.mock("../runtime", () => ({
   }),
 }));
 
+let testScope = 0;
 const scope = (agentId: string, threadId?: string): ComposerScope => ({
   workspaceId: "workspace-a",
-  accountId: "account-a:member-a",
+  accountId: `account-a:member-a:${testScope}`,
   agentId,
   threadId,
 });
 
 describe("useScopedComposer", () => {
   beforeEach(() => {
+    testScope++;
     vi.useFakeTimers();
     mocks.drafts.clear();
     mocks.saves.length = 0;
-    vi.mocked(loadRuntimeConversationDraft).mockImplementation(async (key: string) => mocks.drafts.get(key) ?? null);
+    vi.mocked(loadRuntimeConversationDraft).mockReset().mockImplementation(async (key: string) => mocks.drafts.get(key) ?? null);
   });
   afterEach(() => vi.useRealTimers());
+
+  it("shares recipient, text and one submission lock across duplicate views, while another conversation stays private", async () => {
+    const first = renderHook(() => useScopedComposer(scope("chief", "same-room")));
+    const second = renderHook(() => useScopedComposer(scope("chief", "same-room")));
+    const separate = renderHook(() => useScopedComposer(scope("chief", "private-room")));
+    await act(async () => {});
+    act(() => { first.result.current.setText("shared unsent text"); first.result.current.setRecipient("reviewer"); });
+    expect(second.result.current.text).toBe("shared unsent text");
+    expect(second.result.current.recipientId).toBe("reviewer");
+    expect(separate.result.current.text).toBe("");
+    act(() => { expect(first.result.current.beginSubmission()).toBe(true); expect(second.result.current.beginSubmission()).toBe(false); });
+    const sentRevision = first.result.current.revision;
+    act(() => second.result.current.setText("next message typed while saving"));
+    await act(async () => first.result.current.consume(sentRevision));
+    expect(second.result.current.text).toBe("next message typed while saving");
+    act(() => first.result.current.endSubmission());
+    await act(async () => { await first.result.current.flush(); first.unmount(); });
+    expect(second.result.current.text).toBe("next message typed while saving");
+  });
 
   it("saves a reviewed handoff separately from source and unsent new-conversation drafts", async () => {
     const { result, rerender } = renderHook(

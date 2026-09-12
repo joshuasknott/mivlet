@@ -17,8 +17,7 @@ import type {
   IngestionOutcome,
   KnowledgeScope,
   KnowledgeSource,
-  SkipReason,
-  SourceChunk
+  SkipReason
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
 import { chunkSourceText } from "./chunk";

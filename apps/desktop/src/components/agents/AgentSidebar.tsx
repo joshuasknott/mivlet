@@ -1,12 +1,13 @@
-import { Brand } from "../Brand";
+import { useEffect, useRef, useState } from "react";
+import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { Users } from "@phosphor-icons/react/dist/csr/Users";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
-import { useEffect, useState } from "react";
-import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
+import { Brand } from "../Brand";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
 import { AccountMenu } from "./AccountMenu";
@@ -20,12 +21,19 @@ export interface AgentSidebarPreview {
   presence?: AgentPresence;
   completionId?: string;
 }
-
 export interface AgentSidebarProject {
   id: string;
   name: string;
+  threadId?: string;
 }
-
+type SidebarRoom = {
+  id: string;
+  title: string;
+  kind: "direct" | "group";
+  projectId?: string;
+  participants?: { agentId: string; name?: string }[];
+  status?: string;
+};
 export function AgentSidebar({
   agents,
   activeAgentId,
@@ -47,6 +55,10 @@ export function AgentSidebar({
   hidden = false,
   collapsed = false,
   onToggleCollapsed,
+  conversations = [],
+  selectedConversationId,
+  onSelectConversation,
+  onCreateConversation,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -68,8 +80,18 @@ export function AgentSidebar({
   hidden?: boolean;
   collapsed?: boolean;
   onToggleCollapsed?: () => void;
+  conversations?: SidebarRoom[];
+  selectedConversationId?: string;
+  onSelectConversation?: (id: string, newTab?: boolean) => void;
+  onCreateConversation?: (kind?: "direct" | "group", agentId?: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const sidebar = useRef<HTMLElement>(null);
+  useEffect(() => {
+    setQuery("");
+    const frame = requestAnimationFrame(() => sidebar.current?.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.scrollIntoView?.({ block: "nearest" }));
+    return () => cancelAnimationFrame(frame);
+  }, [activeAgentId]);
   const [completions, setCompletions] = useState<
     Record<string, { id: string; unread: boolean }>
   >({});
@@ -81,212 +103,312 @@ export function AgentSidebar({
         if (preview.status === "running" && next[id]) {
           delete next[id];
           changed = true;
-        } else if (preview.presence === "done") {
-          const completionId = preview.completionId ?? "completed";
-          if (next[id]?.id !== completionId) {
-            next[id] = { id: completionId, unread: true };
-            changed = true;
-          }
+        } else if (
+          preview.presence === "done" &&
+          next[id]?.id !== (preview.completionId ?? "completed")
+        ) {
+          next[id] = { id: preview.completionId ?? "completed", unread: true };
+          changed = true;
         }
       }
       return changed ? next : current;
     });
   }, [previews]);
-  const normalizedQuery = collapsed ? "" : query.trim().toLowerCase();
+  const search = collapsed ? "" : query.trim().toLowerCase();
   const visibleAgents = agents.filter((agent) =>
-    `${agent.name} ${previews[agent.id]?.message ?? ""}`
-      .toLowerCase()
-      .includes(normalizedQuery),
+    agent.name.toLowerCase().includes(search),
   );
   const visibleProjects = projects.filter((project) =>
-    project.name.toLowerCase().includes(normalizedQuery),
+    project.name.toLowerCase().includes(search),
   );
-  const installedConnectors = connectors.filter(
+  const groupRooms = conversations.filter(
+    (room) =>
+      !room.projectId &&
+      room.kind === "group" &&
+      room.title.toLowerCase().includes(search),
+  );
+  const installed = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
   );
-
   return (
-    <aside className={`agent-sidebar${collapsed ? " agent-sidebar--collapsed" : ""}`} aria-label="Agents" hidden={hidden}>
+    <aside
+      ref={sidebar}
+      className={`agent-sidebar${collapsed ? " agent-sidebar--collapsed" : ""}`}
+      aria-label="Agents"
+      hidden={hidden}
+    >
       <div className="agent-sidebar__topline">
         <Brand className="agent-sidebar__brand" />
-        {onToggleCollapsed ? <button className="agent-sidebar__collapse" type="button" aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} title={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed} onClick={onToggleCollapsed}><SidebarSimple size={18} /></button> : null}
+        {onToggleCollapsed ? (
+          <button
+            className="agent-sidebar__collapse"
+            type="button"
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            title={collapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-expanded={!collapsed}
+            onClick={onToggleCollapsed}
+          >
+            <SidebarSimple size={18} />
+          </button>
+        ) : null}
       </div>
-
       <label className="agent-search">
         <MagnifyingGlass size={16} aria-hidden="true" />
         <input
           type="search"
           aria-label="Search projects and agents"
-          placeholder="Search"
+          placeholder="Search projects, groups, agents…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
       </label>
-
-      {projects.length > 0 || onCreateProject ? (
-        <section
-          className="project-sidebar-section"
-          aria-labelledby="project-sidebar-title"
-        >
-          <header>
-            <span id="project-sidebar-title">Projects</span>
-            {onCreateProject ? (
-              <button
-                type="button"
-                onClick={onCreateProject}
-                aria-label="Create project"
-                title="Create project"
-              >
-                <Plus size={15} aria-hidden="true" />
-              </button>
-            ) : null}
-          </header>
-          <div className="project-sidebar-list">
-            {visibleProjects.map((project) => {
-              const active =
-                project.id === selectedProjectId && !marketplaceActive;
-              return (
+      <div className="agent-sidebar__scopes">
+        {(!search && (projects.length || onCreateProject)) || visibleProjects.length ? (
+          <section
+            className="project-sidebar-section"
+            aria-labelledby="project-sidebar-title"
+          >
+            <header>
+              <span id="project-sidebar-title">Projects</span>
+              {onCreateProject ? (
+                <button
+                  type="button"
+                  onClick={onCreateProject}
+                  aria-label="Create project"
+                  title="Create project"
+                >
+                  <Plus size={15} />
+                </button>
+              ) : null}
+            </header>
+            <div className="project-sidebar-list">
+              {visibleProjects.map((project) => (
                 <button
                   key={project.id}
                   type="button"
-                  className={`project-sidebar-row${active ? " project-sidebar-row--active" : ""}`}
-                  aria-current={active ? "page" : undefined}
+                  className={`project-sidebar-row${project.id === selectedProjectId && !marketplaceActive ? " project-sidebar-row--active" : ""}`}
+                  title={project.name}
+                  aria-current={
+                    project.id === selectedProjectId && !marketplaceActive
+                      ? "page"
+                      : undefined
+                  }
+                  data-conversation-room={project.threadId}
+                  onDragStart={(event) => event.preventDefault()}
                   onClick={() => onSelectProject?.(project)}
                 >
                   <span
                     className="project-sidebar-row__icon"
                     aria-hidden="true"
                   >
-                    <FolderSimple size={19} />
+                    <FolderSimple size={20} />
                   </span>
-                  <span>
-                    <strong title={project.name}>{project.name}</strong>
-                    <small>Shared with all agents</small>
-                  </span>
+                  <strong>{project.name}</strong>
                 </button>
-              );
-            })}
-            {projects.length > 0 && visibleProjects.length === 0 ? (
-              <p className="project-sidebar-empty" role="status">
-                No projects match “{query}”.
-              </p>
-            ) : null}
-          </div>
-        </section>
-      ) : null}
-
-      <div className="agent-sidebar__agents-heading">
-        <span>Agents</span>
-        <button className="agent-sidebar__new" type="button" onClick={onCreateAgent} aria-label="Create agent" title="Create agent">
-          <Plus size={17} aria-hidden="true" />
-        </button>
-      </div>
-
-      <div className="agent-list" role="list">
-        {visibleAgents.map((agent) => {
-          const active =
-            agent.id === activeAgentId &&
-            !marketplaceActive &&
-            !selectedProjectId;
-          const preview = previews[agent.id] ?? {
-            message: "Start a conversation",
-            time: "",
-            status: "idle" as const,
-          };
-          const presence =
-            preview.presence ??
-            (preview.status === "running"
-              ? "working"
-              : preview.status === "attention"
-                ? "waiting"
-                : "idle");
-          return (
-            <div
-              key={agent.id}
-              className={`agent-row${active ? " agent-row--active" : ""}`}
-              role="listitem"
-            >
+              ))}
+            </div>
+          </section>
+        ) : null}
+        {groupRooms.length ? (
+          <div className="conversation-sidebar__list">
+            {groupRooms.map((room) => (
               <button
-                className="agent-row__select"
+                key={room.id}
                 type="button"
-                onClick={() => {
-                  setCompletions((current) =>
-                    current[agent.id]
-                      ? {
-                          ...current,
-                          [agent.id]: { ...current[agent.id], unread: false },
-                        }
-                      : current,
-                  );
-                  onSelectAgent(agent);
-                }}
-                aria-current={active ? "page" : undefined}
-                aria-label={collapsed ? agent.name : undefined}
-                title={collapsed ? agent.name : undefined}
+                className="conversation-sidebar__row"
+                aria-current={
+                  room.id === selectedConversationId && !marketplaceActive
+                    ? "page"
+                    : undefined
+                }
+                title={room.title}
+                data-conversation-room={room.id}
+                onDragStart={(event) => event.preventDefault()}
+                onClick={(event) =>
+                  onSelectConversation?.(
+                    room.id,
+                    event.ctrlKey || event.metaKey,
+                  )
+                }
               >
-                <ProfileAgentAvatar
-                  agent={agent}
-                  iconSize={36}
-                  presence={presence}
-                />
-                <span className="agent-row__copy">
-                  <span className="agent-row__line">
-                    <strong title={agent.name}>{agent.name}</strong>
-                    <time>{preview.time}</time>
-                  </span>
-                  <span className="agent-row__meta">
-                    <span className="agent-row__preview">
-                      {preview.message}
-                    </span>
-                  </span>
+                <span
+                  className="group-avatar"
+                  style={{
+                    gridTemplateColumns: `repeat(${(room.participants?.length ?? 0) > 4 ? 3 : 2}, 1fr)`,
+                  }}
+                  aria-label={room.participants
+                    ?.map(
+                      (member) =>
+                        member.name ??
+                        agents.find((agent) => agent.id === member.agentId)
+                          ?.name ??
+                        "Unavailable agent",
+                    )
+                    .join(", ")}
+                >
+                  {room.participants?.map((member) => {
+                    const agent = agents.find(
+                      (agent) => agent.id === member.agentId,
+                    );
+                    return agent ? (
+                      <ProfileAgentAvatar
+                        key={member.agentId}
+                        agent={agent}
+                        iconSize={18}
+                      />
+                    ) : (
+                      <span key={member.agentId}>
+                        {member.name?.[0] ?? "?"}
+                      </span>
+                    );
+                  })}
                 </span>
-                {preview.status === "running" || preview.status === "attention" || completions[agent.id]?.unread ? (
-                  <span
-                    className={`agent-status agent-status--${preview.status === "attention" ? "attention" : preview.status === "running" ? "working" : "unread"}`}
-                    role="status"
-                    aria-label={preview.status !== "idle" ? PRESENCE_LABELS[presence] : "New completed work"}
-                    title={preview.status !== "idle" ? PRESENCE_LABELS[presence] : "New completed work"}
-                  >{preview.status === "attention" ? "!" : null}</span>
+                <span>{room.title}</span>
+                {room.status ? (
+                  <small aria-label={room.status}>
+                    {["Working", "Unread"].includes(room.status) ? "•" : "!"}
+                  </small>
                 ) : null}
               </button>
+            ))}
+          </div>
+        ) : null}
+        {!search || visibleAgents.length ? <div className="agent-sidebar__agents-heading">
+          <span>Agents</span>
+          <div>
+            {onCreateConversation ? (
               <button
-                className="agent-row__edit"
+                className="agent-sidebar__new"
                 type="button"
-                onClick={() => onEditAgent(agent)}
-                aria-label={`Edit ${agent.name}`}
+                onClick={() => onCreateConversation("group")}
+                aria-label="New group"
+                title="New group"
               >
-                <NotePencil size={14} aria-hidden="true" />
+                <Users size={17} />
               </button>
-            </div>
-          );
-        })}
-        {agents.length === 0 ? (
-          <p className="agent-list__empty">
-            Create your first agent to get started.
-          </p>
-        ) : null}
-        {agents.length > 0 && !visibleAgents.length ? (
-          <p className="agent-list__empty" role="status">
-            No agents match “{query}”.
-          </p>
-        ) : null}
+            ) : null}
+            <button
+              className="agent-sidebar__new"
+              type="button"
+              onClick={onCreateAgent}
+              aria-label="Create agent"
+              title="Create agent"
+            >
+              <Plus size={17} />
+            </button>
+          </div>
+        </div> : null}
+        <div className="agent-list" role="list">
+          {visibleAgents.map((agent) => {
+            const preview = previews[agent.id];
+            const presence =
+              preview?.presence ??
+              (preview?.status === "running"
+                ? "working"
+                : preview?.status === "attention"
+                  ? "waiting"
+                  : "idle");
+            const active =
+              agent.id === activeAgentId &&
+              !marketplaceActive &&
+              !selectedProjectId &&
+              conversations.find((room) => room.id === selectedConversationId)
+                ?.kind !== "group";
+            const room = conversations
+              .filter(
+                (room) =>
+                  !room.projectId &&
+                  room.kind === "direct" &&
+                  room.participants?.some(
+                    (member) => member.agentId === agent.id,
+                  ),
+              )
+              .at(-1);
+            return (
+              <div
+                className={`agent-row${active ? " agent-row--active" : ""}`}
+                role="listitem"
+                key={agent.id}
+              >
+                <button
+                  className="agent-row__select"
+                  type="button"
+                  data-conversation-room={room?.id}
+                  onDragStart={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    setCompletions((current) =>
+                      current[agent.id]
+                        ? {
+                            ...current,
+                            [agent.id]: { ...current[agent.id], unread: false },
+                          }
+                        : current,
+                    );
+                    if (room && (event.ctrlKey || event.metaKey))
+                      onSelectConversation?.(room.id, true);
+                    else onSelectAgent(agent);
+                  }}
+                  aria-current={active ? "page" : undefined}
+                  aria-label={agent.name}
+                  title={agent.name}
+                >
+                  <ProfileAgentAvatar
+                    agent={agent}
+                    iconSize={32}
+                    presence={presence}
+                  />
+                  <span className="agent-row__copy">
+                    <strong>{agent.name}</strong>
+                  </span>
+                  {(preview && preview.status !== "idle") ||
+                  completions[agent.id]?.unread ? (
+                    <span
+                      className={`agent-status agent-status--${preview?.status === "attention" ? "attention" : preview?.status === "running" ? presence === "service" ? "service" : "working" : "unread"}`}
+                      role="status"
+                      aria-label={
+                        preview && preview.status !== "idle"
+                          ? PRESENCE_LABELS[presence]
+                          : "New completed work"
+                      }
+                    >
+                      {preview?.status === "attention" ? "!" : null}
+                    </span>
+                  ) : null}
+                </button>
+                <button
+                  className="agent-row__edit"
+                  type="button"
+                  onClick={() => onEditAgent(agent)}
+                  aria-label={`Edit ${agent.name}`}
+                >
+                  <NotePencil size={14} />
+                </button>
+              </div>
+            );
+          })}
+          {!agents.length ? (
+            <p className="agent-list__empty">
+              Create your first agent to get started.
+            </p>
+          ) : null}
+        </div>
+        {search && !visibleAgents.length && !visibleProjects.length && !groupRooms.length ? <p className="agent-list__empty">No projects, groups or agents found. Search conversation titles in History.</p> : null}
       </div>
-
       <button
         className={`agent-sidebar__connections${marketplaceActive ? " agent-sidebar__connections--active" : ""}`}
         type="button"
         onClick={onOpenMarketplace}
         aria-current={marketplaceActive ? "page" : undefined}
       >
-        <PlugsConnected size={16} aria-hidden="true" />
+        <PlugsConnected size={16} />
         <span>Plugins</span>
-        {installedConnectors.length ? (
+        {installed.length ? (
           <span
             className="agent-sidebar__connector-stack"
-            aria-label={`${installedConnectors.length} installed`}
+            aria-label={`${installed.length} installed`}
           >
-            {installedConnectors.slice(0, 3).map((connector) => (
+            {installed.slice(0, 3).map((connector) => (
               <span key={connector.id} title={connector.name}>
                 <ConnectorIcon id={connector.id} />
               </span>
@@ -294,7 +416,6 @@ export function AgentSidebar({
           </span>
         ) : null}
       </button>
-
       <AccountMenu
         name={profileName}
         onUsage={onOpenUsage}

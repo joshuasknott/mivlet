@@ -15,6 +15,25 @@ const request: NativeCompletionRequest = {
 };
 
 describe("gemini shaping", () => {
+  it("round-trips opaque signatures through execution when STOP arrives in a later chunk", async () => {
+    const requests: NativeCompletionRequest[] = [];
+    const transport: HttpTransport = {
+      async *stream(input) {
+        requests.push(structuredClone(input));
+        if (requests.length === 1) {
+          yield JSON.stringify({ candidates: [{ content: { parts: [{ thoughtSignature: "opaque-signed-call", functionCall: { id: "call-1", name: "read-file", args: { path: "a.md" } } }] } }] });
+          yield JSON.stringify({ candidates: [{ finishReason: "STOP" }] });
+        } else yield JSON.stringify({ candidates: [{ content: { parts: [{ text: "Done." }] }, finishReason: "STOP" }] });
+      }
+    };
+    const events: BackendAgentEvent[] = [];
+    for await (const event of runAgentLoop(transport, request, { runId: "signature-test", modelSupportsTools: true, execute: async () => "file data" })) events.push(event);
+    expect(requests).toHaveLength(2);
+    const body = shapeGeminiRequest(requests[1]) as { contents: { parts: Record<string, unknown>[] }[] };
+    expect(body.contents[1].parts).toEqual([{ thoughtSignature: "opaque-signed-call", functionCall: { id: "call-1", name: "read-file", args: { path: "a.md" } } }]);
+    expect(body.contents[2].parts).toEqual([{ functionResponse: { id: "call-1", name: "read-file", response: { output: "file data" } } }]);
+    expect(events.filter(event => event.type === "text-delta")).toEqual([{ type: "text-delta", text: "Done." }]);
+  });
   it("shapes contents with roles mapped to model/user", () => {
     const body = shapeGeminiRequest(request) as Record<string, unknown>;
     const contents = body.contents as Array<Record<string, unknown>>;
@@ -64,6 +83,62 @@ describe("gemini shaping", () => {
     expect(events.some((e) => e.type === "done")).toBe(true);
   });
 
+  it("reports a safety-blocked response as an error, never a fake stop", () => {
+    const events = parseGeminiLine(
+      "gemini",
+      '{"candidates":[{"content":{"parts":[{"text":"partial"}]},"finishReason":"SAFETY"}]}'
+    );
+    expect(events.filter((e) => e.type === "text-delta")).toHaveLength(1);
+    const errors = events.filter((e) => e.type === "error");
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ type: "error", retryable: false });
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
+  });
+
+  it("reports a blocked prompt before any candidate as an error", () => {
+    const events = parseGeminiLine(
+      "gemini",
+      '{"promptFeedback":{"blockReason":"SAFETY"}}'
+    );
+    expect(events).toEqual([
+      {
+        type: "error",
+        message: "The provider blocked this response (prompt:SAFETY).",
+        retryable: false,
+      },
+    ]);
+  });
+
+  it("maps MAX_TOKENS to length and keeps STOP as stop", () => {
+    expect(
+      parseGeminiLine("gemini", '{"candidates":[{"finishReason":"MAX_TOKENS"}]}').at(-1),
+    ).toEqual({ type: "done", finishReason: "length" });
+    expect(
+      parseGeminiLine("gemini", '{"candidates":[{"finishReason":"STOP"}]}').at(-1),
+    ).toEqual({ type: "done", finishReason: "stop" });
+  });
+
+  it("never renders model thinking parts as user-visible text", () => {
+    const events = parseGeminiLine(
+      "gemini",
+      '{"candidates":[{"content":{"parts":[{"text":"hidden reasoning","thought":true},{"text":"answer"}]}}]}'
+    );
+    expect(events).toEqual([{ type: "text-delta", text: "answer" }]);
+  });
+
+  it("rejects malformed function call arguments before execution", async () => {
+    const transport = new FixtureTransport([
+      '{"candidates":[{"content":{"parts":[{"functionCall":{"name":"read-file","args":["not-an-object"]}}]},"finishReason":"STOP"}]}',
+    ]);
+    const events: BackendAgentEvent[] = [];
+    for await (const event of runAgentLoop(transport, request, {
+      runId: "gemini-malformed-args", modelSupportsTools: true,
+      execute: async () => "must not run",
+    })) events.push(event);
+    expect(events.some((event) => event.type === "tool-result" && !event.ok)).toBe(true);
+    expect(events.at(-1)).toEqual({ type: "done", finishReason: "error" });
+  });
+
   it("preserves provider call IDs in events and matching history responses", () => {
     const [event] = parseGeminiLine("gemini", JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { id: "provider-call-7", name: "read-file", args: { path: "a.md" } } }] } }] }));
     expect(event).toMatchObject({ type: "tool-call", callId: "provider-call-7" });
@@ -72,7 +147,7 @@ describe("gemini shaping", () => {
       { role: "tool", content: "file contents", toolCallId: "provider-call-7", toolName: "read-file" },
     ] })).toMatchObject({ contents: [
       { parts: [{ functionCall: { id: "provider-call-7", name: "read-file" } }] },
-      { parts: [{ text: "file contents" }, { functionResponse: { id: "provider-call-7", name: "read-file" } }] },
+      { parts: [{ functionResponse: { id: "provider-call-7", name: "read-file" } }] },
     ] });
   });
 

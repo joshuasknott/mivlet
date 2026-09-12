@@ -1163,6 +1163,16 @@ export async function startRuntimeConnectorAuth(request: ConnectorAuthRequest) {
   }
 }
 
+export async function connectRuntimeTokenPlugin(workspaceId: string, connectorId: string, credential: {
+  token: string; baseUrl?: string; accountId?: string; developerToken?: string; loginCustomerId?: string;
+}): Promise<ConnectorManifest> {
+  if (!hasTauriRuntime()) throw new Error("Open the Mivlet desktop app to connect this plugin.");
+  const scope = activeDataScope();
+  if (!scope || scope.workspaceId !== workspaceId) throw new Error("Select the active workspace before connecting.");
+  try { return await invoke<ConnectorManifest>("connect_token_plugin", { workspaceId, connectorId, credential }); }
+  catch (error) { throw toRuntimeError(error); }
+}
+
 export async function completeRuntimeConnectorAuth(
   request: ConnectorAuthRequest,
 ) {
@@ -1678,7 +1688,9 @@ export async function cancelRuntimeCompletion(requestId: string) {
 export interface RuntimeDiscoveredModel {
   id: string;
   available: boolean;
+  label?: string;
   capabilities?: import("@fable/protocol").ModelCapabilities;
+  reasoning?: import("@fable/protocol").BackendModel["reasoning"];
 }
 
 export interface RuntimeModelDiscoveryResult {

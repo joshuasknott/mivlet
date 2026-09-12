@@ -13,7 +13,6 @@ import type {
   PendingApprovalConfirmation
 } from "../lib/types";
 import {
-  DECISION_LABELS,
   actionSummary,
   decisionDescription,
   decisionLabel,

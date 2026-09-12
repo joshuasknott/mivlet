@@ -30,23 +30,42 @@ export interface PresenceContext {
   awaitingInput?: boolean;
 }
 
+export interface PresenceScope {
+  agentId?: string;
+  threadId?: string;
+}
+
+/**
+ * Progress is renderer-local, so it must be tied to the selected agent and
+ * conversation before it can drive an avatar or status label. Missing scope
+ * fields are allowed for the initial idle state and older preview fixtures.
+ */
+export function isPresenceScopeCurrent(
+  state: Pick<NativeAgentState, "progressAgentId" | "progressThreadId">,
+  scope: PresenceScope,
+) {
+  if (state.progressAgentId && state.progressAgentId !== scope.agentId) return false;
+  if (state.progressThreadId !== undefined && state.progressThreadId !== scope.threadId) return false;
+  return true;
+}
+
 /** Presentation follows execution facts; an approval always takes priority over activity. */
 export function agentPresence(
-  state: Pick<NativeAgentState, "running" | "status" | "activity" | "lastError" | "responseParts" | "transcript">,
+  state: Pick<NativeAgentState, "running" | "status" | "activity" | "lastError" | "responseParts" | "transcript" | "stopRequested">,
   awaitingApproval = false,
   queued = false,
   context: PresenceContext = {},
 ): AgentPresence {
-  if (awaitingApproval || state.status === "awaiting-approval") return "waiting";
-  if (context.awaitingInput) return "input";
+  if (awaitingApproval || (state.status === "awaiting-approval" && !state.stopRequested)) return "waiting";
   if (context.computerController === "human") return "human";
   if (context.computerController === "paused") return "paused";
+  if (state.stopRequested || state.status === "cancelled" || state.status === "interrupted") return "paused";
+  if (state.lastError || state.status === "failed") return "blocked";
+  if (context.awaitingInput) return "input";
   if (context.listening) return "listening";
   if (context.speaking) return "speaking";
   if (context.providerUnavailable && !state.running) return "unavailable";
   if (queued) return "received";
-  if (state.lastError || state.status === "failed") return "blocked";
-  if (state.status === "cancelled" || state.status === "interrupted") return "paused";
   if (state.running) {
     if (state.status === "retrying") return "service";
     if (state.activity || state.responseParts?.some((part) => part.kind === "tool" && part.state === "running")) return "working";

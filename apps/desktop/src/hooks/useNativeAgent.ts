@@ -18,6 +18,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isRoutineConnectorRead } from "@fable/connectors/native-api/tool-executor";
+import { isCollaborationTool } from "@fable/connectors/native-api/tools";
 import type {
   AgentTurnRequest,
   BackendAgentEvent,
@@ -108,6 +109,8 @@ export interface NativeAgentState {
     costUnknown?: boolean;
   } | null;
   running: boolean;
+  /** Immediate presentation fence while the existing durable Stop finishes. */
+  stopRequested?: boolean;
   lastError: string | null;
   contextFailure?: ConversationContextFailure & {
     requestPrompt: string;
@@ -129,11 +132,17 @@ export interface NativeAgentState {
   usageReceipts: Record<string, NonNullable<ExecutionAttempt["usage"]>>;
   /** Canonical id for the current or most recently started attempt. */
   currentAttemptId: string | null;
+  /** Agent scope for the visible progress fields; prevents old work leaking after navigation. */
+  progressAgentId?: string;
   /** True when there is no desktop runtime to carry the request. */
   noTransport: boolean;
 }
 
 export interface UseNativeAgentOptions {
+  /** App-owned workers must never recover journals when a view or worker mounts. */
+  recover?: boolean;
+  /** Public assistant contributions can be labelled without turning them into user authority. */
+  attributeHistory?: (conversation: HydratedConversation) => HydratedConversation;
   computer?: { workspaceId: string; agentId: string };
   contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
@@ -187,6 +196,9 @@ export interface UseNativeAgentOptions {
 }
 
 export interface NativeAgentRunControl {
+  /** Confirmed assistant text only, after its durable checkpoint; never reasoning. */
+  onTextDelta?: (text: string) => void;
+  maxTurns?: number;
   /**
    * Runs after the queued execution journal exists, before canonical user
    * persistence or provider egress. Project execution uses this boundary to
@@ -209,6 +221,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     activity: "",
     usage: null,
     running: false,
+    stopRequested: false,
     lastError: null,
     status: "idle",
     recoverableAttempts: [],
@@ -216,6 +229,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     providerRoutes: {},
     usageReceipts: {},
     currentAttemptId: null,
+    progressAgentId: undefined,
     noTransport: !hasDesktopRuntime(),
   });
   // The active backend + run id for the current run. cancel() delegates to the
@@ -248,8 +262,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   const contextScopeKey = JSON.stringify(contextScope);
   const contextScopeRef = useRef(contextScope);
   contextScopeRef.current = contextScope;
+  const presentationScopeRef = useRef(contextScopeKey);
   const loadConversationRef = useRef(options.loadConversation);
   loadConversationRef.current = options.loadConversation;
+  const attributeHistoryRef = useRef(options.attributeHistory);
+  attributeHistoryRef.current = options.attributeHistory;
   const modelsRef = useRef(options.models ?? []);
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
@@ -262,6 +279,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, [contextScopeKey]);
 
   useEffect(() => {
+    if (options.recover === false) return;
     void (async () => {
       const recovered = await recoverRuntimeExecutionAttempts(
         new Date().toISOString(),
@@ -456,7 +474,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           // must not be replayed as requests or duplicated in the transcript.
           history = continuationMessagesForModel(
             buildContinuationMessages(
-              conversation.messages.filter(
+              (attributeHistoryRef.current?.(conversation) ?? conversation).messages.filter(
                 (view) =>
                   !parentAttemptId || view.message.runId !== parentAttemptId,
               ),
@@ -558,8 +576,10 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         responseParts: [],
         startedAt: createdAt,
         endedAt: undefined,
+        progressAgentId: options.computer?.agentId,
         usage: null,
         running: true,
+        stopRequested: false,
         lastError: null,
         contextFailure: undefined,
         status: "queued",
@@ -875,6 +895,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           shouldCancel: shouldCancelRef.current ?? (() => false),
           contextPrefix: prepared.systemPrefix,
           permissionMode,
+          maxTurns: control?.maxTurns,
           attemptId,
           computer: options.computer,
           onRetry: () => {
@@ -971,6 +992,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             persistence.current = persisted;
             if (durableWriter)
               await persistence.checkpointAssistant(persisted.transcript);
+            if (!persistence.stopped) control?.onTextDelta?.(event.text);
           } else if (event.type === "usage") {
             const usage = {
               inputTokens: event.inputTokens,
@@ -1063,6 +1085,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
             }
           } else if (event.type === "tool-call") {
             const needsApproval =
+              !isCollaborationTool(event.tool) &&
               !isRoutineConnectorRead(event.approval) &&
               !["connector-call", "connector-action"].includes(
                 event.approval.action.split(/\s+/)[0],
@@ -1505,6 +1528,11 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
     // Freeze the generation before any await. Approval authority is revoked at
     // the same boundary, while disk and provider acknowledgement finish below.
     const finalFlush = persistence?.stop();
+    if (attemptToCancel) {
+      setState((current) => current.currentAttemptId === attemptToCancel
+        ? { ...current, stopRequested: true }
+        : current);
+    }
     // Reject approval waiters immediately, even when native cancellation is
     // slow or unavailable. No lost card may leave a provider waiting forever.
     onCancelRef.current?.();
@@ -1550,6 +1578,34 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   }, []);
 
   const getActiveAttemptId = useCallback(() => activeAttemptIdRef.current, []);
+
+  useEffect(() => {
+    if (presentationScopeRef.current === contextScopeKey) return;
+    presentationScopeRef.current = contextScopeKey;
+    // Navigation is a hard presentation boundary. Stop an in-flight attempt
+    // before dropping its visible fields so late provider/tool events cannot
+    // animate the newly selected agent or conversation.
+    if (activeAttemptIdRef.current) void cancel();
+    setState((current) => ({
+      ...current,
+      transcript: "",
+      responseParts: [],
+      progressPrompt: undefined,
+      startedAt: undefined,
+      endedAt: undefined,
+      progressThreadId: undefined,
+      progressAgentId: undefined,
+      stopRequested: false,
+      reasoningSummaries: {},
+      activity: "",
+      usage: null,
+      running: false,
+      lastError: null,
+      contextFailure: undefined,
+      status: "idle",
+      currentAttemptId: null,
+    }));
+  }, [cancel, contextScopeKey]);
 
   useEffect(
     () => () => {

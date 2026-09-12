@@ -25,8 +25,11 @@ import { modelReasoning } from "./reasoning";
 export interface DiscoveredModel {
   id: string;
   available: boolean;
+  /** Optional provider-reported display name (OpenRouter `name`). */
+  label?: string;
   /** Optional provider-reported capabilities, used only when the runtime can substantiate them. */
   capabilities?: BackendModel["capabilities"];
+  /** Optional provider-reported reasoning levels. */
   reasoning?: BackendModel["reasoning"];
 }
 
@@ -71,12 +74,12 @@ export function mergeDiscoveredModels(options: MergeDiscoveryOptions): BackendMo
     const capabilities = model.capabilities ?? catalogueCapabilities(providerId, model.id);
     out.push({
       id: model.id,
-      label: catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
+      label: model.label ?? catalogueModels.find((entry) => entry.id === model.id)?.label ?? model.id,
       available: model.available,
       capabilities,
-      reasoning: modelReasoning(providerId, {
+      reasoning: model.reasoning ?? modelReasoning(providerId, {
         ...catalogueModels.find((entry) => entry.id === model.id),
-        ...model, label: model.id
+        ...model, label: model.label ?? model.id
       })
     });
   }

@@ -64,4 +64,40 @@ describe("applyRetention", () => {
     const result = applyRetention([old, newer], DEFAULT_RETENTION_POLICY, NOW);
     expect(result.reasons["m-old"]).toBe("superseded");
   });
+
+  it.each([[0, 1, 2], [2, 1, 0], [1, 2, 0]])(
+    "finds a newer protected duplicate in input order %j without mutating memory",
+    (...order) => {
+      const records = [
+        makeMemory({ id: "old" }),
+        makeMemory({ id: "pinned", createdAt: NOW, pinned: true }),
+        makeMemory({ id: "approved", createdAt: NOW, approvalState: "approved" })
+      ];
+      records.forEach(Object.freeze);
+      const memory = order.map((index) => records[index]);
+      const original = [...memory];
+      Object.freeze(memory);
+
+      expect(applyRetention(memory, DEFAULT_RETENTION_POLICY, NOW)).toEqual({
+        prunedIds: [],
+        reasons: { old: "superseded" }
+      });
+      expect(memory).toEqual(original);
+    }
+  );
+
+  it("ignores older, same-time, disabled and forgotten duplicates", () => {
+    const memory = [
+      makeMemory({ id: "target", createdAt: NOW }),
+      makeMemory({ id: "older", pinned: true }),
+      makeMemory({ id: "same-time", createdAt: NOW, approved: true }),
+      makeMemory({ id: "disabled", createdAt: "2026-06-29T12:00:00.000Z", disabled: true }),
+      makeMemory({ id: "forgotten", createdAt: "2026-06-29T12:00:00.000Z", forgottenAt: NOW })
+    ];
+
+    expect(applyRetention(memory, DEFAULT_RETENTION_POLICY, NOW)).toEqual({
+      prunedIds: [],
+      reasons: {}
+    });
+  });
 });

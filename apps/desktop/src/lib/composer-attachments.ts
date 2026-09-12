@@ -62,7 +62,7 @@ export async function prepareReadableComposerAttachment(
     ? {
         sourceId,
         transientBytes: new Uint8Array(buffer),
-        status: "Knowledge context · workspace file when sent",
+        status: "Attached to this message",
       }
     : { status: "Could not read file" };
 }

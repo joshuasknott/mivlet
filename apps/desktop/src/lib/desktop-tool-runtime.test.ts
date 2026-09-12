@@ -85,6 +85,19 @@ describe("computer authority across approvals", () => {
 });
 
 describe("native connector chat tools", () => {
+  it("requires current app access for a token plugin before and after the native read", async () => {
+    runtime.executeTool.mockClear();
+    const args = JSON.stringify({ connectorId: "shopify", capability: "products.list", input: {} });
+    const approval = buildToolApproval("Codex", "plugin-read", args);
+    const missing = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1" });
+    await expect(missing(approval, args)).rejects.toThrow("Mention this connected app");
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+    let allowed = true;
+    runtime.executeTool.mockImplementationOnce(async () => { allowed = false; return { ok: true, output: "stale private result" }; });
+    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: () => allowed });
+    await expect(execute(approval, args)).rejects.toThrow("Mention this connected app");
+    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ tool: "plugin-read", workspaceId: "workspace-1" }));
+  });
   it("passes an approved Drive read to the scoped native boundary", async () => {
     runtime.executeTool.mockResolvedValue({ ok: true, output: "live result" });
     const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: (id) => id === "google-drive" });

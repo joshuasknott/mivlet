@@ -19,7 +19,7 @@ describe("conversation shell runtime", () => {
     });
   });
 
-  it("shares approval preferences when creating, editing, switching and deleting agents", async () => {
+  it("shares approval preferences when creating, editing and deleting agents", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
     const first = result.current.agents[0];
@@ -28,9 +28,7 @@ describe("conversation shell runtime", () => {
     act(() => { created = result.current.createAgent({ ...first, name: "New", permissionLabel: "Read Only" }).id; });
     expect(result.current.permissionLabel).toBe("Work Freely");
     act(() => result.current.updateAgent(created, { permissionLabel: "Ask Me" }));
-    act(() => result.current.selectAgent(first.id));
     expect(result.current.permissionLabel).toBe("Work Freely");
-    act(() => result.current.selectAgent(created));
     act(() => result.current.removeAgent(created));
     expect(result.current.permissionLabel).toBe("Work Freely");
   });

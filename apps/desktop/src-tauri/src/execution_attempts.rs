@@ -707,6 +707,7 @@ pub fn save_execution_attempt(
     }
     store
         .transaction(|tx| {
+            crate::collaboration::ensure_run_current(tx, store, Some(&attempt.id))?;
             if let Some(existing) = execution_attempt::get_scoped(tx, store, &scope, &attempt.id)? {
                 let existing_value: ExecutionAttempt =
                     serde_json::from_value(existing.payload.clone()).map_err(|_| {

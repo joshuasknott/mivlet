@@ -8,6 +8,7 @@ export * from "./domains/hosted-computer.js";
 export * from "./domains/hosted-execution-capability.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/local-projects.js";
+export * from "./domains/collaboration.js";
 export * from "./domains/voice.js";
 
 import type {
@@ -125,7 +126,7 @@ export type ConnectorStatus =
   | "unavailable";
 
 export type ConnectorAuthMode =
-  "none" | "oauth-pkce" | "oauth-broker" | "provider-installation";
+  "none" | "oauth-pkce" | "oauth-broker" | "provider-installation" | "api-token";
 
 export type ConnectorPermissionAccess = "read" | "write";
 

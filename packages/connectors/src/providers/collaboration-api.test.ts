@@ -12,6 +12,19 @@ const notion = (fetch: ProviderFetch) => createNotionAdapter({ ...base, fetch })
 const slack = (fetch: ProviderFetch) => createSlackAdapter({ ...base, fetch });
 
 describe("Notion production adapter", () => {
+  it("queries modern data sources with their API version while preserving legacy database queries", async () => {
+    const fetcher = vi.fn(async () => json({ object: "list", results: [], has_more: false, next_cursor: null }));
+    const adapter = notion(fetcher);
+    await adapter.read({ capability: "notion.database.query", input: { dataSourceId: "source-1", pageSize: 10 } }, tokens);
+    expect(fetcher.mock.calls[0]).toEqual(["https://api.notion.com/v1/data_sources/source-1/query", expect.objectContaining({ method: "POST", headers: expect.objectContaining({ "notion-version": "2025-09-03" }) })]);
+    await adapter.read({ capability: "notion.database.query", input: { databaseId: "database-1" } }, tokens);
+    expect(fetcher.mock.calls[1]).toEqual(["https://api.notion.com/v1/databases/database-1/query", expect.objectContaining({ headers: expect.objectContaining({ "notion-version": "2022-06-28" }) })]);
+  });
+  it("validates only the selected write route's required fields", async () => {
+    const fetcher = vi.fn(async () => json({ object: "page", id: "page-1" }));
+    await expect(notion(fetcher).write({ capability: "notion.page.update", input: { pageId: "page-1", properties: {} }, target: "page-1", preview: "Update page", riskLevel: "medium" }, tokens)).resolves.toMatchObject({ id: "page-1" });
+    expect(fetcher.mock.calls[0]).toEqual(["https://api.notion.com/v1/pages/page-1", expect.objectContaining({ method: "PATCH" })]);
+  });
   it("registers typed read and consequential write capabilities", () => {
     expect(NOTION_CAPABILITIES).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "notion.blocks.read", kind: "read", consequential: false }),

@@ -19,6 +19,7 @@ pub mod audit_event;
 pub mod backend_connection;
 pub mod capability_evidence;
 pub mod capability_grant;
+pub mod collaboration;
 pub mod connection_record;
 pub mod connection_selection;
 pub mod connector_account;

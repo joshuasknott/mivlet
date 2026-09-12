@@ -29,6 +29,10 @@ export interface UseLocalScheduleDispatcherOptions {
   providers: BackendProvider[];
   runtimeReady: boolean;
   onThreadCreated?: (agentId: string, threadId: string) => void;
+  canStart?: (agentId: string, providerId: string) => boolean;
+  projectContext?: (projectId: string, prompt: string) => Promise<string>;
+  onBound?: (attemptId: string, cancel: () => Promise<void>) => Promise<() => void>;
+  onFinished?: () => Promise<void>;
 }
 
 const listeners = new Set<() => void>();
@@ -103,8 +107,9 @@ export function useLocalScheduleDispatcher(
       )
         return;
       const workspaceId = currentOptions.workspaceId;
+      let stopped = false;
       const isCurrent = () =>
-        !disposed &&
+        !disposed && !stopped &&
         optionsRef.current.runtimeReady &&
         optionsRef.current.workspaceId === workspaceId;
       polling = true;
@@ -113,11 +118,16 @@ export function useLocalScheduleDispatcher(
       let bound = false;
       let leaseTimer: ReturnType<typeof setInterval> | undefined;
       let statusTimer: ReturnType<typeof setInterval> | undefined;
+      let release: (() => void) | undefined;
       try {
         const schedules = await listLocalSchedules(workspaceId);
         if (!isCurrent()) return;
         const due = firstDue(schedules);
         if (!due) return;
+        if (currentOptions.canStart && !currentOptions.canStart(due.agentId, due.providerId)) {
+          publish({ phase: "claiming", scheduleId: due.id, message: "Scheduled research is queued while its teammate or provider is busy." });
+          return;
+        }
         const agent = currentOptions.agents.find(
           (candidate) => candidate.id === due.agentId,
         );
@@ -184,9 +194,10 @@ export function useLocalScheduleDispatcher(
           scheduleId: claim.scheduleId,
           occurrenceId: immutableOccurrenceId,
           prompt: claim.prompt,
+          projectContext: claim.projectId ? await currentOptions.projectContext?.(claim.projectId, claim.prompt) : undefined,
           providerId: claim.providerId,
           model: claim.model,
-          agent,
+          agent: { ...agent, reasoningEffort: claim.reasoningEffort },
           provider,
           modelDefinition,
           isCurrent,
@@ -197,6 +208,7 @@ export function useLocalScheduleDispatcher(
           onQueued: async () => {
             await bindLocalScheduleDispatch(identity);
             bound = true;
+            if (claim?.projectId) release = await currentOptions.onBound?.(immutableAttemptId, async () => { stopped = true; await activeCancel?.(); });
             leaseTimer = setInterval(() => {
               void renewLocalScheduleDispatch(identity).catch(() =>
                 activeCancel?.(),
@@ -277,6 +289,8 @@ export function useLocalScheduleDispatcher(
         if (leaseTimer) clearInterval(leaseTimer);
         if (statusTimer) clearInterval(statusTimer);
         activeCancel = undefined;
+        release?.();
+        if (claim) await currentOptions.onFinished?.().catch(() => undefined);
         polling = false;
       }
     };

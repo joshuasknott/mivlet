@@ -142,10 +142,11 @@ describe("Composer dictation controls", () => {
         name: `State: ${status}`
       });
       expect(explanation).toHaveAttribute("aria-disabled", "true");
-      expect(explanation).toHaveAttribute(
-        "aria-describedby",
-        "dictation-status dictation-disclosure"
-      );
+      const descriptions = explanation.getAttribute("aria-describedby")!.split(" ");
+      expect(descriptions).toHaveLength(2);
+      expect(descriptions.map(id => document.getElementById(id)?.textContent)).toEqual([
+        `State: ${status}`, "Mivlet does not retain raw audio."
+      ]);
       expect(screen.getByLabelText("Universal composer")).toBeEnabled();
     }
   );
@@ -188,7 +189,7 @@ describe("Composer dictation controls", () => {
   });
   it("exposes the model directly without approval configuration", () => {
     render(<Composer {...propsFor("idle")} />);
-    expect(screen.getByRole("button", { name: "Select model" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Select model:/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Approval preset" })).not.toBeInTheDocument();
   });
   it("keeps Stop available during work even with an empty draft", () => {
