@@ -60,7 +60,7 @@ a deployed or production-validated service.
   credential custody and Mivlet tool approvals. DeepSeek runs its documented
   non-thinking mode; its thinking-mode `reasoning_content` round-trip is not
   bridged, so reasoning levels are not advertised and screenshot delivery stays
-  disabled. User-image turns retain the audited visual
+  disabled. Direct Gemini uses the native Gemini wire adapter with API-key custody. User-image turns retain the audited visual
   wire route; other provider-specific wire adapters remain separate. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.

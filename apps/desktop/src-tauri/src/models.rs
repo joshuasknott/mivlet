@@ -86,12 +86,13 @@ pub const BACKEND_CAPABILITIES: [&str; 9] = [
     "model-availability",
     "cancellation",
 ];
-pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 23] = [
+pub const SUPPORTED_BACKEND_PROVIDER_IDS: [&str; 24] = [
     "codex",
     "openai",
     "claude",
     "anthropic",
     "antigravity",
+    "gemini",
     "grok",
     "xai",
     "deepseek",

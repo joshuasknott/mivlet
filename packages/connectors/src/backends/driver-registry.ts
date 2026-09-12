@@ -64,6 +64,14 @@ export const BUILT_IN_PROVIDER_DRIVERS: readonly ProviderDriverDefinition[] = [
       resolveAntigravityProvider(authState),
   },
   {
+    driverKind: "native-api",
+    defaultInstanceId: "gemini",
+    familyId: "antigravity",
+    category: "api",
+    createProvider: (authState = "needs-auth") =>
+      resolveNativeProvider("gemini", authState),
+  },
+  {
     driverKind: "grok-acp",
     defaultInstanceId: "grok",
     familyId: "xai",

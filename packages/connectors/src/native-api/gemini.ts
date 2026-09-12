@@ -17,6 +17,8 @@ import { extractPayload, splitLines } from "./transport";
 
 interface GeminiPart {
   text?: string;
+  /** Gemini 3 models may attach thinking metadata; never rendered as text. */
+  thought?: boolean;
   functionCall?: { id?: string; name?: string; args?: Record<string, unknown> };
 }
 interface GeminiChunk {
@@ -25,7 +27,29 @@ interface GeminiChunk {
     finishReason?: string;
   }>;
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  /** Present when the prompt itself was blocked before any candidate existed. */
+  promptFeedback?: { blockReason?: string };
   error?: { message?: string };
+}
+
+/** Finish reasons that mean the provider refused or stopped the response. */
+const BLOCKED_FINISH_REASONS = new Set([
+  "SAFETY",
+  "RECITATION",
+  "LANGUAGE",
+  "OTHER",
+  "BLOCKLIST",
+  "PROHIBITED_CONTENT",
+  "SPII",
+  "MALFORMED_FUNCTION_CALL",
+]);
+
+function blockedError(reason: string): Extract<BackendAgentEvent, { type: "error" }> {
+  return {
+    type: "error",
+    message: `The provider blocked this response (${reason}).`,
+    retryable: false
+  };
 }
 
 /** Shape a normalized request into the Gemini generateContent body. */
@@ -104,11 +128,18 @@ export function parseGeminiLine(
   if (chunk?.error) {
     return [{ type: "error", message: "Provider error." }];
   }
+  if (chunk.promptFeedback?.blockReason) {
+    return [blockedError(`prompt:${chunk.promptFeedback.blockReason}`)];
+  }
 
   const events: BackendAgentEvent[] = [];
   const candidate = chunk.candidates?.[0];
   let hasFunctionCall = false;
   for (const part of candidate?.content?.parts ?? []) {
+    if (part.thought) {
+      // Thinking parts are never user-visible transcript text.
+      continue;
+    }
     if (part.text) {
       events.push({ type: "text-delta", text: part.text });
     }
@@ -138,17 +169,22 @@ export function parseGeminiLine(
   }
   if (candidate?.finishReason) {
     const reason = candidate.finishReason;
-    events.push({
-      type: "done",
-      finishReason:
-        hasFunctionCall
-          ? "tool-calls"
-          : reason === "STOP"
-          ? "stop"
-          : reason === "MAX_TOKENS"
-            ? "length"
-            : "stop"
-    });
+    if (BLOCKED_FINISH_REASONS.has(reason)) {
+      events.push(blockedError(reason));
+      events.push({ type: "done", finishReason: "error" });
+    } else {
+      events.push({
+        type: "done",
+        finishReason:
+          hasFunctionCall
+            ? "tool-calls"
+            : reason === "STOP"
+            ? "stop"
+            : reason === "MAX_TOKENS"
+              ? "length"
+              : "stop"
+      });
+    }
   }
   return events;
 }

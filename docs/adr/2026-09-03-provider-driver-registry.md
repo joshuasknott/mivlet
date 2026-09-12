@@ -13,7 +13,7 @@ later back more than one named account without widening the conversation shell.
 
 The built-in catalogue contains account routes for ChatGPT/Codex, Claude,
 Google Antigravity, Grok, Cursor, and OpenCode, followed by direct OpenAI,
-Anthropic, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq, Together,
+Anthropic, Gemini, xAI, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq, Together,
 Fireworks, Cerebras, Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere, and custom
 OpenAI-compatible connections. Provider families
 group an account route with its advanced API-key fallback.
@@ -55,6 +55,14 @@ OpenCode alone owns the model/tool loop for these turns. Its native provider
 modules send key-free requests over a private authenticated loopback bridge;
 the Rust parent validates the current account/provider/workspace route and owns
 provider egress. Native screenshots are hydrated only at that Rust boundary.
+
+Direct Gemini text/tool turns keep Mivlet's local wire loop (`shapeGeminiRequest`
+/ `parseGeminiLine` over the same Rust egress boundary) rather than the embedded
+host: its SDK admission contract is not verified, and no second agent loop wraps
+the first. The Gemini API key stays in the same account-scoped OS secure-store
+boundary as the other direct routes and never crosses into JavaScript. Gemini
+discovery uses the official `models.list` endpoint, and credential verification
+hit-tests the stored key the same way.
 
 The adapter translates SDK events into existing Mivlet conversation events and
 routes tools through the existing permission/approval executor. It removes all
