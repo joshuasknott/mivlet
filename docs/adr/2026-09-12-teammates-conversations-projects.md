@@ -111,7 +111,7 @@ checkout were preserved. These checks are not signed-installer acceptance.
 | Hidden work and Stop | A real running response continued after its last tab closed, stayed discoverable in Activity and cancelled from its Stop button. Reopening showed the stopped response without a follow-up run. |
 | Recovery and failure | Native restart restored a paused exchange and explicit continuation completed it. Deterministic fixtures cover interruption during active work, no replay, denial, budgets, resource contention, missing providers and stale callbacks. |
 | Migration and membership | Native adoption retained legacy history in the encrypted QA copy. Deterministic v41-to-v42 fixtures verify original ciphertext/thread/authorship preservation; membership and scope fixtures reject stale/cross-conversation work. |
-| Artifact preview and schedules | Scoped artifact preview and project schedule binding have deterministic coverage. Live artifact publication was unavailable because Computer Use was disabled in the QA profile; the model and inspector reported that prerequisite. No always-on or hosted execution was tested. |
+| Artifact preview and schedules | Scoped artifact preview and project schedule binding have deterministic coverage. Live artifact publication was unavailable because the QA computer did not reach readiness: its inspector reported that the native Stop button/shortcut was unavailable and computer control remained off. The installed app was preserved. No always-on or hosted execution was tested. |
 
 The final production build is 1,078,721 raw JS/CSS bytes and 311,064 gzip bytes.
 Raw total, initial entry (396,191 bytes), CSS and named route ceilings pass. The
