@@ -38,10 +38,10 @@ describe("connector marketplace catalogue", () => {
       "vercel",
       "linear",
       "atlassian-rovo",
-      "todoist",
     ]) {
       expect(entries.has(id)).toBe(true);
     }
+    expect(entries.has("todoist")).toBe(false);
     expect(recommendedMarketplaceConnectors.map((entry) => entry.id)).toEqual(
       expect.arrayContaining([
         "gmail",

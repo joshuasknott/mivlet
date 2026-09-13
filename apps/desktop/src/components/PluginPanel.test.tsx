@@ -83,9 +83,11 @@ describe("Connector Connection selection", () => {
   });
   it("reports syncing only for an active sync and keeps unhealthy connections actionable", async () => {
     const unchecked = { ...gmail, health: { ...gmail.health!, state: "unknown" as const } };
-    expect(resolveDetailedStatus(unchecked).label).toBe("Not checked");
-    expect(resolveDetailedStatus({ ...unchecked, sync: { connectorId: "gmail", workspaceId: "workspace-test", phase: "syncing", attempt: 1, itemsProcessed: 0, staleTokenRecovered: false } }).label).toBe("Syncing");
+    expect(resolveDetailedStatus(unchecked).label).toBe("Needs attention");
+    expect(resolveDetailedStatus({ ...unchecked, sync: { connectorId: "gmail", workspaceId: "workspace-test", phase: "syncing", attempt: 1, itemsProcessed: 0, staleTokenRecovered: false } }).label).toBe("Connected");
     const unhealthy = { ...gmail, health: { ...gmail.health!, state: "error" as const, summary: "Could not reach Gmail." } };
+    expect(resolveDetailedStatus(unhealthy).label).toBe("Needs attention");
+    expect(resolveDetailedStatus({ ...gmail, status: "configured", account: undefined }).label).toBe("Available");
     expect(resolveDetailedStatus(unhealthy).className).toBe("failed");
     const user = userEvent.setup();
     render(<PluginPanel manifests={[unhealthy]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);

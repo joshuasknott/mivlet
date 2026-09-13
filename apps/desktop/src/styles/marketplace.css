@@ -158,13 +158,6 @@
 .marketplace-connector-row .marketplace-connector-row__copy strong { font-size: 13px; font-weight: 500; }
 .marketplace-connector-row .marketplace-connector-row__copy > span { color: var(--ink-muted); font-size: 11.5px; line-height: 1.4; }
 .marketplace-connector-row__copy small { color: var(--ink-muted); font-size: 10px; }
-.marketplace-connector-row.marketplace-builtin { grid-template-columns: 36px minmax(0, 1fr) auto; }
-.marketplace-builtin .marketplace-connector-row__copy > span { white-space: normal; }
-.marketplace-builtin__icon { width: 36px; height: 36px; object-fit: contain; }
-.marketplace-builtin__actions { display: flex; flex-wrap: wrap; justify-content: end; gap: 4px; max-width: 72px; }
-.marketplace-builtin__toggle { min-height: 44px; min-width: 64px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; background: transparent; color: var(--ink); font: inherit; font-size: 12px; }
-.marketplace-builtin__toggle:disabled { color: var(--ink-muted); cursor: not-allowed; opacity: .65; }
-.marketplace-builtin__toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .marketplace-see-more { display: flex; align-items: center; gap: 10px; width: fit-content; min-height: 36px; padding: 4px 8px; color: var(--ink-muted); background: transparent; border: 0; border-radius: 8px; font-size: 11px; text-align: left; }
 .marketplace-see-more:hover { color: var(--ink); background: var(--surface-hover); }
 .marketplace-see-more__icons { display: flex; align-items: center; }

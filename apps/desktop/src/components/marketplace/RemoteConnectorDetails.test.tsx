@@ -54,7 +54,6 @@ describe("official connector setup", () => {
   it("selects the exact official endpoint for each verified marketplace route", async () => {
     const cases = [
       { id: "atlassian-rovo", name: "Atlassian Rovo", endpoint: "https://mcp.atlassian.com/v2/mcp" },
-      { id: "todoist", name: "Todoist", endpoint: "https://ai.todoist.net/mcp" },
     ];
     for (const expected of cases) {
       const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector(expected.id)!} preset={remoteConnectorFor(expected.id)!} workspaceId="workspace-1" titleId={`${expected.id}-title`} onSaved={vi.fn()} />);

@@ -1,8 +1,25 @@
 import type { BuiltinPlugins } from "@fable/protocol";
 import computerIcon from "../assets/plugins/computer.png?no-inline";
-export const builtinPluginEntries = [
-  { id: "computer", name: "Computer Use", description: "Use a Windows application with your permission, and work with agent workspace files.", icon: computerIcon },
-] as const;
+
+export interface BuiltinPluginEntry {
+  id: "computer";
+  name: string;
+  description: string;
+  icon: string;
+  access: string;
+  about: string;
+}
+
+export const builtinPluginEntries: readonly BuiltinPluginEntry[] = [
+  {
+    id: "computer",
+    name: "Computer Use",
+    description: "Use a Windows application with your permission, and work with agent workspace files.",
+    icon: computerIcon,
+    access: "Supported application controls follow your workspace approval preference. Foreground input needs a separately approved window selection.",
+    about: "Computer Use shares your Windows session so an agent can find and operate an existing application. Background actions are the default where the app supports them; screenshots, keys and pixel actions require an explicit foreground selection that can interrupt you, and only some actions work in the background. Disabling Computer Use stops active application control immediately and requires fresh permission before it runs again. This is not a separate desktop and never adds a host shell tool.",
+  },
+];
 export function builtinPluginMentions(plugins?: BuiltinPlugins) {
   return builtinPluginEntries.filter(entry => plugins?.[entry.id]).map(entry => ({ ...entry, status: "enabled" }));
 }

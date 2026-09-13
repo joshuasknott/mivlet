@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { remoteConnectorFor, remoteConnectors, remoteConnectorServerId } from "./remote-connectors";
+import { remoteConnectorFor, remoteConnectorServerId, remoteConnectors, retiredRemoteConnectorServerIds } from "./remote-connectors";
 import { findMarketplaceConnector } from "./marketplace-catalog";
 
 describe("official connection routes", () => {
@@ -23,11 +23,9 @@ describe("official connection routes", () => {
       documentation: "https://developer.atlassian.com/cloud/rovo-mcp/guides/getting-started",
     });
   });
-  it("points the verified Todoist route at the provider's hosted MCP endpoint", () => {
-    expect(remoteConnectorFor("todoist")).toMatchObject({
-      name: "Todoist",
-      endpoint: "https://ai.todoist.net/mcp",
-      documentation: "https://developer.todoist.com/api/v1/",
-    });
+  it("ignores the retired Todoist route without reusing another configuration", () => {
+    expect(remoteConnectorFor("todoist")).toBeUndefined();
+    expect(retiredRemoteConnectorServerIds).toContain("marketplace-todoist");
+    for (const preset of remoteConnectors) expect(remoteConnectorServerId(preset.id)).not.toBe("marketplace-todoist");
   });
 });

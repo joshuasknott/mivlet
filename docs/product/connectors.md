@@ -153,16 +153,22 @@ covers names, descriptions, permissions, and section names. Each implemented
 connector has a compact detail page with Connect or Reconnect, an account/access
 summary, and optional examples and permissions under About. Back to chat remains
 available while work runs. Skills are specific to a teammate and live in that teammate's editor,
-outside Plugins. See the [plugin and daily-driver assessment](daily-driver.md)
-for the proposed Browser and Computer Use plugins and remaining capability gaps.
+outside Plugins. Built-in plugins, starting with Computer Use, use the same
+card and detail-modal treatment, but their Enabled/Disabled setting stays
+distinct from connection readiness and never implies permission or runtime
+availability. See the [plugin and daily-driver assessment](daily-driver.md)
+for remaining capability gaps.
 Official remote connection routes are also available for Notion, Linear,
-Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, Atlassian Rovo, and
-Todoist. These use the
+Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, and Atlassian Rovo.
+These use the
 existing native MCP OAuth boundary and provider-hosted endpoints; no broker
 client secret is required when the provider supports public client registration.
-Atlassian Rovo and Todoist authorize through the provider's dynamic client
+Atlassian Rovo authorizes through the provider's dynamic client
 registration with a public client; Rovo rate limits, Rovo credit usage, and
-admin controls still apply per site. Asana's official MCP server requires
+admin controls still apply per site. The former Todoist route is retired: it is
+no longer offered, and any saved `marketplace-todoist` server record is ignored
+rather than deleted, so only that record remains removable in advanced
+Settings. Asana's official MCP server requires
 pre-registering an OAuth app with a client secret in the Asana developer
 console and does not support dynamic client registration, so it remains on
 manual server configuration in advanced Settings. Figma client approval,

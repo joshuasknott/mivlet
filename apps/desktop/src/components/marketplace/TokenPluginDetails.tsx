@@ -21,6 +21,7 @@ export function TokenPluginDetails({ plugin, connector, workspaceId, onUseConnec
   const operation = useRef(false);
   const current = override && override.source === connector ? override.result : connector;
   const ready = current?.status === "connected" && current.health?.state === "healthy";
+  const status = busy ? "Checking access…" : ready ? "Connected" : current ? "Needs attention" : "Available";
   const icon = marketplaceConnectorSections.flatMap((section) => section.connectors).find((entry) => entry.id === plugin.id)?.icon ?? "product";
   const run = async (task: () => Promise<void>) => {
     if (operation.current) return;
@@ -45,7 +46,7 @@ export function TokenPluginDetails({ plugin, connector, workspaceId, onUseConnec
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${icon}`}><MarketplaceIcon id={plugin.id} icon={icon} /></span>
       <div><h2 id={titleId}>{plugin.name}</h2><p>{plugin.description}</p></div>
-      <span className="connector-detail__status">{busy ? "Checking access…" : ready ? "Connected" : "API access"}</span>
+      <span className={`connector-detail__status${ready ? " connector-detail__status--connected" : ""}`}>{status}</span>
     </div>
     {ready ? <>
       {accounts.length > 1 && onSwitchAccount ? <label className="connector-detail__account">Account<select aria-label="Active connection" disabled={busy} value={accounts.find((a) => a.active)?.connectionId ?? ""} onChange={(event) => onSwitchAccount(plugin.id, event.target.value)}>{accounts.map((a) => <option key={a.connectionId} value={a.connectionId}>{a.account.displayName}</option>)}</select></label> : null}

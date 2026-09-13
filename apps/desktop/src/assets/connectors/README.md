@@ -24,7 +24,17 @@ The original SVG connector marks come from [Simple Icons 16.29.0](https://github
 
 Bundled locally on 2026-09-08; no remote image requests at runtime.
 
+The Atlassian Rovo mark is extracted from Atlassian's official
+[`@atlaskit/logo`](https://www.npmjs.com/package/@atlaskit/logo) package,
+version 23.0.0, which is distributed under the Apache License 2.0
+(Copyright 2019 Atlassian Pty Ltd). The bundled SVG keeps the product mark's
+published geometry and colours and removes the package's CSS custom properties.
+Marks identify third-party integrations and remain the property of their
+respective owners.
+
+| Mark | Original source |
 | --- | --- |
+| atlassian-rovo | [Official Atlassian Design System logo package](https://www.npmjs.com/package/@atlaskit/logo) |
 | outlook | [Official site icon](https://outlook.live.com/mail/favicon.ico) |
 | microsoft-teams | [Official site icon](https://teams.public.onecdn.static.microsoft/evergreen-assets/icons/microsoft_teams_logo_refresh_v2025.ico) |
 | granola | [Official site icon](https://www.granola.ai/favicon/favicon.svg) |
