@@ -624,7 +624,17 @@ pub fn change_memory_record_state(
         return Err("Memory controls belong to the main Mivlet window.".into());
     }
     let path = memory_state_path(window.app_handle())?;
-    let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;
+    let authorized = command_scope(workspace_id.clone(), None, ScopeAccess::Write)?;
+    // Removing a memory from context also invalidates summaries derived from it
+    // BEFORE the memory write. Over-invalidation is safe: raw history remains
+    // and an explicit re-compaction rebuilds from current records.
+    if matches!(change.state.as_str(), "forgotten" | "disabled") {
+        crate::context_summaries::invalidate_for_memory(
+            window.app_handle(),
+            workspace_id,
+            &change.id,
+        )?;
+    }
     crate::store::update_private_workspace_document(
         &path,
         &authorized.private,
@@ -677,7 +687,14 @@ pub fn correct_memory_record(
         return Err("Memory corrections belong to the main Mivlet window.".into());
     }
     let path = memory_state_path(window.app_handle())?;
-    let authorized = command_scope(workspace_id, None, ScopeAccess::Write)?;
+    let authorized = command_scope(workspace_id.clone(), None, ScopeAccess::Write)?;
+    // A corrected memory invalidates derived summaries before the correction
+    // commits, so the old value cannot be resurrected from derived context.
+    crate::context_summaries::invalidate_for_memory(
+        window.app_handle(),
+        workspace_id,
+        &correction.id,
+    )?;
     crate::store::update_private_workspace_document(
         &path,
         &authorized.private,

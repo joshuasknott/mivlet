@@ -43,12 +43,22 @@ export {
   exportMemories,
   forgetMemory,
   pinMemory,
+  promoteCompletedWorkOutcome,
+  promoteSideChatOutcome,
   promoteToMemory,
+  resolvePromotionScope,
   suggestMemories,
   unpinMemory,
+  MAX_PROMOTED_RECORDS,
+  MAX_PROMOTED_TITLE_CHARACTERS,
+  MAX_PROMOTED_VALUE_CHARACTERS,
+  type CompletedWorkPromotionInput,
   type MemoryRetentionPolicy,
   type MemorySuggestionContext,
-  type PromoteMemoryInput
+  type OutcomeSourceMessage,
+  type PromoteMemoryInput,
+  type PromotionOwners,
+  type SideChatPromotionInput
 } from "./memory";
 
 // --- retrieval pipeline (additive) ----------------------------------------
@@ -70,10 +80,29 @@ export {
 // --- context assembler (additive) -----------------------------------------
 export {
   assembleContext,
+  foldHistorySummary,
+  invalidateSummariesForMemory,
+  isUsableSummary,
+  planBoundedHistory,
+  retrieveElidedHistory,
+  safeHistoryStart,
+  selectRecentHistory,
+  summariesForThread,
+  DERIVED_HISTORY_POLICY,
+  MAX_SUMMARY_CHARACTERS,
+  RETRIEVED_HISTORY_POLICY,
   type AssembleContextInput,
   type AssembledContext,
   type AssembledCitation,
+  type BoundedHistoryBudget,
+  type BoundedHistoryDiagnostics,
+  type BoundedHistoryInput,
+  type BoundedHistoryPlan,
   type ContextAuthorizationRules,
   type ContextContribution,
-  type ContextContributionReason
+  type ContextContributionReason,
+  type FoldHistorySummaryInput,
+  type HistoryEntry,
+  type InvalidationResult,
+  type RetrievedHistoryExcerpt
 } from "./context";

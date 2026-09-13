@@ -126,6 +126,7 @@ import type {
   ConnectorSearchResult,
   ConnectorSyncRequest,
   ConnectorSyncState,
+  ContextSummaryRecord,
   KnowledgeSearchResponse,
   KnowledgeSource,
   LocalFileImport,
@@ -986,6 +987,38 @@ export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   if (!scope || !hasTauriRuntime()) return null;
   try {
     return await invoke<string>("export_memory_state", scope);
+  } catch (error) {
+    throw toRuntimeError(error);
+  }
+}
+
+/**
+ * Live durable summaries for one conversation. Browser preview has no native
+ * account store, so compaction stays unavailable there instead of inventing a
+ * second summary store.
+ */
+export async function listRuntimeContextSummaries(threadId: string) {
+  const scope = activeDataScope();
+  if (!scope || !hasTauriRuntime() || !threadId) return null;
+  try {
+    return await invoke<ContextSummaryRecord[]>("list_context_summaries", {
+      threadId,
+      ...scope,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Persist one incremental summary revision before it may enter a turn. */
+export async function saveRuntimeContextSummary(summary: ContextSummaryRecord) {
+  const scope = activeDataScope();
+  if (!scope || !hasTauriRuntime()) return null;
+  try {
+    return await invoke<ContextSummaryRecord>("save_context_summary", {
+      summary,
+      ...scope,
+    });
   } catch (error) {
     throw toRuntimeError(error);
   }

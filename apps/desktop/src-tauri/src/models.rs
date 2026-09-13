@@ -24,7 +24,14 @@ pub const MAX_RUNTIME_SNAPSHOT_IDS: usize = 200;
 pub const RUNTIME_SNAPSHOT_VERSION: u8 = 1;
 
 // Controlled vocabularies used for validation.
-pub const MEMORY_KINDS: [&str; 4] = ["fact", "inference", "preference", "imported"];
+pub const MEMORY_KINDS: [&str; 6] = [
+    "fact",
+    "inference",
+    "preference",
+    "decision",
+    "correction",
+    "imported",
+];
 pub const SUPPORTED_LOCAL_FILE_EXTENSIONS: [&str; 7] =
     ["txt", "md", "markdown", "json", "csv", "yaml", "yml"];
 pub const APPROVAL_DECISIONS: [&str; 5] = ["once", "session", "rule", "modify", "deny"];

@@ -12,6 +12,19 @@ export {
   type PromoteMemoryInput
 } from "./promote";
 
+export {
+  promoteCompletedWorkOutcome,
+  promoteSideChatOutcome,
+  resolvePromotionScope,
+  MAX_PROMOTED_RECORDS,
+  MAX_PROMOTED_TITLE_CHARACTERS,
+  MAX_PROMOTED_VALUE_CHARACTERS,
+  type CompletedWorkPromotionInput,
+  type OutcomeSourceMessage,
+  type PromotionOwners,
+  type SideChatPromotionInput
+} from "./promotion";
+
 export { detectContradiction, detectDuplicate } from "./duplicate";
 
 export { suggestMemories, type MemorySuggestionContext } from "./suggest";
