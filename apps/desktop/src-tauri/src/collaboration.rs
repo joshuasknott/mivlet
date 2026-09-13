@@ -3,7 +3,7 @@
 mod chats;
 mod commands;
 mod context;
-mod models;
+pub(crate) mod models;
 mod schedules;
 mod work;
 pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_project};
@@ -111,11 +111,14 @@ fn profile<'a>(profiles: &'a [FableAgentProfile], agent_id: &str) -> Result<&'a 
 fn participants(
     profiles: &[FableAgentProfile],
     ids: &[String],
-    facilitator: &str,
+    facilitator: Option<&str>,
 ) -> Result<Vec<Participant>> {
-    if ids.is_empty() || ids.len() > 8 || !ids.iter().any(|id| id == facilitator) {
+    if ids.is_empty()
+        || ids.len() > 8
+        || facilitator.is_some_and(|lead| !ids.iter().any(|id| id == lead))
+    {
         return Err(invalid(
-            "Choose one to eight participants and a facilitator from those participants.",
+            "Choose one to eight participants. A coordinator, when designated, must be one of them.",
         ));
     }
     let mut seen = HashSet::new();
@@ -256,6 +259,11 @@ impl Context<'_> {
         let title = bounded(title, 120, "Conversation title")?;
         if !["direct", "group"].contains(&kind) || kind == "direct" && members.len() != 1 {
             return Err(invalid("A direct conversation needs exactly one teammate."));
+        }
+        if kind == "group" && project.is_none() {
+            return Err(invalid(
+                "Create a project to work with more than one teammate. Standalone groups are retired.",
+            ));
         }
         if let Some(project) = &project {
             let team = self.project_team(project)?;
@@ -405,7 +413,7 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
         {
             ctx.team(&Team {
                 project_id: project.id.clone(),
-                lead_agent_id: ctx.profiles.first().map(|p| p.id.clone()),
+                lead_agent_id: None,
                 participant_ids: ctx.profiles.iter().map(|p| p.id.clone()).collect(),
                 revision: 1,
             })?;
@@ -511,7 +519,12 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
             kind: if project.is_some() { "group" } else { "direct" }.into(),
             title: thread.title,
             project_id: project.map(|p| p.id.clone()),
-            facilitator_id: members.first().map(|p| p.agent_id.clone()),
+            // Adoption never invents a coordinator. A project's submitter
+            // chooses a current participant; a direct Chat has exactly one.
+            facilitator_id: project
+                .is_none()
+                .then(|| members.first().map(|p| p.agent_id.clone()))
+                .flatten(),
             participants: members,
             revision: 1,
             generation: 1,

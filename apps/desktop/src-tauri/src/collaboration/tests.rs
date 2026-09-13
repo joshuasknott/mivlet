@@ -29,18 +29,7 @@ fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
         .unwrap()
 }
 fn group(ctx: &Context<'_>, key: &str) -> Result<Conversation> {
-    ctx.create_room(
-        key,
-        "Fixture group",
-        "group",
-        participants(
-            ctx.profiles,
-            &["lead".into(), "researcher".into(), "reviewer".into()],
-            "lead",
-        )?,
-        Some("lead".into()),
-        None,
-    )
+    project(ctx, &format!("project-{key}"), key)
 }
 fn journal(ctx: &Context<'_>, room: &str, run: &str, status: &str, transcript: &str) -> Result<()> {
     let payload = json!({"id":run,"providerId":"openai","model":"fixture-model","status":status,"transcript":transcript,"threadId":room,"exchanges":[],"turn":1,"usage":{"inputTokens":100,"outputTokens":100,"costUsd":0.0},"pendingApprovalIds":[],"recoverable":true,"retryCount":0,"createdAt":TIME,"updatedAt":TIME});
@@ -103,8 +92,22 @@ fn delegate(agent: &str, prompt: &str) -> AgentCommand {
         focused: false,
     }
 }
-fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<()> {
-    group(ctx, conversation)?;
+fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<Conversation> {
+    // Standalone groups are retired; fixture group rooms are project-owned.
+    thread::create(
+        ctx.conn,
+        ctx.store,
+        &ctx.scope.data,
+        conversation,
+        None,
+        "Fixture group",
+        TIME,
+        &json!({"authorityScope":{"authority":"local","visibility":"member-private","ownerMemberId":ctx.scope.private.owner_member_id()}}),
+    )?;
+    ctx.conn.execute(
+        "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL",
+        rusqlite::params![ctx.scope.private.owner_member_id(), ctx.scope.data.workspace_id(), conversation],
+    )?;
     let row = local_project::LocalProjectRow {
         id: project.into(),
         lifecycle: "active".into(),
@@ -122,9 +125,30 @@ fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<()> {
         participant_ids: vec!["lead".into(), "researcher".into(), "reviewer".into()],
         revision: 1,
     })?;
-    let mut room = ctx.room(conversation)?;
-    room.project_id = Some(project.into());
-    ctx.conversation(&room)
+    let room = Conversation {
+        chat: Some(ChatBinding {
+            role: "main".into(),
+            owner_kind: "project".into(),
+            owner_id: project.into(),
+        }),
+        id: conversation.into(),
+        workspace_id: ctx.scope.data.workspace_id().into(),
+        kind: "group".into(),
+        title: "Fixture group".into(),
+        project_id: Some(project.into()),
+        facilitator_id: Some("lead".into()),
+        participants: participants(
+            ctx.profiles,
+            &["lead".into(), "researcher".into(), "reviewer".into()],
+            Some("lead"),
+        )?,
+        revision: 1,
+        generation: 1,
+        created_at: TIME.into(),
+        updated_at: TIME.into(),
+    };
+    ctx.conversation(&room)?;
+    Ok(room)
 }
 
 #[test]
@@ -135,7 +159,7 @@ fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fa
                 key,
                 key,
                 "direct",
-                participants(ctx.profiles, &["lead".into()], "lead")?,
+                participants(ctx.profiles, &["lead".into()], Some("lead"))?,
                 Some("lead".into()),
                 None,
             )?;
@@ -633,7 +657,7 @@ fn collaboration_sharing_requires_explicit_consent_and_layout_does_not_create_wo
             "private",
             "Private",
             "direct",
-            participants(ctx.profiles, &["lead".into()], "lead")?,
+            participants(ctx.profiles, &["lead".into()], Some("lead"))?,
             Some("lead".into()),
             None,
         )?;
@@ -999,6 +1023,68 @@ fn roadmap_optional_coordinator_preserves_project_team_and_chat() {
             "".into(),
             "Help".into(),
             false
+        )
+        .is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_standalone_groups_are_retired_and_project_chats_allow_no_coordinator() {
+    fixture(&store(), |ctx| {
+        // A group without a project cannot be created through any path.
+        assert!(ctx
+            .create_room(
+                "loose",
+                "Loose group",
+                "group",
+                participants(ctx.profiles, &["lead".into(), "researcher".into()], None)?,
+                None,
+                None,
+            )
+            .is_err());
+        project(ctx, "project", "project-chat")?;
+        let team = ctx.project_team("project")?;
+        commands::apply(
+            ctx,
+            Command::UpdateTeam {
+                project_id: "project".into(),
+                expected_revision: team.revision,
+                lead_agent_id: None,
+                participant_ids: vec!["lead".into(), "researcher".into()],
+                share_history: true,
+            },
+        )?;
+        // A coordinator-less Project Team still accepts side Chats, and the
+        // submitter chooses the exact responder with no automatic fan-out.
+        commands::apply(
+            ctx,
+            Command::CreateConversation {
+                id: "side".into(),
+                title: "Focused review".into(),
+                kind: "group".into(),
+                participant_ids: vec!["researcher".into()],
+                facilitator_id: None,
+                project_id: Some("project".into()),
+            },
+        )?;
+        assert!(ctx.room("side")?.facilitator_id.is_none());
+        work::start(
+            ctx,
+            "work-side".into(),
+            "side".into(),
+            "researcher".into(),
+            "Review this.".into(),
+            false,
+        )?;
+        assert_eq!(ctx.item("work-side")?.agent_id, "researcher");
+        assert!(work::start(
+            ctx,
+            "work-blank".into(),
+            "side".into(),
+            String::new(),
+            "No responder".into(),
+            false,
         )
         .is_err());
         Ok(())

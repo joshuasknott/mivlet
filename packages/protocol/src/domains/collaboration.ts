@@ -47,6 +47,7 @@ export interface ConversationAuthor extends ConversationParticipant {
 
 export interface ProjectTeam {
   projectId: string;
+  /** Optional coordinator. Without one, the submitter chooses a current participant. */
   leadAgentId?: string;
   participantIds: string[];
   revision: number;
@@ -169,7 +170,8 @@ export type CollaborationCommand =
       title: string;
       kind: ConversationRoom["kind"];
       participantIds: string[];
-      facilitatorId: string;
+      /** Omitted when a Project Team has no designated coordinator. */
+      facilitatorId?: string;
       projectId?: string;
     }
   | {
@@ -178,7 +180,8 @@ export type CollaborationCommand =
       expectedRevision: number;
       title: string;
       participantIds: string[];
-      facilitatorId: string;
+      /** Omitted when the Project Team has no designated coordinator. */
+      facilitatorId?: string;
       shareHistory: boolean;
     }
   | {

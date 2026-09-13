@@ -29,7 +29,10 @@ import {
   type LayoutAction,
 } from "../lib/conversation-layout";
 import {
+  addLocalProjectShare,
   createLocalProject,
+  migrateLegacyGroup,
+  removeLocalProjectShare,
   updateLocalProject,
 } from "../runtime/domains/local-projects";
 import {
@@ -76,6 +79,11 @@ const ConversationDialog = lazy(() =>
 const PlaceConversationDialog = lazy(() =>
   import("../components/projects/ConversationDialogs").then((module) => ({
     default: module.PlaceConversationDialog,
+  })),
+);
+const MigrateGroupDialog = lazy(() =>
+  import("../components/projects/ConversationDialogs").then((module) => ({
+    default: module.MigrateGroupDialog,
   })),
 );
 const OnboardingPage = lazy(() =>
@@ -234,6 +242,7 @@ function ActiveWorkspace({
     focused?: boolean;
   } | null>(null);
   const [placeId, setPlaceId] = useState<string | null>(null);
+  const [migrateId, setMigrateId] = useState<string | null>(null);
   const [agentEditor, setAgentEditor] = useState<{ id?: string } | null>(null);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<{
@@ -497,7 +506,7 @@ function ActiveWorkspace({
   ) => {
     await runtime.flushSnapshot();
     const id = `thread-${crypto.randomUUID()}`;
-    if (draft.kind === "project") {
+    if (draft.kind === "project" && !projectId) {
       const project = await createLocalProject({
         workspaceId,
         id: `project-${crypto.randomUUID()}`,
@@ -520,7 +529,7 @@ function ActiveWorkspace({
         projectId: project.id,
         expectedRevision: team.revision,
         participantIds: draft.participantIds,
-        leadAgentId: draft.facilitatorId,
+        leadAgentId: draft.facilitatorId || undefined,
         shareHistory: true,
       });
     } else
@@ -528,12 +537,13 @@ function ActiveWorkspace({
         action: "create-conversation",
         id,
         title: draft.title,
-        kind: draft.kind,
+        kind: draft.kind === "project" ? "group" : "direct",
         participantIds: draft.participantIds,
-        facilitatorId: draft.facilitatorId,
+        facilitatorId: draft.facilitatorId || undefined,
         projectId,
       });
-    if (seedText) await saveDraft(id, draft.facilitatorId, seedText, projectId);
+    if (seedText && draft.facilitatorId)
+      await saveDraft(id, draft.facilitatorId, seedText, projectId);
     open(id, true);
     return id;
   };
@@ -670,10 +680,10 @@ function ActiveWorkspace({
     (project) => project.id === activeRoom?.projectId,
   );
   const newConversation = () => {
-    if (activeRoom?.facilitatorId)
+    if (activeRoom && activeRoom.participants.length)
       void createRoom(
         {
-          kind: activeRoom.kind,
+          kind: activeRoom.kind === "group" ? "project" : "direct",
           title: activeProject
             ? "New conversation"
             : activeRoom.kind === "group"
@@ -683,7 +693,7 @@ function ActiveWorkspace({
           participantIds: activeRoom.participants.map(
             (member) => member.agentId,
           ),
-          facilitatorId: activeRoom.facilitatorId,
+          facilitatorId: activeRoom.facilitatorId ?? "",
           shareHistory: false,
         },
         activeRoom.projectId,
@@ -725,17 +735,7 @@ function ActiveWorkspace({
           status: indicators[room.id],
         }))}
         onSelectConversation={open}
-        onCreateConversation={(kind, agentId) =>
-          setEditor({
-            draft: {
-              kind: kind ?? "direct",
-              ...(agentId
-                ? { participantIds: [agentId], facilitatorId: agentId }
-                : {}),
-            },
-          })
-        }
-        onCreateProject={() => setEditor({ draft: { kind: "project", ...(activeProfile ? { facilitatorId: activeProfile.id, participantIds: [activeProfile.id] } : {}) } })}
+        onCreateProject={() => setEditor({ draft: { kind: "project", ...(activeProfile ? { participantIds: [activeProfile.id] } : {}) } })}
         onSelectProject={(project) => {
           const saved = projects.projects.find(
             (item) => item.id === project.id,
@@ -922,6 +922,7 @@ function ActiveWorkspace({
                           )
                         }
                         onPlace={() => setPlaceId(room.id)}
+                        onMigrate={() => setMigrateId(room.id)}
                         onSchedules={() =>
                           setSchedules({
                             agentId: room.facilitatorId,
@@ -938,7 +939,8 @@ function ActiveWorkspace({
                         onNew={async (text) => {
                           const id = await createRoom(
                             {
-                              kind: room.kind,
+                              kind:
+                                room.kind === "group" ? "project" : "direct",
                               title: text
                                 ? `${room.title.slice(0, 98)} · continued`
                                 : "New conversation",
@@ -1022,6 +1024,34 @@ function ActiveWorkspace({
                   });
                 }}
                 onUpdate={updateProject}
+                onAddShare={async (share) => {
+                  const updated = await addLocalProjectShare({
+                    workspaceId,
+                    projectId: activeProject.id,
+                    expectedRevision: activeProject.revision,
+                    share,
+                  });
+                  projects.setProjects((current) =>
+                    current.map((item) =>
+                      item.id === updated.id ? updated : item,
+                    ),
+                  );
+                  await service.refresh();
+                }}
+                onRemoveShare={async (shareId) => {
+                  const updated = await removeLocalProjectShare({
+                    workspaceId,
+                    projectId: activeProject.id,
+                    expectedRevision: activeProject.revision,
+                    shareId,
+                  });
+                  projects.setProjects((current) =>
+                    current.map((item) =>
+                      item.id === updated.id ? updated : item,
+                    ),
+                  );
+                  await service.refresh();
+                }}
               />
             ) : undefined
           }
@@ -1048,17 +1078,20 @@ function ActiveWorkspace({
                   )
                 : runtime.agents
             }
+            models={runtime.modelOptions}
+            providers={runtime.backendProviders}
             projectName={editor.focused ? editingProject?.name : undefined}
             edit={Boolean(editingRoom || (editingProject && !editor.focused))}
             initial={
               editingRoom
                 ? {
-                    kind: editingRoom.kind,
+                    kind:
+                      editingRoom.kind === "direct" ? "direct" : "project",
                     title: editingRoom.title,
                     participantIds: editingRoom.participants.map(
                       (member) => member.agentId,
                     ),
-                    facilitatorId: editingRoom.facilitatorId,
+                    facilitatorId: editingRoom.facilitatorId ?? "",
                   }
                 : editingProject && !editor.focused
                   ? {
@@ -1066,7 +1099,7 @@ function ActiveWorkspace({
                       title: editingProject.name,
                       instructions: editingProject.instructions,
                       participantIds: editingTeam?.participantIds,
-                      facilitatorId: editingTeam?.leadAgentId,
+                      facilitatorId: editingTeam?.leadAgentId ?? "",
                     }
                   : editor.draft
             }
@@ -1080,7 +1113,7 @@ function ActiveWorkspace({
                   expectedRevision: editingRoom.revision,
                   title: draft.title,
                   participantIds: draft.participantIds,
-                  facilitatorId: draft.facilitatorId,
+                  facilitatorId: draft.facilitatorId || undefined,
                   shareHistory: draft.shareHistory,
                 });
               else if (editingProject && editingTeam && !editor.focused) {
@@ -1098,7 +1131,7 @@ function ActiveWorkspace({
                   action: "update-team",
                   projectId: editingProject.id,
                   expectedRevision: team.revision,
-                  leadAgentId: draft.facilitatorId,
+                  leadAgentId: draft.facilitatorId || undefined,
                   participantIds: draft.participantIds,
                   shareHistory: draft.shareHistory,
                 });
@@ -1133,6 +1166,46 @@ function ActiveWorkspace({
                 projectId,
                 shareHistory: true,
               });
+            }}
+          />
+        </Suspense>
+      ) : null}
+      {migrateId ? (
+        <Suspense fallback={null}>
+          <MigrateGroupDialog
+            title={
+              state.data.conversations.find((room) => room.id === migrateId)
+                ?.title ?? "Legacy group"
+            }
+            agents={runtime.agents}
+            models={runtime.modelOptions}
+            providers={runtime.backendProviders}
+            initialParticipantIds={
+              state.data.conversations
+                .find((room) => room.id === migrateId)
+                ?.participants.map((member) => member.agentId) ?? []
+            }
+            onClose={() => setMigrateId(null)}
+            onMigrate={async (draft) => {
+              await runtime.flushSnapshot();
+              const updated = await migrateLegacyGroup({
+                workspaceId,
+                id: `project-${crypto.randomUUID()}`,
+                conversationId: migrateId,
+                expectedRevision:
+                  service
+                    .getSnapshot()
+                    .data.conversations.find((room) => room.id === migrateId)
+                    ?.revision ?? 0,
+                name: draft.name,
+                instructions: draft.instructions,
+                participantIds: draft.participantIds,
+                leadAgentId: draft.leadAgentId || undefined,
+                shareHistory: true,
+              });
+              projects.setProjects((current) => [...current, updated]);
+              await service.refresh();
+              open(updated.threadId);
             }}
           />
         </Suspense>

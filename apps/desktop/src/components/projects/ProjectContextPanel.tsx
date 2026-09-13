@@ -1,9 +1,13 @@
 import { useRef, useState } from "react";
 import type {
+  AddProjectContextShareInput,
   CollaborationSnapshot,
   ConversationRoom,
   LocalProject,
+  ProjectContextShare,
   ProjectFact,
+  ProjectShareMode,
+  ProjectShareSourceKind,
 } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
@@ -12,8 +16,18 @@ import {
 } from "../../lib/workspace-execution";
 import { WorkItems } from "./WorkItems";
 import { ProjectFiles } from "./ProjectFiles";
+import { TeamReadiness } from "./TeamReadiness";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
 import { ACCEPTED_LOCAL_KNOWLEDGE_FILES } from "../../lib/constants";
+
+interface ShareSourceOption {
+  key: string;
+  kind: ProjectShareSourceKind;
+  id: string;
+  title: string;
+  sourceRevision: string;
+  snapshotText?: string;
+}
 
 export function ProjectContextPanel({
   project,
@@ -25,6 +39,8 @@ export function ProjectContextPanel({
   onEdit,
   onSchedules,
   onUpdate,
+  onAddShare,
+  onRemoveShare,
 }: {
   project: LocalProject;
   room: ConversationRoom;
@@ -38,9 +54,15 @@ export function ProjectContextPanel({
     project: LocalProject,
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
+  onAddShare: (share: AddProjectContextShareInput["share"]) => Promise<void>;
+  onRemoveShare: (shareId: string) => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const [shareMode, setShareMode] = useState<ProjectShareMode>("snapshot");
+  const [recipient, setRecipient] = useState("project");
+  const [sourceKey, setSourceKey] = useState("");
+  const [snapshotDraft, setSnapshotDraft] = useState("");
   const filesInput = useRef<HTMLInputElement>(null);
   const work = data.work.filter((work) => work.projectId === project.id);
   const team = data.teams.find((team) => team.projectId === project.id);
@@ -102,6 +124,72 @@ export function ProjectContextPanel({
       supersedesId,
     });
   };
+  const shareSources: ShareSourceOption[] = [
+    ...files.flatMap((file) =>
+      file.sourceId
+        ? [
+            {
+              key: `file:${file.sourceId}`,
+              kind: "file" as const,
+              id: file.sourceId,
+              title: file.name,
+              sourceRevision:
+                references.find((source) => source.id === file.sourceId)
+                  ?.contentFingerprint ?? "current",
+            },
+          ]
+        : [],
+    ),
+    ...work.flatMap((item) =>
+      item.outputs.map((output) => ({
+        key: `work:${item.id}:${output.runId}`,
+        kind: "work" as const,
+        id: item.id,
+        title: `${item.agentName}: ${item.prompt.slice(0, 70)}`,
+        sourceRevision: output.runId,
+        snapshotText: output.text,
+      })),
+    ),
+    {
+      key: `conversation:${room.id}`,
+      kind: "conversation" as const,
+      id: room.id,
+      title: `${room.title} history`,
+      sourceRevision: String(room.revision),
+    },
+  ];
+  const selectedSource = shareSources.find((source) => source.key === sourceKey);
+  const submitShare = async () => {
+    if (!selectedSource) {
+      setError("Choose a file, result or conversation to share.");
+      return;
+    }
+    await onAddShare({
+      mode: shareMode,
+      source: {
+        workspaceId: service.workspaceId,
+        kind: selectedSource.kind,
+        id: selectedSource.id,
+      },
+      sourceRevision: selectedSource.sourceRevision,
+      recipient:
+        recipient === "project"
+          ? { kind: "project", id: project.id }
+          : { kind: "agent", id: recipient },
+      owner: { kind: "user", name: "You" },
+      title: selectedSource.title,
+      snapshotText:
+        shareMode === "snapshot"
+          ? snapshotDraft || selectedSource.snapshotText || ""
+          : undefined,
+    });
+    setSnapshotDraft("");
+  };
+  const recipientName = (share: ProjectContextShare) =>
+    share.recipient.kind === "project"
+      ? "Whole project"
+      : runtime.agents.find((agent) => agent.id === share.recipient.id)?.name ??
+        "Removed agent";
   return (
     <section className="project-context" aria-label={project.name}>
       <div className="project-context__body">
@@ -183,6 +271,138 @@ export function ProjectContextPanel({
               });
             }}
           />
+        </details>
+        <details>
+          <summary>
+            Shared context <small>{project.shares.length}</small>
+          </summary>
+          <div className="project-shares">
+            {project.shares.map((share) => (
+              <article key={share.id} data-mode={share.mode}>
+                <header>
+                  <strong>{share.title}</strong>
+                  <small>
+                    {share.mode === "snapshot" ? "Snapshot" : "Live reference"} ·{" "}
+                    {share.owner.kind === "agent"
+                      ? `Shared by ${share.owner.name}`
+                      : "Shared by you"}{" "}
+                    → {recipientName(share)}
+                  </small>
+                </header>
+                <p>
+                  {share.mode === "snapshot"
+                    ? share.snapshotText
+                    : `This live reference resolves ${share.source.kind} ${share.source.id} under the current account on each deliberate use. It can become unavailable and conveys no tool authority.`}
+                </p>
+                <small>
+                  {share.source.kind} · source revision {share.sourceRevision} ·{" "}
+                  {new Date(share.createdAt).toLocaleDateString()}
+                </small>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => void perform(() => onRemoveShare(share.id))}
+                >
+                  Stop sharing
+                </button>
+              </article>
+            ))}
+            {project.shares.length === 0 ? (
+              <p className="project-files__empty">
+                Nothing has been explicitly shared into this project yet.
+              </p>
+            ) : null}
+            <form
+              className="project-share__new"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void perform(submitShare);
+              }}
+            >
+              <label>
+                Source
+                <select
+                  name="source"
+                  required
+                  value={sourceKey}
+                  onChange={(event) => {
+                    setSourceKey(event.target.value);
+                    const next = shareSources.find(
+                      (source) => source.key === event.target.value,
+                    );
+                    setSnapshotDraft(next?.snapshotText ?? "");
+                  }}
+                >
+                  <option value="" disabled>
+                    Choose a file, result or conversation
+                  </option>
+                  {shareSources.map((source) => (
+                    <option key={source.key} value={source.key}>
+                      {source.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Sharing
+                <select
+                  name="mode"
+                  value={shareMode}
+                  onChange={(event) =>
+                    setShareMode(event.target.value as ProjectShareMode)
+                  }
+                >
+                  <option value="snapshot">Snapshot — frozen selected bytes</option>
+                  <option value="live-reference">
+                    Live reference — resolves again under this account
+                  </option>
+                </select>
+              </label>
+              <label>
+                Recipient
+                <select
+                  name="recipient"
+                  value={recipient}
+                  onChange={(event) => setRecipient(event.target.value)}
+                >
+                  <option value="project">Whole project</option>
+                  {team?.participantIds.map((id) => (
+                    <option key={id} value={id}>
+                      {runtime.agents.find((agent) => agent.id === id)?.name ??
+                        "Removed agent"}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {shareMode === "snapshot" ? (
+                <label>
+                  Snapshot text
+                  <textarea
+                    name="snapshot"
+                    value={snapshotDraft}
+                    onChange={(event) => setSnapshotDraft(event.target.value)}
+                    rows={3}
+                    maxLength={32000}
+                    required
+                    placeholder="Select the exact text to freeze"
+                  />
+                </label>
+              ) : (
+                <p className="team-dialog-note">
+                  A live reference copies no bytes; it is re-authorized and
+                  resolved when a recipient deliberately uses it.
+                </p>
+              )}
+              <p className="team-dialog-note">
+                Sharing records a recipient and owner. It never grants tool or
+                computer authority, and a snapshot cannot be changed by later
+                source edits.
+              </p>
+              <button type="submit" disabled={pending || !selectedSource}>
+                Share into project
+              </button>
+            </form>
+          </div>
         </details>
         <details>
           <summary>
@@ -346,6 +566,13 @@ export function ProjectContextPanel({
               Edit participants
             </button>
           </div>
+          <TeamReadiness
+            participantIds={team?.participantIds ?? []}
+            agents={runtime.agents}
+            models={runtime.modelOptions}
+            providers={runtime.backendProviders}
+            compact
+          />
           <p className="team-dialog-note">
             New participants can read project-shared history and records.
             Removing a participant prevents dispatch and pauses its active work;

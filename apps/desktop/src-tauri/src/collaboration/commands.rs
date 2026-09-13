@@ -60,15 +60,8 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             facilitator_id,
             project_id,
         } => {
-            let members = participants(ctx.profiles, &participant_ids, &facilitator_id)?;
-            ctx.create_room(
-                &id,
-                &title,
-                &kind,
-                members,
-                Some(facilitator_id),
-                project_id,
-            )?;
+            let members = participants(ctx.profiles, &participant_ids, facilitator_id.as_deref())?;
+            ctx.create_room(&id, &title, &kind, members, facilitator_id, project_id)?;
         }
         Command::UpdateConversation {
             id,
@@ -91,10 +84,10 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                     "Confirm sharing existing conversation history with new participants.",
                 ));
             }
-            let members = participants(ctx.profiles, &participant_ids, &facilitator_id)?;
+            let members = participants(ctx.profiles, &participant_ids, facilitator_id.as_deref())?;
             if room.kind == "direct" && members.len() != 1 {
                 return Err(invalid(
-                    "Create a group to work with more than one teammate.",
+                    "Create a project to work with more than one teammate.",
                 ));
             }
             if let Some(project) = &room.project_id {
@@ -107,8 +100,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 }
             }
             room.title = bounded(&title, 120, "Conversation title")?;
-            if room.participants != members || room.facilitator_id.as_ref() != Some(&facilitator_id)
-            {
+            if room.participants != members || room.facilitator_id != facilitator_id {
                 invalidate_room(
                     ctx,
                     &id,
@@ -117,7 +109,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 room.generation += 1;
             }
             room.participants = members;
-            room.facilitator_id = Some(facilitator_id);
+            room.facilitator_id = facilitator_id;
             room.revision += 1;
             room.updated_at = ctx.time.into();
             thread::update(
@@ -150,20 +142,30 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 ));
             }
             let team = ctx.project_team(&project_id)?;
-            let lead = team
-                .lead_agent_id
-                .as_ref()
-                .ok_or_else(|| invalid("Choose a project lead first."))?;
-            let members = participants(ctx.profiles, &team.participant_ids, lead)?;
+            let members = participants(
+                ctx.profiles,
+                &team.participant_ids,
+                team.lead_agent_id.as_deref(),
+            )?;
             invalidate_room(ctx, &id, "This conversation was shared with a project. Review its context before continuing.")?;
-            room.project_id = Some(project_id);
+            room.project_id = Some(project_id.clone());
             room.kind = "group".into();
             room.participants = members;
-            room.facilitator_id = Some(lead.clone());
+            room.facilitator_id = team.lead_agent_id.clone();
             room.revision += 1;
             room.generation += 1;
             room.updated_at = ctx.time.into();
             ctx.conversation(&room)?;
+            // Historical runs keep their original bytes. Where evidence exists,
+            // they also gain permanent authorship for the new project.
+            crate::local_projects::backfill_thread_authors(
+                ctx.conn,
+                ctx.store,
+                ctx.scope,
+                &project_id,
+                &id,
+                ctx.profiles,
+            )?;
         }
         Command::UpdateTeam {
             project_id,
@@ -185,11 +187,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             {
                 return Err(invalid("Confirm sharing existing project conversations, references and work with new participants."));
             }
-            let validation_lead = lead_agent_id
-                .as_deref()
-                .or_else(|| participant_ids.first().map(String::as_str))
-                .ok_or_else(|| invalid("A Project Team needs at least one Agent."))?;
-            let members = participants(ctx.profiles, &participant_ids, validation_lead)?;
+            let members = participants(ctx.profiles, &participant_ids, lead_agent_id.as_deref())?;
             invalidate_project(ctx, &project_id, None, "The project lead or participants changed. Review current assignments before continuing.")?;
             team.revision += 1;
             team.participant_ids = participant_ids;
