@@ -301,6 +301,7 @@ impl Context<'_> {
             participants: members,
             revision: 1,
             generation: 1,
+            archived: false,
             created_at: self.time.into(),
             updated_at: self.time.into(),
         };
@@ -500,12 +501,23 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
         if !owned {
             continue;
         }
+        // A single positive profile link establishes Side Chat ownership. Zero
+        // or multiple links stay unclassified: ambiguous legacy chats are never
+        // guessed to be an Agent's main Chat.
         let room = Conversation {
-            chat: project.map(|p| ChatBinding {
-                role: "main".into(),
-                owner_kind: "project".into(),
-                owner_id: p.id.clone(),
-            }),
+            chat: project
+                .map(|p| ChatBinding {
+                    role: "main".into(),
+                    owner_kind: "project".into(),
+                    owner_id: p.id.clone(),
+                })
+                .or_else(|| {
+                    (linked.len() == 1).then(|| ChatBinding {
+                        role: "side".into(),
+                        owner_kind: "agent".into(),
+                        owner_id: linked[0].id.clone(),
+                    })
+                }),
             id: thread.id,
             workspace_id: ctx.scope.data.workspace_id().into(),
             kind: if project.is_some() { "group" } else { "direct" }.into(),
@@ -515,6 +527,7 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
             participants: members,
             revision: 1,
             generation: 1,
+            archived: false,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
         };

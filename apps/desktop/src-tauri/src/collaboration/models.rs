@@ -46,6 +46,9 @@ pub struct ChatBinding {
 pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat: Option<ChatBinding>,
+    /// Side Chats may be archived without losing history, drafts or attachments.
+    #[serde(default)]
+    pub archived: bool,
     pub id: String,
     pub workspace_id: String,
     pub kind: String,
@@ -293,6 +296,20 @@ pub enum Command {
         participant_ids: Vec<String>,
         facilitator_id: String,
         project_id: Option<String>,
+    },
+    RenameConversation {
+        id: String,
+        expected_revision: u32,
+        title: String,
+    },
+    SetConversationArchived {
+        id: String,
+        expected_revision: u32,
+        archived: bool,
+    },
+    DeleteConversation {
+        id: String,
+        expected_revision: u32,
     },
     UpdateConversation {
         id: String,

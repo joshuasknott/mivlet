@@ -70,6 +70,20 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 project_id,
             )?;
         }
+        Command::RenameConversation {
+            id,
+            expected_revision,
+            title,
+        } => chats::rename(ctx, &id, expected_revision, &title)?,
+        Command::SetConversationArchived {
+            id,
+            expected_revision,
+            archived,
+        } => chats::set_archived(ctx, &id, expected_revision, archived)?,
+        Command::DeleteConversation {
+            id,
+            expected_revision,
+        } => chats::delete(ctx, &id, expected_revision)?,
         Command::UpdateConversation {
             id,
             expected_revision,

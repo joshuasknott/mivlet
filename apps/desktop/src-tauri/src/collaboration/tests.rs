@@ -1,7 +1,8 @@
 //! Deterministic storage/coordination fixtures. No live provider is simulated as
 //! successful product evidence; fixture attempts are explicitly authored here.
 use super::*;
-use crate::store::repos::{execution_attempt, message};
+use crate::store::repos::scope::{DataScope, PrivateDataScope};
+use crate::store::repos::{draft, execution_attempt, message};
 use crate::store::vault::{MasterKey, Vault};
 use serde_json::json;
 
@@ -14,10 +15,16 @@ fn profiles() -> Vec<FableAgentProfile> {
     ["lead", "researcher", "reviewer"].iter().map(|id| serde_json::from_value(json!({"id":id,"name":id,"instructions":"Fixture teammate","modelId":"openai::fixture-model","icon":"sparkle","permissionLabel":"Ask Me"})).unwrap()).collect()
 }
 fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
+    fixture_with_profiles(store, profiles(), f)
+}
+fn fixture_with_profiles<T>(
+    store: &Store,
+    profiles: Vec<FableAgentProfile>,
+    f: impl FnOnce(&Context<'_>) -> Result<T>,
+) -> T {
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
-            let profiles = profiles();
             f(&Context {
                 conn,
                 store,
@@ -27,6 +34,15 @@ fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
             })
         })
         .unwrap()
+}
+fn account_scope(data: &DataScope, user: &str, member: &str) -> AuthorizedCommandScope {
+    AuthorizedCommandScope {
+        data: data.clone(),
+        private: PrivateDataScope::for_authenticated_user(data.clone(), user, Some(member))
+            .unwrap(),
+        internal_user_id: user.into(),
+        member_id: Some(member.into()),
+    }
 }
 fn group(ctx: &Context<'_>, key: &str) -> Result<Conversation> {
     ctx.create_room(
@@ -1072,4 +1088,495 @@ fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
         assert_eq!(restored.user_request, "Retain request");
         Ok(())
     });
+}
+
+#[test]
+fn roadmap_repeated_selection_resolves_one_persistent_main_chat_per_agent() {
+    fixture(&store(), |ctx| {
+        let first = chats::open_main(ctx, "lead")?;
+        let again = chats::open_main(ctx, "lead")?;
+        assert_eq!(first.id, again.id);
+        assert_eq!(
+            first.chat.as_ref().map(|chat| chat.role.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            first.chat.as_ref().map(|chat| chat.owner_id.as_str()),
+            Some("lead")
+        );
+        let other = chats::open_main(ctx, "researcher")?;
+        assert_ne!(first.id, other.id);
+        let mains = repo::list::<Conversation>(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Conversation,
+        )?
+        .into_iter()
+        .filter(|room| {
+            room.chat
+                .as_ref()
+                .is_some_and(|chat| chat.role == "main" && chat.owner_kind == "agent")
+        })
+        .count();
+        assert_eq!(mains, 2);
+        let reopened = chats::open_main(ctx, "lead")?;
+        assert_eq!(reopened.revision, first.revision);
+        assert_eq!(
+            thread::list(ctx.conn, ctx.store, &ctx.scope.data)?
+                .into_iter()
+                .filter(|row| row.id == first.id || row.id == other.id)
+                .count(),
+            2,
+            "repeated selection must never create a duplicate main Chat"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_side_chat_lifecycle_preserves_transcript_drafts_and_guards_main() {
+    fixture(&store(), |ctx| {
+        let main = chats::open_main(ctx, "lead")?;
+        let side = ctx.create_room(
+            "side",
+            "Separate question",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        assert_eq!(
+            side.chat.as_ref().map(|chat| chat.role.as_str()),
+            Some("side")
+        );
+        output(ctx, &side.id, "side-run", "Side transcript")?;
+        draft::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&side.id),
+            "composer",
+            &json!({"text":"keep me"}),
+            TIME,
+        )?;
+
+        commands::apply(
+            ctx,
+            Command::RenameConversation {
+                id: side.id.clone(),
+                expected_revision: side.revision,
+                title: "Renamed Side Chat".into(),
+            },
+        )?;
+        let renamed = ctx.room(&side.id)?;
+        assert_eq!(renamed.title, "Renamed Side Chat");
+        assert_eq!(renamed.revision, side.revision + 1);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .title,
+            "Renamed Side Chat"
+        );
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?.len(),
+            1,
+            "renaming a Side Chat cannot touch its transcript"
+        );
+
+        commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: renamed.revision,
+                archived: true,
+            },
+        )?;
+        let archived = ctx.room(&side.id)?;
+        assert!(archived.archived);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .lifecycle,
+            "archived"
+        );
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?.len(),
+            1
+        );
+        assert!(
+            draft::get_scoped(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                Some(&side.id),
+                "composer"
+            )?
+            .is_some(),
+            "archiving keeps the conversation-owned draft"
+        );
+
+        for command in [
+            Command::RenameConversation {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+                title: "Not allowed".into(),
+            },
+            Command::SetConversationArchived {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+                archived: true,
+            },
+            Command::DeleteConversation {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+            },
+        ] {
+            assert!(
+                commands::apply(ctx, command).is_err(),
+                "the persistent main Chat cannot be renamed, archived or deleted"
+            );
+        }
+
+        let archived_revision = archived.revision;
+        work::start(
+            ctx,
+            "side-work".into(),
+            side.id.clone(),
+            "lead".into(),
+            "Do a thing".into(),
+            false,
+        )?;
+        assert!(commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+                archived: true,
+            }
+        )
+        .is_err());
+        assert!(commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+            }
+        )
+        .is_err());
+
+        commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+                archived: false,
+            },
+        )?;
+        let restored = ctx.room(&side.id)?;
+        assert!(!restored.archived);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .lifecycle,
+            "active"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_side_chat_delete_is_explicit_and_keeps_durable_evidence() {
+    fixture(&store(), |ctx| {
+        let main = chats::open_main(ctx, "lead")?;
+        let doomed = ctx.create_room(
+            "doomed",
+            "Throwaway",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        let kept = ctx.create_room(
+            "kept",
+            "Keep me",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        output(ctx, &doomed.id, "doomed-run", "Goodbye")?;
+        draft::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&doomed.id),
+            "composer",
+            &json!({"text":"discard with the chat"}),
+            TIME,
+        )?;
+        commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: doomed.id.clone(),
+                expected_revision: doomed.revision,
+            },
+        )?;
+        assert!(ctx.room(&doomed.id).is_err());
+        assert!(thread::get(ctx.conn, ctx.store, &ctx.scope.data, &doomed.id)?.is_none());
+        assert!(draft::get_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&doomed.id),
+            "composer"
+        )?
+        .is_none());
+        assert_eq!(ctx.room(&main.id)?.chat.as_ref().unwrap().role, "main");
+        assert_eq!(ctx.room(&kept.id)?.title, "Keep me");
+        assert!(
+            ctx.create_room(
+                "doomed",
+                "Recreated",
+                "direct",
+                vec![Participant {
+                    agent_id: "lead".into(),
+                    name: "lead".into(),
+                }],
+                Some("lead".into()),
+                None
+            )
+            .is_err(),
+            "a deleted Side Chat stays tombstoned"
+        );
+
+        project(ctx, "project", "project-chat")?;
+        let recorded = ctx.create_room(
+            "recorded",
+            "Decision log",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            Some("project".into()),
+        )?;
+        commands::apply(
+            ctx,
+            Command::SaveFact {
+                project_id: "project".into(),
+                conversation_id: recorded.id.clone(),
+                id: "decision".into(),
+                kind: "decision".into(),
+                text: "Use the two week deadline".into(),
+                source: "Fixture decision".into(),
+                supersedes_id: None,
+            },
+        )?;
+        assert!(commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: recorded.id.clone(),
+                expected_revision: recorded.revision,
+            }
+        )
+        .is_err());
+        commands::apply(
+            ctx,
+            Command::ChangeFact {
+                project_id: "project".into(),
+                id: "decision".into(),
+                status: "forgotten".into(),
+            },
+        )?;
+        commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: recorded.id.clone(),
+                expected_revision: recorded.revision,
+            },
+        )?;
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_legacy_positive_agent_links_adopt_as_side_and_never_as_main() {
+    let store = store();
+    let mut members = profiles();
+    members[0].thread_id = Some("legacy-linked".into());
+    members[1].thread_ids = vec!["legacy-ambiguous".into()];
+    members[2].thread_ids = vec!["legacy-ambiguous".into()];
+    fixture_with_profiles(&store, members, |ctx| {
+        for key in ["legacy-linked", "legacy-ambiguous"] {
+            thread::create(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                key,
+                None,
+                "Legacy conversation",
+                TIME,
+                &json!({"authorityScope":{"authority":"local","visibility":"member-private"}}),
+            )?;
+            ctx.conn.execute(
+                "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3",
+                rusqlite::params![
+                    ctx.scope.private.owner_member_id(),
+                    ctx.scope.data.workspace_id(),
+                    key
+                ],
+            )?;
+            message::append(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                key,
+                &format!("legacy-message-{key}"),
+                "user",
+                &json!({"kind":"user"}),
+                None,
+                1,
+                0,
+                None,
+                &format!("legacy:{key}"),
+                &format!("legacy-revision-{key}"),
+                "terminal",
+                "fixture",
+                &json!({"text":"Legacy content that must survive"}),
+                TIME,
+            )?;
+        }
+        ctx.conn.execute_batch("DROP TABLE collaboration_record")?;
+        crate::store::migrations::apply(ctx.conn, 41, 42)?;
+        adopt_existing(ctx)?;
+        adopt_existing(ctx)?;
+        let linked = ctx.room("legacy-linked")?;
+        assert_eq!(
+            linked.chat.as_ref().map(|chat| (
+                chat.role.as_str(),
+                chat.owner_kind.as_str(),
+                chat.owner_id.as_str()
+            )),
+            Some(("side", "agent", "lead")),
+            "a single positive profile link is a Side Chat, never a guessed main Chat"
+        );
+        assert!(
+            ctx.room("legacy-ambiguous")?.chat.is_none(),
+            "zero or multiple profile links stay unclassified"
+        );
+        assert_eq!(ctx.snapshot()?.conversations.len(), 2);
+        assert!(ctx
+            .snapshot()?
+            .conversations
+            .iter()
+            .all(|room| room.chat.as_ref().is_none_or(|chat| chat.role != "main")));
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, "legacy-linked")?.len(),
+            1
+        );
+        let main = chats::open_main(ctx, "lead")?;
+        assert_ne!(main.id, "legacy-linked");
+        assert_eq!(main.chat.as_ref().unwrap().role, "main");
+        assert_eq!(ctx.snapshot()?.conversations.len(), 3);
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_older_conversation_payloads_default_archived_false() {
+    let value = json!({
+        "id":"legacy",
+        "workspaceId":"default",
+        "kind":"direct",
+        "title":"Legacy",
+        "participants":[],
+        "revision":1,
+        "generation":1,
+        "createdAt":TIME,
+        "updatedAt":TIME
+    });
+    let room: Conversation = serde_json::from_value(value).unwrap();
+    assert!(!room.archived);
+    assert!(room.chat.is_none());
+}
+
+#[test]
+fn roadmap_second_account_cannot_resolve_or_mutate_chats() {
+    let store = store();
+    let data = DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID).unwrap();
+    let alpha = account_scope(&data, "user-a", "member-a");
+    let beta = account_scope(&data, "user-b", "member-b");
+    let (main_id, side_id) = store
+        .transaction(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &alpha,
+                profiles: &profiles,
+                time: TIME,
+            };
+            let main = chats::open_main(&ctx, "lead")?;
+            let side = ctx.create_room(
+                "side",
+                "Private side",
+                "direct",
+                vec![Participant {
+                    agent_id: "lead".into(),
+                    name: "lead".into(),
+                }],
+                Some("lead".into()),
+                None,
+            )?;
+            Ok((main.id, side.id))
+        })
+        .unwrap();
+    store
+        .with_conn(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &beta,
+                profiles: &profiles,
+                time: TIME,
+            };
+            assert!(ctx.room(&main_id).is_err());
+            assert!(
+                repo::list::<Conversation>(conn, &store, &beta.private, Kind::Conversation)?
+                    .is_empty()
+            );
+            assert!(chats::rename(&ctx, &side_id, 1, "Stolen").is_err());
+            assert!(chats::set_archived(&ctx, &side_id, 1, true).is_err());
+            assert!(chats::delete(&ctx, &side_id, 1).is_err());
+            Ok(())
+        })
+        .unwrap();
+    store
+        .with_conn(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &alpha,
+                profiles: &profiles,
+                time: TIME,
+            };
+            assert_eq!(ctx.room(&side_id)?.title, "Private side");
+            assert!(!ctx.room(&side_id)?.archived);
+            assert_eq!(ctx.room(&main_id)?.chat.as_ref().unwrap().role, "main");
+            Ok(())
+        })
+        .unwrap();
 }

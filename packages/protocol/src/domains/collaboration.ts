@@ -27,6 +27,8 @@ export type ContextShare =
 export interface ConversationRoom {
   /** Missing only for unclassified legacy conversations; never guess a main Chat. */
   chat?: ChatBinding;
+  /** True for archived Side Chats. Main Chats are never archived. */
+  archived?: boolean;
   id: string;
   workspaceId: string;
   kind: "direct" | "group";
@@ -171,6 +173,23 @@ export type CollaborationCommand =
       participantIds: string[];
       facilitatorId: string;
       projectId?: string;
+    }
+  | {
+      action: "rename-conversation";
+      id: string;
+      expectedRevision: number;
+      title: string;
+    }
+  | {
+      action: "set-conversation-archived";
+      id: string;
+      expectedRevision: number;
+      archived: boolean;
+    }
+  | {
+      action: "delete-conversation";
+      id: string;
+      expectedRevision: number;
     }
   | {
       action: "update-conversation";
