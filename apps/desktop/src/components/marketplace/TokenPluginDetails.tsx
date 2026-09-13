@@ -45,11 +45,11 @@ export function TokenPluginDetails({ plugin, connector, workspaceId, onUseConnec
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${icon}`}><MarketplaceIcon id={plugin.id} icon={icon} /></span>
       <div><h2 id={titleId}>{plugin.name}</h2><p>{plugin.description}</p></div>
-      <span className="connector-detail__status">{busy ? "Checking access…" : ready ? "Connected" : "API access"}</span>
+      <span className="connector-detail__status">{busy ? "Checking access…" : ready ? "Connected" : "Available"}</span>
     </div>
     {ready ? <>
       {accounts.length > 1 && onSwitchAccount ? <label className="connector-detail__account">Account<select aria-label="Active connection" disabled={busy} value={accounts.find((a) => a.active)?.connectionId ?? ""} onChange={(event) => onSwitchAccount(plugin.id, event.target.value)}>{accounts.map((a) => <option key={a.connectionId} value={a.connectionId}>{a.account.displayName}</option>)}</select></label> : null}
-      <p className="connector-detail__intro">Read access is ready. Additional operations need the permissions listed below.</p>
+      <p className="connector-detail__intro">Read access is ready. This connection supports only the reads listed below; writes, publishing, knowledge sync and token renewal are not available.</p>
       <div className="connector-detail__actions">
         <button type="button" disabled={busy} onClick={() => onUseConnector(current!)}>Use in chat</button>
         <button type="button" disabled={busy} onClick={() => void run(async () => { await onDisconnect(plugin.id); setOverride({ source: connector, result: { ...current!, status: "revoked", account: undefined } }); if (workspaceId) connectorConnectionsChanged(workspaceId); })}>Disconnect</button>

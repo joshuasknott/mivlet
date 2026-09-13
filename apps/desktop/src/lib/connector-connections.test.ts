@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ConnectorManifest } from "@fable/protocol";
+import { retiredRemoteConnectorServerIds } from "../components/marketplace/remote-connectors";
 import type { RuntimeMcpConnectionDetails } from "../runtime";
 import { mergeConnectorConnections, remoteConnectionReady } from "./connector-connections";
 
@@ -20,5 +21,13 @@ describe("canonical connector projection", () => {
     expect(manifest.status).not.toBe("connected");
     expect(manifest.connectionRoute).toBe("remote");
     expect(manifest.account).toBeUndefined();
+  });
+  it("ignores a saved configuration for a retired route without deleting it or other records", () => {
+    const retired = { ...remote, launchReference: retiredRemoteConnectorServerIds[0] } as RuntimeMcpConnectionDetails;
+    const saved = [retired, remote];
+    const manifests = mergeConnectorConnections([{ id: "notion", status: "needs-auth" } as ConnectorManifest], saved);
+    expect(manifests.some((manifest) => manifest.id === "todoist")).toBe(false);
+    expect(manifests).toMatchObject([{ id: "notion", connectionRoute: "remote", status: "connected" }]);
+    expect(saved).toEqual([retired, remote]);
   });
 });

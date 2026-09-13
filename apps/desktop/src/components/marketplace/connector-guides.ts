@@ -8,5 +8,4 @@ export const connectorGuides: Record<string, { description: string; examples: st
   linear: { description: "Keep track of issues and understand what needs attention.", examples: ["Find the issues assigned to me.", "Summarize the blockers in this project.", "Help me prepare a status update from these issues."] },
   vercel: { description: "Review your projects and deployment activity.", examples: ["Show the latest deployments for this project.", "Help me understand this deployment's status.", "Summarize the recent changes across my projects."] },
   "atlassian-rovo": { description: "Find answers and work across your Atlassian apps.", examples: ["Summarize the open issues in this Jira project.", "Find the Confluence page about our release process.", "What changed in this project this week?"] },
-  todoist: { description: "Plan your day and keep tasks moving.", examples: ["What is on my task list today?", "Help me plan the next steps for this project.", "Find tasks I need to finish this week."] },
 };

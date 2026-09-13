@@ -102,7 +102,9 @@ a deployed or production-validated service.
 - File attachments and memory provide conversation context; Knowledge is no
   longer a separate product feature. Existing imported records remain stored.
 - Native Windows application control through bundled Cua Driver 0.25.0, governed
-  by the global approvals setting. Full Access needs
+  by the global approvals setting. Computer Use is enabled and disabled from its
+  ordinary Plugin card and detail view; enabling it does not grant permission.
+  Full Access needs
   no separate app grant; the agent finds and selects the window itself.
   A compact native activity window and Ctrl+Alt+Esc stop control. This shares
   your Windows session. Supported app controls use background delivery by default;

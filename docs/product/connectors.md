@@ -148,21 +148,28 @@ or mismatched approval fails before egress.
 
 The desktop marketplace is opened from the compact Plugins row at the bottom
 of the teammate sidebar. Connected apps appear as compact icons in Installed;
-Popular and category sections use two-column rows with expandable lists. Search
-covers names, descriptions, permissions, and section names. Each implemented
-connector has a compact detail page with Connect or Reconnect, an account/access
-summary, and optional examples and permissions under About. Back to chat remains
-available while work runs. Skills are specific to a teammate and live in that teammate's editor,
-outside Plugins. See the [plugin and daily-driver assessment](daily-driver.md)
-for the proposed Browser and Computer Use plugins and remaining capability gaps.
+the Built-in section and category sections use two-column rows with expandable
+lists. Computer Use is a built-in Plugin: it uses the same card, detail view,
+icon and enable/disable interaction as the rest of the catalogue, while its
+bundled Windows runtime, global approvals, exact target selection and immediate
+Stop stay native-owned. Search covers names, descriptions, permissions, and
+section names. Each implemented connector has a compact detail page with Connect
+or Reconnect, an account/access summary, and optional examples and permissions
+under About. Back to chat remains available while work runs. Skills are specific
+to a teammate and live in that teammate's editor, outside Plugins. See the
+[plugin and daily-driver assessment](daily-driver.md) for computer capability
+details and remaining gaps.
 Official remote connection routes are also available for Notion, Linear,
-Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, Atlassian Rovo, and
-Todoist. These use the
+Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, and Atlassian Rovo.
+These use the
 existing native MCP OAuth boundary and provider-hosted endpoints; no broker
 client secret is required when the provider supports public client registration.
-Atlassian Rovo and Todoist authorize through the provider's dynamic client
+Atlassian Rovo authorizes through the provider's dynamic client
 registration with a public client; Rovo rate limits, Rovo credit usage, and
-admin controls still apply per site. Asana's official MCP server requires
+admin controls still apply per site. The previously published Todoist route is
+retired: it is absent from the active catalogue and registration, any saved
+configuration is ignored rather than deleted, and the saved entry stays
+removable in advanced Settings. Asana's official MCP server requires
 pre-registering an OAuth app with a client secret in the Asana developer
 console and does not support dynamic client registration, so it remains on
 manual server configuration in advanced Settings. Figma client approval,

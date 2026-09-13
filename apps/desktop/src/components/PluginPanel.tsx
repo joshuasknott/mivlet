@@ -2,7 +2,9 @@ import { PluginOverview } from "./marketplace/PluginOverview";
 import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
 import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
 import { useMemo, useRef, useState } from "react";
-import { BuiltinPlugins } from "./marketplace/BuiltinPlugins";
+import { BuiltinPluginCard } from "./marketplace/BuiltinPluginCard";
+import { BuiltinPluginDetails } from "./marketplace/BuiltinPluginDetails";
+import { useBuiltinPlugins } from "./marketplace/useBuiltinPlugins";
 import { builtinPluginEntries } from "../lib/builtin-plugins";
 import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
 import { remoteConnectorFor } from "./marketplace/remote-connectors";
@@ -58,7 +60,7 @@ export function PluginPanel({
   workspaceId?: string;
   manifests: ConnectorManifest[];
   onUseConnector: (connector: ConnectorManifest, prompt?: string) => void;
-  onUseBuiltinPlugin?: (id: "browser" | "computer") => void;
+  onUseBuiltinPlugin?: (id: "computer") => void;
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;
@@ -76,6 +78,7 @@ export function PluginPanel({
   });
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
+  const builtin = useBuiltinPlugins(workspaceId);
   const manifestById = useMemo(
     () => new Map(manifests.map((connector) => [connector.id, connector])),
     [manifests],
@@ -86,6 +89,13 @@ export function PluginPanel({
       null,
     [selectedEntryId],
   );
+  const selectedBuiltinEntry = useMemo(
+    () =>
+      (selectedEntryId
+        ? builtinPluginEntries.find((entry) => entry.id === selectedEntryId)
+        : null) ?? null,
+    [selectedEntryId],
+  );
   const selectedConnector = useMemo(
     () =>
       (selectedEntryId ? manifestById.get(selectedEntryId) : undefined) ?? null,
@@ -93,7 +103,7 @@ export function PluginPanel({
   );
 
   useModalFocusTrap({
-    active: selectedEntry !== null,
+    active: selectedEntry !== null || selectedBuiltinEntry !== null,
     containerRef: detailModalRef,
     initialFocusRef: detailCloseRef,
     onClose: () => setSelectedEntryId(null),
@@ -108,7 +118,10 @@ export function PluginPanel({
     if (readiness === "attention") return !!connector && ["expired", "revoked", "failed", "unavailable", "permission-limited", "unverified", "configuration-required", "needs-auth"].includes(resolveDetailedStatus(connector).className);
     return usable;
   };
-  const showBuiltins = readiness === "available" && builtinPluginEntries.some((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery));
+  const visibleBuiltins = readiness === "available"
+    ? builtinPluginEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery))
+    : [];
+  const showBuiltins = visibleBuiltins.length > 0;
   const visibleSections = useMemo(() => {
     return marketplaceConnectorSections
       .map((section) => ({
@@ -294,6 +307,38 @@ export function PluginPanel({
         )}
       </section> : null}
 
+      {visibleBuiltins.length ? (
+        <section
+          className="marketplace-section"
+          aria-labelledby="marketplace-section-built-in"
+        >
+          <h2 id="marketplace-section-built-in">Built-in</h2>
+          <div className="marketplace-connector-grid">
+            {visibleBuiltins.map((entry) => (
+              <BuiltinPluginCard
+                key={entry.id}
+                entry={entry}
+                enabled={Boolean(builtin.plugins?.[entry.id])}
+                unavailable={builtin.plugins === null}
+                onOpen={() => setSelectedEntryId(entry.id)}
+              />
+            ))}
+          </div>
+          {builtin.plugins === null ? (
+            <p
+              className="marketplace-section__empty"
+              role={builtin.loadError ? "status" : undefined}
+            >
+              {builtin.loadError
+                ? builtin.loadError
+                : workspaceId
+                  ? "Built-in plugin settings are unavailable right now. Open the desktop app to manage Computer Use."
+                  : "Open the desktop app to manage Computer Use."}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
       {[
         ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(matchesReadiness) }] : []),
         ...visibleSections,
@@ -304,7 +349,6 @@ export function PluginPanel({
         const remaining = section.connectors.slice(limit);
         return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
           <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
-          {section.id === "featured" ? <BuiltinPlugins workspaceId={workspaceId} query={query} onUse={onUseBuiltinPlugin} /> : null}
           <div className="marketplace-connector-grid">{shown.map((entry) => renderConnectorRow(entry, section.id))}</div>
           {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
             {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
@@ -319,13 +363,13 @@ export function PluginPanel({
         </p>
       ) : null}
 
-      {selectedEntry ? (
+      {selectedEntryId && (selectedEntry || selectedBuiltinEntry) ? (
         <div
           ref={detailModalRef}
           className="connector-detail-modal"
           role="dialog"
           aria-modal="true"
-          aria-labelledby={`connector-detail-${selectedEntry.id}`}
+          aria-labelledby={`connector-detail-${selectedEntryId}`}
           tabIndex={-1}
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) {
@@ -346,9 +390,21 @@ export function PluginPanel({
             >
               <X size={17} />
             </button>
-            {tokenPluginFor(selectedEntry.id) ? (
+            {selectedBuiltinEntry ? (
+              <BuiltinPluginDetails
+                entry={selectedBuiltinEntry}
+                enabled={Boolean(builtin.plugins?.[selectedBuiltinEntry.id])}
+                unavailable={builtin.plugins === null}
+                busy={builtin.busy}
+                notice={builtin.notice}
+                workspaceId={workspaceId}
+                titleId={`connector-detail-${selectedBuiltinEntry.id}`}
+                onToggle={(enabled) => { void builtin.setEnabled(selectedBuiltinEntry.id, enabled); }}
+                onUse={onUseBuiltinPlugin}
+              />
+            ) : selectedEntry && tokenPluginFor(selectedEntry.id) ? (
               <TokenPluginDetails key={`${workspaceId}-${selectedEntry.id}`} plugin={tokenPluginFor(selectedEntry.id)!} connector={selectedConnector} workspaceId={workspaceId} onUseConnector={onUseConnector} onDisconnect={onDisconnect} accounts={accounts[selectedEntry.id]} onSwitchAccount={onSwitchAccount} titleId={`connector-detail-${selectedEntry.id}`} />
-            ) : (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
+            ) : selectedEntry && (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
                 titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} onSaved={() => { if (workspaceId) connectorConnectionsChanged(workspaceId); }} />
             ) : selectedConnector ? (
@@ -365,12 +421,12 @@ export function PluginPanel({
                 titleId={`connector-detail-${selectedConnector.id}`}
               />
               </>
-            ) : (
+            ) : selectedEntry ? (
               <PlannedConnectorDetails
                 entry={selectedEntry}
                 titleId={`connector-detail-${selectedEntry.id}`}
               />
-            )}
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -456,7 +512,7 @@ function ConnectorDetails({
     <div className="connector-detail__header">
       <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>
       <div><h2 id={titleId}>{connector.name}</h2><p>{findMarketplaceConnector(connector.id)?.description ?? connector.name}</p></div>
-      <span className={`connector-detail__status connector-detail__status--${detail.className}`}>{busy ? "Connecting…" : ready ? "Connected" : connected ? "Reconnect" : detail.label}</span>
+      <span className={`connector-detail__status connector-detail__status--${detail.className}`}>{busy ? "Connecting…" : ready ? "Connected" : detail.label}</span>
     </div>
 
     {connector.account ? <p className="connector-detail__account">Active connection: {connector.account.email ?? connector.account.displayName}</p> : null}
@@ -518,26 +574,26 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     healthSummary.toLowerCase().includes("stale");
   if (status === "connected" && (hasMissingRequiredScopes || isStale)) {
     return {
-      label: "Needs permission",
+      label: "Needs attention",
       className: "permission-limited",
       summary: `${connector.name} is missing required scopes or permissions.`,
     };
   }
 
   if (status === "connected" && (healthState === "error" || healthState === "degraded")) {
-    return { label: "Connection issue", className: "failed", summary: healthSummary || "Check this connection and try again." };
+    return { label: "Needs attention", className: "failed", summary: healthSummary || "Check this connection and try again." };
   }
 
   // Only an active sync operation establishes that syncing is happening.
   if (status === "connected" && connector.sync?.phase === "syncing") {
     return {
-      label: "Syncing",
+      label: "Connected",
       className: "syncing",
       summary: `Syncing ${connector.name}…`,
     };
   }
   if (status === "connected" && healthState === "unknown") {
-    return { label: "Not checked", className: "unverified", summary: healthSummary || "Connection health has not been checked yet." };
+    return { label: "Needs attention", className: "unverified", summary: healthSummary || "Connection health has not been checked yet." };
   }
 
   // 3. Connected
@@ -558,7 +614,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
   // 4. Expired
   if (status === "expired" || healthSummary.toLowerCase().includes("expired")) {
     return {
-      label: "Expired",
+      label: "Needs attention",
       className: "expired",
       summary: `${connector.name} authorization expired; reconnect or refresh is required.`,
     };
@@ -571,7 +627,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     healthSummary.toLowerCase().includes("disconnected")
   ) {
     return {
-      label: "Revoked",
+      label: "Needs attention",
       className: "revoked",
       summary: `${connector.name} was disconnected or revoked.`,
     };
@@ -595,7 +651,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
           `${connector.name} requires a desktop OAuth client configuration.`)
         : `${connector.name} is not configured on the Mivlet auth broker.`;
     return {
-      label: "Setup needed",
+      label: "Needs attention",
       className: "configuration-required",
       summary,
     };
@@ -604,7 +660,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
   // 7. Unavailable
   if (status === "unavailable") {
     return {
-      label: "Unavailable",
+      label: "Needs attention",
       className: "unavailable",
       summary: `${connector.name} service is temporarily unavailable.`,
     };
@@ -618,7 +674,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
     healthState === "degraded"
   ) {
     return {
-      label: "Failed",
+      label: "Needs attention",
       className: "failed",
       summary: healthSummary || `Connection to ${connector.name} failed.`,
     };
@@ -626,7 +682,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
 
   if (status === "configured") {
     return {
-      label: "Ready",
+      label: "Available",
       className: "configured",
       summary: setupMessage ?? healthSummary,
     };
@@ -634,7 +690,7 @@ export function resolveDetailedStatus(connector: ConnectorManifest): {
 
   // Default: unconfigured / Needs Authorization
   return {
-    label: "Not connected",
+    label: "Needs attention",
     className: "needs-auth",
     summary:
       setupMessage ??
