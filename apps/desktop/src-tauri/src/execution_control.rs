@@ -84,6 +84,8 @@ fn write_state(
 }
 
 pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
+    #[cfg(not(test))]
+    crate::account_session::ensure_current()?;
     let Some(store) = crate::store::try_global() else {
         #[cfg(test)]
         return Ok(());

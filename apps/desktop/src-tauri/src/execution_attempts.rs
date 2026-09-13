@@ -629,7 +629,7 @@ fn validate_context_receipt_authority(receipt: &ExecutionContextReceipt) -> Resu
                 .to_string(),
         );
     }
-    let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
+    let (internal_user_id, member_id) = crate::account_session::principals()?;
     validate_context_receipt_for_owner(receipt, &internal_user_id, Some(&member_id))
 }
 

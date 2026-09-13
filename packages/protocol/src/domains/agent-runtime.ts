@@ -70,8 +70,11 @@ export interface ExecutionContextContribution {
 
 /** Scope snapshot used for one execution attempt. */
 export interface ExecutionContextScope {
-  level: "global" | "thread";
+  level: "global" | "thread" | "agent" | "project" | "work";
   threadId?: string;
+  agentId?: string;
+  projectId?: string;
+  workId?: string;
 }
 
 /** Portable access boundary for Knowledge and Memory records. */

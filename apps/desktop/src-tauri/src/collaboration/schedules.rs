@@ -57,6 +57,7 @@ pub(crate) fn bind_schedule(
         .ok_or_else(|| invalid("The scheduled result conversation is missing."))?;
     let team = ctx.project_team(project)?;
     let room = Conversation {
+        chat: None,
         id: thread.id,
         workspace_id: scope.data.workspace_id().into(),
         kind: "group".into(),

@@ -64,6 +64,8 @@ fn new_work(
         0
     };
     Ok(Work {
+        steering: vec![],
+        captured_context: Some(super::context::capture(ctx, room, agent)?),
         permission_mode: match agent.permission_label.as_str() {
             "Work Freely" => "full-access",
             "Ask Me" => "trusted-scope",
@@ -448,6 +450,28 @@ pub(super) fn agent_command(
                 prompt,
                 item.user_request.clone(),
             )?;
+            if !focused {
+                // Delegation within this Chat inherits the parent's frozen
+                // transcript; later unrelated messages cannot enter the request.
+                if let (Some(parent), Some(captured)) =
+                    (&item.captured_context, &mut child.captured_context)
+                {
+                    captured.source_revision = parent.source_revision.clone();
+                    let parent: serde_json::Value = serde_json::from_str(&parent.text)
+                        .map_err(|_| invalid("Invalid captured parent context."))?;
+                    let mut value: serde_json::Value = serde_json::from_str(&captured.text)
+                        .map_err(|_| invalid("Invalid captured child context."))?;
+                    for field in [
+                        "history",
+                        "projectInstructions",
+                        "projectRevision",
+                        "confirmedProjectFacts",
+                    ] {
+                        value[field] = parent[field].clone();
+                    }
+                    captured.text = value.to_string();
+                }
+            }
             child.parent_id = Some(item.id.clone());
             child.root_id = item.root_id.clone();
             child.depth = item.depth + 1;

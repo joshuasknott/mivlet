@@ -62,7 +62,10 @@ export function ExecutionWorker({
     executionProviderId: session.model.providerId,
     onApproval: (id) => service.approval(session, id),
     attributeHistory: (history) =>
-      attributeConversation(history, service.getSnapshot().data),
+      attributeConversation(session.work.capturedContext ? {
+        ...history,
+        messages: history.messages.filter(view => Boolean(view.message.runId && session.work.runIds.includes(view.message.runId))),
+      } : history, service.getSnapshot().data),
     wrapExecutor: (base) => async (approval, args) => {
       const runId = attempt.current;
       if (!runId || !service.current(session))
@@ -248,12 +251,12 @@ export function ExecutionWorker({
                 ),
               ]),
             ],
-            excludePrivateMemory: room.kind === "group",
+            excludePrivateMemory: Boolean(session.work.capturedContext) || room.kind === "group",
           },
         );
         if (!service.current(session)) return;
         const instructions = [
-          agentExecutionInstructions(session.profile),
+          session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : agentExecutionInstructions(session.profile),
           CONVERSATION_STYLE_INSTRUCTIONS,
           service.isVoice(session) ? "This is a voice conversation. Reply concisely in natural spoken sentences; keep normal tool approvals and never speak private reasoning." : "",
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",

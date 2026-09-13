@@ -259,3 +259,16 @@ describe("scope helpers", () => {
     expect(scopesMatch(threadScope, { level: "thread", threadId: "t" })).toBe(true);
   });
 });
+
+describe("roadmap object memory scopes", () => {
+  it("inherits only explicitly supplied durable context and excludes sibling scopes", () => {
+    const run = { level: "thread" as const, threadId: "side-a", agentId: "agent-a", projectId: "project-a", workId: "work-a" };
+    expect(scopeSatisfies({level:"agent",agentId:"agent-a"},run)).toBe(true);
+    expect(scopeSatisfies({level:"agent",agentId:"agent-b"},run)).toBe(false);
+    expect(scopeSatisfies({level:"project",projectId:"project-a"},run)).toBe(true);
+    expect(scopeSatisfies({level:"thread",threadId:"side-b"},run)).toBe(false);
+    expect(scopeSatisfies({level:"work",workId:"work-b"},run)).toBe(false);
+    expect(scopeSatisfies({level:"agent"},run)).toBe(false);
+    expect(scopesMatch({level:"agent"},{level:"agent"})).toBe(false);
+  });
+});

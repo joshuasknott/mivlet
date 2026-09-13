@@ -1,8 +1,5 @@
-//! Single installation-local authority boundary for local product data.
-//!
-//! Renderer workspace fields are assertions only. Optional Mivlet account state
-//! never changes the owner, encryption audience, or workspace of conversations,
-//! memory, provider connections, approvals, or execution attempts.
+//! Validated account authority inside a process-pinned encrypted account store.
+//! Renderer workspace IDs are assertions, never authority.
 
 use rusqlite::Connection;
 
@@ -23,6 +20,15 @@ pub struct AuthorizedCommandScope {
     pub member_id: Option<String>,
 }
 
+fn account_principals() -> crate::store::Result<(String, String)> {
+    #[cfg(test)]
+    if crate::account_session::binding().is_err() {
+        return Ok(("account-test".into(), "member-test".into()));
+    }
+    crate::account_session::ensure_current().map_err(StoreError::Invalid)?;
+    crate::account_session::principals().map_err(StoreError::Invalid)
+}
+
 pub fn resolve(
     conn: &Connection,
     requested_workspace_id: Option<&str>,
@@ -41,7 +47,7 @@ pub fn resolve(
         ));
     }
 
-    let (internal_user_id, member_id) = crate::account_workspace::local_install_principals();
+    let (internal_user_id, member_id) = account_principals()?;
     let data = DataScope::new(DEFAULT_WORKSPACE_ID.to_string(), None)?;
     data.ensure_exists(conn)?;
     let private = PrivateDataScope::for_authenticated_user(
@@ -86,16 +92,16 @@ mod tests {
     }
 
     #[test]
-    fn account_state_cannot_change_installation_local_authority() {
+    fn scope_uses_native_account_principals() {
         store()
             .with_conn(|conn| {
                 let scope = resolve(conn, Some(DEFAULT_WORKSPACE_ID), None, ScopeAccess::Write)?;
                 assert_eq!(scope.data.workspace_id(), DEFAULT_WORKSPACE_ID);
-                assert!(scope.internal_user_id.starts_with("local-user-"));
+                assert!(scope.internal_user_id.starts_with("account-"));
                 assert!(scope
                     .member_id
                     .as_deref()
-                    .is_some_and(|id| id.starts_with("local-member-")));
+                    .is_some_and(|id| id.starts_with("member-")));
                 assert_eq!(scope.private.owner_member_id(), scope.member_id.as_deref());
                 Ok(())
             })

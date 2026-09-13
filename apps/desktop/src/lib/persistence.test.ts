@@ -10,6 +10,17 @@ import {
 } from "./persistence";
 
 describe("conversation shell persistence", () => {
+  it("retains ambiguous browser data without importing or mirroring it into a native account", () => {
+    const legacy = JSON.stringify({ ...defaultShellState, composerValue: "OTHER_ACCOUNT_DRAFT" });
+    localStorage.setItem(STORAGE_KEY, legacy);
+    Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: {} });
+    try {
+      expect(readPersistedShellState(defaultShellState)).toBe(defaultShellState);
+      persistShellState({ ...defaultShellState, composerValue: "NEW_ACCOUNT_DRAFT" });
+      expect(localStorage.getItem(STORAGE_KEY)).toBe(legacy);
+    } finally { Reflect.deleteProperty(window, "__TAURI_INTERNALS__"); }
+  });
+
   it("preserves explicit OpenAI dictation selection and defaults old snapshots to browser speech", () => {
     const snapshot = shellStateToRuntimeSnapshot({ ...defaultShellState, voiceProvider: "openai" });
     expect(shellStateFromRuntimeSnapshot(snapshot, defaultShellState).voiceProvider).toBe("openai");

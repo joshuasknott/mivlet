@@ -10,7 +10,6 @@ import type {
 import { normalizeCustomApprovalSettings } from "@fable/connectors";
 import {
   LEGACY_STORAGE_KEYS,
-  LEGACY_IMPORT_SENTINEL,
   STORAGE_KEY,
   RUNTIME_SNAPSHOT_VERSION
 } from "./constants";
@@ -34,13 +33,8 @@ const MAX_AGENT_LEARNED_TASK_INSTRUCTION = 4_000;
  * pure functions over shell state so they can be tested and reused without
  * React.
  *
- * Source-of-truth rules (the safe interim migration toward encrypted SQLite):
- *
- * - **Desktop (Tauri runtime):** the runtime snapshot is the source of truth
- *   for non-secret state. `localStorage` is a write-only best-effort mirror —
- *   it is read exactly once, on first launch, to import legacy values via
- *   `importLegacyShellStateOnce`, and never read again.
- * - **Preview (no Tauri runtime):** `localStorage` remains the sole store.
+ * Native account snapshots are authoritative. Ambiguous installation browser
+ * state is preserved without adoption or mirroring. Preview uses localStorage.
  */
 
 /** True inside the Tauri desktop runtime (mirrors `runtime.ts`). */
@@ -52,7 +46,7 @@ export function hasTauriRuntime(): boolean {
 }
 
 export function readPersistedShellState(defaultShellState: PersistedShellState): PersistedShellState {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || hasTauriRuntime()) {
     return defaultShellState;
   }
 
@@ -80,57 +74,9 @@ export function readPersistedShellState(defaultShellState: PersistedShellState):
   }
 }
 
-/**
- * Desktop one-time legacy import. Reads the legacy `localStorage` keys a single
- * time (guarded by the `LEGACY_IMPORT_SENTINEL` flag), copies the recovered
- * non-secret state forward, marks the import done, and returns the merged
- * state. Every subsequent call returns the defaults — the snapshot is the
- * source of truth from then on.
- *
- * Safe by construction: it only ever copies the documented `PersistedShellState`
- * fields forward; it never introduces secret-named keys, and the sentinel it
- * writes is a plain `"1"` marker with no payload.
- */
-export function importLegacyShellStateOnce(
-  defaultShellState: PersistedShellState
-): PersistedShellState {
-  if (typeof window === "undefined") {
-    return defaultShellState;
-  }
-
-  try {
-    if (window.localStorage.getItem(LEGACY_IMPORT_SENTINEL)) {
-      return defaultShellState;
-    }
-
-    const legacyStored =
-      LEGACY_STORAGE_KEYS.map((key) => window.localStorage.getItem(key)).find(Boolean) ?? null;
-    if (!legacyStored) {
-      // Nothing to import; still mark the migration done so we never scan again.
-      window.localStorage.setItem(LEGACY_IMPORT_SENTINEL, "1");
-      return defaultShellState;
-    }
-
-    const normalized = normalizePersistedShellState({
-      ...defaultShellState,
-      ...JSON.parse(legacyStored)
-    } as PersistedShellState);
-    // Copy forward to the canonical key (downgrade-safe: the legacy key stays).
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
-    window.localStorage.setItem(LEGACY_IMPORT_SENTINEL, "1");
-    return normalized;
-  } catch {
-    return defaultShellState;
-  }
-}
-
-/**
- * Write-only best-effort mirror of shell state into `localStorage`. This never
- * reads — preview relies on it as its sole store, while desktop treats the
- * snapshot as the source of truth and uses this only as a harmless mirror.
- */
+/** Best-effort browser preview persistence; native state stays in its account store. */
 export function persistShellState(state: PersistedShellState) {
-  if (typeof window === "undefined") {
+  if (typeof window === "undefined" || hasTauriRuntime()) {
     return;
   }
 

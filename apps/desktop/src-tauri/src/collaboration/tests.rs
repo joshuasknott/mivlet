@@ -552,7 +552,7 @@ fn collaboration_membership_and_lead_change_preserve_authorship_reject_late_work
             Command::UpdateTeam {
                 project_id: "project".into(),
                 expected_revision: 1,
-                lead_agent_id: "reviewer".into(),
+                lead_agent_id: Some("reviewer".into()),
                 participant_ids: vec!["lead".into(), "reviewer".into()],
                 share_history: false,
             },
@@ -878,4 +878,198 @@ fn collaboration_legacy_layout_remains_readable_for_renderer_migration() {
     let layout: Layout = serde_json::from_value(json!({ "version": 1, "panes": [[], []], "views": [], "active": [null, null], "activePane": 0, "split": false, "ratio": 0.5, "closed": [] })).unwrap();
     assert_eq!(layout.version, 1);
     assert!(layout.tree.is_none());
+}
+
+#[test]
+fn roadmap_main_chat_is_unique_under_concurrent_selection_and_excludes_side_history() {
+    let store = store();
+    let ids = std::thread::scope(|scope| {
+        let tasks: Vec<_> = (0..8)
+            .map(|_| scope.spawn(|| fixture(&store, |ctx| Ok(chats::open_main(ctx, "lead")?.id))))
+            .collect();
+        tasks
+            .into_iter()
+            .map(|task| task.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert!(ids.iter().all(|id| id == &ids[0]));
+    fixture(&store, |ctx| {
+        let side = ctx.create_room(
+            "side",
+            "Separate question",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        output(ctx, &side.id, "side-run", "SIBLING_TRANSCRIPT_CANARY")?;
+        work::start(
+            ctx,
+            "captured".into(),
+            ids[0].clone(),
+            "lead".into(),
+            "Do this".into(),
+            false,
+        )?;
+        let before = ctx.item("captured")?.captured_context.unwrap();
+        output(ctx, &ids[0], "later", "UNRELATED_LATER_CHAT")?;
+        let after = ctx.item("captured")?.captured_context.unwrap();
+        assert_eq!(before, after);
+        assert!(!after.text.contains("SIBLING_TRANSCRIPT_CANARY"));
+        assert!(!after.text.contains("UNRELATED_LATER_CHAT"));
+        assert_eq!(side.chat.unwrap().role, "side");
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_steering_and_account_suspension_never_replay_uncertain_effects() {
+    let store = store();
+    fixture(&store, |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        work::start(
+            ctx,
+            "work".into(),
+            room.id.clone(),
+            "lead".into(),
+            "Original request".into(),
+            false,
+        )?;
+        bind(ctx, "work", "attempt")?;
+        let generation = ctx.item("work")?.generation;
+        commands::apply(
+            ctx,
+            Command::SteerWork {
+                id: "work".into(),
+                expected_generation: generation,
+                event_id: "steer".into(),
+                text: "Use the smaller scope".into(),
+            },
+        )?;
+        let item = ctx.item("work")?;
+        assert_eq!(item.status, WorkStatus::AwaitingUser);
+        assert_eq!(item.user_request, "Original request");
+        assert_eq!(item.steering.len(), 1);
+        assert!(work::current(ctx, "work", generation, Some("attempt")).is_err());
+        work::start(
+            ctx,
+            "queued".into(),
+            room.id,
+            "lead".into(),
+            "Another request".into(),
+            false,
+        )?;
+        suspend_account(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.internal_user_id,
+            ctx.scope.member_id.as_deref().unwrap(),
+        )?;
+        assert_eq!(ctx.item("queued")?.status, WorkStatus::AwaitingUser);
+        assert!(ctx.item("queued")?.run_ids.is_empty());
+        assert_eq!(ctx.item("work")?.run_ids, vec!["attempt"]);
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_optional_coordinator_preserves_project_team_and_chat() {
+    fixture(&store(), |ctx| {
+        project(ctx, "project", "project-chat")?;
+        let team = ctx.project_team("project")?;
+        commands::apply(
+            ctx,
+            Command::UpdateTeam {
+                project_id: "project".into(),
+                expected_revision: team.revision,
+                lead_agent_id: None,
+                participant_ids: vec!["lead".into(), "researcher".into()],
+                share_history: true,
+            },
+        )?;
+        assert_eq!(ctx.project_team("project")?.lead_agent_id, None);
+        assert!(ctx.room("project-chat")?.facilitator_id.is_none());
+        assert!(work::start(
+            ctx,
+            "missing-choice".into(),
+            "project-chat".into(),
+            "".into(),
+            "Help".into(),
+            false
+        )
+        .is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_delegation_excludes_later_chat_and_steering_fences_children() {
+    fixture(&store(), |ctx| {
+        group(ctx, "room")?;
+        output(ctx, "room", "earlier", "CAPTURED_HISTORY")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "room".into(),
+            "lead".into(),
+            "Request".into(),
+            false,
+        )?;
+        bind(ctx, "root", "run")?;
+        output(ctx, "room", "unrelated", "LATER_UNRELATED_CANARY")?;
+        work::agent_command(
+            ctx,
+            "root",
+            1,
+            "run",
+            "delegate",
+            delegate("researcher", "Research"),
+        )?;
+        let child = ctx
+            .all_work()?
+            .into_iter()
+            .find(|item| item.parent_id.as_deref() == Some("root"))
+            .unwrap();
+        let capture = child.captured_context.as_ref().unwrap();
+        assert!(capture.text.contains("CAPTURED_HISTORY"));
+        assert!(!capture.text.contains("LATER_UNRELATED_CANARY"));
+        commands::apply(
+            ctx,
+            Command::SteerWork {
+                id: "root".into(),
+                expected_generation: 1,
+                event_id: "change".into(),
+                text: "Narrow the request".into(),
+            },
+        )?;
+        assert_eq!(ctx.item(&child.id)?.status, WorkStatus::AwaitingUser);
+        assert!(work::current(ctx, &child.id, child.generation, None).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        work::start(
+            ctx,
+            "old".into(),
+            room.id,
+            "lead".into(),
+            "Retain request".into(),
+            false,
+        )?;
+        let mut legacy = serde_json::to_value(ctx.item("old")?).unwrap();
+        legacy.as_object_mut().unwrap().remove("capturedContext");
+        legacy.as_object_mut().unwrap().remove("steering");
+        let restored: Work = serde_json::from_value(legacy).unwrap();
+        assert!(restored.captured_context.is_none());
+        assert!(restored.steering.is_empty());
+        assert_eq!(restored.user_request, "Retain request");
+        Ok(())
+    });
 }

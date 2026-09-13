@@ -1,5 +1,9 @@
 # Account-first onboarding
 
+> Account ownership and installation-local storage decisions below are superseded by
+> [the roadmap baseline contract](../development/roadmap-parallel-contract.md).
+> A validated Mivlet account now owns a separate native store and credential profile.
+
 Date: 2026-08-31
 
 Status: Accepted

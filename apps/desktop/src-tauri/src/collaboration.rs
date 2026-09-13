@@ -1,6 +1,8 @@
-//! Installation-private teammates and durable coordination. Membership and
+//! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+mod chats;
 mod commands;
+mod context;
 mod models;
 mod schedules;
 mod work;
@@ -276,6 +278,20 @@ impl Context<'_> {
         )?;
         self.conn.execute("UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL", rusqlite::params![self.scope.private.owner_member_id(), self.scope.data.workspace_id(), key])?;
         let room = Conversation {
+            chat: project
+                .as_ref()
+                .map(|project_id| ChatBinding {
+                    role: "side".into(),
+                    owner_kind: "project".into(),
+                    owner_id: project_id.clone(),
+                })
+                .or_else(|| {
+                    (kind == "direct").then(|| ChatBinding {
+                        role: "side".into(),
+                        owner_kind: "agent".into(),
+                        owner_id: members[0].agent_id.clone(),
+                    })
+                }),
             id: key.into(),
             workspace_id: self.scope.data.workspace_id().into(),
             kind: kind.into(),
@@ -485,6 +501,11 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
             continue;
         }
         let room = Conversation {
+            chat: project.map(|p| ChatBinding {
+                role: "main".into(),
+                owner_kind: "project".into(),
+                owner_id: p.id.clone(),
+            }),
             id: thread.id,
             workspace_id: ctx.scope.data.workspace_id().into(),
             kind: if project.is_some() { "group" } else { "direct" }.into(),
@@ -542,6 +563,45 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         }
         Ok(())
     })
+}
+
+pub(crate) fn suspend_account(
+    conn: &Connection,
+    store: &Store,
+    user: &str,
+    member: &str,
+) -> Result<()> {
+    let data = crate::store::repos::scope::DataScope::legacy_default();
+    let private = crate::store::repos::scope::PrivateDataScope::for_authenticated_user(
+        data.clone(),
+        user,
+        Some(member),
+    )?;
+    let scope = AuthorizedCommandScope {
+        data,
+        private,
+        internal_user_id: user.into(),
+        member_id: Some(member.into()),
+    };
+    let time = now();
+    let ctx = Context {
+        conn,
+        store,
+        scope: &scope,
+        profiles: &[],
+        time: &time,
+    };
+    for mut item in ctx.all_work()? {
+        if item.status.active() {
+            item.status = WorkStatus::AwaitingUser;
+            item.generation += 1;
+            item.current_run_id = None;
+            item.reason = Some("Account session ended. Inspect saved results and reconcile uncertain external effects before continuing. Nothing was replayed.".into());
+            item.updated_at = time.clone();
+            ctx.work(&item)?;
+        }
+    }
+    Ok(())
 }
 
 /// Canonical messages and journal writes must still belong to a live assignment.

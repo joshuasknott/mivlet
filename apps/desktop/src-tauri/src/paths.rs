@@ -4,7 +4,11 @@ use std::path::PathBuf;
 
 /// Resolve the effective (portable-aware) app data directory. Thin wrapper over
 /// hardened resolve that prefers marker-based portable dir when present.
-pub fn app_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+pub fn app_data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    Ok(crate::account_session::root()?.to_path_buf())
+}
+
+pub(crate) fn installation_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let tauri_cand = app.path().app_data_dir().ok();
     let exe_cand = std::env::current_exe().ok();

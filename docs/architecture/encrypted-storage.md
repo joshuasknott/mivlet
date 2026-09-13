@@ -1,9 +1,16 @@
 # Encrypted local storage
 
-Mivlet opens `fable-vault.db` in the Tauri app-data directory before registering
-commands. SQLite supplies transactions, foreign keys, write-ahead logging, and
-forward-only schema versions. Rust owns all database access; React never opens
-SQLite directly.
+After validated account identity, Mivlet opens `accounts/<binding>/fable-vault.db`
+in the effective Tauri/portable app-data directory. Each account has an independent
+OS-stored vault key, credential namespace and file root. One native process binds
+to one account; a transition suspends activity and restarts the process. Ambiguous
+installation-level data remains untouched and is never assigned to the next signer.
+See the [parallel implementation contract](../development/roadmap-parallel-contract.md)
+for authority, migration and provider-profile rules.
+
+SQLite supplies transactions, foreign keys, write-ahead logging and forward-only
+schema versions. Rust checks validated account identity before reads/writes and
+before transaction commit; React never opens SQLite.
 
 ## Encryption boundary
 

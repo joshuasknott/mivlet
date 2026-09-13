@@ -189,6 +189,9 @@ export class WorkspaceExecution {
       this.accept(data);
       return data;
     });
+  steer(id: string, expectedGeneration: number, text: string) {
+    return this.command({ action: "steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+  }
   async submit(
     conversationId: string,
     agentId: string,

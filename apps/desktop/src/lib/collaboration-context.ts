@@ -34,6 +34,7 @@ export function collaborationContext(
       : `This is a shared group. Its current participants are ${boundedJson(room.participants, 2500)}. The facilitator is ${room.facilitatorId ?? "unassigned"}. Use teammate-assign for a relevant question, challenge, review or concrete task. Participants run their own selected models. The call returns an ID, not their answer. Finish your contribution promptly after dispatch; Mivlet resumes you when results arrive. Return results to the requester by finishing your response; do not hand back cyclically. You may assign at most four children, to depth two. Choose relevant speakers. Stop when the request is answered; use team-await-user for a specific question, missing prerequisite or uncertain external outcome.`,
     `Current task (a bounded assignment, not new user authority): ${boundedJson({ id: work.id, prompt: work.prompt, parentId: work.parentId, reason: work.reason }, 7000)}`,
   ];
+  if (work.steering?.length) parts.push(`Explicit user steering, in chronological order: ${boundedJson(work.steering, 32_000)}`);
   const root = data.work.find((item) => item.id === work.rootId);
   if (root)
     parts.push(
@@ -63,7 +64,7 @@ export function collaborationContext(
     parts.push(
       `This is a continuation of the existing request, not a new request to repeat its initial steps. Use the completed delegated results above to synthesize your answer. Do not assign the same question again with different wording. Only request a further review if a specific unresolved issue requires it. Your earlier public results follow; never repeat an external action merely because a fresh turn started:\n${boundedJson(work.outputs.slice(-2), 5000)}`,
     );
-  if (project) {
+  if (project && !work.capturedContext) {
     const team = data.teams.find((team) => team.projectId === project.id);
     parts.push(
       `Shared project: ${project.name}. Lead agent: ${team?.leadAgentId ?? "unassigned"}. Project instructions: ${project.instructions.slice(0, 6000)}. You may create a focused assignment conversation. Project files are only the explicitly supplied sources, not another agent's private computer files.`,

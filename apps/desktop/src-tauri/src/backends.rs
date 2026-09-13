@@ -518,8 +518,11 @@ pub(crate) struct KeyringStore;
 
 impl KeyringStore {
     fn entry(provider_id: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(KEYRING_SERVICE, provider_id)
-            .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
+        keyring::Entry::new(
+            KEYRING_SERVICE,
+            &crate::account_session::credential_key(provider_id)?,
+        )
+        .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
     }
 }
 
@@ -636,7 +639,8 @@ fn scoped_credential_key(internal_user_id: &str, provider_id: &str) -> String {
 }
 
 pub(crate) fn require_current_internal_user() -> Result<String, String> {
-    Ok(crate::account_workspace::local_install_principals().0)
+    crate::account_session::ensure_current()?;
+    Ok(crate::account_session::principals()?.0)
 }
 
 impl BackendCredentialStore for CredentialStores {
@@ -1289,7 +1293,7 @@ fn validate_provider_route_quality_snapshot(
 #[tauri::command]
 pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
     let internal_user_id = require_current_internal_user()?;
-    let (_, member_id) = crate::account_workspace::local_install_principals();
+    let (_, member_id) = crate::account_session::principals()?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     let (rows, observations, quality) = store

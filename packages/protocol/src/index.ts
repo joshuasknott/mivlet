@@ -614,12 +614,8 @@ export type KnowledgeTrust = "trusted" | "untrusted";
  * (a thread-scoped memory is not applied to a global run). `global` is the
  * backward-compatible default for everything that predates scoped knowledge.
  */
-export type KnowledgeScopeLevel = "global" | "thread";
-
-export interface KnowledgeScope {
-  level: KnowledgeScopeLevel;
-  threadId?: string;
-}
+export type KnowledgeScope = import("./domains/agent-runtime").ExecutionContextScope;
+export type KnowledgeScopeLevel = KnowledgeScope["level"];
 
 export const GLOBAL_SCOPE: KnowledgeScope = { level: "global" };
 
