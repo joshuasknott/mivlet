@@ -28,6 +28,8 @@ function propsFor(
     onStopVoice: vi.fn(),
     onCancelVoice: vi.fn(),
     onDismissVoice: vi.fn(),
+    onStartVoiceChat: vi.fn(),
+    voiceChatDescription: "Start voice chat",
     onAttach: vi.fn(),
     addMenuOpen: false,
     onToggleAddMenu: vi.fn(),
@@ -70,26 +72,111 @@ describe("Composer dictation controls", () => {
     expect(props.onAuthorizeVoice).toHaveBeenCalledOnce();
     expect(props.onStartVoice).not.toHaveBeenCalled();
   });
-  it("switches between dictation and Send using trimmed text", () => {
+  it("switches between dictation, Send and Start voice chat with trimmed text", () => {
     const { rerender } = render(
       <Composer {...propsFor("idle", { composerValue: "" })} />
     );
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start voice chat" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
 
     rerender(<Composer {...propsFor("idle", { composerValue: "Draft reply" })} />);
 
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Start dictation" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send prompt" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Start voice chat" })).not.toBeInTheDocument();
   });
 
   it("treats whitespace-only drafts as empty", () => {
     render(<Composer {...propsFor("idle", { composerValue: "   " })} />);
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Start voice chat" })).toBeVisible();
     expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+  });
+
+  it("keeps attachment-only drafts sendable and keeps voice chat out of the action", () => {
+    const onSubmit = vi.fn();
+    const view = render(
+      <Composer
+        {...propsFor("idle", {
+          composerValue: "",
+          onSubmit,
+          attachments: [{
+            id: "attachment-1",
+            name: "brief.txt",
+            type: "text/plain",
+            sizeBytes: 42,
+            status: "Attached to this message",
+          }],
+        })}
+      />
+    );
+
+    const send = screen.getByRole("button", { name: "Send prompt" });
+    expect(send).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Start voice chat" })).not.toBeInTheDocument();
+    fireEvent.submit(view.container.querySelector("form")!);
+    expect(onSubmit).toHaveBeenCalledOnce();
+  });
+
+  it("offers Send while working in-thread when only attachments are present", () => {
+    render(
+      <Composer
+        {...propsFor("idle", {
+          composerValue: "",
+          isWorking: true,
+          allowQueue: true,
+          attachments: [{
+            id: "attachment-1",
+            name: "brief.txt",
+            type: "text/plain",
+            sizeBytes: 42,
+          }],
+        })}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
+  });
+
+  it("starts voice chat from the combined action with a setup description", () => {
+    const onStartVoiceChat = vi.fn();
+    render(
+      <Composer
+        {...propsFor("idle", {
+          composerValue: "",
+          onStartVoiceChat,
+          voiceChatDescription: "Connect an OpenAI API account for transcription and speech.",
+        })}
+      />
+    );
+
+    const voiceChat = screen.getByRole("button", { name: "Start voice chat" });
+    expect(voiceChat).toHaveAttribute(
+      "title",
+      "Connect an OpenAI API account for transcription and speech."
+    );
+    fireEvent.click(voiceChat);
+    expect(onStartVoiceChat).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Enter sending, Shift+Enter multiline and IME composition local", () => {
+    const onSubmit = vi.fn();
+    const view = render(
+      <Composer {...propsFor("idle", { composerValue: "Typed text", onSubmit })} />
+    );
+    const input = view.container.querySelector('[contenteditable="true"]')!;
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(onSubmit).toHaveBeenCalledOnce();
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 
   it("shows truthful listening controls while keeping typing available", () => {

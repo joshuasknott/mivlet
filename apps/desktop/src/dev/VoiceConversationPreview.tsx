@@ -22,7 +22,7 @@ export function VoiceConversationPreview() {
     <WindowControls preview />
     <AgentSidebar hidden={isPhone} agents={[agent]} activeAgentId={agent.id} previews={{}} profileName="Preview" connectors={[]} marketplaceActive={false} onSelectAgent={noop} onCreateAgent={noop} onEditAgent={noop} onOpenMarketplace={noop} onOpenSettings={noop} onOpenUsage={noop} onSignOut={noop} />
     <section className="workspace agent-workspace" style={{ gridTemplateRows: "56px auto minmax(0, 1fr)" }}>
-      <AgentWorkspaceHeader agent={agent} attentionCount={approval ? 1 : 0} panelOpen={false} onTogglePanel={noop} onVoice={() => setPhase("ready")} voiceOpen />
+      <AgentWorkspaceHeader agent={agent} attentionCount={approval ? 1 : 0} panelOpen={false} onTogglePanel={noop} />
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, padding: "6px 16px", fontSize: 10, color: "var(--ink-muted)", borderBottom: "1px solid var(--line)" }} aria-label="Voice preview controls">
         <span>Sample states · No microphone or audio</span>
         <select aria-label="Preview voice state" value={phase} onChange={(event) => setPhase(event.target.value as VoiceConversationPhase)}>

@@ -3,8 +3,20 @@ import {
   SUPPORTED_LOCAL_FILE_EXTENSIONS,
 } from "@fable/connectors/local-files";
 import type { ExecutionExchange } from "@fable/protocol";
+import type { ComposerAttachment } from "./types";
 
 const readableExtensions = new Set<string>(SUPPORTED_LOCAL_FILE_EXTENSIONS);
+
+export function composerSubmissionText(
+  text: string,
+  attachments: readonly ComposerAttachment[],
+): string {
+  const trimmed = text.trim();
+  if (trimmed || !attachments.length) return trimmed;
+  return attachments.length === 1
+    ? "Please review the attached file."
+    : "Please review the attached files.";
+}
 
 export interface PreparedReadableComposerAttachment {
   sourceId?: string;

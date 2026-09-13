@@ -34,11 +34,14 @@ a deployed or production-validated service.
 
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
-  selection with supported reasoning levels. Dictation and send have separate
-  controls below the message text.
+  selection with supported reasoning levels. Dictation stays beside one
+  bottom-right action that sends when the draft or attachments have content and
+  starts voice chat when the composer is empty; attachment-only sends keep
+  working.
 - Voice conversations with the selected named agent: automatic speech turns,
   sentence-by-sentence spoken replies, captions, mute, interruption, and End.
-  Open the waveform button in an agent conversation. Speech requires a separate
+  Start voice from the composer when the message is empty; the call continues
+  the active conversation. Speech requires a separate
   OpenAI API connection and explicit per-call consent; the selected agent/model
   still owns reasoning and tools. Microphone interruption requires confirmed
   echo cancellation; an Interrupt button is always available during replies.

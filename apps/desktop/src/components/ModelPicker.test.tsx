@@ -26,6 +26,33 @@ describe("Model picker", () => {
     expect(choose).toHaveBeenLastCalledWith("medium");
     expect(screen.getByRole("button", { name: "Select model: Reasoner, Medium" })).toBeVisible();
   });
+  it("keeps one labelled row above the slider instead of a duplicate lower row", () => {
+    render(<Harness options={[{ ...models[0], reasoning: { supportedEfforts: ["low", "medium", "high"], defaultEffort: "low" } }]} />);
+    openPicker();
+    const slider = screen.getByRole("slider", { name: "Reasoning effort" });
+    for (const label of ["Low", "Medium", "High"]) {
+      const button = screen.getByRole("button", { name: label });
+      expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
+      expect(button.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  });
+  it("labels the highest supported levels Extra High and Max", () => {
+    render(<Harness options={[{ ...models[0], reasoning: { supportedEfforts: ["high", "xhigh", "max"], defaultEffort: "xhigh" } }]} />);
+    openPicker();
+    expect(screen.getByRole("button", { name: "Extra High" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Max" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Select model: Reasoner, Extra High" })).toBeVisible();
+  });
+  it("falls back to a supported level when the saved effort is not advertised", () => {
+    render(<ModelPicker models={[models[0]]} selectedId="codex::reasoner" label="Reasoner" effort="ultra"
+      onSelect={vi.fn()} onSelectEffort={vi.fn()} open onOpenChange={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Select model: Reasoner, Low" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Ultra" })).not.toBeInTheDocument();
+    expect(screen.getByRole("slider", { name: "Reasoning effort" })).toHaveAttribute(
+      "aria-valuetext",
+      "Low"
+    );
+  });
   it("uses only supported effort steps, keeps adjustments open, and resets to the provider default", () => {
     const choose = vi.fn(); render(<Harness choose={choose} />); openPicker();
     const slider = screen.getByRole("slider", { name: "Reasoning effort" });

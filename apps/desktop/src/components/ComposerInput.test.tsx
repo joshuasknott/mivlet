@@ -66,4 +66,24 @@ describe("connector mention input", () => {
     );
     expect(container).toHaveTextContent("email@gmail.com @unknown Gmail.");
   });
+  it("holds the draft during IME composition and commits the final value once", () => {
+    const onChange = vi.fn();
+    render(
+      <ComposerInput
+        inputRef={createRef()}
+        value=""
+        onChange={onChange}
+        onKeyDown={vi.fn()}
+        placeholder="Message"
+        connectors={[]}
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    fireEvent.compositionStart(input);
+    input.append(document.createTextNode("かな"));
+    fireEvent.input(input);
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.compositionEnd(input);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith("かな");
+  });
 });

@@ -470,6 +470,12 @@
   height: 34px;
 }
 
+.voice-chat-action {
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
+  border-color: var(--accent-line);
+}
+
 .voice-action__cancel {
   position: absolute;
   right: calc(100% + 6px);
@@ -643,6 +649,12 @@
   .voice-actions .composer-chip {
     width: 44px;
     height: 44px;
+  }
+}
+
+@media (max-width: 650px) {
+  .desktop-frame--agents .composer .composer-model {
+    max-width: min(150px, 34vw);
   }
 }
 
