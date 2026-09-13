@@ -126,8 +126,11 @@ fn mcp_oauth_credential_key(
 }
 
 fn mcp_oauth_entry(key: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(MCP_OAUTH_KEYRING_SERVICE, key)
-        .map_err(|_| "Mivlet could not access MCP OAuth credentials.".to_string())
+    keyring::Entry::new(
+        MCP_OAUTH_KEYRING_SERVICE,
+        &crate::account_session::credential_key(key)?,
+    )
+    .map_err(|_| "Mivlet could not access MCP OAuth credentials.".to_string())
 }
 
 fn store_mcp_oauth_tokens(key: &str, tokens: &RemoteMcpOAuthTokens) -> Result<(), String> {

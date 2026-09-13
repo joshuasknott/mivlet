@@ -3,11 +3,8 @@ import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";
 
-/**
- * The optional account port deliberately exposes no local-workspace,
- * membership, invitation, device-administration, or sync mutation API.
- * Account sign-in exists only to unlock configured hosted capabilities.
- */
+/** Native identity opens an account-owned local workspace. Hosted inventory is
+ * optional; changing the account tears down and restarts the native process. */
 export interface AccountRuntimePort {
   loadIdentityStatus(): Promise<IdentityStatus | null>;
   beginIdentitySignIn(): Promise<IdentityStatus | null>;
@@ -84,3 +81,6 @@ export const reconcileRuntimeAccountWorkspace = () =>
   accountPort().reconcileWorkspace();
 export const clearRuntimeAccountWorkspaceSession = () =>
   accountPort().clearWorkspaceSession();
+
+export const runtimeAccountTheme = (value?: "light" | "dark") =>
+  getRuntimeAdapter().invoke<"light" | "dark">("account_theme", { value });

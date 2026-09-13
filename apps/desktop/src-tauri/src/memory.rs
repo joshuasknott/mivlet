@@ -237,6 +237,34 @@ fn canonicalize_project_memory_state(
     Ok(state)
 }
 
+fn normalize_context_scope(value: Option<&serde_json::Value>) -> Result<serde_json::Value, String> {
+    let Some(value) = value else {
+        return Ok(serde_json::json!({"level":"global"}));
+    };
+    let level = value
+        .get("level")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("Memory needs an explicit scope.")?;
+    if level == "global" {
+        return Ok(serde_json::json!({"level":"global"}));
+    }
+    let key = match level {
+        "thread" => "threadId",
+        "agent" => "agentId",
+        "project" => "projectId",
+        "work" => "workId",
+        _ => return Err("Unknown memory scope.".into()),
+    };
+    let id = value
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| !id.is_empty() && id.len() <= 128 && !id.contains('\0'))
+        .ok_or("Memory scope needs its owning object ID.")?;
+    let mut result = serde_json::json!({"level":level});
+    result[key] = serde_json::json!(id);
+    Ok(result)
+}
+
 fn canonicalize_private_memory_state(
     state: MemoryControlState,
     scope: &PrivateDataScope,
@@ -252,7 +280,7 @@ fn canonicalize_private_memory_state(
         });
         record.scope = Some(match scope.project_id() {
             Some(project_id) => project_scope_value(project_id),
-            None => serde_json::json!({"level":"global"}),
+            None => normalize_context_scope(record.scope.as_ref())?,
         });
     }
     Ok(state)
@@ -838,6 +866,21 @@ mod tests {
             updated_at: None,
             forgotten_at: None,
             disabled: false,
+        }
+    }
+
+    #[test]
+    fn roadmap_memory_preserves_narrow_scopes_and_rejects_missing_owner_ids() {
+        for (level, key) in [
+            ("thread", "threadId"),
+            ("agent", "agentId"),
+            ("project", "projectId"),
+            ("work", "workId"),
+        ] {
+            let mut input = serde_json::json!({"level":level});
+            assert!(normalize_context_scope(Some(&input)).is_err());
+            input[key] = serde_json::json!("owner");
+            assert_eq!(normalize_context_scope(Some(&input)).unwrap(), input);
         }
     }
 

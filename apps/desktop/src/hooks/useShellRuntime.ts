@@ -140,7 +140,6 @@ import {
 } from "../lib/approval-fallbacks";
 import {
   hasTauriRuntime,
-  importLegacyShellStateOnce,
   persistShellState,
   readPersistedShellState,
   shellStateFromRuntimeSnapshot,
@@ -243,11 +242,11 @@ export function useShellRuntime(
   scopeResetRef.current = options.onScopeReset;
   const initialState = useMemo(
     () =>
-      // Desktop: the runtime snapshot is the source of truth; localStorage is
-      // read once for a legacy import then never again. Preview: localStorage
+      // Desktop: the account-owned runtime snapshot is the source of truth;
+      // ambiguous installation-local browser data is never adopted. Preview: localStorage
       // remains the sole store.
       hasTauriRuntime()
-        ? importLegacyShellStateOnce(defaultShellState)
+        ? defaultShellState
         : readPersistedShellState(defaultShellState),
     [],
   );
@@ -865,7 +864,7 @@ export function useShellRuntime(
         if (hasTauriRuntime()) {
           try {
             // Hosted reconciliation is optional. If it fails, re-read the
-            // native local status so the exact installation owner survives;
+            // native local status so the validated account owner survives;
             // the static boot fallback is not an authority-bearing identity.
             localFallback =
               (await loadRuntimeAccountWorkspaceStatus()) ?? localFallback;
@@ -875,7 +874,9 @@ export function useShellRuntime(
         }
         const failed: AccountWorkspaceStatus = {
           ...localFallback,
-          message: `Local workspace ready. Optional account refresh failed: ${message}`,
+          message: localFallback.accountBound
+            ? `Account workspace ready. Hosted refresh failed: ${message}`
+            : `Account workspace unavailable: ${message}`,
         };
         if (requestGeneration === accountRequestGenerationRef.current) {
           applyAccountWorkspaceStatus(failed);

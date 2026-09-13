@@ -118,8 +118,11 @@ struct NativeConnectorSecretStore;
 
 impl NativeConnectorSecretStore {
     fn entry(key: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(KEYRING_SERVICE, key)
-            .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
+        keyring::Entry::new(
+            KEYRING_SERVICE,
+            &crate::account_session::credential_key(key)?,
+        )
+        .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
     }
 }
 

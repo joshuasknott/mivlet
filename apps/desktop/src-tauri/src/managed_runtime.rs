@@ -12,7 +12,7 @@ use std::{
     io::{BufRead, BufReader, Read, Write},
     net::TcpListener,
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{ChildStdin, Command, Stdio},
     sync::{Arc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -112,7 +112,7 @@ struct OpenCodeControl {
 struct ActiveRun {
     provider_id: String,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
-    child: Arc<Mutex<Child>>,
+    child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     session_id: Arc<Mutex<Option<String>>>,
     permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     opencode: Option<OpenCodeControl>,
@@ -347,8 +347,7 @@ fn run_command(mut command: Command, timeout: Duration) -> Result<CommandOutput,
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start the provider runtime.".to_string())?;
     let stdout = child
         .stdout
@@ -411,7 +410,24 @@ fn command_for_provider(
     provider_id: &str,
     path: &Path,
 ) -> Result<Command, String> {
+    if provider_id != "claude" || cfg!(target_os = "macos") {
+        return Err(format!("{} is unavailable until its provider-owned credential store supports verified Mivlet account isolation. Connect a direct API provider instead.", provider_label(provider_id)));
+    }
+    crate::account_session::ensure_current()?;
     let mut command = executable_command(path);
+    for key in [
+        "ANTHROPIC_API_KEY",
+        "ANTHROPIC_AUTH_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "CLAUDE_CODE_API_KEY_HELPER",
+        "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_USE_BEDROCK",
+        "CLAUDE_CODE_USE_VERTEX",
+        "CLAUDE_CODE_USE_FOUNDRY",
+    ] {
+        command.env_remove(key);
+    }
+
     if provider_id == "claude" {
         command.env("CLAUDE_CONFIG_DIR", claude_profile_dir(app, user_id)?);
     }
@@ -1150,14 +1166,18 @@ fn start_acp_turn(
         return Err("This provider does not use the managed ACP adapter.".into());
     }
     let workspace = workspace_dir(&app, &user_id, &provider_id)?;
-    let mut child = acp_command(&app, &user_id, &provider_id, &workspace)?
-        .spawn()
-        .map_err(|_| {
-            format!(
-                "Mivlet could not start {} ACP.",
-                provider_label(&provider_id)
-            )
-        })?;
+    let mut child = crate::provider_process::SupervisedChild::spawn(acp_command(
+        &app,
+        &user_id,
+        &provider_id,
+        &workspace,
+    )?)
+    .map_err(|_| {
+        format!(
+            "Mivlet could not start {} ACP.",
+            provider_label(&provider_id)
+        )
+    })?;
     let stdin = Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {
         format!("{} stdin was unavailable.", provider_label(&provider_id))
     })?));
@@ -1496,8 +1516,7 @@ fn start_claude_turn(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start Claude.".to_string())?;
     let stdin = Arc::new(Mutex::new(
         child
@@ -1975,8 +1994,7 @@ fn start_opencode_turn(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut process = command
-        .spawn()
+    let mut process = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start OpenCode's local server.".to_string())?;
     let stdout = process.stdout.take();
     let stderr = process.stderr.take();
@@ -2295,6 +2313,16 @@ pub async fn interrupt_managed_runtime_turn(request_id: String) -> Result<(), St
         let _ = child.kill();
     }
     Ok(())
+}
+
+pub(crate) fn shutdown_account() {
+    let ids: Vec<_> = active_runs()
+        .lock()
+        .map(|runs| runs.keys().cloned().collect())
+        .unwrap_or_default();
+    for id in ids {
+        let _ = shutdown_managed_runtime_turn(id);
+    }
 }
 
 #[tauri::command]

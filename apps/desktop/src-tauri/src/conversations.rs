@@ -100,7 +100,7 @@ pub fn conversation_create_thread(
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .transaction(|tx| {
-            let (_, member_id) = crate::account_workspace::local_install_principals();
+            let (_, member_id) = crate::account_session::principals().map_err(crate::store::StoreError::Invalid)?;
             let scope =
                 DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)?;
             let created = thread::create(

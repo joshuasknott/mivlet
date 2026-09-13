@@ -2,7 +2,15 @@ import type {
   ConversationLayout,
   ConversationLayoutNode,
   WorkspaceView,
+  ObjectReference,
 } from "@fable/protocol";
+
+/** View identity resolves an existing object; it never creates a conversation. */
+export function referenceForView(workspaceId: string, view: WorkspaceView): ObjectReference {
+  return view.kind === "conversation"
+    ? { workspaceId, kind: "conversation", id: view.conversationId }
+    : { workspaceId, kind: "file", id: JSON.stringify([view.agentId, view.output]) };
+}
 
 export type DockEdge = "left" | "right" | "top" | "bottom";
 export const emptyLayout = (): ConversationLayout => ({
@@ -114,11 +122,7 @@ export function reduceLayout(
         !action.duplicate &&
         next.views.find(
           (view) =>
-            view.kind === action.view.kind &&
-            view.conversationId === action.view.conversationId &&
-            (view.kind !== "artifact" ||
-              (action.view.kind === "artifact" &&
-                view.output === action.view.output)),
+            JSON.stringify(referenceForView("", view)) === JSON.stringify(referenceForView("", action.view)),
         );
       if (existing) {
         activate(existing.id);

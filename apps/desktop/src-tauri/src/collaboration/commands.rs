@@ -2,6 +2,56 @@ use super::*;
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::SteerWork {
+            id: key,
+            expected_generation,
+            event_id,
+            text,
+        } => {
+            id(&event_id)?;
+            let text = bounded(&text, 2_000, "Steering")?;
+            let mut item = ctx.item(&key)?;
+            if let Some(event) = item.steering.iter().find(|event| event.id == event_id) {
+                return if event.text == text {
+                    Ok(())
+                } else {
+                    Err(invalid("Steering event ID was already used."))
+                };
+            }
+            if item.generation != expected_generation
+                || item.steering.len() >= 16
+                || item.status == WorkStatus::Completed
+            {
+                return Err(invalid(
+                    "Refresh this Work before steering it; completed Work needs a new request.",
+                ));
+            }
+            let uncertain = !item.run_ids.is_empty();
+            item.generation += 1;
+            item.current_run_id = None;
+            item.steering.push(WorkSteering {
+                id: event_id,
+                text,
+                created_at: ctx.time.into(),
+            });
+            item.status = if uncertain {
+                WorkStatus::AwaitingUser
+            } else {
+                WorkStatus::Queued
+            };
+            item.reason = Some(if uncertain { "Steering saved. Review prior outcomes before continuing; no external effect was replayed." } else { "Steering saved before dispatch." }.into());
+            item.updated_at = ctx.time.into();
+            ctx.work(&item)?;
+            for child in ctx.all_work()? {
+                if child.parent_id.as_deref() == Some(&key) && child.status.active() {
+                    work::invalidate_descendants(ctx, &child.id, "The requesting Work was steered. Review existing outcomes before continuing.", WorkStatus::AwaitingUser)?;
+                }
+            }
+        }
+
+        Command::OpenMainChat { agent_id } => {
+            chats::open_main(ctx, &agent_id)?;
+        }
         Command::CreateConversation {
             id,
             title,
@@ -135,11 +185,15 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             {
                 return Err(invalid("Confirm sharing existing project conversations, references and work with new participants."));
             }
-            let members = participants(ctx.profiles, &participant_ids, &lead_agent_id)?;
+            let validation_lead = lead_agent_id
+                .as_deref()
+                .or_else(|| participant_ids.first().map(String::as_str))
+                .ok_or_else(|| invalid("A Project Team needs at least one Agent."))?;
+            let members = participants(ctx.profiles, &participant_ids, validation_lead)?;
             invalidate_project(ctx, &project_id, None, "The project lead or participants changed. Review current assignments before continuing.")?;
             team.revision += 1;
             team.participant_ids = participant_ids;
-            team.lead_agent_id = Some(lead_agent_id.clone());
+            team.lead_agent_id = lead_agent_id.clone();
             ctx.team(&team)?;
             let project =
                 local_project::get_project(ctx.conn, ctx.store, &ctx.scope.private, &project_id)?
@@ -155,7 +209,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 }
                 if room.id == project.thread_id {
                     room.participants = members.clone();
-                    room.facilitator_id = Some(lead_agent_id.clone());
+                    room.facilitator_id = lead_agent_id.clone();
                 } else {
                     room.participants
                         .retain(|p| team.participant_ids.contains(&p.agent_id));
@@ -253,6 +307,9 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 return Err(invalid(
                     "Start a new request; this assignment's parent has ended.",
                 ));
+            }
+            if item.captured_context.is_none() {
+                item.captured_context = Some(super::context::capture(ctx, &room, agent)?);
             }
             item.model_option_id = agent.model_id.clone();
             item.conversation_generation = room.generation;

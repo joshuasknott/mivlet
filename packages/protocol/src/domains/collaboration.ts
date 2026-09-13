@@ -1,4 +1,4 @@
-/** Installation-private coordination. These records grant no tool authority. */
+/** Account-private coordination. These records grant no tool authority. */
 export type WorkStatus =
   | "queued"
   | "running"
@@ -16,7 +16,17 @@ export interface ConversationParticipant {
   name: string;
 }
 
+export type ObjectReference = { workspaceId: string; kind: "agent" | "project" | "conversation" | "work" | "memory" | "file" | "message"; id: string };
+export interface ChatBinding { role: "main" | "side"; ownerKind: "agent" | "project"; ownerId: string }
+/** Explicit sharing never conveys authority. Snapshots retain selected bytes;
+ * live references resolve again under the current account on each deliberate use. */
+export type ContextShare =
+  | { mode: "snapshot"; source: ObjectReference; sourceRevision: string; text: string; capturedAt: string }
+  | { mode: "live-reference"; source: ObjectReference };
+
 export interface ConversationRoom {
+  /** Missing only for unclassified legacy conversations; never guess a main Chat. */
+  chat?: ChatBinding;
   id: string;
   workspaceId: string;
   kind: "direct" | "group";
@@ -51,7 +61,12 @@ export interface WorkOutput {
   createdAt: string;
 }
 
+export interface CapturedWorkContext extends Extract<ContextShare, { mode: "snapshot" }> { version: 1 }
+export interface WorkSteering { id: string; text: string; createdAt: string }
 export interface CollaborationWorkItem {
+  /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
+  capturedContext?: CapturedWorkContext;
+  steering?: WorkSteering[];
   permissionMode: import("./approvals").PermissionMode;
   id: string;
   workspaceId: string;
@@ -146,6 +161,8 @@ export interface CollaborationSnapshot {
 
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
+  | { action: "steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
+  | { action: "open-main-chat"; agentId: string }
   | {
       action: "create-conversation";
       id: string;
@@ -175,7 +192,7 @@ export type CollaborationCommand =
       action: "update-team";
       projectId: string;
       expectedRevision: number;
-      leadAgentId: string;
+      leadAgentId?: string;
       participantIds: string[];
       shareHistory: boolean;
     }

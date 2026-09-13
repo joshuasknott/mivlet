@@ -78,11 +78,16 @@ export function authorityScopeAllowsAudience(
   );
 }
 
+function scopeIdKey(level: Exclude<KnowledgeScope["level"], "global">): "threadId" | "agentId" | "projectId" | "workId" {
+  return { thread: "threadId", agent: "agentId", project: "projectId", work: "workId" }[level] as "threadId" | "agentId" | "projectId" | "workId";
+}
+
 /** Two scopes are the same effective scope. */
 export function scopesMatch(a: KnowledgeScope, b: KnowledgeScope): boolean {
   if (a.level !== b.level) return false;
   if (a.level === "global") return true;
-  return a.threadId === b.threadId;
+  const key = scopeIdKey(a.level);
+  return Boolean(a[key]) && a[key] === b[key];
 }
 
 /**
@@ -93,7 +98,8 @@ export function scopesMatch(a: KnowledgeScope, b: KnowledgeScope): boolean {
  */
 export function scopeSatisfies(entry: KnowledgeScope, run: KnowledgeScope): boolean {
   if (entry.level === "global") return true;
-  return scopesMatch(entry, run);
+  const key = scopeIdKey(entry.level);
+  return Boolean(entry[key]) && entry[key] === run[key];
 }
 
 /**

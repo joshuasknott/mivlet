@@ -796,6 +796,7 @@ fn read_session(store: &dyn IdentitySecretStore) -> Result<Option<StoredSession>
 fn write_session(
     store: &dyn IdentitySecretStore,
     session: &StoredSession,
+    expected_generation: Option<u64>,
 ) -> Result<(), IdentityError> {
     let encoded = serde_json::to_string(session).map_err(|_| {
         identity_error(
@@ -807,6 +808,13 @@ fn write_session(
     let mut generation = IDENTITY_GENERATION
         .lock()
         .map_err(|_| identity_error("unknown", "Mivlet account state is unavailable.", false))?;
+    if expected_generation.is_some_and(|expected| expected != *generation) {
+        return Err(identity_error(
+            "expired",
+            "This account operation was superseded. Sign in again.",
+            false,
+        ));
+    }
     store
         .set(SESSION_KEY, &encoded)
         .map_err(|message| identity_error("unknown", message, false))?;
@@ -815,9 +823,23 @@ fn write_session(
 }
 
 fn clear_session(store: &dyn IdentitySecretStore) -> Result<(), IdentityError> {
+    clear_session_if_current(store, None)
+}
+
+fn clear_session_if_current(
+    store: &dyn IdentitySecretStore,
+    expected: Option<u64>,
+) -> Result<(), IdentityError> {
     let mut generation = IDENTITY_GENERATION
         .lock()
         .map_err(|_| identity_error("unknown", "Mivlet account state is unavailable.", false))?;
+    if expected.is_some_and(|expected| expected != *generation) {
+        return Err(identity_error(
+            "expired",
+            "This account operation was superseded.",
+            false,
+        ));
+    }
     store
         .remove(SESSION_KEY)
         .map_err(|message| identity_error("unknown", message, false))?;
@@ -1761,13 +1783,16 @@ async fn session_from_tokens(
 async fn status_with_store(
     store: &dyn IdentitySecretStore,
 ) -> Result<IdentityStatus, IdentityError> {
+    let expected_generation = *IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Account state unavailable.", false))?;
     let Some(config) = load_config()? else {
         return Ok(disabled_status());
     };
     let session = match read_session(store) {
         Ok(session) => session,
         Err(error) if error.code == "revoked" => {
-            clear_session(store)?;
+            clear_session_if_current(store, Some(expected_generation))?;
             return Ok(status_from_error(&config, &error));
         }
         Err(error) => return Err(error),
@@ -1776,7 +1801,7 @@ async fn status_with_store(
         return Ok(signed_out_status(&config));
     };
     if !session_matches_config(&session, &config) {
-        clear_session(store)?;
+        clear_session_if_current(store, Some(expected_generation))?;
         return Ok(status_from_error(
             &config,
             &identity_error(
@@ -1842,7 +1867,7 @@ async fn status_with_store(
                     }
                     session.authentication = Some(authentication);
                     session.legacy_identity = None;
-                    write_session(store, &session)?;
+                    write_session(store, &session, Some(expected_generation))?;
                 }
                 return Ok(session_status(
                     "signed-in",
@@ -1852,14 +1877,14 @@ async fn status_with_store(
             }
             Err(error) if error.code == "expired" => {}
             Err(error) if error.code == "invalid-token" => {
-                clear_session(store)?;
+                clear_session_if_current(store, Some(expected_generation))?;
                 return Ok(status_from_error(&config, &error));
             }
             Err(error) => return Err(error),
         }
     }
     let Some(refresh_token) = session.refresh_token.clone() else {
-        clear_session(store)?;
+        clear_session_if_current(store, Some(expected_generation))?;
         return Ok(status_from_error(
             &config,
             &identity_error(
@@ -1879,7 +1904,7 @@ async fn status_with_store(
             ))
         }
         Err(error) if error.code == "revoked" => {
-            clear_session(store)?;
+            clear_session_if_current(store, Some(expected_generation))?;
             return Ok(status_from_error(&config, &error));
         }
         Err(error) => return Err(error),
@@ -1888,12 +1913,12 @@ async fn status_with_store(
         match session_from_tokens(config.clone(), &metadata, Some(session), tokens).await {
             Ok(session) => session,
             Err(error) if error.code == "invalid-token" || error.code == "expired" => {
-                clear_session(store)?;
+                clear_session_if_current(store, Some(expected_generation))?;
                 return Ok(status_from_error(&config, &error));
             }
             Err(error) => return Err(error),
         };
-    write_session(store, &refreshed)?;
+    write_session(store, &refreshed, Some(expected_generation))?;
     Ok(session_status(
         "signed-in",
         "Mivlet cloud identity refreshed.",
@@ -1905,6 +1930,9 @@ async fn begin_sign_in_with_store(
     store: &dyn IdentitySecretStore,
     prompt: &str,
 ) -> Result<IdentityStatus, IdentityError> {
+    let expected_generation = *IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Account state unavailable.", false))?;
     let Some(config) = load_config()? else {
         return Ok(disabled_status());
     };
@@ -2030,12 +2058,13 @@ async fn begin_sign_in_with_store(
         .await;
     let _ = stream.shutdown().await;
 
-    complete_callback_with_store(store, &callback_url).await
+    complete_callback_with_store(store, &callback_url, Some(expected_generation)).await
 }
 
 async fn complete_callback_with_store(
     store: &dyn IdentitySecretStore,
     callback_url: &str,
+    expected_generation: Option<u64>,
 ) -> Result<IdentityStatus, IdentityError> {
     let callback = Url::parse(callback_url).map_err(|_| {
         identity_error(
@@ -2149,7 +2178,7 @@ async fn complete_callback_with_store(
         userinfo_endpoint: pending.userinfo_endpoint.clone(),
     };
     let session = session_from_tokens(config.clone(), &metadata, None, tokens).await?;
-    write_session(store, &session)?;
+    write_session(store, &session, expected_generation)?;
     Ok(session_status(
         "signed-in",
         "Mivlet cloud identity is connected.",
@@ -2188,7 +2217,7 @@ fn validate_convex_function_path(path: &str) -> Result<(), IdentityError> {
 #[allow(dead_code)]
 async fn authenticated_session_with_store(
     store: &dyn IdentitySecretStore,
-) -> Result<StoredSession, IdentityError> {
+) -> Result<(StoredSession, u64), IdentityError> {
     let status = status_with_store(store).await?;
     if status.state != "signed-in" {
         let code = match status.state.as_str() {
@@ -2199,6 +2228,9 @@ async fn authenticated_session_with_store(
         };
         return Err(identity_error(code, status.message, code == "offline"));
     }
+    let generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Identity state unavailable.", false))?;
     let session = read_session(store)?.ok_or_else(|| {
         identity_error(
             "expired",
@@ -2213,7 +2245,7 @@ async fn authenticated_session_with_store(
             false,
         ));
     }
-    Ok(session)
+    Ok((session, *generation))
 }
 
 #[allow(dead_code)]
@@ -2270,7 +2302,7 @@ async fn call_convex_with_store(
             false,
         ));
     }
-    let session = authenticated_session_with_store(store).await?;
+    let (session, expected_generation) = authenticated_session_with_store(store).await?;
     endpoint.set_path(&format!("/api/{}", request.function_type.endpoint()));
     crate::ensure_rustls_provider();
     let response = reqwest::Client::builder()
@@ -2301,7 +2333,7 @@ async fn call_convex_with_store(
             )
         })?;
     if response.status() == reqwest::StatusCode::UNAUTHORIZED {
-        clear_session(store)?;
+        clear_session_if_current(store, Some(expected_generation))?;
         return Err(identity_error(
             "revoked",
             "The hosted service rejected the Mivlet account session; sign in again.",
@@ -2318,7 +2350,18 @@ async fn call_convex_with_store(
             response.status().is_server_error(),
         ));
     }
-    read_limited_json(response).await
+    let result = read_limited_json(response).await?;
+    let generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Identity state unavailable.", false))?;
+    if *generation != expected_generation {
+        return Err(identity_error(
+            "expired",
+            "Account changed during the hosted request.",
+            false,
+        ));
+    }
+    Ok(result)
 }
 
 /// Credential-bearing Convex transport for focused native account/workspace
@@ -2359,6 +2402,13 @@ pub(crate) fn native_identity_generation_snapshot(
     let session = read_session(&NativeIdentitySecretStore)
         .map_err(command_message)?
         .ok_or_else(|| "Mivlet account session is unavailable; sign in again.".to_string())?;
+    if session.expires_at <= now_epoch()
+        || !load_config()
+            .map_err(command_message)?
+            .is_some_and(|config| session_matches_config(&session, &config))
+    {
+        return Err("Mivlet account session expired or changed; sign in again.".into());
+    }
     let authentication = session.authentication.ok_or_else(|| {
         "Mivlet account identity facts are unavailable; sign in again.".to_string()
     })?;
@@ -2388,18 +2438,26 @@ pub(crate) fn lock_native_identity_generation(
 }
 
 #[tauri::command]
-pub async fn identity_begin_sign_in(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
-    begin_sign_in_with_store(&NativeIdentitySecretStore, "consent")
+pub async fn identity_begin_sign_in(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+    if crate::account_session::binding().is_ok() {
+        return identity_sign_out(app).await;
+    }
+    let result = begin_sign_in_with_store(&NativeIdentitySecretStore, "consent")
         .await
-        .map_err(command_message)
+        .map_err(command_message)?;
+    if result.authentication.is_some() && matches!(result.state.as_str(), "signed-in" | "offline") {
+        crate::account_session::restart(app).await;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
-pub async fn identity_begin_recovery(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+pub async fn identity_begin_recovery(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+    if crate::account_session::binding().is_ok() {
+        return identity_sign_out(app).await;
+    }
     clear_session(&NativeIdentitySecretStore).map_err(command_message)?;
-    begin_sign_in_with_store(&NativeIdentitySecretStore, "login")
-        .await
-        .map_err(command_message)
+    identity_begin_sign_in(app).await
 }
 
 #[tauri::command]
@@ -2410,18 +2468,12 @@ pub async fn identity_refresh(_app: tauri::AppHandle) -> Result<IdentityStatus, 
 }
 
 #[tauri::command]
-pub async fn identity_sign_out(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+pub async fn identity_sign_out(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     // Configuration may have become invalid since sign-in. Local credential
     // removal must still happen before reporting that diagnostic.
     let status =
         sign_out_with_store(&NativeIdentitySecretStore, load_config).map_err(command_message)?;
-    if let Some(store) = crate::store::try_global() {
-        store
-            .transaction(|conn| {
-                crate::store::repos::workspace_directory::clear_current_internal_user(conn)
-            })
-            .map_err(|error| error.to_string())?;
-    }
+    crate::account_session::restart(app).await;
     Ok(status)
 }
 
@@ -2450,6 +2502,37 @@ mod tests {
             self.0.lock().unwrap().remove(key);
             Ok(())
         }
+    }
+
+    #[test]
+    fn late_oauth_and_refresh_cannot_restore_a_signed_out_identity() {
+        let store = MemoryStore::default();
+        let session: StoredSession = serde_json::from_value(serde_json::json!({
+            "access_token":"fixture", "refresh_token":null, "token_type":"Bearer", "expires_at":1,
+            "scopes":[], "issuer":"https://issuer.example", "audience":"fixture", "client_id":"fixture", "authorized_party":null
+        })).unwrap();
+        let expected = *IDENTITY_GENERATION.lock().unwrap();
+        clear_session(&store).unwrap();
+        assert!(write_session(&store, &session, Some(expected)).is_err());
+        assert!(store.get(SESSION_KEY).unwrap().is_none());
+        assert!(clear_session_if_current(&store, Some(expected)).is_err());
+    }
+
+    #[test]
+    fn local_account_namespace_is_bound_to_verified_issuer_and_subject() {
+        let mut claims = test_claims();
+        let a = authentication_from_claims(&claims, "https://issuer.example", "fixture", 1);
+        claims.sub = "second-account".into();
+        let b = authentication_from_claims(&claims, "https://issuer.example", "fixture", 1);
+        let c = authentication_from_claims(&claims, "https://other-issuer.example", "fixture", 1);
+        assert_ne!(
+            account_binding_for_authentication(&a),
+            account_binding_for_authentication(&b)
+        );
+        assert_ne!(
+            account_binding_for_authentication(&b),
+            account_binding_for_authentication(&c)
+        );
     }
 
     #[test]
@@ -2785,6 +2868,7 @@ mod tests {
         let error = complete_callback_with_store(
             &store,
             "http://127.0.0.1:1234/callback?state=state_1&error=access_denied",
+            None,
         )
         .await
         .unwrap_err();
@@ -2932,7 +3016,7 @@ mod tests {
             session.expires_at,
         ));
         session.legacy_identity = None;
-        write_session(&store, &session).unwrap();
+        write_session(&store, &session, None).unwrap();
 
         let rewritten = store.get(SESSION_KEY).unwrap().unwrap();
         assert!(!rewritten.contains("org_obsolete"));

@@ -53,12 +53,12 @@ export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   scopes: []
 };
 
-/** Native starts with one installation-local workspace; account state loads separately. */
+/** Native must receive a validated account binding before loading product data. */
 export const DEFAULT_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
   configured: false,
-  state: "ready",
-  message: "Local workspace ready. A Mivlet account is optional.",
-  accountBound: true,
+  state: "signed-out",
+  message: "Sign in to open your account workspace.",
+  accountBound: false,
   workspaces: [],
   activeWorkspace: {
     localWorkspaceId: "default",
@@ -66,7 +66,7 @@ export const DEFAULT_ACCOUNT_WORKSPACE_STATUS: AccountWorkspaceStatus = {
     source: "local"
   },
   activeContextOwner: {
-    internalUserId: "local-install"
+    internalUserId: ""
   },
   devices: []
 };

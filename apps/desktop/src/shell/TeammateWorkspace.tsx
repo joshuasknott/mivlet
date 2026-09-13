@@ -1,3 +1,4 @@
+import { runtimeAccountTheme } from "../runtime/domains/account";
 import {
   lazy,
   Suspense,
@@ -119,14 +120,19 @@ export function TeammateWorkspace() {
       current.current = null;
     },
   });
-  const [theme, setTheme] = useState<"light" | "dark">(() =>
-    localStorage.getItem("fable-theme") === "dark" ? "dark" : "light",
-  );
-  useEffect(() => {
-    localStorage.setItem("fable-theme", theme);
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
   const account = runtime.accountWorkspaceStatus;
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => {
+    if (!account.accountBound || !hasNativeRuntimeAdapter()) return;
+    let current = true;
+    void runtimeAccountTheme().then(value => { if (current) setTheme(value); }).catch(() => undefined);
+    return () => { current = false; };
+  }, [account.accountBound]);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  const changeTheme = (value: "light" | "dark") => {
+    setTheme(value);
+    if (account.accountBound && hasNativeRuntimeAdapter()) void runtimeAccountTheme(value).catch(() => undefined);
+  };
   if (
     runtime.accountWorkspacePending ||
     (!runtime.runtimeSnapshotReady &&
@@ -170,7 +176,7 @@ export function TeammateWorkspace() {
       runtime={runtime}
       approvals={approvals}
       theme={theme}
-      onTheme={setTheme}
+      onTheme={changeTheme}
       onService={(service) => {
         current.current = service;
       }}
@@ -536,17 +542,11 @@ function ActiveWorkspace({
     newConversation = false,
     text?: string,
   ) => {
-    const room =
-      !newConversation &&
-      state.data.conversations
-        .filter(
-          (room) =>
-            room.kind === "direct" &&
-            !room.projectId &&
-            room.participants.some((member) => member.agentId === agent.id),
-        )
-        .at(-1);
-    if (room) {
+    if (!newConversation) {
+      await runtime.flushSnapshot();
+      const data = await service.command({ action: "open-main-chat", agentId: agent.id });
+      const room = data.conversations.find(room => room.chat?.role === "main" && room.chat.ownerKind === "agent" && room.chat.ownerId === agent.id);
+      if (!room) throw new Error("The main Chat could not be resolved.");
       open(room.id);
       return room.id;
     }

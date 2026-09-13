@@ -88,6 +88,12 @@ static CALL: OnceLock<Mutex<Option<Call>>> = OnceLock::new();
 fn state() -> &'static Mutex<Option<Call>> {
     CALL.get_or_init(|| Mutex::new(None))
 }
+pub(crate) fn shutdown_account() {
+    if let Ok(mut call) = state().lock() {
+        *call = None;
+    }
+}
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 128

@@ -10,6 +10,7 @@
     clippy::type_complexity
 )]
 
+mod account_session;
 mod account_workspace;
 mod action_history;
 mod antigravity_acp;
@@ -57,6 +58,7 @@ pub mod paths;
 mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
+mod provider_process;
 mod snapshot;
 mod store;
 mod token_plugins;
@@ -89,20 +91,23 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             let handle = app.handle().clone();
-            let app_data = paths::app_data_dir(&handle)?;
-            store::initialize(&app_data)?;
-            if let Some(store) = store::try_global() {
-                collaboration::recover(store).map_err(|error| {
-                    std::io::Error::other(format!("Coordination recovery failed: {error:?}"))
-                })?;
+            if account_session::initialize(&handle)? {
+                let app_data = paths::app_data_dir(&handle)?;
+                store::initialize(&app_data)?;
+                if let Some(store) = store::try_global() {
+                    collaboration::recover(store).map_err(|error| {
+                        std::io::Error::other(format!("Coordination recovery failed: {error:?}"))
+                    })?;
+                }
+                // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
+                let _ = connector_auth::provision_connector_configuration();
+                let computers =
+                    std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
+                computers.start_activity();
+                app.manage(computers);
+                app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
             }
-            // Public OAuth configuration is bundled; developer-provisioned secrets stay in the OS vault.
-            let _ = connector_auth::provision_connector_configuration();
-            let computers =
-                std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
-            computers.start_activity();
-            app.manage(computers);
-            app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
+            account_session::start_watchdog(handle);
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -118,20 +123,22 @@ pub fn run() {
                 }
                 let app = window.app_handle().clone();
                 let computers = app
-                    .state::<std::sync::Arc<local_computer::LocalComputerState>>()
-                    .inner()
-                    .clone();
+                    .try_state::<std::sync::Arc<local_computer::LocalComputerState>>()
+                    .map(|state| state.inner().clone());
                 let _ = window.hide();
                 tauri::async_runtime::spawn(async move {
                     codex_app_server::shutdown_all_runs();
                     embedded_agent::shutdown_all();
                     embedded_mcp::shutdown_all();
-                    local_computer::shutdown_all(computers).await;
+                    if let Some(computers) = computers {
+                        local_computer::shutdown_all(computers).await;
+                    }
                     app.exit(0);
                 });
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(account_session::guard(tauri::generate_handler![
+            account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
             local_computer::artifacts::local_computer_preview_artifact,
@@ -341,7 +348,7 @@ pub fn run() {
             execution_control::execution_control_get,
             execution_control::execution_control_pause,
             execution_control::execution_control_resume
-        ])
+        ]))
         .run(tauri::generate_context!())
         .expect("failed to run Mivlet desktop runtime");
 }

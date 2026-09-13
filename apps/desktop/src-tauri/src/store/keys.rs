@@ -45,8 +45,11 @@ pub struct NativeKeyStore {
 
 impl NativeKeyStore {
     pub fn new() -> Result<Self, String> {
-        let entry = Entry::new(VAULT_KEYRING_SERVICE, VAULT_KEYRING_ENTRY)
-            .map_err(|_| "Mivlet could not reach the OS credential store.".to_string())?;
+        let entry = Entry::new(
+            VAULT_KEYRING_SERVICE,
+            &crate::account_session::credential_key(VAULT_KEYRING_ENTRY)?,
+        )
+        .map_err(|_| "Mivlet could not reach the OS credential store.".to_string())?;
         Ok(Self { entry })
     }
 }

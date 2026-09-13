@@ -11,7 +11,7 @@ use std::{
     fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
-    process::{Child, ChildStdin, Command, Stdio},
+    process::{ChildStdin, Command, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc, Mutex, OnceLock,
@@ -146,7 +146,7 @@ pub struct CodexInterruptRequest {
 
 struct ActiveCodexRun {
     stdin: Arc<Mutex<ChildStdin>>,
-    child: Arc<Mutex<Child>>,
+    child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     computer: Option<CodexComputerScope>,
     supports_images: bool,
     approval_kinds: Arc<Mutex<HashMap<String, PendingApproval>>>,
@@ -274,7 +274,24 @@ fn missing_codex_runtime_message() -> String {
         .to_string()
 }
 
-fn codex_command(path: &PathBuf) -> Command {
+fn codex_command(path: &PathBuf) -> Result<Command, String> {
+    crate::account_session::ensure_current()?;
+    let profile = crate::account_session::root()?
+        .join("provider-profiles")
+        .join("codex");
+    std::fs::create_dir_all(&profile)
+        .map_err(|_| "Could not prepare this account's Codex profile.")?;
+    let mut command = codex_executable_command(path);
+    command
+        .env("CODEX_HOME", profile)
+        .env_remove("OPENAI_API_KEY")
+        .env_remove("CODEX_API_KEY")
+        .env_remove("CODEX_ACCESS_TOKEN")
+        .args(["-c", "cli_auth_credentials_store=\"keyring\""]);
+    Ok(command)
+}
+
+fn codex_executable_command(path: &PathBuf) -> Command {
     #[cfg(windows)]
     {
         if path
@@ -396,15 +413,14 @@ fn chatgpt_login_details(value: &Value) -> Result<(String, String), String> {
 
 fn start_codex_browser_login_blocking() -> Result<CodexBrowserLoginResult, String> {
     let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
-    let mut command = codex_command(&path);
+    let mut command = codex_command(&path)?;
     command
         .arg("app-server")
         .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start Codex app-server.".to_string())?;
     let stdin =
         Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {
@@ -514,9 +530,8 @@ pub fn codex_cli_status() -> CodexCliStatus {
     };
 
     let version = codex_command(&path)
-        .arg("--version")
-        .output()
         .ok()
+        .and_then(|mut command| command.arg("--version").output().ok())
         .and_then(|output| {
             if output.status.success() {
                 Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
@@ -528,7 +543,9 @@ pub fn codex_cli_status() -> CodexCliStatus {
 
     // `codex login status` exposes only whether the provider-owned session is
     // usable and its broad login kind. Mivlet never reads auth.json or tokens.
-    let login = codex_command(&path).args(["login", "status"]).output().ok();
+    let login = codex_command(&path)
+        .ok()
+        .and_then(|mut command| command.args(["login", "status"]).output().ok());
     let authenticated = login.as_ref().is_some_and(|output| output.status.success());
     let login_copy = login
         .as_ref()
@@ -571,15 +588,14 @@ pub fn codex_cli_status() -> CodexCliStatus {
 /// exposing any auth material to JavaScript.
 pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, String> {
     let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
-    let mut command = codex_command(&path);
+    let mut command = codex_command(&path)?;
     command
         .arg("app-server")
         .arg("--stdio")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    let mut child = command
-        .spawn()
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start Codex app-server.".to_string())?;
     let stdin =
         Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {
@@ -759,7 +775,7 @@ pub fn start_codex_app_server_turn(
     fs::create_dir_all(&runtime_dir)
         .map_err(|_| "Mivlet could not prepare its provider workspace.".to_string())?;
     let (image_temp_dir, staged_images) = stage_codex_user_images(&runtime_dir, &request)?;
-    let mut command = codex_command(&path);
+    let mut command = codex_command(&path)?;
     command.current_dir(&runtime_dir).args([
         "-c",
         "features.shell_tool=false",
@@ -782,8 +798,7 @@ pub fn start_codex_app_server_turn(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let mut child = command
-        .spawn()
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
         .map_err(|_| "Mivlet could not start Codex app-server.".to_string())?;
     let stdin =
         Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {

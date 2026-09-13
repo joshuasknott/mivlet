@@ -1696,6 +1696,14 @@ pub(crate) async fn stream_completion(
     Ok(())
 }
 
+pub(crate) fn shutdown_account() {
+    if let Ok(mut calls) = cancel_map().lock() {
+        for (_, sender) in calls.drain() {
+            let _ = sender.send(true);
+        }
+    }
+}
+
 /// Cancel an in-flight completion by dropping its future (real cancellation).
 #[tauri::command]
 pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {

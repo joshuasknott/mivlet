@@ -35,7 +35,17 @@ pub struct Participant {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ChatBinding {
+    pub role: String,
+    pub owner_kind: String,
+    pub owner_id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct Conversation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat: Option<ChatBinding>,
     pub id: String,
     pub workspace_id: String,
     pub kind: String,
@@ -87,6 +97,10 @@ pub struct Output {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured_context: Option<CapturedWorkContext>,
+    #[serde(default)]
+    pub steering: Vec<WorkSteering>,
     #[serde(default = "default_permission")]
     pub permission_mode: String,
     pub id: String,
@@ -126,6 +140,33 @@ pub struct Work {
     pub outputs: Vec<Output>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectReference {
+    pub workspace_id: String,
+    pub kind: String,
+    pub id: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CapturedWorkContext {
+    pub mode: String,
+    pub source: ObjectReference,
+    pub source_revision: String,
+    pub version: u32,
+    pub captured_at: String,
+    pub text: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkSteering {
+    pub id: String,
+    pub text: String,
+    pub created_at: String,
 }
 
 fn default_permission() -> String {
@@ -236,6 +277,15 @@ pub enum AgentCommand {
     deny_unknown_fields
 )]
 pub enum Command {
+    SteerWork {
+        id: String,
+        expected_generation: u32,
+        event_id: String,
+        text: String,
+    },
+    OpenMainChat {
+        agent_id: String,
+    },
     CreateConversation {
         id: String,
         title: String,
@@ -261,7 +311,7 @@ pub enum Command {
     UpdateTeam {
         project_id: String,
         expected_revision: u32,
-        lead_agent_id: String,
+        lead_agent_id: Option<String>,
         participant_ids: Vec<String>,
         share_history: bool,
     },

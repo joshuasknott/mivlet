@@ -86,6 +86,7 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 
 /// The durable encrypted store. Cheap to share behind an `Arc`.
 pub struct Store {
+    account_owned: bool,
     conn: Mutex<Connection>,
     vault: Vault,
 }
@@ -104,6 +105,7 @@ impl Store {
         Self::verify_integrity(&conn)?;
         Self::initialize_schema(&conn)?;
         let store = Self {
+            account_owned: false,
             conn: Mutex::new(conn),
             vault,
         };
@@ -120,6 +122,7 @@ impl Store {
         Self::configure_pragmas(&conn)?;
         Self::initialize_schema(&conn)?;
         let store = Self {
+            account_owned: false,
             conn: Mutex::new(conn),
             vault,
         };
@@ -307,9 +310,19 @@ impl Store {
 
     /// Run `f` against the raw connection under the lock (for integrity checks,
     /// pragmas, and ad-hoc reads).
+    fn check_account(&self) -> Result<()> {
+        if self.account_owned {
+            crate::account_session::ensure_current().map_err(StoreError::Invalid)?;
+        }
+        Ok(())
+    }
+
     pub fn with_conn<R>(&self, f: impl FnOnce(&Connection) -> Result<R>) -> Result<R> {
         let conn = self.conn.lock().expect("store connection mutex poisoned");
-        f(&conn)
+        self.check_account()?;
+        let result = f(&conn)?;
+        self.check_account()?;
+        Ok(result)
     }
 
     /// Run `f` inside a SQLite transaction. All multi-record writes use this.
@@ -319,10 +332,44 @@ impl Store {
         f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
     ) -> Result<R> {
         let mut conn = self.conn.lock().expect("store connection mutex poisoned");
+        self.check_account()?;
         let tx = conn.transaction().map_err(StoreError::from)?;
         let out = f(&tx)?;
+        self.check_account()?;
         tx.commit().map_err(StoreError::from)?;
         Ok(out)
+    }
+
+    /// Privileged outgoing-account cleanup; never accepts a caller-selected owner.
+    pub(crate) fn suspend_account(&self) -> Result<()> {
+        let (user, member) = crate::account_session::principals().map_err(StoreError::Invalid)?;
+        self.suspend_bound_account(&user, &member)
+    }
+
+    fn suspend_bound_account(&self, user: &str, member: &str) -> Result<()> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| StoreError::Invalid("Account store unavailable.".into()))?;
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE local_schedule SET status='paused',revision=revision+1 WHERE status='enabled'",
+            [],
+        )?;
+        crate::collaboration::suspend_account(&tx, self, user, member)?;
+        let data = repos::scope::DataScope::legacy_default();
+        let path = Path::new("execution-approvals.json");
+        let (_, key) = scoped_document_location(path, &data).map_err(StoreError::Invalid)?;
+        if let Some(mut records) = repos::preferences::get_scoped(&tx, self, &data, &key)? {
+            if let Some(records) = records.as_array_mut() {
+                for record in records {
+                    record["invalidatedAt"] = serde_json::json!(timestamp());
+                }
+            }
+            repos::preferences::upsert_scoped(&tx, self, &data, &key, &records, &timestamp())?;
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     /// Borrow the vault for seal/open operations.
@@ -363,7 +410,7 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     };
     let recovery = apply_pending_restore(app_data_dir, &key)?;
     let vault = Vault::new(&key).map_err(|_| "Mivlet could not initialize local encryption.")?;
-    let store = match Store::open(&db_path, vault) {
+    let mut store = match Store::open(&db_path, vault) {
         Ok(store) => store,
         Err(error) => {
             if let Some(recovery) = recovery.as_ref() {
@@ -377,6 +424,12 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
             return Err(error.to_string());
         }
     };
+    store.account_owned = true;
+    if recovery.is_some() {
+        // A backup may contain old permits or enabled schedules. Restoration
+        // preserves outcomes but cannot revive authority or replay dispatch.
+        store.suspend_account().map_err(|error| error.to_string())?;
+    }
     GLOBAL_STORE
         .set(store)
         .map_err(|_| "Mivlet's encrypted store was initialized twice.".to_string())
@@ -559,7 +612,7 @@ fn scoped_document_location(
     }
 }
 
-fn private_document_location(
+pub(crate) fn private_document_location(
     path: &Path,
     scope: &repos::scope::PrivateDataScope,
 ) -> std::result::Result<(repos::scope::DataScope, String), String> {
@@ -1085,6 +1138,116 @@ mod tests {
 
     fn vault() -> Vault {
         Vault::new(&vault::MasterKey::generate().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn account_suspension_pauses_schedules_and_invalidates_saved_permits_atomically() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let scope = repos::scope::PrivateDataScope::for_authenticated_user(
+            repos::scope::DataScope::legacy_default(),
+            "account-test",
+            Some("member-test"),
+        )
+        .unwrap();
+        store.transaction(|conn| {
+            repos::local_schedule::insert_schedule(conn, &store, &scope, &repos::local_schedule::ScheduleRow {
+                id:"schedule".into(), agent_id:"agent".into(), status:"enabled".into(), trigger_kind:"once".into(), revision:1, prompt_revision:1,
+                next_run_at:Some("2026-09-14T00:00:00Z".into()), created_at:"now".into(), updated_at:"now".into(), payload:serde_json::json!({"prompt":"RETAIN_REQUEST"})
+            })?;
+            repos::preferences::upsert(conn, &store, "document:execution-approvals.json", &serde_json::json!([{"requestId":"permit","decision":"allow","consumedAt":null}]), "now")
+        }).unwrap();
+        store
+            .suspend_bound_account("account-test", "member-test")
+            .unwrap();
+        store
+            .with_conn(|conn| {
+                let (status, revision): (String, i64) = conn.query_row(
+                    "SELECT status,revision FROM local_schedule WHERE id='schedule'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )?;
+                assert_eq!((status, revision), ("paused".into(), 2));
+                let permits =
+                    repos::preferences::get(conn, &store, "document:execution-approvals.json")?
+                        .unwrap();
+                assert_eq!(permits[0]["requestId"], "permit");
+                assert!(permits[0]["invalidatedAt"].as_str().is_some());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn account_vaults_do_not_adopt_legacy_data_or_restore_each_others_backups() {
+        let directory = TempDir::new().unwrap();
+        let legacy_path = directory.path().join(DB_FILENAME);
+        std::fs::write(&legacy_path, b"AMBIGUOUS_LEGACY_BYTES").unwrap();
+        let alpha_dir = directory.path().join("accounts/alpha");
+        let beta_dir = directory.path().join("accounts/beta");
+        std::fs::create_dir_all(&alpha_dir).unwrap();
+        std::fs::create_dir_all(&beta_dir).unwrap();
+        let alpha = Store::open(&alpha_dir.join(DB_FILENAME), vault()).unwrap();
+        let beta = Store::open(&beta_dir.join(DB_FILENAME), vault()).unwrap();
+        alpha
+            .transaction(|conn| {
+                repos::preferences::upsert(
+                    conn,
+                    &alpha,
+                    "account-canary",
+                    &serde_json::json!("alpha"),
+                    "now",
+                )
+            })
+            .unwrap();
+        assert!(beta
+            .with_conn(|conn| repos::preferences::get(conn, &beta, "account-canary"))
+            .unwrap()
+            .is_none());
+        write_backup_marker(&alpha).unwrap();
+        let backup = directory.path().join("alpha-backup.db");
+        alpha
+            .with_conn(|conn| {
+                conn.execute("VACUUM INTO ?1", [backup.to_str().unwrap()])?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(validate_backup_candidate(&backup, &alpha.vault).is_ok());
+        assert!(validate_backup_candidate(&backup, &beta.vault).is_err());
+        delete_local_store_content(&beta).unwrap();
+        assert_eq!(
+            alpha
+                .with_conn(|conn| repos::preferences::get(conn, &alpha, "account-canary"))
+                .unwrap(),
+            Some(serde_json::json!("alpha"))
+        );
+        assert_eq!(
+            std::fs::read(legacy_path).unwrap(),
+            b"AMBIGUOUS_LEGACY_BYTES"
+        );
+    }
+
+    #[test]
+    fn account_store_denies_unauthenticated_reads_and_writes_at_the_storage_boundary() {
+        let mut store = Store::open_in_memory(vault()).unwrap();
+        store.account_owned = true;
+        assert!(store.with_conn(|_| Ok(())).is_err());
+        assert!(store
+            .transaction(|conn| {
+                conn.execute("DELETE FROM workspace", [])?;
+                Ok(())
+            })
+            .is_err());
+        store.account_owned = false;
+        assert_eq!(
+            store
+                .with_conn(|conn| Ok(conn.query_row(
+                    "SELECT COUNT(*) FROM workspace",
+                    [],
+                    |row| row.get::<_, i64>(0)
+                )?))
+                .unwrap(),
+            1
+        );
     }
 
     #[test]

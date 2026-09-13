@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALLOW_PREVIEW_FALLBACKS,
   DEFAULT_IDENTITY_STATUS,
+  DEFAULT_ACCOUNT_WORKSPACE_STATUS,
   PREVIEW_ACCOUNT_WORKSPACE_STATUS,
   PREVIEW_IDENTITY_STATUS,
   defaultShellState,
@@ -24,6 +25,9 @@ describe("shell runtime defaults", () => {
       state: "disabled",
       message: "Mivlet account setup is not configured.",
       scopes: []
+    });
+    expect(DEFAULT_ACCOUNT_WORKSPACE_STATUS).toMatchObject({
+      state: "signed-out", accountBound: false, activeContextOwner: { internalUserId: "" }
     });
     expect(PREVIEW_ACCOUNT_WORKSPACE_STATUS).toMatchObject({
       state: "ready",

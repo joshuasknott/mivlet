@@ -1,14 +1,10 @@
-//! Optional hosted-account adapter.
-//!
-//! The installation-local workspace is always authoritative for conversations,
-//! provider credentials, and local execution. This module mirrors only the
-//! account inventory needed by configured hosted-computer capabilities.
+//! Account status and optional hosted inventory. Local authority is resolved
+//! from validated native identity by account_session.
 
 use std::collections::BTreeSet;
 use std::future::Future;
 use std::pin::Pin;
 
-use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{SecondsFormat, TimeZone, Utc};
 use serde::de::IntoDeserializer;
 use serde::{de, Deserialize, Deserializer, Serialize};
@@ -17,8 +13,6 @@ use serde_json::{json, Value};
 use crate::clerk_identity::{self, ConvexFunctionType, ConvexIdentityCallRequest};
 use crate::store::repos::workspace_directory as directory;
 
-const DEVICE_KEYRING_SERVICE: &str = "com.fable.workspace.account-device";
-const DEVICE_KEYRING_ENTRY: &str = "install-device-id";
 const ACCOUNT_CHANGED_ERROR: &str = "Mivlet account changed during the request. Please try again.";
 
 #[derive(Clone, Debug, Serialize)]
@@ -161,36 +155,6 @@ impl HostedAccountTransport for NativeHostedAccountTransport {
 
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
-}
-
-fn opaque_id(prefix: &str) -> Result<String, String> {
-    let mut bytes = [0_u8; 32];
-    getrandom::fill(&mut bytes)
-        .map_err(|_| "Mivlet could not create a secure installation identity.".to_string())?;
-    Ok(format!("{prefix}_{}", URL_SAFE_NO_PAD.encode(bytes)))
-}
-
-/// A stable installation identifier held in OS secure storage.
-fn ensure_install_device_id() -> Option<String> {
-    let entry = keyring::Entry::new(DEVICE_KEYRING_SERVICE, DEVICE_KEYRING_ENTRY).ok()?;
-    match entry.get_password() {
-        Ok(value) if valid_id(&value) => Some(value),
-        Ok(_) => None,
-        Err(keyring::Error::NoEntry) => {
-            let value = opaque_id("dev").ok()?;
-            entry.set_password(&value).ok()?;
-            Some(value)
-        }
-        Err(_) => None,
-    }
-}
-
-pub(crate) fn local_install_principals() -> (String, String) {
-    let install_id = ensure_install_device_id().unwrap_or_else(|| "device-local".into());
-    (
-        format!("local-user-{install_id}"),
-        format!("local-member-{install_id}"),
-    )
 }
 
 fn valid_id(value: &str) -> bool {
@@ -409,9 +373,11 @@ async fn reconcile_hosted_with_transport(
     )?;
 
     let observed_at = now();
-    let _identity_guard = transport.lock_identity_generation(expected_identity)?;
     store
         .transaction(|conn| {
+            let _identity_guard = transport
+                .lock_identity_generation(expected_identity)
+                .map_err(crate::store::StoreError::Invalid)?;
             let existing =
                 directory::list_authoritative_summaries(conn, &bootstrap.internal_user_id)?;
             for workspace in &workspaces {
@@ -473,11 +439,10 @@ async fn reconcile_hosted() -> Result<(), String> {
 fn local_status(
     identity: &clerk_identity::IdentityStatus,
 ) -> Result<AccountWorkspaceStatus, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
-    let (internal_user_id, member_id) = local_install_principals();
-    let signed_in = matches!(identity.state.as_str(), "signed-in" | "offline");
-    let (workspaces, devices) = if signed_in {
+    let ready = crate::account_session::ensure_current().is_ok();
+    let (internal_user_id, member_id) = crate::account_session::principals().unwrap_or_default();
+    let (workspaces, devices) = if ready {
+        let store = crate::store::try_global().ok_or("Account storage unavailable.")?;
         store
             .with_conn(|conn| {
                 Ok((
@@ -491,38 +456,19 @@ fn local_status(
     } else {
         (Vec::new(), Vec::new())
     };
-    let message = match identity.state.as_str() {
-        "signed-in" if !workspaces.is_empty() => {
-            "Local workspace ready. Optional hosted computer access is connected."
-        }
-        "signed-in" => {
-            "Local workspace ready. Refresh the optional account to use hosted features."
-        }
-        "offline" => "Local workspace ready. The optional account is currently offline.",
-        "expired" | "revoked" => {
-            "Local workspace ready. Recover the optional account to use hosted features."
-        }
-        "error" => "Local workspace ready. The optional account is unavailable.",
-        "disabled" => "Local workspace ready. Optional account sign-in is not configured.",
-        _ => "Local workspace ready. A Mivlet account is optional.",
-    };
     Ok(AccountWorkspaceStatus {
         configured: identity.enabled,
-        state: "ready".into(),
-        message: message.into(),
-        account_bound: true,
+        state: if ready { "ready" } else { "signed-out" }.into(),
+        message: if ready { "Your account workspace is ready. Earlier installation data is retained separately and has not been assigned to this account." } else { "Sign in to open your account workspace. Account changes restart Mivlet safely." }.into(),
+        account_bound: ready,
         workspaces,
+        devices,
         active_workspace: directory::ActiveWorkspaceSelection {
             local_workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
             fable_workspace_id: None,
-            name: "On this PC".into(),
-            source: "local".into(),
+            name: "On this PC".into(), source: "local".into(),
         },
-        active_context_owner: ActiveContextOwner {
-            internal_user_id,
-            member_id,
-        },
-        devices,
+        active_context_owner: ActiveContextOwner { internal_user_id, member_id },
     })
 }
 
@@ -543,11 +489,13 @@ pub async fn account_workspace_reconcile() -> Result<AccountWorkspaceStatus, Str
 
 #[tauri::command]
 pub async fn account_workspace_clear_session() -> Result<AccountWorkspaceStatus, String> {
-    let store = crate::store::try_global()
-        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
-    store
-        .transaction(|conn| directory::clear_current_internal_user(conn))
-        .map_err(|error| error.to_string())?;
+    if crate::account_session::ensure_current().is_ok() {
+        if let Some(store) = crate::store::try_global() {
+            store
+                .transaction(|conn| directory::clear_current_internal_user(conn))
+                .map_err(|error| error.to_string())?;
+        }
+    }
     account_workspace_status().await
 }
 
