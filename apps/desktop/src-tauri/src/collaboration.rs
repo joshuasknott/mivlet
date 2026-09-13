@@ -3,7 +3,7 @@
 mod chats;
 mod commands;
 mod context;
-mod models;
+pub(crate) mod models;
 mod schedules;
 mod work;
 pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_project};

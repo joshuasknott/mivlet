@@ -26,25 +26,25 @@ const MAX_PDF_DECOMPRESSED_STREAM_BYTES: usize = 16 * 1024 * 1024;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LocalComputerArtifact {
-    kind: String,
-    version: u32,
-    id: String,
-    computer_id: String,
-    title: String,
-    mime_type: String,
-    size_bytes: u64,
-    relative_path: String,
-    created_at: String,
+    pub(crate) kind: String,
+    pub(crate) version: u32,
+    pub(crate) id: String,
+    pub(crate) computer_id: String,
+    pub(crate) title: String,
+    pub(crate) mime_type: String,
+    pub(crate) size_bytes: u64,
+    pub(crate) relative_path: String,
+    pub(crate) created_at: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ArtifactReceipt {
-    artifact: LocalComputerArtifact,
-    workspace_id: String,
-    agent_id: String,
-    export_name: String,
-    sha256: String,
+pub(crate) struct ArtifactReceipt {
+    pub(crate) artifact: LocalComputerArtifact,
+    pub(crate) workspace_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) export_name: String,
+    pub(crate) sha256: String,
 }
 
 pub(crate) struct VerifiedImageArtifact {

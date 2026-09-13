@@ -629,6 +629,16 @@ pub(crate) fn private_document_location(
     ))
 }
 
+/// Preference-key prefix shared by every private document of one owner. Scoped
+/// search uses it to enumerate only this owner's derived-file receipts without
+/// reading other members' documents.
+pub(crate) fn private_document_key_prefix(
+    scope: &repos::scope::PrivateDataScope,
+) -> std::result::Result<String, String> {
+    let owner_digest = format!("{:x}", Sha256::digest(scope.owner_subject().as_bytes()));
+    Ok(format!("document:owner:{owner_digest}:"))
+}
+
 fn timestamp() -> String {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

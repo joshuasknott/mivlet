@@ -85,6 +85,38 @@ pub fn list(tx: &Connection, _store: &Store, scope: &DataScope) -> Result<Vec<Th
         .map_err(Into::into);
     rows
 }
+
+/// Bounded thread read for scoped search and other incremental scans. Returns
+/// the newest `limit` threads plus whether older rows were withheld.
+pub fn list_bounded(
+    tx: &Connection,
+    _store: &Store,
+    scope: &DataScope,
+    limit: usize,
+) -> Result<(Vec<ThreadRow>, bool)> {
+    scope.ensure_exists(tx)?;
+    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT ?2")?;
+    let mut rows = s
+        .query_map(
+            rusqlite::params![scope.workspace_id(), limit as i64 + 1],
+            |r| {
+                Ok(ThreadRow {
+                    id: r.get(0)?,
+                    project_id: r.get(1)?,
+                    title: r.get(2)?,
+                    lifecycle: r.get(3)?,
+                    last_sequence: r.get(4)?,
+                    last_message_id: r.get(5)?,
+                    created_at: r.get(6)?,
+                    updated_at: r.get(7)?,
+                })
+            },
+        )?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let truncated = rows.len() > limit;
+    rows.truncate(limit);
+    Ok((rows, truncated))
+}
 pub fn update(
     tx: &Connection,
     store: &Store,
