@@ -24,8 +24,10 @@ import google_ads from "../../assets/connectors/google-ads.svg?no-inline";
 import shopify from "../../assets/connectors/shopify.svg?no-inline";
 import stripe from "../../assets/connectors/stripe.svg?no-inline";
 import greenhouse from "../../assets/connectors/greenhouse.svg?no-inline";
+import atlassian_rovo from "../../assets/connectors/atlassian-rovo.svg?no-inline";
 
 export const connectorLogos: Record<string, string> = {
+  "atlassian-rovo": atlassian_rovo,
   "outlook": outlook,
   "microsoft-teams": microsoft_teams,
   "granola": granola,

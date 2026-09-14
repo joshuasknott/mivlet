@@ -10,6 +10,7 @@ pub(super) const COMPUTER: u8 = 2;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BuiltinPlugins {
+    #[serde(default)]
     pub computer: bool,
     /// Accept saved legacy settings without enabling the retired browser tool.
     #[serde(default, rename = "browser", skip_serializing)]
@@ -146,4 +147,44 @@ pub async fn builtin_plugin_prepare_computer(
         .authority_for(&workspace_id, &agent_id)?
         .begin_agent(expected_generation)?;
     ticket.finish(super::computer_snapshot(&state, workspace_id, agent_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{BuiltinPlugins, PluginAuthority, COMPUTER};
+    use std::sync::{atomic::AtomicU8, Arc, Mutex};
+
+    #[test]
+    fn accepts_a_legacy_browser_setting_without_enabling_it() {
+        let saved: BuiltinPlugins = serde_json::from_str(r#"{"computer":true,"browser":true}"#)
+            .expect("legacy plugin settings must decode");
+        assert!(saved.computer);
+        assert_eq!(
+            serde_json::to_string(&saved).expect("plugin settings must encode"),
+            r#"{"computer":true}"#
+        );
+        let legacy: BuiltinPlugins =
+            serde_json::from_str(r#"{"browser":true}"#).expect("legacy settings must decode");
+        assert!(!legacy.computer);
+    }
+
+    #[test]
+    fn defaults_to_disabled_and_never_advertises_unknown_bits() {
+        let saved = BuiltinPlugins::default();
+        assert!(!saved.computer);
+        assert_eq!(
+            serde_json::to_string(&saved).expect("plugin settings must encode"),
+            r#"{"computer":false}"#
+        );
+        let unknown = PluginAuthority {
+            bits: Arc::new(AtomicU8::new(COMPUTER | 4)),
+            update: Mutex::new(()),
+        };
+        assert!(unknown.snapshot().computer);
+        let empty = PluginAuthority {
+            bits: Arc::new(AtomicU8::new(4)),
+            update: Mutex::new(()),
+        };
+        assert!(!empty.snapshot().computer);
+    }
 }

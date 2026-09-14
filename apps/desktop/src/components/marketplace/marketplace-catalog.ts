@@ -77,12 +77,6 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
         "Search and summarize across Jira, Confluence, and more",
         "communication",
       ),
-      entry(
-        "todoist",
-        "Todoist",
-        "Plan, capture, and track tasks and projects",
-        "product",
-      ),
     ],
   },
   {

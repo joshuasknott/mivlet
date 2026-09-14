@@ -73,7 +73,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>
       <div><h2 id={titleId}>{entry.name}</h2><p>{entry.description}</p></div>
-      <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : "Not connected"}</span>
+      <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : failed || saved ? "Needs attention" : "Available"}</span>
     </div>
     <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
     <div className="connector-detail__actions">
@@ -93,7 +93,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
     {notice ? <p className="connector-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
     {!connected && preset.prerequisite ? <p className="connector-detail__notice">{preset.prerequisite}</p> : null}
     <PluginOverview id={entry.id} access={connected ? "Uses your connected account permissions" : "Chosen when you connect"} onExample={connected && !disabled && onUseConnector ? (prompt) => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" }, prompt) : undefined} />
-    <p className="connector-detail__hint">Read access is included when you connect. Actions follow your workspace approval preference.</p>
+    <p className="connector-detail__hint">The tools this connection provides become available to your agents; consequential actions still follow your workspace approval preference.</p>
     <details className="connector-guide"><summary>About this connection</summary>
       <p>Account access is managed by {entry.name}. You can disconnect at any time.</p>
       {preset.prerequisite ? <p>{preset.prerequisite}</p> : null}

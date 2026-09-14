@@ -83,8 +83,9 @@ describe("Connector Connection selection", () => {
   });
   it("reports syncing only for an active sync and keeps unhealthy connections actionable", async () => {
     const unchecked = { ...gmail, health: { ...gmail.health!, state: "unknown" as const } };
-    expect(resolveDetailedStatus(unchecked).label).toBe("Not checked");
-    expect(resolveDetailedStatus({ ...unchecked, sync: { connectorId: "gmail", workspaceId: "workspace-test", phase: "syncing", attempt: 1, itemsProcessed: 0, staleTokenRecovered: false } }).label).toBe("Syncing");
+    expect(resolveDetailedStatus(unchecked).label).toBe("Needs attention");
+    expect(resolveDetailedStatus(unchecked).className).toBe("unverified");
+    expect(resolveDetailedStatus({ ...unchecked, sync: { connectorId: "gmail", workspaceId: "workspace-test", phase: "syncing", attempt: 1, itemsProcessed: 0, staleTokenRecovered: false } }).label).toBe("Connected");
     const unhealthy = { ...gmail, health: { ...gmail.health!, state: "error" as const, summary: "Could not reach Gmail." } };
     expect(resolveDetailedStatus(unhealthy).className).toBe("failed");
     const user = userEvent.setup();
@@ -92,6 +93,15 @@ describe("Connector Connection selection", () => {
     await user.click(screen.getByRole("button", { name: "Manage Gmail from Installed" }));
     expect(screen.queryByRole("button", { name: "Use in chat" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reconnect" })).toBeEnabled();
+  });
+  it("uses the shared readiness vocabulary for every detail state", () => {
+    expect(resolveDetailedStatus(gmail).label).toBe("Connected");
+    expect(resolveDetailedStatus(github).label).toBe("Needs attention");
+    for (const status of ["expired", "revoked", "unavailable", "configured", "unconfigured", "needs-auth"] as const) {
+      const label = resolveDetailedStatus({ ...github, status }).label;
+      expect(["Available", "Needs attention"]).toContain(label);
+    }
+    expect(resolveDetailedStatus({ ...github, status: "configured" }).label).toBe("Available");
   });
   it("labels and selects the opaque Mivlet Connection instead of provider account authority", async () => {
     const user = userEvent.setup();
