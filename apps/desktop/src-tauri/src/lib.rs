@@ -60,6 +60,7 @@ mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
 mod provider_process;
+mod search;
 mod snapshot;
 mod store;
 mod token_plugins;
@@ -186,6 +187,7 @@ pub fn run() {
             conversations::conversation_delete_thread,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
+            search::search_workspace,
             approvals::list_approval_audit,
             approvals::list_approval_rules,
             approvals::record_approval_decision,

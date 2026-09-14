@@ -9,6 +9,7 @@ export * from "./domains/hosted-execution-capability.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
+export * from "./domains/search.js";
 export * from "./domains/voice.js";
 
 import type {
