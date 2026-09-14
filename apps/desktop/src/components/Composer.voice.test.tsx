@@ -54,6 +54,23 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it.each(["starting", "listening", "stopping", "reviewing", "processing"] as const)("blocks Enter during %s as well as form submission", (status) => {
+    const props = propsFor(status);
+    const view = render(<Composer {...props} />);
+    fireEvent.keyDown(view.container.querySelector('[contenteditable="true"]')!, { key: "Enter" });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("does not let Enter bypass Stop or submit whitespace", () => {
+    const props = propsFor("idle", { isWorking: true });
+    const view = render(<Composer {...props} />);
+    fireEvent.keyDown(view.container.querySelector('[contenteditable="true"]')!, { key: "Enter" });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+    view.rerender(<Composer {...props} isWorking={false} composerValue="   " />);
+    fireEvent.keyDown(view.container.querySelector('[contenteditable="true"]')!, { key: "Enter" });
+    expect(props.onSubmit).not.toHaveBeenCalled();
+  });
+
   it("inserts a callable browser mention from keyboard completion", () => {
     const props = propsFor("idle", { composerValue: "@bro", connectedConnectors: [{ id: "browser", name: "Browser", status: "enabled" }] });
     const view = render(<Composer {...props} />);

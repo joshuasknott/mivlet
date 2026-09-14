@@ -288,7 +288,9 @@ export function Composer({
               // Enter sends; Shift+Enter (and IME composition) insert a newline.
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
-                onSubmit(event as unknown as FormEvent);
+                if (!dictationBusy && hasMeaningfulContent && (!isWorking || allowQueue)) {
+                  onSubmit(event as unknown as FormEvent);
+                }
               }
             }}
             placeholder={placeholder}
