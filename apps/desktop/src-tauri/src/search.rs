@@ -262,10 +262,8 @@ pub(crate) fn run_bounded(
         scanned_truncated |= truncated;
         collected.append(&mut results);
     }
-    if selected.contains(&Domain::Project) || selected.contains(&Domain::Work) {
-        // Work archive visibility follows its project lifecycle, so read the
-        // project lifecycle even when only Work results were requested.
-        let (mut results, archived_projects, truncated) = scan_projects(
+    if selected.contains(&Domain::Project) {
+        let (mut results, truncated) = scan_projects(
             conn,
             store,
             &scope.private,
@@ -276,24 +274,21 @@ pub(crate) fn run_bounded(
             &mut summary,
         )?;
         scanned_truncated |= truncated;
-        if selected.contains(&Domain::Project) {
-            collected.append(&mut results);
-        }
-        if selected.contains(&Domain::Work) {
-            let (mut work, truncated) = scan_work(
-                conn,
-                store,
-                &scope.private,
-                &workspace_id,
-                request.include_archived,
-                &archived_projects,
-                &tokens,
-                limits,
-                &mut summary,
-            )?;
-            scanned_truncated |= truncated;
-            collected.append(&mut work);
-        }
+        collected.append(&mut results);
+    }
+    if selected.contains(&Domain::Work) {
+        let (mut work, truncated) = scan_work(
+            conn,
+            store,
+            &scope.private,
+            &workspace_id,
+            request.include_archived,
+            &tokens,
+            limits,
+            &mut summary,
+        )?;
+        scanned_truncated |= truncated;
+        collected.append(&mut work);
     }
     if selected.contains(&Domain::Conversation) {
         let (mut results, truncated) = scan_conversations(
@@ -436,17 +431,13 @@ fn scan_projects(
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
-) -> Result<(Vec<SearchResult>, BTreeSet<String>, bool)> {
+) -> Result<(Vec<SearchResult>, bool)> {
     let rows = local_project::list_projects(conn, store, scope, true, limits.max_projects)?;
     summary.projects_scanned += rows.len();
     let mut truncated = rows.len() >= limits.max_projects;
-    let mut archived_projects = BTreeSet::new();
     let mut results = Vec::new();
     for row in rows {
         let archived = row.lifecycle == "archived";
-        if archived {
-            archived_projects.insert(row.id.clone());
-        }
         let name = row
             .payload
             .get("name")
@@ -490,7 +481,7 @@ fn scan_projects(
             break;
         }
     }
-    Ok((results, archived_projects, truncated))
+    Ok((results, truncated))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -536,7 +527,18 @@ fn scan_conversations(
             truncated = true;
             break;
         }
-        let messages = message_repo::list(conn, store, scope, &thread.id)?;
+        let remaining = limits.max_messages.saturating_sub(summary.messages_scanned);
+        let mut messages = message_repo::list_limited(
+            conn,
+            store,
+            scope,
+            &thread.id,
+            remaining.saturating_add(1) as i64,
+        )?;
+        if messages.len() > remaining {
+            truncated = true;
+            messages.truncate(remaining);
+        }
         summary.messages_scanned += messages.len();
         for message in &messages {
             let (text, text_truncated) = collect_text(&message.content);
@@ -601,7 +603,6 @@ fn scan_work(
     scope: &PrivateDataScope,
     workspace_id: &str,
     include_archived: bool,
-    archived_projects: &BTreeSet<String>,
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
@@ -611,11 +612,21 @@ fn scan_work(
     summary.work_scanned += works.len();
     let mut results = Vec::new();
     for work in works {
+        // Resolve lifecycle for this exact object; a capped catalogue scan is
+        // not evidence that an omitted Project is active.
+        let project = work
+            .project_id
+            .as_deref()
+            .map(|id| local_project::get_project(conn, store, scope, id))
+            .transpose()?
+            .flatten();
         let archived = work.status == WorkStatus::Cancelled
-            || work
-                .project_id
+            || project
                 .as_ref()
-                .is_some_and(|project| archived_projects.contains(project));
+                .is_some_and(|project| project.lifecycle == "archived");
+        if work.project_id.is_some() && project.is_none() {
+            continue;
+        }
         if archived && !include_archived {
             continue;
         }
@@ -700,6 +711,10 @@ fn scan_files(
     let mut truncated = false;
 
     for file in files {
+        if summary.files_scanned >= limits.max_files {
+            truncated = true;
+            break;
+        }
         if file.deleted_at.is_some() {
             continue;
         }
@@ -758,8 +773,9 @@ fn scan_files(
         .into_iter()
         .filter(|key| key.starts_with(&receipt_prefix) && key.ends_with(".json"))
         .collect();
-    if receipt_keys.len() > limits.max_files {
-        receipt_keys.truncate(limits.max_files);
+    let remaining_files = limits.max_files.saturating_sub(summary.files_scanned);
+    if receipt_keys.len() > remaining_files {
+        receipt_keys.truncate(remaining_files);
         truncated = true;
     }
     for key in receipt_keys {
@@ -1447,6 +1463,64 @@ mod tests {
             .expect("knowledge result");
         assert_eq!(knowledge.reference.id, "file-1");
         assert_eq!(knowledge.context.project_id, None);
+    }
+
+    #[test]
+    fn message_budget_is_enforced_before_loading_a_long_thread() {
+        let store = store();
+        let scope = scope("member-a");
+        seed_thread(&store, &scope, "long", "Unrelated title", "active", TIME);
+        seed_messages(
+            &store,
+            &scope,
+            "long",
+            "long",
+            &["first", "second", "aurora"],
+            TIME,
+        );
+        let limits = SearchLimits {
+            max_messages: 2,
+            ..SearchLimits::default()
+        };
+        let mut query = request("aurora");
+        query.kinds = Some(vec!["conversation".into()]);
+        let response = store
+            .with_conn(|conn| run_bounded(conn, &store, &scope, &query, &[], &[], &limits))
+            .unwrap();
+        assert_eq!(response.scanned.messages_scanned, 2);
+        assert!(response.truncated);
+        assert!(response.results.is_empty());
+    }
+
+    #[test]
+    fn work_archive_checks_do_not_depend_on_project_scan_budget() {
+        let store = store();
+        let scope = scope("member-a");
+        seed_thread(&store, &scope, "chat", "Chat", "active", TIME);
+        seed_project(
+            &store, &scope, "archived", "Project", "", "archived", "chat", TIME,
+        );
+        seed_work(
+            &store,
+            &scope,
+            "work",
+            "aurora",
+            "Agent",
+            "chat",
+            Some("archived"),
+            "completed",
+            TIME,
+        );
+        let limits = SearchLimits {
+            max_projects: 0,
+            ..SearchLimits::default()
+        };
+        let mut query = request("aurora");
+        query.kinds = Some(vec!["work".into()]);
+        let response = store
+            .with_conn(|conn| run_bounded(conn, &store, &scope, &query, &[], &[], &limits))
+            .unwrap();
+        assert!(response.results.is_empty());
     }
 
     #[test]
