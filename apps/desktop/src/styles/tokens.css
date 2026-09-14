@@ -43,7 +43,6 @@
   --text-14: 13px;
   --text-15: 14px;
   --text-16: 15px;
-  --text-18: 17px;
   --text-20: 18px;
   --text-24: 22px;
   --text-30: 26px;
@@ -53,15 +52,11 @@
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
-  --space-6: 24px;
-  --space-8: 32px;
-  --space-12: 48px;
 
   /* Shared motion: feedback is quick; spatial transitions are slightly slower. */
   --motion-fast: 140ms;
   --motion-panel: 220ms;
   --ease-out: cubic-bezier(.2, .8, .2, 1);
-  --ease-presence: cubic-bezier(.45, 0, .55, 1);
 
   /* Geometry and elevation */
   --radius-1: 5px;
@@ -76,13 +71,7 @@
 
   /* Compatibility aliases while the component styles consume one token set. */
   --shell: var(--surface);
-  --shell-raised: var(--surface-raised);
-  --shell-soft: var(--surface-raised);
   --canvas: var(--surface);
-  --canvas-warm: var(--surface-raised);
-  --cursor-accent: var(--accent);
-  --accent-blue: var(--accent-subtle);
-  --accent-amber: var(--caution-subtle);
   --radius: var(--radius-2);
 }
 

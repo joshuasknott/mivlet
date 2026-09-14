@@ -1037,7 +1037,6 @@ pub(crate) fn capture_shares(
             match share.source.kind.as_str() {
                 "work" => {
                     collab::get::<Work>(tx, store, &scope.private, Kind::Work, &share.source.id)?
-                        .filter(|work| work.project_id.as_deref() == Some(project.id.as_str()))
                         .and_then(|work| {
                             work.outputs
                                 .last()
@@ -1075,18 +1074,22 @@ pub(crate) fn capture_shares(
                     Some((texts.join("\n"), revision))
                 }
                 "file" if require_owned_file(tx, scope, &project.id, &share.source.id).is_ok() => {
-                    crate::store::repos::knowledge_source::list_private(tx, store, &scope.private)?
-                        .into_iter()
-                        .find(|source| source.id == share.source.id)
-                        .map(|source| {
-                            (
-                                source.payload["contentPreview"]
-                                    .as_str()
-                                    .unwrap_or("")
-                                    .to_string(),
-                                source.content_fingerprint,
-                            )
-                        })
+                    crate::store::repos::knowledge_source::get_shared_source(
+                        tx,
+                        store,
+                        &scope.private,
+                        &project.id,
+                        &share.source.id,
+                    )?
+                    .map(|source| {
+                        (
+                            source.payload["contentPreview"]
+                                .as_str()
+                                .unwrap_or("")
+                                .to_string(),
+                            source.content_fingerprint,
+                        )
+                    })
                 }
                 _ => None,
             }
@@ -1099,9 +1102,10 @@ pub(crate) fn capture_shares(
                 false,
             ),
         };
+        let truncated = text.chars().count() > remaining.min(8_000);
         let text: String = text.chars().take(remaining.min(8_000)).collect();
         remaining -= text.chars().count();
-        result.push(json!({"id":share.id,"mode":share.mode,"source":share.source,"sourceRevision":revision,"recipient":share.recipient,"available":available,"text":text,"instructionAuthority":"none"}));
+        result.push(json!({"id":share.id,"mode":share.mode,"source":share.source,"sourceRevision":revision,"recipient":share.recipient,"available":available,"truncated":truncated,"text":text,"instructionAuthority":"none"}));
     }
     Ok(result)
 }

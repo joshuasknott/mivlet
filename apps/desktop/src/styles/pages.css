@@ -424,7 +424,6 @@
 }
 
 .mcp-settings__form textarea {
-  min-height: 5rem;
   resize: vertical;
 }
 
@@ -1249,10 +1248,6 @@
 .local-schedules .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
 .local-schedules .input, .local-schedules .button, .local-schedules summary { min-height: 44px; }
 .local-schedules small { overflow-wrap: anywhere; }
-.scheduled-work-notice { position: fixed; z-index: 80; top: 52px; right: 20px; width: min(380px, calc(100vw - 32px)); padding: 16px; color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 6px 24px #0002; }
-.scheduled-work-notice p { margin: 0 0 12px; overflow-wrap: anywhere; }
-.scheduled-work-notice > div { display: flex; gap: 8px; flex-wrap: wrap; }
-.scheduled-work-notice button { min-height: 44px; }
 
 .settings-modal__tab { display: flex; align-items: center; gap: 10px; font-size: 13px; border-radius: 8px; }
 .settings-modal__label { font-size: 13px; color: var(--ink-muted); padding-bottom: 20px; }

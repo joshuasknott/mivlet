@@ -44,8 +44,7 @@
   flex-wrap: wrap;
   justify-content: flex-end;
 }
-.work-status-badge,
-.work-origin-badge {
+.work-status-badge {
   border-radius: 999px;
   padding: 2px 8px;
   font-size: 11px;

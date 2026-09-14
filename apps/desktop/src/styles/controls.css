@@ -94,23 +94,13 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
-.settings-sidebar-search,
-.search-control,
-.provider-access-key-form__field input,
-.og-field input,
 .og-provider__key-panel input,
-.settings-field input,
-.connector-search-bar__input-wrapper {
+.settings-field input {
   border-color: transparent;
 }
 
-.settings-sidebar-search:focus-within,
-.search-control:focus-within,
-.provider-access-key-form__field input:focus,
-.og-field input:focus,
 .og-provider__key-panel input:focus,
-.settings-field input:focus,
-.connector-search-bar__input-wrapper:focus-within {
+.settings-field input:focus {
   border-color: transparent;
   box-shadow: none;
 }
@@ -121,7 +111,6 @@ textarea:focus-visible {
   }
 }
 
-.label-row,
 .section-heading span {
   color: var(--ink-muted);
   font-size: var(--text-12);

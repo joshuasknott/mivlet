@@ -679,7 +679,7 @@ export function ConversationPane({
             }}
           />
           {work.filter(item => !item.parentId).slice(-6).map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Work for ${item.agentName}'s request`}>
-            {item.runIds.length ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
+            {item.runIds.length && ["failed", "blocked", "awaiting-user"].includes(item.status) ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
             <WorkCard item={item} onOpen={() => onOpenWork?.(item.id)} onOpenWork={onOpenWork}
               onStop={id => service.stop(id)}
               onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}

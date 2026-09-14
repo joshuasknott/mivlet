@@ -123,6 +123,72 @@ fn integration_project_snapshots_are_recipient_scoped_and_frozen() {
     });
 }
 
+#[test]
+fn integration_shared_file_resolution_checks_project_owner_and_liveness() {
+    fixture(&store(), |ctx| {
+        use crate::store::repos::knowledge_source;
+        ctx.conn.execute("INSERT INTO project (id,workspace_id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES ('source-project',?1,'fixture',?2,?2,x'',x'')", rusqlite::params![ctx.scope.data.workspace_id(), TIME])?;
+        let source_scope = PrivateDataScope::for_authenticated_user(
+            DataScope::new(ctx.scope.data.workspace_id(), Some("source-project".into()))?,
+            &ctx.scope.internal_user_id,
+            ctx.scope.member_id.as_deref(),
+        )?;
+        knowledge_source::upsert_private(
+            ctx.conn,
+            ctx.store,
+            &source_scope,
+            json!({"id":"shared-file","contentPreview":"Project-scoped evidence","contentFingerprint":"v1"}),
+            TIME,
+        )?;
+        assert!(
+            knowledge_source::list_private(ctx.conn, ctx.store, &ctx.scope.private)?.is_empty()
+        );
+        let source = knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "source-project",
+            "shared-file",
+        )?
+        .unwrap();
+        assert_eq!(source.payload["contentPreview"], "Project-scoped evidence");
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "another-project",
+            "shared-file"
+        )?
+        .is_none());
+        let stranger = PrivateDataScope::for_authenticated_user(
+            ctx.scope.data.clone(),
+            "stranger",
+            Some("stranger"),
+        )?;
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &stranger,
+            "source-project",
+            "shared-file"
+        )?
+        .is_none());
+        ctx.conn.execute(
+            "UPDATE knowledge_source SET disabled=1 WHERE id='shared-file'",
+            [],
+        )?;
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "source-project",
+            "shared-file"
+        )?
+        .is_none());
+        Ok(())
+    });
+}
+
 fn account_scope(data: &DataScope, user: &str, member: &str) -> AuthorizedCommandScope {
     AuthorizedCommandScope {
         data: data.clone(),
@@ -1544,9 +1610,10 @@ fn roadmap_staged_attachment_verification_requires_exact_existing_bytes() {
 
 #[test]
 fn roadmap_attachment_refs_survive_restart_review_without_replay() {
-    fixture(&store(), |ctx| {
+    let store = store();
+    let refs = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
+    fixture(&store, |ctx| {
         let room = chats::open_main(ctx, "lead")?;
-        let refs = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
         commands::apply(
             ctx,
             Command::StartWork {
@@ -1568,7 +1635,12 @@ fn roadmap_attachment_refs_survive_restart_review_without_replay() {
                 attachments: Some(refs.clone()),
             },
         )?;
-        recover(ctx.store)?;
+        Ok(())
+    });
+    // Restart recovery opens its own transaction; never call it while holding
+    // the fixture transaction and its non-reentrant Store mutex.
+    recover(&store).unwrap();
+    fixture(&store, |ctx| {
         let item = ctx.item("recover")?;
         assert_eq!(item.status, WorkStatus::AwaitingUser);
         assert_eq!(item.generation, 2);

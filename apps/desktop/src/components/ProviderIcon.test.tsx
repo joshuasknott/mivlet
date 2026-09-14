@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { ProviderIcon } from "./ProviderIcon";
@@ -47,7 +48,9 @@ describe("ProviderIcon", () => {
     const { container } = render(<ProviderIcon provider="xai" />);
     const icon = container.querySelector('[data-provider-brand="grok"]');
     expect(icon).toHaveAttribute("viewBox", "0 0 512 512");
-    expect(icon?.querySelector('rect[fill="#050505"]')).toBeTruthy();
+    expect(icon?.querySelector("use")).toHaveAttribute("href", "/brand/provider-artwork.svg#xai");
+    const artwork = new DOMParser().parseFromString(readFileSync("public/brand/provider-artwork.svg", "utf8"), "image/svg+xml");
+    expect(artwork.querySelector('#xai rect[fill="#050505"]')).toBeTruthy();
   });
 
   it.each(["codex", "openai", "anthropic", "antigravity", "gemini", "custom"])(

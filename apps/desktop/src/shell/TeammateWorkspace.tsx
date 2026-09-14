@@ -62,10 +62,10 @@ import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
 import { useConversationDrag } from "../hooks/useConversationDrag";
-import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
+const ProjectContextPanel = lazy(() => import("../components/projects/ProjectContextPanel").then(module => ({ default: module.ProjectContextPanel })));
 import { SideChatList } from "../components/conversation/SideChats";
 import { createSideChat, renameSideChat, setSideChatArchived, deleteSideChat } from "../lib/conversation-service";
-import { SearchOverlay } from "../components/search/SearchOverlay";
+const SearchOverlay = lazy(() => import("../components/search/SearchOverlay").then(module => ({ default: module.SearchOverlay })));
 import { SearchFileDialog } from "../components/search/SearchFileDialog";
 import { ConversationSummaries } from "../components/memory/ConversationSummaries";
 import { navigationTargetFor } from "../lib/search/navigation";
@@ -73,7 +73,7 @@ import {
   WorkspaceRightNav,
   type NavContext,
 } from "../components/navigation/WorkspaceRightNav";
-import { WorkModeView } from "../components/navigation/WorkModeView";
+const WorkModeView = lazy(() => import("../components/navigation/WorkModeView").then(module => ({ default: module.WorkModeView })));
 import { scopedRoomIds, scopeWork } from "../components/navigation/work-order";
 import { workPresentation } from "../components/work/WorkStatusBadge";
 import "./teammate-workspace.css";
@@ -959,7 +959,7 @@ function ActiveWorkspace({
       data-theme={theme}
       data-mobile-navigation={mobileNavigation}
     >
-      <SearchOverlay workspaceId={workspaceId} open={searchOpen} onClose={() => setSearchOpen(false)}
+      {searchOpen ? <Suspense fallback={null}><SearchOverlay workspaceId={workspaceId} open={searchOpen} onClose={() => setSearchOpen(false)}
         enabled={!runtime.accountWorkspacePending}
         dataRevision={JSON.stringify([state.data, runtime.agents, runtime.workspaceKnowledgeSources, projects.projects])}
         onOpenResult={result => {
@@ -978,7 +978,7 @@ function ActiveWorkspace({
             const source = target.type === "knowledge-file" ? runtime.workspaceKnowledgeSources.find(source => source.id === target.sourceId && !source.deletedAt && !source.disabled) : undefined;
             setSearchFile({ target, title: result.title, text: source?.contentPreview ?? (target.type === "knowledge-file" ? "This source has no text preview." : undefined), onClose: () => setSearchFile(null) });
           }
-        }} />
+        }} /></Suspense> : null}
       {searchFile ? <SearchFileDialog key={JSON.stringify(searchFile.target)} {...searchFile} /> : null}
       <AgentSidebar
         onSearch={() => setSearchOpen(true)}
@@ -1144,7 +1144,7 @@ function ActiveWorkspace({
             />
           </Suspense>
         ) : mode === "work" ? (
-          <WorkModeView
+          <Suspense fallback={<p role="status">Loading work…</p>}><WorkModeView
             project={navProject}
             agent={navAgent}
             work={navWork}
@@ -1187,7 +1187,7 @@ function ActiveWorkspace({
               })
             }
             onOpenPlugins={() => setMarketplace({})}
-          />
+          /></Suspense>
         ) : (
           <ConversationGrid
             layout={layout}
@@ -1410,7 +1410,7 @@ function ActiveWorkspace({
         activity={navSession?.state?.activity}
         projectDetails={
           navProject && navProjectRoom ? (
-            <ProjectContextPanel
+            <Suspense fallback={null}><ProjectContextPanel
               key={navProject.id}
               project={navProject}
               room={navProjectRoom}
@@ -1440,7 +1440,7 @@ function ActiveWorkspace({
                 projects.setProjects(current => current.map(item => item.id === updated.id ? updated : item));
                 await service.refresh();
               }}
-            />
+            /></Suspense>
           ) : undefined
         }
       />

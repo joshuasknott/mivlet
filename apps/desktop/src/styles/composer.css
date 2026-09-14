@@ -387,8 +387,7 @@
   background: var(--line);
 }
 
-.composer-add-menu button,
-.composer-menu-item {
+.composer-add-menu button {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;

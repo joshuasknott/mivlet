@@ -42,6 +42,7 @@ import { AgentAvatarPreview } from "./AgentAvatarPreview";
 import { VoiceConversationPreview } from "./VoiceConversationPreview";
 import { RoadmapPreview } from "./RoadmapPreview";
 import "../styles.css";
+import "./legacy-preview.css";
 
 if (!import.meta.env.DEV)
   throw new Error("The component preview is available only in development.");

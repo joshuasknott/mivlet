@@ -10,14 +10,8 @@
     min-height: 100dvh;
   }
 
-  .workspace-center {
-    width: min(100% - 32px, 760px);
-  }
-
   .context-panel--split,
-  .connector-search,
-  .settings-grid,
-  .settings-form-grid {
+  .connector-search {
     grid-template-columns: 1fr;
   }
 
@@ -79,11 +73,6 @@
     width: 100%;
     min-height: 100dvh;
     overflow-x: hidden;
-  }
-
-  .workspace-center {
-    width: min(100% - 28px, 820px);
-    margin-top: 20px;
   }
 
   .theme-toggle {
@@ -244,13 +233,10 @@
 
 @media (max-width: 700px) {
   .desktop-frame--agents { display: grid; overflow: hidden; }
-  .desktop-frame--agents .composer-preferences-anchor, .desktop-frame--agents .composer-control-anchor:not(.composer-control-anchor--model) { position: static; }
+  .desktop-frame--agents .composer-control-anchor:not(.composer-control-anchor--model) { position: static; }
   .desktop-frame--agents .composer { position: relative; }
-  .desktop-frame--agents .composer-preferences { position: absolute; inset: auto 0 calc(100% + 8px); width: auto; max-height: min(65dvh, 500px); }
-  .desktop-frame--agents .composer-preferences .composer-menu { position: static; inset: auto; width: 100%; }
   .desktop-frame--agents .composer-add-menu { position: absolute; inset: auto 0 calc(100% + 8px); width: auto; }
   .desktop-frame--agents .composer-add-menu button { min-width: 0; }
-  .desktop-frame--agents .composer-preferences > header button { width: 44px; height: 44px; }
 }
 
 @media (max-width: 650px) {

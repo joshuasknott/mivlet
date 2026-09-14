@@ -693,9 +693,6 @@
   }
 }
 @media (max-width: 850px) {
-  .teammates-workspace--history {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
   .teammates-workspace--history > .agent-sidebar {
     display: none;
   }
@@ -908,22 +905,6 @@
   min-height: 46px;
   align-items: center;
 }
-.group-avatar {
-  display: grid;
-  flex: 0 0 34px;
-  width: 34px;
-  height: 34px;
-  align-items: center;
-  justify-items: center;
-  gap: 0;
-  overflow: hidden;
-}
-.group-avatar .agent-avatar {
-  width: 100% !important;
-  height: auto !important;
-  aspect-ratio: 1;
-  min-width: 0;
-}
 .teammates-workspace .agent-sidebar--collapsed .project-sidebar-row > strong,
 .teammates-workspace
   .agent-sidebar--collapsed
@@ -960,12 +941,9 @@
 }
 @container conversation-pane (max-width: 480px) {
   .teammates-workspace .composer-controls {
-    display: flex;
-    flex-wrap: wrap;
     gap: 6px;
   }
   .teammates-workspace .composer-control-group--end {
-    flex: 1;
     justify-content: flex-end;
   }
   .team-conversation-header {

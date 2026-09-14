@@ -86,11 +86,6 @@
   color: var(--ink-muted);
   font-size: var(--text-11);
 }
-.project-sidebar-empty {
-  margin: 12px 10px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
 .agent-sidebar__section-label {
   flex: 0 0 auto;
   min-height: 31px;
