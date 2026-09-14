@@ -37,6 +37,16 @@ const provider = (id: string): BackendProvider => ({
 });
 
 describe("Project Team route readiness", () => {
+  it("does not advertise an unavailable model on a connected provider as ready", () => {
+    const readiness = teamRouteReadiness(
+      ["agent"],
+      [agent("agent", "Agent", "openai::gpt")],
+      [{ ...model("openai", "gpt"), available: false }],
+      [provider("openai")],
+    );
+    expect(readiness[0].state).toBe("model-missing");
+  });
+
   it("reports ready, disconnected, unsupported and missing routes accurately", () => {
     const readiness = teamRouteReadiness(
       ["ready", "offline", "owned", "gone"],

@@ -51,7 +51,7 @@ export function teamRouteReadiness(
         prerequisite: `Choose a model for ${agent.name}.`,
       };
     const model = resolveProviderModelOption(models, agent.modelId);
-    if (!model)
+    if (!model || !model.available)
       return {
         agentId,
         name: agent.name,
