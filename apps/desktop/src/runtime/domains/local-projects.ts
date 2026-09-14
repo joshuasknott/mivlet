@@ -1,8 +1,11 @@
 import type {
+  AddProjectContextShareInput,
   BindLocalProjectRunAuthorInput,
   CreateLocalProjectInput,
   LocalProject,
   LocalProjectRunAuthor,
+  MigrateLegacyGroupInput,
+  RemoveProjectContextShareInput,
   UpdateLocalProjectInput,
 } from "@fable/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
@@ -40,6 +43,17 @@ export const archiveLocalProject = (request: {
   id: string;
   expectedRevision: number;
 }) => invoke<LocalProject>("local_project_archive", request);
+
+export const addLocalProjectShare = (request: AddProjectContextShareInput) =>
+  invoke<LocalProject>("local_project_share_add", request);
+
+export const removeLocalProjectShare = (
+  request: RemoveProjectContextShareInput,
+) => invoke<LocalProject>("local_project_share_remove", request);
+
+/** Converts a legacy standalone group into a project owning its existing thread. */
+export const migrateLegacyGroup = (request: MigrateLegacyGroupInput) =>
+  invoke<LocalProject>("local_project_migrate_group", request);
 
 export const bindLocalProjectRunAuthor = (
   request: BindLocalProjectRunAuthorInput,

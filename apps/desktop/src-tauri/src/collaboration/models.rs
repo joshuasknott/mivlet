@@ -319,7 +319,8 @@ pub enum Command {
         title: String,
         kind: String,
         participant_ids: Vec<String>,
-        facilitator_id: String,
+        #[serde(default)]
+        facilitator_id: Option<String>,
         project_id: Option<String>,
     },
     RenameConversation {
@@ -341,7 +342,8 @@ pub enum Command {
         expected_revision: u32,
         title: String,
         participant_ids: Vec<String>,
-        facilitator_id: String,
+        #[serde(default)]
+        facilitator_id: Option<String>,
         share_history: bool,
     },
     PlaceConversation {

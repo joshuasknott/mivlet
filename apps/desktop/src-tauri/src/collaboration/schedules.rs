@@ -64,7 +64,7 @@ pub(crate) fn bind_schedule(
         title: "Scheduled project research".into(),
         project_id: Some(project.into()),
         facilitator_id: Some(agent.into()),
-        participants: participants(profiles, &team.participant_ids, agent)?,
+        participants: participants(profiles, &team.participant_ids, Some(agent))?,
         revision: 1,
         generation: 1,
         archived: false,

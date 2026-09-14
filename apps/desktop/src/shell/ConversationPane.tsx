@@ -33,6 +33,7 @@ import { agentPresence } from "../lib/agent-presence";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { runWorkspaceVoice } from "../lib/workspace-voice";
+import { selectResponder } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { WorkRecovery } from "../components/projects/WorkItems";
@@ -90,6 +91,7 @@ export function ConversationPane({
   onArtifact,
   onEdit,
   onPlace,
+  onMigrate,
   onNew,
   onSchedules,
   onComputer,
@@ -110,6 +112,7 @@ export function ConversationPane({
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
   onPlace: () => void;
+  onMigrate: () => void;
   onNew: (draft?: string) => Promise<string | void>;
   onSchedules: () => void;
   onComputer: (agentId: string) => void;
@@ -336,15 +339,34 @@ export function ConversationPane({
         status: connector.status,
       })),
   ];
+  const selection = selectResponder(composer.text, room.participants, {
+    selectedRecipientId: recipientId,
+    coordinatorId: room.facilitatorId,
+  });
+  const mentions = selection?.source === "mention" ? selection : null;
+  const responder = selection
+    ? runtime.agents.find((agent) => agent.id === selection.responderId)
+    : undefined;
   const send = async () => {
     const prompt = composerSubmissionText(composer.text, composer.attachments);
     if (!composer.ready || !prompt || submission.current || voice.isBusy)
       return;
     if (
-      !profile ||
-      !room.participants.some((member) => member.agentId === profile.id)
+      recipient === "discussion" &&
+      !room.facilitatorId
     ) {
-      setError("Choose an available participant before sending.");
+      setError("Choose a coordinator before requesting a team discussion.");
+      return;
+    }
+    if (
+      !responder ||
+      !room.participants.some((member) => member.agentId === responder.id)
+    ) {
+      setError(
+        mentions
+          ? "That mentioned participant is unavailable. Pick a current participant."
+          : "Choose an available participant before sending.",
+      );
       return;
     }
     if (
@@ -381,7 +403,7 @@ export function ConversationPane({
       }
       await service.submit(
         room.id,
-        profile.id,
+        responder.id,
         prompt,
         recipient === "discussion",
         composer.attachments,
@@ -586,6 +608,11 @@ export function ConversationPane({
                   Place in project…
                 </button>
               ) : null}
+              {!project && room.kind === "group" ? (
+                <button type="button" onClick={onMigrate}>
+                  Convert to project…
+                </button>
+              ) : null}
               <button type="button" onClick={onSchedules}>
                 Schedules
               </button>
@@ -687,6 +714,25 @@ export function ConversationPane({
               {error || composer.error}
             </p>
           ) : null}
+          {mentions ? (
+            <p className="conversation-attention" role="status">
+              Addressing{" "}
+              {runtime.agents.find(
+                (agent) => agent.id === mentions.responderId,
+              )?.name ?? "the mentioned participant"}
+              {mentions.mentionedIds.length > 1
+                ? ` · also mentioned: ${mentions.mentionedIds
+                    .slice(1)
+                    .map(
+                      (id) =>
+                        runtime.agents.find((agent) => agent.id === id)?.name ??
+                        id,
+                    )
+                    .join(", ")}`
+                : ""}
+              . Each reply stays attributed to its author.
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="conversation-pane-composer">
@@ -757,7 +803,9 @@ export function ConversationPane({
           }}
           placeholder={
             room.kind === "group"
-              ? "Message the group…"
+              ? project
+                ? "Message the project…"
+                : "Message the group…"
               : `Message ${displayAgent.name}…`
           }
           inThread
@@ -790,12 +838,23 @@ export function ConversationPane({
                     id: member.agentId,
                     name:
                       member.name +
-                      (member.agentId === room.facilitatorId ? " · Lead" : ""),
+                      (member.agentId === room.facilitatorId
+                        ? " · Coordinator"
+                        : ""),
                     disabled: !runtime.agents.some(
                       (agent) => agent.id === member.agentId,
                     ),
                   })),
-                  { id: "discussion", name: "Team discussion", description: "The lead invites relevant contributions; each teammate uses its own model." },
+                  ...(room.facilitatorId
+                    ? [
+                        {
+                          id: "discussion",
+                          name: "Team discussion",
+                          description:
+                            "The coordinator invites relevant contributions; each teammate uses its own model.",
+                        },
+                      ]
+                    : []),
                 ]}
               />
             ) : undefined

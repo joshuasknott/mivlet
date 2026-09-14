@@ -55,7 +55,8 @@ export function RecipientPicker({
         }}
       >
         <span>
-          {options.find((option) => option.id === value)?.name ?? "Choose lead"}
+          {options.find((option) => option.id === value)?.name ??
+            "Choose participant"}
         </span>
         <CaretDown size={11} />
       </button>
