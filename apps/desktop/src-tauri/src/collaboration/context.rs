@@ -168,7 +168,9 @@ pub(super) fn capture(
         .map(|state| crate::context_summaries::live_summaries(&state))
         .unwrap_or_default()
         .into_iter()
-        .filter(|summary| summary_scope_allows(&summary.scope, room))
+        .filter(|summary| {
+            summary.thread_id == room.id && summary_scope_allows(&summary.scope, room)
+        })
         .collect();
     derived_summaries.sort_by(|left, right| {
         right

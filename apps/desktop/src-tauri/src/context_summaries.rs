@@ -295,23 +295,39 @@ fn invalidate_state(
 fn upsert_state(
     state: &mut ContextSummaryState,
     record: ContextSummaryRecord,
-) -> ContextSummaryRecord {
-    let mut replaced = false;
+) -> Result<ContextSummaryRecord, String> {
     for existing in &mut state.summaries {
-        if existing.id == record.id && existing.thread_id == record.thread_id {
+        if existing.id == record.id {
+            if existing.thread_id != record.thread_id || existing.scope != record.scope {
+                return Err("A context summary cannot change its owner.".into());
+            }
+            if existing.stale_at.is_some() {
+                return Err(
+                    "This context summary was invalidated. Reload before compacting.".into(),
+                );
+            }
+            if existing.revision.checked_add(1) != Some(record.revision)
+                || record.through_sequence < existing.through_sequence
+                || record.from_sequence != existing.from_sequence
+            {
+                return Err("This context summary changed. Reload before compacting.".into());
+            }
             let created_at = existing.created_at.clone();
             *existing = ContextSummaryRecord {
                 created_at,
                 ..record.clone()
             };
-            replaced = true;
-            break;
+            return Ok(existing.clone());
         }
     }
-    if !replaced {
-        state.summaries.push(record.clone());
+    if state.summaries.len() >= MAX_CONTEXT_SUMMARIES {
+        return Err("Context summary storage is full. Existing summaries were preserved.".into());
     }
-    record
+    if record.revision != 1 {
+        return Err("A new context summary must start at revision one.".into());
+    }
+    state.summaries.push(record.clone());
+    Ok(record)
 }
 
 #[cfg(test)]
@@ -400,7 +416,7 @@ pub fn save_context_summary(
         scope,
         |existing: Option<ContextSummaryState>| {
             let mut state = canonicalize_state(existing.unwrap_or_default(), scope)?;
-            let saved = upsert_state(&mut state, normalize_summary(summary, scope)?);
+            let saved = upsert_state(&mut state, normalize_summary(summary, scope)?)?;
             Ok((Some(state), saved))
         },
     )
@@ -548,11 +564,30 @@ mod tests {
         let mut next = record("summary-1", "thread-1", 8);
         next.revision = 2;
         next.created_at = "2026-09-09T00:00:00Z".into();
-        let saved = upsert_state(&mut state, next);
+        let saved = upsert_state(&mut state, next).unwrap();
         assert_eq!(state.summaries.len(), 1);
         assert_eq!(saved.revision, 2);
         assert_eq!(state.summaries[0].revision, 2);
         assert_eq!(state.summaries[0].created_at, "2026-09-01T00:00:00Z");
+    }
+
+    #[test]
+    fn upsert_rejects_stale_writers_and_cannot_resurrect_invalidated_text() {
+        let original = record("summary-1", "thread-1", 4);
+        let mut state = ContextSummaryState {
+            summaries: vec![original.clone()],
+        };
+        assert!(upsert_state(&mut state, original.clone()).is_err());
+        let mut next = original.clone();
+        next.revision = 2;
+        next.through_sequence = 8;
+        state.summaries[0].stale_at = Some("invalidated".into());
+        assert!(upsert_state(&mut state, next.clone()).is_err());
+        assert!(live_summaries(&state).is_empty());
+        state.summaries[0].stale_at = None;
+        next.thread_id = "another-thread".into();
+        assert!(upsert_state(&mut state, next).is_err());
+        assert_eq!(state.summaries[0], original);
     }
 
     #[test]
