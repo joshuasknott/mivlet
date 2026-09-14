@@ -1,6 +1,5 @@
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
-import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { WorkspaceMenu } from "./WorkspaceMenu";
 import type { FableAgentProfile } from "@fable/protocol";
 import { ProfileAgentAvatar } from "./agent-icons";
@@ -16,8 +15,6 @@ export function AgentWorkspaceHeader({
   activity,
   computerActive = false,
   onSchedules,
-  onVoice,
-  voiceOpen = false,
   activityKey,
 }: {
   agent: FableAgentProfile;
@@ -29,8 +26,6 @@ export function AgentWorkspaceHeader({
   activity?: string;
   computerActive?: boolean;
   onSchedules?: () => void;
-  onVoice?: () => void;
-  voiceOpen?: boolean;
   activityKey?: string;
 }) {
   return (
@@ -44,7 +39,6 @@ export function AgentWorkspaceHeader({
         </div>
       </div>
       <div className="agent-workspace-header__actions">
-        {onVoice ? <button type="button" data-voice-toggle className={voiceOpen ? "is-active" : ""} onClick={onVoice} aria-label={voiceOpen ? "End voice conversation" : "Start voice conversation"} aria-pressed={voiceOpen} title="Voice conversation"><Waveform size={19} /></button> : null}
         {onSchedules ? <WorkspaceMenu onSchedules={onSchedules} /> : null}
         <button
           type="button"

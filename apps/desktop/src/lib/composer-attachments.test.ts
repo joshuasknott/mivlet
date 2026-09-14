@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { MAX_LOCAL_FILE_BYTES } from "@fable/connectors/local-files";
 import {
+  composerSubmissionText,
   prepareReadableComposerAttachment,
   projectAttachmentRetryError,
 } from "./composer-attachments";
@@ -216,5 +217,29 @@ describe("readable composer attachments", () => {
         },
       ]),
     ).toContain("Reattach the original files");
+  });
+});
+
+describe("composer submission text", () => {
+  const attachment = {
+    id: "attachment-1",
+    name: "brief.txt",
+    type: "text/plain",
+    sizeBytes: 12,
+  };
+  it("trims typed text and leaves an empty draft without attachments empty", () => {
+    expect(composerSubmissionText("  typed request  ", [])).toBe("typed request");
+    expect(composerSubmissionText("   ", [])).toBe("");
+  });
+  it("supplies a minimal request for attachment-only sends", () => {
+    expect(composerSubmissionText("", [attachment])).toBe(
+      "Please review the attached file.",
+    );
+    expect(composerSubmissionText("", [attachment, { ...attachment, id: "attachment-2" }])).toBe(
+      "Please review the attached files.",
+    );
+    expect(composerSubmissionText("  ", [attachment])).toBe(
+      "Please review the attached file.",
+    );
   });
 });

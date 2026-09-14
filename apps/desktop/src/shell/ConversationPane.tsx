@@ -19,7 +19,7 @@ import {
 } from "../lib/workspace-execution";
 import { insertDictation } from "../lib/insert-dictation";
 import { prepareComposerImage } from "../lib/composer-images";
-import { prepareReadableComposerAttachment } from "../lib/composer-attachments";
+import { prepareReadableComposerAttachment, composerSubmissionText } from "../lib/composer-attachments";
 import { builtinPluginMentions } from "../lib/builtin-plugins";
 import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerModelsFor } from "./composer-models";
@@ -32,7 +32,6 @@ import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
-import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { runWorkspaceVoice } from "../lib/workspace-voice";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
@@ -146,8 +145,7 @@ export function ConversationPane({
   const [pending, setPending] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("ready");
-  const voiceToggle = useRef<HTMLButtonElement>(null);
-  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => voiceToggle.current?.focus()); };
+  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => composerRef.current?.focus()); };
   useEffect(() => { setVoiceOpen(false); setVoicePhase("ready"); }, [active, room.id, recipientId, profile?.modelId, profile?.reasoningEffort]);
   const optionsRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -232,6 +230,15 @@ export function ConversationPane({
     [runtime.modelOptions],
   );
   const model = models.find((model) => model.id === profile?.modelId);
+  const voiceUnavailable =
+    !runtime.backendProviders.some(
+      (provider) =>
+        provider.id === "openai" && provider.authState === "connected",
+    )
+      ? "Connect an OpenAI API account for transcription and speech."
+      : !model?.available
+        ? "Connect this agent's model provider before starting voice."
+        : undefined;
   const approvals = active
     ? runtime.openApprovals.filter((approval) =>
         sessions.some((session) => session.approvalIds.has(approval.id)),
@@ -271,7 +278,7 @@ export function ConversationPane({
       })),
   ];
   const send = async () => {
-    const prompt = composer.text.trim();
+    const prompt = composerSubmissionText(composer.text, composer.attachments);
     if (!composer.ready || !prompt || submission.current || voice.isBusy)
       return;
     if (
@@ -482,11 +489,6 @@ export function ConversationPane({
           </span>
         </div>
         <div className="team-conversation-actions">
-          <button type="button" ref={voiceToggle} aria-label={`Talk to ${displayAgent.name}`} aria-pressed={voiceOpen}
-            disabled={!active || (!voiceOpen && (running.length > 0 || pending || !profile))}
-            onClick={() => { if (voiceOpen) closeVoice(); else { voice.cancel(); setVoiceOpen(true); } }}>
-            <Waveform size={18} />
-          </button>
           <button
             type="button"
             aria-label={`Open ${displayAgent.name}'s computer`}
@@ -528,7 +530,7 @@ export function ConversationPane({
         key={`${service.workspaceId}:${room.id}:${recipientId}:${profile?.modelId}`}
         agent={displayAgent} modelLabel={model?.label ?? "Choose model"}
         scope={{ workspaceId: service.workspaceId, agentId: recipientId, threadId: room.id }}
-        unavailable={!runtime.backendProviders.some(provider => provider.id === "openai" && provider.authState === "connected") ? "Connect an OpenAI API account for transcription and speech." : !model?.available ? "Connect this agent's model provider before starting voice." : undefined}
+        unavailable={voiceUnavailable}
         approvals={approvalPanel} onPhase={setVoicePhase} onClose={closeVoice}
         onOpenProviders={() => { closeVoice(); onProviders(); }}
         onPrompt={(text, control) => runWorkspaceVoice(service, text, control)}
@@ -648,6 +650,21 @@ export function ConversationPane({
           onStopVoice={() => void voice.stop()}
           onCancelVoice={voice.cancel}
           onDismissVoice={voice.dismiss}
+          onStartVoiceChat={() => {
+            voice.reset();
+            setVoiceOpen(true);
+          }}
+          voiceChatDisabled={!active || pending || !profile}
+          voiceChatDescription={
+            !active
+              ? "Open this conversation to start voice chat."
+              : pending
+                ? "Wait for this message to finish sending."
+                : !profile
+                  ? "Choose an available participant before starting voice."
+                  : voiceUnavailable ??
+                    `Start voice chat with ${displayAgent.name}. Your draft stays in this conversation.`
+          }
           onAttach={() => fileInput.current?.click()}
           onImportRepository={() => void importRepository()}
           addMenuOpen={addOpen}

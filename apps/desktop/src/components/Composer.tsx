@@ -4,6 +4,7 @@ import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
+import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
@@ -33,6 +34,9 @@ export function Composer({
   onStopVoice,
   onCancelVoice,
   onDismissVoice,
+  onStartVoiceChat,
+  voiceChatDisabled = false,
+  voiceChatDescription,
   onAttach,
   onImportRepository,
   addMenuOpen,
@@ -74,6 +78,9 @@ export function Composer({
   onStopVoice: () => void;
   onCancelVoice: () => void;
   onDismissVoice: () => void;
+  onStartVoiceChat?: () => void;
+  voiceChatDisabled?: boolean;
+  voiceChatDescription?: string;
   onAttach: () => void;
   onImportRepository?: () => void;
   addMenuOpen: boolean;
@@ -154,7 +161,11 @@ export function Composer({
   const showVoiceFeedback =
     voiceStatus !== "idle" && voiceStatus !== "disabled" && voiceStatus !== "unsupported";
   const hasComposerText = composerValue.trim().length > 0;
-  const showStop = isWorking && (!allowQueue || !hasComposerText);
+  const hasComposerAttachments = attachments.length > 0;
+  const hasMeaningfulContent = hasComposerText || hasComposerAttachments;
+  const dictationBusy = voiceListening || voiceTransitioning;
+  const showStop = isWorking && (!allowQueue || !hasMeaningfulContent);
+  const voiceChatLabel = voiceChatDescription ?? "Start voice chat";
   const currentToken = useMemo(() => {
     const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
     if (!match) return null;
@@ -277,7 +288,9 @@ export function Composer({
               // Enter sends; Shift+Enter (and IME composition) insert a newline.
               if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault();
-                onSubmit(event as unknown as FormEvent);
+                if (!dictationBusy && hasMeaningfulContent && (!isWorking || allowQueue)) {
+                  onSubmit(event as unknown as FormEvent);
+                }
               }
             }}
             placeholder={placeholder}
@@ -349,7 +362,7 @@ export function Composer({
               label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
               onSelectEffort={onSelectReasoningEffort} open={modelOpen}
               onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
-            {!isWorking && (!hasComposerText || voiceListening || voiceTransitioning) ? (
+            {!isWorking ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
                   <button
@@ -387,19 +400,42 @@ export function Composer({
                 </button>
               </div>
             ) : null}
-              {isWorking || (hasComposerText && !voiceListening && !voiceTransitioning) ? <button
-                className={`send-button${showStop ? " send-button--stop" : ""}`}
-                type={showStop ? "button" : "submit"}
-                aria-label={showStop ? "Stop response" : "Send prompt"}
-                onClick={showStop ? onStop : undefined}
-                disabled={!showStop && (!hasComposerText || voiceListening || voiceTransitioning)}
-              >
-                {showStop ? (
-                  <Stop size={14} weight="fill" />
-                ) : (
-                  <PaperPlaneTilt size={20} />
-                )}
-              </button> : null}
+            {!dictationBusy && isWorking ? <button
+              className={`send-button${showStop ? " send-button--stop" : ""}`}
+              type={showStop ? "button" : "submit"}
+              aria-label={showStop ? "Stop response" : "Send prompt"}
+              onClick={showStop ? onStop : undefined}
+            >
+              {showStop ? (
+                <Stop size={14} weight="fill" />
+              ) : (
+                <PaperPlaneTilt size={20} />
+              )}
+            </button> : null}
+            {!dictationBusy && !isWorking && hasMeaningfulContent ? <button
+              className="send-button"
+              type="submit"
+              aria-label="Send prompt"
+            >
+              <PaperPlaneTilt size={20} />
+            </button> : null}
+            {!dictationBusy && !isWorking && !hasMeaningfulContent && onStartVoiceChat ? (
+              <div className="voice-action voice-action--chat">
+                <button
+                  type="button"
+                  className="composer-chip voice-chat-action"
+                  onClick={onStartVoiceChat}
+                  aria-label="Start voice chat"
+                  disabled={voiceChatDisabled}
+                  title={voiceChatLabel}
+                >
+                  <Waveform size={19} />
+                </button>
+                <span className="voice-tooltip" role="tooltip" aria-hidden="true">
+                  {voiceChatLabel}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
 

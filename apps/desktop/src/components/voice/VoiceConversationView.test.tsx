@@ -27,6 +27,12 @@ describe("voice call controls", () => {
     await userEvent.click(screen.getByRole("button", { name: "Show captions" })); expect(screen.queryByText("Hi there")).not.toBeInTheDocument();
     await userEvent.keyboard("{Escape}"); expect(p.onClose).toHaveBeenCalledOnce();
   });
+  it("resumes the same conversation from the ended state", async () => {
+    const p = props(); render(<VoiceConversationView {...p} state={{ ...p.state, phase: "ended", startedAt: Date.now() - 1_000 }} />);
+    const reconnect = screen.getByRole("button", { name: "Reconnect voice" });
+    expect(reconnect).toHaveFocus();
+    await userEvent.click(reconnect); expect(p.onStart).toHaveBeenCalledOnce();
+  });
   it("keeps actual approval controls visible within the call", () => {
     const p = props(); const { container } = render(<VoiceConversationView {...p} state={{ ...p.state, phase: "thinking" }} approvals={<button>Approve exact action</button>} />);
     expect(screen.getByText("Your approval is needed")).toBeInTheDocument();

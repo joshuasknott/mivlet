@@ -8,8 +8,9 @@ silently submit its attachments.
 
 ## Request flow
 
-1. The waveform button opens the voice view. Start voice explicitly authorizes
-   automatic transcription and AI-generated speech for this call, using the
+1. The composer's voice action opens the voice view for the active
+   conversation. Start voice explicitly authorizes automatic transcription and
+   AI-generated speech for this call, using the
    user's separately connected, metered OpenAI API account.
 2. A bundled AudioWorklet captures mono microphone frames. Local turn detection
    keeps 350 ms of pre-roll, recognizes speech onset, and ends a turn after
@@ -83,7 +84,8 @@ and [AudioWorkletNode](https://developer.mozilla.org/en-US/docs/Web/API/AudioWor
 
 ## Workspace integration
 
-ConversationPane opens the call in its active view. The workspace execution
+ConversationPane opens the call in its active conversation; the composer action
+replaces the former separate pane-header voice button. The workspace execution
 service owns each voice exchange and the headless ExecutionWorker forwards
 assistant text only after its durable checkpoint. Voice never submits the draft
 or its attachments. Leaving the view, changing recipient/model, or ending the
