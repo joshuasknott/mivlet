@@ -35,8 +35,8 @@ The expected result is the request: nothing in the record overwrites
 and shared through subscription snapshots. `ExecutionWorker` mounts once per
 admitted session at the workspace root, never inside a tab. Closing views,
 switching panes, or closing every tab of a conversation neither stops nor
-detaches Work; it stays discoverable and cancellable from the History details
-and the reusable Work components. View actions only change view state.
+detaches Work; it stays discoverable and cancellable from Work mode and the
+contextual Right Nav. View actions only change view state.
 
 Unrelated Chat never enters a running request: the transcript is frozen at
 admission, later messages are excluded from captured context and run
@@ -50,15 +50,16 @@ rejected (`ensure_run_current`, `work::current`).
 | `queued` | Queued | Waiting for an available execution slot |
 | `running` | Working | A bound provider attempt is executing |
 | `waiting` | Waiting | Delegated dependencies are not finished |
-| `blocked` | Blocked | A dependency is unresolved |
-| `awaiting-approval` | Awaiting approval | A consequential tool waits on the exact approval gate |
-| `awaiting-user` | Needs review | Interrupted/steered/uncertain; saved evidence must be reviewed |
+| `blocked` | Waiting | A dependency is unresolved |
+| `awaiting-approval` | Working | Awaiting approval appears as secondary detail; the exact approval gate remains required |
+| `awaiting-user` | Waiting | Needs outcome review appears as secondary detail; saved evidence must be reviewed |
 | `completed` | Completed | A saved provider result and assistant message exist |
 | `failed` | Failed | Terminal without a verified result; never authorizes retry alone |
 | `cancelled` | Stopped | Stopped by the user; completed external actions are not undone |
 
-Schedule-derived Work carries `origin: "schedule"` and is labelled Scheduled.
-The label is provenance, not a new execution mode: schedule occurrences
+Schedule-derived Work carries `origin: "schedule"` and is labelled Scheduled
+only while queued. Running and terminal occurrences show their actual state,
+with schedule provenance as secondary detail. Schedule occurrences
 integrate into the unified Work list and details without claiming general
 scheduled execution.
 
@@ -105,8 +106,9 @@ Project schedule occurrences become read-only Work through
 occurrences without a project never enter the Work surface.
 
 Saved results can be promoted into Memory through the baseline Memory
-interface (`save_memory_state`) with an explicit user action, a `work`-scoped
-record and run provenance. P4 creates no separate outcome store; P6 owns
+interface (`save_memory_state`) with explicit user-confirmed conclusion text,
+an owning Agent or Project scope and run provenance. Only the new record is
+submitted, preserving concurrent corrections and forget tombstones. P4 creates no separate outcome store; P6 owns
 Memory internals and capture inheritance.
 
 ## Reusable Work components
@@ -122,10 +124,9 @@ Memory internals and capture inheritance.
   promote-to-memory, and continue-with-reconciliation.
 
 Components expose narrow callbacks (`onOpen`, `onStop`, `onContinue`,
-`onSteer`, `onPromote`); the shell routes them. `components/projects/WorkItems.tsx`
-keeps its service-based props for existing surfaces (History details, project
-context, Work mode) and now renders the same badges, attachment notes and
-steering.
+`onSteer`, `onPromote`); the shell routes them. Chat shows compact Work cards;
+Work mode provides the scoped list and Right Nav opens the selected Work details.
+The obsolete History and Project WorkItems implementations have been removed.
 
 ## Verification
 
@@ -135,4 +136,12 @@ suspension. TypeScript tests cover captured-context isolation, steer command
 shape, detached execution, approval freshness, Stop, restart recovery,
 attachment retention and partial outcomes (see `collaboration/tests.rs`,
 `lib/execution-attachments.test.ts`, `lib/work-memory.test.ts`,
-`components/work/*.test.tsx`, `components/projects/WorkItems.test.tsx`).
+`components/work/*.test.tsx`, `components/navigation/*.test.tsx`).
+
+The captured transcript includes recent raw messages and a cached, revision-checked
+local extract of omitted terminal text. The extract has an 8,000-character ceiling,
+is untrusted prior evidence, and is not a semantic model summary. Native capture
+currently reads the raw Chat to validate that cache; the output budget does not
+establish constant-cost capture for very long Chats. Delegated Work in the same
+Chat inherits the parent's frozen capture. Explicit Project shares are recipient
+checked and frozen at admission; live resolution supports Chats, Work and files.
