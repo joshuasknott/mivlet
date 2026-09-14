@@ -27,6 +27,8 @@ export type ContextShare =
 export interface ConversationRoom {
   /** Missing only for unclassified legacy conversations; never guess a main Chat. */
   chat?: ChatBinding;
+  /** True for archived Side Chats. Main Chats are never archived. */
+  archived?: boolean;
   id: string;
   workspaceId: string;
   kind: "direct" | "group";
@@ -47,6 +49,7 @@ export interface ConversationAuthor extends ConversationParticipant {
 
 export interface ProjectTeam {
   projectId: string;
+  /** Optional coordinator. Without one, the submitter chooses a current participant. */
   leadAgentId?: string;
   participantIds: string[];
   revision: number;
@@ -63,10 +66,29 @@ export interface WorkOutput {
 
 export interface CapturedWorkContext extends Extract<ContextShare, { mode: "snapshot" }> { version: 1 }
 export interface WorkSteering { id: string; text: string; createdAt: string }
+/** Durable reference for one file or input attached to a request. */
+export interface WorkAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** image-input and transient bytes existed only in memory and cannot be restored after restart. */
+  availability: "image-input" | "transient" | "knowledge-context" | "workspace-file";
+  /** Workspace-file refs carry the staged path under the account root's Attachments/. */
+  relativePath?: string;
+  /** Knowledge refs carry the exact source identity resolved on each deliberate use. */
+  sourceId?: string;
+  /** Workspace-file refs carry the staged content hash; native code re-verifies the exact bytes before dispatch. */
+  sha256?: string;
+}
 export interface CollaborationWorkItem {
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
   steering?: WorkSteering[];
+  /** Durable attachment references recorded at submission and refreshed at dispatch. */
+  attachments?: WorkAttachment[];
+  /** Where the request came from. Absent legacy Work predates origins (chat). */
+  origin?: "chat" | "schedule";
   permissionMode: import("./approvals").PermissionMode;
   id: string;
   workspaceId: string;
@@ -169,8 +191,26 @@ export type CollaborationCommand =
       title: string;
       kind: ConversationRoom["kind"];
       participantIds: string[];
-      facilitatorId: string;
+      /** Omitted when a Project Team has no designated coordinator. */
+      facilitatorId?: string;
       projectId?: string;
+    }
+  | {
+      action: "rename-conversation";
+      id: string;
+      expectedRevision: number;
+      title: string;
+    }
+  | {
+      action: "set-conversation-archived";
+      id: string;
+      expectedRevision: number;
+      archived: boolean;
+    }
+  | {
+      action: "delete-conversation";
+      id: string;
+      expectedRevision: number;
     }
   | {
       action: "update-conversation";
@@ -178,7 +218,8 @@ export type CollaborationCommand =
       expectedRevision: number;
       title: string;
       participantIds: string[];
-      facilitatorId: string;
+      /** Omitted when the Project Team has no designated coordinator. */
+      facilitatorId?: string;
       shareHistory: boolean;
     }
   | {
@@ -203,8 +244,10 @@ export type CollaborationCommand =
       agentId: string;
       prompt: string;
       discussion: boolean;
+      /** Composer-level attachment references captured with the request. */
+      attachments?: WorkAttachment[];
     }
-  | { action: "bind-work"; id: string; generation: number; runId: string }
+  | { action: "bind-work"; id: string; generation: number; runId: string; attachments?: WorkAttachment[] }
   | { action: "check-work"; id: string; generation: number; runId: string }
   | {
       action: "finish-work";

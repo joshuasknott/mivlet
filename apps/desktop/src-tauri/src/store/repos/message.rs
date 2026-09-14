@@ -37,31 +37,55 @@ pub fn list(
     scope: &DataScope,
     thread_id: &str,
 ) -> Result<Vec<MessageRow>> {
+    list_limited(tx, store, scope, thread_id, i64::MAX)
+}
+
+pub fn list_limited(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    limit: i64,
+) -> Result<Vec<MessageRow>> {
+    list_page(tx, store, scope, thread_id, limit, 0)
+}
+
+pub fn list_page(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<MessageRow>> {
     let exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL)",rusqlite::params![scope.workspace_id(),thread_id],|r|r.get(0))?;
     if !exists {
         return Err(StoreError::Invalid(
             "Thread does not belong to this workspace.".into(),
         ));
     };
-    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq")?;
-    let rows = s.query_map(rusqlite::params![scope.workspace_id(), thread_id], |r| {
-        Ok((
-            r.get::<_, String>(0)?,
-            r.get::<_, String>(1)?,
-            r.get::<_, i64>(2)?,
-            r.get::<_, String>(3)?,
-            r.get::<_, Option<String>>(4)?,
-            r.get::<_, String>(5)?,
-            r.get::<_, String>(6)?,
-            r.get::<_, i64>(7)?,
-            r.get::<_, String>(8)?,
-            r.get::<_, String>(9)?,
-            crate::store::vault::Sealed {
-                ciphertext: r.get(10)?,
-                nonce: r.get(11)?,
-            },
-        ))
-    })?;
+    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq LIMIT ?3 OFFSET ?4")?;
+    let rows = s.query_map(
+        rusqlite::params![scope.workspace_id(), thread_id, limit.max(0), offset.max(0)],
+        |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+                r.get::<_, String>(3)?,
+                r.get::<_, Option<String>>(4)?,
+                r.get::<_, String>(5)?,
+                r.get::<_, String>(6)?,
+                r.get::<_, i64>(7)?,
+                r.get::<_, String>(8)?,
+                r.get::<_, String>(9)?,
+                crate::store::vault::Sealed {
+                    ciphertext: r.get(10)?,
+                    nonce: r.get(11)?,
+                },
+            ))
+        },
+    )?;
     rows.map(|x| {
         let (a, b, c, d, run_id, e, f, g, h, i, sealed) = x?;
         let content = open_json(store, &sealed, &raad(scope.workspace_id(), &f))?;

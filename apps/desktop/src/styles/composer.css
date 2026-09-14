@@ -387,8 +387,7 @@
   background: var(--line);
 }
 
-.composer-add-menu button,
-.composer-menu-item {
+.composer-add-menu button {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
@@ -468,6 +467,12 @@
 .voice-actions .composer-chip {
   width: 34px;
   height: 34px;
+}
+
+.voice-chat-action {
+  color: var(--accent-strong);
+  background: var(--accent-subtle);
+  border-color: var(--accent-line);
 }
 
 .voice-action__cancel {
@@ -643,6 +648,12 @@
   .voice-actions .composer-chip {
     width: 44px;
     height: 44px;
+  }
+}
+
+@media (max-width: 650px) {
+  .desktop-frame--agents .composer .composer-model {
+    max-width: min(150px, 34vw);
   }
 }
 

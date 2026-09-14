@@ -11,6 +11,7 @@ import { Signature } from "@phosphor-icons/react/dist/csr/Signature";
 import { UserCircleGear } from "@phosphor-icons/react/dist/csr/UserCircleGear";
 import { connectorLogos } from "./connector-logos";
 import { ConnectorIcon } from "../ConnectorIcon";
+import { builtinPluginEntries } from "../../lib/builtin-plugins";
 import type { MarketplaceIconName } from "./marketplace-catalog";
 
 const LIVE_CONNECTOR_IDS = new Set([
@@ -30,9 +31,12 @@ export function MarketplaceIcon({
   size = 26,
 }: {
   id: string;
-  icon: MarketplaceIconName;
+  icon?: MarketplaceIconName;
   size?: number;
 }) {
+  const builtin = builtinPluginEntries.find((entry) => entry.id === id);
+  if (builtin) return <img src={builtin.icon} width={size} height={size} loading="lazy" decoding="async" alt="" aria-hidden="true" />;
+
   if (LIVE_CONNECTOR_IDS.has(id)) {
     return <ConnectorIcon id={id} />;
   }

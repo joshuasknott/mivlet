@@ -141,12 +141,23 @@ pub fn list_projects(
     include_archived: bool,
     limit: usize,
 ) -> Result<Vec<LocalProjectRow>> {
+    list_projects_page(tx, store, scope, include_archived, limit, 0)
+}
+
+pub fn list_projects_page(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    include_archived: bool,
+    limit: usize,
+    offset: usize,
+) -> Result<Vec<LocalProjectRow>> {
     scope.ensure_exists(tx)?;
     let mut statement = tx.prepare(
         "SELECT id FROM local_project
           WHERE workspace_id=?1 AND owner_subject=?2
             AND (?3=1 OR lifecycle='active')
-          ORDER BY updated_at DESC,id ASC LIMIT ?4",
+          ORDER BY updated_at DESC,id ASC LIMIT ?4 OFFSET ?5",
     )?;
     let ids = statement
         .query_map(
@@ -154,7 +165,8 @@ pub fn list_projects(
                 scope.workspace_id(),
                 scope.owner_subject(),
                 include_archived as i64,
-                limit as i64
+                limit as i64,
+                offset as i64
             ],
             |row| row.get::<_, String>(0),
         )?

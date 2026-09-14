@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   ConversationGrid,
@@ -200,4 +200,45 @@ describe("workspace tab interactions", () => {
       expect(onResize).toHaveBeenLastCalledWith(0.2);
     },
   );
+  it("offers contextual creation targets and dismisses the menu on Escape", async () => {
+    const sideChat = vi.fn();
+    const createAgent = vi.fn();
+    // Settle any deferred drag-gesture teardown from earlier tests before
+    // interacting; a leaked click suppressor must never swallow this menu.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const view = render(
+      <ConversationTabs
+        layout={layout}
+        titles={{ "room-a": "First", "room-b": "Second" }}
+        indicators={{}}
+        onAction={vi.fn()}
+        onCreate={() => {}}
+        newActions={[
+          { id: "side-chat", label: "New side chat with Mira", run: sideChat },
+          { id: "agent", label: "New agent", run: createAgent },
+        ]}
+      />,
+    );
+    const scope = within(view.container);
+    // The legacy generic Plus is replaced by the named menu.
+    expect(scope.queryByRole("button", { name: "New conversation" })).toBeNull();
+    fireEvent.click(scope.getByRole("button", { name: "New" }));
+    expect(scope.getByRole("menuitem", { name: "New side chat with Mira" })).toHaveFocus();
+    fireEvent.keyDown(scope.getByRole("menuitem", { name: "New side chat with Mira" }), { key: "ArrowDown" });
+    const item = scope.getByRole("menuitem", { name: "New side chat with Mira" });
+    expect(scope.getByRole("menuitem", { name: "New agent" })).toBeVisible();
+    fireEvent.click(item);
+    expect(sideChat).toHaveBeenCalledOnce();
+    expect(createAgent).not.toHaveBeenCalled();
+    expect(scope.queryByRole("menu", { name: "Create" })).toBeNull();
+    sideChat.mockClear();
+    fireEvent.click(scope.getByRole("button", { name: "New" }));
+    fireEvent.keyDown(scope.getByRole("menuitem", { name: "New side chat with Mira" }), { key: "ArrowDown" });
+    expect(scope.getByRole("menuitem", { name: "New agent" })).toHaveFocus();
+    fireEvent.keyDown(scope.getByRole("menuitem", { name: "New agent" }), { key: "Escape" });
+    expect(scope.getByRole("button", { name: "New" })).toHaveFocus();
+    expect(scope.queryByRole("menu", { name: "Create" })).toBeNull();
+    expect(sideChat).not.toHaveBeenCalled();
+    expect(createAgent).not.toHaveBeenCalled();
+  });
 });

@@ -1,9 +1,11 @@
 //! Deterministic storage/coordination fixtures. No live provider is simulated as
 //! successful product evidence; fixture attempts are explicitly authored here.
 use super::*;
-use crate::store::repos::{execution_attempt, message};
+use crate::store::repos::scope::{DataScope, PrivateDataScope};
+use crate::store::repos::{draft, execution_attempt, message};
 use crate::store::vault::{MasterKey, Vault};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 const TIME: &str = "2026-09-12T10:00:00.000Z";
 
@@ -14,10 +16,16 @@ fn profiles() -> Vec<FableAgentProfile> {
     ["lead", "researcher", "reviewer"].iter().map(|id| serde_json::from_value(json!({"id":id,"name":id,"instructions":"Fixture teammate","modelId":"openai::fixture-model","icon":"sparkle","permissionLabel":"Ask Me"})).unwrap()).collect()
 }
 fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
+    fixture_with_profiles(store, profiles(), f)
+}
+fn fixture_with_profiles<T>(
+    store: &Store,
+    profiles: Vec<FableAgentProfile>,
+    f: impl FnOnce(&Context<'_>) -> Result<T>,
+) -> T {
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
-            let profiles = profiles();
             f(&Context {
                 conn,
                 store,
@@ -28,19 +36,170 @@ fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
         })
         .unwrap()
 }
+#[test]
+fn integration_chat_capture_compacts_old_text_and_never_adopts_later_chat() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        for index in 0..32 {
+            output(
+                ctx,
+                &room.id,
+                &format!("old-{index}"),
+                &format!("Earlier decision {index}"),
+            )?;
+        }
+        let agent = ctx
+            .profiles
+            .iter()
+            .find(|agent| agent.id == "lead")
+            .unwrap();
+        let first = context::capture(ctx, &room, agent)?;
+        let captured: serde_json::Value = serde_json::from_str(&first.text).unwrap();
+        assert_eq!(captured["history"].as_array().unwrap().len(), 24);
+        assert!(captured["transcriptSummary"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Earlier decision 0"));
+        output(ctx, &room.id, "later", "Future unrelated input")?;
+        assert!(!first.text.contains("Future unrelated input"));
+        let next = context::capture(ctx, &room, agent)?;
+        let next: serde_json::Value = serde_json::from_str(&next.text).unwrap();
+        assert!(
+            next["transcriptSummary"]["throughSequence"]
+                .as_i64()
+                .unwrap()
+                > captured["transcriptSummary"]["throughSequence"]
+                    .as_i64()
+                    .unwrap()
+        );
+        assert_eq!(
+            next["transcriptSummary"]["text"]
+                .as_str()
+                .unwrap()
+                .matches("Earlier decision 0")
+                .count(),
+            1
+        );
+        // A deleted source revision cannot survive in the derived cache.
+        ctx.conn.execute(
+            "UPDATE message SET deleted_at=?1 WHERE id='message-old-0'",
+            [TIME],
+        )?;
+        let changed = context::capture(ctx, &room, agent)?;
+        assert!(!changed.text.contains("Earlier decision 0"));
+        Ok(())
+    });
+}
+
+#[test]
+fn integration_project_snapshots_are_recipient_scoped_and_frozen() {
+    fixture(&store(), |ctx| {
+        project(ctx, "shared-project", "shared-chat")?;
+        let mut row =
+            local_project::get_project(ctx.conn, ctx.store, &ctx.scope.private, "shared-project")?
+                .unwrap();
+        row.payload["shares"] = json!([{"id":"snapshot","mode":"snapshot","source":{"workspaceId":ctx.scope.data.workspace_id(),"kind":"conversation","id":"deleted-source"},"sourceRevision":"original","recipient":{"kind":"agent","id":"lead"},"owner":{"kind":"user","name":"You"},"title":"Selected conclusion","snapshotText":"Immutable selected bytes","createdAt":TIME}]);
+        let own =
+            crate::local_projects::capture_shares(ctx.conn, ctx.store, ctx.scope, &row, "lead")?;
+        assert_eq!(own[0]["text"], "Immutable selected bytes");
+        assert_eq!(own[0]["sourceRevision"], "original");
+        assert!(crate::local_projects::capture_shares(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            &row,
+            "researcher"
+        )?
+        .is_empty());
+        assert!(crate::local_projects::capture_shares(
+            ctx.conn, ctx.store, ctx.scope, &row, "outsider"
+        )?
+        .is_empty());
+        row.payload["shares"][0]["mode"] = json!("live-reference");
+        let unavailable =
+            crate::local_projects::capture_shares(ctx.conn, ctx.store, ctx.scope, &row, "lead")?;
+        assert_eq!(unavailable[0]["available"], false);
+        Ok(())
+    });
+}
+
+#[test]
+fn integration_shared_file_resolution_checks_project_owner_and_liveness() {
+    fixture(&store(), |ctx| {
+        use crate::store::repos::knowledge_source;
+        ctx.conn.execute("INSERT INTO project (id,workspace_id,title_fingerprint,created_at,updated_at,payload,payload_nonce) VALUES ('source-project',?1,'fixture',?2,?2,x'',x'')", rusqlite::params![ctx.scope.data.workspace_id(), TIME])?;
+        let source_scope = PrivateDataScope::for_authenticated_user(
+            DataScope::new(ctx.scope.data.workspace_id(), Some("source-project".into()))?,
+            &ctx.scope.internal_user_id,
+            ctx.scope.member_id.as_deref(),
+        )?;
+        knowledge_source::upsert_private(
+            ctx.conn,
+            ctx.store,
+            &source_scope,
+            json!({"id":"shared-file","contentPreview":"Project-scoped evidence","contentFingerprint":"v1"}),
+            TIME,
+        )?;
+        assert!(
+            knowledge_source::list_private(ctx.conn, ctx.store, &ctx.scope.private)?.is_empty()
+        );
+        let source = knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "source-project",
+            "shared-file",
+        )?
+        .unwrap();
+        assert_eq!(source.payload["contentPreview"], "Project-scoped evidence");
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "another-project",
+            "shared-file"
+        )?
+        .is_none());
+        let stranger = PrivateDataScope::for_authenticated_user(
+            ctx.scope.data.clone(),
+            "stranger",
+            Some("stranger"),
+        )?;
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &stranger,
+            "source-project",
+            "shared-file"
+        )?
+        .is_none());
+        ctx.conn.execute(
+            "UPDATE knowledge_source SET disabled=1 WHERE id='shared-file'",
+            [],
+        )?;
+        assert!(knowledge_source::get_shared_source(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            "source-project",
+            "shared-file"
+        )?
+        .is_none());
+        Ok(())
+    });
+}
+
+fn account_scope(data: &DataScope, user: &str, member: &str) -> AuthorizedCommandScope {
+    AuthorizedCommandScope {
+        data: data.clone(),
+        private: PrivateDataScope::for_authenticated_user(data.clone(), user, Some(member))
+            .unwrap(),
+        internal_user_id: user.into(),
+        member_id: Some(member.into()),
+    }
+}
 fn group(ctx: &Context<'_>, key: &str) -> Result<Conversation> {
-    ctx.create_room(
-        key,
-        "Fixture group",
-        "group",
-        participants(
-            ctx.profiles,
-            &["lead".into(), "researcher".into(), "reviewer".into()],
-            "lead",
-        )?,
-        Some("lead".into()),
-        None,
-    )
+    project(ctx, &format!("project-{key}"), key)
 }
 fn journal(ctx: &Context<'_>, room: &str, run: &str, status: &str, transcript: &str) -> Result<()> {
     let payload = json!({"id":run,"providerId":"openai","model":"fixture-model","status":status,"transcript":transcript,"threadId":room,"exchanges":[],"turn":1,"usage":{"inputTokens":100,"outputTokens":100,"costUsd":0.0},"pendingApprovalIds":[],"recoverable":true,"retryCount":0,"createdAt":TIME,"updatedAt":TIME});
@@ -87,7 +246,7 @@ fn output(ctx: &Context<'_>, room: &str, run: &str, text: &str) -> Result<()> {
 fn bind(ctx: &Context<'_>, key: &str, run: &str) -> Result<()> {
     let work = ctx.item(key)?;
     journal(ctx, &work.conversation_id, run, "queued", "")?;
-    work::bind(ctx, key, work.generation, run)
+    work::bind(ctx, key, work.generation, run, None)
 }
 fn complete(ctx: &Context<'_>, key: &str, run: &str, text: &str) -> Result<()> {
     let item = ctx.item(key)?;
@@ -103,8 +262,37 @@ fn delegate(agent: &str, prompt: &str) -> AgentCommand {
         focused: false,
     }
 }
-fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<()> {
-    group(ctx, conversation)?;
+fn staged_attachment(id: &str, path: &str) -> WorkAttachment {
+    staged_attachment_with_hash(id, path, 128, &"a".repeat(64))
+}
+fn staged_attachment_with_hash(id: &str, path: &str, size: u64, hash: &str) -> WorkAttachment {
+    WorkAttachment {
+        id: id.into(),
+        name: path.rsplit('/').next().unwrap_or(id).into(),
+        mime_type: "text/plain".into(),
+        size_bytes: size,
+        availability: "workspace-file".into(),
+        relative_path: Some(path.into()),
+        source_id: None,
+        sha256: Some(hash.into()),
+    }
+}
+fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<Conversation> {
+    // Standalone groups are retired; fixture group rooms are project-owned.
+    thread::create(
+        ctx.conn,
+        ctx.store,
+        &ctx.scope.data,
+        conversation,
+        None,
+        "Fixture group",
+        TIME,
+        &json!({"authorityScope":{"authority":"local","visibility":"member-private","ownerMemberId":ctx.scope.private.owner_member_id()}}),
+    )?;
+    ctx.conn.execute(
+        "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3 AND owner_member_id IS NULL",
+        rusqlite::params![ctx.scope.private.owner_member_id(), ctx.scope.data.workspace_id(), conversation],
+    )?;
     let row = local_project::LocalProjectRow {
         id: project.into(),
         lifecycle: "active".into(),
@@ -122,9 +310,31 @@ fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<()> {
         participant_ids: vec!["lead".into(), "researcher".into(), "reviewer".into()],
         revision: 1,
     })?;
-    let mut room = ctx.room(conversation)?;
-    room.project_id = Some(project.into());
-    ctx.conversation(&room)
+    let room = Conversation {
+        archived: false,
+        chat: Some(ChatBinding {
+            role: "main".into(),
+            owner_kind: "project".into(),
+            owner_id: project.into(),
+        }),
+        id: conversation.into(),
+        workspace_id: ctx.scope.data.workspace_id().into(),
+        kind: "group".into(),
+        title: "Fixture group".into(),
+        project_id: Some(project.into()),
+        facilitator_id: Some("lead".into()),
+        participants: participants(
+            ctx.profiles,
+            &["lead".into(), "researcher".into(), "reviewer".into()],
+            Some("lead"),
+        )?,
+        revision: 1,
+        generation: 1,
+        created_at: TIME.into(),
+        updated_at: TIME.into(),
+    };
+    ctx.conversation(&room)?;
+    Ok(room)
 }
 
 #[test]
@@ -135,7 +345,7 @@ fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fa
                 key,
                 key,
                 "direct",
-                participants(ctx.profiles, &["lead".into()], "lead")?,
+                participants(ctx.profiles, &["lead".into()], Some("lead"))?,
                 Some("lead".into()),
                 None,
             )?;
@@ -146,6 +356,8 @@ fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fa
                 "lead".into(),
                 format!("Question in {key}"),
                 false,
+                None,
+                None,
             )?;
         }
         bind(ctx, "work-private-one", "run-one")?;
@@ -189,6 +401,8 @@ fn collaboration_question_response_and_synthesis_use_distinct_real_attempt_bindi
             "lead".into(),
             "Compare two plans".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead-one")?;
         work::agent_command(
@@ -257,6 +471,8 @@ fn collaboration_duplicate_circular_and_nonparticipant_handoffs_fail_closed() {
             "lead".into(),
             "Discuss".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead")?;
         let command = delegate("researcher", "Question");
@@ -316,6 +532,8 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "lead".into(),
             "Discuss".into(),
             false,
+            None,
+            None,
         )?;
         work::start(
             ctx,
@@ -324,6 +542,8 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "reviewer".into(),
             "Separate request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead")?;
         work::agent_command(
@@ -367,6 +587,8 @@ fn collaboration_completion_requires_saved_provider_result_and_enforces_turn_bud
             "lead".into(),
             "Do work".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         assert!(work::finish(ctx, "root", 1, "run", WorkStatus::Completed, None).is_err());
@@ -400,6 +622,8 @@ fn collaboration_restart_marks_work_for_review_and_does_not_replay_attempts() {
             "lead".into(),
             "Work".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")
     });
@@ -454,6 +678,8 @@ fn collaboration_project_correction_invalidates_work_and_never_reads_private_his
             "lead".into(),
             "Plan work".into(),
             false,
+            None,
+            None,
         )?;
         work::start(
             ctx,
@@ -462,6 +688,8 @@ fn collaboration_project_correction_invalidates_work_and_never_reads_private_his
             "researcher".into(),
             "Private request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         commands::apply(
@@ -545,6 +773,8 @@ fn collaboration_membership_and_lead_change_preserve_authorship_reject_late_work
             "researcher".into(),
             "Research".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         commands::apply(
@@ -566,7 +796,9 @@ fn collaboration_membership_and_lead_change_preserve_authorship_reject_late_work
             "main".into(),
             "researcher".into(),
             "Do more".into(),
-            false
+            false,
+            None,
+            None
         )
         .is_err());
         Ok(())
@@ -633,7 +865,7 @@ fn collaboration_sharing_requires_explicit_consent_and_layout_does_not_create_wo
             "private",
             "Private",
             "direct",
-            participants(ctx.profiles, &["lead".into()], "lead")?,
+            participants(ctx.profiles, &["lead".into()], Some("lead"))?,
             Some("lead".into()),
             None,
         )?;
@@ -776,9 +1008,11 @@ fn collaboration_rejects_cross_conversation_run_binding_and_keeps_usage_on_conti
             "lead".into(),
             "Fixture request".into(),
             false,
+            None,
+            None,
         )?;
         journal(ctx, "two", "wrong-run", "queued", "")?;
-        assert!(work::bind(ctx, "work", 1, "wrong-run").is_err());
+        assert!(work::bind(ctx, "work", 1, "wrong-run", None).is_err());
         let mut item = ctx.item("work")?;
         item.status = WorkStatus::AwaitingUser;
         item.token_usage = 128_005;
@@ -913,6 +1147,8 @@ fn roadmap_main_chat_is_unique_under_concurrent_selection_and_excludes_side_hist
             "lead".into(),
             "Do this".into(),
             false,
+            None,
+            None,
         )?;
         let before = ctx.item("captured")?.captured_context.unwrap();
         output(ctx, &ids[0], "later", "UNRELATED_LATER_CHAT")?;
@@ -937,6 +1173,8 @@ fn roadmap_steering_and_account_suspension_never_replay_uncertain_effects() {
             "lead".into(),
             "Original request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "work", "attempt")?;
         let generation = ctx.item("work")?.generation;
@@ -961,6 +1199,8 @@ fn roadmap_steering_and_account_suspension_never_replay_uncertain_effects() {
             "lead".into(),
             "Another request".into(),
             false,
+            None,
+            None,
         )?;
         suspend_account(
             ctx.conn,
@@ -998,7 +1238,75 @@ fn roadmap_optional_coordinator_preserves_project_team_and_chat() {
             "project-chat".into(),
             "".into(),
             "Help".into(),
-            false
+            false,
+            None,
+            None
+        )
+        .is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_standalone_groups_are_retired_and_project_chats_allow_no_coordinator() {
+    fixture(&store(), |ctx| {
+        // A group without a project cannot be created through any path.
+        assert!(ctx
+            .create_room(
+                "loose",
+                "Loose group",
+                "group",
+                participants(ctx.profiles, &["lead".into(), "researcher".into()], None)?,
+                None,
+                None,
+            )
+            .is_err());
+        project(ctx, "project", "project-chat")?;
+        let team = ctx.project_team("project")?;
+        commands::apply(
+            ctx,
+            Command::UpdateTeam {
+                project_id: "project".into(),
+                expected_revision: team.revision,
+                lead_agent_id: None,
+                participant_ids: vec!["lead".into(), "researcher".into()],
+                share_history: true,
+            },
+        )?;
+        // A coordinator-less Project Team still accepts side Chats, and the
+        // submitter chooses the exact responder with no automatic fan-out.
+        commands::apply(
+            ctx,
+            Command::CreateConversation {
+                id: "side".into(),
+                title: "Focused review".into(),
+                kind: "group".into(),
+                participant_ids: vec!["researcher".into()],
+                facilitator_id: None,
+                project_id: Some("project".into()),
+            },
+        )?;
+        assert!(ctx.room("side")?.facilitator_id.is_none());
+        work::start(
+            ctx,
+            "work-side".into(),
+            "side".into(),
+            "researcher".into(),
+            "Review this.".into(),
+            false,
+            None,
+            None,
+        )?;
+        assert_eq!(ctx.item("work-side")?.agent_id, "researcher");
+        assert!(work::start(
+            ctx,
+            "work-blank".into(),
+            "side".into(),
+            String::new(),
+            "No responder".into(),
+            false,
+            None,
+            None,
         )
         .is_err());
         Ok(())
@@ -1017,6 +1325,8 @@ fn roadmap_delegation_excludes_later_chat_and_steering_fences_children() {
             "lead".into(),
             "Request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         output(ctx, "room", "unrelated", "LATER_UNRELATED_CANARY")?;
@@ -1062,14 +1372,800 @@ fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
             "lead".into(),
             "Retain request".into(),
             false,
+            None,
+            None,
         )?;
         let mut legacy = serde_json::to_value(ctx.item("old")?).unwrap();
         legacy.as_object_mut().unwrap().remove("capturedContext");
         legacy.as_object_mut().unwrap().remove("steering");
+        legacy.as_object_mut().unwrap().remove("attachments");
+        legacy.as_object_mut().unwrap().remove("origin");
         let restored: Work = serde_json::from_value(legacy).unwrap();
         assert!(restored.captured_context.is_none());
         assert!(restored.steering.is_empty());
+        assert!(restored.attachments.is_empty());
+        assert!(restored.origin.is_none());
         assert_eq!(restored.user_request, "Retain request");
         Ok(())
     });
+}
+
+#[test]
+fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        let preview = vec![
+            WorkAttachment {
+                id: "upload".into(),
+                name: "brief.txt".into(),
+                mime_type: "text/plain".into(),
+                size_bytes: 128,
+                availability: "transient".into(),
+                relative_path: None,
+                source_id: None,
+                sha256: None,
+            },
+            WorkAttachment {
+                id: "source".into(),
+                name: "catalog.pdf".into(),
+                mime_type: "application/pdf".into(),
+                size_bytes: 2048,
+                availability: "knowledge-context".into(),
+                relative_path: None,
+                source_id: Some("knowledge-1".into()),
+                sha256: None,
+            },
+        ];
+        commands::apply(
+            ctx,
+            Command::StartWork {
+                id: "attach".into(),
+                conversation_id: room.id.clone(),
+                agent_id: "lead".into(),
+                prompt: "Read the brief".into(),
+                discussion: false,
+                attachments: Some(preview.clone()),
+            },
+        )?;
+        let item = ctx.item("attach")?;
+        assert_eq!(item.attachments, preview);
+        assert!(item.origin.is_none());
+        let staged = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
+        journal(ctx, &room.id, "run", "queued", "")?;
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(staged.clone()),
+            },
+        )?;
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        assert_eq!(ctx.item("attach")?.current_run_id.as_deref(), Some("run"));
+        // A repeated bind is idempotent and never rewrites the dispatched inputs.
+        let replacement = vec![staged_attachment(
+            "upload",
+            "Attachments/batch-2/replacement.txt",
+        )];
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(replacement),
+            },
+        )?;
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        // A stale generation cannot reach the dispatched request at all.
+        let stale = vec![staged_attachment("upload", "Attachments/batch-3/stale.txt")];
+        assert!(commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 99,
+                run_id: "run".into(),
+                attachments: Some(stale),
+            },
+        )
+        .is_err());
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        let mut unsafe_path = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        unsafe_path.relative_path = Some("../outside.txt".into());
+        assert!(work::validate_attachments(&[unsafe_path]).is_err());
+        let mut missing_hash = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        missing_hash.sha256 = None;
+        assert!(work::validate_attachments(&[missing_hash]).is_err());
+        let mut bad_hash = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        bad_hash.sha256 = Some("not-a-hash".into());
+        assert!(work::validate_attachments(&[bad_hash]).is_err());
+        let mut in_memory_with_ref = preview[0].clone();
+        in_memory_with_ref.relative_path = Some("Attachments/batch-1/brief.txt".into());
+        assert!(work::validate_attachments(&[in_memory_with_ref]).is_err());
+        let mut unknown_kind = preview[1].clone();
+        unknown_kind.availability = "cloud".into();
+        assert!(work::validate_attachments(&[unknown_kind]).is_err());
+        assert!(work::validate_attachments(&vec![preview[0].clone(); 13]).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_repeated_selection_resolves_one_persistent_main_chat_per_agent() {
+    fixture(&store(), |ctx| {
+        let first = chats::open_main(ctx, "lead")?;
+        let again = chats::open_main(ctx, "lead")?;
+        assert_eq!(first.id, again.id);
+        assert_eq!(
+            first.chat.as_ref().map(|chat| chat.role.as_str()),
+            Some("main")
+        );
+        assert_eq!(
+            first.chat.as_ref().map(|chat| chat.owner_id.as_str()),
+            Some("lead")
+        );
+        let other = chats::open_main(ctx, "researcher")?;
+        assert_ne!(first.id, other.id);
+        let mains = repo::list::<Conversation>(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Conversation,
+        )?
+        .into_iter()
+        .filter(|room| {
+            room.chat
+                .as_ref()
+                .is_some_and(|chat| chat.role == "main" && chat.owner_kind == "agent")
+        })
+        .count();
+        assert_eq!(mains, 2);
+        let reopened = chats::open_main(ctx, "lead")?;
+        assert_eq!(reopened.revision, first.revision);
+        assert_eq!(
+            thread::list(ctx.conn, ctx.store, &ctx.scope.data)?
+                .into_iter()
+                .filter(|row| row.id == first.id || row.id == other.id)
+                .count(),
+            2,
+            "repeated selection must never create a duplicate main Chat"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_staged_attachment_verification_requires_exact_existing_bytes() {
+    use std::path::PathBuf;
+    let root = std::env::temp_dir().join(format!(
+        "mivlet-work-attachments-{}-{}",
+        std::process::id(),
+        TIME.replace([':', '.', '-'], "")
+    ));
+    let state = crate::local_computer::LocalComputerState::for_test(root.clone());
+    let key = hex::encode(Sha256::digest(b"fable-local-computer-v1\0workspace\0lead"));
+    let workspace = root.join(&key[..32]).join("workspace");
+    let staged_path: PathBuf = workspace.join("Attachments/batch-1/brief.txt");
+    std::fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+    let bytes = b"exact staged bytes";
+    std::fs::write(&staged_path, bytes).unwrap();
+    let hash = hex::encode(Sha256::digest(bytes));
+    let verified = vec![staged_attachment_with_hash(
+        "upload",
+        "Attachments/batch-1/brief.txt",
+        bytes.len() as u64,
+        &hash,
+    )];
+    assert!(work::verify_attachment_files(Some(&state), "workspace", "lead", &verified).is_ok());
+    // In-memory refs are not file claims and never block verification.
+    let memory_only = vec![WorkAttachment {
+        id: "photo".into(),
+        name: "photo.png".into(),
+        mime_type: "image/png".into(),
+        size_bytes: 2048,
+        availability: "image-input".into(),
+        relative_path: None,
+        source_id: None,
+        sha256: None,
+    }];
+    assert!(work::verify_attachment_files(Some(&state), "workspace", "lead", &memory_only).is_ok());
+    // Wrong recorded size fails closed.
+    let wrong_size = vec![staged_attachment_with_hash(
+        "upload",
+        "Attachments/batch-1/brief.txt",
+        bytes.len() as u64 + 1,
+        &hash,
+    )];
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &wrong_size)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed since it was attached"), "{error}");
+    // Changed content fails closed even when the size matches.
+    std::fs::write(&staged_path, b"tampered staged bytes").unwrap();
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &verified)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed since it was attached"), "{error}");
+    // Missing staged files name the exact reattach prerequisite.
+    std::fs::remove_file(&staged_path).unwrap();
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &verified)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no longer available"), "{error}");
+    assert!(error.contains("Reattach it before continuing."), "{error}");
+    // A different agent's workspace never satisfies the same relative path.
+    let other_key = hex::encode(Sha256::digest(
+        b"fable-local-computer-v1\0workspace\0researcher",
+    ));
+    let other = root.join(&other_key[..32]).join("workspace");
+    std::fs::create_dir_all(other.join("Attachments/batch-1")).unwrap();
+    std::fs::write(other.join("Attachments/batch-1/brief.txt"), bytes).unwrap();
+    assert!(
+        work::verify_attachment_files(Some(&state), "workspace", "lead", &verified).is_err(),
+        "another agent's workspace does not satisfy this request"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn roadmap_attachment_refs_survive_restart_review_without_replay() {
+    let store = store();
+    let refs = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
+    fixture(&store, |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        commands::apply(
+            ctx,
+            Command::StartWork {
+                id: "recover".into(),
+                conversation_id: room.id.clone(),
+                agent_id: "lead".into(),
+                prompt: "Read the brief".into(),
+                discussion: false,
+                attachments: Some(refs.clone()),
+            },
+        )?;
+        journal(ctx, &room.id, "run", "queued", "")?;
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "recover".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(refs.clone()),
+            },
+        )?;
+        Ok(())
+    });
+    // Restart recovery opens its own transaction; never call it while holding
+    // the fixture transaction and its non-reentrant Store mutex.
+    recover(&store).unwrap();
+    fixture(&store, |ctx| {
+        let item = ctx.item("recover")?;
+        assert_eq!(item.status, WorkStatus::AwaitingUser);
+        assert_eq!(item.generation, 2);
+        assert_eq!(item.attachments, refs);
+        assert!(commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "recover".into(),
+                expected_generation: 2,
+                reconcile: false,
+            },
+        )
+        .is_err());
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "recover".into(),
+                expected_generation: 2,
+                reconcile: true,
+            },
+        )?;
+        assert_eq!(ctx.item("recover")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("recover")?.attachments, refs);
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_schedule_work_carries_schedule_origin_and_inherits_it_on_delegation() {
+    fixture(&store(), |ctx| {
+        project(ctx, "project", "project-chat")?;
+        let room = ctx.room("project-chat")?;
+        let payload = json!({"id":"scheduled-run","providerId":"openai","model":"fixture-model","status":"queued","transcript":"","threadId":room.id,"exchanges":[{"role":"user","content":"Scheduled brief"}],"turn":1,"usage":{"inputTokens":100,"outputTokens":100,"costUsd":0.0},"pendingApprovalIds":[],"recoverable":true,"retryCount":0,"createdAt":TIME,"updatedAt":TIME});
+        execution_attempt::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            "scheduled-run",
+            Some(&room.id),
+            "openai",
+            "fixture-model",
+            "queued",
+            1,
+            true,
+            0,
+            TIME,
+            TIME,
+            &payload,
+        )?;
+        bind_schedule(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            ctx.profiles,
+            "project",
+            "lead",
+            "scheduled-run",
+            TIME,
+        )?;
+        let item = ctx.item("work-scheduled-run")?;
+        assert_eq!(item.origin.as_deref(), Some("schedule"));
+        assert_eq!(item.permission_mode, "read-only");
+        work::agent_command(
+            ctx,
+            "work-scheduled-run",
+            1,
+            "scheduled-run",
+            "delegate",
+            delegate("researcher", "Dig deeper"),
+        )?;
+        let child = ctx
+            .all_work()?
+            .into_iter()
+            .find(|item| item.parent_id.as_deref() == Some("work-scheduled-run"))
+            .unwrap();
+        assert_eq!(child.origin.as_deref(), Some("schedule"));
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_side_chat_lifecycle_preserves_transcript_drafts_and_guards_main() {
+    fixture(&store(), |ctx| {
+        let main = chats::open_main(ctx, "lead")?;
+        let side = ctx.create_room(
+            "side",
+            "Separate question",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        assert_eq!(
+            side.chat.as_ref().map(|chat| chat.role.as_str()),
+            Some("side")
+        );
+        output(ctx, &side.id, "side-run", "Side transcript")?;
+        draft::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&side.id),
+            "composer",
+            &json!({"text":"keep me"}),
+            TIME,
+        )?;
+
+        commands::apply(
+            ctx,
+            Command::RenameConversation {
+                id: side.id.clone(),
+                expected_revision: side.revision,
+                title: "Renamed Side Chat".into(),
+            },
+        )?;
+        let renamed = ctx.room(&side.id)?;
+        assert_eq!(renamed.title, "Renamed Side Chat");
+        assert_eq!(renamed.revision, side.revision + 1);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .title,
+            "Renamed Side Chat"
+        );
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?.len(),
+            1,
+            "renaming a Side Chat cannot touch its transcript"
+        );
+
+        commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: renamed.revision,
+                archived: true,
+            },
+        )?;
+        let archived = ctx.room(&side.id)?;
+        assert!(archived.archived);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .lifecycle,
+            "archived"
+        );
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?.len(),
+            1
+        );
+        assert!(
+            draft::get_scoped(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                Some(&side.id),
+                "composer"
+            )?
+            .is_some(),
+            "archiving keeps the conversation-owned draft"
+        );
+
+        for command in [
+            Command::RenameConversation {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+                title: "Not allowed".into(),
+            },
+            Command::SetConversationArchived {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+                archived: true,
+            },
+            Command::DeleteConversation {
+                id: main.id.clone(),
+                expected_revision: main.revision,
+            },
+        ] {
+            assert!(
+                commands::apply(ctx, command).is_err(),
+                "the persistent main Chat cannot be renamed, archived or deleted"
+            );
+        }
+
+        let archived_revision = archived.revision;
+        work::start(
+            ctx,
+            "side-work".into(),
+            side.id.clone(),
+            "lead".into(),
+            "Do a thing".into(),
+            false,
+            None,
+            None,
+        )?;
+        assert!(commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+                archived: true,
+            }
+        )
+        .is_err());
+        assert!(commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+            }
+        )
+        .is_err());
+
+        commands::apply(
+            ctx,
+            Command::SetConversationArchived {
+                id: side.id.clone(),
+                expected_revision: archived_revision,
+                archived: false,
+            },
+        )?;
+        let restored = ctx.room(&side.id)?;
+        assert!(!restored.archived);
+        assert_eq!(
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &side.id)?
+                .unwrap()
+                .lifecycle,
+            "active"
+        );
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_side_chat_delete_is_explicit_and_keeps_durable_evidence() {
+    fixture(&store(), |ctx| {
+        let main = chats::open_main(ctx, "lead")?;
+        let doomed = ctx.create_room(
+            "doomed",
+            "Throwaway",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        let kept = ctx.create_room(
+            "kept",
+            "Keep me",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            None,
+        )?;
+        output(ctx, &doomed.id, "doomed-run", "Goodbye")?;
+        draft::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&doomed.id),
+            "composer",
+            &json!({"text":"discard with the chat"}),
+            TIME,
+        )?;
+        commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: doomed.id.clone(),
+                expected_revision: doomed.revision,
+            },
+        )?;
+        assert!(ctx.room(&doomed.id).is_err());
+        assert!(thread::get(ctx.conn, ctx.store, &ctx.scope.data, &doomed.id)?.is_none());
+        assert!(draft::get_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            Some(&doomed.id),
+            "composer"
+        )?
+        .is_none());
+        assert_eq!(ctx.room(&main.id)?.chat.as_ref().unwrap().role, "main");
+        assert_eq!(ctx.room(&kept.id)?.title, "Keep me");
+        assert!(
+            ctx.create_room(
+                "doomed",
+                "Recreated",
+                "direct",
+                vec![Participant {
+                    agent_id: "lead".into(),
+                    name: "lead".into(),
+                }],
+                Some("lead".into()),
+                None
+            )
+            .is_err(),
+            "a deleted Side Chat stays tombstoned"
+        );
+
+        project(ctx, "project", "project-chat")?;
+        let recorded = ctx.create_room(
+            "recorded",
+            "Decision log",
+            "direct",
+            vec![Participant {
+                agent_id: "lead".into(),
+                name: "lead".into(),
+            }],
+            Some("lead".into()),
+            Some("project".into()),
+        )?;
+        commands::apply(
+            ctx,
+            Command::SaveFact {
+                project_id: "project".into(),
+                conversation_id: recorded.id.clone(),
+                id: "decision".into(),
+                kind: "decision".into(),
+                text: "Use the two week deadline".into(),
+                source: "Fixture decision".into(),
+                supersedes_id: None,
+            },
+        )?;
+        assert!(commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: recorded.id.clone(),
+                expected_revision: recorded.revision,
+            }
+        )
+        .is_err());
+        commands::apply(
+            ctx,
+            Command::ChangeFact {
+                project_id: "project".into(),
+                id: "decision".into(),
+                status: "forgotten".into(),
+            },
+        )?;
+        commands::apply(
+            ctx,
+            Command::DeleteConversation {
+                id: recorded.id.clone(),
+                expected_revision: recorded.revision,
+            },
+        )?;
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_legacy_positive_agent_links_adopt_as_side_and_never_as_main() {
+    let store = store();
+    let mut members = profiles();
+    members[0].thread_id = Some("legacy-linked".into());
+    members[1].thread_ids = vec!["legacy-ambiguous".into()];
+    members[2].thread_ids = vec!["legacy-ambiguous".into()];
+    fixture_with_profiles(&store, members, |ctx| {
+        for key in ["legacy-linked", "legacy-ambiguous"] {
+            thread::create(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                key,
+                None,
+                "Legacy conversation",
+                TIME,
+                &json!({"authorityScope":{"authority":"local","visibility":"member-private"}}),
+            )?;
+            ctx.conn.execute(
+                "UPDATE thread SET owner_member_id=?1 WHERE workspace_id=?2 AND id=?3",
+                rusqlite::params![
+                    ctx.scope.private.owner_member_id(),
+                    ctx.scope.data.workspace_id(),
+                    key
+                ],
+            )?;
+            message::append(
+                ctx.conn,
+                ctx.store,
+                &ctx.scope.data,
+                key,
+                &format!("legacy-message-{key}"),
+                "user",
+                &json!({"kind":"user"}),
+                None,
+                1,
+                0,
+                None,
+                &format!("legacy:{key}"),
+                &format!("legacy-revision-{key}"),
+                "terminal",
+                "fixture",
+                &json!({"text":"Legacy content that must survive"}),
+                TIME,
+            )?;
+        }
+        ctx.conn.execute_batch("DROP TABLE collaboration_record")?;
+        crate::store::migrations::apply(ctx.conn, 41, 42)?;
+        adopt_existing(ctx)?;
+        adopt_existing(ctx)?;
+        let linked = ctx.room("legacy-linked")?;
+        assert_eq!(
+            linked.chat.as_ref().map(|chat| (
+                chat.role.as_str(),
+                chat.owner_kind.as_str(),
+                chat.owner_id.as_str()
+            )),
+            Some(("side", "agent", "lead")),
+            "a single positive profile link is a Side Chat, never a guessed main Chat"
+        );
+        assert!(
+            ctx.room("legacy-ambiguous")?.chat.is_none(),
+            "zero or multiple profile links stay unclassified"
+        );
+        assert_eq!(ctx.snapshot()?.conversations.len(), 2);
+        assert!(ctx
+            .snapshot()?
+            .conversations
+            .iter()
+            .all(|room| room.chat.as_ref().is_none_or(|chat| chat.role != "main")));
+        assert_eq!(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, "legacy-linked")?.len(),
+            1
+        );
+        let main = chats::open_main(ctx, "lead")?;
+        assert_ne!(main.id, "legacy-linked");
+        assert_eq!(main.chat.as_ref().unwrap().role, "main");
+        assert_eq!(ctx.snapshot()?.conversations.len(), 3);
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_older_conversation_payloads_default_archived_false() {
+    let value = json!({
+        "id":"legacy",
+        "workspaceId":"default",
+        "kind":"direct",
+        "title":"Legacy",
+        "participants":[],
+        "revision":1,
+        "generation":1,
+        "createdAt":TIME,
+        "updatedAt":TIME
+    });
+    let room: Conversation = serde_json::from_value(value).unwrap();
+    assert!(!room.archived);
+    assert!(room.chat.is_none());
+}
+
+#[test]
+fn roadmap_second_account_cannot_resolve_or_mutate_chats() {
+    let store = store();
+    let data = DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID).unwrap();
+    let alpha = account_scope(&data, "user-a", "member-a");
+    let beta = account_scope(&data, "user-b", "member-b");
+    let (main_id, side_id) = store
+        .transaction(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &alpha,
+                profiles: &profiles,
+                time: TIME,
+            };
+            let main = chats::open_main(&ctx, "lead")?;
+            let side = ctx.create_room(
+                "side",
+                "Private side",
+                "direct",
+                vec![Participant {
+                    agent_id: "lead".into(),
+                    name: "lead".into(),
+                }],
+                Some("lead".into()),
+                None,
+            )?;
+            Ok((main.id, side.id))
+        })
+        .unwrap();
+    store
+        .with_conn(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &beta,
+                profiles: &profiles,
+                time: TIME,
+            };
+            assert!(ctx.room(&main_id).is_err());
+            assert!(
+                repo::list::<Conversation>(conn, &store, &beta.private, Kind::Conversation)?
+                    .is_empty()
+            );
+            assert!(chats::rename(&ctx, &side_id, 1, "Stolen").is_err());
+            assert!(chats::set_archived(&ctx, &side_id, 1, true).is_err());
+            assert!(chats::delete(&ctx, &side_id, 1).is_err());
+            Ok(())
+        })
+        .unwrap();
+    store
+        .with_conn(|conn| {
+            let profiles = profiles();
+            let ctx = Context {
+                conn,
+                store: &store,
+                scope: &alpha,
+                profiles: &profiles,
+                time: TIME,
+            };
+            assert_eq!(ctx.room(&side_id)?.title, "Private side");
+            assert!(!ctx.room(&side_id)?.archived);
+            assert_eq!(ctx.room(&main_id)?.chat.as_ref().unwrap().role, "main");
+            Ok(())
+        })
+        .unwrap();
 }

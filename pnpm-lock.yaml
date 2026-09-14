@@ -118,6 +118,9 @@ importers:
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
+      lightningcss:
+        specifier: ^1.33.0
+        version: 1.33.0
       terser:
         specifier: ^5.51.2
         version: 5.51.2
@@ -9672,7 +9675,6 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
-    optional: true
 
   locate-path@6.0.0:
     dependencies:

@@ -58,12 +58,20 @@ export type ExecutionContextContributionReason =
   | "pinned"
   | "memory-approved"
   | "memory-pinned"
+  | "summary"
+  | "history-retrieval"
   | "retrieved"
   | "tool-result";
 
 export interface ExecutionContextContribution {
   id: string;
-  kind: "memory" | "source" | "tool-result" | "conversation" | "instruction";
+  kind:
+    | "memory"
+    | "source"
+    | "tool-result"
+    | "conversation"
+    | "instruction"
+    | "summary";
   reason: ExecutionContextContributionReason;
   citationId?: string;
 }

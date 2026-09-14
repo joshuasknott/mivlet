@@ -3,7 +3,6 @@ import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { Users } from "@phosphor-icons/react/dist/csr/Users";
 import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
@@ -58,7 +57,7 @@ export function AgentSidebar({
   conversations = [],
   selectedConversationId,
   onSelectConversation,
-  onCreateConversation,
+  onSearch,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -83,7 +82,7 @@ export function AgentSidebar({
   conversations?: SidebarRoom[];
   selectedConversationId?: string;
   onSelectConversation?: (id: string, newTab?: boolean) => void;
-  onCreateConversation?: (kind?: "direct" | "group", agentId?: string) => void;
+  onSearch?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const sidebar = useRef<HTMLElement>(null);
@@ -121,12 +120,15 @@ export function AgentSidebar({
   const visibleProjects = projects.filter((project) =>
     project.name.toLowerCase().includes(search),
   );
-  const groupRooms = conversations.filter(
-    (room) =>
-      !room.projectId &&
-      room.kind === "group" &&
-      room.title.toLowerCase().includes(search),
-  );
+  // Search is the one place every existing conversation becomes reachable;
+  // the default list keeps the sidebar quiet. Standalone groups are not a
+  // navigation section: they are opened by reference and migrated into
+  // projects through the conversation menu.
+  const searchRooms = search
+    ? conversations.filter((room) =>
+        room.title.toLowerCase().includes(search),
+      )
+    : [];
   const installed = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
@@ -153,16 +155,16 @@ export function AgentSidebar({
           </button>
         ) : null}
       </div>
-      <label className="agent-search">
+      {onSearch ? <button type="button" className="agent-search" onClick={onSearch} aria-label="Search workspace"><MagnifyingGlass size={16} /><span>Search</span></button> : <label className="agent-search">
         <MagnifyingGlass size={16} aria-hidden="true" />
         <input
           type="search"
-          aria-label="Search projects and agents"
-          placeholder="Search projects, groups, agents…"
+          aria-label="Search projects, conversations and agents"
+          placeholder="Search projects, chats, agents…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-      </label>
+      </label>}
       <div className="agent-sidebar__scopes">
         {(!search && (projects.length || onCreateProject)) || visibleProjects.length ? (
           <section
@@ -210,9 +212,9 @@ export function AgentSidebar({
             </div>
           </section>
         ) : null}
-        {groupRooms.length ? (
+        {searchRooms.length ? (
           <div className="conversation-sidebar__list">
-            {groupRooms.map((room) => (
+            {searchRooms.map((room) => (
               <button
                 key={room.id}
                 type="button"
@@ -232,39 +234,12 @@ export function AgentSidebar({
                   )
                 }
               >
-                <span
-                  className="group-avatar"
-                  style={{
-                    gridTemplateColumns: `repeat(${(room.participants?.length ?? 0) > 4 ? 3 : 2}, 1fr)`,
-                  }}
-                  aria-label={room.participants
-                    ?.map(
-                      (member) =>
-                        member.name ??
-                        agents.find((agent) => agent.id === member.agentId)
-                          ?.name ??
-                        "Unavailable agent",
-                    )
-                    .join(", ")}
-                >
-                  {room.participants?.map((member) => {
-                    const agent = agents.find(
-                      (agent) => agent.id === member.agentId,
-                    );
-                    return agent ? (
-                      <ProfileAgentAvatar
-                        key={member.agentId}
-                        agent={agent}
-                        iconSize={18}
-                      />
-                    ) : (
-                      <span key={member.agentId}>
-                        {member.name?.[0] ?? "?"}
-                      </span>
-                    );
-                  })}
+                <span>
+                  {room.title}
+                  {room.projectId
+                    ? ` · ${projects.find((project) => project.id === room.projectId)?.name ?? "Project"}`
+                    : ""}
                 </span>
-                <span>{room.title}</span>
                 {room.status ? (
                   <small aria-label={room.status}>
                     {["Working", "Unread"].includes(room.status) ? "•" : "!"}
@@ -277,17 +252,6 @@ export function AgentSidebar({
         {!search || visibleAgents.length ? <div className="agent-sidebar__agents-heading">
           <span>Agents</span>
           <div>
-            {onCreateConversation ? (
-              <button
-                className="agent-sidebar__new"
-                type="button"
-                onClick={() => onCreateConversation("group")}
-                aria-label="New group"
-                title="New group"
-              >
-                <Users size={17} />
-              </button>
-            ) : null}
             <button
               className="agent-sidebar__new"
               type="button"
@@ -364,7 +328,7 @@ export function AgentSidebar({
                   {(preview && preview.status !== "idle") ||
                   completions[agent.id]?.unread ? (
                     <span
-                      className={`agent-status agent-status--${preview?.status === "attention" ? "attention" : preview?.status === "running" ? presence === "service" ? "service" : "working" : "unread"}`}
+                      className={`agent-status agent-status--${preview?.status === "attention" ? "attention" : preview?.status === "running" ? presence === "service" ? "service" : presence === "thinking" ? "thinking" : presence === "waiting" || presence === "input" ? "waiting" : "working" : "unread"}`}
                       role="status"
                       aria-label={
                         preview && preview.status !== "idle"
@@ -393,7 +357,7 @@ export function AgentSidebar({
             </p>
           ) : null}
         </div>
-        {search && !visibleAgents.length && !visibleProjects.length && !groupRooms.length ? <p className="agent-list__empty">No projects, groups or agents found. Search conversation titles in History.</p> : null}
+        {search && !visibleAgents.length && !visibleProjects.length && !searchRooms.length ? <p className="agent-list__empty">No matching projects, conversations or agents.</p> : null}
       </div>
       <button
         className={`agent-sidebar__connections${marketplaceActive ? " agent-sidebar__connections--active" : ""}`}

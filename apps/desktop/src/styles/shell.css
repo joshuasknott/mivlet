@@ -37,10 +37,6 @@
   box-shadow: none;
 }
 
-.desktop-frame[data-theme="dark"] .nav-group-heading {
-  color: var(--ink-muted);
-}
-
 .desktop-frame[data-theme="dark"] .avatar {
   color: var(--ink);
   background: rgba(255, 255, 255, 0.1);

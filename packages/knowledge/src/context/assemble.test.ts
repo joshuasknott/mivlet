@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type {
   CitationRanking,
+  ContextSummaryRecord,
   MemoryRecord,
   NativeMessage,
   PinnedContextEntry,
@@ -623,5 +624,77 @@ describe("assembleContext — forbidden sources", () => {
     expect(assembled.systemPrefix).not.toContain("github");
     expect(assembled.receipt.citations.map((c) => c.sourceId)).toEqual(["source-local-allowed"]);
     expect(assembled.usage.map((u) => u.id)).toEqual(["source-local-allowed"]);
+  });
+});
+
+describe("assembleContext — derived conversation history", () => {
+  const makeSummary = (overrides: Partial<ContextSummaryRecord> = {}): ContextSummaryRecord => ({
+    id: "summary-1",
+    threadId: "t1",
+    scope: { level: "thread", threadId: "t1" },
+    fromSequence: 1,
+    throughSequence: 8,
+    revision: 2,
+    text: "User commitments:\n- The launch target is Friday.",
+    sourceMessageIds: ["message-1"],
+    sourceRevisionIds: ["revision-1"],
+    derivedMemoryIds: [],
+    derivedMemoryRevisions: {},
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides
+  });
+
+  it("carries live in-scope summaries as untrusted derived evidence", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      scope: { level: "thread", threadId: "t1" },
+      memory: [],
+      citations: [],
+      summaries: [makeSummary()],
+      retrievedHistory: [
+        {
+          messageId: "message-2",
+          sequence: 2,
+          role: "user",
+          text: "Keep the launch window narrow.",
+          score: 2
+        }
+      ]
+    });
+    expect(assembled.systemPrefix).toContain("launch target is Friday");
+    expect(assembled.systemPrefix).toContain("untrusted prior evidence");
+    expect(assembled.systemPrefix).toContain("Keep the launch window narrow.");
+    expect(assembled.usage).toEqual([
+      { id: "summary-1", kind: "summary", reason: "summary" },
+      { id: "message-2", kind: "conversation", reason: "history-retrieval" }
+    ]);
+  });
+
+  it("excludes stale summaries and out-of-scope summaries", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      scope: { level: "thread", threadId: "t1" },
+      memory: [],
+      citations: [],
+      summaries: [
+        makeSummary({ id: "stale", staleAt: NOW }),
+        makeSummary({ id: "other-thread", scope: { level: "thread", threadId: "t2" } })
+      ]
+    });
+    expect(assembled.systemPrefix).not.toContain("launch target is Friday");
+    expect(assembled.usage).toEqual([]);
+  });
+
+  it("enforces the derived-history budget", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [],
+      summaries: [makeSummary({ text: "x".repeat(200) })],
+      derivedHistoryBudget: 40
+    });
+    expect(assembled.usage).toEqual([]);
+    expect(assembled.systemPrefix).not.toContain("x".repeat(200));
   });
 });

@@ -1,5 +1,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { createRequire } from "node:module";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
 import ts from "typescript";
 import type { Plugin } from "vite";
 
@@ -175,24 +178,79 @@ function readSources(directory: string): IconSource[] {
   });
 }
 
+export function spriteGlyph(
+  icon: string,
+  weight: string,
+  glyph: ReactNode,
+): string {
+  return `<g id="${icon}-${weight}">${renderToStaticMarkup(glyph)}</g>`;
+}
+
 export function pruneUnusedIconWeights(sourceRoots: string[]): Plugin {
+  const requireModule = createRequire(import.meta.url);
   let weights: IconWeights | null;
+  let spriteId: string;
+  let iconBaseId: string;
+  const wrapperId = "\0mivlet-icon-wrapper";
+  const symbols = new Map<string, string>();
   return {
     name: "mivlet-icon-weights",
     apply: "build",
     enforce: "pre",
     buildStart() {
       weights = collectIconWeights(sourceRoots.flatMap(readSources));
+      symbols.clear();
+      spriteId = this.emitFile({ type: "asset", name: "icons.svg" });
+    },
+    resolveId(id) {
+      return id === "mivlet-icon-wrapper" ? wrapperId : null;
+    },
+    load(id) {
+      if (id !== wrapperId) return null;
+      return `import {forwardRef,createElement} from "react"; import Base from ${JSON.stringify(iconBaseId)}; const sprite=import.meta.ROLLUP_FILE_URL_${spriteId}; export function make(weights,name) { if(Array.isArray(weights)) weights=new Map(weights.map(weight=>[weight,createElement("use",{href:sprite+"#"+name+"-"+weight})])); const Icon=forwardRef((props,ref)=>createElement(Base,{ref,...props,weights})); Icon.displayName=name+"Icon"; return Icon; }`;
     },
     transform(code, id) {
+      const component =
+        /[/\\]@phosphor-icons[/\\]react[/\\]dist[/\\]csr[/\\](\w+)\.es\.js$/.exec(
+          id,
+        )?.[1];
+      if (component && weights?.has(component)) {
+        iconBaseId = id.replace(/csr[/\\]\w+\.es\.js$/, "lib/IconBase.es.js");
+        return {
+          code: `import weights from "../defs/${component}.es.js"; import {make} from "mivlet-icon-wrapper"; const Icon=make(weights,${JSON.stringify(component)}); export {Icon as ${component},Icon as ${component}Icon};`,
+          map: null,
+        };
+      }
       const icon =
         /[/\\]@phosphor-icons[/\\]react[/\\]dist[/\\]defs[/\\](\w+)\.es\.js$/.exec(
           id,
         )?.[1];
       const used = icon && weights?.get(icon);
       if (!used) return null;
-      const pruned = pruneIconDefinition(code, used);
-      return pruned === code ? null : { code: pruned, map: null };
+      // Paths are immutable artwork. Keep them in one cached SVG asset instead
+      // of parsing and allocating the same glyph trees in JavaScript. The
+      // package's IconBase still owns size, colour, mirroring, title and ref.
+      const glyphs: Map<string, ReactNode> = requireModule(id).default;
+      if (!(glyphs instanceof Map))
+        return { code: pruneIconDefinition(code, used), map: null };
+      const entries: string[] = [];
+      for (const weight of Array.from(used)) {
+        const glyph = glyphs.get(weight);
+        if (!glyph) throw new Error(`Missing ${icon} icon weight ${weight}`);
+        const key = `${icon}-${weight}`;
+        symbols.set(key, spriteGlyph(icon, weight, glyph));
+        entries.push(JSON.stringify(weight));
+      }
+      return { code: `export default [${entries.join(",")}];`, map: null };
+    },
+    buildEnd() {
+      this.setAssetSource(
+        spriteId,
+        `<svg xmlns="http://www.w3.org/2000/svg">${Array.from(symbols)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([, value]) => value)
+          .join("")}</svg>`,
+      );
     },
   };
 }

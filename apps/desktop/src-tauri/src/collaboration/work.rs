@@ -9,6 +9,8 @@ pub(super) fn start(
     agent_id: String,
     prompt: String,
     discussion: bool,
+    origin: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
 ) -> Result<()> {
     id(&key)?;
     let prompt = bounded(&prompt, 32_000, "Message")?;
@@ -33,7 +35,16 @@ pub(super) fn start(
         ));
     }
     let room = ctx.room(&room_id)?;
-    let mut work = new_work(ctx, key.clone(), &room, agent_id, prompt.clone(), prompt)?;
+    let mut work = new_work(
+        ctx,
+        key.clone(),
+        &room,
+        agent_id,
+        prompt.clone(),
+        prompt,
+        origin,
+        attachments,
+    )?;
     if discussion {
         work.prompt = format!("{}\n\nThe user requested a wider discussion. Ask relevant participants for distinct contributions, compare their answers, and report agreement or remaining disagreement. Do not make everyone reply without a reason.", work.prompt);
     }
@@ -47,6 +58,8 @@ fn new_work(
     agent_id: String,
     prompt: String,
     user_request: String,
+    origin: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
 ) -> Result<Work> {
     if !room.participants.iter().any(|p| p.agent_id == agent_id) {
         return Err(invalid(
@@ -72,6 +85,8 @@ fn new_work(
             _ => "read-only",
         }
         .into(),
+        attachments: attachments.map(|refs| refs.to_vec()).unwrap_or_default(),
+        origin: origin.map(Into::into),
         id: key.clone(),
         root_id: key,
         workspace_id: ctx.scope.data.workspace_id().into(),
@@ -157,14 +172,31 @@ pub(super) fn current(
     Ok(item)
 }
 
-pub(super) fn bind(ctx: &Context<'_>, key: &str, generation: u32, run: &str) -> Result<()> {
+pub(super) fn bind(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: &str,
+    attachments: Option<&[WorkAttachment]>,
+) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    // An already-dispatched run keeps the exact inputs it captured. A repeated
+    // bind is idempotent and never rewrites them.
     if item.current_run_id.as_deref() == Some(run) && item.status.executing() {
+        if let Some(refs) = attachments {
+            validate_attachments(refs)?;
+        }
         return Ok(());
     }
     if item.status != WorkStatus::Queued {
         return Err(invalid("This assignment is not queued."));
+    }
+    if let Some(refs) = attachments {
+        validate_attachments(refs)?;
+        item.attachments = refs.to_vec();
+        item.updated_at = ctx.time.into();
+        ctx.work(&item)?;
     }
     let all = ctx.all_work()?;
     if all
@@ -449,6 +481,8 @@ pub(super) fn agent_command(
                 agent_id.clone(),
                 prompt,
                 item.user_request.clone(),
+                item.origin.as_deref(),
+                None,
             )?;
             if !focused {
                 // Delegation within this Chat inherits the parent's frozen
@@ -463,6 +497,8 @@ pub(super) fn agent_command(
                         .map_err(|_| invalid("Invalid captured child context."))?;
                     for field in [
                         "history",
+                        "transcriptSummary",
+                        "derivedSummaries",
                         "projectInstructions",
                         "projectRevision",
                         "confirmedProjectFacts",
@@ -626,6 +662,172 @@ pub(super) fn wake_waiters(ctx: &Context<'_>) -> Result<()> {
         }
         item.updated_at = ctx.time.into();
         ctx.work(&item)?;
+    }
+    Ok(())
+}
+
+const MAX_WORK_ATTACHMENTS: usize = 12;
+const MAX_WORK_ATTACHMENT_BYTES: u64 = 2 * 1024 * 1024;
+
+fn sha256_is_well_formed(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Durable attachment references are bounded and exact. Transient and image
+/// inputs may only carry identity metadata; workspace refs require the staged
+/// account-root path and the exact staged content hash, and knowledge refs the
+/// exact source id.
+pub(super) fn validate_attachments(attachments: &[WorkAttachment]) -> Result<()> {
+    if attachments.len() > MAX_WORK_ATTACHMENTS {
+        return Err(invalid(
+            "A request can reference at most twelve attached files.",
+        ));
+    }
+    let mut ids = HashSet::new();
+    for attachment in attachments {
+        if attachment.id.is_empty()
+            || attachment.id.chars().count() > 160
+            || !ids.insert(&attachment.id)
+        {
+            return Err(invalid(
+                "Each attached file needs a unique bounded identity.",
+            ));
+        }
+        let name = attachment.name.trim();
+        if name.is_empty()
+            || name.chars().count() > 256
+            || name.contains(['/', '\\'])
+            || name.chars().any(char::is_control)
+        {
+            return Err(invalid("The attached file name is invalid."));
+        }
+        let mime = attachment.mime_type.trim();
+        if mime.is_empty() || mime.chars().count() > 120 || mime.chars().any(char::is_control) {
+            return Err(invalid("The attached file media type is invalid."));
+        }
+        if attachment.size_bytes == 0 || attachment.size_bytes > MAX_WORK_ATTACHMENT_BYTES {
+            return Err(invalid("The attached file size is invalid."));
+        }
+        let path_is_safe = attachment.relative_path.as_ref().is_some_and(|path| {
+            path.chars().count() <= 512
+                && path.starts_with("Attachments/")
+                && !path.contains('\\')
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
+                && !path.chars().any(char::is_control)
+        });
+        let source_is_safe = attachment
+            .source_id
+            .as_ref()
+            .is_some_and(|id| !id.is_empty() && id.chars().count() <= 200 && !id.contains('\0'));
+        let hash_is_safe = attachment
+            .sha256
+            .as_deref()
+            .is_some_and(sha256_is_well_formed);
+        match attachment.availability.as_str() {
+            "workspace-file" => {
+                if !path_is_safe || attachment.source_id.is_some() || !hash_is_safe {
+                    return Err(invalid("The staged file reference is invalid."));
+                }
+            }
+            "knowledge-context" => {
+                if !source_is_safe
+                    || attachment.relative_path.is_some()
+                    || attachment.sha256.is_some()
+                {
+                    return Err(invalid("The knowledge reference is invalid."));
+                }
+            }
+            "image-input" | "transient" => {
+                if attachment.relative_path.is_some()
+                    || attachment.source_id.is_some()
+                    || attachment.sha256.is_some()
+                {
+                    return Err(invalid("In-memory inputs cannot carry durable references."));
+                }
+            }
+            _ => return Err(invalid("The attached file reference kind is unknown.")),
+        }
+    }
+    Ok(())
+}
+
+/// Native authority for staged inputs: every workspace ref must resolve inside
+/// the exact agent workspace for this account and still match the staged size
+/// and content hash. Missing or changed files fail closed with the reattach
+/// prerequisite; the renderer never has to be trusted for this.
+pub(super) fn verify_attachment_files(
+    computer: Option<&crate::local_computer::LocalComputerState>,
+    workspace_id: &str,
+    agent_id: &str,
+    attachments: &[WorkAttachment],
+) -> Result<()> {
+    let files = attachments
+        .iter()
+        .filter(|attachment| attachment.availability == "workspace-file")
+        .collect::<Vec<_>>();
+    if files.is_empty() {
+        return Ok(());
+    }
+    let computer = computer.ok_or_else(|| {
+        invalid("The local computer is unavailable, so staged attachments cannot be verified.")
+    })?;
+    let root = computer
+        .tool_workspace_root(workspace_id, agent_id)
+        .map_err(|_| {
+            invalid(
+                "This agent's workspace is unavailable, so staged attachments cannot be verified.",
+            )
+        })?;
+    let canonical_root = crate::paths::strict_canonicalize(&root)
+        .map_err(|_| invalid("This agent's workspace failed its security check."))?;
+    for attachment in files {
+        let relative = attachment
+            .relative_path
+            .as_deref()
+            .ok_or_else(|| invalid("The staged file reference is invalid."))?;
+        let canonical = crate::paths::strict_canonicalize(&root.join(relative)).map_err(|_| {
+            StoreError::Invalid(format!(
+                "This request's staged file is no longer available: {}. Reattach it before continuing.",
+                attachment.name
+            ))
+        })?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err(invalid(
+                "The staged attachment path is outside this agent's workspace.",
+            ));
+        }
+        let metadata = std::fs::metadata(&canonical).map_err(|_| {
+            StoreError::Invalid(format!(
+                "This request's staged file is no longer available: {}. Reattach it before continuing.",
+                attachment.name
+            ))
+        })?;
+        if !metadata.is_file() || metadata.len() != attachment.size_bytes {
+            return Err(StoreError::Invalid(format!(
+                "This request's staged file changed since it was attached: {}. Reattach it before continuing.",
+                attachment.name
+            )));
+        }
+        if let Some(expected) = attachment.sha256.as_deref() {
+            let bytes = std::fs::read(&canonical).map_err(|_| {
+                StoreError::Invalid(format!(
+                    "This request's staged file could not be verified: {}. Reattach it before continuing.",
+                    attachment.name
+                ))
+            })?;
+            let actual = hex::encode(Sha256::digest(&bytes));
+            if actual != expected {
+                return Err(StoreError::Invalid(format!(
+                    "This request's staged file changed since it was attached: {}. Reattach it before continuing.",
+                    attachment.name
+                )));
+            }
+        }
     }
     Ok(())
 }

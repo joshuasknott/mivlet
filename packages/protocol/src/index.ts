@@ -9,6 +9,7 @@ export * from "./domains/hosted-execution-capability.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
+export * from "./domains/search.js";
 export * from "./domains/voice.js";
 
 import type {
@@ -32,7 +33,13 @@ import type {
   SupportedConnectorId,
 } from "./domains/connectors.js";
 
-export type MemoryKind = "fact" | "inference" | "preference" | "imported";
+export type MemoryKind =
+  | "fact"
+  | "inference"
+  | "preference"
+  | "decision"
+  | "correction"
+  | "imported";
 
 /**
  * Approval lifecycle for a memory. Suggested memories are surfaced for the
@@ -112,6 +119,58 @@ export interface MemoryPromotionResponse {
   record: MemoryRecord;
   auditEntry: ApprovalAuditEntry;
   state: MemoryControlState;
+}
+
+/** Why a durable conversation summary was invalidated. */
+export type ContextSummaryStaleReason =
+  | "memory-changed"
+  | "source-invalidated"
+  | "editor-replaced";
+
+/**
+ * One durable, incremental summary of an older range of a single conversation.
+ * Raw transcript records remain the source of truth and are never replaced by a
+ * summary. Summary text is derived, untrusted prior evidence: it can never carry
+ * user authority, approval, or tool permission. `derivedMemoryIds` records which
+ * promoted memory records a producer folded in, so a later correction or
+ * forgetting can invalidate the summary instead of silently resurrecting it.
+ */
+export interface ContextSummaryRecord {
+  /** Explicit durable owner; native canonicalization stamps it. */
+  workspaceId?: WorkspaceId;
+  /** Native-canonical access facts; absent legacy records are never shared. */
+  authorityScope?: ContextRecordAuthorityScope;
+  id: string;
+  /** Account-authorized Thread (agent chat or Side Chat) this summary belongs to. */
+  threadId: string;
+  /** Narrow scope the summary belongs to; it must be satisfied by a run. */
+  scope: KnowledgeScope;
+  /** Oldest raw transcript sequence folded into this revision. */
+  fromSequence: number;
+  /** Newest raw transcript sequence folded into this revision. */
+  throughSequence: number;
+  /** Monotonic revision; each compaction folds new material into the previous. */
+  revision: number;
+  /** Bounded derived summary text. Untrusted evidence, never instructions. */
+  text: string;
+  /** Raw message ids covered by this revision, for inspection and rebuild. */
+  sourceMessageIds: string[];
+  /** Raw revision ids covered by this revision, in the same order. */
+  sourceRevisionIds: string[];
+  /** Promoted memory records folded into this summary, for invalidation. */
+  derivedMemoryIds: string[];
+  /** Memory id -> `updatedAt` at derivation time, for revision checks. */
+  derivedMemoryRevisions: Record<string, string>;
+  createdAt: string;
+  updatedAt: string;
+  /** Present => the summary must not enter context. */
+  staleAt?: string;
+  staleReason?: ContextSummaryStaleReason;
+}
+
+/** Durable derived-summary state for one account. */
+export interface ContextSummaryState {
+  summaries: ContextSummaryRecord[];
 }
 
 export type ConnectorStatus =

@@ -206,23 +206,45 @@ pub fn list_private(
     store: &Store,
     scope: &PrivateDataScope,
 ) -> Result<Vec<KnowledgeRow>> {
+    list_matching(tx, store, scope, scope.project_id(), None)
+}
+
+/// Read one explicitly shared source, including sources stored in the Project.
+/// Ownership and liveness are checked in SQL before any payload is decrypted.
+pub fn get_shared_source(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    project_id: &str,
+    id: &str,
+) -> Result<Option<KnowledgeRow>> {
+    Ok(list_matching(tx, store, scope, Some(project_id), Some(id))?
+        .into_iter()
+        .next())
+}
+
+fn list_matching(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    project_id: Option<&str>,
+    id: Option<&str>,
+) -> Result<Vec<KnowledgeRow>> {
     scope.ensure_exists(tx)?;
     let mut stmt = tx.prepare(
         "SELECT id, workspace_id, project_id, connector_id, connector_account_id, external_id,
                 kind, trust, pinned, disabled, content_fingerprint,
                 size_bytes, imported_at, origin, payload, payload_nonce
          FROM knowledge_source
-         WHERE workspace_id=?1 AND owner_subject=?2 AND project_id IS ?3
+         WHERE workspace_id=?1 AND owner_subject=?2
+           AND (project_id IS ?3 OR (?4 IS NOT NULL AND project_id IS NULL))
+           AND (?4 IS NULL OR id=?4)
            AND authority='local' AND visibility='member-private' AND disabled=0
          ORDER BY imported_at DESC;",
     )?;
     let partials: Vec<Partial> = stmt
         .query_map(
-            rusqlite::params![
-                scope.workspace_id(),
-                scope.owner_subject(),
-                scope.project_id()
-            ],
+            rusqlite::params![scope.workspace_id(), scope.owner_subject(), project_id, id],
             |row| {
                 Ok(Partial {
                     id: row.get(0)?,

@@ -1,3 +1,6 @@
+import { createElement, createRef, forwardRef } from "react";
+import { render } from "@testing-library/react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
@@ -6,6 +9,8 @@ import ts from "typescript";
 import {
   collectIconWeights as collect,
   pruneIconDefinition,
+  spriteGlyph,
+  pruneUnusedIconWeights,
 } from "./icon-weights";
 
 const collectIconWeights = (sources: string[]) =>
@@ -146,4 +151,97 @@ describe("icon definition pruning", () => {
       pruneIconDefinition("export default {};", new Set(["regular"])),
     ).toBe("export default {};");
   });
+});
+
+describe("cached icon artwork", () => {
+  it.each(["Check", "ShieldCheck", "Browser", "GoogleLogo", "CursorClick"])(
+    "preserves every %s variant and its reference id",
+    (icon) => {
+      const requireModule = createRequire(import.meta.url);
+      const root = dirname(
+        requireModule.resolve("@phosphor-icons/react/package.json"),
+      );
+      const glyphs = requireModule(
+        join(root, `dist/defs/${icon}.es.js`),
+      ).default;
+      for (const weight of allWeights) {
+        const glyph = glyphs.get(weight);
+        expect(spriteGlyph(icon, weight, glyph)).toBe(
+          `<g id="${icon}-${weight}">${renderToStaticMarkup(glyph)}</g>`,
+        );
+        expect(spriteGlyph(icon, weight, glyph)).toContain("<path");
+      }
+    },
+  );
+});
+
+it("preserves the icon wrapper contract after consolidation", async () => {
+  const requireModule = createRequire(import.meta.url);
+  const root = dirname(
+    requireModule.resolve("@phosphor-icons/react/package.json"),
+  );
+  const plugin = pruneUnusedIconWeights([join(process.cwd(), "src")]);
+  const start =
+    typeof plugin.buildStart === "function"
+      ? plugin.buildStart
+      : plugin.buildStart!.handler;
+  await start.call({ emitFile: () => "fixture" } as never, {} as never);
+  const transform =
+    typeof plugin.transform === "function"
+      ? plugin.transform
+      : plugin.transform!.handler;
+  const id = join(root, "dist/csr/Check.es.js");
+  const transformed = await transform.call(
+    {} as never,
+    readFileSync(id, "utf8"),
+    id,
+  );
+  expect(transformed).toHaveProperty(
+    "code",
+    expect.stringContaining("mivlet-icon-wrapper"),
+  );
+  const load =
+    typeof plugin.load === "function" ? plugin.load : plugin.load!.handler;
+  const source = (await load.call(
+    {} as never,
+    "\0mivlet-icon-wrapper",
+  )) as string;
+  const body = source
+    .replace(/import [^;]+;/g, "")
+    .replace(/const sprite=[^;]+;/, "")
+    .replace("export function make", "return function make");
+  const make = new Function(
+    "forwardRef",
+    "createElement",
+    "Base",
+    "sprite",
+    body,
+  )(
+    forwardRef,
+    createElement,
+    requireModule(join(root, "dist/lib/IconBase.es.js")).default,
+    "/icons.svg",
+  );
+  const Icon = make(["regular", "bold"], "Check");
+  const ref = createRef<SVGSVGElement>();
+  const view = render(
+    createElement(Icon, {
+      ref,
+      size: 32,
+      color: "purple",
+      weight: "bold",
+      mirrored: true,
+      "aria-label": "Confirm",
+    }),
+  );
+  expect(ref.current).toBe(view.container.querySelector("svg"));
+  expect(ref.current).toHaveAttribute("width", "32");
+  expect(ref.current).toHaveAttribute("height", "32");
+  expect(ref.current).toHaveAttribute("fill", "purple");
+  expect(ref.current).toHaveAttribute("aria-label", "Confirm");
+  expect(ref.current).toHaveAttribute("transform", "scale(-1, 1)");
+  expect(ref.current?.querySelector("use")).toHaveAttribute(
+    "href",
+    "/icons.svg#Check-bold",
+  );
 });

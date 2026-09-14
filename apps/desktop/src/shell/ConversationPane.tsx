@@ -19,7 +19,7 @@ import {
 } from "../lib/workspace-execution";
 import { insertDictation } from "../lib/insert-dictation";
 import { prepareComposerImage } from "../lib/composer-images";
-import { prepareReadableComposerAttachment } from "../lib/composer-attachments";
+import { prepareReadableComposerAttachment, composerSubmissionText } from "../lib/composer-attachments";
 import { builtinPluginMentions } from "../lib/builtin-plugins";
 import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerModelsFor } from "./composer-models";
@@ -32,13 +32,25 @@ import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
-import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
 import { runWorkspaceVoice } from "../lib/workspace-voice";
+import { selectResponder } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
-import { WorkRecovery } from "../components/projects/WorkItems";
+import { WorkCard } from "../components/work/WorkCard";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
-import type { ConversationTurn } from "../lib/conversation-presentation";
+import {
+  conversationTurns,
+  type ConversationTurn,
+} from "../lib/conversation-presentation";
+import {
+  promoteConversationConclusion,
+  runtimeMemoryPorts,
+} from "../lib/conversation-service";
+import {
+  ConversationMemoryPromotion,
+  type MemoryScopeOption,
+} from "../components/conversation/ConversationMemoryPromotion";
+import { SideChatContextNotice } from "../components/conversation/SideChats";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -79,6 +91,7 @@ export function ConversationPane({
   onArtifact,
   onEdit,
   onPlace,
+  onMigrate,
   onNew,
   onSchedules,
   onComputer,
@@ -86,6 +99,7 @@ export function ConversationPane({
   onProviders,
   onProjectUpdate,
   onDraftReady,
+  onOpenWork,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -99,6 +113,7 @@ export function ConversationPane({
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
   onPlace: () => void;
+  onMigrate: () => void;
   onNew: (draft?: string) => Promise<string | void>;
   onSchedules: () => void;
   onComputer: (agentId: string) => void;
@@ -109,6 +124,7 @@ export function ConversationPane({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
+  onOpenWork?: (id: string) => void;
 }) {
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
   const composer = useScopedComposer({
@@ -144,10 +160,10 @@ export function ConversationPane({
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("ready");
-  const voiceToggle = useRef<HTMLButtonElement>(null);
-  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => voiceToggle.current?.focus()); };
+  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => composerRef.current?.focus()); };
   useEffect(() => { setVoiceOpen(false); setVoicePhase("ready"); }, [active, room.id, recipientId, profile?.modelId, profile?.reasoningEffort]);
   const optionsRef = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
@@ -200,6 +216,52 @@ export function ConversationPane({
     void service.loadHistory(room.id).catch((error) => service.report(error));
   }, [room.id, service]);
   const history = state.histories[room.id];
+  const sideChat = room.chat?.role === "side";
+  const latestConclusion = useMemo(() => {
+    const turns = conversationTurns(history?.messages ?? []);
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const text = turns[index].parts
+        .filter((part) => part.kind === "text")
+        .map((part) => part.content.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      if (text) return text.slice(0, 2_000);
+    }
+    return "";
+  }, [history?.messages]);
+  const memoryScopes: MemoryScopeOption[] = [
+    {
+      id: "thread",
+      label: "This conversation",
+      description: sideChat
+        ? "Only this Side Chat inherits it."
+        : "Only this Agent's main Chat inherits it.",
+    },
+    ...(room.projectId
+      ? [
+          {
+            id: "project" as const,
+            label: "This project",
+            description: "Project chats and Work in this project inherit it.",
+          },
+        ]
+      : []),
+    ...(!room.projectId && room.participants.length === 1
+      ? [
+          {
+            id: "agent" as const,
+            label: room.participants[0].name,
+            description: "This Agent's conversations inherit it.",
+          },
+        ]
+      : []),
+  ];
+  const memoryScopeId = (level: MemoryScopeOption["id"]) =>
+    level === "project"
+      ? (room.projectId ?? room.id)
+      : level === "agent"
+        ? (room.participants[0]?.agentId ?? displayAgent.id)
+        : room.id;
   const sessions = state.sessions.filter(
     (session) => session.work.conversationId === room.id && !session.cancelled,
   );
@@ -211,7 +273,6 @@ export function ConversationPane({
     id: item.id, prompt: item.userRequest || item.prompt, startedAt: item.createdAt, endedAt: item.updatedAt,
     parts: item.status === "failed" ? [{ id: `${item.id}-error`, kind: "notice", error: true, content: item.reason || "This request could not start." }] : [],
   }));
-  const recovery = work.filter(item => !item.parentId && ["failed", "blocked", "awaiting-user", "cancelled"].includes(item.status));
   const liveStates = sessions
     .filter((session) => session.state)
     .map((session) => ({
@@ -232,6 +293,15 @@ export function ConversationPane({
     [runtime.modelOptions],
   );
   const model = models.find((model) => model.id === profile?.modelId);
+  const voiceUnavailable =
+    !runtime.backendProviders.some(
+      (provider) =>
+        provider.id === "openai" && provider.authState === "connected",
+    )
+      ? "Connect an OpenAI API account for transcription and speech."
+      : !model?.available
+        ? "Connect this agent's model provider before starting voice."
+        : undefined;
   const approvals = active
     ? runtime.openApprovals.filter((approval) =>
         sessions.some((session) => session.approvalIds.has(approval.id)),
@@ -270,15 +340,34 @@ export function ConversationPane({
         status: connector.status,
       })),
   ];
+  const selection = selectResponder(composer.text, room.participants, {
+    selectedRecipientId: recipientId,
+    coordinatorId: room.facilitatorId,
+  });
+  const mentions = selection?.source === "mention" ? selection : null;
+  const responder = selection
+    ? runtime.agents.find((agent) => agent.id === selection.responderId)
+    : undefined;
   const send = async () => {
-    const prompt = composer.text.trim();
+    const prompt = composerSubmissionText(composer.text, composer.attachments);
     if (!composer.ready || !prompt || submission.current || voice.isBusy)
       return;
     if (
-      !profile ||
-      !room.participants.some((member) => member.agentId === profile.id)
+      recipient === "discussion" &&
+      !room.facilitatorId
     ) {
-      setError("Choose an available participant before sending.");
+      setError("Choose a coordinator before requesting a team discussion.");
+      return;
+    }
+    if (
+      !responder ||
+      !room.participants.some((member) => member.agentId === responder.id)
+    ) {
+      setError(
+        mentions
+          ? "That mentioned participant is unavailable. Pick a current participant."
+          : "Choose an available participant before sending.",
+      );
       return;
     }
     if (
@@ -315,7 +404,7 @@ export function ConversationPane({
       }
       await service.submit(
         room.id,
-        profile.id,
+        responder.id,
         prompt,
         recipient === "discussion",
         composer.attachments,
@@ -479,14 +568,14 @@ export function ConversationPane({
           />
           <span>
             <strong>{room.title}</strong>
+            {sideChat ? (
+              <small className="side-chat-marker">
+                Side Chat · separate conversation
+              </small>
+            ) : null}
           </span>
         </div>
         <div className="team-conversation-actions">
-          <button type="button" ref={voiceToggle} aria-label={`Talk to ${displayAgent.name}`} aria-pressed={voiceOpen}
-            disabled={!active || (!voiceOpen && (running.length > 0 || pending || !profile))}
-            onClick={() => { if (voiceOpen) closeVoice(); else { voice.cancel(); setVoiceOpen(true); } }}>
-            <Waveform size={18} />
-          </button>
           <button
             type="button"
             aria-label={`Open ${displayAgent.name}'s computer`}
@@ -504,6 +593,9 @@ export function ConversationPane({
               <button type="button" onClick={() => void onNew()}>
                 New conversation
               </button>
+              <button type="button" onClick={() => setMemoryOpen(true)}>
+                Save conclusion to Memory…
+              </button>
               <button type="button" onClick={onEdit}>
                 Edit{" "}
                 {project
@@ -517,6 +609,11 @@ export function ConversationPane({
                   Place in project…
                 </button>
               ) : null}
+              {!project && room.kind === "group" ? (
+                <button type="button" onClick={onMigrate}>
+                  Convert to project…
+                </button>
+              ) : null}
               <button type="button" onClick={onSchedules}>
                 Schedules
               </button>
@@ -528,7 +625,7 @@ export function ConversationPane({
         key={`${service.workspaceId}:${room.id}:${recipientId}:${profile?.modelId}`}
         agent={displayAgent} modelLabel={model?.label ?? "Choose model"}
         scope={{ workspaceId: service.workspaceId, agentId: recipientId, threadId: room.id }}
-        unavailable={!runtime.backendProviders.some(provider => provider.id === "openai" && provider.authState === "connected") ? "Connect an OpenAI API account for transcription and speech." : !model?.available ? "Connect this agent's model provider before starting voice." : undefined}
+        unavailable={voiceUnavailable}
         approvals={approvalPanel} onPhase={setVoicePhase} onClose={closeVoice}
         onOpenProviders={() => { closeVoice(); onProviders(); }}
         onPrompt={(text, control) => runWorkspaceVoice(service, text, control)}
@@ -540,6 +637,7 @@ export function ConversationPane({
         onWheel={scroll.pauseFollowing}
       >
         <div className="conversation-pane-messages" ref={scroll.contentRef}>
+          {sideChat ? <SideChatContextNotice compact /> : null}
           {history === undefined ? (
             <p className="team-empty" role="status">
               Loading conversation…
@@ -580,9 +678,12 @@ export function ConversationPane({
               focus();
             }}
           />
-          {recovery.map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Recovery for ${item.agentName}'s request`}>
-            {item.runIds.length ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
-            <WorkRecovery item={item} service={service} />
+          {work.filter(item => !item.parentId).slice(-6).map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Work for ${item.agentName}'s request`}>
+            {item.runIds.length && ["failed", "blocked", "awaiting-user"].includes(item.status) ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
+            <WorkCard item={item} onOpen={() => onOpenWork?.(item.id)} onOpenWork={onOpenWork}
+              onStop={id => service.stop(id)}
+              onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}
+              onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }} />
             <button type="button" onClick={() => { composer.setText(item.userRequest || item.prompt); focus(); }}>Restore request to composer</button>
             {/computer|runtime|plugin/i.test(item.reason ?? "") ? <button type="button" onClick={() => onComputer(item.agentId)}>Check Computer Use</button> : /provider|connect|model/i.test(item.reason ?? "") ? <button type="button" onClick={() => onPlugins()}>Check connections</button> : null}
           </div>)}
@@ -617,6 +718,25 @@ export function ConversationPane({
               {error || composer.error}
             </p>
           ) : null}
+          {mentions ? (
+            <p className="conversation-attention" role="status">
+              Addressing{" "}
+              {runtime.agents.find(
+                (agent) => agent.id === mentions.responderId,
+              )?.name ?? "the mentioned participant"}
+              {mentions.mentionedIds.length > 1
+                ? ` · also mentioned: ${mentions.mentionedIds
+                    .slice(1)
+                    .map(
+                      (id) =>
+                        runtime.agents.find((agent) => agent.id === id)?.name ??
+                        id,
+                    )
+                    .join(", ")}`
+                : ""}
+              . Each reply stays attributed to its author.
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="conversation-pane-composer">
@@ -648,6 +768,21 @@ export function ConversationPane({
           onStopVoice={() => void voice.stop()}
           onCancelVoice={voice.cancel}
           onDismissVoice={voice.dismiss}
+          onStartVoiceChat={() => {
+            voice.reset();
+            setVoiceOpen(true);
+          }}
+          voiceChatDisabled={!active || pending || !profile}
+          voiceChatDescription={
+            !active
+              ? "Open this conversation to start voice chat."
+              : pending
+                ? "Wait for this message to finish sending."
+                : !profile
+                  ? "Choose an available participant before starting voice."
+                  : voiceUnavailable ??
+                    `Start voice chat with ${displayAgent.name}. Your draft stays in this conversation.`
+          }
           onAttach={() => fileInput.current?.click()}
           onImportRepository={() => void importRepository()}
           addMenuOpen={addOpen}
@@ -672,7 +807,9 @@ export function ConversationPane({
           }}
           placeholder={
             room.kind === "group"
-              ? "Message the group…"
+              ? project
+                ? "Message the project…"
+                : "Message the group…"
               : `Message ${displayAgent.name}…`
           }
           inThread
@@ -705,12 +842,23 @@ export function ConversationPane({
                     id: member.agentId,
                     name:
                       member.name +
-                      (member.agentId === room.facilitatorId ? " · Lead" : ""),
+                      (member.agentId === room.facilitatorId
+                        ? " · Coordinator"
+                        : ""),
                     disabled: !runtime.agents.some(
                       (agent) => agent.id === member.agentId,
                     ),
                   })),
-                  { id: "discussion", name: "Team discussion", description: "The lead invites relevant contributions; each teammate uses its own model." },
+                  ...(room.facilitatorId
+                    ? [
+                        {
+                          id: "discussion",
+                          name: "Team discussion",
+                          description:
+                            "The coordinator invites relevant contributions; each teammate uses its own model.",
+                        },
+                      ]
+                    : []),
                 ]}
               />
             ) : undefined
@@ -718,6 +866,24 @@ export function ConversationPane({
         />
       </div>
       </>}
+      {memoryOpen ? (
+        <ConversationMemoryPromotion
+          chatTitle={room.title}
+          defaultTitle={room.title}
+          defaultValue={latestConclusion}
+          scopes={memoryScopes}
+          onSave={async (input) => {
+            await promoteConversationConclusion(runtimeMemoryPorts, {
+              conversation: room,
+              title: input.title,
+              value: input.value,
+              scope: { level: input.scopeId, id: memoryScopeId(input.scopeId) },
+              promotedAt: new Date().toISOString(),
+            });
+          }}
+          onClose={() => setMemoryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

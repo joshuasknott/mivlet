@@ -23,7 +23,7 @@ export function MarketplacePage({
   accounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
   onUseConnector: (connector: ConnectorManifest, prompt?: string) => void;
-  onUseBuiltinPlugin?: (id: "browser" | "computer") => void;
+  onUseBuiltinPlugin?: (id: "computer") => void;
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   onDisconnect: (connectorId: string) => void | Promise<void>;
   onRefresh: (connectorId: string) => void;

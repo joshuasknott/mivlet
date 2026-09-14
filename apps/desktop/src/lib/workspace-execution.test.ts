@@ -179,6 +179,40 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(service.getSnapshot().sessions[0].attachments).toEqual([]);
     service.dispose();
   });
+  it("captures durable attachment references with the handoff request", async () => {
+    const { service, command } = fixture([]);
+    await service.refresh();
+    const attachment = {
+      id: "file",
+      name: "brief.txt",
+      type: "text/plain",
+      sizeBytes: 4,
+      transientBytes: new Uint8Array([116, 101, 115, 116]),
+    };
+    await service.submit("conversation-a", "a", "Read the brief", false, [
+      attachment,
+      {
+        id: "source",
+        name: "catalog.pdf",
+        type: "application/pdf",
+        sizeBytes: 9,
+        sourceId: "knowledge-1",
+      },
+    ]);
+    expect(command).toHaveBeenCalledWith("fixture", {
+      action: "start-work",
+      id: expect.any(String),
+      conversationId: "conversation-a",
+      agentId: "a",
+      prompt: "Read the brief",
+      discussion: false,
+      attachments: [
+        { id: "file", name: "brief.txt", mimeType: "text/plain", sizeBytes: 4, availability: "transient" },
+        { id: "source", name: "catalog.pdf", mimeType: "application/pdf", sizeBytes: 9, availability: "knowledge-context", sourceId: "knowledge-1" },
+      ],
+    });
+    service.dispose();
+  });
   it("keeps two same-agent conversations distinct and queues only that agent", async () => {
     const { service } = fixture([
       fixtureWork("one", "a"),

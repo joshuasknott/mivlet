@@ -13,6 +13,8 @@ export function referenceForView(workspaceId: string, view: WorkspaceView): Obje
 }
 
 export type DockEdge = "left" | "right" | "top" | "bottom";
+/** The workspace never shows more than three panes; content keeps its owner. */
+export const MAX_PANES = 3;
 export const emptyLayout = (): ConversationLayout => ({
   version: 2,
   panes: [[]],
@@ -162,7 +164,7 @@ export function reduceLayout(
       break;
     }
     case "dock": {
-      if (next.panes.length >= 8 || !next.panes[action.pane]) return state;
+      if (next.panes.length >= MAX_PANES || !next.panes[action.pane]) return state;
       const source = action.id
         ? next.views.find((view) => view.id === action.id)
         : action.view;
@@ -239,7 +241,10 @@ export function reduceLayout(
   return compact(next);
 }
 
-/** v1 used two fixed panes. Preserve its tabs in the new single-pane default. */
+/** v1 used two fixed panes. Preserve its tabs in the new single-pane default.
+ *  Saved desktop layouts with more than three panes fold extras into the last
+ *  kept pane so every open view survives; narrow sessions restore this same
+ *  desktop layout instead of persisting their own single-pane arrangement. */
 export function restoreLayout(
   layout: ConversationLayout | null,
   conversationIds: Set<string>,
@@ -254,6 +259,13 @@ export function restoreLayout(
   const filtered = panes.map((pane) =>
     pane.filter((id) => ids.has(id) && !seen.has(id) && Boolean(seen.add(id))),
   );
+  const extra = filtered.splice(MAX_PANES);
+  if (extra.length) {
+    const tail = extra
+      .flat()
+      .filter((id) => !filtered[MAX_PANES - 1]?.includes(id));
+    filtered[MAX_PANES - 1].push(...tail);
+  }
   const active = filtered.map((pane, i) =>
     pane.includes(layout.active[i] ?? "")
       ? layout.active[i]
@@ -264,7 +276,7 @@ export function restoreLayout(
     views: views.filter((view) => seen.has(view.id)),
     panes: filtered,
     active,
-    activePane: layout.version === 2 ? layout.activePane : 0,
+    activePane: layout.version === 2 ? Math.min(layout.activePane, filtered.length - 1) : 0,
     tree: layout.version === 2 ? layout.tree : { kind: "pane", pane: 0 },
     closed: layout.closed
       .filter((view) => conversationIds.has(view.conversationId))

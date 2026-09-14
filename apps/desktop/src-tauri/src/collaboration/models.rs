@@ -46,6 +46,9 @@ pub struct ChatBinding {
 pub struct Conversation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat: Option<ChatBinding>,
+    /// Side Chats may be archived without losing history, drafts or attachments.
+    #[serde(default)]
+    pub archived: bool,
     pub id: String,
     pub workspace_id: String,
     pub kind: String,
@@ -94,6 +97,27 @@ pub struct Output {
     pub created_at: String,
 }
 
+/// Durable reference for one file or input attached to a request. Transient
+/// and image inputs existed only in memory and cannot be restored after a
+/// restart; workspace and knowledge refs resolve again on each deliberate use.
+/// Workspace refs carry the staged path and its content hash so native code can
+/// verify the exact bytes before an attempt is dispatched.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkAttachment {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub availability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
@@ -103,6 +127,10 @@ pub struct Work {
     pub steering: Vec<WorkSteering>,
     #[serde(default = "default_permission")]
     pub permission_mode: String,
+    #[serde(default)]
+    pub attachments: Vec<WorkAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub id: String,
     pub workspace_id: String,
     pub conversation_id: String,
@@ -291,15 +319,31 @@ pub enum Command {
         title: String,
         kind: String,
         participant_ids: Vec<String>,
-        facilitator_id: String,
+        #[serde(default)]
+        facilitator_id: Option<String>,
         project_id: Option<String>,
+    },
+    RenameConversation {
+        id: String,
+        expected_revision: u32,
+        title: String,
+    },
+    SetConversationArchived {
+        id: String,
+        expected_revision: u32,
+        archived: bool,
+    },
+    DeleteConversation {
+        id: String,
+        expected_revision: u32,
     },
     UpdateConversation {
         id: String,
         expected_revision: u32,
         title: String,
         participant_ids: Vec<String>,
-        facilitator_id: String,
+        #[serde(default)]
+        facilitator_id: Option<String>,
         share_history: bool,
     },
     PlaceConversation {
@@ -321,11 +365,15 @@ pub enum Command {
         agent_id: String,
         prompt: String,
         discussion: bool,
+        #[serde(default)]
+        attachments: Option<Vec<WorkAttachment>>,
     },
     BindWork {
         id: String,
         generation: u32,
         run_id: String,
+        #[serde(default)]
+        attachments: Option<Vec<WorkAttachment>>,
     },
     CheckWork {
         id: String,

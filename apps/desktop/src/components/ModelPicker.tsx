@@ -10,7 +10,7 @@ import { ProviderIcon } from "./ProviderIcon";
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None", minimal: "Minimal", low: "Low", medium: "Medium",
-  high: "High", xhigh: "Extra high", max: "Maximum", ultra: "Ultra"
+  high: "High", xhigh: "Extra High", max: "Max", ultra: "Ultra"
 };
 const effortLabel = (value: string) => EFFORT_LABELS[value] ?? value;
 
@@ -45,8 +45,15 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   closeRef.current = onOpenChange;
   const selected = models.find((model) => model.id === selectedId);
   const providers = [...new Map(models.map((model) => [model.providerId, model.providerLabel])).entries()];
-  const levels = selected?.available && onSelectEffort ? selected.reasoning?.supportedEfforts ?? [] : [];
-  const currentEffort = effort ?? selected?.reasoning?.defaultEffort;
+  const advertised = selected?.available && onSelectEffort ? selected.reasoning?.supportedEfforts ?? [] : [];
+  const levels = advertised.filter((level, index) => level.length > 0 && advertised.indexOf(level) === index);
+  const currentEffort = levels.length
+    ? effort && levels.includes(effort)
+      ? effort
+      : levels.includes(selected?.reasoning?.defaultEffort ?? "")
+        ? selected?.reasoning?.defaultEffort
+        : levels[0]
+    : undefined;
   const effortIndex = Math.max(0, levels.indexOf(currentEffort ?? ""));
   const showEffort = view === "effort" && levels.length > 0;
   const activeProvider = providers.some(([id]) => id === provider) ? provider : "";
@@ -171,13 +178,13 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
             <ArrowCounterClockwise size={16} />
           </button>
         </div>
+        <div className="model-picker__scale" role="group" aria-label="Reasoning levels">{levels.map(level => <button type="button" key={level} aria-pressed={level === currentEffort} onClick={() => onSelectEffort?.(level)}>{effortLabel(level)}</button>)}</div>
         <div className="model-picker__slider" style={{ "--effort-progress": `${levels.length > 1 ? effortIndex / (levels.length - 1) * 100 : 0}%` } as CSSProperties}>
           <input type="range" min={0} max={Math.max(0, levels.length - 1)} step={1} value={effortIndex}
             aria-label="Reasoning effort" aria-valuetext={currentEffort ? effortLabel(currentEffort) : "Default"}
             disabled={levels.length < 2} onChange={(event) => onSelectEffort?.(levels[Number(event.target.value)])} />
           <div className="model-picker__ticks" aria-hidden="true">{levels.map((level) => <i key={level} />)}</div>
         </div>
-        <div className="model-picker__scale" role="group" aria-label="Reasoning levels">{levels.map(level => <button type="button" key={level} aria-pressed={level === currentEffort} onClick={() => onSelectEffort?.(level)}>{effortLabel(level)}</button>)}</div>
       </div> : <div className="model-picker__browse">
         <div className="model-picker__toolbar">
           {levels.length > 0 ? <button type="button" aria-label="Back to reasoning" onClick={() => setView("effort")}><CaretLeft size={16} /></button> : null}

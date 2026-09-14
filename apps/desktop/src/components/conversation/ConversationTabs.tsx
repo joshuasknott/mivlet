@@ -9,6 +9,13 @@ import type {
 } from "@fable/protocol";
 import { type LayoutAction } from "../../lib/conversation-layout";
 
+/** A contextual New target: it names the object it will create. */
+export interface NewAction {
+  id: string;
+  label: string;
+  run: () => void;
+}
+
 export function ConversationTabs({
   layout,
   titles,
@@ -16,13 +23,16 @@ export function ConversationTabs({
   descriptions = {},
   onAction,
   onCreate,
+  newActions,
 }: {
   layout: ConversationLayout;
   titles: Record<string, string>;
   indicators: Record<string, string>;
   descriptions?: Record<string, string>;
   onAction: (action: LayoutAction) => void;
-  onCreate: () => void;
+  onCreate?: () => void;
+  /** Contextual New creates relevant objects, never generic conversations. */
+  newActions?: NewAction[];
 }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
   useEffect(() => {
@@ -33,8 +43,17 @@ export function ConversationTabs({
   const strip = useRef<HTMLDivElement>(null);
   const overflowTrigger = useRef<HTMLButtonElement>(null);
   const overflowPanel = useRef<HTMLDivElement>(null);
+  const newTrigger = useRef<HTMLButtonElement>(null);
+  const newMenu = useRef<HTMLDivElement>(null);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
+  useEffect(() => {
+    if (newMenuOpen)
+      newMenu.current
+        ?.querySelector<HTMLButtonElement>("[role='menuitem']")
+        ?.focus();
+  }, [newMenuOpen]);
   useEffect(() => {
     const reveal = () => { if (active) document
         .getElementById(`tab-${active}`)
@@ -45,6 +64,14 @@ export function ConversationTabs({
     if (strip.current) observer?.observe(strip.current);
     return () => { window.removeEventListener("resize", reveal); observer?.disconnect(); };
   }, [active, host]);
+  useEffect(() => {
+    if (!newMenuOpen) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!newMenu.current?.contains(event.target as Node)) setNewMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [newMenuOpen]);
   useEffect(() => {
     if (!overflowOpen) return;
     overflowPanel.current?.querySelector("input")?.focus();
@@ -204,15 +231,92 @@ export function ConversationTabs({
           );
         })}
       </div>
-      <button
-        type="button"
-        className="conversation-tabs__new"
-        aria-label="New conversation"
-        title="New conversation"
-        onClick={onCreate}
-      >
-        <Plus size={16} />
-      </button>
+      {newActions?.length ? (
+        <div className="conversation-tabs__new-menu">
+          <button
+            ref={newTrigger}
+            type="button"
+            className="conversation-tabs__new"
+            aria-label="New"
+            title="New"
+            aria-haspopup="menu"
+            aria-expanded={newMenuOpen}
+            onClick={() => {
+              setNewMenuOpen((open) => !open);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && !newMenuOpen) {
+                event.preventDefault();
+                setNewMenuOpen(true);
+              }
+            }}
+          >
+            <Plus size={16} />
+          </button>
+          {newMenuOpen ? (
+            <div
+              ref={newMenu}
+              className="conversation-tabs-menu conversation-tabs-menu--new"
+              role="menu"
+              aria-label="Create"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setNewMenuOpen(false);
+                  newTrigger.current?.focus();
+                }
+                if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
+                  event.preventDefault();
+                  const buttons = [
+                    ...event.currentTarget.querySelectorAll<HTMLButtonElement>(
+                      "[role='menuitem']",
+                    ),
+                  ];
+                  const i = buttons.indexOf(
+                    document.activeElement as HTMLButtonElement,
+                  );
+                  const next =
+                    event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? buttons.length - 1
+                        : i < 0
+                          ? (event.key === "ArrowDown" ? 0 : buttons.length - 1)
+                          : (i + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) %
+                            buttons.length;
+                  buttons[next]?.focus();
+                }
+              }}
+            >
+              {newActions.map((action) => (
+                <button
+                  key={action.id}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setNewMenuOpen(false);
+                    newTrigger.current?.focus();
+                    action.run();
+                  }}
+                >
+                  {action.label}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : onCreate ? (
+        <button
+          type="button"
+          className="conversation-tabs__new"
+          aria-label="New conversation"
+          title="New conversation"
+          onClick={onCreate}
+        >
+          <Plus size={16} />
+        </button>
+      ) : null}
       <button ref={overflowTrigger} type="button" className="conversation-tabs__overflow" aria-label="Search open tabs" aria-expanded={overflowOpen} aria-haspopup="dialog" onClick={() => { setQuery(""); setOverflowOpen(!overflowOpen); }}><CaretDown size={16} /></button>
       {overflowOpen ? createPortal(<div ref={overflowPanel} className="conversation-tabs-menu" role="dialog" aria-label="Open tabs" onKeyDown={(event) => {
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setOverflowOpen(false); overflowTrigger.current?.focus(); }

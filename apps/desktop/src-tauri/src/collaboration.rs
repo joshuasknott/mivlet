@@ -1,9 +1,10 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+mod capture_summary;
 mod chats;
 mod commands;
 mod context;
-mod models;
+pub(crate) mod models;
 mod schedules;
 mod work;
 pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_project};
@@ -19,6 +20,7 @@ use models::*;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashSet;
+use tauri::Manager;
 
 type Result<T> = crate::store::Result<T>;
 
@@ -111,11 +113,14 @@ fn profile<'a>(profiles: &'a [FableAgentProfile], agent_id: &str) -> Result<&'a 
 fn participants(
     profiles: &[FableAgentProfile],
     ids: &[String],
-    facilitator: &str,
+    facilitator: Option<&str>,
 ) -> Result<Vec<Participant>> {
-    if ids.is_empty() || ids.len() > 8 || !ids.iter().any(|id| id == facilitator) {
+    if ids.is_empty()
+        || ids.len() > 8
+        || facilitator.is_some_and(|lead| !ids.iter().any(|id| id == lead))
+    {
         return Err(invalid(
-            "Choose one to eight participants and a facilitator from those participants.",
+            "Choose one to eight participants. A coordinator, when designated, must be one of them.",
         ));
     }
     let mut seen = HashSet::new();
@@ -257,6 +262,11 @@ impl Context<'_> {
         if !["direct", "group"].contains(&kind) || kind == "direct" && members.len() != 1 {
             return Err(invalid("A direct conversation needs exactly one teammate."));
         }
+        if kind == "group" && project.is_none() {
+            return Err(invalid(
+                "Create a project to work with more than one teammate. Standalone groups are retired.",
+            ));
+        }
         if let Some(project) = &project {
             let team = self.project_team(project)?;
             if members
@@ -301,6 +311,7 @@ impl Context<'_> {
             participants: members,
             revision: 1,
             generation: 1,
+            archived: false,
             created_at: self.time.into(),
             updated_at: self.time.into(),
         };
@@ -365,8 +376,11 @@ pub fn collaboration_command(
     request: Request,
 ) -> std::result::Result<Snapshot, String> {
     main_window(&window)?;
-    let profiles = native_profiles(app, &request.workspace_id)?;
+    let profiles = native_profiles(app.clone(), &request.workspace_id)?;
     let store = crate::store::try_global().ok_or("Mivlet's encrypted store is unavailable.")?;
+    let computers = app
+        .try_state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
+        .map(|state| state.inner().clone());
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(
@@ -383,6 +397,23 @@ pub fn collaboration_command(
                 profiles: &profiles,
                 time: &time,
             };
+            // Staged inputs are native facts: verify them against the exact
+            // agent workspace before the dispatch binding can proceed.
+            if let Command::BindWork {
+                id,
+                attachments: Some(refs),
+                ..
+            } = &request.command
+            {
+                let item = repo::get::<Work>(conn, store, &scope.private, Kind::Work, id)?
+                    .ok_or_else(|| invalid("The assignment is unavailable."))?;
+                work::verify_attachment_files(
+                    computers.as_deref(),
+                    scope.data.workspace_id(),
+                    &item.agent_id,
+                    refs,
+                )?;
+            }
             commands::apply(&ctx, request.command)?;
             ctx.snapshot()
         })
@@ -405,7 +436,7 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
         {
             ctx.team(&Team {
                 project_id: project.id.clone(),
-                lead_agent_id: ctx.profiles.first().map(|p| p.id.clone()),
+                lead_agent_id: None,
                 participant_ids: ctx.profiles.iter().map(|p| p.id.clone()).collect(),
                 revision: 1,
             })?;
@@ -500,21 +531,38 @@ fn adopt_existing(ctx: &Context<'_>) -> Result<()> {
         if !owned {
             continue;
         }
+        // A single positive profile link establishes Side Chat ownership. Zero
+        // or multiple links stay unclassified: ambiguous legacy chats are never
+        // guessed to be an Agent's main Chat.
         let room = Conversation {
-            chat: project.map(|p| ChatBinding {
-                role: "main".into(),
-                owner_kind: "project".into(),
-                owner_id: p.id.clone(),
-            }),
+            chat: project
+                .map(|p| ChatBinding {
+                    role: "main".into(),
+                    owner_kind: "project".into(),
+                    owner_id: p.id.clone(),
+                })
+                .or_else(|| {
+                    (linked.len() == 1).then(|| ChatBinding {
+                        role: "side".into(),
+                        owner_kind: "agent".into(),
+                        owner_id: linked[0].id.clone(),
+                    })
+                }),
             id: thread.id,
             workspace_id: ctx.scope.data.workspace_id().into(),
             kind: if project.is_some() { "group" } else { "direct" }.into(),
             title: thread.title,
             project_id: project.map(|p| p.id.clone()),
-            facilitator_id: members.first().map(|p| p.agent_id.clone()),
+            // Adoption never invents a coordinator. A project's submitter
+            // chooses a current participant; a direct Chat has exactly one.
+            facilitator_id: project
+                .is_none()
+                .then(|| members.first().map(|p| p.agent_id.clone()))
+                .flatten(),
             participants: members,
             revision: 1,
             generation: 1,
+            archived: false,
             created_at: thread.created_at,
             updated_at: thread.updated_at,
         };

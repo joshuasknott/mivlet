@@ -93,6 +93,7 @@ import {
   loadRuntimeApprovalRules,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
+  listRuntimeContextSummaries,
   loadRuntimeSnapshot,
   loadRuntimeIdentityStatus,
   loadRuntimeAccountWorkspaceStatus,
@@ -1430,6 +1431,12 @@ export function useShellRuntime(
       audience,
     );
     const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
+    // Durable derived summaries for this exact conversation. They are account-
+    // scoped natively and only enter the prefix as untrusted prior evidence.
+    const summaries =
+      hasTauriRuntime() && context?.threadId
+        ? ((await listRuntimeContextSummaries(context.threadId)) ?? [])
+        : [];
     const result = await retrieve(
       knowledgeRetrievalSources(visibleSources, context),
       {
@@ -1449,6 +1456,7 @@ export function useShellRuntime(
       // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
       // switch) excludes everything.
       memory: memoryDisabled || context?.excludePrivateMemory ? [] : visibleMemory,
+      summaries,
       citations: result.citations,
       authorization: {
         isSourceAuthorized: connectionIsAuthorized,

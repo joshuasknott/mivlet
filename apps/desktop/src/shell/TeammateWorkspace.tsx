@@ -9,9 +9,11 @@ import {
   useSyncExternalStore,
 } from "react";
 import type {
+  CollaborationWorkItem,
   ConversationLayout,
   FableAgentProfile,
   LocalProject,
+  WorkOutput,
 } from "@fable/protocol";
 import { useShellRuntime, type ShellRuntime } from "../hooks/useShellRuntime";
 import { useLocalProjects } from "../hooks/useLocalProjects";
@@ -22,6 +24,8 @@ import {
 } from "../hooks/useLocalScheduleDispatcher";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import { activeWork, WorkspaceExecution } from "../lib/workspace-execution";
+import { agentPresence, type AgentPresence } from "../lib/agent-presence";
+import { promoteWorkOutputToMemory } from "../lib/work-memory";
 import {
   emptyLayout,
   reduceLayout,
@@ -29,7 +33,10 @@ import {
   type LayoutAction,
 } from "../lib/conversation-layout";
 import {
+  addLocalProjectShare,
   createLocalProject,
+  migrateLegacyGroup,
+  removeLocalProjectShare,
   updateLocalProject,
 } from "../runtime/domains/local-projects";
 import {
@@ -43,6 +50,7 @@ import { ConversationPane } from "./ConversationPane";
 import {
   ConversationTabs,
   ConversationGrid,
+  type NewAction,
 } from "../components/conversation/ConversationTabs";
 import {
   AgentSidebar,
@@ -54,8 +62,20 @@ import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
 import { useConversationDrag } from "../hooks/useConversationDrag";
-import { WorkspaceHistory } from "../components/conversation/WorkspaceHistory";
-import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
+const ProjectContextPanel = lazy(() => import("../components/projects/ProjectContextPanel").then(module => ({ default: module.ProjectContextPanel })));
+import { SideChatList } from "../components/conversation/SideChats";
+import { createSideChat, renameSideChat, setSideChatArchived, deleteSideChat } from "../lib/conversation-service";
+const SearchOverlay = lazy(() => import("../components/search/SearchOverlay").then(module => ({ default: module.SearchOverlay })));
+import { SearchFileDialog } from "../components/search/SearchFileDialog";
+import { ConversationSummaries } from "../components/memory/ConversationSummaries";
+import { navigationTargetFor } from "../lib/search/navigation";
+import {
+  WorkspaceRightNav,
+  type NavContext,
+} from "../components/navigation/WorkspaceRightNav";
+const WorkModeView = lazy(() => import("../components/navigation/WorkModeView").then(module => ({ default: module.WorkModeView })));
+import { scopedRoomIds, scopeWork } from "../components/navigation/work-order";
+import { workPresentation } from "../components/work/WorkStatusBadge";
 import "./teammate-workspace.css";
 
 const ExecutionWorker = lazy(() =>
@@ -76,6 +96,11 @@ const ConversationDialog = lazy(() =>
 const PlaceConversationDialog = lazy(() =>
   import("../components/projects/ConversationDialogs").then((module) => ({
     default: module.PlaceConversationDialog,
+  })),
+);
+const MigrateGroupDialog = lazy(() =>
+  import("../components/projects/ConversationDialogs").then((module) => ({
+    default: module.MigrateGroupDialog,
   })),
 );
 const OnboardingPage = lazy(() =>
@@ -221,10 +246,15 @@ function ActiveWorkspace({
   const initialized = useRef(false);
   const narrow = useMediaQuery("(max-width: 850px)");
   const phone = useMediaQuery("(max-width: 700px)");
-  const [historyOpen, setHistoryOpen] = useState(!narrow);
+  // One contextual right panel replaces history, details and computer panels.
+  const [contextOpen, setContextOpen] = useState(!narrow);
+  const [mode, setMode] = useState<"chat" | "work">("chat");
+  const [navWorkId, setNavWorkId] = useState<string | null>(null);
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFile, setSearchFile] = useState<Parameters<typeof SearchFileDialog>[0] | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [marketplace, setMarketplace] = useState<{ id?: string } | null>(null);
   const [editor, setEditor] = useState<{
@@ -234,6 +264,7 @@ function ActiveWorkspace({
     focused?: boolean;
   } | null>(null);
   const [placeId, setPlaceId] = useState<string | null>(null);
+  const [migrateId, setMigrateId] = useState<string | null>(null);
   const [agentEditor, setAgentEditor] = useState<{ id?: string } | null>(null);
   const [createdAgentId, setCreatedAgentId] = useState<string | null>(null);
   const [schedules, setSchedules] = useState<{
@@ -264,6 +295,88 @@ function ActiveWorkspace({
     runtime.agents.find((agent) => agent.id === activeRoom?.facilitatorId) ??
     runtime.agents.find((agent) => agent.id === runtime.activeAgentId) ??
     runtime.agents[0];
+
+  // The context the right panel and modes describe: an explicitly selected
+  // Work item, else the active view's loaded Project, else its Agent, else the
+  // remembered active agent. A Project that has not loaded yet is not faked.
+  const activeProject = projects.projects.find(
+    (project) => project.id === activeRoom?.projectId,
+  );
+  const selectedWork =
+    (navWorkId
+      ? state.data.work.find((work) => work.id === navWorkId)
+      : undefined) ?? null;
+  const navContext: NavContext = selectedWork
+    ? { kind: "work", item: selectedWork }
+    : activeProject
+      ? { kind: "project", project: activeProject }
+      : activeProfile
+        ? { kind: "agent", agent: activeProfile }
+        : null;
+  const navAgent =
+    navContext?.kind === "agent"
+      ? navContext.agent
+      : navContext?.kind === "work"
+        ? runtime.agents.find(
+            (agent) => agent.id === navContext.item.agentId,
+          ) ?? activeProfile
+        : undefined;
+  const navProject =
+    navContext?.kind === "project"
+      ? navContext.project
+      : navContext?.kind === "work" && navContext.item.projectId
+        ? projects.projects.find(
+            (project) => project.id === navContext.item.projectId,
+          )
+        : undefined;
+  const navTeam = state.data.teams.find(
+    (team) => team.projectId === navProject?.id,
+  );
+  const navRoomIds = new Set(
+    scopedRoomIds(navAgent?.id, navProject?.id, state.data.conversations),
+  );
+  const navWork =
+    navContext?.kind === "work"
+      ? [navContext.item]
+      : scopeWork(state.data.work, {
+          agentId: navContext?.kind === "agent" ? navAgent?.id : undefined,
+          projectId: navProject?.id,
+        });
+  const navApprovals = runtime.openApprovals.filter((approval) =>
+    state.sessions.some(
+      (session) =>
+        session.approvalIds.has(approval.id) &&
+        (navContext?.kind === "work"
+          ? session.work.id === navContext.item.id
+          : navRoomIds.has(session.work.conversationId)),
+    ),
+  );
+  const navSession = navAgent
+    ? state.sessions.find(
+        (entry) => entry.work.agentId === navAgent.id && entry.state,
+      )
+    : undefined;
+  const navPresence: AgentPresence = (() => {
+    if (!navAgent) return "idle";
+    const session = navSession;
+    if (session?.state)
+      return agentPresence(
+        session.state,
+        runtime.openApprovals.some((approval) =>
+          session.approvalIds.has(approval.id),
+        ),
+        session.work.status === "queued",
+      );
+    const current =
+      navWork.find(activeWork) ?? navWork.at(-1) ?? undefined;
+    if (!current) return "idle";
+    if (current.status === "queued") return "received";
+    if (current.status === "awaiting-approval") return "waiting";
+    if (current.status === "awaiting-user") return "input";
+    if (current.status === "failed" || current.status === "blocked")
+      return "blocked";
+    return "working";
+  })();
 
   useEffect(() => {
     mounts.current++;
@@ -440,6 +553,7 @@ function ActiveWorkspace({
       );
       return;
     }
+    setNavWorkId(null);
     actLayout({
       type: newTab ? "open" : "navigate",
       view: {
@@ -448,10 +562,14 @@ function ActiveWorkspace({
         conversationId: id,
       },
     });
-    if (narrow) setHistoryOpen(false);
+    if (narrow) setContextOpen(false);
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
       if (
         event.ctrlKey &&
         event.shiftKey &&
@@ -497,7 +615,7 @@ function ActiveWorkspace({
   ) => {
     await runtime.flushSnapshot();
     const id = `thread-${crypto.randomUUID()}`;
-    if (draft.kind === "project") {
+    if (draft.kind === "project" && !projectId) {
       const project = await createLocalProject({
         workspaceId,
         id: `project-${crypto.randomUUID()}`,
@@ -520,7 +638,7 @@ function ActiveWorkspace({
         projectId: project.id,
         expectedRevision: team.revision,
         participantIds: draft.participantIds,
-        leadAgentId: draft.facilitatorId,
+        leadAgentId: draft.facilitatorId || undefined,
         shareHistory: true,
       });
     } else
@@ -528,12 +646,13 @@ function ActiveWorkspace({
         action: "create-conversation",
         id,
         title: draft.title,
-        kind: draft.kind,
+        kind: draft.kind === "project" ? "group" : "direct",
         participantIds: draft.participantIds,
-        facilitatorId: draft.facilitatorId,
+        facilitatorId: draft.facilitatorId || undefined,
         projectId,
       });
-    if (seedText) await saveDraft(id, draft.facilitatorId, seedText, projectId);
+    if (seedText && draft.facilitatorId)
+      await saveDraft(id, draft.facilitatorId, seedText, projectId);
     open(id, true);
     return id;
   };
@@ -630,50 +749,60 @@ function ActiveWorkspace({
   );
   const previews: Record<string, AgentSidebarPreview> = Object.fromEntries(
     runtime.agents.map((agent) => {
-      const work = state.data.work.filter((work) => work.agentId === agent.id);
-      const current = work.find(activeWork) ?? work.at(-1);
+      const agentWork = state.data.work.filter(
+        (work) => work.agentId === agent.id,
+      );
+      const current = agentWork.find(activeWork) ?? agentWork.at(-1);
+      const session = state.sessions.find(
+        (entry) => entry.work.agentId === agent.id && entry.state,
+      );
+      const awaitingApproval = session
+        ? runtime.openApprovals.some((approval) =>
+            session.approvalIds.has(approval.id),
+          )
+        : current?.status === "awaiting-approval";
+      // Detailed execution text stays out of the sidebar: it shows the unified
+      // state, while approvals and failures outrank another item completing.
+      const presence: AgentPresence = session?.state
+        ? agentPresence(
+            session.state,
+            awaitingApproval,
+            session.work.status === "queued",
+          )
+        : awaitingApproval
+          ? "waiting"
+          : current?.status === "awaiting-user"
+            ? "input"
+            : current && ["failed", "blocked"].includes(current.status)
+              ? "blocked"
+              : current?.status === "queued"
+                ? "received"
+                : current && activeWork(current)
+                  ? "working"
+                  : "idle";
       return [
         agent.id,
         {
           message: current
-            ? current.status === "queued"
-              ? "Queued"
-              : current.status.replaceAll("-", " ")
+            ? workPresentation(current).label
             : "Open a conversation",
           time: "",
-          presence:
-            current?.status === "awaiting-approval"
-              ? "waiting"
-              : current?.status === "awaiting-user"
-                ? "input"
-                : current && ["failed", "blocked"].includes(current.status)
-                  ? "blocked"
-                  : current?.status === "queued"
-                    ? "received"
-                    : current && activeWork(current)
-                      ? "working"
-                      : "idle",
+          presence,
           status:
-            current && activeWork(current)
-              ? "running"
-              : current &&
-                  ["failed", "blocked", "awaiting-user"].includes(
-                    current.status,
-                  )
-                ? "attention"
+            awaitingApproval || (current && ["failed", "blocked", "awaiting-user"].includes(current.status))
+              ? "attention"
+              : current && activeWork(current)
+                ? "running"
                 : "idle",
         },
       ];
     }),
   );
-  const activeProject = projects.projects.find(
-    (project) => project.id === activeRoom?.projectId,
-  );
   const newConversation = () => {
-    if (activeRoom?.facilitatorId)
+    if (activeRoom && activeRoom.participants.length)
       void createRoom(
         {
-          kind: activeRoom.kind,
+          kind: activeRoom.kind === "group" ? "project" : "direct",
           title: activeProject
             ? "New conversation"
             : activeRoom.kind === "group"
@@ -683,7 +812,7 @@ function ActiveWorkspace({
           participantIds: activeRoom.participants.map(
             (member) => member.agentId,
           ),
-          facilitatorId: activeRoom.facilitatorId,
+          facilitatorId: activeRoom.facilitatorId ?? "",
           shareHistory: false,
         },
         activeRoom.projectId,
@@ -694,20 +823,165 @@ function ActiveWorkspace({
       );
     else setAgentEditor({});
   };
+  // Contextual New: it names and creates the relevant object for the selected
+  // Agent, Project or workspace, never an implicit generic conversation.
+  const newSideChat = () => {
+    if (navContext?.kind === "agent") {
+      void createRoom(
+        {
+          kind: "direct",
+          title: `Side chat with ${navContext.agent.name}`,
+          instructions: "",
+          participantIds: [navContext.agent.id],
+          facilitatorId: navContext.agent.id,
+          shareHistory: false,
+        },
+        undefined,
+      ).catch((error) => service.report(error));
+      return;
+    }
+    if (navProject && navTeam) {
+      const facilitatorId =
+        navTeam.leadAgentId ?? "";
+      void createRoom(
+        {
+          kind: "project",
+          title: `Side chat in ${navProject.name}`,
+          instructions: "",
+          participantIds: navTeam.participantIds,
+          facilitatorId,
+          shareHistory: false,
+        },
+        navProject.id,
+      ).catch((error) => service.report(error));
+      return;
+    }
+    setEditor({
+      draft: {
+        kind: "direct",
+        ...(activeProfile
+          ? {
+              participantIds: [activeProfile.id],
+              facilitatorId: activeProfile.id,
+            }
+          : {}),
+      },
+    });
+  };
+  const newActions: NewAction[] =
+    navContext?.kind === "agent"
+      ? [
+          {
+            id: "side-chat",
+            label: `New side chat with ${navContext.agent.name}`,
+            run: newSideChat,
+          },
+        ]
+      : navProject
+        ? [
+            {
+              id: "side-chat",
+              label: `New side chat in ${navProject.name}`,
+              run: newSideChat,
+            },
+          ]
+        : [
+            {
+              id: "agent",
+              label: "New agent",
+              run: () => setAgentEditor({}),
+            },
+            {
+              id: "project",
+              label: "New project",
+              run: () =>
+                setEditor({
+                  draft: {
+                    kind: "project",
+                    ...(activeProfile
+                      ? { participantIds: [activeProfile.id] }
+                      : {}),
+                  },
+                }),
+            },
+          ];
   const onConversationPointerDown = useConversationDrag(
     layout,
     actLayout,
     open,
     !narrow,
   );
+  // Narrow shared work actions: the shell routes Work UI callbacks to the
+  // service, keeping result snapshots out of the component contracts.
+  const stopWork = (id: string) => service.stop(id);
+  const continueWork = (id: string, generation: number) =>
+    service
+      .command({
+        action: "continue-work",
+        id,
+        expectedGeneration: generation,
+        reconcile: true,
+      })
+      .then(() => undefined);
+  const steerWork = (id: string, generation: number, text: string) =>
+    service.steer(id, generation, text).then(() => undefined);
+  const promoteWorkOutput = async (
+    output: WorkOutput,
+    workItem: CollaborationWorkItem,
+    value: string,
+  ) => {
+    await promoteWorkOutputToMemory(
+      workItem,
+      output,
+      value,
+      runtime.memoryState,
+    );
+  };
+  const selectNavWork = (id: string | null) => {
+    setNavWorkId(id);
+    if (id) {
+      setMode("work");
+      setContextOpen(true);
+    }
+  };
+  const navProjectRoom =
+    navProject && activeRoom?.projectId === navProject.id
+      ? activeRoom
+      : navProject
+        ? state.data.conversations.find(
+            (room) => room.id === navProject.threadId,
+          )
+        : undefined;
   return (
     <main
       onPointerDownCapture={onConversationPointerDown}
-      className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${navigationCollapsed ? " teammates-workspace--collapsed" : ""}${historyOpen || computer ? " teammates-workspace--history" : ""}`}
+      className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${navigationCollapsed ? " teammates-workspace--collapsed" : ""}${contextOpen || computer ? " teammates-workspace--history" : ""}`}
       data-theme={theme}
       data-mobile-navigation={mobileNavigation}
     >
+      {searchOpen ? <Suspense fallback={null}><SearchOverlay workspaceId={workspaceId} open={searchOpen} onClose={() => setSearchOpen(false)}
+        enabled={!runtime.accountWorkspacePending}
+        dataRevision={JSON.stringify([state.data, runtime.agents, runtime.workspaceKnowledgeSources, projects.projects])}
+        onOpenResult={result => {
+          const target = navigationTargetFor(result);
+          if (!target || target.workspaceId !== workspaceId) { service.report(new Error("This result is unavailable.")); return; }
+          setSearchOpen(false);
+          setMarketplace(null);
+          setMode("chat");
+          if (target.type === "conversation") open(target.conversationId);
+          else if (target.type === "project") open(target.threadId);
+          else if (target.type === "work") { open(target.conversationId); setNavWorkId(target.workId); setContextOpen(true); }
+          else if (target.type === "agent") {
+            const room = state.data.conversations.find(room => room.chat?.role === "main" && room.chat.ownerKind === "agent" && room.chat.ownerId === target.agentId);
+            if (room) open(room.id); else setAgentEditor({ id: target.agentId });
+          } else {
+            const source = target.type === "knowledge-file" ? runtime.workspaceKnowledgeSources.find(source => source.id === target.sourceId && !source.deletedAt && !source.disabled) : undefined;
+            setSearchFile({ target, title: result.title, text: source?.contentPreview ?? (target.type === "knowledge-file" ? "This source has no text preview." : undefined), onClose: () => setSearchFile(null) });
+          }
+        }} /></Suspense> : null}
+      {searchFile ? <SearchFileDialog key={JSON.stringify(searchFile.target)} {...searchFile} /> : null}
       <AgentSidebar
+        onSearch={() => setSearchOpen(true)}
         collapsed={navigationCollapsed && !phone}
         hidden={phone && !mobileNavigation}
         onToggleCollapsed={() => setNavigationCollapsed(!navigationCollapsed)}
@@ -725,17 +999,7 @@ function ActiveWorkspace({
           status: indicators[room.id],
         }))}
         onSelectConversation={open}
-        onCreateConversation={(kind, agentId) =>
-          setEditor({
-            draft: {
-              kind: kind ?? "direct",
-              ...(agentId
-                ? { participantIds: [agentId], facilitatorId: agentId }
-                : {}),
-            },
-          })
-        }
-        onCreateProject={() => setEditor({ draft: { kind: "project", ...(activeProfile ? { facilitatorId: activeProfile.id, participantIds: [activeProfile.id] } : {}) } })}
+        onCreateProject={() => setEditor({ draft: { kind: "project", ...(activeProfile ? { participantIds: [activeProfile.id] } : {}) } })}
         onSelectProject={(project) => {
           const saved = projects.projects.find(
             (item) => item.id === project.id,
@@ -753,25 +1017,54 @@ function ActiveWorkspace({
         onSignOut={() => setAccountDialog("sign-out")}
       />
       <section className="workspace-views" aria-label="Conversation workspace">
-        <ConversationTabs
-          layout={layout}
-          titles={Object.fromEntries(
-            state.data.conversations.map((room) => [room.id, room.title]),
-          )}
-          indicators={indicators}
-          descriptions={Object.fromEntries(state.data.conversations.map(room => [room.id, [projects.projects.find(project => project.id === room.projectId)?.name, room.participants.map(member => member.name).join(", ")].filter(Boolean).join(" · ")]))}
-          onAction={actLayout}
-          onCreate={newConversation}
-        />
+        <div
+          className="workspace-mode-bar"
+          role="tablist"
+          aria-label="Workspace mode"
+        >
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "chat"}
+            onClick={() => setMode("chat")}
+          >
+            Chat
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "work"}
+            onClick={() => setMode("work")}
+          >
+            Work
+          </button>
+        </div>
+        {mode === "chat" && !marketplace ? (
+          <ConversationTabs
+            layout={layout}
+            titles={Object.fromEntries(
+              state.data.conversations.map((room) => [room.id, room.title]),
+            )}
+            indicators={indicators}
+            descriptions={Object.fromEntries(state.data.conversations.map(room => [room.id, [projects.projects.find(project => project.id === room.projectId)?.name, room.participants.map(member => member.name).join(", ")].filter(Boolean).join(" · ")]))}
+            onAction={actLayout}
+            onCreate={newConversation}
+            newActions={newActions}
+          />
+        ) : null}
         <button
           type="button"
           className="workspace-history-toggle"
-          aria-label={historyOpen ? "Hide history" : "Show history"}
-          title={historyOpen ? "Hide history" : "Show history"}
-          aria-expanded={historyOpen}
+          aria-label={contextOpen ? "Hide context" : "Show context"}
+          title={contextOpen ? "Hide context" : "Show context"}
+          aria-expanded={contextOpen}
           onClick={() => {
-            setComputer(null);
-            setHistoryOpen(!historyOpen);
+            if (computer) {
+              setComputer(null);
+              setContextOpen(true);
+              return;
+            }
+            setContextOpen(!contextOpen);
           }}
         >
           ◷
@@ -850,6 +1143,51 @@ function ActiveWorkspace({
               }
             />
           </Suspense>
+        ) : mode === "work" ? (
+          <Suspense fallback={<p role="status">Loading work…</p>}><WorkModeView
+            project={navProject}
+            agent={navAgent}
+            work={navWork}
+            runtime={runtime}
+            service={service}
+            approvals={navApprovals}
+            selectedWork={selectedWork ?? undefined}
+            onOpen={open}
+            onOpenWork={selectNavWork}
+            onStopWork={stopWork}
+            onContinueWork={continueWork}
+            onSteerWork={steerWork}
+            onPromoteWorkOutput={promoteWorkOutput}
+            onOpenArtifact={(output, agentId) => {
+              const artifact = parseComputerArtifact(output);
+              const conversationId =
+                activeRoom?.id ?? state.data.conversations[0]?.id;
+              if (!artifact || !conversationId) return;
+              setMode("chat");
+              actLayout({
+                type: "open",
+                view: {
+                  id: `view-${crypto.randomUUID()}`,
+                  conversationId,
+                  kind: "artifact",
+                  output,
+                  agentId,
+                  title: artifact.title,
+                },
+              });
+            }}
+            onOpenComputer={(agentId) => {
+              setComputer(agentId);
+              setContextOpen(true);
+            }}
+            onSchedules={() =>
+              setSchedules({
+                agentId: navAgent?.id,
+                projectId: navProject?.id,
+              })
+            }
+            onOpenPlugins={() => setMarketplace({})}
+          /></Suspense>
         ) : (
           <ConversationGrid
             layout={layout}
@@ -895,6 +1233,7 @@ function ActiveWorkspace({
                         state={state}
                         active={pane === layout.activePane}
                         profileName={profileName}
+                        onOpenWork={selectNavWork}
                         onClose={() =>
                           actLayout({ type: "close", id: view.id })
                         }
@@ -922,6 +1261,7 @@ function ActiveWorkspace({
                           )
                         }
                         onPlace={() => setPlaceId(room.id)}
+                        onMigrate={() => setMigrateId(room.id)}
                         onSchedules={() =>
                           setSchedules({
                             agentId: room.facilitatorId,
@@ -938,7 +1278,8 @@ function ActiveWorkspace({
                         onNew={async (text) => {
                           const id = await createRoom(
                             {
-                              kind: room.kind,
+                              kind:
+                                room.kind === "group" ? "project" : "direct",
                               title: text
                                 ? `${room.title.slice(0, 98)} · continued`
                                 : "New conversation",
@@ -994,50 +1335,115 @@ function ActiveWorkspace({
           />
         ))}
       </Suspense>
-      {historyOpen && !computer ? (
-        <WorkspaceHistory
-          rooms={state.data.conversations}
-          work={state.data.work}
+      <WorkspaceRightNav
+        context={navContext}
+        rooms={state.data.conversations}
+        work={state.data.work}
+        team={navTeam}
+        runtime={runtime}
+        approvals={navApprovals}
+        open={contextOpen || Boolean(computer)}
+        onClose={() => {
+          setComputer(null);
+          setContextOpen(false);
+        }}
+        onOpenConversation={open}
+        onOpenWork={selectNavWork}
+        onStopWork={stopWork}
+        onContinueWork={continueWork}
+        onSteerWork={steerWork}
+        onPromoteWorkOutput={promoteWorkOutput}
+        onNewSideChat={newSideChat}
+        summaries={activeRoom ? <ConversationSummaries key={activeRoom.id} threadId={activeRoom.id} revision={JSON.stringify(state.data.work.filter(work => work.conversationId === activeRoom.id).map(work => [work.id, work.updatedAt]))} /> : undefined}
+        sideChats={navContext && navContext.kind !== "work" ? <SideChatList
+          owner={navContext.kind === "project" ? { kind: "project", id: navContext.project.id } : { kind: "agent", id: navContext.agent.id }}
+          ownerName={navContext.kind === "project" ? navContext.project.name : navContext.agent.name}
+          chats={state.data.conversations}
           activeId={activeRoom?.id}
-          indicators={indicators}
-          service={service}
-          onOpen={open}
-          onClose={() => setHistoryOpen(false)}
-          projectDetails={
-            activeProject && activeRoom ? (
-              <ProjectContextPanel
-                key={activeProject.id}
-                project={activeProject}
-                room={activeRoom}
-                data={state.data}
+          onOpen={room => open(room.id)}
+          onCreate={async title => {
+            const project = navContext.kind === "project";
+            const room = await createSideChat(service, { title,
+              owner: project ? { kind: "project", id: navContext.project.id } : { kind: "agent", id: navContext.agent.id },
+              participantIds: project ? navTeam?.participantIds ?? [] : [navContext.agent.id],
+              facilitatorId: project ? navTeam?.leadAgentId ?? "" : navContext.agent.id,
+            });
+            open(room.id);
+          }}
+          onRename={async (room, title) => { await renameSideChat(service, room, title); }}
+          onArchive={async (room, archived) => { await setSideChatArchived(service, room, archived); }}
+          onDelete={async room => { await deleteSideChat(service, room); }}
+        /> : undefined}
+        onSchedules={() =>
+          setSchedules({
+            agentId: navAgent?.id,
+            projectId: navProject?.id,
+          })
+        }
+        onOpenComputer={(agentId) => {
+          setComputer(agentId);
+          setContextOpen(true);
+        }}
+        computerAgentId={computer}
+        computer={
+          computer ? (
+            <Suspense fallback={null}>
+              <ComputerInspector
+                key={computer}
+                agentId={computer}
                 runtime={runtime}
                 service={service}
-                onOpen={open}
-                onEdit={() => { if (narrow) setHistoryOpen(false); setEditor({ projectId: activeProject.id }); }}
-                onSchedules={() => {
-                  if (narrow) setHistoryOpen(false);
-                  setSchedules({
-                    projectId: activeProject.id,
-                    agentId: activeRoom.facilitatorId,
-                  });
-                }}
-                onUpdate={updateProject}
+                onClose={() => setComputer(null)}
               />
-            ) : undefined
-          }
-        />
-      ) : null}
-      {computer ? (
-        <Suspense fallback={null}>
-          <ComputerInspector
-            key={computer}
-            agentId={computer}
-            runtime={runtime}
-            service={service}
-            onClose={() => setComputer(null)}
-          />
-        </Suspense>
-      ) : null}
+            </Suspense>
+          ) : null
+        }
+        onCloseComputer={() => setComputer(null)}
+        onManageMemory={() => {
+          setSettingsTab("privacy");
+          setSettings(true);
+        }}
+        onEditProject={
+          navProject ? () => setEditor({ projectId: navProject.id }) : undefined
+        }
+        presence={navPresence}
+        activity={navSession?.state?.activity}
+        projectDetails={
+          navProject && navProjectRoom ? (
+            <Suspense fallback={null}><ProjectContextPanel
+              key={navProject.id}
+              project={navProject}
+              room={navProjectRoom}
+              data={state.data}
+              runtime={runtime}
+              service={service}
+              onOpen={open}
+              onEdit={() => {
+                if (narrow) setContextOpen(false);
+                setEditor({ projectId: navProject.id });
+              }}
+              onSchedules={() => {
+                if (narrow) setContextOpen(false);
+                setSchedules({
+                  projectId: navProject.id,
+                  agentId: navProjectRoom.facilitatorId,
+                });
+              }}
+              onUpdate={updateProject}
+              onAddShare={async (share) => {
+                const updated = await addLocalProjectShare({ workspaceId, projectId: navProject.id, expectedRevision: navProject.revision, share });
+                projects.setProjects(current => current.map(item => item.id === updated.id ? updated : item));
+                await service.refresh();
+              }}
+              onRemoveShare={async (shareId) => {
+                const updated = await removeLocalProjectShare({ workspaceId, projectId: navProject.id, expectedRevision: navProject.revision, shareId });
+                projects.setProjects(current => current.map(item => item.id === updated.id ? updated : item));
+                await service.refresh();
+              }}
+            /></Suspense>
+          ) : undefined
+        }
+      />
       {editor ? (
         <Suspense fallback={null}>
           <ConversationDialog
@@ -1048,17 +1454,20 @@ function ActiveWorkspace({
                   )
                 : runtime.agents
             }
+            models={runtime.modelOptions}
+            providers={runtime.backendProviders}
             projectName={editor.focused ? editingProject?.name : undefined}
             edit={Boolean(editingRoom || (editingProject && !editor.focused))}
             initial={
               editingRoom
                 ? {
-                    kind: editingRoom.kind,
+                    kind:
+                      editingRoom.kind === "direct" ? "direct" : "project",
                     title: editingRoom.title,
                     participantIds: editingRoom.participants.map(
                       (member) => member.agentId,
                     ),
-                    facilitatorId: editingRoom.facilitatorId,
+                    facilitatorId: editingRoom.facilitatorId ?? "",
                   }
                 : editingProject && !editor.focused
                   ? {
@@ -1066,7 +1475,7 @@ function ActiveWorkspace({
                       title: editingProject.name,
                       instructions: editingProject.instructions,
                       participantIds: editingTeam?.participantIds,
-                      facilitatorId: editingTeam?.leadAgentId,
+                      facilitatorId: editingTeam?.leadAgentId ?? "",
                     }
                   : editor.draft
             }
@@ -1080,7 +1489,7 @@ function ActiveWorkspace({
                   expectedRevision: editingRoom.revision,
                   title: draft.title,
                   participantIds: draft.participantIds,
-                  facilitatorId: draft.facilitatorId,
+                  facilitatorId: draft.facilitatorId || undefined,
                   shareHistory: draft.shareHistory,
                 });
               else if (editingProject && editingTeam && !editor.focused) {
@@ -1098,7 +1507,7 @@ function ActiveWorkspace({
                   action: "update-team",
                   projectId: editingProject.id,
                   expectedRevision: team.revision,
-                  leadAgentId: draft.facilitatorId,
+                  leadAgentId: draft.facilitatorId || undefined,
                   participantIds: draft.participantIds,
                   shareHistory: draft.shareHistory,
                 });
@@ -1133,6 +1542,46 @@ function ActiveWorkspace({
                 projectId,
                 shareHistory: true,
               });
+            }}
+          />
+        </Suspense>
+      ) : null}
+      {migrateId ? (
+        <Suspense fallback={null}>
+          <MigrateGroupDialog
+            title={
+              state.data.conversations.find((room) => room.id === migrateId)
+                ?.title ?? "Legacy group"
+            }
+            agents={runtime.agents}
+            models={runtime.modelOptions}
+            providers={runtime.backendProviders}
+            initialParticipantIds={
+              state.data.conversations
+                .find((room) => room.id === migrateId)
+                ?.participants.map((member) => member.agentId) ?? []
+            }
+            onClose={() => setMigrateId(null)}
+            onMigrate={async (draft) => {
+              await runtime.flushSnapshot();
+              const updated = await migrateLegacyGroup({
+                workspaceId,
+                id: `project-${crypto.randomUUID()}`,
+                conversationId: migrateId,
+                expectedRevision:
+                  service
+                    .getSnapshot()
+                    .data.conversations.find((room) => room.id === migrateId)
+                    ?.revision ?? 0,
+                name: draft.name,
+                instructions: draft.instructions,
+                participantIds: draft.participantIds,
+                leadAgentId: draft.leadAgentId || undefined,
+                shareHistory: true,
+              });
+              projects.setProjects((current) => [...current, updated]);
+              await service.refresh();
+              open(updated.threadId);
             }}
           />
         </Suspense>

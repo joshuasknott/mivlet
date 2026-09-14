@@ -92,6 +92,42 @@ pub fn list<T: DeserializeOwned>(
         .collect()
 }
 
+/// Bounded typed read for scoped search. Unlike `list`, a full table never
+/// fails the read; the caller receives a truncation flag instead.
+pub fn list_bounded<T: DeserializeOwned>(
+    conn: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    kind: Kind,
+    limit: usize,
+    offset: usize,
+) -> Result<(Vec<T>, bool)> {
+    scope.ensure_exists(conn)?;
+    let mut statement = conn.prepare("SELECT id FROM collaboration_record WHERE workspace_id=?1 AND owner_subject=?2 AND kind=?3 ORDER BY id LIMIT ?4 OFFSET ?5")?;
+    let mut ids = statement
+        .query_map(
+            rusqlite::params![
+                scope.workspace_id(),
+                scope.owner_subject(),
+                kind.key(),
+                limit as i64 + 1,
+                offset as i64
+            ],
+            |row| row.get::<_, String>(0),
+        )?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    let truncated = ids.len() > limit;
+    ids.truncate(limit);
+    let values = ids
+        .into_iter()
+        .map(|id| {
+            get(conn, store, scope, kind, &id)?
+                .ok_or_else(|| StoreError::Invalid("A coordination record disappeared.".into()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok((values, truncated))
+}
+
 pub fn put<T: Serialize>(
     conn: &Connection,
     store: &Store,

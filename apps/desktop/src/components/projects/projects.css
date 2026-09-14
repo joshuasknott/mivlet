@@ -86,11 +86,6 @@
   color: var(--ink-muted);
   font-size: var(--text-11);
 }
-.project-sidebar-empty {
-  margin: 12px 10px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-}
 .agent-sidebar__section-label {
   flex: 0 0 auto;
   min-height: 31px;
@@ -337,4 +332,71 @@
 }
 .project-form-message--error {
   color: var(--destructive);
+}
+
+.team-readiness {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.team-readiness li {
+  display: grid;
+  gap: 1px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-subtle);
+}
+.team-readiness li[data-state="ready"] {
+  border-color: color-mix(in srgb, var(--positive) 35%, var(--border-subtle));
+}
+.team-readiness li[data-state="provider-disconnected"],
+.team-readiness li[data-state="model-missing"],
+.team-readiness li[data-state="agent-missing"],
+.team-readiness li[data-state="route-unsupported"] {
+  border-color: color-mix(in srgb, var(--attention, #b7791f) 40%, var(--border-subtle));
+}
+.team-readiness strong {
+  font-size: var(--text-12);
+}
+.team-readiness small {
+  color: var(--text-muted);
+  font-size: var(--text-11);
+}
+
+.project-shares {
+  display: grid;
+  gap: 10px;
+}
+.project-shares article {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+}
+.project-shares article[data-mode="snapshot"] {
+  border-left: 3px solid var(--accent);
+}
+.project-shares article[data-mode="live-reference"] {
+  border-left: 3px dashed var(--text-muted);
+}
+.project-shares header {
+  display: grid;
+}
+.project-shares header small,
+.project-shares > article > small {
+  color: var(--text-muted);
+  font-size: var(--text-11);
+}
+.project-shares article button {
+  justify-self: start;
+}
+.project-share__new {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
 }

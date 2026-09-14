@@ -7,9 +7,11 @@ budget and remaining live artifact acceptance. No deployment or merge is include
 
 Agent profiles remain the identity, instructions, skills, avatar, and provider/model
 source. Conversations have their own durable IDs, membership, drafts, history, and
-facilitator. An optional project owns a lead role assigned to an existing agent,
-participants, related conversations, explicit shared references, work, and decisions.
-The project's original thread remains its main conversation.
+optional coordinator. An optional project owns an optional coordinator role assigned
+to an existing agent, participants, related conversations, explicit shared
+references, work, and decisions. The project's original thread remains its main
+conversation. Standalone groups are retired: a legacy group converts into its own
+project while retaining its thread, messages and historical authorship.
 
 Execution belongs to an app-lifetime coordinator, never a tab or selected agent.
 Each assignment captures workspace, conversation, participant, provider/model,
@@ -20,9 +22,11 @@ views. No additional agent framework is installed.
 
 ## Coordination and authority
 
-An unaddressed shared request goes to its facilitator (the project lead in the main
-conversation). Explicit recipients select a participant; discussion invites relevant
-contributions rather than an unconditional round robin. A participant can request
+A request goes to the participant the sender chooses, to an explicitly @mentioned
+participant, or to the designated coordinator when one exists. A coordinator is
+optional; without one the sender must choose a current participant and Mivlet never
+broadcasts to every member automatically. Discussion invites relevant contributions
+rather than an unconditional round robin. A participant can request
 bounded assignments, questions, and reviews through Mivlet-owned collaboration tools.
 Results wake the requester for synthesis. Handoffs are contributions to the original
 user request, never new user authority. Delegation cannot widen permissions, retrieve
@@ -60,8 +64,11 @@ message or execution. External observations remain dated and can be marked stale
 
 Adding a participant explicitly shares the existing group history and project context.
 Removal cancels that participant's assignments, removes future dispatch eligibility,
-and retains historical authorship. Model/lead changes retain history, invalidate stale
-assignments, and require a fresh attempt using current configuration.
+and retains historical authorship. Model/coordinator changes retain history, invalidate
+stale assignments, and require a fresh attempt using current configuration.
+Explicit shares record the source, recipient, owner and either frozen snapshot bytes
+or a live reference that resolves again under the current account; sharing conveys
+no tool or computer authority.
 
 Schema v42 adds encrypted, installation-member-owned conversation metadata, work,
 facts and layout. Existing threads, messages, attachments, projects and author rows

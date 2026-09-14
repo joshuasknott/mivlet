@@ -34,11 +34,14 @@ a deployed or production-validated service.
 
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
-  selection with supported reasoning levels. Dictation and send have separate
-  controls below the message text.
+  selection with supported reasoning levels. Dictation stays beside one
+  bottom-right action that sends when the draft or attachments have content and
+  starts voice chat when the composer is empty; attachment-only sends keep
+  working.
 - Voice conversations with the selected named agent: automatic speech turns,
   sentence-by-sentence spoken replies, captions, mute, interruption, and End.
-  Open the waveform button in an agent conversation. Speech requires a separate
+  Start voice from the composer when the message is empty; the call continues
+  the active conversation. Speech requires a separate
   OpenAI API connection and explicit per-call consent; the selected agent/model
   still owns reasoning and tools. Microphone interruption requires confirmed
   echo cancellation; an Interrupt button is always available during replies.
@@ -77,17 +80,27 @@ a deployed or production-validated service.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
-- Each named agent can have multiple private conversations. Standalone groups
-  and optional projects use selected participants, an existing agent as lead or
-  facilitator, bounded assignments, attributed results and inspectable decisions.
-  Group delegation uses the Codex and native API routes that bridge Mivlet tools;
-  provider-owned routes without that bridge remain unavailable for group work.
+- Each named agent can have multiple private conversations. Projects own a shared
+  Chat, Team, Work, files, artifacts and decisions with an optional coordinator,
+  explicit @mention routing, bounded assignments, attributed results and
+  inspectable decisions. Without a coordinator the sender picks a current
+  participant; Mivlet never fans out automatically. Legacy standalone groups
+  convert into projects without losing history or authorship, and explicit shares
+  record recipient, owner and snapshot/live-reference semantics. Delegation uses
+  the Codex and native API routes that bridge Mivlet tools; provider-owned routes
+  without that bridge remain unavailable for project work and show that
+  prerequisite.
 - Conversation tabs and two-pane splits arrange durable conversations and
   supported artifacts. Closing a tab leaves work running and discoverable in
   Activity. Projects contain focused chats, shared files and occurrence-tracked
   local research schedules. Work runs while the app is open and Windows is awake;
-  interrupted work requires review before continuation. See the
-  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md).
+  interrupted work requires review before continuation. Steering and explicit
+  continuation are recorded at safe boundaries without replaying external
+  effects, request files keep durable references with accurate reattachment
+  prerequisites after restart, and saved results can be promoted into Memory
+  with provenance. See the
+  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md)
+  and [Work execution](docs/architecture/work-execution.md).
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Agents can create bounded passive DOCX files and XLSX workbooks
@@ -99,10 +112,14 @@ a deployed or production-validated service.
   with exact approval checks for consequential tools and connector actions.
 - Provider model visibility controls in Settings. Hidden models stay out of
   conversation pickers; hiding the selected model requires a new selection.
-- File attachments and memory provide conversation context; Knowledge is no
-  longer a separate product feature. Existing imported records remain stored.
+- File attachments and memory provide conversation context; long conversations
+  keep recent turns plus incremental durable summaries and scoped retrieval of
+  older relevant history rather than replaying the lifetime transcript. Knowledge
+  is no longer a separate product feature. Existing imported records remain stored.
 - Native Windows application control through bundled Cua Driver 0.25.0, governed
-  by the global approvals setting. Full Access needs
+  by the global approvals setting. Computer Use is enabled and disabled from its
+  ordinary Plugin card and detail view; enabling it does not grant permission.
+  Full Access needs
   no separate app grant; the agent finds and selects the window itself.
   A compact native activity window and Ctrl+Alt+Esc stop control. This shares
   your Windows session. Supported app controls use background delivery by default;

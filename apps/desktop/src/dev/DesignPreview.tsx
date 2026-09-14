@@ -40,7 +40,9 @@ import { additionalNativeProviderCatalog } from "@fable/connectors/backends/addi
 import { OnboardingPreview } from "./OnboardingPreview";
 import { AgentAvatarPreview } from "./AgentAvatarPreview";
 import { VoiceConversationPreview } from "./VoiceConversationPreview";
+import { RoadmapPreview } from "./RoadmapPreview";
 import "../styles.css";
+import "./legacy-preview.css";
 
 if (!import.meta.env.DEV)
   throw new Error("The component preview is available only in development.");
@@ -653,7 +655,7 @@ const previewRoot = createRoot(document.getElementById("root")!);
 import.meta.hot?.dispose(() => previewRoot.unmount());
 previewRoot.render(
   <QueryClientProvider client={previewQueryClient}>
-    {previewView === "onboarding" ? (
+    {previewView === "roadmap" ? <RoadmapPreview agent={samples[0]} /> : previewView === "onboarding" ? (
       <OnboardingPreview />
     ) : previewView === "avatars" ? (
       <AgentAvatarPreview />

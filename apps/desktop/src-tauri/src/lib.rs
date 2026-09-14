@@ -31,6 +31,7 @@ mod connector_cache;
 mod connector_check;
 mod connector_sync;
 mod connectors;
+mod context_summaries;
 mod conversation_links;
 mod conversations;
 mod diagnostics;
@@ -59,6 +60,7 @@ mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
 mod provider_process;
+mod search;
 mod snapshot;
 mod store;
 mod token_plugins;
@@ -169,6 +171,9 @@ pub fn run() {
             local_projects::local_project_run_author_bind,
             local_projects::local_project_run_author_list,
             local_projects::local_project_run_author_get,
+            local_projects::local_project_share_add,
+            local_projects::local_project_share_remove,
+            local_projects::local_project_migrate_group,
             conversations::conversation_create_thread,
             conversations::conversation_list_threads,
             conversations::conversation_get_thread,
@@ -182,6 +187,7 @@ pub fn run() {
             conversations::conversation_delete_thread,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
+            search::search_workspace,
             approvals::list_approval_audit,
             approvals::list_approval_rules,
             approvals::record_approval_decision,
@@ -198,6 +204,8 @@ pub fn run() {
             memory::change_memory_record_state,
             memory::export_memory_state,
             memory::promote_knowledge_source_to_memory,
+            context_summaries::list_context_summaries,
+            context_summaries::save_context_summary,
             media_images::media_image_status,
             native_speech::native_speech_prepare_recording,
             native_speech::native_speech_cancel_recording,
