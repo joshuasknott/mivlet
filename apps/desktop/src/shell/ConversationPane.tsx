@@ -37,7 +37,19 @@ import { ContextRecoveryPanel } from "../components/conversation/ContextRecovery
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { WorkRecovery } from "../components/projects/WorkItems";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
-import type { ConversationTurn } from "../lib/conversation-presentation";
+import {
+  conversationTurns,
+  type ConversationTurn,
+} from "../lib/conversation-presentation";
+import {
+  promoteConversationConclusion,
+  runtimeMemoryPorts,
+} from "../lib/conversation-service";
+import {
+  ConversationMemoryPromotion,
+  type MemoryScopeOption,
+} from "../components/conversation/ConversationMemoryPromotion";
+import { SideChatContextNotice } from "../components/conversation/SideChats";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -143,6 +155,7 @@ export function ConversationPane({
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("ready");
   const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => composerRef.current?.focus()); };
@@ -198,6 +211,52 @@ export function ConversationPane({
     void service.loadHistory(room.id).catch((error) => service.report(error));
   }, [room.id, service]);
   const history = state.histories[room.id];
+  const sideChat = room.chat?.role === "side";
+  const latestConclusion = useMemo(() => {
+    const turns = conversationTurns(history?.messages ?? []);
+    for (let index = turns.length - 1; index >= 0; index -= 1) {
+      const text = turns[index].parts
+        .filter((part) => part.kind === "text")
+        .map((part) => part.content.trim())
+        .filter(Boolean)
+        .join("\n\n");
+      if (text) return text.slice(0, 2_000);
+    }
+    return "";
+  }, [history?.messages]);
+  const memoryScopes: MemoryScopeOption[] = [
+    {
+      id: "thread",
+      label: "This conversation",
+      description: sideChat
+        ? "Only this Side Chat inherits it."
+        : "Only this Agent's main Chat inherits it.",
+    },
+    ...(room.projectId
+      ? [
+          {
+            id: "project" as const,
+            label: "This project",
+            description: "Project chats and Work in this project inherit it.",
+          },
+        ]
+      : []),
+    ...(!room.projectId && room.participants.length === 1
+      ? [
+          {
+            id: "agent" as const,
+            label: room.participants[0].name,
+            description: "This Agent's conversations inherit it.",
+          },
+        ]
+      : []),
+  ];
+  const memoryScopeId = (level: MemoryScopeOption["id"]) =>
+    level === "project"
+      ? (room.projectId ?? room.id)
+      : level === "agent"
+        ? (room.participants[0]?.agentId ?? displayAgent.id)
+        : room.id;
   const sessions = state.sessions.filter(
     (session) => session.work.conversationId === room.id && !session.cancelled,
   );
@@ -486,6 +545,11 @@ export function ConversationPane({
           />
           <span>
             <strong>{room.title}</strong>
+            {sideChat ? (
+              <small className="side-chat-marker">
+                Side Chat · separate conversation
+              </small>
+            ) : null}
           </span>
         </div>
         <div className="team-conversation-actions">
@@ -505,6 +569,9 @@ export function ConversationPane({
             <div onClick={() => { if (optionsRef.current) optionsRef.current.open = false; }}>
               <button type="button" onClick={() => void onNew()}>
                 New conversation
+              </button>
+              <button type="button" onClick={() => setMemoryOpen(true)}>
+                Save conclusion to Memory…
               </button>
               <button type="button" onClick={onEdit}>
                 Edit{" "}
@@ -542,6 +609,7 @@ export function ConversationPane({
         onWheel={scroll.pauseFollowing}
       >
         <div className="conversation-pane-messages" ref={scroll.contentRef}>
+          {sideChat ? <SideChatContextNotice compact /> : null}
           {history === undefined ? (
             <p className="team-empty" role="status">
               Loading conversation…
@@ -735,6 +803,24 @@ export function ConversationPane({
         />
       </div>
       </>}
+      {memoryOpen ? (
+        <ConversationMemoryPromotion
+          chatTitle={room.title}
+          defaultTitle={room.title}
+          defaultValue={latestConclusion}
+          scopes={memoryScopes}
+          onSave={async (input) => {
+            await promoteConversationConclusion(runtimeMemoryPorts, {
+              conversation: room,
+              title: input.title,
+              value: input.value,
+              scope: { level: input.scopeId, id: memoryScopeId(input.scopeId) },
+              promotedAt: new Date().toISOString(),
+            });
+          }}
+          onClose={() => setMemoryOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

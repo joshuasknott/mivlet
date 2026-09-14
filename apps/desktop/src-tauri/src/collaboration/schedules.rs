@@ -67,6 +67,7 @@ pub(crate) fn bind_schedule(
         participants: participants(profiles, &team.participant_ids, agent)?,
         revision: 1,
         generation: 1,
+        archived: false,
         created_at: time.into(),
         updated_at: time.into(),
     };
