@@ -1000,6 +1000,112 @@ fn require_owned_file(
     }
 }
 
+/// Resolve explicit shares at Work admission under the same transaction and
+/// current membership. The returned bytes are evidence, never tool authority.
+pub(crate) fn capture_shares(
+    tx: &rusqlite::Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    project: &LocalProjectRow,
+    agent_id: &str,
+) -> crate::store::Result<Vec<serde_json::Value>> {
+    use crate::store::repos::message;
+    use serde_json::json;
+    if project.lifecycle != "active"
+        || require_team_participant(tx, store, scope, &project.id, agent_id).is_err()
+    {
+        return Ok(vec![]);
+    }
+    let payload: LocalProjectPayload = serde_json::from_value(project.payload.clone())
+        .map_err(|_| StoreError::Invalid("Invalid Project context.".into()))?;
+    let mut remaining = 32_000usize;
+    let mut result = Vec::new();
+    for share in payload.shares.iter().filter(|share| {
+        share.source.workspace_id == scope.data.workspace_id()
+            && ((share.recipient.kind == "project" && share.recipient.id == project.id)
+                || (share.recipient.kind == "agent" && share.recipient.id == agent_id))
+    }) {
+        if remaining == 0 || result.len() == 12 {
+            break;
+        }
+        let resolved = if share.mode == "snapshot" {
+            share
+                .snapshot_text
+                .clone()
+                .map(|text| (text, share.source_revision.clone()))
+        } else {
+            match share.source.kind.as_str() {
+                "work" => {
+                    collab::get::<Work>(tx, store, &scope.private, Kind::Work, &share.source.id)?
+                        .filter(|work| work.project_id.as_deref() == Some(project.id.as_str()))
+                        .and_then(|work| {
+                            work.outputs
+                                .last()
+                                .map(|output| (output.text.clone(), output.run_id.clone()))
+                        })
+                }
+                "conversation" if thread_is_owned(tx, scope, &share.source.id)? => {
+                    let rows = message::list(tx, store, &scope.data, &share.source.id)?;
+                    let revision = rows
+                        .last()
+                        .map(|row| row.sequence.to_string())
+                        .unwrap_or_default();
+                    let mut texts: Vec<_> = rows
+                        .iter()
+                        .rev()
+                        .filter(|row| {
+                            row.current_revision_state == "terminal"
+                                && matches!(row.kind.as_str(), "user" | "assistant")
+                        })
+                        .take(24)
+                        .map(|row| {
+                            format!(
+                                "{}: {}",
+                                row.kind,
+                                row.content["text"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .chars()
+                                    .take(1_000)
+                                    .collect::<String>()
+                            )
+                        })
+                        .collect();
+                    texts.reverse();
+                    Some((texts.join("\n"), revision))
+                }
+                "file" if require_owned_file(tx, scope, &project.id, &share.source.id).is_ok() => {
+                    crate::store::repos::knowledge_source::list_private(tx, store, &scope.private)?
+                        .into_iter()
+                        .find(|source| source.id == share.source.id)
+                        .map(|source| {
+                            (
+                                source.payload["contentPreview"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string(),
+                                source.content_fingerprint,
+                            )
+                        })
+                }
+                _ => None,
+            }
+        };
+        let (text, revision, available) = match resolved {
+            Some((text, revision)) if !text.is_empty() => (text, revision, true),
+            _ => (
+                "This shared source is unavailable.".into(),
+                share.source_revision.clone(),
+                false,
+            ),
+        };
+        let text: String = text.chars().take(remaining.min(8_000)).collect();
+        remaining -= text.chars().count();
+        result.push(json!({"id":share.id,"mode":share.mode,"source":share.source,"sourceRevision":revision,"recipient":share.recipient,"available":available,"text":text,"instructionAuthority":"none"}));
+    }
+    Ok(result)
+}
+
 fn remove_share_at(
     tx: &rusqlite::Connection,
     store: &Store,
@@ -2075,6 +2181,7 @@ mod tests {
                     Some("legacy-thread"),
                     None,
                     &Conversation {
+                        archived: false,
                         chat: None,
                         id: "legacy-thread".into(),
                         workspace_id: "workspace-1".into(),

@@ -61,8 +61,8 @@ function summary(overrides: Partial<ContextSummaryRecord> = {}): ContextSummaryR
     throughSequence: 4,
     revision: 1,
     text: "Decisions:\n- The launch window is Friday.",
-    sourceMessageIds: ["message-1"],
-    sourceRevisionIds: ["revision-1"],
+    sourceMessageIds: Array.from({ length: (overrides.throughSequence ?? 4) - (overrides.fromSequence ?? 1) + 1 }, (_, index) => `message-${index + (overrides.fromSequence ?? 1)}`),
+    sourceRevisionIds: Array.from({ length: (overrides.throughSequence ?? 4) - (overrides.fromSequence ?? 1) + 1 }, (_, index) => `revision-${index + (overrides.fromSequence ?? 1)}`),
     derivedMemoryIds: [],
     derivedMemoryRevisions: {},
     createdAt: "2026-09-01T00:00:00.000Z",
@@ -118,6 +118,15 @@ describe("describeHistoryEntries", () => {
 });
 
 describe("compactConversationTurn", () => {
+  it("excludes summaries covering another Work or a changed revision", async () => {
+    for (const prior of [summary({ fromSequence: 20, throughSequence: 24, text: "UNRELATED FUTURE WORK" }), summary({ text: "STALE REVISION", sourceRevisionIds: ["old-revision"] })]) {
+      const save = vi.fn(async (record: ContextSummaryRecord) => record);
+      const result = await compactConversationTurn({ threadId: "thread-1", history: describeHistoryEntries(historyViews(14)), request: request(), backendType: "native-api", contextWindowTokens: 20_000, budget: { maxRecentTurns: 2, maxRecentCharacters: 900, maxSummaryCharacters: 4_000, maxRetrievalCharacters: 1_000 }, dependencies: dependencies([prior], save) });
+      expect(result.ok).toBe(true);
+      if (result.ok) { expect(result.prefix).not.toContain(prior.text); }
+      expect(save.mock.calls[0][0].revision).toBe(1);
+    }
+  });
   it("fails closed when durable summaries are unavailable", async () => {
     const result = await compactConversationTurn({
       threadId: "thread-1",

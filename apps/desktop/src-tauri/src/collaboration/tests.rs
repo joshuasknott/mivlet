@@ -36,6 +36,93 @@ fn fixture_with_profiles<T>(
         })
         .unwrap()
 }
+#[test]
+fn integration_chat_capture_compacts_old_text_and_never_adopts_later_chat() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        for index in 0..32 {
+            output(
+                ctx,
+                &room.id,
+                &format!("old-{index}"),
+                &format!("Earlier decision {index}"),
+            )?;
+        }
+        let agent = ctx
+            .profiles
+            .iter()
+            .find(|agent| agent.id == "lead")
+            .unwrap();
+        let first = context::capture(ctx, &room, agent)?;
+        let captured: serde_json::Value = serde_json::from_str(&first.text).unwrap();
+        assert_eq!(captured["history"].as_array().unwrap().len(), 24);
+        assert!(captured["transcriptSummary"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Earlier decision 0"));
+        output(ctx, &room.id, "later", "Future unrelated input")?;
+        assert!(!first.text.contains("Future unrelated input"));
+        let next = context::capture(ctx, &room, agent)?;
+        let next: serde_json::Value = serde_json::from_str(&next.text).unwrap();
+        assert!(
+            next["transcriptSummary"]["throughSequence"]
+                .as_i64()
+                .unwrap()
+                > captured["transcriptSummary"]["throughSequence"]
+                    .as_i64()
+                    .unwrap()
+        );
+        assert_eq!(
+            next["transcriptSummary"]["text"]
+                .as_str()
+                .unwrap()
+                .matches("Earlier decision 0")
+                .count(),
+            1
+        );
+        // A deleted source revision cannot survive in the derived cache.
+        ctx.conn.execute(
+            "UPDATE message SET deleted_at=?1 WHERE id='message-old-0'",
+            [TIME],
+        )?;
+        let changed = context::capture(ctx, &room, agent)?;
+        assert!(!changed.text.contains("Earlier decision 0"));
+        Ok(())
+    });
+}
+
+#[test]
+fn integration_project_snapshots_are_recipient_scoped_and_frozen() {
+    fixture(&store(), |ctx| {
+        project(ctx, "shared-project", "shared-chat")?;
+        let mut row =
+            local_project::get_project(ctx.conn, ctx.store, &ctx.scope.private, "shared-project")?
+                .unwrap();
+        row.payload["shares"] = json!([{"id":"snapshot","mode":"snapshot","source":{"workspaceId":ctx.scope.data.workspace_id(),"kind":"conversation","id":"deleted-source"},"sourceRevision":"original","recipient":{"kind":"agent","id":"lead"},"owner":{"kind":"user","name":"You"},"title":"Selected conclusion","snapshotText":"Immutable selected bytes","createdAt":TIME}]);
+        let own =
+            crate::local_projects::capture_shares(ctx.conn, ctx.store, ctx.scope, &row, "lead")?;
+        assert_eq!(own[0]["text"], "Immutable selected bytes");
+        assert_eq!(own[0]["sourceRevision"], "original");
+        assert!(crate::local_projects::capture_shares(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            &row,
+            "researcher"
+        )?
+        .is_empty());
+        assert!(crate::local_projects::capture_shares(
+            ctx.conn, ctx.store, ctx.scope, &row, "outsider"
+        )?
+        .is_empty());
+        row.payload["shares"][0]["mode"] = json!("live-reference");
+        let unavailable =
+            crate::local_projects::capture_shares(ctx.conn, ctx.store, ctx.scope, &row, "lead")?;
+        assert_eq!(unavailable[0]["available"], false);
+        Ok(())
+    });
+}
+
 fn account_scope(data: &DataScope, user: &str, member: &str) -> AuthorizedCommandScope {
     AuthorizedCommandScope {
         data: data.clone(),
@@ -158,6 +245,7 @@ fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<Conve
         revision: 1,
     })?;
     let room = Conversation {
+        archived: false,
         chat: Some(ChatBinding {
             role: "main".into(),
             owner_kind: "project".into(),
@@ -1140,6 +1228,8 @@ fn roadmap_standalone_groups_are_retired_and_project_chats_allow_no_coordinator(
             "researcher".into(),
             "Review this.".into(),
             false,
+            None,
+            None,
         )?;
         assert_eq!(ctx.item("work-side")?.agent_id, "researcher");
         assert!(work::start(
@@ -1149,6 +1239,8 @@ fn roadmap_standalone_groups_are_retired_and_project_chats_allow_no_coordinator(
             String::new(),
             "No responder".into(),
             false,
+            None,
+            None,
         )
         .is_err());
         Ok(())
@@ -1672,6 +1764,8 @@ fn roadmap_side_chat_lifecycle_preserves_transcript_drafts_and_guards_main() {
             "lead".into(),
             "Do a thing".into(),
             false,
+            None,
+            None,
         )?;
         assert!(commands::apply(
             ctx,

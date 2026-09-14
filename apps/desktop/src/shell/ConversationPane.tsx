@@ -36,7 +36,7 @@ import { runWorkspaceVoice } from "../lib/workspace-voice";
 import { selectResponder } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
-import { WorkRecovery } from "../components/projects/WorkItems";
+import { WorkCard } from "../components/work/WorkCard";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
 import {
   conversationTurns,
@@ -99,6 +99,7 @@ export function ConversationPane({
   onProviders,
   onProjectUpdate,
   onDraftReady,
+  onOpenWork,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -123,6 +124,7 @@ export function ConversationPane({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
+  onOpenWork?: (id: string) => void;
 }) {
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
   const composer = useScopedComposer({
@@ -271,7 +273,6 @@ export function ConversationPane({
     id: item.id, prompt: item.userRequest || item.prompt, startedAt: item.createdAt, endedAt: item.updatedAt,
     parts: item.status === "failed" ? [{ id: `${item.id}-error`, kind: "notice", error: true, content: item.reason || "This request could not start." }] : [],
   }));
-  const recovery = work.filter(item => !item.parentId && ["failed", "blocked", "awaiting-user", "cancelled"].includes(item.status));
   const liveStates = sessions
     .filter((session) => session.state)
     .map((session) => ({
@@ -677,9 +678,12 @@ export function ConversationPane({
               focus();
             }}
           />
-          {recovery.map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Recovery for ${item.agentName}'s request`}>
+          {work.filter(item => !item.parentId).slice(-6).map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Work for ${item.agentName}'s request`}>
             {item.runIds.length ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
-            <WorkRecovery item={item} service={service} />
+            <WorkCard item={item} onOpen={() => onOpenWork?.(item.id)} onOpenWork={onOpenWork}
+              onStop={id => service.stop(id)}
+              onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}
+              onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }} />
             <button type="button" onClick={() => { composer.setText(item.userRequest || item.prompt); focus(); }}>Restore request to composer</button>
             {/computer|runtime|plugin/i.test(item.reason ?? "") ? <button type="button" onClick={() => onComputer(item.agentId)}>Check Computer Use</button> : /provider|connect|model/i.test(item.reason ?? "") ? <button type="button" onClick={() => onPlugins()}>Check connections</button> : null}
           </div>)}

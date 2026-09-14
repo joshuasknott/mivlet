@@ -102,6 +102,8 @@ export function WorkspaceRightNav({
   presence = "idle",
   activity,
   projectDetails,
+  sideChats,
+  summaries,
 }: {
   context: NavContext;
   rooms: ConversationRoom[];
@@ -139,6 +141,8 @@ export function WorkspaceRightNav({
   presence?: AgentPresence;
   activity?: string;
   projectDetails?: ReactNode;
+  sideChats?: ReactNode;
+  summaries?: ReactNode;
 }) {
   const panel = useRef<HTMLElement>(null);
   const compact = useMediaQuery("(max-width: 850px)");
@@ -287,7 +291,8 @@ export function WorkspaceRightNav({
               ))}
             </div>
           ) : null}
-          {!item && context ? (
+          {summaries}
+          {sideChats ?? (!item && context ? (
             <NavSection title="Side Chats" count={chats.length}>
               {onNewSideChat ? (
                 <button
@@ -319,7 +324,7 @@ export function WorkspaceRightNav({
                 </p>
               ) : null}
             </NavSection>
-          ) : null}
+          ) : null)}
           {!item && project && members ? (
             <NavSection title="Team" count={members.participants.length} open={false}>
               {members.lead ? (

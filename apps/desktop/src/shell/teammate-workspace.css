@@ -418,8 +418,7 @@
   gap: 12px;
   margin: 10px 0 15px;
 }
-.project-context button,
-.team-work-item button {
+.project-context button {
   font-size: 11px;
   color: inherit;
   background: none;
@@ -447,77 +446,24 @@
   font-size: 12px;
   line-height: 1.7;
 }
-.team-work-list {
-  padding: 0;
-  list-style: none;
-  margin: 10px 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.team-work-item {
-  padding: 12px;
-  border: 1px solid var(--team-border);
-  border-radius: 8px;
-}
-.team-work-item > header,
 .project-facts article > header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
 }
-.team-work-item > header > span:first-child {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-}
-.team-work-item strong,
 .project-facts strong {
   font-size: 12px;
   font-weight: 600;
 }
-.team-work-item p,
 .project-facts p {
   font-size: 12px;
   line-height: 1.65;
   overflow-wrap: anywhere;
 }
-.team-work-item small,
 .project-facts small {
   font-size: 10px;
   color: var(--team-muted);
-}
-.team-work-reason {
-  color: var(--team-muted);
-}
-.team-work-output {
-  white-space: pre-wrap;
-  max-height: 170px;
-  overflow: auto;
-}
-.team-work-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 10px;
-  padding-top: 9px;
-}
-.team-work-item summary {
-  cursor: pointer;
-  font-size: 11px;
-  margin: 9px 0;
-}
-.team-work-actions details {
-  flex: 1 1 100%;
-  min-width: 0;
-}
-.team-work-actions form label {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  padding-bottom: 8px;
-  font-size: 11px;
 }
 .project-facts {
   display: flex;
@@ -915,137 +861,6 @@
 .workspace-history-toggle:hover {
   background: var(--surface-hover);
 }
-.workspace-history {
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  border-left: 1px solid var(--team-border);
-  background: var(--surface);
-  color: var(--ink);
-  overflow: hidden;
-}
-.workspace-history > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 10px 6px 14px;
-  gap: 10px;
-}
-.workspace-history > header > div {
-  display: flex;
-  gap: 12px;
-}
-.workspace-history > header button {
-  border: 0;
-  background: none;
-  padding: 7px 0;
-  font-size: 12px;
-  color: var(--ink-muted);
-}
-.workspace-history > header button[aria-selected="true"] {
-  color: var(--ink);
-}
-.workspace-history > header > button {
-  display: grid;
-  place-items: center;
-  width: 28px;
-}
-.workspace-history__search {
-  margin: 8px 14px 12px;
-  padding: 8px 10px;
-  min-width: 0;
-  background: var(--surface-hover);
-  border: 0;
-  border-radius: 6px;
-  color: var(--ink);
-  font-size: 11px;
-  outline-offset: 2px;
-}
-.workspace-history__list,
-.workspace-history__details {
-  overflow: auto;
-  min-height: 0;
-  padding: 0 8px 12px;
-}
-.workspace-history__list {
-  flex: 1;
-}
-.workspace-history__row {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  width: 100%;
-  text-align: left;
-  padding: 11px 24px 11px 8px;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--ink);
-  font-size: 11px;
-}
-.workspace-history__row > span {
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workspace-history__row time {
-  font-size: 10px;
-  color: var(--ink-muted);
-}
-.workspace-history__row small {
-  position: absolute;
-  top: 11px;
-  right: 8px;
-  color: #ad7c3c;
-}
-.workspace-history__row:hover,
-.workspace-history__row[aria-current="page"] {
-  background: var(--surface-hover);
-}
-.workspace-history__running {
-  margin: 5px 14px 8px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--team-border);
-  max-height: 28%;
-  overflow: auto;
-}
-.workspace-history__running > div {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.workspace-history__running button {
-  border: 0;
-  background: none;
-  color: var(--ink);
-  padding: 7px 0;
-  font-size: 10px;
-}
-.workspace-history__running button:first-child {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;
-}
-.workspace-history__running strong {
-  font-weight: 500;
-}
-.workspace-history__running small {
-  color: var(--ink-muted);
-  font-size: 10px;
-}
-.workspace-history .project-context__body {
-  max-height: none;
-  padding: 10px 5px;
-}
-.workspace-history .team-work-item > header {
-  flex-wrap: wrap;
-}
 .teammates-workspace .agent-sidebar {
   padding-top: 16px;
 }
@@ -1175,13 +990,6 @@
   }
   .teammates-workspace--history > .agent-sidebar:not([hidden]) {
     display: flex;
-  }
-  .workspace-history {
-    position: fixed;
-    inset: 42px 0 0;
-    width: 100%;
-    z-index: 50;
-    box-shadow: -8px 0 30px #0002;
   }
 }
 @media (max-width: 700px) {

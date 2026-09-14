@@ -1,0 +1,27 @@
+import { useEffect, useRef, useState } from "react";
+import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { previewRuntimeLocalComputerFile } from "../../runtime/domains/local-computer";
+import type { SearchNavigationTarget } from "../../lib/search/navigation";
+
+export function SearchFileDialog({ target, title, text, onClose }: {
+  target: Extract<SearchNavigationTarget, { type: "artifact" | "knowledge-file" }>;
+  title: string;
+  text?: string;
+  onClose: () => void;
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  const [content, setContent] = useState(text ?? "Loading preview…");
+  useModalFocusTrap({ active: true, containerRef: panel, onClose });
+  useEffect(() => {
+    if (target.type !== "artifact") return;
+    let current = true;
+    void previewRuntimeLocalComputerFile({ workspaceId: target.workspaceId, agentId: target.agentId, path: target.relativePath })
+      .then(preview => { if (current) setContent(preview ? preview.content + (preview.truncated ? "\n[Preview truncated]" : "") : "Preview requires the desktop app."); })
+      .catch(error => { if (current) setContent(error instanceof Error ? error.message : "This file is unavailable."); });
+    return () => { current = false; };
+  }, [target]);
+  return <div className="side-chat-dialog-backdrop"><div ref={panel} className="side-chat-dialog" role="dialog" aria-modal="true" aria-label={title}>
+    <header><h2>{title}</h2><button onClick={onClose} aria-label="Close file preview">×</button></header>
+    <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxHeight: "65vh", overflow: "auto" }}>{content}</pre>
+  </div></div>;
+}

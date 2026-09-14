@@ -63,10 +63,9 @@ pub(super) fn capture(
 ) -> Result<CapturedWorkContext> {
     let mut remaining = 20_000;
     let mut history = Vec::new();
-    for row in message::list(ctx.conn, ctx.store, &ctx.scope.data, &room.id)?
-        .into_iter()
-        .rev()
-    {
+    let rows = message::list(ctx.conn, ctx.store, &ctx.scope.data, &room.id)?;
+    let mut before = i64::MAX;
+    for row in rows.iter().rev() {
         if !matches!(row.kind.as_str(), "user" | "assistant")
             || row.current_revision_state != "terminal"
         {
@@ -79,12 +78,14 @@ pub(super) fn capture(
             .unwrap_or("");
         let text = clip(text, remaining.min(4_000));
         remaining -= text.chars().count();
+        before = row.sequence;
         history.push(json!({"messageId": row.id, "revisionId": row.current_revision_id, "role": row.kind, "text": text}));
         if remaining == 0 || history.len() == 24 {
             break;
         }
     }
     history.reverse();
+    let transcript_summary = super::capture_summary::capture(ctx, room, &rows, before)?;
     let project = room
         .project_id
         .as_deref()
@@ -169,7 +170,44 @@ pub(super) fn capture(
         .unwrap_or_default()
         .into_iter()
         .filter(|summary| {
-            summary.thread_id == room.id && summary_scope_allows(&summary.scope, room)
+            let covered: Vec<_> = rows
+                .iter()
+                .filter(|row| {
+                    row.sequence >= summary.from_sequence
+                        && row.sequence <= summary.through_sequence
+                        && row.current_revision_state == "terminal"
+                        && matches!(row.kind.as_str(), "user" | "assistant")
+                })
+                .collect();
+            summary.thread_id == room.id
+                && summary_scope_allows(&summary.scope, room)
+                && !covered.is_empty()
+                && covered.len() == summary.source_message_ids.len()
+                && covered.iter().all(|row| {
+                    summary.source_message_ids.contains(&row.id)
+                        && summary
+                            .source_revision_ids
+                            .contains(&row.current_revision_id)
+                })
+                && summary.derived_memory_ids.iter().all(|id| {
+                    memories.get("disabled").and_then(|value| value.as_bool()) != Some(true)
+                        && memories["records"].as_array().is_some_and(|records| {
+                            records.iter().any(|record| {
+                                record["id"].as_str() == Some(id.as_str())
+                                    && record["approved"].as_bool() == Some(true)
+                                    && record["disabled"].as_bool() != Some(true)
+                                    && record
+                                        .get("forgottenAt")
+                                        .is_none_or(|value| value.is_null())
+                                    && summary.derived_memory_revisions.get(id).is_some_and(
+                                        |revision| {
+                                            record["updatedAt"].as_str() == Some(revision.as_str())
+                                        },
+                                    )
+                                    && memory_scope_allows(&record["scope"], room, &agent.id)
+                            })
+                        })
+                })
         })
         .collect();
     derived_summaries.sort_by(|left, right| {
@@ -195,7 +233,18 @@ pub(super) fn capture(
             })
         })
         .collect();
+    let shares = project
+        .as_ref()
+        .map(|project| {
+            crate::local_projects::capture_shares(
+                ctx.conn, ctx.store, ctx.scope, project, &agent.id,
+            )
+        })
+        .transpose()?
+        .unwrap_or_default();
     let value = json!({
+        "explicitProjectShares":shares,
+        "transcriptSummary":transcript_summary,
         "conversationId":room.id,
         "approvedScopedMemory":inherited_memory,
         "derivedSummaries":derived_summaries,
@@ -233,6 +282,7 @@ mod tests {
 
     fn room(id: &str, project_id: Option<&str>) -> Conversation {
         Conversation {
+            archived: false,
             chat: None,
             id: id.into(),
             workspace_id: "default".into(),

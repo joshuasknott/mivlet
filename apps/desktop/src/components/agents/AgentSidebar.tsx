@@ -57,6 +57,7 @@ export function AgentSidebar({
   conversations = [],
   selectedConversationId,
   onSelectConversation,
+  onSearch,
 }: {
   agents: FableAgentProfile[];
   activeAgentId: string;
@@ -81,6 +82,7 @@ export function AgentSidebar({
   conversations?: SidebarRoom[];
   selectedConversationId?: string;
   onSelectConversation?: (id: string, newTab?: boolean) => void;
+  onSearch?: () => void;
 }) {
   const [query, setQuery] = useState("");
   const sidebar = useRef<HTMLElement>(null);
@@ -153,7 +155,7 @@ export function AgentSidebar({
           </button>
         ) : null}
       </div>
-      <label className="agent-search">
+      {onSearch ? <button type="button" className="agent-search" onClick={onSearch} aria-label="Search workspace"><MagnifyingGlass size={16} /><span>Search</span></button> : <label className="agent-search">
         <MagnifyingGlass size={16} aria-hidden="true" />
         <input
           type="search"
@@ -162,7 +164,7 @@ export function AgentSidebar({
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-      </label>
+      </label>}
       <div className="agent-sidebar__scopes">
         {(!search && (projects.length || onCreateProject)) || visibleProjects.length ? (
           <section

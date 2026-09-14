@@ -63,6 +63,12 @@ import type { ConversationDraft } from "../components/projects/ConversationDialo
 import { parseComputerArtifact } from "../lib/computer-artifacts";
 import { useConversationDrag } from "../hooks/useConversationDrag";
 import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
+import { SideChatList } from "../components/conversation/SideChats";
+import { createSideChat, renameSideChat, setSideChatArchived, deleteSideChat } from "../lib/conversation-service";
+import { SearchOverlay } from "../components/search/SearchOverlay";
+import { SearchFileDialog } from "../components/search/SearchFileDialog";
+import { ConversationSummaries } from "../components/memory/ConversationSummaries";
+import { navigationTargetFor } from "../lib/search/navigation";
 import {
   WorkspaceRightNav,
   type NavContext,
@@ -247,6 +253,8 @@ function ActiveWorkspace({
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [settings, setSettings] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchFile, setSearchFile] = useState<Parameters<typeof SearchFileDialog>[0] | null>(null);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [marketplace, setMarketplace] = useState<{ id?: string } | null>(null);
   const [editor, setEditor] = useState<{
@@ -558,6 +566,10 @@ function ActiveWorkspace({
   };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
       if (
         event.ctrlKey &&
         event.shiftKey &&
@@ -830,10 +842,10 @@ function ActiveWorkspace({
     }
     if (navProject && navTeam) {
       const facilitatorId =
-        navTeam.leadAgentId ?? navTeam.participantIds[0] ?? "";
+        navTeam.leadAgentId ?? "";
       void createRoom(
         {
-          kind: "group",
+          kind: "project",
           title: `Side chat in ${navProject.name}`,
           instructions: "",
           participantIds: navTeam.participantIds,
@@ -947,7 +959,29 @@ function ActiveWorkspace({
       data-theme={theme}
       data-mobile-navigation={mobileNavigation}
     >
+      <SearchOverlay workspaceId={workspaceId} open={searchOpen} onClose={() => setSearchOpen(false)}
+        enabled={!runtime.accountWorkspacePending}
+        dataRevision={JSON.stringify([state.data, runtime.agents, runtime.workspaceKnowledgeSources, projects.projects])}
+        onOpenResult={result => {
+          const target = navigationTargetFor(result);
+          if (!target || target.workspaceId !== workspaceId) { service.report(new Error("This result is unavailable.")); return; }
+          setSearchOpen(false);
+          setMarketplace(null);
+          setMode("chat");
+          if (target.type === "conversation") open(target.conversationId);
+          else if (target.type === "project") open(target.threadId);
+          else if (target.type === "work") { open(target.conversationId); setNavWorkId(target.workId); setContextOpen(true); }
+          else if (target.type === "agent") {
+            const room = state.data.conversations.find(room => room.chat?.role === "main" && room.chat.ownerKind === "agent" && room.chat.ownerId === target.agentId);
+            if (room) open(room.id); else setAgentEditor({ id: target.agentId });
+          } else {
+            const source = target.type === "knowledge-file" ? runtime.workspaceKnowledgeSources.find(source => source.id === target.sourceId && !source.deletedAt && !source.disabled) : undefined;
+            setSearchFile({ target, title: result.title, text: source?.contentPreview ?? (target.type === "knowledge-file" ? "This source has no text preview." : undefined), onClose: () => setSearchFile(null) });
+          }
+        }} />
+      {searchFile ? <SearchFileDialog key={JSON.stringify(searchFile.target)} {...searchFile} /> : null}
       <AgentSidebar
+        onSearch={() => setSearchOpen(true)}
         collapsed={navigationCollapsed && !phone}
         hidden={phone && !mobileNavigation}
         onToggleCollapsed={() => setNavigationCollapsed(!navigationCollapsed)}
@@ -1199,6 +1233,7 @@ function ActiveWorkspace({
                         state={state}
                         active={pane === layout.activePane}
                         profileName={profileName}
+                        onOpenWork={selectNavWork}
                         onClose={() =>
                           actLayout({ type: "close", id: view.id })
                         }
@@ -1319,6 +1354,26 @@ function ActiveWorkspace({
         onSteerWork={steerWork}
         onPromoteWorkOutput={promoteWorkOutput}
         onNewSideChat={newSideChat}
+        summaries={activeRoom ? <ConversationSummaries key={activeRoom.id} threadId={activeRoom.id} revision={JSON.stringify(state.data.work.filter(work => work.conversationId === activeRoom.id).map(work => [work.id, work.updatedAt]))} /> : undefined}
+        sideChats={navContext && navContext.kind !== "work" ? <SideChatList
+          owner={navContext.kind === "project" ? { kind: "project", id: navContext.project.id } : { kind: "agent", id: navContext.agent.id }}
+          ownerName={navContext.kind === "project" ? navContext.project.name : navContext.agent.name}
+          chats={state.data.conversations}
+          activeId={activeRoom?.id}
+          onOpen={room => open(room.id)}
+          onCreate={async title => {
+            const project = navContext.kind === "project";
+            const room = await createSideChat(service, { title,
+              owner: project ? { kind: "project", id: navContext.project.id } : { kind: "agent", id: navContext.agent.id },
+              participantIds: project ? navTeam?.participantIds ?? [] : [navContext.agent.id],
+              facilitatorId: project ? navTeam?.leadAgentId ?? "" : navContext.agent.id,
+            });
+            open(room.id);
+          }}
+          onRename={async (room, title) => { await renameSideChat(service, room, title); }}
+          onArchive={async (room, archived) => { await setSideChatArchived(service, room, archived); }}
+          onDelete={async room => { await deleteSideChat(service, room); }}
+        /> : undefined}
         onSchedules={() =>
           setSchedules({
             agentId: navAgent?.id,
@@ -1375,6 +1430,16 @@ function ActiveWorkspace({
                 });
               }}
               onUpdate={updateProject}
+              onAddShare={async (share) => {
+                const updated = await addLocalProjectShare({ workspaceId, projectId: navProject.id, expectedRevision: navProject.revision, share });
+                projects.setProjects(current => current.map(item => item.id === updated.id ? updated : item));
+                await service.refresh();
+              }}
+              onRemoveShare={async (shareId) => {
+                const updated = await removeLocalProjectShare({ workspaceId, projectId: navProject.id, expectedRevision: navProject.revision, shareId });
+                projects.setProjects(current => current.map(item => item.id === updated.id ? updated : item));
+                await service.refresh();
+              }}
             />
           ) : undefined
         }

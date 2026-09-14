@@ -128,9 +128,9 @@ export async function createSideChat(
     action: "create-conversation",
     id,
     title: input.title.trim() || "New Side Chat",
-    kind: input.participantIds.length > 1 ? "group" : "direct",
+    kind: input.owner.kind === "project" ? "group" : "direct",
     participantIds: input.participantIds,
-    facilitatorId: input.facilitatorId,
+    facilitatorId: input.facilitatorId || undefined,
     projectId: input.owner.kind === "project" ? input.owner.id : undefined,
   });
   const room = snapshot.conversations.find((candidate) => candidate.id === id);

@@ -497,6 +497,8 @@ pub(super) fn agent_command(
                         .map_err(|_| invalid("Invalid captured child context."))?;
                     for field in [
                         "history",
+                        "transcriptSummary",
+                        "derivedSummaries",
                         "projectInstructions",
                         "projectRevision",
                         "confirmedProjectFacts",

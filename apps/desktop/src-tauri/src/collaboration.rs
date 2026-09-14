@@ -1,5 +1,6 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+mod capture_summary;
 mod chats;
 mod commands;
 mod context;

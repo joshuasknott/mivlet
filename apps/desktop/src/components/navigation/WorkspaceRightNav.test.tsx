@@ -26,6 +26,7 @@ const agent: FableAgentProfile = {
   permissionLabel: "Ask Me",
 };
 const project: LocalProject = {
+  shares: [],
   id: "project",
   workspaceId: "workspace",
   name: "Launch",

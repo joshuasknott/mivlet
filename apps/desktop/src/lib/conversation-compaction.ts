@@ -212,7 +212,14 @@ export async function compactConversationTurn(
         "Mivlet could not read durable summaries. The original history is unchanged."
     };
   }
-  let latest = summariesForThread(summaries, input.threadId)[0];
+  // A Work receives an immutable capture plus only its own runs. Never reuse
+  // another Work's summary just because it has the same conversation id.
+  let latest = summariesForThread(summaries, input.threadId).find(summary => {
+    const covered = input.history.filter(entry => entry.sequence >= summary.fromSequence && entry.sequence <= summary.throughSequence);
+    return covered.length > 0 && covered.length === summary.sourceMessageIds.length &&
+      covered[0].sequence === summary.fromSequence && covered.at(-1)?.sequence === summary.throughSequence &&
+      covered.every(entry => entry.messageId !== undefined && entry.revisionId !== undefined && summary.sourceMessageIds.includes(entry.messageId) && summary.sourceRevisionIds.includes(entry.revisionId));
+  });
   const query = lastUserText(input.request);
   const baseBudget = input.budget ?? COMPACTED_CONTEXT_BUDGET;
   const attempts = [baseBudget, retryContextBudget(baseBudget)];

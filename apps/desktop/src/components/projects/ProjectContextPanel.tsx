@@ -14,7 +14,6 @@ import {
   activeWork,
   type WorkspaceExecution,
 } from "../../lib/workspace-execution";
-import { WorkItems } from "./WorkItems";
 import { ProjectFiles } from "./ProjectFiles";
 import { TeamReadiness } from "./TeamReadiness";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
@@ -217,12 +216,6 @@ export function ProjectContextPanel({
             ) : null}
           </div>
         </div>
-        <details>
-          <summary>
-            Work <small>{work.length}</small>
-          </summary>
-          <WorkItems work={work} service={service} onOpen={onOpen} />
-        </details>
         <details>
           <summary>
             Files & references <small>{files.length}</small>
