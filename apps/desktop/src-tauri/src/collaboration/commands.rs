@@ -233,12 +233,28 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             agent_id,
             prompt,
             discussion,
-        } => work::start(ctx, id, conversation_id, agent_id, prompt, discussion)?,
+            attachments,
+        } => {
+            if let Some(refs) = &attachments {
+                work::validate_attachments(refs)?;
+            }
+            work::start(
+                ctx,
+                id,
+                conversation_id,
+                agent_id,
+                prompt,
+                discussion,
+                None,
+                attachments.as_deref(),
+            )?;
+        }
         Command::BindWork {
             id,
             generation,
             run_id,
-        } => work::bind(ctx, &id, generation, &run_id)?,
+            attachments,
+        } => work::bind(ctx, &id, generation, &run_id, attachments.as_deref())?,
         Command::CheckWork {
             id,
             generation,

@@ -86,8 +86,13 @@ a deployed or production-validated service.
   supported artifacts. Closing a tab leaves work running and discoverable in
   Activity. Projects contain focused chats, shared files and occurrence-tracked
   local research schedules. Work runs while the app is open and Windows is awake;
-  interrupted work requires review before continuation. See the
-  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md).
+  interrupted work requires review before continuation. Steering and explicit
+  continuation are recorded at safe boundaries without replaying external
+  effects, request files keep durable references with accurate reattachment
+  prerequisites after restart, and saved results can be promoted into Memory
+  with provenance. See the
+  [coordination decision](docs/adr/2026-09-12-teammates-conversations-projects.md)
+  and [Work execution](docs/architecture/work-execution.md).
 - Conversation turns preserve the order of updates and tool activity, with
   expandable public reasoning summaries, Markdown answers and reading-aware
   scrolling. Agents can create bounded passive DOCX files and XLSX workbooks

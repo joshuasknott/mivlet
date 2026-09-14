@@ -94,6 +94,23 @@ pub struct Output {
     pub created_at: String,
 }
 
+/// Durable reference for one file or input attached to a request. Transient
+/// and image inputs existed only in memory and cannot be restored after a
+/// restart; workspace and knowledge refs resolve again on each deliberate use.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkAttachment {
+    pub id: String,
+    pub name: String,
+    pub mime_type: String,
+    pub size_bytes: u64,
+    pub availability: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relative_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
@@ -103,6 +120,10 @@ pub struct Work {
     pub steering: Vec<WorkSteering>,
     #[serde(default = "default_permission")]
     pub permission_mode: String,
+    #[serde(default)]
+    pub attachments: Vec<WorkAttachment>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
     pub id: String,
     pub workspace_id: String,
     pub conversation_id: String,
@@ -321,11 +342,15 @@ pub enum Command {
         agent_id: String,
         prompt: String,
         discussion: bool,
+        #[serde(default)]
+        attachments: Option<Vec<WorkAttachment>>,
     },
     BindWork {
         id: String,
         generation: u32,
         run_id: String,
+        #[serde(default)]
+        attachments: Option<Vec<WorkAttachment>>,
     },
     CheckWork {
         id: String,

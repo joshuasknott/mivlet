@@ -9,6 +9,8 @@ pub(super) fn start(
     agent_id: String,
     prompt: String,
     discussion: bool,
+    origin: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
 ) -> Result<()> {
     id(&key)?;
     let prompt = bounded(&prompt, 32_000, "Message")?;
@@ -33,7 +35,16 @@ pub(super) fn start(
         ));
     }
     let room = ctx.room(&room_id)?;
-    let mut work = new_work(ctx, key.clone(), &room, agent_id, prompt.clone(), prompt)?;
+    let mut work = new_work(
+        ctx,
+        key.clone(),
+        &room,
+        agent_id,
+        prompt.clone(),
+        prompt,
+        origin,
+        attachments,
+    )?;
     if discussion {
         work.prompt = format!("{}\n\nThe user requested a wider discussion. Ask relevant participants for distinct contributions, compare their answers, and report agreement or remaining disagreement. Do not make everyone reply without a reason.", work.prompt);
     }
@@ -47,6 +58,8 @@ fn new_work(
     agent_id: String,
     prompt: String,
     user_request: String,
+    origin: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
 ) -> Result<Work> {
     if !room.participants.iter().any(|p| p.agent_id == agent_id) {
         return Err(invalid(
@@ -72,6 +85,10 @@ fn new_work(
             _ => "read-only",
         }
         .into(),
+        attachments: attachments
+            .map(|refs| refs.to_vec())
+            .unwrap_or_default(),
+        origin: origin.map(Into::into),
         id: key.clone(),
         root_id: key,
         workspace_id: ctx.scope.data.workspace_id().into(),
@@ -157,9 +174,21 @@ pub(super) fn current(
     Ok(item)
 }
 
-pub(super) fn bind(ctx: &Context<'_>, key: &str, generation: u32, run: &str) -> Result<()> {
+pub(super) fn bind(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: &str,
+    attachments: Option<&[WorkAttachment]>,
+) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    if let Some(refs) = attachments {
+        validate_attachments(refs)?;
+        item.attachments = refs.to_vec();
+        item.updated_at = ctx.time.into();
+        ctx.work(&item)?;
+    }
     if item.current_run_id.as_deref() == Some(run) && item.status.executing() {
         return Ok(());
     }
@@ -449,6 +478,8 @@ pub(super) fn agent_command(
                 agent_id.clone(),
                 prompt,
                 item.user_request.clone(),
+                item.origin.as_deref(),
+                None,
             )?;
             if !focused {
                 // Delegation within this Chat inherits the parent's frozen
@@ -626,6 +657,75 @@ pub(super) fn wake_waiters(ctx: &Context<'_>) -> Result<()> {
         }
         item.updated_at = ctx.time.into();
         ctx.work(&item)?;
+    }
+    Ok(())
+}
+
+const MAX_WORK_ATTACHMENTS: usize = 12;
+const MAX_WORK_ATTACHMENT_BYTES: u64 = 2 * 1024 * 1024;
+
+/// Durable attachment references are bounded and exact. Transient and image
+/// inputs may only carry identity metadata; workspace refs require the staged
+/// account-root path and knowledge refs the exact source id.
+pub(super) fn validate_attachments(attachments: &[WorkAttachment]) -> Result<()> {
+    if attachments.len() > MAX_WORK_ATTACHMENTS {
+        return Err(invalid(
+            "A request can reference at most twelve attached files.",
+        ));
+    }
+    let mut ids = HashSet::new();
+    for attachment in attachments {
+        if attachment.id.is_empty() || attachment.id.chars().count() > 160 || !ids.insert(&attachment.id)
+        {
+            return Err(invalid("Each attached file needs a unique bounded identity."));
+        }
+        let name = attachment.name.trim();
+        if name.is_empty()
+            || name.chars().count() > 256
+            || name.contains(['/', '\\'])
+            || name.chars().any(char::is_control)
+        {
+            return Err(invalid("The attached file name is invalid."));
+        }
+        let mime = attachment.mime_type.trim();
+        if mime.is_empty() || mime.chars().count() > 120 || mime.chars().any(char::is_control) {
+            return Err(invalid("The attached file media type is invalid."));
+        }
+        if attachment.size_bytes == 0 || attachment.size_bytes > MAX_WORK_ATTACHMENT_BYTES {
+            return Err(invalid("The attached file size is invalid."));
+        }
+        let path_is_safe = attachment.relative_path.as_ref().is_some_and(|path| {
+            path.chars().count() <= 512
+                && path.starts_with("Attachments/")
+                && !path.contains('\\')
+                && path
+                    .split('/')
+                    .all(|part| !part.is_empty() && part != "." && part != "..")
+                && !path.chars().any(char::is_control)
+        });
+        let source_is_safe = attachment.source_id.as_ref().is_some_and(|id| {
+            !id.is_empty() && id.chars().count() <= 200 && !id.contains('\0')
+        });
+        match attachment.availability.as_str() {
+            "workspace-file" => {
+                if !path_is_safe || attachment.source_id.is_some() {
+                    return Err(invalid("The staged file reference is invalid."));
+                }
+            }
+            "knowledge-context" => {
+                if !source_is_safe || attachment.relative_path.is_some() {
+                    return Err(invalid("The knowledge reference is invalid."));
+                }
+            }
+            "image-input" | "transient" => {
+                if attachment.relative_path.is_some() || attachment.source_id.is_some() {
+                    return Err(invalid(
+                        "In-memory inputs cannot carry durable references.",
+                    ));
+                }
+            }
+            _ => return Err(invalid("The attached file reference kind is unknown.")),
+        }
     }
     Ok(())
 }

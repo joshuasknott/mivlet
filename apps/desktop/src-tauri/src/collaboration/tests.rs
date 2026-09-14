@@ -87,7 +87,7 @@ fn output(ctx: &Context<'_>, room: &str, run: &str, text: &str) -> Result<()> {
 fn bind(ctx: &Context<'_>, key: &str, run: &str) -> Result<()> {
     let work = ctx.item(key)?;
     journal(ctx, &work.conversation_id, run, "queued", "")?;
-    work::bind(ctx, key, work.generation, run)
+    work::bind(ctx, key, work.generation, run, None)
 }
 fn complete(ctx: &Context<'_>, key: &str, run: &str, text: &str) -> Result<()> {
     let item = ctx.item(key)?;
@@ -146,6 +146,8 @@ fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fa
                 "lead".into(),
                 format!("Question in {key}"),
                 false,
+                None,
+                None,
             )?;
         }
         bind(ctx, "work-private-one", "run-one")?;
@@ -189,6 +191,8 @@ fn collaboration_question_response_and_synthesis_use_distinct_real_attempt_bindi
             "lead".into(),
             "Compare two plans".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead-one")?;
         work::agent_command(
@@ -257,6 +261,8 @@ fn collaboration_duplicate_circular_and_nonparticipant_handoffs_fail_closed() {
             "lead".into(),
             "Discuss".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead")?;
         let command = delegate("researcher", "Question");
@@ -316,6 +322,8 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "lead".into(),
             "Discuss".into(),
             false,
+            None,
+            None,
         )?;
         work::start(
             ctx,
@@ -324,6 +332,8 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "reviewer".into(),
             "Separate request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run-lead")?;
         work::agent_command(
@@ -367,6 +377,8 @@ fn collaboration_completion_requires_saved_provider_result_and_enforces_turn_bud
             "lead".into(),
             "Do work".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         assert!(work::finish(ctx, "root", 1, "run", WorkStatus::Completed, None).is_err());
@@ -400,6 +412,8 @@ fn collaboration_restart_marks_work_for_review_and_does_not_replay_attempts() {
             "lead".into(),
             "Work".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")
     });
@@ -454,6 +468,8 @@ fn collaboration_project_correction_invalidates_work_and_never_reads_private_his
             "lead".into(),
             "Plan work".into(),
             false,
+            None,
+            None,
         )?;
         work::start(
             ctx,
@@ -462,6 +478,8 @@ fn collaboration_project_correction_invalidates_work_and_never_reads_private_his
             "researcher".into(),
             "Private request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         commands::apply(
@@ -545,6 +563,8 @@ fn collaboration_membership_and_lead_change_preserve_authorship_reject_late_work
             "researcher".into(),
             "Research".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         commands::apply(
@@ -566,7 +586,9 @@ fn collaboration_membership_and_lead_change_preserve_authorship_reject_late_work
             "main".into(),
             "researcher".into(),
             "Do more".into(),
-            false
+            false,
+            None,
+            None
         )
         .is_err());
         Ok(())
@@ -776,9 +798,11 @@ fn collaboration_rejects_cross_conversation_run_binding_and_keeps_usage_on_conti
             "lead".into(),
             "Fixture request".into(),
             false,
+            None,
+            None,
         )?;
         journal(ctx, "two", "wrong-run", "queued", "")?;
-        assert!(work::bind(ctx, "work", 1, "wrong-run").is_err());
+        assert!(work::bind(ctx, "work", 1, "wrong-run", None).is_err());
         let mut item = ctx.item("work")?;
         item.status = WorkStatus::AwaitingUser;
         item.token_usage = 128_005;
@@ -913,6 +937,8 @@ fn roadmap_main_chat_is_unique_under_concurrent_selection_and_excludes_side_hist
             "lead".into(),
             "Do this".into(),
             false,
+            None,
+            None,
         )?;
         let before = ctx.item("captured")?.captured_context.unwrap();
         output(ctx, &ids[0], "later", "UNRELATED_LATER_CHAT")?;
@@ -937,6 +963,8 @@ fn roadmap_steering_and_account_suspension_never_replay_uncertain_effects() {
             "lead".into(),
             "Original request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "work", "attempt")?;
         let generation = ctx.item("work")?.generation;
@@ -961,6 +989,8 @@ fn roadmap_steering_and_account_suspension_never_replay_uncertain_effects() {
             "lead".into(),
             "Another request".into(),
             false,
+            None,
+            None,
         )?;
         suspend_account(
             ctx.conn,
@@ -998,7 +1028,9 @@ fn roadmap_optional_coordinator_preserves_project_team_and_chat() {
             "project-chat".into(),
             "".into(),
             "Help".into(),
-            false
+            false,
+            None,
+            None
         )
         .is_err());
         Ok(())
@@ -1017,6 +1049,8 @@ fn roadmap_delegation_excludes_later_chat_and_steering_fences_children() {
             "lead".into(),
             "Request".into(),
             false,
+            None,
+            None,
         )?;
         bind(ctx, "root", "run")?;
         output(ctx, "room", "unrelated", "LATER_UNRELATED_CANARY")?;
@@ -1062,14 +1096,229 @@ fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
             "lead".into(),
             "Retain request".into(),
             false,
+            None,
+            None,
         )?;
         let mut legacy = serde_json::to_value(ctx.item("old")?).unwrap();
         legacy.as_object_mut().unwrap().remove("capturedContext");
         legacy.as_object_mut().unwrap().remove("steering");
+        legacy.as_object_mut().unwrap().remove("attachments");
+        legacy.as_object_mut().unwrap().remove("origin");
         let restored: Work = serde_json::from_value(legacy).unwrap();
         assert!(restored.captured_context.is_none());
         assert!(restored.steering.is_empty());
+        assert!(restored.attachments.is_empty());
+        assert!(restored.origin.is_none());
         assert_eq!(restored.user_request, "Retain request");
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        let preview = vec![
+            WorkAttachment {
+                id: "upload".into(),
+                name: "brief.txt".into(),
+                mime_type: "text/plain".into(),
+                size_bytes: 128,
+                availability: "transient".into(),
+                relative_path: None,
+                source_id: None,
+            },
+            WorkAttachment {
+                id: "source".into(),
+                name: "catalog.pdf".into(),
+                mime_type: "application/pdf".into(),
+                size_bytes: 2048,
+                availability: "knowledge-context".into(),
+                relative_path: None,
+                source_id: Some("knowledge-1".into()),
+            },
+        ];
+        commands::apply(
+            ctx,
+            Command::StartWork {
+                id: "attach".into(),
+                conversation_id: room.id.clone(),
+                agent_id: "lead".into(),
+                prompt: "Read the brief".into(),
+                discussion: false,
+                attachments: Some(preview.clone()),
+            },
+        )?;
+        let item = ctx.item("attach")?;
+        assert_eq!(item.attachments, preview);
+        assert!(item.origin.is_none());
+        let staged = vec![WorkAttachment {
+            id: "upload".into(),
+            name: "brief.txt".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 128,
+            availability: "workspace-file".into(),
+            relative_path: Some("Attachments/batch-1/brief.txt".into()),
+            source_id: None,
+        }];
+        journal(ctx, &room.id, "run", "queued", "")?;
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(staged.clone()),
+            },
+        )?;
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        assert_eq!(ctx.item("attach")?.current_run_id.as_deref(), Some("run"));
+        let unsafe_path = vec![WorkAttachment {
+            id: "upload".into(),
+            name: "brief.txt".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 128,
+            availability: "workspace-file".into(),
+            relative_path: Some("../outside.txt".into()),
+            source_id: None,
+        }];
+        assert!(work::validate_attachments(&unsafe_path).is_err());
+        let in_memory_with_ref = vec![WorkAttachment {
+            id: "upload".into(),
+            name: "brief.txt".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 128,
+            availability: "transient".into(),
+            relative_path: Some("Attachments/batch-1/brief.txt".into()),
+            source_id: None,
+        }];
+        assert!(work::validate_attachments(&in_memory_with_ref).is_err());
+        let unknown_kind = vec![WorkAttachment {
+            id: "upload".into(),
+            name: "brief.txt".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 128,
+            availability: "cloud".into(),
+            relative_path: None,
+            source_id: None,
+        }];
+        assert!(work::validate_attachments(&unknown_kind).is_err());
+        assert!(work::validate_attachments(&vec![preview[0].clone(); 13]).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_attachment_refs_survive_restart_review_without_replay() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        let refs = vec![WorkAttachment {
+            id: "upload".into(),
+            name: "brief.txt".into(),
+            mime_type: "text/plain".into(),
+            size_bytes: 128,
+            availability: "workspace-file".into(),
+            relative_path: Some("Attachments/batch-1/brief.txt".into()),
+            source_id: None,
+        }];
+        commands::apply(
+            ctx,
+            Command::StartWork {
+                id: "recover".into(),
+                conversation_id: room.id.clone(),
+                agent_id: "lead".into(),
+                prompt: "Read the brief".into(),
+                discussion: false,
+                attachments: Some(refs.clone()),
+            },
+        )?;
+        journal(ctx, &room.id, "run", "queued", "")?;
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "recover".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(refs.clone()),
+            },
+        )?;
+        recover(ctx.store)?;
+        let item = ctx.item("recover")?;
+        assert_eq!(item.status, WorkStatus::AwaitingUser);
+        assert_eq!(item.generation, 2);
+        assert_eq!(item.attachments, refs);
+        assert!(commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "recover".into(),
+                expected_generation: 2,
+                reconcile: false,
+            },
+        )
+        .is_err());
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "recover".into(),
+                expected_generation: 2,
+                reconcile: true,
+            },
+        )?;
+        assert_eq!(ctx.item("recover")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("recover")?.attachments, refs);
+        Ok(())
+    });
+}
+
+#[test]
+fn roadmap_schedule_work_carries_schedule_origin_and_inherits_it_on_delegation() {
+    fixture(&store(), |ctx| {
+        project(ctx, "project", "project-chat")?;
+        let room = ctx.room("project-chat")?;
+        let payload = json!({"id":"scheduled-run","providerId":"openai","model":"fixture-model","status":"queued","transcript":"","threadId":room.id,"exchanges":[{"role":"user","content":"Scheduled brief"}],"turn":1,"usage":{"inputTokens":100,"outputTokens":100,"costUsd":0.0},"pendingApprovalIds":[],"recoverable":true,"retryCount":0,"createdAt":TIME,"updatedAt":TIME});
+        execution_attempt::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            "scheduled-run",
+            Some(&room.id),
+            "openai",
+            "fixture-model",
+            "queued",
+            1,
+            true,
+            0,
+            TIME,
+            TIME,
+            &payload,
+        )?;
+        bind_schedule(
+            ctx.conn,
+            ctx.store,
+            ctx.scope,
+            ctx.profiles,
+            "project",
+            "lead",
+            "scheduled-run",
+            TIME,
+        )?;
+        let item = ctx.item("work-scheduled-run")?;
+        assert_eq!(item.origin.as_deref(), Some("schedule"));
+        assert_eq!(item.permission_mode, "read-only");
+        work::agent_command(
+            ctx,
+            "work-scheduled-run",
+            1,
+            "scheduled-run",
+            "delegate",
+            delegate("researcher", "Dig deeper"),
+        )?;
+        let child = ctx
+            .all_work()?
+            .into_iter()
+            .find(|item| item.parent_id.as_deref() == Some("work-scheduled-run"))
+            .unwrap();
+        assert_eq!(child.origin.as_deref(), Some("schedule"));
         Ok(())
     });
 }

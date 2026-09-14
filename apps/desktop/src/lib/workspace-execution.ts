@@ -5,6 +5,7 @@ import type {
   CollaborationWorkItem,
   FableAgentProfile,
   PermissionMode,
+  WorkAttachment,
 } from "@fable/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
@@ -32,6 +33,80 @@ export const restrictedPermission = (
     : modes.includes("trusted-scope")
       ? "trusted-scope"
       : "full-access";
+
+/** Durable reference preview captured with the request before staging. */
+export function composerAttachmentRefs(
+  attachments: readonly ComposerAttachment[],
+): WorkAttachment[] {
+  return attachments.map((attachment) => {
+    if (attachment.workspaceFile)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.workspaceFile.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        availability: "workspace-file",
+        relativePath: attachment.workspaceFile.relativePath,
+      };
+    if (attachment.sourceId)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.type,
+        sizeBytes: attachment.sizeBytes,
+        availability: "knowledge-context",
+        sourceId: attachment.sourceId,
+      };
+    if (attachment.imageInput)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.type,
+        sizeBytes: attachment.sizeBytes,
+        availability: "image-input",
+      };
+    return {
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.type,
+      sizeBytes: attachment.sizeBytes,
+      availability: "transient",
+    };
+  });
+}
+
+/** Final staged references recorded at dispatch for durable recovery. */
+export function stagedAttachmentRefs(
+  attachments: readonly ComposerAttachment[],
+): WorkAttachment[] {
+  return attachments.map((attachment) => {
+    if (attachment.workspaceFile)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.workspaceFile.mimeType,
+        sizeBytes: attachment.sizeBytes,
+        availability: "workspace-file",
+        relativePath: attachment.workspaceFile.relativePath,
+      };
+    if (attachment.sourceId)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.type,
+        sizeBytes: attachment.sizeBytes,
+        availability: "knowledge-context",
+        sourceId: attachment.sourceId,
+      };
+    return {
+      id: attachment.id,
+      name: attachment.name,
+      mimeType: attachment.type,
+      sizeBytes: attachment.sizeBytes,
+      availability: "image-input",
+    };
+  });
+}
 
 export interface ExecutionSession {
   key: string;
@@ -211,6 +286,7 @@ export class WorkspaceExecution {
         agentId,
         prompt,
         discussion,
+        attachments: composerAttachmentRefs(attachments),
       });
       return id;
     } catch (error) {

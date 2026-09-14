@@ -1,4 +1,9 @@
-import type { LocalComputerSnapshot, Spine } from "@fable/protocol";
+import type {
+  CollaborationWorkItem,
+  LocalComputerSnapshot,
+  Spine,
+  WorkAttachment,
+} from "@fable/protocol";
 import type { ComposerAttachment } from "./types";
 import type { useLocalComputer } from "../hooks/useLocalComputer";
 import {
@@ -12,6 +17,91 @@ function encodeAttachmentBytes(bytes: Uint8Array) {
     binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768));
   }
   return window.btoa(binary);
+}
+
+/** Reconstructs durable attachment inputs for a continued assignment whose
+ * composer inputs are gone (restart or a released prior run). Workspace refs
+ * point at the staged files under the account root; knowledge refs resolve by
+ * source identity. In-memory refs (images, unbound transient uploads) cannot
+ * be restored and must fail closed before dispatch. */
+export function restagedAttachmentRefs(
+  work: Pick<CollaborationWorkItem, "attachments" | "createdAt">,
+): ComposerAttachment[] {
+  return (work.attachments ?? []).flatMap<ComposerAttachment>((ref) => {
+    if (ref.availability === "workspace-file" && ref.relativePath)
+      return [
+        {
+          id: ref.id,
+          name: ref.name,
+          type: ref.mimeType,
+          sizeBytes: ref.sizeBytes,
+          workspaceFile: {
+            attachmentId: ref.id,
+            originalName: ref.name,
+            mimeType: ref.mimeType,
+            relativePath: ref.relativePath,
+            sizeBytes: ref.sizeBytes,
+            // Durable refs predate any new staging batch; nothing discards them.
+            computerId: "",
+            batchId: "",
+            sha256: "",
+            stagedAt: work.createdAt,
+          },
+          status: `Workspace/${ref.relativePath}`,
+        },
+      ];
+    if (ref.availability === "knowledge-context" && ref.sourceId)
+      return [
+        {
+          id: ref.id,
+          name: ref.name,
+          type: ref.mimeType,
+          sizeBytes: ref.sizeBytes,
+          sourceId: ref.sourceId,
+        },
+      ];
+    return [];
+  });
+}
+
+/** Chooses inputs for one admission: original composer inputs when present,
+ * otherwise durable refs, and fails closed with the exact missing prerequisite
+ * when the request referenced inputs that only existed in memory. */
+export function resolveWorkAttachments(
+  sessionAttachments: readonly ComposerAttachment[],
+  work: Pick<CollaborationWorkItem, "attachments" | "createdAt">,
+): { attachments: ComposerAttachment[]; error?: string } {
+  if (sessionAttachments.length) return { attachments: [...sessionAttachments] };
+  const refs = work.attachments ?? [];
+  const unrecoverable = refs.filter(
+    (ref) =>
+      ref.availability === "transient" || ref.availability === "image-input",
+  );
+  if (unrecoverable.length) {
+    const image = unrecoverable.some(
+      (ref) => ref.availability === "image-input",
+    );
+    return {
+      attachments: [],
+      error: image
+        ? "This request included images that were only held in memory. Reattach the original images before continuing."
+        : "This request included files that were only held in memory. Reattach them before continuing.",
+    };
+  }
+  return { attachments: restagedAttachmentRefs(work) };
+}
+
+/** Restaged workspace refs must still exist under the account root. */
+export function missingRestagedPaths(
+  refs: readonly WorkAttachment[],
+  entries: readonly { path: string }[],
+): WorkAttachment[] {
+  return refs.filter(
+    (ref) =>
+      ref.availability === "workspace-file" &&
+      ref.relativePath &&
+      !entries.some((entry) => entry.path === ref.relativePath),
+  );
 }
 
 export function attachmentRunInstructions(

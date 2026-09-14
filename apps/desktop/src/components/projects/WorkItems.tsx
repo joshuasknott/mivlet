@@ -5,6 +5,7 @@ import {
   activeWork,
   type WorkspaceExecution,
 } from "../../lib/workspace-execution";
+import { WorkStatusBadge } from "../work/WorkStatusBadge";
 
 export function WorkItems({
   work,
@@ -37,13 +38,24 @@ export function WorkItems({
                 <strong>{item.agentName}</strong>
                 <small>{item.parentId ? "Assignment" : "Request"}</small>
               </span>
-              <span className="team-work-status">
-                {item.status.replaceAll("-", " ")}
-              </span>
+              <WorkStatusBadge status={item.status} origin={item.origin} />
             </header>
             <WorkPrompt prompt={item.userRequest || item.prompt} />
             {item.reason ? (
               <p className="team-work-reason">{item.reason}</p>
+            ) : null}
+            {item.attachments?.length ? (
+              <small className="team-work-attachments">
+                {item.attachments.length} attached file
+                {item.attachments.length === 1 ? "" : "s"}
+                {item.attachments.some(
+                  (ref) =>
+                    ref.availability === "transient" ||
+                    ref.availability === "image-input",
+                )
+                  ? " · in-memory inputs need reattaching after a restart"
+                  : ""}
+              </small>
             ) : null}
             {!item.parentId ? (
               <small>
@@ -117,6 +129,9 @@ export function WorkItems({
               ) : item.status !== "completed" ? (
                 <WorkRecovery item={item} service={service} />
               ) : null}
+              {item.status !== "completed" ? (
+                <WorkSteer item={item} service={service} />
+              ) : null}
             </div>
           </li>
         ))}
@@ -154,6 +169,37 @@ export function WorkRecovery({ item, service }: { item: CollaborationWorkItem; s
         : "Review saved results and any uncertain external actions first. Continuing starts a fresh attempt with current context and approvals."}</p>
       {!unstarted ? <label><input type="checkbox" required /> I have checked the previous outcome</label> : null}
       <button type="submit" disabled={pending}>{pending ? "Starting…" : unstarted ? "Retry with current model" : "Continue with current model"}</button>
+      {error ? <p role="alert">{error}</p> : null}
+    </form>
+  </details>;
+}
+
+/** Deliberate steering records an instruction at a safe native boundary.
+ * Steering after provider activity moves Work to needs-review; nothing replays. */
+export function WorkSteer({ item, service }: { item: CollaborationWorkItem; service: WorkspaceExecution }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const apply = async () => {
+    const instruction = text.trim();
+    if (pending || !instruction) return;
+    setPending(true); setError("");
+    try {
+      await service.steer(item.id, item.generation, instruction);
+      setText(""); setOpen(false);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : "Could not apply steering.");
+    } finally { setPending(false); }
+  };
+  return <details className="work-recovery" open={open}>
+    <summary onClick={(event) => { if (open) return; event.preventDefault(); setOpen(true); }}>
+      Steer request…
+    </summary>
+    <form onSubmit={(event) => { event.preventDefault(); void apply(); }}>
+      <p>Steering records a deliberate update applied at a safe boundary. If provider activity already started, the request moves to needs review before it continues; no external effect is replayed.</p>
+      <label><textarea value={text} onChange={(event) => setText(event.target.value)} rows={2} placeholder="Adjust the request…" /></label>
+      <button type="submit" disabled={pending || !text.trim()}>{pending ? "Applying…" : "Apply steering"}</button>
       {error ? <p role="alert">{error}</p> : null}
     </form>
   </details>;

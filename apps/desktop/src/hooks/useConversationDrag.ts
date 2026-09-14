@@ -4,7 +4,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { ConversationLayout } from "@fable/protocol";
-import type { DockEdge, LayoutAction } from "../lib/conversation-layout";
+import { MAX_PANES, type DockEdge, type LayoutAction } from "../lib/conversation-layout";
 
 type Drop =
   | { kind: "tab"; pane: number; index: number }
@@ -84,7 +84,7 @@ export function useConversationDrag(
       const paneElement = target?.closest<HTMLElement>(
         "[data-conversation-pane]",
       );
-      if (!paneElement || !allowDock || layout.panes.length >= 8) return;
+      if (!paneElement || !allowDock || layout.panes.length >= MAX_PANES) return;
       const pane = Number(paneElement.dataset.conversationPane),
         rect = paneElement.getBoundingClientRect();
       const x = (moveEvent.clientX - rect.left) / rect.width,

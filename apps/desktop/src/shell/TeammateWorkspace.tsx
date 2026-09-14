@@ -22,6 +22,7 @@ import {
 } from "../hooks/useLocalScheduleDispatcher";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import { activeWork, WorkspaceExecution } from "../lib/workspace-execution";
+import { agentPresence } from "../lib/agent-presence";
 import {
   emptyLayout,
   reduceLayout,
@@ -54,8 +55,12 @@ import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
 import { useConversationDrag } from "../hooks/useConversationDrag";
-import { WorkspaceHistory } from "../components/conversation/WorkspaceHistory";
 import { ProjectContextPanel } from "../components/projects/ProjectContextPanel";
+import {
+  WorkspaceRightNav,
+  type NavContext,
+} from "../components/navigation/WorkspaceRightNav";
+import { WorkModeView } from "../components/navigation/WorkModeView";
 import "./teammate-workspace.css";
 
 const ExecutionWorker = lazy(() =>
@@ -221,7 +226,9 @@ function ActiveWorkspace({
   const initialized = useRef(false);
   const narrow = useMediaQuery("(max-width: 850px)");
   const phone = useMediaQuery("(max-width: 700px)");
-  const [historyOpen, setHistoryOpen] = useState(!narrow);
+  // One contextual right panel replaces history, details and computer panels.
+  const [contextOpen, setContextOpen] = useState(!narrow);
+  const [mode, setMode] = useState<"chat" | "work">("chat");
   const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [settings, setSettings] = useState(false);
@@ -241,6 +248,15 @@ function ActiveWorkspace({
     projectId?: string;
   } | null>(null);
   const [computer, setComputer] = useState<string | null>(null);
+  // The context the right panel and modes describe: the active view's project,
+  // else its facilitator, else the remembered active agent.
+  const navContext: NavContext = activeRoom?.projectId
+    ? { kind: "project", project: projects.projects.find((project) => project.id === activeRoom.projectId) ?? { ...emptyProjectFor(workspaceId), id: activeRoom.projectId, threadId: activeRoom.id, name: "Project" } }
+    : activeRoom?.facilitatorId && runtime.agents.some((agent) => agent.id === activeRoom.facilitatorId)
+      ? { kind: "agent", agent: runtime.agents.find((agent) => agent.id === activeRoom.facilitatorId)! }
+      : activeProfile
+        ? { kind: "agent", agent: activeProfile }
+        : null;
   const [accountDialog, setAccountDialog] = useState<
     "usage" | "sign-out" | null
   >(null);

@@ -72,7 +72,7 @@ pub(crate) fn bind_schedule(
     };
     let key = format!("work-{run}");
     if repo::get::<Work>(conn, store, &scope.private, Kind::Work, &key)?.is_some() {
-        return work::bind(&ctx, &key, 1, run);
+        return work::bind(&ctx, &key, 1, run, None);
     }
     ctx.conversation(&room)?;
     let prompt = attempt
@@ -90,11 +90,13 @@ pub(crate) fn bind_schedule(
         agent.into(),
         prompt.into(),
         false,
+        Some("schedule"),
+        None,
     )?;
     let mut item = ctx.item(&key)?;
     item.permission_mode = "read-only".into();
     ctx.work(&item)?;
-    work::bind(&ctx, &key, 1, run)
+    work::bind(&ctx, &key, 1, run, None)
 }
 
 pub(crate) fn finish_schedule(

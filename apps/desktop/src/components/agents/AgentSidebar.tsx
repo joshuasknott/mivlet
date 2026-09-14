@@ -121,12 +121,18 @@ export function AgentSidebar({
   const visibleProjects = projects.filter((project) =>
     project.name.toLowerCase().includes(search),
   );
-  const groupRooms = conversations.filter(
-    (room) =>
-      !room.projectId &&
-      room.kind === "group" &&
-      room.title.toLowerCase().includes(search),
-  );
+  const groupRooms = !search
+    ? conversations.filter(
+        (room) => !room.projectId && room.kind === "group",
+      )
+    : [];
+  // Search is the one place every existing conversation becomes reachable;
+  // the default list keeps the sidebar quiet.
+  const searchRooms = search
+    ? conversations.filter((room) =>
+        room.title.toLowerCase().includes(search),
+      )
+    : [];
   const installed = connectors.filter(
     (connector) =>
       connector.id !== "local-files" && connector.status === "connected",
@@ -157,8 +163,8 @@ export function AgentSidebar({
         <MagnifyingGlass size={16} aria-hidden="true" />
         <input
           type="search"
-          aria-label="Search projects and agents"
-          placeholder="Search projects, groups, agents…"
+          aria-label="Search projects, conversations and agents"
+          placeholder="Search projects, chats, agents…"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -274,6 +280,43 @@ export function AgentSidebar({
             ))}
           </div>
         ) : null}
+        {searchRooms.length ? (
+          <div className="conversation-sidebar__list">
+            {searchRooms.map((room) => (
+              <button
+                key={room.id}
+                type="button"
+                className="conversation-sidebar__row"
+                aria-current={
+                  room.id === selectedConversationId && !marketplaceActive
+                    ? "page"
+                    : undefined
+                }
+                title={room.title}
+                data-conversation-room={room.id}
+                onDragStart={(event) => event.preventDefault()}
+                onClick={(event) =>
+                  onSelectConversation?.(
+                    room.id,
+                    event.ctrlKey || event.metaKey,
+                  )
+                }
+              >
+                <span>
+                  {room.title}
+                  {room.projectId
+                    ? ` · ${projects.find((project) => project.id === room.projectId)?.name ?? "Project"}`
+                    : ""}
+                </span>
+                {room.status ? (
+                  <small aria-label={room.status}>
+                    {["Working", "Unread"].includes(room.status) ? "•" : "!"}
+                  </small>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
         {!search || visibleAgents.length ? <div className="agent-sidebar__agents-heading">
           <span>Agents</span>
           <div>
@@ -364,7 +407,7 @@ export function AgentSidebar({
                   {(preview && preview.status !== "idle") ||
                   completions[agent.id]?.unread ? (
                     <span
-                      className={`agent-status agent-status--${preview?.status === "attention" ? "attention" : preview?.status === "running" ? presence === "service" ? "service" : "working" : "unread"}`}
+                      className={`agent-status agent-status--${preview?.status === "attention" ? "attention" : preview?.status === "running" ? presence === "service" ? "service" : presence === "thinking" ? "thinking" : presence === "waiting" || presence === "input" ? "waiting" : "working" : "unread"}`}
                       role="status"
                       aria-label={
                         preview && preview.status !== "idle"
@@ -393,7 +436,7 @@ export function AgentSidebar({
             </p>
           ) : null}
         </div>
-        {search && !visibleAgents.length && !visibleProjects.length && !groupRooms.length ? <p className="agent-list__empty">No projects, groups or agents found. Search conversation titles in History.</p> : null}
+        {search && !visibleAgents.length && !visibleProjects.length && !searchRooms.length ? <p className="agent-list__empty">No matching projects, conversations or agents.</p> : null}
       </div>
       <button
         className={`agent-sidebar__connections${marketplaceActive ? " agent-sidebar__connections--active" : ""}`}

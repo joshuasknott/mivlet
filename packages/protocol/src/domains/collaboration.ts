@@ -63,10 +63,27 @@ export interface WorkOutput {
 
 export interface CapturedWorkContext extends Extract<ContextShare, { mode: "snapshot" }> { version: 1 }
 export interface WorkSteering { id: string; text: string; createdAt: string }
+/** Durable reference for one file or input attached to a request. */
+export interface WorkAttachment {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** image-input and transient bytes existed only in memory and cannot be restored after restart. */
+  availability: "image-input" | "transient" | "knowledge-context" | "workspace-file";
+  /** Workspace-file refs carry the staged path under the account root's Attachments/. */
+  relativePath?: string;
+  /** Knowledge refs carry the exact source identity resolved on each deliberate use. */
+  sourceId?: string;
+}
 export interface CollaborationWorkItem {
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
   steering?: WorkSteering[];
+  /** Durable attachment references recorded at submission and refreshed at dispatch. */
+  attachments?: WorkAttachment[];
+  /** Where the request came from. Absent legacy Work predates origins (chat). */
+  origin?: "chat" | "schedule";
   permissionMode: import("./approvals").PermissionMode;
   id: string;
   workspaceId: string;
@@ -203,8 +220,10 @@ export type CollaborationCommand =
       agentId: string;
       prompt: string;
       discussion: boolean;
+      /** Composer-level attachment references captured with the request. */
+      attachments?: WorkAttachment[];
     }
-  | { action: "bind-work"; id: string; generation: number; runId: string }
+  | { action: "bind-work"; id: string; generation: number; runId: string; attachments?: WorkAttachment[] }
   | { action: "check-work"; id: string; generation: number; runId: string }
   | {
       action: "finish-work";

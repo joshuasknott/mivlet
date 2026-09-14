@@ -488,19 +488,6 @@
   font-size: 10px;
   color: var(--team-muted);
 }
-.team-work-status {
-  color: var(--team-muted);
-  font-size: 10px;
-  white-space: nowrap;
-}
-.team-work-item[data-status="failed"] .team-work-status,
-.team-work-item[data-status="awaiting-user"] .team-work-status,
-.team-work-item[data-status="blocked"] .team-work-status {
-  color: #a66f26;
-}
-.team-work-item[data-status="completed"] .team-work-status {
-  color: #58754c;
-}
 .team-work-reason {
   color: var(--team-muted);
 }

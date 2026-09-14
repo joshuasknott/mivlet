@@ -30,7 +30,10 @@ import {
   prepareExecutionAttachments,
   attachmentMessageMetadata,
   attachmentRunInstructions,
+  missingRestagedPaths,
+  resolveWorkAttachments,
 } from "../lib/execution-attachments";
+import { stagedAttachmentRefs } from "../lib/workspace-execution";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
@@ -180,7 +183,9 @@ export function ExecutionWorker({
         );
         if (!validation.ok)
           throw new Error(validation.error ?? "This model is unavailable.");
-        const images = composerImageInputs(session.attachments);
+        const resolved = resolveWorkAttachments(session.attachments, session.work);
+        if (resolved.error) throw new Error(resolved.error);
+        const images = composerImageInputs(resolved.attachments);
         if (!images.ok) throw new Error(images.error);
         if (
           images.images.length &&
@@ -192,12 +197,30 @@ export function ExecutionWorker({
           );
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(
-          session.attachments,
+          resolved.attachments,
           controller.localComputer,
           service.workspaceId,
           session.work.agentId,
           () => service.current(session),
         );
+        if (!service.current(session)) return;
+        if (!session.attachments.length) {
+          // Continued assignments recover durable workspace refs; files that
+          // were cleaned out of the account root fail closed before dispatch.
+          const entries = await controller.localComputer
+            .refreshFiles()
+            .catch(() => null);
+          const missing = missingRestagedPaths(
+            session.work.attachments ?? [],
+            entries?.entries ?? [],
+          );
+          if (missing.length)
+            throw new Error(
+              `This request's files are no longer available in the workspace: ${missing
+                .map((ref) => ref.name)
+                .join(", ")}. Reattach them before continuing.`,
+            );
+        }
         batch = staged.batch;
         if (!service.current(session)) return;
         const { ids, tools: connectorTools } =
@@ -246,7 +269,7 @@ export function ExecutionWorker({
             allowedKnowledgeSourceIds: [
               ...new Set([
                 ...(project?.knowledgeSourceIds ?? []),
-                ...session.attachments.flatMap((attachment) =>
+                ...staged.attachments.flatMap((attachment) =>
                   attachment.sourceId ? [attachment.sourceId] : [],
                 ),
               ]),
@@ -304,6 +327,7 @@ export function ExecutionWorker({
                 action: "bind-work",
                 ...scope,
                 runId: attemptId,
+                attachments: stagedAttachmentRefs(staged.attachments),
               });
               if (!service.current(session))
                 throw new Error("This assignment changed before dispatch.");

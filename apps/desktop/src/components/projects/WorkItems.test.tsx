@@ -15,7 +15,11 @@ const item: CollaborationWorkItem = {
   maxTurns: 12, maxTokens: 64000, runIds: [], modelOptionId: "codex::fixture", outputs: [],
   createdAt: "2026-09-12T10:00:00Z", updatedAt: "2026-09-12T10:00:00Z",
 };
-const service = (command = vi.fn().mockResolvedValue({})) => ({ command } as unknown as WorkspaceExecution);
+const service = (command = vi.fn().mockResolvedValue({})) => ({
+  command,
+  steer: async (id: string, expectedGeneration: number, text: string) =>
+    command({ action: "steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text }),
+} as unknown as WorkspaceExecution);
 
 describe("failed work recovery", () => {
   it("preserves the complete user request and makes it expandable", () => {
@@ -46,5 +50,28 @@ describe("failed work recovery", () => {
   it("includes failed requests in the attention summary", () => {
     render(<WorkspaceHistory rooms={[]} work={[item]} indicators={{}} service={service()} onOpen={vi.fn()} onClose={vi.fn()} />);
     expect(screen.getByLabelText("Work needing attention")).toHaveTextContent("Researcherfailed");
+  });
+  it("records deliberate steering under the item's exact generation", async () => {
+    const command = vi.fn().mockResolvedValue({});
+    render(<WorkItems work={[item]} service={service(command)} onOpen={vi.fn()} />);
+    fireEvent.click(screen.getByText("Steer request…"));
+    fireEvent.change(screen.getByPlaceholderText("Adjust the request…"), {
+      target: { value: "Focus on the brief" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Apply steering" }));
+    await waitFor(() =>
+      expect(command).toHaveBeenCalledWith({
+        action: "steer-work",
+        id: "work",
+        expectedGeneration: 3,
+        eventId: expect.any(String),
+        text: "Focus on the brief",
+      }),
+    );
+  });
+  it("labels schedule-origin work and in-memory attachment recovery", () => {
+    render(<WorkItems work={[{ ...item, origin: "schedule", attachments: [{ id: "upload", name: "brief.txt", mimeType: "text/plain", sizeBytes: 4, availability: "transient" }] }]} service={service()} onOpen={vi.fn()} />);
+    expect(screen.getByText("Scheduled")).toBeVisible();
+    expect(screen.getByText(/in-memory inputs need reattaching/)).toBeVisible();
   });
 });
