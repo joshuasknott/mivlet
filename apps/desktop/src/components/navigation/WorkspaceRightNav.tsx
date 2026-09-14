@@ -1,9 +1,12 @@
 import { useRef, useState, type ReactNode } from "react";
 import type {
+  ApprovalRequest,
   CollaborationWorkItem,
   ConversationRoom,
   FableAgentProfile,
   LocalProject,
+  ProjectTeam,
+  WorkOutput,
 } from "@fable/protocol";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
@@ -11,47 +14,32 @@ import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
-import type { WorkspaceExecution } from "../../lib/workspace-execution";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
-import { WorkItems } from "../projects/WorkItems";
+import { WorkList } from "../work/WorkCard";
+import { WorkDetails } from "../work/WorkDetails";
+import { WorkStatusBadge } from "../work/WorkStatusBadge";
+import "../work/work.css";
+import "./navigation.css";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
 import { PRESENCE_LABELS, type AgentPresence } from "../../lib/agent-presence";
-import { attentionOrder, needsAttention } from "./work-order";
+import {
+  attentionOrder,
+  memoryInScope,
+  needsAttention,
+  scopeLevelsFor,
+  scopedRoomIds,
+  sideChatsFor,
+  teamMembers,
+} from "./work-order";
 
-/** The selected Agent or Project that owns the nav's sections. */
+/** The selected context the nav describes: an Agent, a Project, or one Work
+ * item inside either. It never fabricates a Project that has not loaded. */
 export type NavContext =
   | { kind: "agent"; agent: FableAgentProfile }
   | { kind: "project"; project: LocalProject }
+  | { kind: "work"; item: CollaborationWorkItem }
   | null;
-
-/** Side Chats stay subordinate: proven side chats plus unclassified private rooms. */
-export function sideChatsFor(
-  context: NavContext,
-  rooms: ConversationRoom[],
-): ConversationRoom[] {
-  if (!context) return [];
-  return rooms.filter((room) => {
-    if (context.kind === "agent") {
-      const agent = context.agent;
-      if (room.chat)
-        return (
-          room.chat.role === "side" &&
-          room.chat.ownerKind === "agent" &&
-          room.chat.ownerId === agent.id
-        );
-      return (
-        !room.projectId &&
-        room.kind === "direct" &&
-        room.participants.some((member) => member.agentId === agent.id)
-      );
-    }
-    return (
-      room.projectId === context.project.id &&
-      (!room.chat || room.chat.role === "side")
-    );
-  });
-}
 
 function NavSection({
   title,
@@ -84,19 +72,25 @@ function NavSection({
 
 /**
  * The one contextual right panel. It replaces the separate history, details
- * and computer panels: sections follow the selected Agent or Project, and the
- * agent computer renders here as a mode of this same panel. Closing it never
- * affects running work.
+ * and computer panels: sections follow the selected Agent, Project or Work
+ * item, and the agent computer renders here as a mode of this same panel.
+ * Closing it never affects running work.
  */
 export function WorkspaceRightNav({
   context,
   rooms,
   work,
+  team,
   runtime,
-  service,
+  approvals = [],
   open,
   onClose,
   onOpenConversation,
+  onOpenWork,
+  onStopWork,
+  onContinueWork,
+  onSteerWork,
+  onPromoteWorkOutput,
   onNewSideChat,
   onSchedules,
   onOpenComputer,
@@ -112,11 +106,28 @@ export function WorkspaceRightNav({
   context: NavContext;
   rooms: ConversationRoom[];
   work: CollaborationWorkItem[];
+  team?: ProjectTeam;
   runtime: ShellRuntime;
-  service: WorkspaceExecution;
+  approvals?: ApprovalRequest[];
   open: boolean;
   onClose: () => void;
   onOpenConversation: (id: string, newTab?: boolean) => void;
+  onOpenWork?: (id: string | null) => void;
+  onStopWork?: (id: string) => void | Promise<void>;
+  onContinueWork?: (
+    id: string,
+    expectedGeneration: number,
+  ) => void | Promise<void>;
+  onSteerWork?: (
+    id: string,
+    expectedGeneration: number,
+    text: string,
+  ) => void | Promise<void>;
+  onPromoteWorkOutput?: (
+    output: WorkOutput,
+    item: CollaborationWorkItem,
+    value: string,
+  ) => void | Promise<void>;
   onNewSideChat?: () => void;
   onSchedules?: () => void;
   onOpenComputer?: (agentId: string) => void;
@@ -132,15 +143,43 @@ export function WorkspaceRightNav({
   const panel = useRef<HTMLElement>(null);
   const compact = useMediaQuery("(max-width: 850px)");
   useModalFocusTrap({ active: open && compact, containerRef: panel, onClose });
-  const attention = work.filter(needsAttention);
-  const agent = context?.kind === "agent" ? context.agent : null;
+  const agent =
+    context?.kind === "agent"
+      ? context.agent
+      : context?.kind === "work"
+        ? runtime.agents.find((item) => item.id === context.item.agentId)
+        : null;
   const project = context?.kind === "project" ? context.project : null;
-  const contextWork = agent
-    ? work.filter((item) => item.agentId === agent.id)
-    : work;
-  const chats = sideChatsFor(context, rooms);
+  const item = context?.kind === "work" ? context.item : null;
+  const contextWork = item
+    ? [item]
+    : project
+      ? work.filter((entry) => entry.projectId === project.id)
+      : agent
+        ? work.filter((entry) => entry.agentId === agent.id)
+        : work;
+  const attention = attentionOrder(contextWork).filter(needsAttention);
+  const chats = sideChatsFor(
+    agent
+      ? { kind: "agent", agentId: agent.id }
+      : project
+        ? { kind: "project", project }
+        : null,
+    rooms,
+  );
+  const scopes = scopeLevelsFor({
+    agentId: agent?.id,
+    projectId: project?.id,
+    roomIds: scopedRoomIds(agent?.id, project?.id, rooms),
+    workIds: contextWork.map((entry) => entry.id),
+  });
   const memory = (runtime.managedMemoryRecords ?? []).filter(
-    (record) => !record.forgottenAt,
+    (record) => !record.forgottenAt && memoryInScope(record, scopes),
+  );
+  const members = project ? teamMembers(team, runtime.agents) : null;
+  const contextApprovals = approvals;
+  const contextTools = runtime.connectorManifests.filter(
+    (connector) => connector.status === "connected" && connector.id !== "local-files",
   );
   return (
     <aside
@@ -161,6 +200,18 @@ export function WorkspaceRightNav({
             <ArrowLeft size={16} aria-hidden="true" />
             Back to context
           </button>
+        ) : item ? (
+          <>
+            <button
+              type="button"
+              className="workspace-context__back"
+              onClick={() => onOpenWork?.(null)}
+            >
+              <ArrowLeft size={16} aria-hidden="true" />
+              Back to context
+            </button>
+            <WorkStatusBadge item={item} />
+          </>
         ) : (
           <span className="workspace-context__identity">
             {agent ? (
@@ -201,22 +252,42 @@ export function WorkspaceRightNav({
         <div className="workspace-context__computer">{computer}</div>
       ) : (
         <div className="workspace-context__sections">
-          {attention.length ? (
+          {item ? (
+            <div className="workspace-context__work">
+              <WorkDetails
+                item={item}
+                onOpen={onOpenConversation}
+                onStop={(id) => onStopWork?.(id)}
+                onContinue={(id, generation) =>
+                  onContinueWork?.(id, generation)
+                }
+                onSteer={(id, generation, text) =>
+                  onSteerWork?.(id, generation, text)
+                }
+                onPromote={onPromoteWorkOutput}
+              />
+            </div>
+          ) : null}
+          {!item && attention.length ? (
             <div className="workspace-context__pinned">
               <h3>Work needing attention</h3>
-              {attention.slice(0, 4).map((item) => (
+              {attention.slice(0, 4).map((entry) => (
                 <button
-                  key={item.id}
+                  key={entry.id}
                   type="button"
-                  onClick={() => onOpenConversation(item.conversationId)}
+                  onClick={() =>
+                    onOpenWork
+                      ? onOpenWork(entry.id)
+                      : onOpenConversation(entry.conversationId)
+                  }
                 >
-                  <strong>{item.agentName}</strong>
-                  <small>{item.status.replaceAll("-", " ")}</small>
+                  <strong>{entry.agentName}</strong>
+                  <small>{entry.status.replaceAll("-", " ")}</small>
                 </button>
               ))}
             </div>
           ) : null}
-          {context ? (
+          {!item && context ? (
             <NavSection title="Side Chats" count={chats.length}>
               {onNewSideChat ? (
                 <button
@@ -234,6 +305,7 @@ export function WorkspaceRightNav({
                   type="button"
                   className="workspace-context__row"
                   title={room.title}
+                  aria-current={false}
                   onClick={(event) =>
                     onOpenConversation(room.id, event.ctrlKey || event.metaKey)
                   }
@@ -248,19 +320,64 @@ export function WorkspaceRightNav({
               ) : null}
             </NavSection>
           ) : null}
-          {project ? (
+          {!item && project && members ? (
+            <NavSection title="Team" count={members.participants.length} open={false}>
+              {members.lead ? (
+                <p className="workspace-context__empty">
+                  Lead: {members.lead}
+                </p>
+              ) : null}
+              {members.participants.map((name) => (
+                <p key={name} className="workspace-context__empty">
+                  {name}
+                </p>
+              ))}
+            </NavSection>
+          ) : null}
+          {!item ? (
+            <NavSection title="Work" count={contextWork.length}>
+              <WorkList
+                work={attentionOrder(contextWork)}
+                empty="Assignments and their results appear here when work starts."
+                onOpen={onOpenConversation}
+                onOpenWork={onOpenWork}
+                onStop={(id) => onStopWork?.(id)}
+                onContinue={(id, generation) =>
+                  onContinueWork?.(id, generation)
+                }
+                onSteer={(id, generation, text) =>
+                  onSteerWork?.(id, generation, text)
+                }
+              />
+            </NavSection>
+          ) : null}
+          {!item && project ? (
             <NavSection title="Project" open={false}>
               {projectDetails}
             </NavSection>
-          ) : (
-            <NavSection title="Work" count={contextWork.length}>
-              <WorkItems
-                work={attentionOrder(contextWork)}
-                service={service}
-                onOpen={onOpenConversation}
-              />
+          ) : null}
+          {!item && contextApprovals.length ? (
+            <NavSection
+              title="Approvals"
+              count={contextApprovals.length}
+              open={false}
+            >
+              {contextApprovals.slice(0, 4).map((approval) => (
+                <p key={approval.id} className="workspace-context__empty">
+                  {approval.action}
+                </p>
+              ))}
             </NavSection>
-          )}
+          ) : null}
+          {!item && contextTools.length ? (
+            <NavSection title="Tools" count={contextTools.length} open={false}>
+              {contextTools.map((connector) => (
+                <p key={connector.id} className="workspace-context__empty">
+                  {connector.name}
+                </p>
+              ))}
+            </NavSection>
+          ) : null}
           {onSchedules ? (
             <button
               type="button"
@@ -271,7 +388,7 @@ export function WorkspaceRightNav({
               View schedules
             </button>
           ) : null}
-          {project && onEditProject ? (
+          {!item && project && onEditProject ? (
             <button
               type="button"
               className="workspace-context__row workspace-context__row--action"
@@ -280,13 +397,13 @@ export function WorkspaceRightNav({
               Edit project
             </button>
           ) : null}
-          {agent ? (
+          {!item && agent ? (
             <>
               <NavSection title="Memory" count={memory.length} open={false}>
                 <p className="workspace-context__empty">
                   {memory.length
                     ? `${memory.length} in scope for this agent.`
-                    : "No memory records are saved yet."}
+                    : "No memory records are in scope yet."}
                 </p>
                 {onManageMemory ? (
                   <button

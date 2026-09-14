@@ -70,7 +70,9 @@ describe("failed work recovery", () => {
     );
   });
   it("labels schedule-origin work and in-memory attachment recovery", () => {
-    render(<WorkItems work={[{ ...item, origin: "schedule", attachments: [{ id: "upload", name: "brief.txt", mimeType: "text/plain", sizeBytes: 4, availability: "transient" }] }]} service={service()} onOpen={vi.fn()} />);
+    render(<WorkItems work={[{ ...item, origin: "schedule", status: "queued", attachments: [{ id: "upload", name: "brief.txt", mimeType: "text/plain", sizeBytes: 4, availability: "transient" }] }]} service={service()} onOpen={vi.fn()} />);
+    // A queued scheduled request is Scheduled; a failed one shows Failed with
+    // the scheduled origin as secondary detail.
     expect(screen.getByText("Scheduled")).toBeVisible();
     expect(screen.getByText(/in-memory inputs need reattaching/)).toBeVisible();
   });

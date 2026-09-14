@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CollaborationWorkItem } from "@fable/protocol";
 import { WorkDetails } from "./WorkDetails";
@@ -58,13 +58,38 @@ describe("Work details", () => {
     expect(onContinue).toHaveBeenCalledWith("work", 2);
   });
 
-  it("promotes a saved outcome through the explicit memory callback", () => {
+  it("promotes an explicitly selected conclusion through the memory callback", async () => {
     const onPromote = vi.fn();
     render(<WorkDetails item={item()} onOpen={vi.fn()} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} onPromote={onPromote} />);
-    fireEvent.click(screen.getByRole("button", { name: "Save to memory" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save to memory…" }));
+    const editor = screen.getByLabelText(/Conclusion to keep/) as HTMLTextAreaElement;
+    expect(editor.value).toContain("A saved report.");
+    fireEvent.change(editor, { target: { value: "Keep the summary short." } });
+    const form = document.querySelector("form.work-promote-form");
+    if (!form) throw new Error("Expected the memory promotion form.");
+    fireEvent.click(within(form as HTMLElement).getByRole("button", { name: "Save to memory" }));
+    await Promise.resolve();
     expect(onPromote).toHaveBeenCalledWith(
       expect.objectContaining({ runId: "run-one" }),
       expect.objectContaining({ id: "work" }),
+      "Keep the summary short.",
+    );
+  });
+
+  it("keeps the conclusion editor when promotion fails", async () => {
+    const onPromote = vi.fn().mockRejectedValue(new Error("Memory changed; refresh first"));
+    render(<WorkDetails item={item()} onOpen={vi.fn()} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} onPromote={onPromote} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save to memory…" }));
+    fireEvent.change(screen.getByLabelText(/Conclusion to keep/), {
+      target: { value: "Keep the summary short." },
+    });
+    const form = document.querySelector("form.work-promote-form");
+    if (!form) throw new Error("Expected the memory promotion form.");
+    fireEvent.click(within(form as HTMLElement).getByRole("button", { name: "Save to memory" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Memory changed; refresh first");
+    // The user's text is retained for a retry.
+    expect((screen.getByLabelText(/Conclusion to keep/) as HTMLTextAreaElement).value).toBe(
+      "Keep the summary short.",
     );
   });
 });

@@ -207,13 +207,17 @@ export function ExecutionWorker({
         if (!session.attachments.length) {
           // Continued assignments recover durable workspace refs; files that
           // were cleaned out of the account root fail closed before dispatch.
+          // When the listing itself is unavailable, dispatch proceeds and the
+          // native bind remains the authority that verifies every reference.
           const entries = await controller.localComputer
             .refreshFiles()
             .catch(() => null);
-          const missing = missingRestagedPaths(
-            session.work.attachments ?? [],
-            entries?.entries ?? [],
-          );
+          const missing = entries
+            ? missingRestagedPaths(
+                session.work.attachments ?? [],
+                entries.entries ?? [],
+              )
+            : [];
           if (missing.length)
             throw new Error(
               `This request's files are no longer available in the workspace: ${missing

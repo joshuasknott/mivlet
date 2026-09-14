@@ -4,6 +4,7 @@ use super::*;
 use crate::store::repos::{execution_attempt, message};
 use crate::store::vault::{MasterKey, Vault};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 const TIME: &str = "2026-09-12T10:00:00.000Z";
 
@@ -101,6 +102,21 @@ fn delegate(agent: &str, prompt: &str) -> AgentCommand {
         title: prompt.into(),
         dependencies: vec![],
         focused: false,
+    }
+}
+fn staged_attachment(id: &str, path: &str) -> WorkAttachment {
+    staged_attachment_with_hash(id, path, 128, &"a".repeat(64))
+}
+fn staged_attachment_with_hash(id: &str, path: &str, size: u64, hash: &str) -> WorkAttachment {
+    WorkAttachment {
+        id: id.into(),
+        name: path.rsplit('/').next().unwrap_or(id).into(),
+        mime_type: "text/plain".into(),
+        size_bytes: size,
+        availability: "workspace-file".into(),
+        relative_path: Some(path.into()),
+        source_id: None,
+        sha256: Some(hash.into()),
     }
 }
 fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<()> {
@@ -1127,6 +1143,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 availability: "transient".into(),
                 relative_path: None,
                 source_id: None,
+                sha256: None,
             },
             WorkAttachment {
                 id: "source".into(),
@@ -1136,6 +1153,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 availability: "knowledge-context".into(),
                 relative_path: None,
                 source_id: Some("knowledge-1".into()),
+                sha256: None,
             },
         ];
         commands::apply(
@@ -1152,15 +1170,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
         let item = ctx.item("attach")?;
         assert_eq!(item.attachments, preview);
         assert!(item.origin.is_none());
-        let staged = vec![WorkAttachment {
-            id: "upload".into(),
-            name: "brief.txt".into(),
-            mime_type: "text/plain".into(),
-            size_bytes: 128,
-            availability: "workspace-file".into(),
-            relative_path: Some("Attachments/batch-1/brief.txt".into()),
-            source_id: None,
-        }];
+        let staged = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
         journal(ctx, &room.id, "run", "queued", "")?;
         commands::apply(
             ctx,
@@ -1173,54 +1183,132 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
         )?;
         assert_eq!(ctx.item("attach")?.attachments, staged);
         assert_eq!(ctx.item("attach")?.current_run_id.as_deref(), Some("run"));
-        let unsafe_path = vec![WorkAttachment {
-            id: "upload".into(),
-            name: "brief.txt".into(),
-            mime_type: "text/plain".into(),
-            size_bytes: 128,
-            availability: "workspace-file".into(),
-            relative_path: Some("../outside.txt".into()),
-            source_id: None,
-        }];
-        assert!(work::validate_attachments(&unsafe_path).is_err());
-        let in_memory_with_ref = vec![WorkAttachment {
-            id: "upload".into(),
-            name: "brief.txt".into(),
-            mime_type: "text/plain".into(),
-            size_bytes: 128,
-            availability: "transient".into(),
-            relative_path: Some("Attachments/batch-1/brief.txt".into()),
-            source_id: None,
-        }];
-        assert!(work::validate_attachments(&in_memory_with_ref).is_err());
-        let unknown_kind = vec![WorkAttachment {
-            id: "upload".into(),
-            name: "brief.txt".into(),
-            mime_type: "text/plain".into(),
-            size_bytes: 128,
-            availability: "cloud".into(),
-            relative_path: None,
-            source_id: None,
-        }];
-        assert!(work::validate_attachments(&unknown_kind).is_err());
+        // A repeated bind is idempotent and never rewrites the dispatched inputs.
+        let replacement = vec![staged_attachment(
+            "upload",
+            "Attachments/batch-2/replacement.txt",
+        )];
+        commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 1,
+                run_id: "run".into(),
+                attachments: Some(replacement),
+            },
+        )?;
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        // A stale generation cannot reach the dispatched request at all.
+        let stale = vec![staged_attachment("upload", "Attachments/batch-3/stale.txt")];
+        assert!(commands::apply(
+            ctx,
+            Command::BindWork {
+                id: "attach".into(),
+                generation: 99,
+                run_id: "run".into(),
+                attachments: Some(stale),
+            },
+        )
+        .is_err());
+        assert_eq!(ctx.item("attach")?.attachments, staged);
+        let mut unsafe_path = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        unsafe_path.relative_path = Some("../outside.txt".into());
+        assert!(work::validate_attachments(&[unsafe_path]).is_err());
+        let mut missing_hash = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        missing_hash.sha256 = None;
+        assert!(work::validate_attachments(&[missing_hash]).is_err());
+        let mut bad_hash = staged_attachment("upload", "Attachments/batch-1/brief.txt");
+        bad_hash.sha256 = Some("not-a-hash".into());
+        assert!(work::validate_attachments(&[bad_hash]).is_err());
+        let mut in_memory_with_ref = preview[0].clone();
+        in_memory_with_ref.relative_path = Some("Attachments/batch-1/brief.txt".into());
+        assert!(work::validate_attachments(&[in_memory_with_ref]).is_err());
+        let mut unknown_kind = preview[1].clone();
+        unknown_kind.availability = "cloud".into();
+        assert!(work::validate_attachments(&[unknown_kind]).is_err());
         assert!(work::validate_attachments(&vec![preview[0].clone(); 13]).is_err());
         Ok(())
     });
 }
 
 #[test]
+fn roadmap_staged_attachment_verification_requires_exact_existing_bytes() {
+    use std::path::PathBuf;
+    let root = std::env::temp_dir().join(format!(
+        "mivlet-work-attachments-{}-{}",
+        std::process::id(),
+        TIME.replace([':', '.', '-'], "")
+    ));
+    let state = crate::local_computer::LocalComputerState::for_test(root.clone());
+    let key = hex::encode(Sha256::digest(b"fable-local-computer-v1\0workspace\0lead"));
+    let workspace = root.join(&key[..32]).join("workspace");
+    let staged_path: PathBuf = workspace.join("Attachments/batch-1/brief.txt");
+    std::fs::create_dir_all(staged_path.parent().unwrap()).unwrap();
+    let bytes = b"exact staged bytes";
+    std::fs::write(&staged_path, bytes).unwrap();
+    let hash = hex::encode(Sha256::digest(bytes));
+    let verified = vec![staged_attachment_with_hash(
+        "upload",
+        "Attachments/batch-1/brief.txt",
+        bytes.len() as u64,
+        &hash,
+    )];
+    assert!(work::verify_attachment_files(Some(&state), "workspace", "lead", &verified).is_ok());
+    // In-memory refs are not file claims and never block verification.
+    let memory_only = vec![WorkAttachment {
+        id: "photo".into(),
+        name: "photo.png".into(),
+        mime_type: "image/png".into(),
+        size_bytes: 2048,
+        availability: "image-input".into(),
+        relative_path: None,
+        source_id: None,
+        sha256: None,
+    }];
+    assert!(work::verify_attachment_files(Some(&state), "workspace", "lead", &memory_only).is_ok());
+    // Wrong recorded size fails closed.
+    let wrong_size = vec![staged_attachment_with_hash(
+        "upload",
+        "Attachments/batch-1/brief.txt",
+        bytes.len() as u64 + 1,
+        &hash,
+    )];
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &wrong_size)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed since it was attached"), "{error}");
+    // Changed content fails closed even when the size matches.
+    std::fs::write(&staged_path, b"tampered staged bytes").unwrap();
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &verified)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("changed since it was attached"), "{error}");
+    // Missing staged files name the exact reattach prerequisite.
+    std::fs::remove_file(&staged_path).unwrap();
+    let error = work::verify_attachment_files(Some(&state), "workspace", "lead", &verified)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("no longer available"), "{error}");
+    assert!(error.contains("Reattach it before continuing."), "{error}");
+    // A different agent's workspace never satisfies the same relative path.
+    let other_key = hex::encode(Sha256::digest(
+        b"fable-local-computer-v1\0workspace\0researcher",
+    ));
+    let other = root.join(&other_key[..32]).join("workspace");
+    std::fs::create_dir_all(other.join("Attachments/batch-1")).unwrap();
+    std::fs::write(other.join("Attachments/batch-1/brief.txt"), bytes).unwrap();
+    assert!(
+        work::verify_attachment_files(Some(&state), "workspace", "lead", &verified).is_err(),
+        "another agent's workspace does not satisfy this request"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
 fn roadmap_attachment_refs_survive_restart_review_without_replay() {
     fixture(&store(), |ctx| {
         let room = chats::open_main(ctx, "lead")?;
-        let refs = vec![WorkAttachment {
-            id: "upload".into(),
-            name: "brief.txt".into(),
-            mime_type: "text/plain".into(),
-            size_bytes: 128,
-            availability: "workspace-file".into(),
-            relative_path: Some("Attachments/batch-1/brief.txt".into()),
-            source_id: None,
-        }];
+        let refs = vec![staged_attachment("upload", "Attachments/batch-1/brief.txt")];
         commands::apply(
             ctx,
             Command::StartWork {

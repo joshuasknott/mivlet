@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentLearningDialog } from "./AgentLearningDialog";
@@ -19,7 +19,7 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
-  it("opens projects and agents directly and shows group avatars without nested history", () => {
+  it("opens projects and agents directly without standalone group routing", () => {
     const onSelect = vi.fn(),
       onSelectAgent = vi.fn(),
       onSelectProject = vi.fn();
@@ -56,7 +56,6 @@ describe("quiet agent surface", () => {
           },
         ]}
         onSelectConversation={onSelect}
-        onCreateConversation={vi.fn()}
         onSelectProject={onSelectProject}
         onCreateProject={vi.fn()}
         onSelectAgent={onSelectAgent}
@@ -68,11 +67,11 @@ describe("quiet agent surface", () => {
         onSignOut={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("region", { name: "Group chats" })).toBeNull();
-    const group = screen.getByRole("button", { name: /Review group/ });
-    expect(within(group).getByLabelText("Mira, Former teammate")).toBeVisible();
-    fireEvent.click(group);
-    expect(onSelect).toHaveBeenLastCalledWith("group", false);
+    // Legacy standalone groups are not routed from the sidebar; they stay
+    // reachable by reference through search and migrate into projects through
+    // the conversation menu.
+    expect(screen.queryByRole("button", { name: /Review group/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "New group" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Mira" }));
     expect(onSelectAgent).toHaveBeenCalledWith(agent);
     fireEvent.click(screen.getByRole("button", { name: "Launch" }));

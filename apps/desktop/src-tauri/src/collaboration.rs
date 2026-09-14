@@ -19,6 +19,7 @@ use models::*;
 use rusqlite::Connection;
 use serde::Serialize;
 use std::collections::HashSet;
+use tauri::Manager;
 
 type Result<T> = crate::store::Result<T>;
 
@@ -365,8 +366,11 @@ pub fn collaboration_command(
     request: Request,
 ) -> std::result::Result<Snapshot, String> {
     main_window(&window)?;
-    let profiles = native_profiles(app, &request.workspace_id)?;
+    let profiles = native_profiles(app.clone(), &request.workspace_id)?;
     let store = crate::store::try_global().ok_or("Mivlet's encrypted store is unavailable.")?;
+    let computers = app
+        .try_state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
+        .map(|state| state.inner().clone());
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(
@@ -383,6 +387,23 @@ pub fn collaboration_command(
                 profiles: &profiles,
                 time: &time,
             };
+            // Staged inputs are native facts: verify them against the exact
+            // agent workspace before the dispatch binding can proceed.
+            if let Command::BindWork {
+                id,
+                attachments: Some(refs),
+                ..
+            } = &request.command
+            {
+                let item = repo::get::<Work>(conn, store, &scope.private, Kind::Work, id)?
+                    .ok_or_else(|| invalid("The assignment is unavailable."))?;
+                work::verify_attachment_files(
+                    computers.as_deref(),
+                    scope.data.workspace_id(),
+                    &item.agent_id,
+                    refs,
+                )?;
+            }
             commands::apply(&ctx, request.command)?;
             ctx.snapshot()
         })

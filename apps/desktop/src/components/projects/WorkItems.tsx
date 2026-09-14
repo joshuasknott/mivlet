@@ -38,7 +38,7 @@ export function WorkItems({
                 <strong>{item.agentName}</strong>
                 <small>{item.parentId ? "Assignment" : "Request"}</small>
               </span>
-              <WorkStatusBadge status={item.status} origin={item.origin} />
+              <WorkStatusBadge item={item} />
             </header>
             <WorkPrompt prompt={item.userRequest || item.prompt} />
             {item.reason ? (

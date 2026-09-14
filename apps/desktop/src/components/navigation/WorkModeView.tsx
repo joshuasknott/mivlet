@@ -2,14 +2,17 @@ import { lazy, Suspense, useState } from "react";
 import type {
   ApprovalRequest,
   CollaborationWorkItem,
-  ConversationRoom,
   FableAgentProfile,
   LocalProject,
+  WorkOutput,
 } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import type { WorkspaceExecution } from "../../lib/workspace-execution";
 import { useLocalComputer } from "../../hooks/useLocalComputer";
-import { WorkItems } from "../projects/WorkItems";
+import { WorkList } from "../work/WorkCard";
+import { WorkDetails } from "../work/WorkDetails";
+import "../work/work.css";
+import "./navigation.css";
 import { NativeComputerPanel } from "../agents/NativeComputerPanel";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { attentionOrder } from "./work-order";
@@ -50,27 +53,48 @@ function ComputerSummary({
  * connected tools and the agent computer. Nothing here dispatches work.
  */
 export function WorkModeView({
-  room,
   project,
   agent,
   work,
   runtime,
   service,
   approvals,
+  selectedWork,
   onOpen,
+  onOpenWork,
+  onStopWork,
+  onContinueWork,
+  onSteerWork,
+  onPromoteWorkOutput,
   onOpenArtifact,
   onOpenComputer,
   onSchedules,
   onOpenPlugins,
 }: {
-  room: ConversationRoom;
   project?: LocalProject;
   agent?: FableAgentProfile;
   work: CollaborationWorkItem[];
   runtime: ShellRuntime;
   service: WorkspaceExecution;
   approvals: ApprovalRequest[];
+  selectedWork?: CollaborationWorkItem;
   onOpen: (id: string, newTab?: boolean) => void;
+  onOpenWork: (id: string | null) => void;
+  onStopWork: (id: string) => void | Promise<void>;
+  onContinueWork: (
+    id: string,
+    expectedGeneration: number,
+  ) => void | Promise<void>;
+  onSteerWork: (
+    id: string,
+    expectedGeneration: number,
+    text: string,
+  ) => void | Promise<void>;
+  onPromoteWorkOutput: (
+    output: WorkOutput,
+    item: CollaborationWorkItem,
+    value: string,
+  ) => void | Promise<void>;
   onOpenArtifact: (output: string, agentId: string) => void;
   onOpenComputer: (agentId: string) => void;
   onSchedules: () => void;
@@ -91,11 +115,13 @@ export function WorkModeView({
       <header className="work-mode__header">
         <h1>Work</h1>
         <p>
-          {project
-            ? `Everything ${project.name}'s team is doing.`
-            : agent
-              ? `Everything ${agent.name} is doing.`
-              : "Everything happening in this conversation."}
+          {selectedWork
+            ? `Selected request for ${selectedWork.agentName}.`
+            : project
+              ? `Everything ${project.name}'s team is doing.`
+              : agent
+                ? `Everything ${agent.name} is doing.`
+                : "Everything happening in this conversation."}
         </p>
         <div className="work-mode__header-actions">
           <button type="button" onClick={onSchedules}>
@@ -105,10 +131,33 @@ export function WorkModeView({
       </header>
       <section aria-label="Progress" className="work-mode__section">
         <h2>Progress</h2>
-        <WorkItems
+        {selectedWork ? (
+          <div className="work-mode__selected">
+            <button
+              type="button"
+              className="work-mode__back"
+              onClick={() => onOpenWork(null)}
+            >
+              All work
+            </button>
+            <WorkDetails
+              item={selectedWork}
+              onOpen={onOpen}
+              onStop={onStopWork}
+              onContinue={onContinueWork}
+              onSteer={onSteerWork}
+              onPromote={onPromoteWorkOutput}
+            />
+          </div>
+        ) : null}
+        <WorkList
           work={attentionOrder(work)}
-          service={service}
+          empty="Assignments and their results appear here when work starts."
           onOpen={onOpen}
+          onOpenWork={onOpenWork}
+          onStop={onStopWork}
+          onContinue={onContinueWork}
+          onSteer={onSteerWork}
         />
       </section>
       <section aria-label="Files" className="work-mode__section">
@@ -120,7 +169,7 @@ export function WorkModeView({
               type="button"
               className="work-mode__file"
               onClick={() => onOpenArtifact(output.text, item.agentId)}
-              title={artifact.path}
+              title={artifact.relativePath}
             >
               {artifact.title}
             </button>

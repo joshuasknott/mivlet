@@ -28,31 +28,66 @@ const output = {
 };
 
 describe("work outcome promotion through the baseline memory interface", () => {
-  it("builds an explicit work-scoped record with run provenance", () => {
-    const record = memoryRecordFromWorkOutput(work, output, "2026-09-12T11:00:00Z");
-    expect(record.scope).toEqual({ level: "work", workId: "work" });
-    expect(record.provenance).toEqual({
+  it("builds an explicitly selected conclusion at the work owner's destination", () => {
+    const agentRecord = memoryRecordFromWorkOutput(
+      work,
+      output,
+      "Keep summaries under five lines.",
+      "2026-09-12T11:00:00Z",
+    );
+    expect(agentRecord.scope).toEqual({ level: "agent", agentId: "agent" });
+    expect(agentRecord.provenance).toEqual({
       origin: "run",
       runId: "run-one",
       note: "Saved from work output run-one",
     });
-    expect(record.runId).toBe("run-one");
-    expect(record.approved).toBe(true);
-    expect(record.value).toBe("A durable saved report.");
+    expect(agentRecord.runId).toBe("run-one");
+    expect(agentRecord.approved).toBe(true);
+    expect(agentRecord.value).toBe("Keep summaries under five lines.");
+    const projectRecord = memoryRecordFromWorkOutput(
+      { ...work, projectId: "project" },
+      output,
+      "Keep summaries under five lines.",
+      "2026-09-12T11:00:00Z",
+    );
+    expect(projectRecord.scope).toEqual({
+      level: "project",
+      projectId: "project",
+    });
   });
 
-  it("persists through saveRuntimeMemoryState without a separate store", async () => {
+  it("rejects an empty or unbounded conclusion instead of truncating it", () => {
+    expect(() => memoryRecordFromWorkOutput(work, output, "  ")).toThrow(
+      "Choose the conclusion",
+    );
+    expect(() =>
+      memoryRecordFromWorkOutput(work, output, "x".repeat(2001)),
+    ).toThrow("limited to 2000");
+  });
+
+  it("sends only the new record so concurrent memory is preserved", async () => {
     const mocked = vi.mocked(saveRuntimeMemoryState);
     mocked.mockClear();
-    await promoteWorkOutputToMemory(work, output, {
-      disabled: false,
-      records: [],
-    });
+    await promoteWorkOutputToMemory(
+      work,
+      output,
+      "Keep summaries under five lines.",
+      {
+        disabled: false,
+        records: [],
+      },
+    );
     expect(mocked).toHaveBeenCalledWith(
       expect.objectContaining({
         disabled: false,
-        records: [expect.objectContaining({ scope: { level: "work", workId: "work" } })],
+        records: [
+          expect.objectContaining({
+            scope: { level: "agent", agentId: "agent" },
+            value: "Keep summaries under five lines.",
+          }),
+        ],
       }),
     );
+    expect(mocked.mock.calls[0][0].records).toHaveLength(1);
   });
 });

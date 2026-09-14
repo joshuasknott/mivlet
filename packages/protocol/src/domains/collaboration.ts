@@ -75,6 +75,8 @@ export interface WorkAttachment {
   relativePath?: string;
   /** Knowledge refs carry the exact source identity resolved on each deliberate use. */
   sourceId?: string;
+  /** Workspace-file refs carry the staged content hash; native code re-verifies the exact bytes before dispatch. */
+  sha256?: string;
 }
 export interface CollaborationWorkItem {
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */

@@ -47,6 +47,7 @@ export function composerAttachmentRefs(
         sizeBytes: attachment.sizeBytes,
         availability: "workspace-file",
         relativePath: attachment.workspaceFile.relativePath,
+        sha256: attachment.workspaceFile.sha256,
       };
     if (attachment.sourceId)
       return {
@@ -80,6 +81,7 @@ export function stagedAttachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
   return attachments.map((attachment) => {
+    if (attachment.durableRef) return attachment.durableRef;
     if (attachment.workspaceFile)
       return {
         id: attachment.id,
@@ -88,6 +90,7 @@ export function stagedAttachmentRefs(
         sizeBytes: attachment.sizeBytes,
         availability: "workspace-file",
         relativePath: attachment.workspaceFile.relativePath,
+        sha256: attachment.workspaceFile.sha256,
       };
     if (attachment.sourceId)
       return {
@@ -98,12 +101,20 @@ export function stagedAttachmentRefs(
         availability: "knowledge-context",
         sourceId: attachment.sourceId,
       };
+    if (attachment.imageInput)
+      return {
+        id: attachment.id,
+        name: attachment.name,
+        mimeType: attachment.type,
+        sizeBytes: attachment.sizeBytes,
+        availability: "image-input",
+      };
     return {
       id: attachment.id,
       name: attachment.name,
       mimeType: attachment.type,
       sizeBytes: attachment.sizeBytes,
-      availability: "image-input",
+      availability: "transient",
     };
   });
 }

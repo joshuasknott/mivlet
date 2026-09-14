@@ -97,6 +97,8 @@ pub struct Output {
 /// Durable reference for one file or input attached to a request. Transient
 /// and image inputs existed only in memory and cannot be restored after a
 /// restart; workspace and knowledge refs resolve again on each deliberate use.
+/// Workspace refs carry the staged path and its content hash so native code can
+/// verify the exact bytes before an attempt is dispatched.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkAttachment {
@@ -109,6 +111,8 @@ pub struct WorkAttachment {
     pub relative_path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sha256: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

@@ -42,6 +42,9 @@ export interface ComposerAttachment {
   /** Original upload bytes for one pending send. Never persisted in a draft. */
   transientBytes?: Uint8Array;
   workspaceFile?: import("@fable/protocol").LocalComputerAttachmentReceipt;
+  /** Durable reference restored for a continued request. Native code re-verifies
+   * the exact workspace path, size and content hash before dispatch. */
+  durableRef?: import("@fable/protocol").WorkAttachment;
   status?: string;
 }
 

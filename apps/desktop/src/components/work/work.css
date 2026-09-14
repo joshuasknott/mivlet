@@ -53,33 +53,37 @@
   background: var(--surface-muted, #ececec);
   color: var(--text, #222);
 }
-.work-status-badge[data-status="running"],
-.work-status-badge[data-status="awaiting-approval"] {
+.work-status-detail {
+  color: var(--text-secondary, #666);
+  font-size: 11px;
+}
+.work-status-badge[data-state="working"] {
   background: #dbe6f5;
   color: #2f4d7a;
 }
-.work-status-badge[data-status="queued"],
-.work-status-badge[data-status="waiting"] {
+.work-status-badge[data-state="queued"] {
   background: #e8e3d5;
   color: #6b5d2f;
 }
-.work-status-badge[data-status="completed"] {
-  background: #dcead5;
-  color: #3f5c37;
+.work-status-badge[data-state="scheduled"] {
+  background: #dce7f0;
+  color: #33526e;
 }
-.work-status-badge[data-status="failed"],
-.work-status-badge[data-status="awaiting-user"],
-.work-status-badge[data-status="blocked"] {
+.work-status-badge[data-state="waiting"] {
   background: #f0e2cf;
   color: #7a4f16;
 }
-.work-status-badge[data-status="cancelled"] {
+.work-status-badge[data-state="completed"] {
+  background: #dcead5;
+  color: #3f5c37;
+}
+.work-status-badge[data-state="failed"] {
+  background: #f0e2cf;
+  color: #7a4f16;
+}
+.work-status-badge[data-state="stopped"] {
   background: #ececec;
   color: #666;
-}
-.work-origin-badge[data-origin="schedule"] {
-  background: #dce7f0;
-  color: #33526e;
 }
 .work-card-prompt,
 .work-details-request {
@@ -103,6 +107,31 @@
 }
 .work-card-meta {
   color: var(--text-secondary, #555);
+}
+.work-card-error {
+  color: #7a4f16;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.work-promote-form {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.work-promote-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+.work-promote-form textarea {
+  border: 1px solid var(--border, #bbb);
+  border-radius: 6px;
+  padding: 6px;
+  font: inherit;
+  resize: vertical;
+  min-height: 60px;
 }
 .work-card-actions,
 .work-details-actions {

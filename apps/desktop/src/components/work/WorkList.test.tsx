@@ -37,24 +37,58 @@ describe("reusable Work list and compact cards", () => {
         onSteer={onSteer}
       />,
     );
-    for (const label of ["Queued", "Working", "Waiting", "Blocked", "Awaiting approval", "Needs review", "Completed", "Failed", "Stopped"]) {
-      expect(screen.getByText(label)).toBeVisible();
-    }
+    // Blocked, awaiting-approval, awaiting-user and cancelled collapse into
+    // the unified badge states; their reasons stay as secondary detail.
+    const badges = [...document.querySelectorAll("span.work-status-badge")].map(
+      (badge) => badge.textContent,
+    );
+    expect(badges).toEqual([
+      "Queued",
+      "Working",
+      "Waiting",
+      "Waiting",
+      "Working",
+      "Waiting",
+      "Completed",
+      "Failed",
+      "Stopped",
+    ]);
+    expect(screen.getByTitle("Needs outcome review")).toBeVisible();
+    expect(screen.getByTitle("A delegated assignment is unresolved")).toBeVisible();
+    expect(screen.getByTitle("Awaiting approval")).toBeVisible();
     expect(screen.queryByText("No work yet")).toBeNull();
   });
 
-  it("labels schedule-origin work without claiming general scheduled execution", () => {
-    render(
+  it("shows Scheduled only for queued schedule-origin work", () => {
+    const onOpenWork = vi.fn();
+    const { rerender } = render(
+      <WorkList
+        work={[item({ id: "scheduled", origin: "schedule", status: "queued" })]}
+        empty=""
+        onOpen={vi.fn()}
+        onOpenWork={onOpenWork}
+        onStop={vi.fn()}
+        onContinue={vi.fn()}
+        onSteer={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Scheduled")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Work details" }));
+    expect(onOpenWork).toHaveBeenCalledWith("scheduled");
+    // A running scheduled request shows its real progress, not Scheduled.
+    rerender(
       <WorkList
         work={[item({ id: "scheduled", origin: "schedule", status: "running" })]}
         empty=""
         onOpen={vi.fn()} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()}
       />,
     );
-    expect(screen.getByText("Scheduled")).toBeVisible();
+    expect(screen.getByText("Working")).toBeVisible();
+    expect(screen.queryByText("Scheduled")).toBeNull();
+    expect(screen.getByTitle("Scheduled research")).toBeVisible();
   });
 
-  it("routes stop, retry and steer through narrow callbacks", () => {
+  it("routes stop, retry and steer through narrow callbacks", async () => {
     const onOpen = vi.fn(), onStop = vi.fn(), onContinue = vi.fn(), onSteer = vi.fn();
     render(
       <WorkList
@@ -68,8 +102,12 @@ describe("reusable Work list and compact cards", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(onStop).toHaveBeenCalledWith("active");
+    // Real gestures settle between actions; the duplicate-action guard must
+    // release before the next action on the same card is accepted.
+    await Promise.resolve();
     fireEvent.click(screen.getByRole("button", { name: "Retry request" }));
     expect(onContinue).toHaveBeenCalledWith("failed-one", 1);
+    await Promise.resolve();
     fireEvent.click(screen.getAllByRole("button", { name: "Steer" })[0]);
     fireEvent.change(screen.getAllByPlaceholderText(/Adjust this request/)[0], {
       target: { value: "Narrow it" },

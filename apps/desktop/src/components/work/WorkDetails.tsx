@@ -1,19 +1,27 @@
 import { useState } from "react";
-import type {
-  CollaborationWorkItem,
-  WorkOutput,
-} from "@fable/protocol";
+import type { CollaborationWorkItem, WorkOutput } from "@fable/protocol";
 import { activeWork } from "../../lib/workspace-execution";
+import {
+  MAX_PROMOTED_MEMORY_VALUE,
+  memoryPromotionDestination,
+} from "../../lib/work-memory";
 import { WorkStatusBadge } from "./WorkStatusBadge";
 import "./work.css";
 
 const ATTACHMENT_KINDS: Record<string, string> = {
-  "workspace-file": "Staged workspace file",
+  "workspace-file": "Verified workspace file",
   "knowledge-context": "Knowledge source",
   "image-input": "Transient image input",
   transient: "Upload held in memory",
 };
 
+type PendingAction = "stop" | "continue" | "steer" | null;
+
+/**
+ * The detailed Work view: original request, captured context, steering,
+ * attachments, runs and saved results with explicit continuation and Memory
+ * promotion. Every action reports failure and keeps unsaved input.
+ */
 export function WorkDetails({
   item,
   onOpen,
@@ -24,14 +32,29 @@ export function WorkDetails({
 }: {
   item: CollaborationWorkItem;
   onOpen: (conversationId: string) => void;
-  onStop: (id: string) => void;
-  onContinue: (id: string, expectedGeneration: number) => void;
-  onSteer: (id: string, expectedGeneration: number, text: string) => void;
-  onPromote?: (output: WorkOutput, work: CollaborationWorkItem) => void;
+  onStop: (id: string) => void | Promise<void>;
+  onContinue: (id: string, expectedGeneration: number) => void | Promise<void>;
+  onSteer: (
+    id: string,
+    expectedGeneration: number,
+    text: string,
+  ) => void | Promise<void>;
+  onPromote?: (
+    output: WorkOutput,
+    work: CollaborationWorkItem,
+    value: string,
+  ) => void | Promise<void>;
 }) {
   const [steering, setSteering] = useState(false);
   const [text, setText] = useState("");
   const [checked, setChecked] = useState(false);
+  const [pending, setPending] = useState<PendingAction>(null);
+  const [error, setError] = useState("");
+  const [promoting, setPromoting] = useState<string | null>(null);
+  const [promoteText, setPromoteText] = useState("");
+  const [promotePending, setPromotePending] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
+  const [promoted, setPromoted] = useState<string | null>(null);
   const unstarted =
     item.runIds.length === 0 &&
     item.turnCount === 0 &&
@@ -39,11 +62,51 @@ export function WorkDetails({
   const uncertain =
     item.status === "awaiting-user" && item.runIds.length > 0;
   const canContinue = !activeWork(item) && item.status !== "completed";
+  const run = async (
+    kind: PendingAction,
+    action: () => void | Promise<void>,
+    onSuccess?: () => void,
+  ) => {
+    if (pending) return;
+    setPending(kind);
+    setError("");
+    try {
+      await action();
+      onSuccess?.();
+    } catch (failure) {
+      setError(
+        failure instanceof Error
+          ? failure.message
+          : "This Work action could not be completed.",
+      );
+    } finally {
+      setPending(null);
+    }
+  };
+  const save = async (output: WorkOutput) => {
+    if (!onPromote || promotePending) return;
+    setPromotePending(true);
+    setPromoteError("");
+    try {
+      await onPromote(output, item, promoteText);
+      setPromoted(output.runId);
+      setPromoting(null);
+      setPromoteText("");
+    } catch (failure) {
+      setPromoteError(
+        failure instanceof Error
+          ? failure.message
+          : "This result could not be saved to memory.",
+      );
+    } finally {
+      setPromotePending(false);
+    }
+  };
   return (
     <article className="work-details" data-status={item.status}>
       <header className="work-details-header">
         <strong>{item.agentName}</strong>
-        <WorkStatusBadge status={item.status} origin={item.origin} />
+        <WorkStatusBadge item={item} />
       </header>
       <section className="work-details-section">
         <h3>Original request</h3>
@@ -120,7 +183,7 @@ export function WorkDetails({
       ) : null}
       {item.runIds.length ? (
         <section className="work-details-section">
-          <h3>Runs</h3>
+          <h3>Progress</h3>
           <small>
             {item.runIds.length} provider run
             {item.runIds.length === 1 ? "" : "s"}
@@ -129,6 +192,16 @@ export function WorkDetails({
             {item.tokenUsage.toLocaleString()} /{" "}
             {item.maxTokens.toLocaleString()} reported tokens
           </small>
+          {(item.prerequisites.length || item.waitingFor.length) ? (
+            <small>
+              {item.prerequisites.length
+                ? `Needs ${item.prerequisites.length} prerequisite assignment(s). `
+                : ""}
+              {item.waitingFor.length
+                ? `Waiting for ${item.waitingFor.length} delegated assignment(s).`
+                : ""}
+            </small>
+          ) : null}
         </section>
       ) : null}
       {item.outputs.length ? (
@@ -151,29 +224,99 @@ export function WorkDetails({
                 {onPromote ? (
                   <button
                     type="button"
-                    onClick={() => onPromote(output, item)}
+                    disabled={promotePending}
+                    onClick={() => {
+                      setPromoting(
+                        promoting === output.runId ? null : output.runId,
+                      );
+                      setPromoteText(output.text.slice(0, MAX_PROMOTED_MEMORY_VALUE));
+                      setPromoteError("");
+                    }}
                   >
-                    Save to memory
+                    {promoted === output.runId
+                      ? "Saved to memory"
+                      : "Save to memory…"}
                   </button>
                 ) : null}
               </div>
+              {promoting === output.runId && onPromote ? (
+                <form
+                  className="work-promote-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void save(output);
+                  }}
+                >
+                  <label>
+                    Conclusion to keep in {memoryPromotionDestination(item)}
+                    <textarea
+                      value={promoteText}
+                      rows={4}
+                      maxLength={MAX_PROMOTED_MEMORY_VALUE}
+                      onChange={(event) => {
+                        setPromoteText(event.target.value);
+                        setPromoteError("");
+                      }}
+                    />
+                  </label>
+                  <small>
+                    {promoteText.length} / {MAX_PROMOTED_MEMORY_VALUE}{" "}
+                    characters · saved with this run's provenance
+                  </small>
+                  <div className="work-details-actions">
+                    <button
+                      type="submit"
+                      disabled={promotePending || !promoteText.trim()}
+                    >
+                      {promotePending ? "Saving…" : "Save to memory"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={promotePending}
+                      onClick={() => setPromoting(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {promoteError ? (
+                    <p role="alert">{promoteError}</p>
+                  ) : null}
+                </form>
+              ) : null}
             </div>
           ))}
         </section>
       ) : null}
+      {error ? (
+        <p className="work-details-reason" role="alert">
+          {error}
+        </p>
+      ) : null}
       <div className="work-details-actions">
         {activeWork(item) ? (
-          <button type="button" onClick={() => onStop(item.id)}>
+          <button
+            type="button"
+            disabled={Boolean(pending)}
+            onClick={() => void run("stop", () => onStop(item.id))}
+          >
             Stop
           </button>
         ) : null}
         {canContinue ? (
           <button
             type="button"
-            disabled={!unstarted && !checked}
-            onClick={() => onContinue(item.id, item.generation)}
+            disabled={Boolean(pending) || (!unstarted && !checked)}
+            onClick={() =>
+              void run("continue", () =>
+                onContinue(item.id, item.generation),
+              )
+            }
           >
-            {unstarted ? "Retry request" : "Continue"}
+            {pending === "continue"
+              ? "Starting…"
+              : unstarted
+                ? "Retry request"
+                : "Continue"}
           </button>
         ) : null}
         {item.status !== "completed" ? (
@@ -204,9 +347,14 @@ export function WorkDetails({
             event.preventDefault();
             const instruction = text.trim();
             if (!instruction) return;
-            onSteer(item.id, item.generation, instruction);
-            setText("");
-            setSteering(false);
+            void run(
+              "steer",
+              () => onSteer(item.id, item.generation, instruction),
+              () => {
+                setText("");
+                setSteering(false);
+              },
+            );
           }}
         >
           <label>
@@ -218,8 +366,11 @@ export function WorkDetails({
               placeholder="Applied at a safe boundary; prior outcomes are never replayed…"
             />
           </label>
-          <button type="submit" disabled={!text.trim()}>
-            Apply steering
+          <button
+            type="submit"
+            disabled={Boolean(pending) || !text.trim()}
+          >
+            {pending === "steer" ? "Applying…" : "Apply steering"}
           </button>
         </form>
       ) : null}

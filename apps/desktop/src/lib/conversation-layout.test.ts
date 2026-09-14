@@ -61,28 +61,59 @@ describe("conversation view layout", () => {
     expect(layout.panes).toEqual([["c", "b", "a"]]);
     expect(layout.tree).toEqual({ kind: "pane", pane: 0 });
   });
-  it("allows eight panes with nested rows and columns and refuses a ninth", () => {
+  it("allows three panes and refuses a fourth without losing its views", () => {
     let layout = opened("a");
-    for (let i = 1; i < 8; i++)
-      layout = reduceLayout(layout, {
-        type: "dock",
-        view: view(`v${i}`),
-        pane: i - 1,
-        edge: i % 2 ? "right" : "bottom",
-      });
-    expect(layout.panes).toHaveLength(8);
-    expect(layout.views).toHaveLength(8);
-    expect(
-      reduceLayout(layout, {
-        type: "dock",
-        view: view("ninth"),
-        pane: 7,
-        edge: "left",
-      }),
-    ).toBe(layout);
-    layout = reduceLayout(layout, { type: "close", id: "v3" });
-    expect(layout.panes).toHaveLength(7);
-    expect(layout.activePane).toBe(6);
+    layout = reduceLayout(layout, {
+      type: "dock",
+      view: view("v1"),
+      pane: 0,
+      edge: "right",
+    });
+    layout = reduceLayout(layout, {
+      type: "dock",
+      view: view("v2"),
+      pane: 1,
+      edge: "bottom",
+    });
+    expect(layout.panes).toHaveLength(3);
+    expect(layout.views).toHaveLength(3);
+    // A dock that would exceed the cap returns the identical state; the
+    // existing panes, active views and split tree are untouched.
+    const refused = reduceLayout(layout, {
+      type: "dock",
+      view: view("fourth"),
+      pane: 2,
+      edge: "left",
+    });
+    expect(refused).toBe(layout);
+    expect(refused.tree).toEqual({
+      kind: "split",
+      axis: "row",
+      ratio: 0.5,
+      children: [
+        { kind: "pane", pane: 0 },
+        {
+          kind: "split",
+          axis: "column",
+          ratio: 0.5,
+          children: [
+            { kind: "pane", pane: 1 },
+            { kind: "pane", pane: 2 },
+          ],
+        },
+      ],
+    });
+    layout = reduceLayout(layout, { type: "close", id: "v1" });
+    expect(layout.panes).toHaveLength(2);
+    expect(layout.tree).toEqual({
+      kind: "split",
+      axis: "row",
+      ratio: 0.5,
+      children: [
+        { kind: "pane", pane: 0 },
+        { kind: "pane", pane: 1 },
+      ],
+    });
     expect(
       restoreLayout(
         layout,
@@ -93,6 +124,72 @@ describe("conversation view layout", () => {
         ),
       ),
     ).toEqual(layout);
+  });
+  it("folds larger saved layouts into the last kept pane and clamps the active view", () => {
+    const saved: ConversationLayout = {
+      version: 2,
+      panes: [["a"], ["b"], ["c"], ["d"]],
+      views: [view("a"), view("b"), view("c"), view("d")],
+      active: ["a", "b", "c", "d"],
+      activePane: 3,
+      tree: {
+        kind: "split",
+        axis: "row",
+        ratio: 0.5,
+        children: [
+          {
+            kind: "split",
+            axis: "column",
+            ratio: 0.5,
+            children: [
+              { kind: "pane", pane: 0 },
+              { kind: "pane", pane: 1 },
+            ],
+          },
+          {
+            kind: "split",
+            axis: "column",
+            ratio: 0.5,
+            children: [
+              { kind: "pane", pane: 2 },
+              { kind: "pane", pane: 3 },
+            ],
+          },
+        ],
+      },
+      closed: [],
+    };
+    const restored = restoreLayout(
+      saved,
+      new Set(["room-a", "room-b", "room-c", "room-d"]),
+    );
+    // Every open view survives; only the arrangement folds.
+    expect(restored.panes).toEqual([["a"], ["b"], ["c", "d"]]);
+    expect(restored.views.map((item) => item.id)).toEqual([
+      "a",
+      "b",
+      "c",
+      "d",
+    ]);
+    // The active pane clamps to a kept pane and the tree prunes the folded leaf.
+    expect(restored.activePane).toBe(2);
+    expect(restored.tree).toEqual({
+      kind: "split",
+      axis: "row",
+      ratio: 0.5,
+      children: [
+        {
+          kind: "split",
+          axis: "column",
+          ratio: 0.5,
+          children: [
+            { kind: "pane", pane: 0 },
+            { kind: "pane", pane: 1 },
+          ],
+        },
+        { kind: "pane", pane: 2 },
+      ],
+    });
   });
   it("normal opening activates an existing view; dragging history can show the same conversation twice", () => {
     let layout = opened("a");

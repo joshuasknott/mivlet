@@ -38,6 +38,10 @@ export function useConversationDrag(
     let dragging = false,
       drop: Drop | null = null,
       markedTab: Element | null = null;
+    // Suppresses only the click that follows a completed drag. It is armed in
+    // finish() and cleared with the deferred listener removal, so a leaked
+    // listener can never swallow later clicks on a stale dragging flag.
+    let suppressing = false;
     const hint = document.createElement("div");
     hint.className = "conversation-dock__hint";
     hint.setAttribute("aria-hidden", "true");
@@ -112,12 +116,14 @@ export function useConversationDrag(
       document.body.append(hint);
     };
     const suppressClick = (click: MouseEvent) => {
-      if (dragging) {
+      if (suppressing) {
         click.preventDefault();
         click.stopImmediatePropagation();
       }
     };
     const finish = () => {
+      const wasDragging = dragging;
+      dragging = false;
       clearHint();
       if (source.hasPointerCapture(pointerId))
         source.releasePointerCapture(pointerId);
@@ -126,18 +132,20 @@ export function useConversationDrag(
       document.removeEventListener("pointercancel", cancel, true);
       document.removeEventListener("keydown", escape, true);
       window.removeEventListener("blur", cancel);
-      window.setTimeout(
-        () => document.removeEventListener("click", suppressClick, true),
-        0,
-      );
+      suppressing = wasDragging;
+      window.setTimeout(() => {
+        suppressing = false;
+        document.removeEventListener("click", suppressClick, true);
+      }, 0);
       cleanup.current = null;
     };
     const up = (upEvent: PointerEvent) => {
       if (upEvent.pointerId !== pointerId) return;
       if (dragging) move(upEvent);
       const target = drop;
+      const wasDragging = dragging;
       finish();
-      if (!dragging || !target) return;
+      if (!wasDragging || !target) return;
       const { onAction, onOpen } = latest.current;
       if (target.kind === "tab") {
         if (viewId)
