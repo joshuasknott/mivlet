@@ -19,6 +19,7 @@
 
 import type {
   CitationRanking,
+  ContextSummaryRecord,
   KnowledgeScope,
   MemoryRecord,
   NativeMessage,
@@ -31,6 +32,12 @@ import { GLOBAL_SCOPE } from "@fable/protocol";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
 import { splitsSurrogatePair } from "../retrieval/retrieve";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
+import { isUsableSummary } from "./compaction";
+import {
+  DERIVED_HISTORY_POLICY,
+  RETRIEVED_HISTORY_POLICY,
+  type RetrievedHistoryExcerpt
+} from "./history";
 
 /** Why a given memory or source entered the assembled context. */
 export type ContextContributionReason =
@@ -39,12 +46,20 @@ export type ContextContributionReason =
   | "pinned"
   | "memory-approved"
   | "memory-pinned"
+  | "summary"
+  | "history-retrieval"
   | "retrieved"
   | "tool-result";
 
 export interface ContextContribution {
   id: string;
-  kind: "memory" | "source" | "tool-result" | "conversation" | "instruction";
+  kind:
+    | "memory"
+    | "source"
+    | "tool-result"
+    | "conversation"
+    | "instruction"
+    | "summary";
   reason: ContextContributionReason;
   /** Citation id(s) backing a source contribution, for inspection. */
   citationId?: string;
@@ -95,6 +110,12 @@ export interface AssembleContextInput {
   pinned?: PinnedContextEntry[];
   /** Approved memory (step 5 filters to scope + live + authorized). */
   memory: MemoryRecord[];
+  /** Durable derived conversation summaries (step 5b, live + in-scope only). */
+  summaries?: ContextSummaryRecord[];
+  /** Retrieved excerpts of older conversation history (step 5c). */
+  retrievedHistory?: RetrievedHistoryExcerpt[];
+  /** Character budget for derived summaries + retrieved history. Default 14000. */
+  derivedHistoryBudget?: number;
   /** Retrieved citations to surface as excerpts (step 6). */
   citations: AuthorityScopedKnowledgeCitation[];
   /** Most recent tool results (step 7). */
@@ -107,6 +128,7 @@ export interface AssembleContextInput {
 
 const DEFAULT_CONVERSATION_TURNS = 6;
 const DEFAULT_PREFIX_BUDGET = 8_000;
+const DEFAULT_DERIVED_HISTORY_BUDGET = 14_000;
 const MAX_EXCERPT_CHARS = 500;
 const MAX_TOOL_RESULT_CHARS = 1_200;
 
@@ -205,6 +227,70 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
       });
     }
     if (memoryLines.length > 1) pushPart(memoryLines.join("\n"));
+  }
+
+  // Step 5b/5c: durable derived conversation history. Summaries and retrieved
+  // older-history excerpts enter only as UNTRUSTED prior evidence, within an
+  // explicit combined character budget, and only when their scope is satisfied
+  // by the run. Stale (invalidated) summaries never enter.
+  const derivedBudget =
+    input.derivedHistoryBudget ?? DEFAULT_DERIVED_HISTORY_BUDGET;
+  let derivedUsed = 0;
+  const pushDerivedBlock = (
+    lines: string[],
+    contributions: ContextContribution[]
+  ): void => {
+    const block = lines.join("\n");
+    if (derivedUsed + block.length > derivedBudget) return;
+    const separator = usedLength === 0 ? 0 : 2;
+    if (usedLength + separator + block.length > budget) return;
+    derivedUsed += block.length;
+    pushPart(block);
+    usage.push(...contributions);
+  };
+  const summaryCandidates = (input.summaries ?? [])
+    .filter(
+      (summary) =>
+        isUsableSummary(summary) &&
+        authorityScopeAllowsAudience(summary.authorityScope, input.audience) &&
+        scopeSatisfies(summary.scope ?? GLOBAL_SCOPE, scope)
+    )
+    .sort(
+      (left, right) =>
+        right.throughSequence - left.throughSequence ||
+        right.revision - left.revision
+    );
+  if (summaryCandidates.length > 0) {
+    const lines = [DERIVED_HISTORY_POLICY];
+    const contributions: ContextContribution[] = [];
+    const remaining = derivedBudget - derivedUsed;
+    let used = DERIVED_HISTORY_POLICY.length;
+    for (const summary of summaryCandidates) {
+      const line = `[summary ${summary.id}, revision ${summary.revision}, messages ${summary.fromSequence}–${summary.throughSequence}]: ${summary.text}`;
+      if (used + 1 + line.length > remaining) continue;
+      lines.push(line);
+      used += 1 + line.length;
+      contributions.push({ id: summary.id, kind: "summary", reason: "summary" });
+    }
+    if (contributions.length > 0) pushDerivedBlock(lines, contributions);
+  }
+  if ((input.retrievedHistory ?? []).length > 0) {
+    const lines = [RETRIEVED_HISTORY_POLICY];
+    const contributions: ContextContribution[] = [];
+    const remaining = derivedBudget - derivedUsed;
+    let used = RETRIEVED_HISTORY_POLICY.length;
+    for (const excerpt of input.retrievedHistory ?? []) {
+      const line = `- [message ${excerpt.messageId}] ${excerpt.role}: ${truncate(excerpt.text, MAX_EXCERPT_CHARS)}`;
+      if (used + 1 + line.length > remaining) continue;
+      lines.push(line);
+      used += 1 + line.length;
+      contributions.push({
+        id: excerpt.messageId,
+        kind: "conversation",
+        reason: "history-retrieval"
+      });
+    }
+    if (contributions.length > 0) pushDerivedBlock(lines, contributions);
   }
 
   // Step 6: retrieved source excerpts, with citations. The accumulated excerpt

@@ -38,6 +38,7 @@ import {
   type BackendDeps,
   type ToolExecutor,
 } from "@fable/connectors";
+import type { HistoryEntry } from "@fable/knowledge";
 import { validateReasoningEffort } from "@fable/connectors/native-api/reasoning";
 import { describeBackendError } from "../lib/backend-errors";
 import {
@@ -52,8 +53,10 @@ import { createDesktopTransport } from "../lib/native-transport";
 import { createDesktopEmbeddedRuntime } from "../lib/embedded-agent";
 import {
   listRuntimeBackendModels,
+  listRuntimeContextSummaries,
   listRuntimeExecutionAttempts,
   recoverRuntimeExecutionAttempts,
+  saveRuntimeContextSummary,
   saveRuntimeExecutionAttempt,
 } from "../runtime";
 import type {
@@ -67,6 +70,10 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../lib/agent-run";
 import { selectNativeProviderRoute } from "../lib/provider-route-selection";
+import {
+  compactConversationTurn,
+  describeHistoryEntries,
+} from "../lib/conversation-compaction";
 import { planConversationContext, type ConversationContextFailure } from "../lib/conversation-context";
 import {
   appendResponseText,
@@ -456,6 +463,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const requestContextScope = contextScopeRef.current;
       const requestContextScopeKey = JSON.stringify(requestContextScope);
       let history: AgentTurnRequest["messages"] = [];
+      let historyEntries: HistoryEntry[] = [];
       if (requestThreadId && loadConversationRef.current) {
         try {
           const conversation =
@@ -472,14 +480,15 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           }
           // Completed conversation only. Orphaned tool results and tool calls
           // must not be replayed as requests or duplicated in the transcript.
-          history = continuationMessagesForModel(
-            buildContinuationMessages(
-              (attributeHistoryRef.current?.(conversation) ?? conversation).messages.filter(
-                (view) =>
-                  !parentAttemptId || view.message.runId !== parentAttemptId,
-              ),
-            ),
+          const replaySafeViews = (
+            attributeHistoryRef.current?.(conversation) ?? conversation
+          ).messages.filter(
+            (view) => !parentAttemptId || view.message.runId !== parentAttemptId,
           );
+          history = continuationMessagesForModel(
+            buildContinuationMessages(replaySafeViews),
+          );
+          historyEntries = describeHistoryEntries(replaySafeViews);
         } catch (error) {
           activeAttemptIdRef.current = null;
           if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) return;
@@ -503,13 +512,55 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       const selectedModel =
         modelsRef.current.find((model) => model.id === request.model) ??
         backend.backend.models.find((model) => model.id === request.model);
-      const contextPlan = await planConversationContext({
+      let effectiveContextPrefix = prepared.systemPrefix;
+      let contextPlan = await planConversationContext({
         history,
         request,
         contextPrefix: prepared.systemPrefix,
         contextWindowTokens: selectedModel?.capabilities?.contextWindow,
         backendType: provider?.backendType ?? backend.backend.backendType,
       });
+      if (
+        !contextPlan.ok &&
+        requestThreadId &&
+        historyEntries.length > 0 &&
+        (contextPlan.reason === "model-context-window" ||
+          contextPlan.reason === "native-history-envelope")
+      ) {
+        // Bounded compaction: fold only newly elided history into a durable
+        // summary revision, then retry with recent turns + summary + scoped
+        // retrieval excerpts. A persistence failure keeps the original failure
+        // and never sends the unplanned lifetime transcript.
+        const compacted = await compactConversationTurn({
+          threadId: requestThreadId,
+          history: historyEntries,
+          request,
+          contextPrefix: prepared.systemPrefix,
+          contextWindowTokens: selectedModel?.capabilities?.contextWindow,
+          backendType: provider?.backendType ?? backend.backend.backendType,
+          dependencies: {
+            listSummaries: listRuntimeContextSummaries,
+            saveSummary: saveRuntimeContextSummary,
+          },
+        });
+        if (
+          JSON.stringify(contextScopeRef.current) !== requestContextScopeKey ||
+          threadIdRef.current !== requestThreadId
+        ) {
+          if (activeAttemptIdRef.current === attemptId)
+            activeAttemptIdRef.current = null;
+          return;
+        }
+        if (compacted.ok) {
+          contextPlan = compacted.plan;
+          effectiveContextPrefix = compacted.prefix;
+        } else {
+          contextPlan = {
+            ...contextPlan,
+            message: `${contextPlan.message} ${compacted.message}`
+          };
+        }
+      }
       if (JSON.stringify(contextScopeRef.current) !== requestContextScopeKey) {
         if (activeAttemptIdRef.current === attemptId) activeAttemptIdRef.current = null;
         return;
@@ -893,7 +944,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
           ),
           authorize: authorizeRef.current,
           shouldCancel: shouldCancelRef.current ?? (() => false),
-          contextPrefix: prepared.systemPrefix,
+          contextPrefix: effectiveContextPrefix,
           permissionMode,
           maxTurns: control?.maxTurns,
           attemptId,

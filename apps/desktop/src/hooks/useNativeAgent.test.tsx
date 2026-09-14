@@ -12,6 +12,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
 import { agentPresence } from "../lib/agent-presence";
+import {
+  listRuntimeContextSummaries,
+  saveRuntimeContextSummary,
+} from "../runtime";
 import { useNativeAgent } from "./useNativeAgent";
 
 // This suite retains the direct wire-family and provider-owned runtime coverage.
@@ -146,6 +150,8 @@ vi.mock("../runtime", () => ({
   recoverRuntimeExecutionAttempts: vi.fn(async () => mocks.recoveredRuns),
   listRuntimeExecutionAttempts: vi.fn(async () => mocks.listedRuns),
   listRuntimeBackendModels: vi.fn(async () => null),
+  listRuntimeContextSummaries: vi.fn(async () => null),
+  saveRuntimeContextSummary: vi.fn(async (summary: unknown) => summary),
   executeRuntimeToolCall: vi.fn(async (request: unknown) => {
     mocks.toolRequests.push(request);
     return mocks.toolResult;
@@ -285,6 +291,12 @@ describe("useNativeAgent", () => {
     vi.clearAllMocks();
     resetLineState();
     removeDesktopRuntime();
+    // Compaction stays unavailable by default; individual tests opt in with
+    // durable summaries so a previous test's mock implementation cannot leak.
+    vi.mocked(listRuntimeContextSummaries).mockResolvedValue(null);
+    vi.mocked(saveRuntimeContextSummary).mockImplementation(
+      async (summary) => summary,
+    );
   });
 
   it("delivers voice text only after the matching durable assistant checkpoint", async () => {
@@ -477,6 +489,55 @@ describe("useNativeAgent", () => {
     act(() => result.current.clearError());
     expect(result.current.state.contextFailure).toBeUndefined();
     expect(result.current.state.lastError).toBeNull();
+  });
+
+  it("compacts oversized Codex history through a durable summary before egress", async () => {
+    installDesktopRuntime();
+    mocks.codexEvents = [{ type: "done", finishReason: "stop" }];
+    vi.mocked(listRuntimeContextSummaries).mockResolvedValue([]);
+    const saveSummary = vi.mocked(saveRuntimeContextSummary);
+    saveSummary.mockImplementation(async (summary) => summary);
+    const record = vi.fn(async () => undefined);
+    const messages = Array.from({ length: 40 }, (_, index) => ({
+      message: {
+        kind: index % 2 === 0 ? "user" : "assistant",
+        sequence: index + 1,
+      },
+      currentRevision: {
+        state: "terminal",
+        content: `turn ${index + 1} ${"detail ".repeat(300)}`,
+      },
+    }));
+    const { result } = renderHook(() =>
+      useNativeAgent({
+        providers: [connectedCodexProvider()],
+        activeProviderId: "codex",
+        computer: { workspaceId: "workspace-1", agentId: "agent-1" },
+        contextOwner: { internalUserId: "user-1", memberId: "member-1" },
+        threadId: "thread-1",
+        loadConversation: async () =>
+          ({ thread: { id: "thread-1" }, messages }) as never,
+        createDurableRunWriter: () => ({
+          record,
+          checkpointAssistant: vi.fn(async () => undefined),
+        }),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.run({ ...baseRequest, model: "gpt-5" });
+    });
+
+    expect(result.current.state.contextFailure).toBeUndefined();
+    expect(result.current.state.lastError).toBeNull();
+    expect(saveSummary).toHaveBeenCalledTimes(1);
+    const saved = saveSummary.mock.calls[0][0];
+    expect(saved.threadId).toBe("thread-1");
+    expect(saved.revision).toBe(1);
+    expect(saved.throughSequence).toBeGreaterThan(0);
+    expect(saved.fromSequence).toBe(1);
+    expect(record).toHaveBeenCalled();
+    expect(mocks.savedRuns.length).toBeGreaterThan(0);
   });
 
   it("clears a context failure when only its account owner changes", async () => {

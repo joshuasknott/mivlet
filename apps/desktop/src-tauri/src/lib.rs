@@ -31,6 +31,7 @@ mod connector_cache;
 mod connector_check;
 mod connector_sync;
 mod connectors;
+mod context_summaries;
 mod conversation_links;
 mod conversations;
 mod diagnostics;
@@ -201,6 +202,8 @@ pub fn run() {
             memory::change_memory_record_state,
             memory::export_memory_state,
             memory::promote_knowledge_source_to_memory,
+            context_summaries::list_context_summaries,
+            context_summaries::save_context_summary,
             media_images::media_image_status,
             native_speech::native_speech_prepare_recording,
             native_speech::native_speech_cancel_recording,

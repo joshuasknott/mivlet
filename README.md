@@ -112,8 +112,10 @@ a deployed or production-validated service.
   with exact approval checks for consequential tools and connector actions.
 - Provider model visibility controls in Settings. Hidden models stay out of
   conversation pickers; hiding the selected model requires a new selection.
-- File attachments and memory provide conversation context; Knowledge is no
-  longer a separate product feature. Existing imported records remain stored.
+- File attachments and memory provide conversation context; long conversations
+  keep recent turns plus incremental durable summaries and scoped retrieval of
+  older relevant history rather than replaying the lifetime transcript. Knowledge
+  is no longer a separate product feature. Existing imported records remain stored.
 - Native Windows application control through bundled Cua Driver 0.25.0, governed
   by the global approvals setting. Computer Use is enabled and disabled from its
   ordinary Plugin card and detail view; enabling it does not grant permission.
