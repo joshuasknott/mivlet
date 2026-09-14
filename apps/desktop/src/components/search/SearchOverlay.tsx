@@ -1,7 +1,7 @@
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { SpinnerGap } from "@phosphor-icons/react/dist/csr/SpinnerGap";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { SearchResult } from "@fable/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { useWorkspaceSearch } from "../../lib/search/useWorkspaceSearch";
@@ -50,7 +50,7 @@ export function SearchOverlay({
     onClose,
   });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setActiveIndex(0);
   }, [search.results]);
 
@@ -144,7 +144,7 @@ export function SearchOverlay({
           </label>
           {search.truncated ? (
             <span className="search-overlay__status" role="status">
-              Showing bounded results. Refine your search for more.
+              Bounded results. Load more to continue searching.
             </span>
           ) : null}
         </div>

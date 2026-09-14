@@ -60,7 +60,11 @@ describe("SearchOverlay", () => {
           matchedField: "title",
           score: 3,
           archived: false,
-          context: { workId: "work-1", conversationId: "thread-1", agentName: "Nova" },
+          context: {
+            workId: "work-1",
+            conversationId: "thread-1",
+            agentName: "Nova",
+          },
         },
       ]),
     );
@@ -75,20 +79,60 @@ describe("SearchOverlay", () => {
     );
     const input = screen.getByRole("combobox", { name: /search agents/i });
     fireEvent.change(input, { target: { value: "aurora" } });
-    await waitFor(() =>
-      expect(screen.getAllByRole("option")).toHaveLength(2),
-    );
+    await waitFor(() => expect(screen.getAllByRole("option")).toHaveLength(2));
     expect(
       screen.getByRole("option", { name: /Aurora planning/ }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: /Work · Nova/ })).toBeInTheDocument();
-    expect(screen.getAllByText("aurora", { exact: false }).length).toBeGreaterThan(0);
+    expect(
+      screen.getByRole("option", { name: /Work · Nova/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByText("aurora", { exact: false }).length,
+    ).toBeGreaterThan(0);
 
     fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(input).toHaveAttribute(
+      "aria-activedescendant",
+      "workspace-search-result-1",
+    );
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onOpenResult).toHaveBeenCalledWith(
-      expect.objectContaining({ reference: expect.objectContaining({ id: "work-1" }) }),
+      expect.objectContaining({
+        reference: expect.objectContaining({ id: "work-1" }),
+      }),
     );
+  });
+
+  it("continues searching after an empty bounded batch", async () => {
+    mocks.searchWorkspace
+      .mockResolvedValueOnce({
+        ...response([]),
+        truncated: true,
+        nextCursor: "1:0:2:0",
+      })
+      .mockResolvedValueOnce(
+        response([makeResult("older", "Aurora older chat")]),
+      );
+    render(
+      <SearchOverlay
+        workspaceId="ws"
+        open
+        onClose={vi.fn()}
+        onOpenResult={vi.fn()}
+        debounceMs={0}
+      />,
+    );
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "aurora" },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Load more" }));
+    expect(
+      await screen.findByRole("option", { name: /Aurora older chat/ }),
+    ).toBeInTheDocument();
+    expect(mocks.searchWorkspace.mock.calls[1][0].cursor).toBe("1:0:2:0");
+    expect(
+      screen.queryByRole("button", { name: "Load more" }),
+    ).not.toBeInTheDocument();
   });
 
   it("requests archived rows only when asked", async () => {
@@ -108,7 +152,9 @@ describe("SearchOverlay", () => {
       target: { value: "aurora" },
     });
     await waitFor(() => expect(mocks.searchWorkspace).toHaveBeenCalledTimes(1));
-    expect(mocks.searchWorkspace.mock.calls[0][0].includeArchived).toBeUndefined();
+    expect(
+      mocks.searchWorkspace.mock.calls[0][0].includeArchived,
+    ).toBeUndefined();
     fireEvent.click(screen.getByLabelText("Include archived"));
     await waitFor(() => expect(mocks.searchWorkspace).toHaveBeenCalledTimes(2));
     expect(mocks.searchWorkspace.mock.calls[1][0].includeArchived).toBe(true);
@@ -149,7 +195,9 @@ describe("SearchOverlay", () => {
       target: { value: "nebula" },
     });
     await waitFor(() =>
-      expect(screen.getByRole("alert")).toHaveTextContent("installed desktop app"),
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "installed desktop app",
+      ),
     );
 
     fireEvent.keyDown(document, { key: "Escape" });

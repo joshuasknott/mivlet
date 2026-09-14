@@ -27,7 +27,7 @@ use crate::store::{Result, Store, StoreError};
 pub const SEARCH_MAX_QUERY_CHARACTERS: usize = 200;
 const SEARCH_DEFAULT_LIMIT: usize = 20;
 const SEARCH_MAX_LIMIT: usize = 50;
-const MAX_DOMAIN_RESULTS: usize = 100;
+const AGENT_SCAN_PAGE: usize = 100;
 const MAX_MATCH_TEXT_CHARACTERS: usize = 20_000;
 const SNIPPET_CHARACTERS: usize = 200;
 
@@ -252,13 +252,16 @@ pub(crate) fn run_bounded(
         });
     }
 
+    let cursor = parse_cursor(request.cursor.as_deref())?;
+    let mut next = cursor.clone();
     let workspace_id = scope.data.workspace_id().to_string();
     let mut summary = SearchScanSummary::default();
     let mut scanned_truncated = false;
     let mut collected: Vec<SearchResult> = Vec::new();
 
     if selected.contains(&Domain::Agent) {
-        let (mut results, truncated) = scan_agents(agents, &workspace_id, &tokens, &mut summary);
+        let (mut results, truncated) =
+            scan_agents(agents, &workspace_id, &tokens, &mut summary, cursor.page);
         scanned_truncated |= truncated;
         collected.append(&mut results);
     }
@@ -272,6 +275,7 @@ pub(crate) fn run_bounded(
             &tokens,
             limits,
             &mut summary,
+            cursor.page,
         )?;
         scanned_truncated |= truncated;
         collected.append(&mut results);
@@ -286,6 +290,7 @@ pub(crate) fn run_bounded(
             &tokens,
             limits,
             &mut summary,
+            cursor.page,
         )?;
         scanned_truncated |= truncated;
         collected.append(&mut work);
@@ -294,12 +299,13 @@ pub(crate) fn run_bounded(
         let (mut results, truncated) = scan_conversations(
             conn,
             store,
-            &scope.data,
+            &scope.private,
             &workspace_id,
             request.include_archived,
             &tokens,
             limits,
             &mut summary,
+            &mut next,
         )?;
         scanned_truncated |= truncated;
         collected.append(&mut results);
@@ -314,19 +320,34 @@ pub(crate) fn run_bounded(
             &tokens,
             limits,
             &mut summary,
+            cursor.page,
         )?;
         scanned_truncated |= truncated;
         collected.append(&mut results);
     }
 
     collected.sort_by(compare_results);
-    let offset = parse_cursor(request.cursor.as_deref())?;
+    let offset = cursor.result;
     let limit = request
         .limit
         .unwrap_or(SEARCH_DEFAULT_LIMIT)
         .clamp(1, SEARCH_MAX_LIMIT);
     let has_more = collected.len() > offset.saturating_add(limit);
-    let next_cursor = has_more.then(|| offset.saturating_add(limit).to_string());
+    let next_cursor = if has_more {
+        Some(
+            SearchCursor {
+                result: offset.saturating_add(limit),
+                ..cursor
+            }
+            .encode(),
+        )
+    } else if scanned_truncated {
+        next.page += 1;
+        next.result = 0;
+        Some(next.encode())
+    } else {
+        None
+    };
     let results = collected.into_iter().skip(offset).take(limit).collect();
 
     Ok(SearchResponse {
@@ -361,11 +382,14 @@ fn scan_agents(
     workspace_id: &str,
     tokens: &[String],
     summary: &mut SearchScanSummary,
+    page: usize,
 ) -> (Vec<SearchResult>, bool) {
-    summary.agents_scanned += agents.len();
+    let offset = page * AGENT_SCAN_PAGE;
+    let selected: Vec<_> = agents.iter().skip(offset).take(AGENT_SCAN_PAGE).collect();
+    summary.agents_scanned += selected.len();
     let mut results = Vec::new();
-    let mut truncated = false;
-    for agent in agents {
+    let truncated = agents.len() > offset.saturating_add(AGENT_SCAN_PAGE);
+    for agent in selected {
         let name_score = weight(&agent.name, tokens, 4.0);
         let instruction_score = weight(&agent.instructions, tokens, 1.0);
         let learned_score = agent
@@ -414,10 +438,6 @@ fn scan_agents(
                 ..SearchResultContext::default()
             },
         });
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
     }
     (results, truncated)
 }
@@ -431,10 +451,19 @@ fn scan_projects(
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
+    page: usize,
 ) -> Result<(Vec<SearchResult>, bool)> {
-    let rows = local_project::list_projects(conn, store, scope, true, limits.max_projects)?;
+    let mut rows = local_project::list_projects_page(
+        conn,
+        store,
+        scope,
+        true,
+        limits.max_projects + 1,
+        page * limits.max_projects,
+    )?;
+    let truncated = rows.len() > limits.max_projects;
+    rows.truncate(limits.max_projects);
     summary.projects_scanned += rows.len();
-    let mut truncated = rows.len() >= limits.max_projects;
     let mut results = Vec::new();
     for row in rows {
         let archived = row.lifecycle == "archived";
@@ -476,10 +505,6 @@ fn scan_projects(
                 ..SearchResultContext::default()
             },
         });
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
     }
     Ok((results, truncated))
 }
@@ -488,20 +513,29 @@ fn scan_projects(
 fn scan_conversations(
     conn: &Connection,
     store: &Store,
-    scope: &crate::store::repos::scope::DataScope,
+    scope: &PrivateDataScope,
     workspace_id: &str,
     include_archived: bool,
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
+    next: &mut SearchCursor,
 ) -> Result<(Vec<SearchResult>, bool)> {
-    let (threads, mut truncated) =
-        thread_repo::list_bounded(conn, store, scope, limits.max_threads)?;
+    let (threads, mut truncated) = thread_repo::list_bounded(
+        conn,
+        store,
+        scope.data(),
+        limits.max_threads,
+        scope.owner_member_id(),
+        next.thread,
+    )?;
     summary.conversations_scanned += threads.len();
     let mut results = Vec::new();
     for thread in threads {
         let archived = thread.lifecycle == "archived";
         if archived && !include_archived {
+            next.thread += 1;
+            next.message = 0;
             continue;
         }
         let title_score = weight(&thread.title, tokens, 4.0);
@@ -517,39 +551,32 @@ fn scan_conversations(
                 updated_at: Some(thread.updated_at.clone()),
                 context: conversation_context(&thread),
             });
-            if results.len() >= MAX_DOMAIN_RESULTS {
-                truncated = true;
-                break;
-            }
+            next.thread += 1;
+            next.message = 0;
             continue;
         }
         if summary.messages_scanned >= limits.max_messages {
             truncated = true;
             break;
         }
-        let remaining = limits.max_messages.saturating_sub(summary.messages_scanned);
-        let mut messages = message_repo::list_limited(
+        let remaining = limits.max_messages - summary.messages_scanned;
+        let mut messages = message_repo::list_page(
             conn,
             store,
-            scope,
+            scope.data(),
             &thread.id,
             remaining.saturating_add(1) as i64,
+            next.message as i64,
         )?;
-        if messages.len() > remaining {
-            truncated = true;
-            messages.truncate(remaining);
-        }
+        let more_messages = messages.len() > remaining;
+        messages.truncate(remaining);
         summary.messages_scanned += messages.len();
+        let mut matched = false;
         for message in &messages {
             let (text, text_truncated) = collect_text(&message.content);
-            if text_truncated {
-                truncated = true;
-            }
-            if text.trim().is_empty() {
-                continue;
-            }
+            truncated |= text_truncated;
             let score = weight(&text, tokens, 1.0);
-            if score <= 0.0 {
+            if text.trim().is_empty() || score <= 0.0 {
                 continue;
             }
             let title = if thread.title.trim().is_empty() {
@@ -572,16 +599,18 @@ fn scan_conversations(
                     ..conversation_context(&thread)
                 },
             });
+            matched = true;
             break;
         }
-        if summary.messages_scanned >= limits.max_messages {
+        // One result opens this exact Chat. Otherwise resume its unscanned raw
+        // messages on the next batch, rather than permanently hiding its tail.
+        if more_messages && !matched {
+            next.message += messages.len();
             truncated = true;
             break;
         }
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
+        next.thread += 1;
+        next.message = 0;
     }
     Ok((results, truncated))
 }
@@ -606,9 +635,16 @@ fn scan_work(
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
+    page: usize,
 ) -> Result<(Vec<SearchResult>, bool)> {
-    let (works, mut truncated) =
-        collaboration_repo::list_bounded::<Work>(conn, store, scope, Kind::Work, limits.max_work)?;
+    let (works, truncated) = collaboration_repo::list_bounded::<Work>(
+        conn,
+        store,
+        scope,
+        Kind::Work,
+        limits.max_work,
+        page * limits.max_work,
+    )?;
     summary.work_scanned += works.len();
     let mut results = Vec::new();
     for work in works {
@@ -688,10 +724,6 @@ fn scan_work(
                 ..SearchResultContext::default()
             },
         });
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
     }
     Ok((results, truncated))
 }
@@ -706,18 +738,17 @@ fn scan_files(
     tokens: &[String],
     limits: &SearchLimits,
     summary: &mut SearchScanSummary,
+    page: usize,
 ) -> Result<(Vec<SearchResult>, bool)> {
     let mut results = Vec::new();
-    let mut truncated = false;
+    let offset = page * limits.max_files;
+    let live_files: Vec<_> = files
+        .iter()
+        .filter(|file| file.deleted_at.is_none())
+        .collect();
+    let mut truncated = live_files.len() > offset.saturating_add(limits.max_files);
 
-    for file in files {
-        if summary.files_scanned >= limits.max_files {
-            truncated = true;
-            break;
-        }
-        if file.deleted_at.is_some() {
-            continue;
-        }
+    for file in live_files.iter().skip(offset).take(limits.max_files) {
         summary.files_scanned += 1;
         let archived = file.disabled;
         if archived && !include_archived {
@@ -759,10 +790,6 @@ fn scan_files(
                 ..SearchResultContext::default()
             },
         });
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
     }
 
     let prefix =
@@ -772,6 +799,7 @@ fn scan_files(
     let mut receipt_keys: Vec<String> = keys
         .into_iter()
         .filter(|key| key.starts_with(&receipt_prefix) && key.ends_with(".json"))
+        .skip(offset.saturating_sub(live_files.len()))
         .collect();
     let remaining_files = limits.max_files.saturating_sub(summary.files_scanned);
     if receipt_keys.len() > remaining_files {
@@ -831,10 +859,6 @@ fn scan_files(
                 ..SearchResultContext::default()
             },
         });
-        if results.len() >= MAX_DOMAIN_RESULTS {
-            truncated = true;
-            break;
-        }
     }
 
     Ok((results, truncated))
@@ -865,12 +889,45 @@ fn compare_results(left: &SearchResult, right: &SearchResult) -> std::cmp::Order
         .then_with(|| left.reference.id.cmp(&right.reference.id))
 }
 
-fn parse_cursor(cursor: Option<&str>) -> Result<usize> {
-    match cursor {
-        None | Some("") => Ok(0),
-        Some(value) => value.parse::<usize>().map_err(|_| {
-            StoreError::Invalid("The search cursor is invalid. Start a new search.".into())
+#[derive(Clone, Default)]
+struct SearchCursor {
+    page: usize,
+    thread: usize,
+    message: usize,
+    result: usize,
+}
+impl SearchCursor {
+    fn encode(&self) -> String {
+        format!(
+            "{}:{}:{}:{}",
+            self.page, self.thread, self.message, self.result
+        )
+    }
+}
+fn parse_cursor(cursor: Option<&str>) -> Result<SearchCursor> {
+    let bad = || StoreError::Invalid("The search cursor is invalid. Start a new search.".into());
+    let Some(value) = cursor.filter(|value| !value.is_empty()) else {
+        return Ok(SearchCursor::default());
+    };
+    let parts: Vec<usize> = value
+        .split(':')
+        .map(|part| part.parse::<usize>().map_err(|_| bad()))
+        .collect::<Result<_>>()?;
+    if parts.iter().any(|value| *value > 1_000_000_000) {
+        return Err(bad());
+    }
+    match parts.as_slice() {
+        [result] => Ok(SearchCursor {
+            result: *result,
+            ..SearchCursor::default()
         }),
+        [page, thread, message, result] if *page <= 1_000_000 => Ok(SearchCursor {
+            page: *page,
+            thread: *thread,
+            message: *message,
+            result: *result,
+        }),
+        _ => Err(bad()),
     }
 }
 
@@ -1490,6 +1547,15 @@ mod tests {
         assert_eq!(response.scanned.messages_scanned, 2);
         assert!(response.truncated);
         assert!(response.results.is_empty());
+        query.cursor = response.next_cursor;
+        assert!(query.cursor.is_some());
+        let tail = store
+            .with_conn(|conn| run_bounded(conn, &store, &scope, &query, &[], &[], &limits))
+            .unwrap();
+        assert_eq!(tail.scanned.messages_scanned, 1);
+        assert_eq!(tail.results.len(), 1);
+        assert_eq!(tail.results[0].reference.id, "long");
+        assert!(tail.next_cursor.is_none());
     }
 
     #[test]
@@ -1568,6 +1634,10 @@ mod tests {
 
         let member_b = scope("member-b");
         let response = search(&store, &member_b, "aurora", &[], &[]);
+        assert!(!response
+            .results
+            .iter()
+            .any(|result| result.object_kind == "conversation"));
         assert!(!response
             .results
             .iter()
@@ -1839,6 +1909,107 @@ mod tests {
         assert!(response.truncated);
         assert_eq!(response.scanned.conversations_scanned, 2);
         assert_eq!(response.results.len(), 2);
+    }
+
+    #[test]
+    fn file_pages_cross_the_import_receipt_boundary_without_gaps() {
+        let store = store();
+        let scope = scope("member-a");
+        let files = vec![
+            knowledge("one", "Aurora one", "", false, false),
+            knowledge("two", "Aurora two", "", false, false),
+            knowledge("three", "Aurora three", "", false, false),
+        ];
+        for index in 0..3 {
+            seed_artifact(
+                &store,
+                &scope,
+                &format!("receipt-{index}"),
+                "agent",
+                "Aurora artifact",
+                &format!("notes/{index}.txt"),
+                TIME,
+            );
+        }
+        let limits = SearchLimits {
+            max_files: 2,
+            ..SearchLimits::default()
+        };
+        let mut query = request("aurora");
+        query.kinds = Some(vec!["file".into()]);
+        let mut found = std::collections::HashSet::new();
+        for page in 0..3 {
+            let response = store
+                .with_conn(|conn| run_bounded(conn, &store, &scope, &query, &[], &files, &limits))
+                .unwrap();
+            assert_eq!(response.scanned.files_scanned, 2);
+            assert_eq!(response.results.len(), 2);
+            for result in response.results {
+                assert!(found.insert(result.reference.id));
+            }
+            query.cursor = response.next_cursor;
+            assert_eq!(query.cursor.is_some(), page < 2);
+        }
+        assert_eq!(found.len(), 6);
+    }
+
+    #[test]
+    fn scan_windows_and_result_pages_reach_all_private_records() {
+        let store = store();
+        let scope = scope("member-a");
+        for index in 0..5 {
+            let id = format!("page-{index}");
+            seed_thread(&store, &scope, &id, "Aurora chat", "active", TIME);
+            seed_project(
+                &store,
+                &scope,
+                &id,
+                "Aurora project",
+                "",
+                "active",
+                &id,
+                TIME,
+            );
+            seed_work(
+                &store,
+                &scope,
+                &id,
+                "Aurora work",
+                "Agent",
+                &id,
+                None,
+                "completed",
+                TIME,
+            );
+        }
+        let limits = SearchLimits {
+            max_threads: 2,
+            max_projects: 2,
+            max_work: 2,
+            ..SearchLimits::default()
+        };
+        let mut query = request("aurora");
+        query.kinds = Some(vec!["conversation".into(), "project".into(), "work".into()]);
+        query.limit = Some(2);
+        let mut found = std::collections::HashSet::new();
+        for page in 0..12 {
+            let response = store
+                .with_conn(|conn| run_bounded(conn, &store, &scope, &query, &[], &[], &limits))
+                .unwrap();
+            assert!(response.scanned.conversations_scanned <= 2);
+            assert!(response.scanned.projects_scanned <= 2);
+            assert!(response.scanned.work_scanned <= 2);
+            assert!(response.results.len() <= 2);
+            for result in response.results {
+                assert!(found.insert(format!("{}:{}", result.object_kind, result.reference.id)));
+            }
+            query.cursor = response.next_cursor;
+            if query.cursor.is_none() {
+                break;
+            }
+            assert!(page < 11, "pagination must terminate");
+        }
+        assert_eq!(found.len(), 15);
     }
 
     #[test]

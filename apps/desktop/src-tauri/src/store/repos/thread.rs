@@ -93,12 +93,19 @@ pub fn list_bounded(
     _store: &Store,
     scope: &DataScope,
     limit: usize,
+    owner_member_id: Option<&str>,
+    offset: usize,
 ) -> Result<(Vec<ThreadRow>, bool)> {
     scope.ensure_exists(tx)?;
-    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL ORDER BY updated_at DESC,id LIMIT ?2")?;
+    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL AND owner_member_id IS ?3 ORDER BY updated_at DESC,id LIMIT ?2 OFFSET ?4")?;
     let mut rows = s
         .query_map(
-            rusqlite::params![scope.workspace_id(), limit as i64 + 1],
+            rusqlite::params![
+                scope.workspace_id(),
+                limit as i64 + 1,
+                owner_member_id,
+                offset as i64
+            ],
             |r| {
                 Ok(ThreadRow {
                     id: r.get(0)?,

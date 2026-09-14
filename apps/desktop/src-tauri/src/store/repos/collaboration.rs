@@ -100,16 +100,18 @@ pub fn list_bounded<T: DeserializeOwned>(
     scope: &PrivateDataScope,
     kind: Kind,
     limit: usize,
+    offset: usize,
 ) -> Result<(Vec<T>, bool)> {
     scope.ensure_exists(conn)?;
-    let mut statement = conn.prepare("SELECT id FROM collaboration_record WHERE workspace_id=?1 AND owner_subject=?2 AND kind=?3 ORDER BY id LIMIT ?4")?;
+    let mut statement = conn.prepare("SELECT id FROM collaboration_record WHERE workspace_id=?1 AND owner_subject=?2 AND kind=?3 ORDER BY id LIMIT ?4 OFFSET ?5")?;
     let mut ids = statement
         .query_map(
             rusqlite::params![
                 scope.workspace_id(),
                 scope.owner_subject(),
                 kind.key(),
-                limit as i64 + 1
+                limit as i64 + 1,
+                offset as i64
             ],
             |row| row.get::<_, String>(0),
         )?
