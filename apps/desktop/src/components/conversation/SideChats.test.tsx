@@ -46,6 +46,16 @@ function setup(overrides: Partial<Parameters<typeof SideChatList>[0]> = {}) {
 }
 
 describe("SideChatList", () => {
+  it("does not carry a rename editor into another owner's list", () => {
+    const handlers = { onOpen: vi.fn(), onCreate: vi.fn(), onRename: vi.fn(), onArchive: vi.fn(), onDelete: vi.fn() };
+    const view = render(<SideChatList chats={[active]} owner={{ kind: "agent", id: "lead" }} ownerName="Mira" {...handlers} />);
+    fireEvent.click(screen.getByRole("button", { name: "Rename Active research" }));
+    expect(screen.getByRole("dialog")).toBeVisible();
+    view.rerender(<SideChatList chats={[]} owner={{ kind: "agent", id: "other" }} ownerName="Other" {...handlers} />);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(handlers.onRename).not.toHaveBeenCalled();
+  });
+
   it("marks Side Chats as separate and separates active from archived", () => {
     setup();
     expect(screen.getByText(/Side Chats are separate conversations/i)).toBeVisible();

@@ -136,6 +136,12 @@ export interface SideChatListProps {
  * panel; it never owns layout, routing or provider authority.
  */
 export function SideChatList({
+  ...props
+}: SideChatListProps) {
+  return <OwnedSideChatList key={`${props.owner.kind}:${props.owner.id}`} {...props} />;
+}
+
+function OwnedSideChatList({
   chats,
   owner,
   ownerName,
