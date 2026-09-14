@@ -73,7 +73,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
     <div className="connector-detail__header">
       <span className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>
       <div><h2 id={titleId}>{entry.name}</h2><p>{entry.description}</p></div>
-      <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : "Available"}</span>
+      <span className="connector-detail__status">{busy ? "Connecting…" : connected ? "Connected" : failed || saved ? "Needs attention" : "Available"}</span>
     </div>
     <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
     <div className="connector-detail__actions">

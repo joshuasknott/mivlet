@@ -1,5 +1,5 @@
 import "@testing-library/jest-dom/vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginPanel } from "../PluginPanel";
@@ -35,6 +35,18 @@ function panel(onUseBuiltinPlugin?: (id: "computer") => void) {
 }
 
 describe("built-in plugin settings", () => {
+  it("withdraws stale enablement when a native refresh fails", async () => {
+    api.load.mockResolvedValueOnce({ computer: true });
+    panel(vi.fn());
+    await screen.findByRole("button", { name: "Manage Computer Use" });
+    api.load.mockRejectedValueOnce(new Error("Settings unavailable"));
+    fireEvent(window, new Event("focus"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Set up Computer Use" })).toHaveTextContent("Unavailable"));
+    fireEvent.click(screen.getByRole("button", { name: "Set up Computer Use" }));
+    expect(screen.getByRole("button", { name: "Enable" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Use in chat" })).toBeNull();
+  });
+
   it("renders Computer Use as an ordinary card and enables it through the ordinary modal", async () => {
     const user = userEvent.setup();
     const onUse = vi.fn();

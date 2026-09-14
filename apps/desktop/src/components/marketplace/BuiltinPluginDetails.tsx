@@ -57,7 +57,7 @@ export function BuiltinPluginDetails({
           {busy ? "Saving…" : enabled ? "Disable" : "Enable"}
         </button>
         {enabled ? (
-          <button type="button" disabled={busy || !onUse} onClick={() => onUse?.(entry.id)}>Use in chat</button>
+          <button type="button" disabled={unavailable || busy || !onUse} onClick={() => onUse?.(entry.id)}>Use in chat</button>
         ) : null}
       </div>
       {notice ? <p className="connector-detail__notice" role="status">{notice}</p> : null}

@@ -26,6 +26,7 @@ export function useBuiltinPlugins(workspaceId?: string) {
       setLoadError("");
     }).catch((error: unknown) => {
       if (current !== epoch.current || sequence !== readSequence.current) return;
+      setPlugins(null);
       setLoadError(connectorErrorMessage(error));
     });
   }, [workspaceId]);

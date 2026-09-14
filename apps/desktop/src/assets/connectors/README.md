@@ -30,6 +30,8 @@ The Atlassian Rovo mark is extracted from Atlassian's official
 Atlassian Pty Ltd. The bundled SVG keeps the published product-mark geometry and
 colours with the package's CSS custom properties resolved. Marks identify
 third-party integrations and remain the property of their respective owners.
+The package's copyright and license notice is retained in
+[ATLASSIAN-LICENSE.txt](ATLASSIAN-LICENSE.txt).
 
 | Mark | Original source |
 | --- | --- |
