@@ -24,3 +24,9 @@ that artwork out of JavaScript while preserving size, colour and identification.
 
 The generated Phosphor sprite retains the package's MIT artwork. Its complete
 license is bundled as `phosphor-LICENSE.txt`.
+
+The brand marks in `additional-provider-artwork.svg` are from [Lobe Icons](https://github.com/lobehub/lobe-icons/tree/a94750e3f5f8fc33757b839d85030e742284e43a/packages/static-svg/icons), pinned to commit `a94750e3f5f8fc33757b839d85030e742284e43a`. Original path geometry, colour fills, gradients and fill rules are retained in local SVG symbols. Gradient identifiers are prefixed per provider to prevent collisions. The MIT license is included in `lobe-icons-LICENSE.txt`; provider trademarks remain with their owners. Alibaba uses Qwen artwork, Moonshot uses the Kimi product artwork, and SiliconFlow uses SiliconCloud artwork. Colour variants are used wherever available. Groq uses its primary #F55036 from the same pinned source (`src/Groq/style.ts`). Z.ai retains its monochrome mark; uncoloured portions of artwork inherit the theme's provider monochrome colour.
+
+The Claude symbol (`provider-artwork.svg#anthropic`) is the original orange symbol path from the [official Claude site](https://claude.com/), retrieved 2026-09-14. Its 125 by 125 geometry and #D97757 fill are preserved. The internal Anthropic provider identifier is retained; the company AI monogram is no longer used for Claude. Anthropic trademark, identification only.
+
+Kimi retains its blue accent (#1783FF); its letter uses the theme-aware provider monochrome colour instead of a fixed white fill, so the mark stays legible on light and dark surfaces.

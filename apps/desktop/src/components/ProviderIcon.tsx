@@ -9,8 +9,29 @@ interface ProviderIconProps {
 // public/brand/README.md for source and terms.
 const openAiViewBox = "1.68 1.75 16.65 16.5";
 
+const additionalProviderMarks = new Set([
+  "deepseek", "alibaba", "moonshot", "zai", "groq", "together",
+  "fireworks", "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere",
+]);
+
 export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
   const providerId = provider.toLowerCase();
+
+  if (additionalProviderMarks.has(providerId)) {
+    return (
+      <svg
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        fill="currentColor"
+        style={{ color: providerId === "groq" ? "#F55036" : "var(--provider-monochrome)" }}
+        data-provider-brand={providerId}
+        aria-hidden="true"
+      >
+        <use href={`/brand/additional-provider-artwork.svg#${providerId}`} />
+      </svg>
+    );
+  }
 
   if (providerId === "codex" || providerId === "openai") {
     const color = providerId === "codex" ? "#3941FF" : "var(--provider-monochrome)";
@@ -19,9 +40,9 @@ export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
     );
   }
 
-  if (providerId === "anthropic") {
+  if (providerId === "anthropic" || providerId === "claude") {
     return (
-      <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" style={{ color: "#D97757" }} data-provider-brand="anthropic" aria-hidden="true"><use href="/brand/provider-artwork.svg#anthropic" /></svg>
+      <svg viewBox="0 0 125 125" width={size} height={size} fill="currentColor" style={{ color: "#D97757" }} data-provider-brand="anthropic" aria-hidden="true"><use href="/brand/provider-artwork.svg#anthropic" /></svg>
     );
   }
 

@@ -4,6 +4,51 @@ import { describe, expect, it } from "vitest";
 import { ProviderIcon } from "./ProviderIcon";
 
 describe("ProviderIcon", () => {
+  it("keeps Kimi's blue accent while adapting its letter to the theme", () => {
+    const { container } = render(<ProviderIcon provider="moonshot" />);
+    expect(container.querySelector("svg")).toHaveStyle({ color: "var(--provider-monochrome)" });
+    const artwork = new DOMParser().parseFromString(
+      readFileSync("public/brand/additional-provider-artwork.svg", "utf8"), "image/svg+xml",
+    );
+    const kimi = artwork.querySelector("symbol#moonshot")!;
+    expect(kimi.querySelector('path[fill="#1783FF"]')).toBeTruthy();
+    expect(kimi.querySelector('path[fill="currentColor"]')).toBeTruthy();
+    expect(kimi.querySelector('path[fill="#fff"]')).toBeNull();
+  });
+  it.each([
+    "deepseek", "alibaba", "moonshot", "zai", "groq", "together", "fireworks",
+    "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere",
+  ])("resolves %s to bundled brand artwork", (provider) => {
+    const { container } = render(<ProviderIcon provider={provider.toUpperCase()} size={16} />);
+    const mark = container.querySelector(`[data-provider-brand="${provider}"]`);
+    expect(mark).toHaveAttribute("width", "16");
+    expect(mark).toHaveAttribute("height", "16");
+    expect(mark).toHaveAttribute("aria-hidden", "true");
+    expect(mark).toHaveStyle({ color: provider === "groq" ? "#F55036" : "var(--provider-monochrome)" });
+    expect(mark?.querySelector("use")).toHaveAttribute("href", `/brand/additional-provider-artwork.svg#${provider}`);
+    const artwork = new DOMParser().parseFromString(
+      readFileSync("public/brand/additional-provider-artwork.svg", "utf8"), "image/svg+xml",
+    );
+    expect(artwork.querySelector("parsererror")).toBeNull();
+    expect(artwork.querySelector(`symbol#${provider} path`)).toBeTruthy();
+  });
+
+  it("preserves multicolour artwork and local gradient references", () => {
+    const artwork = new DOMParser().parseFromString(
+      readFileSync("public/brand/additional-provider-artwork.svg", "utf8"), "image/svg+xml",
+    );
+    for (const id of ["deepseek", "alibaba", "moonshot", "together", "fireworks", "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere"]) {
+      const symbol = artwork.querySelector(`symbol#${id}`)!;
+      expect(symbol).toBeTruthy();
+      expect(symbol.outerHTML).toMatch(/(?:fill|stop-color)="#[0-9A-Fa-f]+"/);
+      for (const reference of symbol.outerHTML.matchAll(/url\(#([^)]+)\)/g)) {
+        expect(artwork.getElementById(reference[1])).toBeTruthy();
+      }
+    }
+    const cohere = artwork.querySelector("#cohere")!;
+    expect(new Set([...cohere.querySelectorAll("[fill]")].map(node => node.getAttribute("fill"))).size).toBeGreaterThan(1);
+  });
+
   it("renders the supported provider mark at the requested size", () => {
     const { container } = render(<ProviderIcon provider="openai" size={28} />);
     const mark = container.querySelector('[data-provider-brand="openai"]');
@@ -37,8 +82,13 @@ describe("ProviderIcon", () => {
     expect(mark).toHaveAttribute("aria-hidden", "true");
   });
 
-  it("renders the Anthropic mark in its official terracotta treatment", () => {
+  it("renders the official Claude symbol instead of the Anthropic company monogram", () => {
     const { container } = render(<ProviderIcon provider="anthropic" />);
+    expect(container.querySelector("svg")).toHaveAttribute("viewBox", "0 0 125 125");
+    const artwork = new DOMParser().parseFromString(readFileSync("public/brand/provider-artwork.svg", "utf8"), "image/svg+xml");
+    expect(artwork.querySelector("#anthropic path")?.getAttribute("fill")).toBe("#D97757");
+    expect(artwork.querySelector("#anthropic path")?.getAttribute("d")).not.toContain("M17.3041 3.541");
+
     expect(container.querySelector('[data-provider-brand="anthropic"]')).toHaveStyle({
       color: "#D97757",
     });
