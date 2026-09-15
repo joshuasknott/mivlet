@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { agentPresence, isPresenceScopeCurrent, presenceLabel } from "./agent-presence";
+import { agentPresence, isPresenceScopeCurrent } from "./agent-presence";
 const idle: Parameters<typeof agentPresence>[0] = { running: false, status: "idle", lastError: null, activity: undefined, responseParts: [], transcript: "" };
 describe("agent presence", () => {
   it("does not animate stale tools after a stop, interruption or failure", () => {
@@ -31,8 +31,6 @@ describe("agent presence", () => {
     expect(agentPresence(idle, false, false, { listening: true })).toBe("listening");
     expect(agentPresence(idle, false, false, { speaking: true })).toBe("speaking");
     expect(agentPresence({ ...idle, running: true, transcript: "Do you want me to continue?" })).toBe("working");
-    expect(presenceLabel("working", "Reading Google Drive")).toBe("Reading Google Drive");
-    expect(presenceLabel("paused", "Reading Google Drive")).toBe("Paused");
   });
   it("gives approval and failure priority over active work", () => {
     const active = { ...idle, running: true, activity: "Reading a file" };

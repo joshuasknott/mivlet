@@ -60,7 +60,8 @@ API key.
 
 Custom endpoints must use HTTPS except for loopback development. URLs with
 user info, query strings, or fragments are rejected. Every connection is
-verified before onboarding can finish. The managed Antigravity installer is
+verified before an agent can run. Signed-in users can enter the workspace before
+provider setup. The managed Antigravity installer is
 currently available on Windows x64; other platforms fail closed. The other
 provider-owned runtimes are detected from their official local installations
 and fail closed when missing, signed out, or unconfigured; Codex additionally
@@ -161,6 +162,12 @@ to a teammate and live in that teammate's editor, outside Plugins. See the
 details and remaining gaps.
 Official remote connection routes are also available for Notion, Linear,
 Vercel, Canva, Figma, Sentry, Stripe, Cloudflare, Granola, and Atlassian Rovo.
+Notion, Linear and Vercel use official remote sign-in for new connections, with
+one Connect action and no method selector. Existing native accounts remain
+usable and reconnect through their existing method. Verified remote access wins
+when both work; incomplete remote setups cannot hide a healthy native account
+with all required permissions. A route change invalidates access for an ongoing
+turn rather than redirecting its actions to the other account.
 These use the
 existing native MCP OAuth boundary and provider-hosted endpoints; no broker
 client secret is required when the provider supports public client registration.

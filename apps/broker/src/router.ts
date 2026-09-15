@@ -58,7 +58,7 @@ export interface BrokerRouterOptions {
 }
 
 /** A logger sink the transports can supply; never receives bodies or secrets. */
-export type BrokerLogger = (line: string) => void;
+type BrokerLogger = (line: string) => void;
 
 export interface BrokerRouter {
   /**

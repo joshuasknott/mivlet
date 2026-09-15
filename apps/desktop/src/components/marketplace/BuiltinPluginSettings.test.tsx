@@ -5,10 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginPanel } from "../PluginPanel";
 
 const api = vi.hoisted(() => ({ load: vi.fn(), set: vi.fn() }));
-vi.mock("../../runtime", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../runtime")>()),
-  loadRuntimeBuiltinPlugins: api.load,
-  setRuntimeBuiltinPlugin: api.set,
+vi.mock("../../runtime/domains/local-computer", async (importOriginal) => ({
+...(await importOriginal<typeof import("../../runtime/domains/local-computer")>()),
+loadRuntimeBuiltinPlugins: api.load,
+setRuntimeBuiltinPlugin: api.set
 }));
 
 afterEach(cleanup);
@@ -53,7 +53,8 @@ describe("built-in plugin settings", () => {
     api.set.mockResolvedValue({ computer: true });
     panel(onUse);
 
-    expect(screen.getByRole("heading", { name: "Built-in" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Built-in" })).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Featured" })).toContainElement(screen.getByRole("button", { name: "Set up Computer Use" }));
     const card = screen.getByRole("button", { name: "Set up Computer Use" });
     await waitFor(() => expect(card).toHaveTextContent("Disabled"));
 

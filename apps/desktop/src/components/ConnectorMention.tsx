@@ -24,7 +24,7 @@ export function mentionParts(
   return parts;
 }
 
-export function ConnectorMention({
+function ConnectorMention({
   connector,
 }: {
   connector: MentionConnector;

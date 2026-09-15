@@ -3,9 +3,6 @@ import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@fable/connectors";
 import { knowledgeSources, memoryRecords } from "../../data/workspace";
 import { DEFAULT_PERMISSION_LABEL } from "../../lib/agent-run";
 import type { PersistedShellState } from "../../lib/types";
-
-export const CURRENT_ONBOARDING_VERSION = 2;
-
 export const defaultShellState: PersistedShellState = {
   activeItem: "new-chat",
   composerValue: "",

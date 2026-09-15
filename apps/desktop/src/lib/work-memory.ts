@@ -4,15 +4,15 @@ import type {
   MemoryRecord,
   WorkOutput,
 } from "@fable/protocol";
-import { saveRuntimeMemoryState } from "../runtime";
+import { saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /** Native Memory bounds; the promotion editor enforces the same limits. */
-export const MAX_PROMOTED_MEMORY_TITLE = 120;
+const MAX_PROMOTED_MEMORY_TITLE = 120;
 export const MAX_PROMOTED_MEMORY_VALUE = 2_000;
 
 /** The durable destination under the baseline contract: project work promotes
  * into the owning Project, everything else into the requesting Agent. */
-export function memoryPromotionScope(
+function memoryPromotionScope(
   work: CollaborationWorkItem,
 ): MemoryRecord["scope"] {
   return work.projectId

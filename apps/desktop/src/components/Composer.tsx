@@ -61,6 +61,9 @@ export function Composer({
   onRemoveAttachment,
   recipientControl,
   modelControl,
+  secondaryControlsInMenu = false,
+  onConnectProvider,
+  onSaveConclusion,
   compactAgentSurface = false
 }: {
   composerRef: RefObject<ComposerInputHandle | null>;
@@ -110,6 +113,9 @@ export function Composer({
   onRemoveAttachment?: (attachmentId: string) => void;
   recipientControl?: ReactNode;
   modelControl?: ReactNode;
+  secondaryControlsInMenu?: boolean;
+  onConnectProvider?: () => void;
+  onSaveConclusion?: () => void;
   compactAgentSurface?: boolean;
 }) {
   const [modelOpen, setModelOpen] = useState(false);
@@ -341,6 +347,11 @@ export function Composer({
                   {onImportRepository && <button type="button" role="menuitem" onClick={() => { onImportRepository(); closeExternalMenus(); }}>
                     <UploadSimple size={18} /><span>Import repository ZIP</span>
                   </button>}
+                  {secondaryControlsInMenu ? <>
+                    <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); setModelOpen(true); }}>Model and reasoning…</button>
+                    <button type="button" role="menuitem" disabled={!voiceCanStart || isWorking || dictationBusy} onClick={() => { closeExternalMenus(); onStartVoice(); }}><Microphone size={18} /><span>Dictate message</span></button>
+                    {onSaveConclusion ? <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); onSaveConclusion(); }}>Save conclusion to Memory…</button> : null}
+                  </> : null}
                   {connectedConnectors.length > 0 && <span className="composer-menu__heading">Plugins</span>}
                   {connectedConnectors.map((connector) => <button key={connector.id} type="button" role="menuitem" onClick={() => {
                     const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + connector.id + " ";
@@ -355,14 +366,25 @@ export function Composer({
 
 
             {recipientControl}
+            {secondaryControlsInMenu ? <div className="composer-secondary-model">
+              <ModelPicker hideTrigger models={models} selectedId={selectedModelId} label={selectedModelLabel}
+                scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
+                onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+                onOpenChange={(open) => { setModelOpen(open); if (!open) addTrigger.current?.focus(); }} />
+            </div> : null}
           </div>
 
           <div className="composer-control-group composer-control-group--end">
-            {!compactAgentSurface && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
+            {secondaryControlsInMenu && !models.some(model => model.id === selectedModelId && model.available) ? <button type="button" className="composer-model" onClick={() => {
+              closeExternalMenus();
+              if (models.some(model => model.available)) setModelOpen(true);
+              else onConnectProvider?.();
+            }}>{models.some(model => model.available) ? "Choose model" : "Connect a provider"}</button> : null}
+            {!compactAgentSurface && !secondaryControlsInMenu && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
               label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
               onSelectEffort={onSelectReasoningEffort} open={modelOpen}
               onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
-            {!isWorking ? (
+            {!isWorking && (!secondaryControlsInMenu || dictationBusy || voiceCancelable) ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
                   <button

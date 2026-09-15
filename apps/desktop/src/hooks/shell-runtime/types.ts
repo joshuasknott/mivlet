@@ -215,7 +215,6 @@ export interface ShellRuntime {
   actionHistory: ActionHistoryEvent[];
   /** Re-fetch action history from the Rust store (poll on demand). */
   refreshActionHistory: () => void;
-  dismissOnboarding: () => void;
   // shell-level status
   lastAction: string;
 

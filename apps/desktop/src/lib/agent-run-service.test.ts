@@ -32,13 +32,17 @@ vi.mock("../hooks/useDurableConversation", () => ({
     },
   }),
 }));
-vi.mock("../runtime", () => ({
-  createRuntimeConversationThread: mocks.createThread,
-  listRuntimeBackendModels: async () => null,
-  saveRuntimeExecutionAttempt: async (attempt: Record<string, unknown>) => {
+vi.mock("../runtime/domains/conversations", () => ({
+createRuntimeConversationThread: mocks.createThread
+}));
+vi.mock("../runtime/domains/providers", () => ({
+listRuntimeBackendModels: async () => null
+}));
+vi.mock("../runtime/domains/workspace", () => ({
+saveRuntimeExecutionAttempt: async (attempt: Record<string, unknown>) => {
     mocks.saved.push(structuredClone(attempt));
     return attempt;
-  },
+  }
 }));
 vi.mock("../runtime-scope", () => ({
   getActiveRuntimeDataScope: () => ({ workspaceId: mocks.scopeWorkspaceId }),

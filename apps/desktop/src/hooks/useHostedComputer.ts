@@ -1,8 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  loadRuntimeHostedComputer,
-  provisionRuntimeHostedComputer
-} from "../runtime";
+import { loadRuntimeHostedComputer, provisionRuntimeHostedComputer } from "../runtime/domains/hosted-computer";
 
 /** Optional hosted computer state. No background conversation is attached. */
 export function useHostedComputer({

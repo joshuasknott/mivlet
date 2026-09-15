@@ -2,14 +2,11 @@ import type {
   CollaborationWorkItem,
   ConversationRoom,
   LocalProject,
-  MemoryRecord,
-  ProjectTeam,
 } from "@fable/protocol";
-import { GLOBAL_SCOPE, type KnowledgeScope } from "@fable/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 
 /** Work whose outcome blocks the person, ordered newest first. */
-export const needsAttention = (work: CollaborationWorkItem) =>
+const needsAttention = (work: CollaborationWorkItem) =>
   ["awaiting-approval", "awaiting-user", "failed", "blocked"].includes(
     work.status,
   );
@@ -43,56 +40,6 @@ export function scopeWork(
         ? item.agentId === context.agentId
         : true,
   );
-}
-
-/**
- * The exact scope levels a Memory record may claim for this context. Each level
- * is an equality on the owning object; nothing is widened to global and no
- * record from another Agent, Project, Chat or Work item matches.
- */
-export function scopeLevelsFor(input: {
-  agentId?: string;
-  projectId?: string;
-  roomIds?: string[];
-  workIds?: string[];
-}): KnowledgeScope[] {
-  const scopes: KnowledgeScope[] = [GLOBAL_SCOPE];
-  if (input.projectId) scopes.push({ level: "project", projectId: input.projectId });
-  if (input.agentId) scopes.push({ level: "agent", agentId: input.agentId });
-  for (const threadId of input.roomIds ?? [])
-    scopes.push({ level: "thread", threadId });
-  for (const workId of input.workIds ?? [])
-    scopes.push({ level: "work", workId });
-  return scopes;
-}
-
-/** True when a Memory record's exact scope is satisfied by one of the scopes. */
-export function memoryInScope(
-  record: Pick<MemoryRecord, "scope">,
-  scopes: KnowledgeScope[],
-): boolean {
-  const scope = record.scope ?? GLOBAL_SCOPE;
-  if (scope.level === "global") return true;
-  return scopes.some(
-    (candidate) =>
-      candidate.level === scope.level &&
-      scopeId(candidate) === scopeId(scope),
-  );
-}
-
-function scopeId(scope: KnowledgeScope): string | undefined {
-  switch (scope.level) {
-    case "global":
-      return undefined;
-    case "thread":
-      return scope.threadId;
-    case "agent":
-      return scope.agentId;
-    case "project":
-      return scope.projectId;
-    case "work":
-      return scope.workId;
-  }
 }
 
 /** Side Chats stay subordinate to their owner; a project's main Chat and an
@@ -145,19 +92,4 @@ export function scopedRoomIds(
           : false,
     )
     .map((room) => room.id);
-}
-
-/** Durable Team section data for the selected Project. */
-export function teamMembers(
-  team: ProjectTeam | undefined,
-  agents: { id: string; name: string }[],
-): { lead?: string; participants: string[] } {
-  if (!team) return { participants: [] };
-  const names = new Map(agents.map((agent) => [agent.id, agent.name]));
-  return {
-    lead: team.leadAgentId
-      ? (names.get(team.leadAgentId) ?? team.leadAgentId)
-      : undefined,
-    participants: team.participantIds.map((id) => names.get(id) ?? id),
-  };
 }

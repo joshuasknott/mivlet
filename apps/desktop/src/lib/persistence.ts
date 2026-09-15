@@ -37,7 +37,7 @@ const MAX_AGENT_LEARNED_TASK_INSTRUCTION = 4_000;
  * state is preserved without adoption or mirroring. Preview uses localStorage.
  */
 
-/** True inside the Tauri desktop runtime (mirrors `runtime.ts`). */
+/** True inside the Tauri desktop runtime; preview storage remains separate. */
 export function hasTauriRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
@@ -221,11 +221,3 @@ function normalizeApprovalPresetLabel(
 ) {
   return label && isApprovalPresetLabel(label) ? label : permissionLabelFor(mode);
 }
-
-// Re-export protocol array types referenced by callers.
-export type {
-  ApprovalAuditEntry,
-  ApprovalGrant,
-  LocalFileImport,
-  MemoryRecord
-};

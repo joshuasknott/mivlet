@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { BuiltinPlugins } from "@fable/protocol";
-import { loadRuntimeBuiltinPlugins, setRuntimeBuiltinPlugin } from "../../runtime";
+import { loadRuntimeBuiltinPlugins, setRuntimeBuiltinPlugin } from "../../runtime/domains/local-computer";
 import { connectorErrorMessage } from "../../lib/connector-errors";
 
 /**

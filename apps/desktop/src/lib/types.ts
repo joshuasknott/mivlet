@@ -15,8 +15,7 @@ import type {
  * shapes without App.tsx owning them.
  */
 
-export type AccountPage = "Profile" | "Settings";
-export type WorkspacePage = AccountPage;
+type AccountPage = "Profile" | "Settings";
 
 export type ApprovalModificationDraft = {
   mode: ApprovalModification["mode"];

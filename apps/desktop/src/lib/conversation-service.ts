@@ -6,7 +6,7 @@ import type {
   MemoryControlState,
   MemoryRecord,
 } from "@fable/protocol";
-import { loadRuntimeMemoryState, saveRuntimeMemoryState } from "../runtime";
+import { loadRuntimeMemoryState, saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /**
  * Conversation-domain service for the durable main/Side Chat model. The shell's
@@ -21,11 +21,11 @@ export interface SideChatOwner {
   id: string;
 }
 
-export function isMainChat(room: ConversationRoom) {
+function isMainChat(room: ConversationRoom) {
   return room.chat?.role === "main";
 }
 
-export function isSideChat(room: ConversationRoom) {
+function isSideChat(room: ConversationRoom) {
   return room.chat?.role === "side";
 }
 

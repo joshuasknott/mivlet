@@ -21,7 +21,7 @@ export function SideChatContextNotice({ compact = false }: { compact?: boolean }
   );
 }
 
-export function SideChatEditor({
+function SideChatEditor({
   heading,
   ownerLabel,
   initialTitle = "",
@@ -123,6 +123,7 @@ export interface SideChatListProps {
   ownerName: string;
   activeId?: string;
   busy?: boolean;
+  compact?: boolean;
   onOpen: (room: ConversationRoom) => void;
   /** Creates a new Side Chat with the given name. */
   onCreate: (title: string) => Promise<void>;
@@ -147,6 +148,7 @@ function OwnedSideChatList({
   ownerName,
   activeId,
   busy = false,
+  compact = false,
   onOpen,
   onCreate,
   onRename,
@@ -201,7 +203,7 @@ function OwnedSideChatList({
           New Side Chat
         </button>
       </header>
-      <SideChatContextNotice />
+      <SideChatContextNotice compact={compact} />
       <input
         className="side-chats__search"
         type="search"

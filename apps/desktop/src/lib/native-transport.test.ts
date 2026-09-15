@@ -3,10 +3,12 @@ import type { BackendProvider, NativeCompletionRequest } from "@fable/protocol";
 import { createDesktopTransport } from "./native-transport";
 
 const native = vi.hoisted(() => ({ begin: vi.fn(), end: vi.fn(), listen: vi.fn(), stream: vi.fn(), cancel: vi.fn() }));
-vi.mock("../runtime", () => ({
-  beginRuntimeComputerSession: native.begin, endRuntimeComputerSession: native.end,
-  listenRuntimeBackendEvents: native.listen, streamRuntimeCompletion: native.stream,
-  cancelRuntimeCompletion: native.cancel,
+vi.mock("../runtime/domains/providers", () => ({
+beginRuntimeComputerSession: native.begin,
+endRuntimeComputerSession: native.end,
+listenRuntimeBackendEvents: native.listen,
+streamRuntimeCompletion: native.stream,
+cancelRuntimeCompletion: native.cancel
 }));
 const provider = { id: "openai" } as BackendProvider;
 const request = {

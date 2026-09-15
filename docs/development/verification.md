@@ -10,6 +10,25 @@ before dependent ones. Update affected documentation in the same pull request;
 delete superseded instructions and obsolete tests with the behavior they describe.
 Retain tests for observable behavior, authorization, persistence, and regressions.
 
+Runtime calls live in `apps/desktop/src/runtime/domains/`; import their owning
+domain directly. Provider setup and model discovery belong to
+`hooks/shell-runtime/useProviderConnections.ts`. Keep account transitions,
+snapshot persistence and execution ownership explicit when separating shell code.
+
+`useAccountWorkspace` owns account requests and scope transitions;
+`useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
+`useWorkspaceApprovals` owns the queue, audit and decision bridge.
+`useWorkspaceNavigation` owns view restoration and navigation, while
+`WorkspaceExecution` retains execution ownership. Native-agent regressions are
+split into context, persistence, recovery, cancellation and provider suites;
+their shared `native-agent-test-harness.ts` supplies deterministic native transport.
+
+Generated logs, screenshots, reports and build comparisons belong under the
+ignored `output/` directory or the system temporary directory, not the repository
+root. They can be regenerated. Do not put the only copy of source changes or
+recovery bundles there. Dead-code checks include test entry points, so trace
+production callers before retaining or deleting a module used only by tests.
+
 CI runs on pull requests to `main`, or manually. New revisions cancel older runs
 of the same pull request. There is no duplicate full run on pushes to `main`.
 The required `check` job aggregates affected jobs and fails if any required job
@@ -69,38 +88,14 @@ and dynamic icon imports disable pruning. Package-format changes keep the origin
 definitions; the bundle gate still checks the resulting size. The desktop suite
 tests the analysis and retained artwork against the installed icon package.
 
-The development-only `design-preview.html` exercises the production conversation
-components with labelled sample data: streaming, completion, reasoning disclosure,
-failure and stop/continue. Select a fixture with `?conversation=stream`,
-`?conversation=stopped` or `?conversation=failure`; the default is completed.
-`?conversation=context` shows the context-budget diagnostics and continuation action.
-Fixture controls stay out of the conversation. It does not call a provider or establish live acceptance.
+Inspect the actual application entry point when verifying UI. Use the native app
+for account-owned storage, conversation navigation, provider setup, approvals and
+computer control; the browser entry is a runtime-limited rendering of that same
+application. There is no separate design-preview shell to maintain.
 
-`?view=avatars` is the focused avatar QA board. It renders all eight vector
-characters on light and dark surfaces, at sidebar (36px; 44px on narrow
-layouts), header (36px), feed (28px), editor (80px), compact (18px), and large
-inspection sizes. Use the
-native-colour default or enable the custom colour field, state gallery, and
-uploaded portrait control to check saved identity, recolouring,
-and custom image preservation. The realistic sequence, identity buttons, Stop
-now control, and remounted completion card are explicitly simulated; they do not
-call a provider or claim a live runtime event. The sidebar-sized samples use
-quiet motion while header, feed and large active samples use expressive motion.
-Idle stays still; thinking uses a slow glance, working uses a small forward focus
-and accessory movement, and attention/completion gestures run once and settle.
-Provider waiting, stopped work and human control use static expressions. Scope
-keys fence agent/conversation/attempt changes; mounting finished history never
-replays acknowledgement. Offscreen and hidden-document avatars have no running
-animation; reduced motion keeps the expressions without timelines.
-Runtime presence still comes from approvals, execution
-status, confirmed dictation listening, provider availability, and relevant
-computer control. Speaking and explicit-input expressions require confirmed
-runtime events; voice conversations now use the audio element's playback event
-for speaking. Text streaming and question marks must never stand in for those
-events. `?view=voice` previews the production call
-view, including mute, captions, approval and error states, without audio or API
-calls. See [voice conversations](../architecture/voice-conversations.md) for its
-focused checks and separate live-audio acceptance.
-Conversation regressions cover ordered durable segments, call/result pairing,
-redaction, scroll following, safe Markdown and preview scope changes. Native
-tests cover bounded previews, public-summary persistence and external link schemes.
+Cover relevant desktop and narrow layouts, focus/keyboard behavior, loading and
+error states. Avatar and voice state regressions remain in their focused component
+tests; speaking must come from confirmed audio playback, and reduced motion must
+retain static expressions. Conversation tests cover ordered durable segments,
+call/result pairing, redaction, scrolling and safe Markdown. Native tests cover
+bounded previews, public-summary persistence and external link schemes.

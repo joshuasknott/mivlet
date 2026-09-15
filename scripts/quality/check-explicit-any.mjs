@@ -12,7 +12,7 @@ const sourcePattern = /\.(?:ts|tsx)$/u;
 const excludedFilePattern = /\.(?:test|spec)\.(?:ts|tsx)$/u;
 const explicitAnyPattern =
   /(?:\bas\s+any\b|:\s*any\b|<\s*any\s*>|\bany\s*\[\s*\])/gu;
-const maximum = 128;
+const maximum = 127;
 
 async function collect(directory) {
   const entries = await readdir(directory, { withFileTypes: true });

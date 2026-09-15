@@ -1,6 +1,6 @@
 # Mivlet
 
-Independent, provider-neutral, local-first AI agent workspace. Preserve the quiet conversation with named agents and keep account identity, workspace data, and provider credentials separate. First run requires a Mivlet account and a validated provider. Keep hosted and planned features distinct from implemented local behavior.
+Independent, provider-neutral, local-first AI agent workspace. Preserve the quiet conversation with named agents and keep account identity, workspace data, and provider credentials separate. Signed-out users authenticate; signed-in users open their local workspace without onboarding. Agent execution requires a validated provider. Keep hosted and planned features distinct from implemented local behavior.
 
 ## Map and context
 

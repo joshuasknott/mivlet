@@ -5,13 +5,7 @@ import type {
   CodexTurnRequest
 } from "@fable/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
-import {
-  interruptRuntimeCodexTurn,
-  listenRuntimeCodexEvents,
-  respondRuntimeCodexApproval,
-  shutdownRuntimeCodexTurn,
-  startRuntimeCodexTurn
-} from "../runtime";
+import { interruptRuntimeCodexTurn, listenRuntimeCodexEvents, respondRuntimeCodexApproval, shutdownRuntimeCodexTurn, startRuntimeCodexTurn } from "../runtime/domains/providers";
 
 function hasDesktopRuntime(): boolean {
   return (

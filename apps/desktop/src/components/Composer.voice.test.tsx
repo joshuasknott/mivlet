@@ -54,6 +54,32 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it("keeps secondary controls in the menu and routes missing-provider setup", () => {
+    const props = propsFor("idle", { secondaryControlsInMenu: true, models: [], addMenuOpen: true, onConnectProvider: vi.fn() });
+    render(<Composer {...props} />);
+    expect(screen.queryByRole("button", { name: "Start dictation" })).toBeNull();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Dictate message" }));
+    expect(props.onStartVoice).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Connect a provider" }));
+    expect(props.onConnectProvider).toHaveBeenCalledOnce();
+  });
+
+  it("opens model selection from secondary controls and restores focus on Escape", () => {
+    const props = propsFor("idle", { secondaryControlsInMenu: true, addMenuOpen: true });
+    render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Model and reasoning…" }));
+    expect(screen.getByRole("dialog", { name: "Model and reasoning" })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "Model and reasoning" }), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Model and reasoning" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Add files and context" })).toHaveFocus();
+  });
+
+  it("keeps Stop and cancellation visible during compact dictation", () => {
+    render(<Composer {...propsFor("listening", { secondaryControlsInMenu: true })} />);
+    expect(screen.getByRole("button", { name: "Stop dictation" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel dictation" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send prompt" })).toBeNull();
+  });
   it.each(["starting", "listening", "stopping", "reviewing", "processing"] as const)("blocks Enter during %s as well as form submission", (status) => {
     const props = propsFor(status);
     const view = render(<Composer {...props} />);

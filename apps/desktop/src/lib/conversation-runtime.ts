@@ -1,8 +1,8 @@
 import type { Spine } from "@fable/protocol";
 
 export type ConversationThread = Spine.Conversations.Thread;
-export type ConversationMessage = Spine.Conversations.Message;
-export type ConversationRevision = Spine.Conversations.MessageRevision;
+type ConversationMessage = Spine.Conversations.Message;
+type ConversationRevision = Spine.Conversations.MessageRevision;
 export type ConversationThreadCreate = Spine.Conversations.ThreadCreateInput;
 export type ConversationThreadUpdate = Spine.Conversations.ThreadUpdateInput;
 export type ConversationMessageAppend = Spine.Conversations.MessageAppendInput;
@@ -40,7 +40,7 @@ export interface HydratedConversation {
   messages: ConversationMessageView[];
 }
 
-export const NEW_THREAD_DRAFT_PREFIX = "new-thread";
+const NEW_THREAD_DRAFT_PREFIX = "new-thread";
 
 export function newThreadDraftKey() {
   return NEW_THREAD_DRAFT_PREFIX;

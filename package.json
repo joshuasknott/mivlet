@@ -13,7 +13,7 @@
     "test": "pnpm --filter @fable/agent-host test && pnpm --filter @fable/connectors test && pnpm --filter @fable/broker test && pnpm --filter @fable/hosted-runner test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test",
     "lint": "eslint apps packages scripts --max-warnings=0 && node scripts/quality/check-explicit-any.mjs",
     "format:check": "prettier --check \"eslint.config.mjs\" \"knip.json\" \"scripts/quality/**/*.{mjs,json}\" \"apps/desktop/src/runtime/**/*.{ts,tsx}\" \"apps/desktop/src/components/settings/PreferencesSettingsViews.tsx\" \"apps/desktop/src/styles/routes/*.css\" \"packages/protocol/src/domains/connectors.ts\"",
-    "dead-code": "knip --no-config-hints --include files,dependencies,devDependencies,unlisted,binaries",
+    "dead-code": "knip --no-config-hints --include files,dependencies,devDependencies,unlisted,binaries,exports,types",
     "cycles": "node scripts/quality/check-cycles.mjs",
     "quality": "pnpm lint && pnpm format:check && pnpm dead-code && pnpm cycles",
     "audit:pnpm": "pnpm audit --prod --audit-level=low",

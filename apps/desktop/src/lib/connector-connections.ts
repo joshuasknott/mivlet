@@ -25,15 +25,20 @@ export function remoteConnectionReady(connection: RemoteConnectionState) {
     && connection.enabledTools.some((tool) => connection.discoveredTools.includes(tool));
 }
 
-/** One selected route for setup, Installed, mentions and model execution. An
- * existing remote configuration remains selected when it needs reconnection;
- * never silently fall back to a different native account. */
+/** One route for setup, Installed, mentions and new turns. Prefer verified
+ * remote access, but a broken saved setup must not hide a healthy native account.
+ * In-flight turns retain their admitted route through the execution fence. */
 export function mergeConnectorConnections(native: readonly ConnectorManifest[], remote: readonly RemoteConnectionState[]): ConnectorManifest[] {
   const manifests = new Map(native.map((manifest) => [manifest.id, { ...manifest, connectionRoute: "native" as const } as ConnectorManifest]));
   for (const preset of remoteConnectors) {
     const connection = remote.find((candidate) => candidate.launchReference === remoteConnectorServerId(preset.id));
     if (!connection) continue;
     const ready = remoteConnectionReady(connection);
+    const existing = manifests.get(preset.id);
+    const nativeReady = existing?.status === "connected"
+      && existing.health?.state === "healthy"
+      && !existing.scopes?.some((scope) => scope.required && !scope.granted);
+    if (!ready && nativeReady) continue;
     const revoked = connection.authorizationState === "revoked";
     const summary = ready ? `${preset.name} is connected.` : revoked ? "Disconnected." : `Connect ${preset.name} to finish signing in or restore access.`;
     manifests.set(preset.id, {

@@ -2,7 +2,7 @@ import { useRef } from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 
-export function PrivacySummary() {
+function PrivacySummary() {
   return (
     <dl className="privacy-summary">
       <div>

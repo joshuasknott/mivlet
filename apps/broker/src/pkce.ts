@@ -11,12 +11,12 @@
 import { base64url, randomBytes, sha256 } from "./crypto-web.js";
 
 /** Generate a high-entropy PKCE verifier. */
-export function generateVerifier(): string {
+function generateVerifier(): string {
   return base64url(randomBytes(48));
 }
 
 /** S256 code challenge for a verifier (base64url, no padding). */
-export async function challengeFor(verifier: string): Promise<string> {
+async function challengeFor(verifier: string): Promise<string> {
   return base64url(await sha256(verifier));
 }
 

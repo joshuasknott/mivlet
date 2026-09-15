@@ -487,6 +487,3 @@ export function ingestFolder(
 
   return outcomes;
 }
-
-/** Re-export the normalizer for callers that need to match the hash input. */
-export { normalizeText };

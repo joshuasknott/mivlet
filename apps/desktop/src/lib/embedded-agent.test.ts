@@ -14,11 +14,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@fable/connectors", () => ({
   resolveModelCapabilities: vi.fn(() => ({ contextWindow: 16_384 })),
 }));
-vi.mock("../runtime", () => ({
-  startRuntimeEmbeddedAgent: mocks.start,
-  cancelRuntimeEmbeddedAgent: mocks.cancel,
-  replyRuntimeEmbeddedAgent: mocks.reply,
-  listenRuntimeEmbeddedAgent: mocks.listen,
+vi.mock("../runtime/domains/embedded-agent", () => ({
+startRuntimeEmbeddedAgent: mocks.start,
+cancelRuntimeEmbeddedAgent: mocks.cancel,
+replyRuntimeEmbeddedAgent: mocks.reply,
+listenRuntimeEmbeddedAgent: mocks.listen
 }));
 
 import { createDesktopEmbeddedRuntime } from "./embedded-agent";

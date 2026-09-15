@@ -1,8 +1,7 @@
 //! Approval audit log, standing approval rules, and approval resolution.
 //!
-//! Public Tauri commands (names must stay stable): `list_approval_audit`,
-//! `list_approval_rules`, `record_approval_decision`,
-//! `resolve_approval_request`.
+//! Tauri commands: `list_approval_audit`, `list_approval_rules`, and
+//! `resolve_approval_request`. Decisions are persisted through resolution.
 
 use std::{collections::HashSet, fs, path::Path};
 
@@ -450,15 +449,6 @@ pub fn list_approval_audit(app: tauri::AppHandle) -> Result<Vec<ApprovalAuditEnt
 pub fn list_approval_rules(app: tauri::AppHandle) -> Result<Vec<ApprovalGrant>, String> {
     let path = approval_rules_path(&app)?;
     read_approval_rules(&path)
-}
-
-#[tauri::command]
-pub fn record_approval_decision(
-    app: tauri::AppHandle,
-    entry: ApprovalAuditEntry,
-) -> Result<ApprovalAuditRecordResponse, String> {
-    let path = approval_audit_path(&app)?;
-    persist_approval_audit_entry(&path, entry)
 }
 
 #[tauri::command]

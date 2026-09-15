@@ -42,7 +42,7 @@ export interface NativeProviderCatalogEntry {
 }
 
 export const codexCatalog: CodexCatalogEntry = {
-  label: "OpenAI / ChatGPT",
+  label: "ChatGPT",
   description:
     "Continue with ChatGPT through the official Codex browser sign-in flow.",
   installHint: "Requires the official Codex desktop app components.",
@@ -114,7 +114,7 @@ export const managedProviderCatalog: ManagedProviderCatalogEntry[] = [
 export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
   {
     providerId: "openai",
-    label: "OpenAI API",
+    label: "ChatGPT",
     description: "Connect an OpenAI API key for direct model access.",
     authLabel: "OpenAI API key",
     models: [
@@ -125,7 +125,7 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
   },
   {
     providerId: "anthropic",
-    label: "Anthropic",
+    label: "Claude",
     description: "Connect an Anthropic API key for direct Claude access.",
     authLabel: "Anthropic API key",
     models: [
@@ -135,7 +135,7 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
   },
   {
     providerId: "gemini",
-    label: "Gemini API",
+    label: "Antigravity",
     description: "Connect a Google AI Gemini API key for direct model access.",
     authLabel: "Gemini API key",
     models: [
@@ -145,7 +145,7 @@ export const nativeProviderCatalog: NativeProviderCatalogEntry[] = [
   },
   {
     providerId: "xai",
-    label: "xAI",
+    label: "Grok",
     description: "Connect an xAI API key for direct Grok access.",
     authLabel: "xAI API key",
     models: [{ id: "grok-4", label: "Grok 4" }],

@@ -663,3 +663,9 @@
 .composer-add-menu button > svg { flex: 0 0 18px; }
 .composer-add-menu .composer-menu__heading { padding: 14px 12px 6px; margin-top: 6px; border-top: 1px solid var(--line); }
 .composer-add-menu .composer-add-menu__manage { margin-top: 6px; border-top: 1px solid var(--line); border-radius: 0 0 9px 9px; color: var(--ink-muted); }
+
+/* The attachment trigger also anchors secondary conversation controls. */
+.composer-secondary-model { position: relative; width: 0; }
+.composer-secondary-model .composer-control-anchor--model { width: 1px; height: 32px; }
+.composer-secondary-model .composer-model { display: none; }
+.composer-secondary-model .composer-menu { left: 0; right: auto; }

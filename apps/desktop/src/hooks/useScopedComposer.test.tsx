@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadRuntimeConversationDraft } from "../runtime";
+import { loadRuntimeConversationDraft } from "../runtime/domains/conversations";
 import type { ComposerScope } from "./useScopedComposer";
 import { composerScopeKey, useScopedComposer } from "./useScopedComposer";
 
@@ -17,13 +17,13 @@ const deferred = () => {
 };
 const storedContent = (text: string) => JSON.stringify({ text, attachments: [] });
 
-vi.mock("../runtime", () => ({
-  loadRuntimeConversationDraft: vi.fn(async (key: string) => mocks.drafts.get(key) ?? null),
-  saveRuntimeConversationDraft: vi.fn(async (draft) => {
+vi.mock("../runtime/domains/conversations", () => ({
+loadRuntimeConversationDraft: vi.fn(async (key: string) => mocks.drafts.get(key) ?? null),
+saveRuntimeConversationDraft: vi.fn(async (draft) => {
     mocks.saves.push(draft);
     mocks.drafts.set(draft.draftKey, draft);
     return draft;
-  }),
+  })
 }));
 
 let testScope = 0;
@@ -177,7 +177,7 @@ describe("useScopedComposer", () => {
 
   it("does not repaint a new scope when an older load resolves late", async () => {
     let resolveOld!: (value: null) => void;
-    const load = vi.mocked((await import("../runtime")).loadRuntimeConversationDraft);
+    const load = vi.mocked((await import("../runtime/domains/conversations")).loadRuntimeConversationDraft);
     load.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
     const { result, rerender } = renderHook(
       ({ value }) => useScopedComposer(value),

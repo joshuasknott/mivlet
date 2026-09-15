@@ -51,14 +51,9 @@ import { createDesktopAntigravityAcp } from "../lib/antigravity-acp";
 import { createDesktopManagedRuntime } from "../lib/managed-runtime";
 import { createDesktopTransport } from "../lib/native-transport";
 import { createDesktopEmbeddedRuntime } from "../lib/embedded-agent";
-import {
-  listRuntimeBackendModels,
-  listRuntimeContextSummaries,
-  listRuntimeExecutionAttempts,
-  recoverRuntimeExecutionAttempts,
-  saveRuntimeContextSummary,
-  saveRuntimeExecutionAttempt,
-} from "../runtime";
+import { listRuntimeBackendModels } from "../runtime/domains/providers";
+import { listRuntimeContextSummaries, saveRuntimeContextSummary } from "../runtime/domains/memory";
+import { listRuntimeExecutionAttempts, recoverRuntimeExecutionAttempts, saveRuntimeExecutionAttempt } from "../runtime/domains/workspace";
 import type {
   DurableRunWriter,
   HydratedConversation,
@@ -278,12 +273,6 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
   modelsRef.current = options.models ?? [];
   const createDurableRunWriterRef = useRef(options.createDurableRunWriter);
   createDurableRunWriterRef.current = options.createDurableRunWriter;
-
-  useEffect(() => {
-    setState((current) => current.contextFailure && JSON.stringify(current.contextFailure.scope) !== contextScopeKey
-      ? { ...current, lastError: null, contextFailure: undefined }
-      : current);
-  }, [contextScopeKey]);
 
   useEffect(() => {
     if (options.recover === false) return;

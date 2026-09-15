@@ -2,19 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { McpClient } from "../../lib/native-mcp-client";
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
-import {
-  beginRuntimeRemoteMcpAuthorization,
-  commitRuntimeMcpServerConfiguration,
-  disconnectRuntimeRemoteMcpAuthorization,
-  inspectRuntimeRemoteMcpAuthorization,
-  listRuntimeMcpServerConfigurations,
-  prepareRuntimeMcpServerConfiguration,
-  resolveRuntimeApprovalRequest,
-  setRuntimeMcpEnablement,
-  type RuntimeMcpConnectionDetails,
-  type RuntimeMcpServerConfiguration,
-  type RuntimeMcpServerSummary
-} from "../../runtime";
+import { beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration, disconnectRuntimeRemoteMcpAuthorization, inspectRuntimeRemoteMcpAuthorization, listRuntimeMcpServerConfigurations, prepareRuntimeMcpServerConfiguration, setRuntimeMcpEnablement, type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration, type RuntimeMcpServerSummary } from "../../runtime/domains/mcp";
+import { resolveRuntimeApprovalRequest } from "../../runtime/domains/approvals";
 import {
   createDesktopMcpTransport,
   createDesktopRemoteMcpTransport

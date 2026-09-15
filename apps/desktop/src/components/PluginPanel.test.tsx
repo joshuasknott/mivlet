@@ -10,6 +10,7 @@ import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConnectorManifest } from "@fable/protocol";
 import { PluginPanel, resolveDetailedStatus, connectorAccessSummary } from "./PluginPanel";
+import { mergeConnectorConnections } from "../lib/connector-connections";
 
 afterEach(cleanup);
 
@@ -51,6 +52,34 @@ const github: ConnectorManifest = {
 };
 
 describe("Connector Connection selection", () => {
+  it.each([["notion", "Notion"], ["linear", "Linear"], ["vercel", "Vercel"]])("offers one official sign-in for a new %s account", async (id, name) => {
+    render(<PluginPanel initialConnectorId={id} manifests={[{ ...github, id, name, status: "provider-error" }]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    expect(screen.getByRole("article", { name: `${name} connection` })).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Connect" })).toBeInTheDocument();
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: /endpoint|token|method/i })).not.toBeInTheDocument();
+  });
+  it("shows the working native account when a saved remote connection is revoked", () => {
+    const manifests = mergeConnectorConnections([{ ...gmail, id: "notion", name: "Notion" }], [{ launchReference: "marketplace-notion", authorizationState: "revoked", discoveryState: "unknown", discoveredTools: [], enabledTools: [] }]);
+    const onUse = vi.fn();
+    render(<PluginPanel initialConnectorId="notion" manifests={manifests} accounts={{}} onUseConnector={onUse} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    expect(screen.getByText("Active connection: work@example.com")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Use in chat" }));
+    expect(onUse).toHaveBeenCalledWith(manifests[0]);
+  });
+  it("reconnects an existing native account without changing its method", async () => {
+    const connector = { ...gmail, id: "linear", name: "Linear", status: "needs-auth" as const, health: undefined, healthSummary: "Sign in again." };
+    const onConnect = vi.fn();
+    render(<PluginPanel initialConnectorId="linear" manifests={[connector]} accounts={{}} onUseConnector={vi.fn()} onConnect={onConnect} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+    await waitFor(() => expect(onConnect).toHaveBeenCalledExactlyOnceWith(connector));
+  });
+  it("opens custom tool servers from Plugins", async () => {
+    render(<PluginPanel workspaceId="workspace-test" manifests={[]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
+    expect(screen.queryByText("Tool servers are available only in the desktop app.")).toBeNull();
+    fireEvent.click(screen.getByText("Custom tool servers"));
+    expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeVisible();
+  });
   it("filters ready connections separately from missing authorization and unhealthy connections", () => {
     const props = { manifests: [gmail, github], accounts: {}, onUseConnector: vi.fn(), onConnect: vi.fn(), onDisconnect: vi.fn(), onRefresh: vi.fn(), onSelect: vi.fn(), onSwitchAccount: vi.fn() };
     const view = render(<PluginPanel {...props} />);

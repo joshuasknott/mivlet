@@ -20,7 +20,7 @@ import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";
 
-export interface HostedComputerRuntimePort {
+interface HostedComputerRuntimePort {
   load(
     workspaceId: string,
     agentId: string,

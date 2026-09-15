@@ -288,5 +288,3 @@ export type AgentBackendFactory = (
   provider: BackendProvider,
   deps: BackendDeps,
 ) => AgentBackend | null;
-
-export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";

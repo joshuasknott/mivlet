@@ -4,13 +4,11 @@ import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { Key } from "@phosphor-icons/react/dist/csr/Key";
-import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { TerminalWindow } from "@phosphor-icons/react/dist/csr/TerminalWindow";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
-  BackendAuthState,
   BackendProvider,
   BackendVerifyResult,
 } from "@fable/protocol";
@@ -20,17 +18,10 @@ import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { ProviderIcon } from "../ProviderIcon";
 import { additionalNativeProviderCatalog, providerEndpointSetup } from "@fable/connectors/backends/additional-native";
 
-export const FEATURED_PROVIDER_FAMILY_IDS = [
-  "openai",
-  "anthropic",
-  "antigravity",
-  "xai",
-] as const;
-
-export type ProviderConnectionMethodKind =
+type ProviderConnectionMethodKind =
   "api-key" | "oauth-browser" | "provider-cli" | "custom";
 
-export interface ProviderConnectionMethod {
+interface ProviderConnectionMethod {
   id: string;
   kind: ProviderConnectionMethodKind;
   label: string;
@@ -55,7 +46,7 @@ interface ProviderFamilyMetadata {
 
 const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
   openai: {
-    label: "OpenAI / ChatGPT",
+    label: "ChatGPT",
     iconProvider: "openai",
     aliases: ["OpenAI", "ChatGPT", "Codex", "GPT"],
   },
@@ -65,7 +56,7 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     aliases: ["Anthropic", "Claude"],
   },
   antigravity: {
-    label: "Google Antigravity",
+    label: "Antigravity",
     iconProvider: "antigravity",
     aliases: ["Google", "Gemini", "Antigravity"],
   },
@@ -74,9 +65,9 @@ const FAMILY_METADATA: Record<string, ProviderFamilyMetadata> = {
     iconProvider: "xai",
     aliases: ["xAI", "Grok", "Grok Build"],
   },
-  alibaba: { label: "Alibaba / Qwen", iconProvider: "alibaba", aliases: ["Qwen", "Alibaba", "DashScope", "Model Studio"] },
-  moonshot: { label: "Moonshot / Kimi", iconProvider: "moonshot", aliases: ["Moonshot", "Kimi"] },
-  zai: { label: "Z.ai / GLM", iconProvider: "zai", aliases: ["Z.ai", "Zhipu", "GLM"] },
+  alibaba: { label: "Qwen", iconProvider: "alibaba", aliases: ["Qwen", "Alibaba", "DashScope", "Model Studio"] },
+  moonshot: { label: "Kimi", iconProvider: "moonshot", aliases: ["Moonshot", "Kimi"] },
+  zai: { label: "Z.ai", iconProvider: "zai", aliases: ["Z.ai", "Zhipu", "GLM"] },
   custom: {
     label: "Custom provider",
     iconProvider: "custom",
@@ -105,7 +96,7 @@ function compactProviderId(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-export function providerFamilyIdFor(providerId: string): string {
+function providerFamilyIdFor(providerId: string): string {
   const compact = compactProviderId(providerId);
   if (["openai", "chatgpt", "codex"].includes(compact)) return "openai";
   if (["xai", "grok"].includes(compact)) return "xai";
@@ -159,7 +150,7 @@ function providerOwnedMethods(
   ];
 }
 
-export function connectionMethodsForProvider(
+function connectionMethodsForProvider(
   provider: BackendProvider,
 ): ProviderConnectionMethod[] {
   const familyId = providerFamilyIdFor(provider.id);
@@ -254,60 +245,6 @@ function isProviderConnected(
   );
 }
 
-function familyState(
-  family: ProviderFamily,
-  connectedBackendIds: string[],
-): { label: string; tone: string } {
-  const connectedProviders = family.providers.filter((provider) =>
-    isProviderConnected(provider, connectedBackendIds),
-  );
-  if (
-    connectedProviders.some((provider) => provider.backendType !== "native-api")
-  ) {
-    return { label: "Connected", tone: "ready" };
-  }
-  if (connectedProviders.length > 0) {
-    // A stored direct-provider credential is configured, but key presence alone
-    // is not proof that the provider accepted it. Keep this conservative until
-    // Mivlet has persisted live verification state.
-    return { label: "Configured", tone: "info" };
-  }
-  const statePriority: BackendAuthState[] = [
-    "connecting",
-    "sign-in-required",
-    "install-required",
-    "expired",
-    "failed",
-    "needs-auth",
-    "unsupported",
-    "unavailable",
-  ];
-  const state =
-    statePriority.find((candidate) =>
-      family.providers.some((provider) => provider.authState === candidate),
-    ) ?? family.providers[0].authState;
-  return stateViewFor(state);
-}
-
-function familyMatches(family: ProviderFamily, query: string): boolean {
-  const normalized = query.trim().toLocaleLowerCase();
-  if (!normalized) return true;
-  const haystack = [
-    family.label,
-    family.id,
-    ...family.aliases,
-    ...family.providers.flatMap((provider) => [
-      provider.label,
-      provider.description,
-      ...provider.models.flatMap((model) => [model.id, model.label]),
-    ]),
-    ...family.methods.flatMap((method) => [method.label, method.description]),
-  ]
-    .join(" ")
-    .toLocaleLowerCase();
-  return haystack.includes(normalized);
-}
-
 export interface ProviderCatalogueProps {
   providers: BackendProvider[];
   connectedBackendIds: string[];
@@ -334,75 +271,30 @@ export function ProviderCatalogue({
   onStartBrowserLogin,
   onStatus,
 }: ProviderCatalogueProps) {
-  const families = useMemo(() => buildProviderFamilies(providers), [providers]);
-  const [showAll, setShowAll] = useState(false);
-  const [query, setQuery] = useState("");
+  const families = useMemo(() => buildProviderFamilies(providers).filter((family) => !["custom", "siliconflow", "together"].includes(family.id)), [providers]);
   const [selectedFamilyId, setSelectedFamilyId] = useState<string | null>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
 
-  const featured = useMemo(() => {
-    const ranked = FEATURED_PROVIDER_FAMILY_IDS.flatMap((id) => {
-      const family = families.find((candidate) => candidate.id === id);
-      return family ? [family] : [];
-    });
-    return ranked.length > 0 ? ranked : families.slice(0, 8);
-  }, [families]);
-
-  const alphabetical = useMemo(
-    () => families.filter((family) => familyMatches(family, query)),
-    [families, query],
-  );
   const selectedFamily = families.find(
     (family) => family.id === selectedFamilyId,
   );
 
-  useEffect(() => {
-    if (showAll) searchRef.current?.focus();
-  }, [showAll]);
-
-  const visibleFamilies = showAll ? alphabetical : featured;
-
   return (
     <div className="provider-catalogue">
-      {showAll ? (
-        <div className="provider-catalogue__toolbar">
-          <label className="provider-catalogue__search">
-            <MagnifyingGlass size={16} aria-hidden="true" />
-            <span className="sr-only">Search providers</span>
-            <input
-              ref={searchRef}
-              type="search"
-              placeholder="Search providers"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          <span className="provider-catalogue__count">
-            {alphabetical.length}{" "}
-            {alphabetical.length === 1 ? "provider" : "providers"}
-          </span>
-        </div>
-      ) : null}
-
       <div
-        className={
-          showAll ? "provider-catalogue__list" : "provider-catalogue__grid"
-        }
-        aria-label={showAll ? "All providers" : "Featured providers"}
+        className="provider-catalogue__grid"
+        aria-label="All providers"
       >
-        {visibleFamilies.map((family) => {
-          const state = familyState(family, connectedBackendIds);
+        {families.map((family) => {
+          const connected = family.providers.some((provider) => isProviderConnected(provider, connectedBackendIds));
           return (
             <button
               key={family.id}
               type="button"
-              className={
-                showAll
-                  ? "provider-catalogue-item provider-catalogue-item--list"
-                  : "provider-catalogue-item"
-              }
+              className="provider-catalogue-item"
+              aria-haspopup="dialog"
+              title={family.label}
               data-provider-family-id={family.id}
-              aria-label={`${family.label}, ${state.label}`}
+              aria-label={connected ? `${family.label}, Connected` : family.label}
               onClick={() => setSelectedFamilyId(family.id)}
             >
               <span
@@ -411,42 +303,22 @@ export function ProviderCatalogue({
               >
                 <ProviderIcon
                   provider={family.iconProvider}
-                  size={showAll ? 28 : 34}
+                  size={32}
                 />
               </span>
               <span className="provider-catalogue-item__text">
                 <strong>{family.label}</strong>
-                <small data-tone={state.tone}>{state.label}</small>
+                {connected ? <small className="provider-catalogue-item__connected">Connected</small> : null}
+
               </span>
-              {showAll ? <CaretRight size={16} aria-hidden="true" /> : null}
             </button>
           );
         })}
       </div>
 
-      {showAll && visibleFamilies.length === 0 ? (
-        <p className="provider-catalogue__empty" role="status">
-          No providers match &ldquo;{query}&rdquo;.
-        </p>
+      {families.length === 0 ? (
+        <p className="provider-catalogue__empty" role="status">No model providers are registered in this build.</p>
       ) : null}
-
-      {families.length > 0 ? (
-        <button
-          type="button"
-          className="provider-catalogue__show-all"
-          aria-expanded={showAll}
-          onClick={() => {
-            setShowAll((current) => !current);
-            setQuery("");
-          }}
-        >
-          {showAll ? "Show featured providers" : "Show all providers"}
-        </button>
-      ) : (
-        <p className="provider-catalogue__empty" role="status">
-          No model providers are registered in this build.
-        </p>
-      )}
 
       {selectedFamily ? (
         <ProviderConnectionModal

@@ -6,11 +6,7 @@ import type {
 import type { ToolApprovalGate } from "@fable/connectors/native-api/tool-executor";
 import type { useHostedComputer } from "./useHostedComputer";
 import type { ShellRuntime } from "./useShellRuntime";
-import {
-  navigateRuntimeHostedBrowser,
-  prepareRuntimeHostedBrowser,
-  snapshotRuntimeHostedBrowser,
-} from "../runtime";
+import { navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, snapshotRuntimeHostedBrowser } from "../runtime/domains/hosted-computer";
 
 export function useHostedBrowserController({
   hostedWorkspaceId,

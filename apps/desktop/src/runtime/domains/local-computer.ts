@@ -91,12 +91,3 @@ export const setRuntimeBuiltinPlugin = (
     plugin,
     enabled,
   });
-export const prepareRuntimeBuiltinComputer = (
-  target: LocalComputerTarget,
-  plugin: "computer",
-  expectedGeneration: number,
-) =>
-  nativeComputerCommand<LocalComputerSnapshot>(
-    "builtin_plugin_prepare_computer",
-    { ...target, plugin, expectedGeneration },
-  );

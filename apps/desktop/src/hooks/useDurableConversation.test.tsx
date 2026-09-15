@@ -11,18 +11,18 @@ const mocks = vi.hoisted(() => ({
   createThread: vi.fn(),
 }));
 
-vi.mock("../runtime", () => ({
-  createRuntimeConversationThread: mocks.createThread,
-  listRuntimeConversationThreads: mocks.listThreads,
-  getRuntimeConversationThread: mocks.getThread,
-  updateRuntimeConversationThread: vi.fn(),
-  listRuntimeConversationMessages: mocks.listMessages,
-  appendRuntimeConversationMessage: vi.fn(),
-  reviseRuntimeConversationMessage: vi.fn(),
-  loadRuntimeConversationDraft: mocks.loadDraft,
-  saveRuntimeConversationDraft: vi.fn(async (draft) => draft),
-  deleteRuntimeConversationDraft: vi.fn(async () => {}),
-  deleteRuntimeConversationThread: mocks.deleteThread,
+vi.mock("../runtime/domains/conversations", () => ({
+createRuntimeConversationThread: mocks.createThread,
+listRuntimeConversationThreads: mocks.listThreads,
+getRuntimeConversationThread: mocks.getThread,
+updateRuntimeConversationThread: vi.fn(),
+listRuntimeConversationMessages: mocks.listMessages,
+appendRuntimeConversationMessage: vi.fn(),
+reviseRuntimeConversationMessage: vi.fn(),
+loadRuntimeConversationDraft: mocks.loadDraft,
+saveRuntimeConversationDraft: vi.fn(async (draft) => draft),
+deleteRuntimeConversationDraft: vi.fn(async () => {}),
+deleteRuntimeConversationThread: mocks.deleteThread
 }));
 
 const thread = (id: string) => ({

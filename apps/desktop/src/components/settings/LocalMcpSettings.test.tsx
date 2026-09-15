@@ -17,15 +17,17 @@ const runtime = vi.hoisted(() => ({
 }));
 const transportFactory = vi.hoisted(() => vi.fn());
 
-vi.mock("../../runtime", () => ({
-  beginRuntimeRemoteMcpAuthorization: runtime.beginAuth,
-  commitRuntimeMcpServerConfiguration: runtime.commit,
-  disconnectRuntimeRemoteMcpAuthorization: runtime.disconnectAuth,
-  inspectRuntimeRemoteMcpAuthorization: runtime.inspectAuth,
-  listRuntimeMcpServerConfigurations: runtime.list,
-  prepareRuntimeMcpServerConfiguration: runtime.prepare,
-  resolveRuntimeApprovalRequest: runtime.resolve,
-  setRuntimeMcpEnablement: runtime.setEnablement
+vi.mock("../../runtime/domains/mcp", () => ({
+beginRuntimeRemoteMcpAuthorization: runtime.beginAuth,
+commitRuntimeMcpServerConfiguration: runtime.commit,
+disconnectRuntimeRemoteMcpAuthorization: runtime.disconnectAuth,
+inspectRuntimeRemoteMcpAuthorization: runtime.inspectAuth,
+listRuntimeMcpServerConfigurations: runtime.list,
+prepareRuntimeMcpServerConfiguration: runtime.prepare,
+setRuntimeMcpEnablement: runtime.setEnablement
+}));
+vi.mock("../../runtime/domains/approvals", () => ({
+resolveRuntimeApprovalRequest: runtime.resolve
 }));
 vi.mock("../../lib/mcp-transport", () => ({
   createDesktopMcpTransport: transportFactory,

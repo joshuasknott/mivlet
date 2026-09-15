@@ -1,3 +1,4 @@
+import { act } from "@testing-library/react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { CollaborationWorkItem } from "@fable/protocol";
@@ -15,7 +16,7 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
 });
 
 describe("reusable Work list and compact cards", () => {
-  it("shows every status with its working label and surfaces the empty state", () => {
+  it("shows every status with its working label and surfaces the empty state", async () => {
     const onOpen = vi.fn(), onStop = vi.fn(), onContinue = vi.fn(), onSteer = vi.fn();
     render(
       <WorkList
@@ -59,7 +60,7 @@ describe("reusable Work list and compact cards", () => {
     expect(screen.queryByText("No work yet")).toBeNull();
   });
 
-  it("shows Scheduled only for queued schedule-origin work", () => {
+  it("shows Scheduled only for queued schedule-origin work", async () => {
     const onOpenWork = vi.fn();
     const { rerender } = render(
       <WorkList
@@ -73,7 +74,7 @@ describe("reusable Work list and compact cards", () => {
       />,
     );
     expect(screen.getByText("Scheduled")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Work details" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Work details" })); });
     expect(onOpenWork).toHaveBeenCalledWith("scheduled");
     // A running scheduled request shows its real progress, not Scheduled.
     rerender(
@@ -100,25 +101,25 @@ describe("reusable Work list and compact cards", () => {
         onSteer={onSteer}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Stop" })); });
     expect(onStop).toHaveBeenCalledWith("active");
     // Real gestures settle between actions; the duplicate-action guard must
     // release before the next action on the same card is accepted.
     await Promise.resolve();
-    fireEvent.click(screen.getByRole("button", { name: "Retry request" }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Retry request" })); });
     expect(onContinue).toHaveBeenCalledWith("failed-one", 1);
     await Promise.resolve();
-    fireEvent.click(screen.getAllByRole("button", { name: "Steer" })[0]);
-    fireEvent.change(screen.getAllByPlaceholderText(/Adjust this request/)[0], {
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Steer" })[0]); });
+    await act(async () => { fireEvent.change(screen.getAllByPlaceholderText(/Adjust this request/)[0], {
       target: { value: "Narrow it" },
-    });
-    fireEvent.click(screen.getAllByRole("button", { name: "Apply steering" })[0]);
+    }); });
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Apply steering" })[0]); });
     expect(onSteer).toHaveBeenCalledWith("active", 1, "Narrow it");
-    fireEvent.click(screen.getAllByRole("button", { name: "Open conversation" })[0]);
+    await act(async () => { fireEvent.click(screen.getAllByRole("button", { name: "Open conversation" })[0]); });
     expect(onOpen).toHaveBeenCalledWith("room");
   });
 
-  it("never offers blind retry on a started request from the compact card", () => {
+  it("never offers blind retry on a started request from the compact card", async () => {
     render(
       <WorkList
         work={[item({ id: "started", status: "failed", runIds: ["run"], turnCount: 1 })]}

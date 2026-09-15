@@ -21,9 +21,9 @@ import {
   type MemoryPromotionPorts,
 } from "./conversation-service";
 
-vi.mock("../runtime", () => ({
-  loadRuntimeMemoryState: vi.fn(),
-  saveRuntimeMemoryState: vi.fn(),
+vi.mock("../runtime/domains/memory", () => ({
+loadRuntimeMemoryState: vi.fn(),
+saveRuntimeMemoryState: vi.fn()
 }));
 
 const room = (over: Partial<ConversationRoom> = {}): ConversationRoom => ({

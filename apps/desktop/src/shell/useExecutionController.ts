@@ -16,7 +16,7 @@ import {
 import { chatConnectorIds, chatConnectorTools } from "../lib/connector-chat";
 import { isLocalComputerTool } from "../lib/computer-tools";
 import { modelsForProvider } from "../lib/provider-models";
-import { cancelRuntimeLocalComputer } from "../runtime";
+import { cancelRuntimeLocalComputer } from "../runtime/domains/local-computer";
 
 export function useExecutionController({
   runtime,

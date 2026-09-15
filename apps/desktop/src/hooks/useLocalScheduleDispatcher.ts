@@ -11,7 +11,7 @@ import {
 } from "../runtime/domains/local-schedules";
 import { AgentRunService } from "../lib/agent-run-service";
 
-export type LocalScheduleDispatchPhase =
+type LocalScheduleDispatchPhase =
   "idle" | "claiming" | "running" | "needs-user" | "failed";
 
 export interface LocalScheduleDispatchStatus {
@@ -52,7 +52,7 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener);
 }
 
-export function getLocalScheduleDispatchStatus() {
+function getLocalScheduleDispatchStatus() {
   return snapshot;
 }
 

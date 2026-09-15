@@ -6,7 +6,7 @@ import {
 } from "../../lib/provider-models";
 import "./projects.css";
 
-export type TeamRouteState =
+type TeamRouteState =
   | "ready"
   | "agent-missing"
   | "model-missing"

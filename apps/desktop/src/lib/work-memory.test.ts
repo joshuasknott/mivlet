@@ -5,10 +5,10 @@ import {
   promoteWorkOutputToMemory,
 } from "./work-memory";
 
-vi.mock("../runtime", () => ({
-  saveRuntimeMemoryState: vi.fn(async (state: MemoryControlState) => state),
+vi.mock("../runtime/domains/memory", () => ({
+saveRuntimeMemoryState: vi.fn(async (state: MemoryControlState) => state)
 }));
-import { saveRuntimeMemoryState } from "../runtime";
+import { saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 const work = {
   id: "work", rootId: "work", workspaceId: "workspace", conversationId: "room",

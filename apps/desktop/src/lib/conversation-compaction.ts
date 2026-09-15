@@ -42,7 +42,7 @@ import {
  * stays with `planConversationContext`, which receives exactly this bounded
  * message list; these character budgets only split the available history.
  */
-export const COMPACTED_CONTEXT_BUDGET: BoundedHistoryBudget = {
+const COMPACTED_CONTEXT_BUDGET: BoundedHistoryBudget = {
   maxRecentTurns: 24,
   maxRecentCharacters: 48_000,
   maxSummaryCharacters: 12_000,
@@ -50,7 +50,7 @@ export const COMPACTED_CONTEXT_BUDGET: BoundedHistoryBudget = {
 };
 
 /** A tighter retry derived from the base budget when the first split misses. */
-export function retryContextBudget(
+function retryContextBudget(
   base: BoundedHistoryBudget
 ): BoundedHistoryBudget {
   return {
@@ -90,7 +90,7 @@ export interface CompactConversationTurnInput {
   now?: string;
 }
 
-export type CompactionFailureCode =
+type CompactionFailureCode =
   | "compaction-unavailable"
   | "nothing-to-elide"
   | "compaction-persist-failed"

@@ -1,4 +1,5 @@
-import { Fragment, createElement, memo, useState, type ReactNode } from "react";
+import { OpenWebPreview } from "../navigation/open-web-preview";
+import { Fragment, createElement, memo, useContext, useState, type ReactNode } from "react";
 import { Lexer, type Token, type Tokens } from "marked";
 import {
   MAX_CONVERSATION_MARKDOWN_CHARS,
@@ -60,7 +61,9 @@ function renderTokens(tokens: Token[], depth = 0): ReactNode {
 
 function ConversationLink({ href, children }: { href: string; children: ReactNode }) {
   const [error, setError] = useState("");
+  const openPreview = useContext(OpenWebPreview);
   return <><a href={href} title={href} target="_blank" rel="noopener noreferrer" onClick={(event) => {
+    if (openPreview && /^https?:/.test(href) && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { event.preventDefault(); openPreview(href); return; }
     if (!hasNativeRuntimeAdapter()) return;
     event.preventDefault(); setError("");
     void getRuntimeAdapter().invoke<void>("open_conversation_link", { url: href }).catch(() => setError("Could not open this link. Copy the link address to open it in your browser."));

@@ -15,11 +15,9 @@ import { planConversationContext } from "./conversation-context";
 import { describeBackendError } from "./backend-errors";
 import { agentExecutionInstructions } from "./agent-learning";
 import { createDesktopDurableRunWriter } from "../hooks/useDurableConversation";
-import {
-  createRuntimeConversationThread,
-  listRuntimeBackendModels,
-  saveRuntimeExecutionAttempt,
-} from "../runtime";
+import { createRuntimeConversationThread } from "../runtime/domains/conversations";
+import { listRuntimeBackendModels } from "../runtime/domains/providers";
+import { saveRuntimeExecutionAttempt } from "../runtime/domains/workspace";
 import { getActiveRuntimeDataScope } from "../runtime-scope";
 
 const SCHEDULED_RESEARCH_INSTRUCTIONS = [
@@ -28,7 +26,7 @@ const SCHEDULED_RESEARCH_INSTRUCTIONS = [
   "Report the findings clearly in this conversation and include source links supplied by the web research result.",
 ].join(" ");
 
-export type ScheduledResearchTerminal =
+type ScheduledResearchTerminal =
   "completed" | "failed" | "needs-user" | "interrupted";
 
 export interface ScheduledResearchRunInput {

@@ -10,14 +10,14 @@ the concise source of truth for repository maturity.
 
 ## Default experience
 
-1. Sign in to Mivlet and connect a supported model provider.
-2. Create or choose a named teammate.
+1. Sign in to Mivlet to open the local workspace.
+2. Choose a named teammate and connect a supported model provider before running work.
 3. Describe the work in conversation.
-4. Watch the current work, take over the teammate computer when needed, and
+4. Watch the current work, stop application control when needed, and
    approve exact consequential actions.
 5. Continue refining the result in the same conversation.
 
-Knowledge, Connections, approvals, model choice, and computer controls are
+Memory, Plugins, approvals, model choice, and computer controls are
 contextual depth. They should not become permanent navigation clutter or make a
 person administer execution machinery.
 
@@ -25,12 +25,13 @@ person administer execution machinery.
 
 - Provider-neutral model selection through Mivlet-owned contracts.
 - Durable teammate identity, responsibilities, context, and conversation.
-- A genuine isolated local desktop for browser, terminal, file, and application
-  work, with explicit human control.
+- Native Windows application control in the user's existing session, with exact
+  target selection and immediate Stop. This is not an isolated local desktop.
 - Optional isolated hosted computers only when the person intentionally chooses
   remote placement and the deployment is available.
-- Narrow browser, filesystem, process, connector, MCP, and knowledge tools that
-  are observable and approval-bound.
+- Scoped workspace files, app integrations and MCP tools that are observable and
+  approval-bound. Browser interaction depends on the available execution route;
+  passive web previews do not establish browser automation.
 - Account sign-in for first-run setup, with workspace data and provider
   credentials remaining local. Future synchronization is separately gated.
 

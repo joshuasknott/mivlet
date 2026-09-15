@@ -1,8 +1,10 @@
 # Parallel roadmap implementation contract
 
-P1–P8 start isolated branches from the **merged baseline SHA** reported in its PR,
-not the walkthrough or PR head. These are real shared interfaces; remaining roadmap
-features and hosted sync are not claimed as implemented.
+This records the account and collaboration contracts used by the September 2026
+roadmap integration. The P1–P8 ownership allocations below describe that completed
+integration, not instructions to restart those workstreams. Use the current
+README for delivered behaviour and remaining limitations; hosted sync remains
+deployment-gated.
 
 ## Account ownership
 
@@ -127,7 +129,7 @@ P8 owns final global layout styling; feature leaf styles belong to their track.
 | P5 Projects/Teams | Renderer `hooks/useLocalProjects.ts`, `runtime/domains/local-projects.ts`, `components/projects/ConversationDialogs.tsx`, `components/projects/ProjectContextPanel.tsx`, `components/projects/ProjectFiles.tsx`, `components/projects/projects.css`; native `local_projects.rs`, `store/repos/local_project.rs`. New Team/Project leaves stay in these domains. |
 | P6 Memory/compaction | `packages/knowledge/src/**`; renderer `lib/collaboration-context.ts`, `components/settings/MemoryRecords.tsx`, new `components/memory/**`; native `memory.rs`, `collaboration/context.rs`, `store/repos/memory_record.rs`. |
 | P7 Search | New renderer `lib/search/**`, `runtime/domains/search.ts`, `components/search/**`; new native `search.rs`/`search/**` if needed. Scoped reads over existing repositories, stable references and reusable results, no replacement stores. |
-| P8 Navigation/activity | Renderer `App.tsx`, `shell/DesktopShell.tsx`, `shell/TeammateWorkspace.tsx`, `shell/teammate-workspace.css`, `components/agents/AgentSidebar.tsx`, `components/agents/AgentWorkspaceHeader.tsx`, `components/conversation/ConversationTabs.tsx`, `lib/conversation-layout.ts`, `hooks/useConversationDrag.ts`, global/navigation layout styles. |
+| P8 Navigation/activity | Renderer `App.tsx`, `shell/DesktopShell.tsx`, `shell/TeammateWorkspace.tsx`, `shell/teammate-workspace.css`, `components/agents/AgentSidebar.tsx`, `shell/ConversationPane.tsx`, `components/conversation/ConversationTabs.tsx`, `lib/conversation-layout.ts`, `hooks/useConversationDrag.ts`, global/navigation layout styles. |
 
 P8 composes P1 catalogue, P2 controls and P3–P7 reusable domain components through
 props/services. It must not reimplement their modals, stores, Work dispatch, context,

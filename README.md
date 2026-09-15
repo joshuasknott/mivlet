@@ -14,9 +14,9 @@ computer appear only when the work needs them.
 Mivlet is local-first: conversations and workspace data are stored on the device,
 provider credentials stay in native secure storage, and the default agent computer
 runs locally. Connected providers and apps receive the context needed for their
-requests. First-run setup uses a lightweight
-Mivlet account, then validates a supported model provider and optionally connects
-the apps a person already uses.
+requests. Signed-out users authenticate with a Mivlet account. Authenticated
+users open their local workspace directly; a supported model provider must be
+validated before running an agent, and app connections are optional.
 
 ## Maturity
 
@@ -48,9 +48,9 @@ a deployed or production-validated service.
   Calls retain normal tool approvals and stop on conversation/model changes.
   Raw audio is transient. See [voice architecture](docs/architecture/voice-conversations.md)
   for limits and the remaining live-audio acceptance checks.
-- First-run setup with Google-first account sign-in, a verified model-provider
-  connection, and optional app connectors. The default Chief of Staff appears
-  only after setup is complete.
+- Google-first account sign-in for signed-out users. Authenticated users skip
+  onboarding and enter their workspace, including when provider setup is incomplete.
+  Agent execution still requires a verified model-provider connection.
 - One provider-driver registry with stable instance ids for ChatGPT/Codex,
   Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
   connections. Codex and Antigravity have provider-owned agent adapters;
@@ -90,6 +90,13 @@ a deployed or production-validated service.
   the Codex and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge remain unavailable for project work and show that
   prerequisite.
+- A single workspace panel keeps Files, Side chats and Schedules available above
+  closable content tabs. Created files, search previews and side conversations
+  open alongside the main chat. Text, Markdown and images preview locally;
+  PDF and Office files retain their native external-open flow. Explicit web-link
+  clicks open script-free HTTPS frames; sites that block embedding or require
+  interaction can be opened in the browser. Frames receive no native capabilities,
+  while the application renderer retains its IPC-only network policy.
 - Conversation tabs and two-pane splits arrange durable conversations and
   supported artifacts. Closing a tab leaves work running and discoverable in
   Activity. Projects contain focused chats, shared files and occurrence-tracked

@@ -4,7 +4,6 @@ import { describe, expect, it, vi } from "vitest";
 import type { FableAgentProfile } from "@fable/protocol";
 import { AgentLearningDialog } from "./AgentLearningDialog";
 import { AgentSidebar } from "./AgentSidebar";
-import { AgentWorkspaceHeader } from "./AgentWorkspaceHeader";
 
 const agent: FableAgentProfile = {
   id: "agent-1",
@@ -186,7 +185,7 @@ describe("quiet agent surface", () => {
     );
 
     expect(screen.getByRole("button", { name: "Mira" })).toBeVisible();
-    expect(screen.queryByText("Draft launch copy")).not.toBeInTheDocument();
+    expect(screen.getByText("Draft launch copy")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();
@@ -248,28 +247,4 @@ describe("quiet agent surface", () => {
     expect(screen.getByLabelText("What to repeat")).toBeVisible();
   });
 
-  it("keeps only the computer sidebar toggle in the conversation header", () => {
-    render(
-      <AgentWorkspaceHeader
-        agent={agent}
-        presence="done"
-        attentionCount={1}
-        panelOpen={false}
-        onTogglePanel={vi.fn()}
-      />,
-    );
-
-    expect(screen.getAllByRole("button")).toHaveLength(1);
-    expect(screen.getByRole("status")).toHaveTextContent("Finished");
-    expect(screen.getByRole("status")).toHaveClass("sr-only");
-    expect(screen.queryByRole("button", { name: /Learned work/i })).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: /Open work panel, 1 needs attention/i,
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /agents/i }),
-    ).not.toBeInTheDocument();
-  });
 });

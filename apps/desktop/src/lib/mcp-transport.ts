@@ -10,26 +10,8 @@ import {
   type McpTransport
 } from "@fable/connectors";
 import type { ApprovalResolutionRequest } from "@fable/protocol";
-import {
-  authorizeRuntimeMcpToolCall,
-  closeRuntimeRemoteMcpSession,
-  closeRuntimeMcpProcess,
-  executeRuntimeApprovedMcpToolCall,
-  listenRuntimeMcpFrames,
-  openRuntimeRemoteMcpSession,
-  pollRuntimeRemoteMcpMessages,
-  recordRuntimeMcpDiscovery,
-  prepareRuntimeMcpToolCall,
-  spawnRuntimeMcpProcess,
-  sendRuntimeRemoteMcpFrame,
-  writeRuntimeMcpFrame
-} from "../runtime";
-import type {
-  RuntimeAuthorizedMcpToolCall,
-  RuntimeMcpConnectionDetails,
-  RuntimeMcpToolProposal,
-  RuntimePreparedMcpToolCall
-} from "../runtime";
+import { authorizeRuntimeMcpToolCall, closeRuntimeRemoteMcpSession, closeRuntimeMcpProcess, executeRuntimeApprovedMcpToolCall, listenRuntimeMcpFrames, openRuntimeRemoteMcpSession, pollRuntimeRemoteMcpMessages, recordRuntimeMcpDiscovery, prepareRuntimeMcpToolCall, spawnRuntimeMcpProcess, sendRuntimeRemoteMcpFrame, writeRuntimeMcpFrame } from "../runtime/domains/mcp";
+import type { RuntimeAuthorizedMcpToolCall, RuntimeMcpConnectionDetails, RuntimeMcpToolProposal, RuntimePreparedMcpToolCall } from "../runtime/domains/mcp";
 
 export interface DesktopMcpTransportHandle extends McpTransport {
   readonly sessionId: string;
@@ -46,10 +28,6 @@ export interface DesktopMcpTransportHandle extends McpTransport {
     proposal: RuntimeMcpToolProposal,
     permitId: string
   ): Promise<unknown>;
-}
-
-export interface DesktopMcpDiscoveryTransport extends McpTransport {
-  recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
 }
 
 interface PendingToolResponse {

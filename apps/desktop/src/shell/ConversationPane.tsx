@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   ConversationRoom,
   FableAgentProfile,
@@ -30,8 +30,7 @@ import type { ComposerAttachment } from "../lib/types";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
-import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
-import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { runWorkspaceVoice } from "../lib/workspace-voice";
 import { selectResponder } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
@@ -64,7 +63,7 @@ const ArtifactPreview = lazy(() =>
   })),
 );
 
-export const idleAgentState: NativeAgentState = {
+const idleAgentState: NativeAgentState = {
   transcript: "",
   usage: null,
   running: false,
@@ -93,13 +92,13 @@ export function ConversationPane({
   onPlace,
   onMigrate,
   onNew,
-  onSchedules,
   onComputer,
   onPlugins,
   onProviders,
   onProjectUpdate,
   onDraftReady,
   onOpenWork,
+  headerActions,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -115,7 +114,6 @@ export function ConversationPane({
   onPlace: () => void;
   onMigrate: () => void;
   onNew: (draft?: string) => Promise<string | void>;
-  onSchedules: () => void;
   onComputer: (agentId: string) => void;
   onPlugins: (id?: string) => void;
   onProviders: () => void;
@@ -125,6 +123,7 @@ export function ConversationPane({
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
   onOpenWork?: (id: string) => void;
+  headerActions?: ReactNode;
 }) {
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
   const composer = useScopedComposer({
@@ -283,6 +282,7 @@ export function ConversationPane({
       ),
     }));
   const baseState = liveStates[0]?.state ?? idleAgentState;
+
   const scroll = useConversationScroll(
     `${service.workspaceId}:${view.id}`,
     `${state.revision}:${history?.messages.length}`,
@@ -496,6 +496,7 @@ export function ConversationPane({
   const contextFailure = sessions.find(
     (session) => session.state?.contextFailure,
   )?.state?.contextFailure;
+  const empty = history !== undefined && !history?.messages.length && !liveStates.length && !work.length && !approvals.length && !sideChat;
   const approvalPanel = approvals.length ? (
             <Suspense fallback={null}>
               <div
@@ -558,68 +559,70 @@ export function ConversationPane({
       </Suspense>
     );
   return (
-    <div className="conversation-pane-content">
-      <header className="team-conversation-header">
+    <div className={`conversation-pane-content${empty && !voiceOpen ? " conversation-pane-content--empty" : ""}`}>
+      <header className={`team-conversation-header${headerActions ? " team-conversation-header--with-mode" : ""}`}>
         <div className="team-conversation-identity">
           <ProfileAgentAvatar
             agent={displayAgent}
             iconSize={29}
-            presence={agentPresence(baseState, approvals.length > 0, false, { speaking: voicePhase === "speaking", listening: voicePhase === "listening" || voicePhase === "hearing" })}
+            presence={agentPresence(baseState, approvals.length > 0, false, {
+              speaking: voicePhase === "speaking",
+              listening: voicePhase === "listening" || voicePhase === "hearing",
+            })}
           />
-          <span>
-            <strong>{room.title}</strong>
+          <div className="team-conversation-title">
+            <div className="team-conversation-actions conversation-title-menu">
+              <details
+                ref={optionsRef}
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.currentTarget.open = false;
+                    event.currentTarget.querySelector("summary")?.focus();
+                  }
+                }}
+              >
+                <summary aria-label="Conversation options">
+                  <strong>{room.kind === "direct" && room.title === `Chat with ${displayAgent.name}` ? displayAgent.name : room.title}</strong>
+                  <CaretDown size={12} />
+                </summary>
+                <div
+                  onClick={() => {
+                    if (optionsRef.current) optionsRef.current.open = false;
+                  }}
+                >
+                  <button type="button" onClick={() => void onNew()}>
+                    New conversation
+                  </button>
+                  <button type="button" onClick={onEdit}>
+                    {project
+                      ? "Project settings"
+                      : room.kind === "group"
+                        ? "Edit participants and title"
+                        : "Edit conversation"}
+                  </button>
+                  {!project ? (
+                    <button type="button" onClick={onPlace}>
+                      Place in project…
+                    </button>
+                  ) : null}
+                  {!project && room.kind === "group" ? (
+                    <button type="button" onClick={onMigrate}>
+                      Convert to project…
+                    </button>
+                  ) : null}
+                </div>
+              </details>
+            </div>
             {sideChat ? (
               <small className="side-chat-marker">
                 Side Chat · separate conversation
               </small>
             ) : null}
-          </span>
+          </div>
         </div>
-        <div className="team-conversation-actions">
-          <button
-            type="button"
-            aria-label={`Open ${displayAgent.name}'s computer`}
-            onClick={() => onComputer(displayAgent.id)}
-          >
-            <Desktop size={18} />
-          </button>
-          <details ref={optionsRef} onKeyDown={(event) => {
-            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); }
-          }}>
-            <summary aria-label="Conversation options">
-              <DotsThree size={22} />
-            </summary>
-            <div onClick={() => { if (optionsRef.current) optionsRef.current.open = false; }}>
-              <button type="button" onClick={() => void onNew()}>
-                New conversation
-              </button>
-              <button type="button" onClick={() => setMemoryOpen(true)}>
-                Save conclusion to Memory…
-              </button>
-              <button type="button" onClick={onEdit}>
-                Edit{" "}
-                {project
-                  ? "project"
-                  : room.kind === "group"
-                    ? "participants and title"
-                    : "conversation"}
-              </button>
-              {!project ? (
-                <button type="button" onClick={onPlace}>
-                  Place in project…
-                </button>
-              ) : null}
-              {!project && room.kind === "group" ? (
-                <button type="button" onClick={onMigrate}>
-                  Convert to project…
-                </button>
-              ) : null}
-              <button type="button" onClick={onSchedules}>
-                Schedules
-              </button>
-            </div>
-          </details>
-        </div>
+        {headerActions}
       </header>
       {voiceOpen && active ? <Suspense fallback={<p role="status">Opening voice…</p>}><VoiceConversation
         key={`${service.workspaceId}:${room.id}:${recipientId}:${profile?.modelId}`}
@@ -642,14 +645,6 @@ export function ConversationPane({
             <p className="team-empty" role="status">
               Loading conversation…
             </p>
-          ) : !history?.messages.length && !liveStates.length && !pendingTurns.length ? (
-            <div className="team-conversation-welcome">
-              <h1>
-                {room.kind === "group"
-                  ? "Message the team"
-                  : `Message ${displayAgent.name}`}
-              </h1>
-            </div>
           ) : null}
           <ConversationFeed
             messages={history?.messages ?? []}
@@ -740,6 +735,7 @@ export function ConversationPane({
         </div>
       </div>
       <div className="conversation-pane-composer">
+        {empty ? <div className="team-conversation-welcome"><h1>What would you like to work on?</h1></div> : null}
         {scroll.showLatest ? (
           <button
             type="button"
@@ -750,6 +746,9 @@ export function ConversationPane({
           </button>
         ) : null}
         <Composer
+          secondaryControlsInMenu
+          onConnectProvider={onProviders}
+          onSaveConclusion={latestConclusion ? () => setMemoryOpen(true) : undefined}
           composerRef={composerRef}
           fileInputRef={fileInput}
           composerValue={composer.text}
@@ -805,13 +804,7 @@ export function ConversationPane({
           onSelectModel={(modelId) => {
             if (profile) runtime.updateAgent(profile.id, { modelId });
           }}
-          placeholder={
-            room.kind === "group"
-              ? project
-                ? "Message the project…"
-                : "Message the group…"
-              : `Message ${displayAgent.name}…`
-          }
+          placeholder="Message…"
           inThread
           isWorking={running.length > 0}
           allowQueue

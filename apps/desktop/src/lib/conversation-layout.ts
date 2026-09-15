@@ -6,7 +6,7 @@ import type {
 } from "@fable/protocol";
 
 /** View identity resolves an existing object; it never creates a conversation. */
-export function referenceForView(workspaceId: string, view: WorkspaceView): ObjectReference {
+function referenceForView(workspaceId: string, view: WorkspaceView): ObjectReference {
   return view.kind === "conversation"
     ? { workspaceId, kind: "conversation", id: view.conversationId }
     : { workspaceId, kind: "file", id: JSON.stringify([view.agentId, view.output]) };

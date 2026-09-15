@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CollaborationWorkItem, WorkOutput } from "@fable/protocol";
+import type { CollaborationWorkItem } from "@fable/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 import { WorkStatusBadge } from "./WorkStatusBadge";
 import "./work.css";
@@ -196,13 +196,4 @@ export function WorkList({
         ))}
     </ol>
   );
-}
-
-/** Promotion callback for one explicitly selected conclusion. */
-export interface WorkOutputPromotion {
-  (
-    output: WorkOutput,
-    work: CollaborationWorkItem,
-    value: string,
-  ): void | Promise<void>;
 }

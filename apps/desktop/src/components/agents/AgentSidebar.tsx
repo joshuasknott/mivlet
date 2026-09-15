@@ -86,6 +86,7 @@ export function AgentSidebar({
 }) {
   const [query, setQuery] = useState("");
   const sidebar = useRef<HTMLElement>(null);
+
   useEffect(() => {
     setQuery("");
     const frame = requestAnimationFrame(() => sidebar.current?.querySelector<HTMLElement>('.agent-row__select[aria-current="page"]')?.scrollIntoView?.({ block: "nearest" }));
@@ -142,13 +143,13 @@ export function AgentSidebar({
     >
       <div className="agent-sidebar__topline">
         <Brand className="agent-sidebar__brand" />
-        {onToggleCollapsed ? (
+        {collapsed && onToggleCollapsed ? (
           <button
             className="agent-sidebar__collapse"
             type="button"
-            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
-            title={collapsed ? "Expand navigation" : "Collapse navigation"}
-            aria-expanded={!collapsed}
+            aria-label="Expand navigation"
+            title="Expand navigation"
+            aria-expanded={false}
             onClick={onToggleCollapsed}
           >
             <SidebarSimple size={18} />
@@ -324,6 +325,7 @@ export function AgentSidebar({
                   />
                   <span className="agent-row__copy">
                     <strong>{agent.name}</strong>
+                    {preview?.message ? <span className="agent-row__preview" title={preview.message}>{preview.message}</span> : null}
                   </span>
                   {(preview && preview.status !== "idle") ||
                   completions[agent.id]?.unread ? (

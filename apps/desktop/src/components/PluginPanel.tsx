@@ -1,15 +1,4 @@
-import { PluginOverview } from "./marketplace/PluginOverview";
-import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
 import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
-import { useMemo, useRef, useState } from "react";
-import { BuiltinPluginCard } from "./marketplace/BuiltinPluginCard";
-import { BuiltinPluginDetails } from "./marketplace/BuiltinPluginDetails";
-import { useBuiltinPlugins } from "./marketplace/useBuiltinPlugins";
-import { builtinPluginEntries } from "../lib/builtin-plugins";
-import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
-import { remoteConnectorFor } from "./marketplace/remote-connectors";
-import { connectorConnectionsChanged } from "../lib/connector-connections";
-import { connectorErrorMessage } from "../lib/connector-errors";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
@@ -19,25 +8,34 @@ import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { ConnectorIcon } from "./ConnectorIcon";
+import { useMemo, useRef, useState } from "react";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
+import { builtinPluginEntries } from "../lib/builtin-plugins";
+import { ConnectorIcon } from "./ConnectorIcon";
+import { BuiltinPluginCard } from "./marketplace/BuiltinPluginCard";
+import { BuiltinPluginDetails } from "./marketplace/BuiltinPluginDetails";
 import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
+import { PluginDetailHeader } from "./marketplace/PluginDetailHeader";
+import { PluginOverview } from "./marketplace/PluginOverview";
+import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
+import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
 import {
   findMarketplaceConnector,
   marketplaceConnectorSections,
   type MarketplaceConnectorEntry,
 } from "./marketplace/marketplace-catalog";
+import { remoteConnectorFor } from "./marketplace/remote-connectors";
+import { useBuiltinPlugins } from "./marketplace/useBuiltinPlugins";
+import { useConnectorOperation } from "./marketplace/useConnectorOperation";
+import { LocalMcpSettings } from "./settings/LocalMcpSettings";
 
-const INSTALLED_CONNECTOR_PRIORITY = [
-  "gmail",
-  "google-drive",
-  "slack",
-  "github",
-  "google-calendar",
-  "notion",
-  "linear",
-  "vercel",
-];
+const CONNECTOR_PRIORITY = ["gmail", "google-drive", "google-calendar", "github", "vercel", "slack", "notion", "linear"];
+
+function prefersRemoteConnector(id: string | null, connector?: ConnectorManifest | null) {
+  return Boolean(id && remoteConnectorFor(id)) &&
+    (connector?.connectionRoute === "remote" || (!connector?.account &&
+      connector?.status !== "connected"));
+}
 
 /**
  * Marketplace directory backed by native manifests and official remote setup
@@ -69,13 +67,11 @@ export function PluginPanel({
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const [toolServersOpen, setToolServersOpen] = useState(false);
+  const [toolServerStatus, setToolServerStatus] = useState("");
   const [readiness, setReadiness] = useState<"available" | "connected" | "attention" | "planned">("available");
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(initialConnectorId ?? null);
-  const [useRemote, setUseRemote] = useState(() => {
-    const connector = manifests.find((candidate) => candidate.id === initialConnectorId);
-    return Boolean(initialConnectorId && remoteConnectorFor(initialConnectorId)) && (connector?.connectionRoute === "remote" || (!connector?.account && (!connector || ["configured", "unconfigured", "needs-auth"].includes(connector.status))));
-  });
   const detailModalRef = useRef<HTMLDivElement>(null);
   const detailCloseRef = useRef<HTMLButtonElement>(null);
   const builtin = useBuiltinPlugins(workspaceId);
@@ -101,6 +97,8 @@ export function PluginPanel({
       (selectedEntryId ? manifestById.get(selectedEntryId) : undefined) ?? null,
     [manifestById, selectedEntryId],
   );
+
+  const useRemote = prefersRemoteConnector(selectedEntryId, selectedConnector);
 
   useModalFocusTrap({
     active: selectedEntry !== null || selectedBuiltinEntry !== null,
@@ -165,8 +163,8 @@ export function PluginPanel({
               .includes(normalized)),
       )
       .sort((left, right) => {
-        const leftIndex = INSTALLED_CONNECTOR_PRIORITY.indexOf(left.id);
-        const rightIndex = INSTALLED_CONNECTOR_PRIORITY.indexOf(right.id);
+        const leftIndex = CONNECTOR_PRIORITY.indexOf(left.id);
+        const rightIndex = CONNECTOR_PRIORITY.indexOf(right.id);
         return (
           (leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex) -
           (rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex)
@@ -178,9 +176,7 @@ export function PluginPanel({
   const openEntry = (entry: MarketplaceConnectorEntry) => {
     setSelectedEntryId(entry.id);
     const connector = manifestById.get(entry.id);
-    const remote = Boolean(remoteConnectorFor(entry.id)) && (connector?.connectionRoute === "remote" || (!connector?.account && (!connector || ["configured", "unconfigured", "needs-auth"].includes(connector.status))));
-    setUseRemote(remote);
-    if (connector && !remote) onSelect(connector);
+    if (connector && !prefersRemoteConnector(entry.id, connector)) onSelect(connector);
   };
 
   const renderConnectorRow = (
@@ -193,6 +189,7 @@ export function PluginPanel({
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const connected = connector?.status === "connected" && !!cardDetail && ["connected", "syncing"].includes(cardDetail.className);
     const needsReconnect =
+      (connector?.status === "needs-auth" && Boolean(connector.account || connector.connectionRoute === "remote")) ||
       cardDetail?.className === "expired" ||
       cardDetail?.className === "revoked" ||
       cardDetail?.className === "failed" ||
@@ -259,6 +256,7 @@ export function PluginPanel({
           />
         </label>
       </header>
+      {workspaceId ? <details className="settings-disclosure" onToggle={(event) => setToolServersOpen(event.currentTarget.open)}><summary>Custom tool servers</summary>{toolServersOpen ? <LocalMcpSettings workspaceId={workspaceId} onStatus={setToolServerStatus} /> : null}{toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}</details> : null}
       <div className="marketplace-readiness" role="group" aria-label="Filter plugins by readiness">{([ ["available", "Available"], ["connected", "Connected"], ["attention", "Needs attention"], ["planned", "Planned"] ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={readiness === value} onClick={() => setReadiness(value)}>{label}</button>)}</div>
       {readiness === "planned" ? <p className="marketplace-section__empty">Planned integrations are not available to connect yet.</p> : null}
       {readiness === "available" ? <section
@@ -307,13 +305,18 @@ export function PluginPanel({
         )}
       </section> : null}
 
-      {visibleBuiltins.length ? (
-        <section
-          className="marketplace-section"
-          aria-labelledby="marketplace-section-built-in"
-        >
-          <h2 id="marketplace-section-built-in">Built-in</h2>
+      {[
+        ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : CONNECTOR_PRIORITY.map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(matchesReadiness) }] : []),
+        ...visibleSections,
+      ].map((section) => {
+        const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
+        const limit = section.id === "featured" ? 6 : 4;
+        const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
+        const remaining = section.connectors.slice(limit);
+        return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
+          <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
           <div className="marketplace-connector-grid">
+            {section.id === "featured" ? (<>
             {visibleBuiltins.map((entry) => (
               <BuiltinPluginCard
                 key={entry.id}
@@ -323,7 +326,10 @@ export function PluginPanel({
                 onOpen={() => setSelectedEntryId(entry.id)}
               />
             ))}
+            </>) : null}
+            {shown.map((entry) => renderConnectorRow(entry, section.id))}
           </div>
+          {section.id === "featured" ? (<>
           {builtin.plugins === null ? (
             <p
               className="marketplace-section__empty"
@@ -332,24 +338,11 @@ export function PluginPanel({
               {builtin.loadError
                 ? builtin.loadError
                 : workspaceId
-                  ? "Built-in plugin settings are unavailable right now. Open the desktop app to manage Computer Use."
+                  ? "Computer Use settings are unavailable right now. Open the desktop app to manage Computer Use."
                   : "Open the desktop app to manage Computer Use."}
             </p>
           ) : null}
-        </section>
-      ) : null}
-
-      {[
-        ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : ["gmail", "github", "google-drive", "slack", "notion", "google-calendar", "linear", "vercel"].map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(matchesReadiness) }] : []),
-        ...visibleSections,
-      ].map((section) => {
-        const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
-        const limit = section.id === "featured" ? 6 : 4;
-        const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
-        const remaining = section.connectors.slice(limit);
-        return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
-          <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
-          <div className="marketplace-connector-grid">{shown.map((entry) => renderConnectorRow(entry, section.id))}</div>
+          </>) : null}
           {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
             {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
             {expanded ? "Show less" : `See ${remaining.slice(0, 2).map((entry) => entry.name).join(", ")}${remaining.length > 2 ? ", and more" : ""}`}
@@ -406,11 +399,11 @@ export function PluginPanel({
               <TokenPluginDetails key={`${workspaceId}-${selectedEntry.id}`} plugin={tokenPluginFor(selectedEntry.id)!} connector={selectedConnector} workspaceId={workspaceId} onUseConnector={onUseConnector} onDisconnect={onDisconnect} accounts={accounts[selectedEntry.id]} onSwitchAccount={onSwitchAccount} titleId={`connector-detail-${selectedEntry.id}`} />
             ) : selectedEntry && (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
-                titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} onSaved={() => { if (workspaceId) connectorConnectionsChanged(workspaceId); }} />
+                titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} />
             ) : selectedConnector ? (
               <>
               <ConnectorDetails
-                key={selectedConnector.id}
+                key={`${workspaceId}-${selectedConnector.id}`}
                 connector={selectedConnector}
                 onUseConnector={onUseConnector}
                 onDisconnect={onDisconnect}
@@ -490,30 +483,17 @@ function ConnectorDetails({
   onConnect: (connector: ConnectorManifest) => void | Promise<void>;
   titleId?: string;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [notice, setNotice] = useState("");
-  const operation = useRef(false);
+  const { busy, notice, setNotice, run } = useConnectorOperation();
   const detail = resolveDetailedStatus(connector);
   const connected = connector.status === "connected";
-  const needsRepair = ["failed", "permission-limited", "expired", "revoked", "unverified"].includes(detail.className);
+  const needsRepair = ["failed", "permission-limited", "expired", "revoked", "unverified"].includes(detail.className)
+    || (connector.status === "needs-auth" && Boolean(connector.account));
   const ready = connected && !needsRepair;
   const configured = !["configuration-required", "unavailable"].includes(detail.className);
-  const run = async (task: () => void | Promise<void>) => {
-    if (operation.current) return;
-    operation.current = true; setBusy(true); setNotice("");
-    try { await task(); }
-    catch (error) { setNotice(connectorErrorMessage(error)); }
-    finally { operation.current = false; setBusy(false); }
-  };
   const granted = connector.scopes?.filter((scope) => scope.granted) ?? [];
 
   return <article className="connector-detail" aria-label={`${connector.name} details`} aria-busy={busy}>
-    <p className="connector-detail__eyebrow">Plugins</p>
-    <div className="connector-detail__header">
-      <span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>
-      <div><h2 id={titleId}>{connector.name}</h2><p>{findMarketplaceConnector(connector.id)?.description ?? connector.name}</p></div>
-      <span className={`connector-detail__status connector-detail__status--${detail.className}`}>{busy ? "Connecting…" : ready ? "Connected" : detail.label}</span>
-    </div>
+    <PluginDetailHeader name={connector.name} description={findMarketplaceConnector(connector.id)?.description ?? connector.name} icon={<span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>} titleId={titleId} status={busy ? "Connecting…" : ready ? "Connected" : detail.label} statusClass={detail.className} />
 
     {connector.account ? <p className="connector-detail__account">Active connection: {connector.account.email ?? connector.account.displayName}</p> : null}
     {connected && accounts.length > 1 ? <label className="connector-detail__account">

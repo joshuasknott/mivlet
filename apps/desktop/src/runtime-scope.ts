@@ -7,7 +7,7 @@ export type RuntimeDataScope = Record<string, unknown> & {
   workspaceId: string;
 };
 
-export const PREVIEW_RUNTIME_DATA_SCOPE: RuntimeDataScope = {
+const PREVIEW_RUNTIME_DATA_SCOPE: RuntimeDataScope = {
   workspaceId: "preview-default"
 };
 

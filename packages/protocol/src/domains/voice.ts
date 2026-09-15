@@ -45,9 +45,6 @@ export interface VoiceInputState {
   errorCode: VoiceFailureCode | null;
 }
 
-/** @deprecated Use VoiceInputState. */
-export type VoiceRecordingState = VoiceInputState["status"];
-
 /** A call authorizes speech processing only; it never grants agent tool authority. */
 export interface VoiceConversationScope {
   workspaceId: string;
