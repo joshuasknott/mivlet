@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { chunk, fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 function anthropic(id, parts, stop = "end_turn") {
   return [

@@ -1,20 +1,12 @@
 import assert from "node:assert/strict";
-import { before, test } from "node:test";
-import { existsSync } from "node:fs";
 import {
-  AgentHostProcess,
   chunk,
-  executable,
   fixtureInput,
   sendChunks,
   usageChunk,
   withHost,
 } from "./support/host-process.mjs";
-
-before(() => {
-  assert.equal(process.platform, "win32", "the acceptance host is the bundled Windows executable");
-  assert.ok(existsSync(executable), `bundled agent host is missing: ${executable}`);
-});
+import { test } from "./support/windows-host.mjs";
 
 test("runs a tool turn through two model requests and preserves text before tool order", async () => {
   await withHost(async (host) => {

@@ -1,11 +1,12 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WINDOWS_HOST_SKIP_REASON } from "./windows-host.mjs";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-export const executable = resolve(testDirectory, "../../../../apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe");
+const executable = resolve(testDirectory, "../../../../apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe");
 
 function timeoutError(label, events) {
   const recent = events.slice(-8).map(event => JSON.stringify(event)).join("\n");
@@ -18,8 +19,15 @@ export class AgentHostProcess {
   #frames = [];
   #waiters = [];
   #closed;
+  #spawnError;
 
   constructor(args = [], env = {}) {
+    if (process.platform !== "win32") {
+      throw new Error(WINDOWS_HOST_SKIP_REASON);
+    }
+    if (!existsSync(executable)) {
+      throw new Error(`bundled agent host is missing: ${executable}`);
+    }
     this.directory = mkdtempSync(join(tmpdir(), "mivlet-agent-host-test-"));
     this.child = spawn(executable, args, {
       cwd: this.directory,
@@ -28,8 +36,20 @@ export class AgentHostProcess {
       windowsHide: true,
     });
     this.#closed = new Promise((resolve) => {
-      this.child.once("close", (code, signal) => resolve({ code, signal }));
+      const finish = (result) => resolve(result);
+      this.child.once("close", (code, signal) => finish({ code, signal }));
+      this.child.once("error", (error) => {
+        this.#spawnError = error;
+        for (const waiter of this.#waiters.splice(0)) {
+          clearTimeout(waiter.timer);
+          waiter.reject(error);
+        }
+        finish({ code: null, signal: null });
+      });
     });
+    if (!this.child.stdout) {
+      throw new Error(`failed to spawn ${executable}`);
+    }
     this.child.stdout.setEncoding("utf8");
     let buffer = "";
     this.child.stdout.on("data", (chunk) => {
@@ -68,6 +88,7 @@ export class AgentHostProcess {
   }
 
   next(predicate, label = "host event", timeoutMs = 12_000) {
+    if (this.#spawnError) return Promise.reject(this.#spawnError);
     const index = this.#events.findIndex(predicate);
     if (index >= 0) return Promise.resolve(this.#events.splice(index, 1)[0]);
     return new Promise((resolve, reject) => {

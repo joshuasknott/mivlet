@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { chunk, fixtureInput, sendChunks, withHost } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 // OpenRouter speaks the OpenAI-compatible chat wire, so the embedded host
 // routes it through `@opencode/ai/providers/openai-compatible`. These fixtures

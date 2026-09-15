@@ -1,12 +1,6 @@
 import assert from "node:assert/strict";
-import { before, test } from "node:test";
-import { existsSync } from "node:fs";
-import { AgentHostProcess, executable } from "./support/host-process.mjs";
-
-before(() => {
-  assert.equal(process.platform, "win32", "the acceptance host is the bundled Windows executable");
-  assert.ok(existsSync(executable), `bundled agent host is missing: ${executable}`);
-});
+import { AgentHostProcess } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 async function withMcpHost(callback, env) {
   const host = new AgentHostProcess(["--mcp"], env);
