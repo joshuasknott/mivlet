@@ -2,7 +2,7 @@
 //! user decision. Side-effecting commands verify these records immediately
 //! before dispatch, so model-produced approval JSON is never authority.
 
-use std::{fs, path::Path};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -99,6 +99,7 @@ fn request_fingerprint(request: &ApprovalRequest) -> Result<String, String> {
     Ok(digest.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 
+#[cfg(test)]
 fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
     if let Some(records) = crate::store::read_document(path)? {
         return Ok(records);
@@ -106,7 +107,7 @@ fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let contents = fs::read_to_string(path)
+    let contents = std::fs::read_to_string(path)
         .map_err(|_| "Mivlet could not read execution approvals.".to_string())?;
     if contents.trim().is_empty() {
         return Ok(Vec::new());
@@ -115,38 +116,38 @@ fn read_records(path: &Path) -> Result<Vec<ExecutionApproval>, String> {
         .map_err(|_| "Mivlet could not parse execution approvals.".to_string())
 }
 
-fn write_records(path: &Path, records: &[ExecutionApproval]) -> Result<(), String> {
-    if crate::store::write_document(path, &records)? {
-        return Ok(());
-    }
-    let encoded = serde_json::to_vec_pretty(records)
-        .map_err(|_| "Mivlet could not encode execution approvals.".to_string())?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, encoded)
-        .map_err(|_| "Mivlet could not save execution approvals.".to_string())?;
-    fs::rename(&temporary, path)
-        .map_err(|_| "Mivlet could not commit execution approvals.".to_string())
+fn mutate_records<R>(
+    path: &Path,
+    update: impl FnOnce(&mut Vec<ExecutionApproval>) -> Result<R, String>,
+) -> Result<R, String> {
+    crate::store::update_document(path, |current| {
+        let mut records = current.unwrap_or_default();
+        let result = update(&mut records)?;
+        Ok((Some(records), result))
+    })
 }
 
 pub(crate) fn record_execution_decision(
     path: &Path,
     response: &ApprovalResolutionResponse,
 ) -> Result<(), String> {
-    let mut records = read_records(path)?;
-    records.retain(|record| record.request_id != response.effective_request.id);
-    records.insert(
-        0,
-        ExecutionApproval {
-            request_id: response.effective_request.id.clone(),
-            request_fingerprint: request_fingerprint(&response.effective_request)?,
-            decision: response.audit_entry.decision.clone(),
-            decided_at: response.audit_entry.decided_at.clone(),
-            consumed_at: None,
-            invalidated_at: None,
-        },
-    );
-    records.truncate(500);
-    write_records(path, &records)
+    let fingerprint = request_fingerprint(&response.effective_request)?;
+    mutate_records(path, |records| {
+        records.retain(|record| record.request_id != response.effective_request.id);
+        records.insert(
+            0,
+            ExecutionApproval {
+                request_id: response.effective_request.id.clone(),
+                request_fingerprint: fingerprint,
+                decision: response.audit_entry.decision.clone(),
+                decided_at: response.audit_entry.decided_at.clone(),
+                consumed_at: None,
+                invalidated_at: None,
+            },
+        );
+        records.truncate(500);
+        Ok(())
+    })
 }
 
 /// Revoke approval permits that belonged to an interrupted attempt.
@@ -162,33 +163,43 @@ pub(crate) fn invalidate_execution_approvals(
     if request_ids.is_empty() {
         return Ok(());
     }
-    let mut records = read_records(path)?;
-    let mut changed = false;
-    for record in &mut records {
-        if request_ids.contains(&record.request_id)
-            && record.consumed_at.is_none()
-            && record.invalidated_at.is_none()
-        {
-            record.invalidated_at = Some(invalidated_at.to_string());
-            changed = true;
+    mutate_records(path, |records| {
+        for record in records {
+            if request_ids.contains(&record.request_id)
+                && record.consumed_at.is_none()
+                && record.invalidated_at.is_none()
+            {
+                record.invalidated_at = Some(invalidated_at.to_string());
+            }
         }
-    }
-    if changed {
-        write_records(path, &records)?;
-    }
-    Ok(())
+        Ok(())
+    })
 }
 
 /// Consume a persisted one-time permit if it is still within the freshness
 /// fence. `consumed_at` is wall-clock consume time, never the decision
 /// timestamp: elapsed time is `consumed_at - decided_at`.
+///
+/// Check-and-set of `consumed_at` runs inside one document transaction (or the
+/// test-file lock), so two concurrent callers cannot both observe an unused
+/// permit and both succeed.
 pub(crate) fn verify_and_consume_execution_approval(
     path: &Path,
     request: &ApprovalRequest,
     consumed_at: &str,
 ) -> Result<(), String> {
     let expected = request_fingerprint(request)?;
-    let mut records = read_records(path)?;
+    mutate_records(path, |records| {
+        consume_unconsumed_record(records, request, &expected, consumed_at)
+    })
+}
+
+fn consume_unconsumed_record(
+    records: &mut [ExecutionApproval],
+    request: &ApprovalRequest,
+    expected: &str,
+    consumed_at: &str,
+) -> Result<(), String> {
     let record = records
         .iter_mut()
         .find(|record| record.request_id == request.id)
@@ -224,13 +235,14 @@ pub(crate) fn verify_and_consume_execution_approval(
         return Err("Execution blocked: this approval is stale.".to_string());
     }
     record.consumed_at = Some(consumed_at.to_string());
-    write_records(path, &records)
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::{ApprovalAuditEntry, ApprovalRequest, ApprovalResolutionResponse};
+    use std::fs;
 
     fn request() -> ApprovalRequest {
         ApprovalRequest {
@@ -386,6 +398,60 @@ mod tests {
             verify_and_consume_execution_approval(&path, &approved, &wall_clock_consumed_at())
                 .expect_err("TTL must elapse against wall-clock consume time");
         assert!(error.contains("stale"), "{error}");
+    }
+
+    #[test]
+    fn concurrent_consume_of_the_same_permit_succeeds_once() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = std::sync::Arc::new(directory.path().join("approvals.json"));
+        let approved = std::sync::Arc::new(request());
+        record_execution_decision(&path, &response((*approved).clone())).expect("record");
+        let workers = 16;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+        let successes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let already_consumed = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                let path = std::sync::Arc::clone(&path);
+                let approved = std::sync::Arc::clone(&approved);
+                let barrier = std::sync::Arc::clone(&barrier);
+                let successes = std::sync::Arc::clone(&successes);
+                let already_consumed = std::sync::Arc::clone(&already_consumed);
+                scope.spawn(move || {
+                    barrier.wait();
+                    match verify_and_consume_execution_approval(
+                        &path,
+                        &approved,
+                        "2026-06-27T12:00:02Z",
+                    ) {
+                        Ok(()) => {
+                            successes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        Err(error) if error.contains("already consumed") => {
+                            already_consumed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                        Err(error) => panic!("unexpected consume error: {error}"),
+                    }
+                });
+            }
+        });
+        assert_eq!(
+            successes.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "exactly one concurrent consume may succeed"
+        );
+        assert_eq!(
+            already_consumed.load(std::sync::atomic::Ordering::SeqCst),
+            workers - 1
+        );
+        let records = read_records(&path).expect("read");
+        assert_eq!(
+            records
+                .iter()
+                .filter(|record| record.request_id == approved.id && record.consumed_at.is_some())
+                .count(),
+            1
+        );
     }
 
     #[test]
