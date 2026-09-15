@@ -60,7 +60,8 @@ or when a secret that is supposed to stay server-side leaks:
 2. The hosted-runner root Bearer credential is a generation-unfenced superuser
    on process and browser routes, not only on provision/destroy.
 3. The broker can run public HTTPS with in-memory OAuth state if the Worker is
-   labeled `local`.
+   labeled `local`. **Closed:** unlabeled/`local` plus a public URL, and
+   `memory` plus public HTTPS, now return 503.
 4. Connector OAuth tokens, especially GitHub `repo`, are broader than the
    documented read-only GitHub surface.
 5. Durable conversation tool arguments and results are re-fed to models without
@@ -198,6 +199,10 @@ comment is not a runtime control.
 is HTTPS and not loopback. Treat unlabeled or `local` + public URL as 503.
 Add a deploy gate that rejects non-durable public brokers. Keep the existing
 durable encryption-key and DO-binding checks.
+
+**Status.** Runtime gate in `apps/broker/src/worker.ts`: unlabeled/`local` plus
+a public URL returns 503; `memory` plus public HTTPS returns 503. Staging and
+production still require durable storage, encryption key, and DO bindings.
 
 ### H4 — GitHub OAuth token is full `repo` while the product surface is read-only
 
@@ -907,6 +912,7 @@ advertised image input.
 | Hosted runner URL not public HTTPS origin | Desktop and Convex reject |
 | Broker durable mode missing DO bindings or encryption key | Worker 503 `configuration-required` |
 | Broker staging/production + memory | Worker 503 |
+| Broker `local`/unlabeled + public URL, or `memory` + public HTTPS | Worker 503 `configuration-required` |
 | Clerk issuer missing on desktop | Identity configuration-required |
 | Clerk production audience missing | Configuration-required |
 | Remote MCP private IP / DNS to private | Rejected; HTTP client pins resolved addrs; no redirects |
@@ -919,9 +925,9 @@ advertised image input.
 | Background screenshot | Disabled (desktop-crop fallback risk) |
 
 Gaps in this table are H1 (nonce while the signed generation stays ready),
-H2 (Bearer generation skip on execution routes), H3 (local+public memory),
+H2 (Bearer generation skip on execution routes),
 H7 (hosted-browser DNS), and M23 (Convex mock issuer as a deploy footgun,
-not an identity bypass).
+not an identity bypass). H3 (local+public memory) is now a Worker 503.
 
 ---
 
@@ -969,7 +975,7 @@ When these areas change, add or extend tests that:
   success and expect rejection once nonce consumption exists.
 - Call process/browser routes with root Bearer and expect 401 if H2 is fixed.
 - Boot a Worker with `FABLE_BROKER_ENVIRONMENT=local`, memory backend, and an
-  HTTPS public URL; expect 503.
+  HTTPS public URL; expect 503 (`apps/broker/src/worker.test.ts`).
 - Persist a tool result containing a non-`sk-` secret and assert it is not in
   the next provider payload.
 - Authorize GitHub and assert requested scopes no longer include write-capable
@@ -1000,7 +1006,8 @@ Do not weaken those assertions to pass a suite.
 
 1. Consume hosted capability nonces (H1) and stop treating root Bearer as an
    execution credential (H2).
-2. Fail closed on public broker + memory (H3).
+2. Fail closed on public broker + memory (H3) — Worker 503 on unlabeled/`local`
+   plus a public URL, and on `memory` plus public HTTPS.
 3. Cut GitHub OAuth to read-only power (H4).
 4. Redact tool I/O at the durable conversation boundary (H5).
 5. Bind desktop redeem (H6 / M1) and pin hosted-browser DNS (H7).

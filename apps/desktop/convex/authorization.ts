@@ -24,6 +24,12 @@ export async function requireActiveMembership(ctx: any, workspaceId: string) {
   return { ...principal, workspace, membership };
 }
 
+/**
+ * Soft device binding: the claimed `deviceId` must be this Clerk principal's
+ * active device and workspace link. The stored `publicKey` is not challenged
+ * (no proof-of-possession). Ambiguous, foreign, revoked, or missing records
+ * fail closed. Native still matches the local hosted scope separately.
+ */
 export async function requireActiveDevice(ctx: any, workspaceId: string, deviceId: string) {
   const authz = await requireActiveMembership(ctx, workspaceId);
   const devices = await ctx.db.query("account_devices").withIndex("by_device", (q: any) => q.eq("deviceId", deviceId)).collect();
