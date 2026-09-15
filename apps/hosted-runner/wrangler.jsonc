@@ -4,6 +4,8 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-08-28",
   "compatibility_flags": ["nodejs_compat"],
+  // Secrets (distinct): FABLE_HOSTED_RUNNER_API_KEY (lifecycle Bearer),
+  // FABLE_HOSTED_RUNNER_SIGNING_KEY (FableCapability HMAC).
   "browser": {
     "binding": "MYBROWSER"
   },

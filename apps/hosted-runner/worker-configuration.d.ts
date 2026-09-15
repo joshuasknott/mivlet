@@ -4,6 +4,7 @@
 interface __BaseEnv_Env {
   MYBROWSER: BrowserRun;
   FABLE_HOSTED_RUNNER_API_KEY: string;
+  FABLE_HOSTED_RUNNER_SIGNING_KEY: string;
   Sandbox: DurableObjectNamespace<import("./src/index").Sandbox>;
   COMPUTER_AUTHORITY: DurableObjectNamespace<
     import("./src/index").ComputerAuthority
@@ -27,7 +28,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 };
 declare namespace NodeJS {
   interface ProcessEnv extends StringifyValues<
-    Pick<Cloudflare.Env, "FABLE_HOSTED_RUNNER_API_KEY">
+    Pick<Cloudflare.Env, "FABLE_HOSTED_RUNNER_API_KEY" | "FABLE_HOSTED_RUNNER_SIGNING_KEY">
   > {}
 }
 

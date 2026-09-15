@@ -12,6 +12,7 @@ import {
   validateLaunchRequest,
   validateProcessId
 } from "./contracts";
+import { consumeCapabilityNonceRecord, nextEnsureGeneration } from "./capability-nonce";
 
 interface ComputerRow extends Record<string, SqlStorageValue> {
   computer_id: string;
@@ -48,7 +49,7 @@ export class ComputerAuthority extends DurableObject<Env> {
   async ensure(rawComputerId: string): Promise<HostedComputerSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const previous = this.readComputer();
-    const generation = previous?.generation ?? 1;
+    const generation = nextEnsureGeneration(previous?.generation);
     const now = new Date().toISOString();
     this.writeComputer({ computerId, lifecycle: "provisioning", keepAlive: true, generation, updatedAt: now });
     const sandbox = this.sandbox(computerId);
@@ -84,21 +85,33 @@ export class ComputerAuthority extends DurableObject<Env> {
   }
 
   /** Generation fence for sibling computer-scoped services such as Browser Run. */
-  async requireReady(rawComputerId: string, expectedGeneration?: number): Promise<number> {
+  async requireReady(rawComputerId: string, expectedGeneration: number): Promise<number> {
     validateComputerId(rawComputerId);
+    this.requireCapabilityGeneration(expectedGeneration);
     const computer = this.readComputer();
-    if (
-      !computer
-      || computer.lifecycle !== "ready"
-      || !computer.keep_alive
-      || (expectedGeneration !== undefined && computer.generation !== expectedGeneration)
-    ) {
-      throw this.operationError(expectedGeneration === undefined ? "computer-not-ready" : "capability-stale");
-    }
+    if (!computer) throw this.operationError("capability-stale");
     return computer.generation;
   }
 
-  async launch(rawComputerId: string, rawRequest: unknown, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async consumeCapabilityNonce(
+    rawComputerId: string,
+    nonce: string,
+    expectedGeneration: number,
+    expiresAt: number
+  ): Promise<void> {
+    validateComputerId(rawComputerId);
+    this.requireCapabilityGeneration(expectedGeneration);
+    consumeCapabilityNonceRecord(
+      (query, ...params) => {
+        this.ctx.storage.sql.exec(query, ...params);
+      },
+      nonce,
+      expiresAt,
+      Date.now()
+    );
+  }
+
+  async launch(rawComputerId: string, rawRequest: unknown, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const request = validateLaunchRequest(rawRequest);
@@ -138,7 +151,7 @@ export class ComputerAuthority extends DurableObject<Env> {
     }
   }
 
-  async inspect(rawComputerId: string, rawProcessId: string, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async inspect(rawComputerId: string, rawProcessId: string, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const processId = validateProcessId(rawProcessId);
@@ -174,7 +187,7 @@ export class ComputerAuthority extends DurableObject<Env> {
     };
   }
 
-  async kill(rawComputerId: string, rawProcessId: string, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async kill(rawComputerId: string, rawProcessId: string, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const processId = validateProcessId(rawProcessId);
@@ -216,8 +229,10 @@ export class ComputerAuthority extends DurableObject<Env> {
     return getSandbox(this.env.Sandbox, computerId, { keepAlive: true, normalizeId: true });
   }
 
-  private requireCapabilityGeneration(expectedGeneration: number | undefined): void {
-    if (expectedGeneration === undefined) return;
+  private requireCapabilityGeneration(expectedGeneration: number): void {
+    if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 1) {
+      throw this.operationError("capability-stale");
+    }
     const computer = this.readComputer();
     if (
       !computer
@@ -260,7 +275,13 @@ export class ComputerAuthority extends DurableObject<Env> {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_process_id ON processes(process_id) WHERE process_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_processes_run_id ON processes(run_id);
+      CREATE TABLE IF NOT EXISTS consumed_nonces (
+        nonce TEXT PRIMARY KEY,
+        expires_at INTEGER NOT NULL,
+        consumed_at INTEGER NOT NULL
+      );
       INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (1);
+      INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2);
     `);
   }
 

@@ -66,7 +66,7 @@ owners, telemetry, backups, and access controls.
 
 ## Optional account, sync, or hosted incident
 
-- Revoke the affected session, device, HMAC/root secret, and active capabilities
+- Revoke the affected session, device, HMAC signing secret, service Bearer, and active capabilities
   at the authoritative service.
 - Disable remote writes or hosted provisioning while preserving local work.
 - Check workspace scoping, current membership/device state, idempotency records,
