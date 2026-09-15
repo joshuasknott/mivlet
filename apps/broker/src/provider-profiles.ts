@@ -7,7 +7,7 @@
  * broker is the ONLY process that holds these secrets; the desktop never sees them.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
+import { GITHUB_OAUTH_SCOPES, type BrokerProviderId } from "@fable/connectors";
 
 /**
  * How a provider wants PKCE handled by the broker.
@@ -73,7 +73,7 @@ const GITHUB_PROFILE: ProviderProfile = {
   tokenEndpoint: "https://github.com/login/oauth/access_token",
   revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/token`,
   identityEndpoint: "https://api.github.com/user",
-  scopes: ["read:user", "read:org", "repo"],
+  scopes: [...GITHUB_OAUTH_SCOPES],
   clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
   clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
   pkce: "broker-pkce",

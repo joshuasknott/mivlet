@@ -1,3 +1,4 @@
+import { redactSecretsFromObject, redactSecretsFromString } from "@fable/connectors/agent-runtime";
 import type { Spine } from "@fable/protocol";
 
 export type ConversationThread = Spine.Conversations.Thread;
@@ -217,8 +218,30 @@ export function createDurableRunWriter(
         assistant = null;
         transcriptOffset = latestTranscript.length;
       }
-      await append(record);
+      await append(redactDurableRecord(record));
     }),
     checkpointAssistant: (content, terminal = false) => enqueue(() => checkpoint(content, terminal)),
   };
+}
+
+function redactDurableRecord(record: DurableRunRecord): DurableRunRecord {
+  if (record.kind !== "tool-call" && record.kind !== "tool-result" && record.kind !== "error") {
+    return record;
+  }
+  return { ...record, content: redactPersistedToolContent(record.content) };
+}
+
+function redactPersistedToolContent(content: string): string {
+  const trimmed = content.trim();
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    || (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    try {
+      return JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown));
+    } catch {
+      // Marker-free JSON that failed to parse is still scrubbed as text.
+    }
+  }
+  return redactSecretsFromString(content);
 }

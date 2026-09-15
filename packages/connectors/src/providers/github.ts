@@ -106,6 +106,17 @@ export interface GitHubAdapterOptions extends Omit<OAuthClientOptions, "connecto
   fetch?: FetchLike;
 }
 
+/**
+ * Classic GitHub OAuth scopes Mivlet requests. GitHub's `repo` scope is
+ * write-capable (private repository admin, including contents and webhooks) and
+ * is not requested; private-repository reads require a GitHub App registered
+ * with read-only repository permissions rather than a classic OAuth App.
+ */
+export const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"] as const;
+
+/** Classic GitHub OAuth scopes that grant write power Mivlet never exposes. */
+export const GITHUB_DISALLOWED_OAUTH_SCOPES = ["repo", "public_repo", "delete_repo"] as const;
+
 /** Real GitHub REST adapter. The GitHub OAuth App exchange stays at the configured auth broker. */
 export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
   const authBase = new URL(options.authBaseUrl);
@@ -116,7 +127,7 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
     handoffEndpoint: new URL("oauth/github/handoff", authBase).toString(),
     refreshEndpoint: new URL("oauth/github/refresh", authBase).toString(),
     revocationEndpoint: new URL("oauth/github/revoke", authBase).toString(),
-    scopes: ["read:user", "read:org", "repo"]
+    scopes: [...GITHUB_OAUTH_SCOPES]
   });
   const http = new ProviderHttpClient("github", options.apiBaseUrl ?? "https://api.github.com/", options.fetch);
   return {

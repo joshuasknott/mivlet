@@ -6,6 +6,7 @@ import {
   launchRuntimeHostedProcess,
   loadRuntimeHostedComputer,
   navigateRuntimeHostedBrowser,
+  openRuntimeHostedLiveView,
   prepareRuntimeHostedBrowser,
   prepareRuntimeHostedBrowserAction,
   prepareRuntimeHostedProcess,
@@ -285,5 +286,46 @@ describe("hosted computer runtime boundary", () => {
       "FableCapability",
     );
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain("runnerUrl");
+  });
+
+  it("strips Live View secrets from browser snapshots and opens them natively", async () => {
+    setNative(true);
+    const target = {
+      workspaceId: "workspace-a",
+      agentId: "agent-a",
+      deviceId: "device-a",
+    };
+    mocks.invoke.mockResolvedValueOnce({
+      currentUrl: "https://example.com/",
+      title: "Example Domain",
+      previewDataUrl: "data:image/jpeg;base64,/9j/",
+      observationId: "observation-1234567890abcdef",
+      viewport: {
+        scrollX: 0,
+        scrollY: 0,
+        width: 1280,
+        height: 800,
+        documentWidth: 1280,
+        documentHeight: 1600,
+        canScrollUp: false,
+        canScrollDown: true,
+      },
+      navigation: { canGoBack: false, canGoForward: false },
+      controls: [],
+      liveViewUrl: "https://live.browser.run/ui/token?wss=secret",
+      updatedAt: "2026-08-25T12:00:02.000Z",
+    });
+    const snapshot = await snapshotRuntimeHostedBrowser(target);
+    expect(snapshot?.liveViewUrl).toBeUndefined();
+    expect(snapshot?.takeoverAvailable).toBe(true);
+    expect(JSON.stringify(snapshot)).not.toContain("wss=secret");
+    mocks.invoke.mockResolvedValueOnce(undefined);
+    await expect(openRuntimeHostedLiveView(target)).resolves.toBe(true);
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      "hosted_browser_open_live_view",
+      {
+        target,
+      },
+    );
   });
 });

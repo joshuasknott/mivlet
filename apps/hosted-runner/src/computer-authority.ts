@@ -13,6 +13,7 @@ import {
   validateProcessId
 } from "./contracts";
 import { consumeCapabilityNonceRecord, nextEnsureGeneration } from "./capability-nonce";
+import { redactHostedProcessOutput } from "./secret-redact";
 
 interface ComputerRow extends Record<string, SqlStorageValue> {
   computer_id: string;
@@ -181,8 +182,8 @@ export class ComputerAuthority extends DurableObject<Env> {
     const output = await process.output({ encoding: "utf8", maxBytes: 256 * 1024, timeout: 5_000 });
     return {
       ...processSnapshot(this.readRequiredProcess(stored.request_key)),
-      stdout: output.stdout,
-      stderr: output.stderr,
+      stdout: redactHostedProcessOutput(output.stdout),
+      stderr: redactHostedProcessOutput(output.stderr),
       outputTruncated: output.truncated
     };
   }

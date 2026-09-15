@@ -27,6 +27,19 @@ describe("connector catalogue", () => {
     }
   });
 
+  it("requests read-appropriate GitHub scopes and does not label write power as read", () => {
+    const github = connectorCatalog.find((connector) => connector.id === "github");
+    expect(github?.scopes?.map((scope) => scope.id)).toEqual(["read:user", "read:org"]);
+    expect(github?.scopes?.some((scope) => scope.id === "repo" || scope.access !== "read")).toBe(
+      false
+    );
+    const drive = connectorCatalog.find((connector) => connector.id === "google-drive");
+    const driveFile = drive?.scopes?.find(
+      (scope) => scope.id === "https://www.googleapis.com/auth/drive.file"
+    );
+    expect(driveFile?.access).toBe("write");
+  });
+
   it("keeps explicit local files available without authentication", () => {
     expect(connectorCatalog.find((connector) => connector.id === "local-files"))
       .toMatchObject({ status: "connected", authMode: "none", supportsImport: true });

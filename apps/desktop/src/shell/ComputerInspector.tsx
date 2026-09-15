@@ -84,10 +84,11 @@ export function ComputerInspector({
           browserError: browser.error,
           browserUrl: browser.snapshot?.currentUrl,
           browserTitle: browser.snapshot?.title,
-          liveViewUrl: browser.snapshot?.liveViewUrl,
+          liveViewAvailable: browser.snapshot?.takeoverAvailable,
           browserDownload: browser.snapshot?.lastDownload,
           onOpenBrowser: browser.open,
           onRefreshBrowser: browser.refresh,
+          onOpenLiveView: browser.openLiveView,
         }}
         screenPreviewUrl={browser.snapshot?.previewDataUrl}
         onClose={onClose}
