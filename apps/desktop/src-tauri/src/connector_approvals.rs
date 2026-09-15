@@ -321,6 +321,25 @@ pub(crate) fn verify_prepared_connector_action(
     Ok(record)
 }
 
+/// Bind verify/execute to the account captured at prepare time. Selection at
+/// click time is not authority; a switch after preview fails closed.
+pub(crate) fn require_prepared_connector_account(
+    record: &ConnectorApprovalRecord,
+    current_account_id: Option<&str>,
+) -> Result<(), String> {
+    let prepared = record.account_id.trim();
+    if prepared.is_empty() || prepared == "unconnected" {
+        return Err("Connector action was prepared without a connected account.".to_string());
+    }
+    let current = current_account_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if current != Some(prepared) {
+        return Err("Connector account changed after its approval preview.".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn update_connector_action_result(
     path: &Path,
     request_id: &str,
@@ -551,5 +570,39 @@ mod tests {
             }
         });
         assert_eq!(successes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prepared_account_bind_fails_closed_when_selection_switches() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-connector-approval-account-bind-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let prepared = action("person@example.com");
+        let record =
+            record_pending_connector_action(&path, &prepared, "account-1", "person@example.com")
+                .expect("record");
+        assert!(verify_prepared_connector_action(&path, &prepared).is_ok());
+        assert!(require_prepared_connector_account(&record, Some("account-1")).is_ok());
+        let switched = require_prepared_connector_account(&record, Some("account-2")).unwrap_err();
+        assert_eq!(
+            switched,
+            "Connector account changed after its approval preview."
+        );
+        assert!(!switched.contains("account-1"));
+        assert!(!switched.contains("account-2"));
+        assert_eq!(
+            require_prepared_connector_account(&record, None).unwrap_err(),
+            "Connector account changed after its approval preview."
+        );
+        let unconnected =
+            record_pending_connector_action(&path, &prepared, "unconnected", "unconnected account")
+                .expect("unconnected");
+        assert_eq!(
+            require_prepared_connector_account(&unconnected, Some("account-1")).unwrap_err(),
+            "Connector action was prepared without a connected account."
+        );
+        let _ = fs::remove_file(path);
     }
 }

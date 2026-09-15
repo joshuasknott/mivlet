@@ -402,8 +402,11 @@ fn slack_item(value: &Value) -> Option<ConnectorSearchItem> {
 pub(crate) async fn execute(
     app: &tauri::AppHandle,
     action: &ConnectorActionRequest,
+    expected_connection_id: &str,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
-    let (_, token) = access_token(app, &action.connector_id).await?;
+    let (_, token) =
+        access_token_for_connection(app, &action.connector_id, Some(expected_connection_id))
+            .await?;
     let value = match action.connector_id.as_str() {
         "slack" => execute_slack(action, &token).await?,
         "notion" => execute_notion(action, &token).await?,

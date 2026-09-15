@@ -9,12 +9,13 @@ use crate::approvals::resolve_approval;
 use crate::collaboration_connectors;
 use crate::connector_api;
 use crate::connector_approvals::{
-    record_pending_connector_action, update_connector_action_result,
-    verify_prepared_connector_action,
+    record_pending_connector_action, require_prepared_connector_account,
+    update_connector_action_result, verify_prepared_connector_action,
 };
 use crate::connector_auth::{
-    account_options_from_connections, connection_for, disconnect, read_connections,
-    refresh_connection, safe_account_projection, usable_connection_for_scope, ConnectorConnection,
+    account_options_from_connections, connection_for, connection_for_scope, disconnect,
+    read_connections, refresh_connection, safe_account_projection, usable_connection_for_scope,
+    ConnectorConnection,
 };
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
@@ -2303,14 +2304,20 @@ pub fn prepare_connector_tool_action(
 ) -> Result<serde_json::Value, ConnectorCommandError> {
     require_connector_workspace(Some(workspace_id.clone()))?;
     let request = connector_tool_action_request(connector_id, action, payload)?;
-    let action = prepare_connector_action(app.clone(), request, Some(workspace_id))?;
+    let action = prepare_connector_action(app.clone(), request, Some(workspace_id.clone()))?;
     let record = verify_prepared_connector_action(
         &connector_approval_records_path(&app)
             .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?,
         &action,
     )
     .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
-    Ok(serde_json::json!({"action": action, "preview": record.preview}))
+    let connection_id =
+        prepared_connection_id(&workspace_id, &action.connector_id, &record.account_id);
+    Ok(serde_json::json!({
+        "action": action,
+        "preview": record.preview,
+        "connectionId": connection_id,
+    }))
 }
 
 fn connector_tool_action_request(
@@ -2400,17 +2407,51 @@ fn prepare_connector_action(
     Ok(action)
 }
 
+fn prepared_connection_id(
+    workspace_id: &str,
+    connector_id: &str,
+    account_id: &str,
+) -> Option<String> {
+    let account_id = account_id.trim();
+    if account_id.is_empty() || account_id == "unconnected" {
+        return None;
+    }
+    Some(crate::connector_auth::derive_native_connection_id(
+        workspace_id,
+        connector_id,
+        account_id,
+    ))
+}
+
+fn bound_prepared_connection_id(
+    workspace_id: &str,
+    connector_id: &str,
+    record: &crate::models::ConnectorApprovalRecord,
+    current_account_id: Option<&str>,
+) -> Result<String, ConnectorCommandError> {
+    require_prepared_connector_account(record, current_account_id)
+        .map_err(|message| command_error("conflict", connector_id, &message, true))?;
+    prepared_connection_id(workspace_id, connector_id, &record.account_id).ok_or_else(|| {
+        command_error(
+            "conflict",
+            connector_id,
+            "Connector action was prepared without a connected account.",
+            true,
+        )
+    })
+}
+
 #[tauri::command]
 pub async fn execute_approved_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
     workspace_id: Option<String>,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
-    require_connector_workspace(workspace_id)?;
+    require_connector_workspace(workspace_id.clone())?;
     let (action, resolution) = validate_connector_execution_request(request)?;
     let records_path = connector_approval_records_path(&app)
         .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
-    verify_prepared_connector_action(&records_path, &action).map_err(|message| {
+    let record = verify_prepared_connector_action(&records_path, &action).map_err(|message| {
         command_error("approval-required", &action.connector_id, &message, false)
     })?;
 
@@ -2437,6 +2478,23 @@ pub async fn execute_approved_connector_action(
             provider_resource_id: None,
         });
     }
+
+    let scope = crate::authorized_scope::command_scope(
+        workspace_id,
+        None,
+        crate::authorized_scope::ScopeAccess::Read,
+    )
+    .map_err(|message| command_error("invalid-request", &action.connector_id, &message, false))?;
+    let connections_path = connector_connections_path(&app)
+        .map_err(|message| command_error("unknown", &action.connector_id, &message, false))?;
+    let current_account_id = connection_for_scope(&connections_path, &action.connector_id, &scope)
+        .map(|connection| connection.account.id);
+    let expected_connection_id = bound_prepared_connection_id(
+        scope.data.workspace_id(),
+        &action.connector_id,
+        &record,
+        current_account_id.as_deref(),
+    )?;
 
     if matches!(
         action.connector_id.as_str(),
@@ -2472,7 +2530,7 @@ pub async fn execute_approved_connector_action(
         action.connector_id.as_str(),
         "google-drive" | "gmail" | "google-calendar"
     ) {
-        match crate::google::execute_action(&app, &action).await {
+        match crate::google::execute_action(&app, &action, &expected_connection_id).await {
             Ok(result) => {
                 update_connector_action_result(
                     &records_path,
@@ -2507,7 +2565,7 @@ pub async fn execute_approved_connector_action(
     }
 
     if matches!(action.connector_id.as_str(), "notion" | "slack") {
-        match collaboration_connectors::execute(&app, &action).await {
+        match collaboration_connectors::execute(&app, &action, &expected_connection_id).await {
             Ok(result) => {
                 update_connector_action_result(
                     &records_path,
@@ -2547,7 +2605,7 @@ pub async fn execute_approved_connector_action(
     }
 
     if matches!(action.connector_id.as_str(), "github" | "vercel" | "linear") {
-        match connector_api::execute_action(&app, &action).await {
+        match connector_api::execute_action(&app, &action, &expected_connection_id).await {
             Ok(provider_resource_id) => {
                 update_connector_action_result(
                     &records_path,
@@ -2652,6 +2710,55 @@ mod workspace_scope_tests {
             BTreeMap::new()
         )
         .is_err());
+    }
+
+    #[test]
+    fn approved_connector_execution_binds_prepared_account_not_current_selection() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-connector-prepared-account-bind-{}.json",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let prepared = connector_tool_action_request(
+            "gmail".into(),
+            "gmail.send".into(),
+            BTreeMap::from([
+                ("to".into(), "person@example.com".into()),
+                ("subject".into(), "Status update".into()),
+            ]),
+        )
+        .unwrap();
+        let record =
+            record_pending_connector_action(&path, &prepared, "account-a", "Account A").unwrap();
+        let workspace = "workspace-a";
+        let bound =
+            bound_prepared_connection_id(workspace, "gmail", &record, Some("account-a")).unwrap();
+        assert_eq!(
+            bound,
+            crate::connector_auth::derive_native_connection_id(workspace, "gmail", "account-a")
+        );
+        assert_eq!(
+            prepared_connection_id(workspace, "gmail", "account-a").as_deref(),
+            Some(bound.as_str())
+        );
+        let switched = bound_prepared_connection_id(workspace, "gmail", &record, Some("account-b"))
+            .unwrap_err();
+        assert_eq!(switched.code, "conflict");
+        assert!(switched.retryable);
+        assert_eq!(
+            switched.message,
+            "Connector account changed after its approval preview."
+        );
+        assert!(!switched.message.contains("account-a"));
+        assert!(!switched.message.contains("account-b"));
+        assert_ne!(
+            bound,
+            crate::connector_auth::derive_native_connection_id(workspace, "gmail", "account-b")
+        );
+        let disconnected =
+            bound_prepared_connection_id(workspace, "gmail", &record, None).unwrap_err();
+        assert_eq!(disconnected.code, "conflict");
+        let _ = std::fs::remove_file(path);
     }
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;

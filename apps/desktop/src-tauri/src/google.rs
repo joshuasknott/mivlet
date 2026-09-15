@@ -1257,9 +1257,12 @@ fn parse_json_field(
 pub(crate) async fn execute_action(
     app: &tauri::AppHandle,
     action: &ConnectorActionRequest,
+    expected_connection_id: &str,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
     let call_id = new_call_id(&action.connector_id);
-    let (_, tokens) = authorized_tokens(app, &action.connector_id).await?;
+    let (_, tokens) =
+        authorized_tokens_for_connection(app, &action.connector_id, Some(expected_connection_id))
+            .await?;
     let resource_id = match action.connector_id.as_str() {
         "google-drive" => execute_drive_action(&call_id, &tokens, action).await?,
         "gmail" => execute_gmail_action(&call_id, &tokens, action).await?,
