@@ -151,7 +151,11 @@ inspectRuntimeHostedProcess: runtime.inspectHosted,
 prepareRuntimeHostedBrowser: runtime.prepareBrowser,
 navigateRuntimeHostedBrowser: runtime.navigateBrowser,
 prepareRuntimeHostedBrowserAction: runtime.prepareBrowserAction,
-actRuntimeHostedBrowser: runtime.actBrowser
+actRuntimeHostedBrowser: runtime.actBrowser,
+toPublicHostedBrowserSnapshot: (snapshot: { liveViewUrl?: string; takeoverAvailable?: boolean }) => {
+  const { liveViewUrl, ...rest } = snapshot;
+  return { ...rest, takeoverAvailable: rest.takeoverAvailable === true || Boolean(liveViewUrl) };
+}
 }));
 vi.mock("./mcp-transport", () => ({
   createDesktopMcpTransport: mcpFactory,
