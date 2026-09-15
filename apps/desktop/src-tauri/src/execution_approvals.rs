@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn persisted_permit_is_exact_and_one_time() {
         let path = std::env::temp_dir().join(format!(
-            "fable-execution-approval-{}.json",
+            "mivlet-execution-approval-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -356,7 +356,7 @@ mod tests {
 
     #[test]
     fn unpersisted_model_claim_cannot_authorize_execution() {
-        let path = std::env::temp_dir().join("fable-missing-execution-approval.json");
+        let path = std::env::temp_dir().join("mivlet-missing-execution-approval.json");
         let _ = fs::remove_file(&path);
         let error =
             verify_and_consume_execution_approval(&path, &request(), "2026-06-27T12:00:02Z")
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn stale_or_backdated_execution_is_rejected_without_consuming_the_permit() {
         let path = std::env::temp_dir().join(format!(
-            "fable-stale-execution-approval-{}.json",
+            "mivlet-stale-execution-approval-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -459,7 +459,7 @@ mod tests {
     #[test]
     fn reshaping_or_downgrading_approval_fails_closed() {
         let path = std::env::temp_dir().join(format!(
-            "fable-reshape-approval-{}.json",
+            "mivlet-reshape-approval-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);

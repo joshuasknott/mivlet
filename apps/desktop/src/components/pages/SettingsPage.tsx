@@ -3,7 +3,7 @@ import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { useState } from "react";
-import type { VoiceCapability } from "@fable/protocol";
+import type { VoiceCapability } from "@mivlet/protocol";
 import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
@@ -161,13 +161,13 @@ function ConfiguredAccountSettings({
     <div className="settings-page__body">
       <article className="profile-clean-card settings-open-section">
         <div className="profile-clean-card__content">
-          <section className="profile-section" aria-labelledby="fable-account-title">
+          <section className="profile-section" aria-labelledby="mivlet-account-title">
             <div className="profile-section__heading">
               <span className="settings-panel__icon" aria-hidden="true">
                 <UserCircle size={19} />
               </span>
               <span>
-                <strong id="fable-account-title">Mivlet account</strong>
+                <strong id="mivlet-account-title">Mivlet account</strong>
                 <small>{runtime.identityStatus.message}</small>
               </span>
             </div>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@fable/protocol";
+import type { NativeCompletionRequest } from "@mivlet/protocol";
 import { shapeAnthropicRequest } from "./anthropic";
 import { shapeOpenAiRequest } from "./openai-compat";
 import { registeredToolSpecs } from "./tools";

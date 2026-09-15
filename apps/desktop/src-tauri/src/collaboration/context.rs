@@ -59,7 +59,7 @@ pub(super) fn summary_scope_allows(scope: &serde_json::Value, room: &Conversatio
 pub(super) fn capture(
     ctx: &Context<'_>,
     room: &Conversation,
-    agent: &FableAgentProfile,
+    agent: &MivletAgentProfile,
 ) -> Result<CapturedWorkContext> {
     let mut remaining = 20_000;
     let mut history = Vec::new();

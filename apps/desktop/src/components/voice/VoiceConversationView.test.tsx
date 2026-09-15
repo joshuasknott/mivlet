@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { INITIAL_CONVERSATION_STATE } from "@fable/connectors/voice";
+import { INITIAL_CONVERSATION_STATE } from "@mivlet/connectors/voice";
 import { VoiceConversationView, type VoiceConversationViewProps } from "./VoiceConversationView";
 
 function props(): VoiceConversationViewProps {

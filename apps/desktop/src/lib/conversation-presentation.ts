@@ -2,7 +2,7 @@ import type { ConversationMessageView } from "./conversation-runtime";
 import { connectorErrorMessage } from "./connector-errors";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 import { findMarketplaceConnector } from "../components/marketplace/marketplace-catalog";
-import type { Spine } from "@fable/protocol";
+import type { Spine } from "@mivlet/protocol";
 
 export type ResponsePart =
   | { id: string; kind: "text"; content: string }

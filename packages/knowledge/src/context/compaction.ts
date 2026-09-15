@@ -17,7 +17,7 @@ import type {
   ContextSummaryRecord,
   ContextSummaryStaleReason,
   KnowledgeScope
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { HistoryEntry } from "./history";
 
 export const MAX_SUMMARY_CHARACTERS = 12_000;

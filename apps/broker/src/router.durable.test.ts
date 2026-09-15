@@ -5,9 +5,9 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerRouter } from "./router.js";
 import {
   createDurableMemoryRateLimiter,
@@ -17,8 +17,8 @@ import { createEphemeralOps, createSerialInMemoryEphemeralOps } from "./ephemera
 import { fixedClock } from "./clock.js";
 
 const ENV = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "sec"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "sec"
 } as any;
 
 function pfetch() {
@@ -35,7 +35,7 @@ describe("durable backend E2E (async ephemeral-ops with serial in-mem DO)", () =
     const clock = fixedClock(1_000);
     const secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 32 zero bytes base64-ish for test (real enc path)
     const { ops, pendingInst, handoffInst } = await createSerialInMemoryEphemeralOps(clock, secret);
-    const broker = new FableBroker({ env: ENV, clock, fetch: pfetch(), publicBaseUrl: "https://b.test/", ephemeralOps: ops });
+    const broker = new MivletBroker({ env: ENV, clock, fetch: pfetch(), publicBaseUrl: "https://b.test/", ephemeralOps: ops });
 
     await broker.authorize({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", redirectUri: "http://127.0.0.1:1/callback", state: "d1-12345678901234567890", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256" });
 
@@ -58,7 +58,7 @@ describe("durable backend E2E (async ephemeral-ops with serial in-mem DO)", () =
   it("storage_backend_memory_default + rate cross via shared limiter", () => {
     const clock = fixedClock(10_000);
     const lim = createDurableMemoryRateLimiter({ limit: 1, windowMs: 60000, clock });
-    const broker = new FableBroker({ env: ENV, clock, fetch: pfetch(), publicBaseUrl: "https://b.test/" });
+    const broker = new MivletBroker({ env: ENV, clock, fetch: pfetch(), publicBaseUrl: "https://b.test/" });
     const r = createBrokerRouter({ broker, rateLimiter: lim });
     expect(lim.check("x:y").allowed).toBe(true);
   });

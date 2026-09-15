@@ -2,7 +2,7 @@ import {
   assertHostedExecutionCapability,
   readHostedExecutionCapability,
   type HostedExecutionCapabilityScope
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export interface CapabilityNonceStore {
   consume(input: { nonce: string; generation: number; expiresAt: number }): Promise<void>;
@@ -15,14 +15,11 @@ export async function authorizeCapabilityRequest(
   scope: HostedExecutionCapabilityScope,
   nonceStore: CapabilityNonceStore
 ): Promise<{ authorized: boolean; expectedGeneration?: number }> {
-  const value = request.headers.get("Authorization");
-  if (!value?.startsWith("FableCapability ")) return { authorized: false };
+  const token = capabilityAuthorizationToken(request.headers.get("Authorization"));
+  if (!token) return { authorized: false };
   if (!signingKey || signingKey.length < 32) return { authorized: false };
   try {
-    const payload = await readHostedExecutionCapability(
-      signingKey,
-      value.slice("FableCapability ".length)
-    );
+    const payload = await readHostedExecutionCapability(signingKey, token);
     assertHostedExecutionCapability(payload, {
       computerId,
       scope,
@@ -38,6 +35,20 @@ export async function authorizeCapabilityRequest(
     if (isCapabilityCredentialError(error)) return { authorized: false };
     throw error;
   }
+}
+
+const CAPABILITY_SCHEMES = [
+  "MivletCapability ",
+  // Deprecated: former product Authorization scheme.
+  "FableCapability "
+] as const;
+
+function capabilityAuthorizationToken(value: string | null): string | undefined {
+  if (!value) return undefined;
+  for (const prefix of CAPABILITY_SCHEMES) {
+    if (value.startsWith(prefix)) return value.slice(prefix.length);
+  }
+  return undefined;
 }
 
 export async function serviceAuthorized(request: Request, expected: string | undefined): Promise<boolean> {

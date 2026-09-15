@@ -1,4 +1,4 @@
-import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
+import { tokenPluginFor } from "@mivlet/connectors/providers/token-plugins";
 
 export interface MarketplaceConnectorEntry {
   id: string;

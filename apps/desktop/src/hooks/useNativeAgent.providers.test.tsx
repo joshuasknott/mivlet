@@ -1,10 +1,10 @@
 import { baseRequest,connectedCodexProvider,connectedOpenAiProvider,finishStop,installDesktopRuntime,mocks,openAiChunk } from "./native-agent-test-harness";
-import { createApprovalGate } from "@fable/connectors";
+import { createApprovalGate } from "@mivlet/connectors";
 import type {
 BackendAgentEvent,
 BackendProvider,
 ExecutionAttempt
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { act,renderHook,waitFor } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
@@ -321,7 +321,7 @@ describe("native agent providers", () => {
   it("joins the executor + gate + Rust boundary: tool-call -> register -> grant -> execute -> ok result", async () => {
     // The missing joined seam. This proves in one place that:
     //   - the execute option is createDesktopToolExecutor backed by a REAL
-    //     ProductionApprovalGate (from @fable/connectors);
+    //     ProductionApprovalGate (from @mivlet/connectors);
     //   - executeRuntimeToolCall (../runtime) is mocked to a scripted result and
     //     records its inputs;
     //   - a read-file tool-call surfaces -> onToolCall registers on the gate
@@ -619,13 +619,13 @@ describe("native agent providers", () => {
 
   it("provider errors surface into lastError through the transport control channel", async () => {
     installDesktopRuntime();
-    // The desktop transport parses `__fableTransport` control lines: a `{ kind:
+    // The desktop transport parses `__mivletTransport` control lines: a `{ kind:
     // "error" }` from Rust sets transportError, which the transport re-throws so
     // the loop surfaces it as a lastError. Here the listener feeds that control
     // line (no provider payload, no [DONE]) to prove the error path.
     mocks.lines = [
       JSON.stringify({
-        __fableTransport: {
+        __mivletTransport: {
           kind: "error",
           code: "authentication",
           message: "Provider rejected the API key.",
@@ -662,7 +662,7 @@ describe("native agent providers", () => {
     // configuration one. The surfaced message must not point at the API key.
     mocks.lines = [
       JSON.stringify({
-        __fableTransport: {
+        __mivletTransport: {
           kind: "error",
           code: "provider-unavailable",
           message: "Provider request failed with HTTP 503.",

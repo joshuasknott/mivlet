@@ -1,13 +1,13 @@
 import type {
   ApprovalAuditEntry,
   ApprovalGrant,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalFileImport,
   MemoryRecord,
   PermissionMode,
   RuntimeSnapshot
-} from "@fable/protocol";
-import { normalizeCustomApprovalSettings } from "@fable/connectors";
+} from "@mivlet/protocol";
+import { normalizeCustomApprovalSettings } from "@mivlet/connectors";
 import {
   LEGACY_STORAGE_KEYS,
   STORAGE_KEY,
@@ -165,7 +165,7 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
   };
 }
 
-function normalizeAgentProfiles(agents: FableAgentProfile[] | undefined): FableAgentProfile[] {
+function normalizeAgentProfiles(agents: MivletAgentProfile[] | undefined): MivletAgentProfile[] {
   return (agents ?? []).map((agent, index) => {
     const iconColor = typeof agent.iconColor === "string" && /^#[0-9a-f]{6}$/i.test(agent.iconColor)
       ? agent.iconColor.toUpperCase()

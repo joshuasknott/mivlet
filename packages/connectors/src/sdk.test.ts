@@ -5,7 +5,7 @@ import type {
   ConnectorAccountSession
 } from "./sdk";
 import { ConnectorRuntime, tokenExpiresSoon } from "./sdk";
-import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
+import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@mivlet/protocol";
 
 function fixtureAdapter(overrides: Partial<ConnectorAdapter> = {}): ConnectorAdapter {
   return {

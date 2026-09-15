@@ -6,7 +6,7 @@ Status: Accepted
 
 ## Decision
 
-Fable separates a configured provider instance from the driver that runs it.
+Mivlet separates a configured provider instance from the driver that runs it.
 The built-in instance id remains the existing provider id, preserving current
 local connections and thread routing. A driver kind selects the adapter and may
 later back more than one named account without widening the conversation shell.
@@ -31,17 +31,17 @@ registered adapter. Registered drivers without a shipped adapter remain
 unavailable and publish no capabilities or models. Fixtures cannot change
 that state into a live-capability claim.
 
-Older local payloads may omit instance, driver, and setup metadata. Fable keeps
+Older local payloads may omit instance, driver, and setup metadata. Mivlet keeps
 a narrow backend-type fallback while those payloads age out; all current native
 and TypeScript catalogue builders emit the new fields.
 
 The first shipped managed-runtime set uses full ACP execution for Cursor and
-Grok, including model discovery, cancellation, and Fable-mediated permissions.
+Grok, including model discovery, cancellation, and Mivlet-mediated permissions.
 Claude uses its bidirectional Agent SDK stdio protocol; OpenCode uses a
-Fable-owned authenticated loopback server and session event stream. Both route
-provider tool permissions through Fable and advertise tool, approval, and file
+Mivlet-owned authenticated loopback server and session event stream. Both route
+provider tool permissions through Mivlet and advertise tool, approval, and file
 change capabilities only when their runtime and account state are connected.
-Antigravity remains a separate pinned ACP runtime because Fable owns its
+Antigravity remains a separate pinned ACP runtime because Mivlet owns its
 verified installation and account-scoped profile lifecycle.
 
 ## Credential boundary
@@ -101,6 +101,6 @@ exact tool authorization, result bounds and unsupported server-request rejection
 remain Mivlet responsibilities.
 
 Provider-owned account runtimes retain their own authentication state. Direct
-API credentials remain in Fable's account-scoped OS secure-store boundary.
+API credentials remain in Mivlet's account-scoped OS secure-store boundary.
 Neither path puts provider credentials in React state, persisted snapshots,
 logs, model transcripts, or cross-provider configuration.

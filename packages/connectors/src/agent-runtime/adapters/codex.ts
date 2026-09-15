@@ -13,7 +13,7 @@ import type {
   BackendAgentEvent,
   BackendCapability,
   BackendProvider
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type {
   AgentBackend,
   BackendDeps,

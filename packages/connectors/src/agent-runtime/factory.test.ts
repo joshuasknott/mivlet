@@ -3,7 +3,7 @@ import type {
   BackendProvider,
   BackendAgentEvent,
   NativeCompletionRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { FixtureTransport, SequencedFixtureTransport } from "../native-api/transport";
 import { readFixture } from "../native-api/fixtures-loader";
 import { buildToolApproval } from "../native-api/approvals";

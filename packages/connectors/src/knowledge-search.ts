@@ -4,7 +4,7 @@ import type {
   KnowledgeSearchResponse,
   KnowledgeSource,
   SourceStatus
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 const DEFAULT_RESULT_LIMIT = 5;
 const MAX_SNIPPET_CHARACTERS = 240;

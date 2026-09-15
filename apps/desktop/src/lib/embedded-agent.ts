@@ -1,5 +1,5 @@
-import type { BackendProvider } from "@fable/protocol";
-import { resolveModelCapabilities, type EmbeddedRuntimeEvent, type EmbeddedRuntimeHandle } from "@fable/connectors";
+import type { BackendProvider } from "@mivlet/protocol";
+import { resolveModelCapabilities, type EmbeddedRuntimeEvent, type EmbeddedRuntimeHandle } from "@mivlet/connectors";
 import { startRuntimeEmbeddedAgent, cancelRuntimeEmbeddedAgent, replyRuntimeEmbeddedAgent, listenRuntimeEmbeddedAgent } from "../runtime/domains/embedded-agent";
 
 export function createDesktopEmbeddedRuntime(_provider: BackendProvider): EmbeddedRuntimeHandle | null {

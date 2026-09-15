@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import { MarketplacePage } from "./MarketplacePage";
 
 const github: ConnectorManifest = { id: "github", name: "GitHub", status: "needs-auth", permissions: ["Repositories"], healthSummary: "Not connected", lastCheckedAt: "Not checked", authMode: "oauth-broker", supportsSearch: false, supportsImport: false, supportedActions: [] };

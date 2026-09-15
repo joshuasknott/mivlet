@@ -10,17 +10,21 @@ const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localPath = resolve(desktopRoot, ".env.local");
 const local = existsSync(localPath) ? parseEnv(readFileSync(localPath, "utf8")) : {};
 const environment = { ...process.env };
-// Only public account and connector configuration is compiled into the native application.
-for (const key of [
-  "FABLE_GOOGLE_OAUTH_CLIENT_ID",
-  "FABLE_AUTH_BROKER_URL",
-  "FABLE_CLERK_ISSUER",
-  "FABLE_CLERK_OAUTH_CLIENT_ID",
-  "FABLE_CLERK_AUDIENCE",
-  "FABLE_CLERK_AUTHORIZED_PARTY",
-  "FABLE_CLERK_SCOPES",
-]) {
-  if (Object.hasOwn(local, key)) environment[key] = local[key];
+const packagedKeys = [
+  "GOOGLE_OAUTH_CLIENT_ID",
+  "AUTH_BROKER_URL",
+  "CLERK_ISSUER",
+  "CLERK_OAUTH_CLIENT_ID",
+  "CLERK_AUDIENCE",
+  "CLERK_AUTHORIZED_PARTY",
+  "CLERK_SCOPES",
+];
+for (const suffix of packagedKeys) {
+  const current = `MIVLET_${suffix}`;
+  const legacy = `FABLE_${suffix}`;
+  if (Object.hasOwn(local, current)) environment[current] = local[current];
+  else if (Object.hasOwn(local, legacy)) environment[current] = local[legacy];
+  if (Object.hasOwn(local, legacy)) environment[legacy] = local[legacy];
 }
 const result = spawnSync(process.execPath, [
   resolve(desktopRoot, "node_modules/@tauri-apps/cli/tauri.js"),

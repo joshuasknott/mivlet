@@ -4,7 +4,7 @@ import type {
   ConnectorSyncFailureKind,
   ConnectorSyncState,
   ConnectorSyncTrigger
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export type ConnectorCacheClass =
   | "metadata"

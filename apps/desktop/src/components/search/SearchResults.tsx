@@ -1,4 +1,4 @@
-import type { SearchResult } from "@fable/protocol";
+import type { SearchResult } from "@mivlet/protocol";
 import {
   describeSearchContext,
   highlightSegments,

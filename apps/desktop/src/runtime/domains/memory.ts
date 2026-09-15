@@ -1,5 +1,5 @@
 import { toRuntimeError } from "../errors";
-import type { LocalTextFileCandidate } from "@fable/connectors/local-files";
+import type { LocalTextFileCandidate } from "@mivlet/connectors/local-files";
 import type {
   ContextSummaryRecord,
   KnowledgeSearchResponse,
@@ -8,7 +8,7 @@ import type {
   LocalKnowledgeRefreshResponse,
   RefreshLocalKnowledgeSourceRequest,
   MemoryControlState,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
 
 export async function loadRuntimeImportedKnowledgeSources() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SearchObjectKind, SearchResult } from "@fable/protocol";
+import type { SearchObjectKind, SearchResult } from "@mivlet/protocol";
 import { navigationTargetFor } from "./navigation";
 
 function result(

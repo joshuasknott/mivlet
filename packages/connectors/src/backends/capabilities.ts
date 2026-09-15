@@ -14,7 +14,7 @@ import type {
   BackendAuthState,
   BackendCapability,
   BackendType,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /** A capability set that supports `includes` without array copying. */
 export type CapabilitySet = readonly BackendCapability[];

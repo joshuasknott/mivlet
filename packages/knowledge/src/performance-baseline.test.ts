@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, MemoryRecord, SourceChunk } from "@fable/protocol";
+import type { KnowledgeSource, MemoryRecord, SourceChunk } from "@mivlet/protocol";
 import { chunkSourceText } from "./ingestion/chunk";
 import { retrieve, type RetrievalSource } from "./retrieval/retrieve";
 import { applyRetention, DEFAULT_RETENTION_POLICY } from "./memory/retention";

@@ -1,5 +1,5 @@
 {
-  "name": "@fable/knowledge",
+  "name": "@mivlet/knowledge",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,7 +17,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fable/protocol": "workspace:*"
+    "@mivlet/protocol": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.9.2",

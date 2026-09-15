@@ -2697,7 +2697,7 @@ mod workspace_scope_tests {
     #[test]
     fn approved_connector_execution_binds_prepared_account_not_current_selection() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-prepared-account-bind-{}.json",
+            "mivlet-connector-prepared-account-bind-{}.json",
             std::process::id()
         ));
         let _ = std::fs::remove_file(&path);

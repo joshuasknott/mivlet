@@ -4,7 +4,7 @@
  * Pure functions: hashing, extraction/classification, structure-aware
  * chunking, and the candidate -> IngestionOutcome pipeline (with incremental
  * reindex, dedup, move/rename detection, and folder indexing). No React, no
- * transport — depends on @fable/protocol types only.
+ * transport — depends on @mivlet/protocol types only.
  */
 
 export { contentHash, fnv1a64, normalizeText, slug } from "./hash";

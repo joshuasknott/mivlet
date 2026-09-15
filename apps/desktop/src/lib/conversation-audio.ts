@@ -1,4 +1,4 @@
-import { base64ToBytes, VoiceTurnDetector } from "@fable/connectors/voice";
+import { base64ToBytes, VoiceTurnDetector } from "@mivlet/connectors/voice";
 
 export interface ConversationMicrophone {
   setEnabled(enabled: boolean): void;

@@ -28,7 +28,7 @@ export type {
   TransportHandle,
   AgentBackendFactory,
 } from "./contract";
-export type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
+export type { AgentTurnRequest, AgentTurnOptions } from "@mivlet/protocol";
 export { resolveAgentBackend, hasRunnableAdapter } from "./factory";
 // Adapter constructors are exported for direct unit testing; production code
 // reaches them only through resolveAgentBackend.

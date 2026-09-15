@@ -2,8 +2,8 @@ import type {
   ManagedRuntimeEvent,
   ManagedRuntimeHandle,
   ManagedRuntimeHandlers,
-} from "@fable/connectors";
-import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
+} from "@mivlet/connectors";
+import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
 import { getRuntimeManagedStatus, interruptRuntimeManagedTurn, listenRuntimeManagedEvents, respondRuntimeManagedApproval, shutdownRuntimeManagedTurn, startRuntimeManagedTurn, type ManagedRuntimeProviderId } from "../runtime/domains/providers";
 
 const MANAGED_PROVIDER_IDS = new Set<ManagedRuntimeProviderId>([

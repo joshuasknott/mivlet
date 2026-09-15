@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import type { HostInput } from "./host";
-import { isEmbeddedNativeProvider } from "@fable/connectors/backends/catalog";
+import { isEmbeddedNativeProvider } from "@mivlet/connectors/backends/catalog";
 
 // Rust supplies a fresh private working directory and a cleared environment.
 // These assignments precede SDK module evaluation, including global services.
@@ -79,16 +79,17 @@ function frame(raw: string) {
     if (value.line === "[CANCELLED]") { stop(); return; }
     if (value.line === "[DONE]") { pending.controller.close(); models.delete(value.id); return; }
     const data = JSON.parse(value.line);
-    if (data.__fableTransport) {
-      if (data.__fableTransport.kind === "retrying") {
+    const transport = data.__mivletTransport ?? data.__fableTransport; // mixed-version host frames
+    if (transport) {
+      if (transport.kind === "retrying") {
         emit({ type: "retrying" });
-      } else if (data.__fableTransport.kind === "error") {
-        emit({ type: "error", message: data.__fableTransport.message, code: data.__fableTransport.code, retryable: data.__fableTransport.retryable });
+      } else if (transport.kind === "error") {
+        emit({ type: "error", message: transport.message, code: transport.code, retryable: transport.retryable });
         pending.controller.error(new Error("Provider failed")); models.delete(value.id);
       }
       return;
     }
-    if (data.__fableComputerTool) throw new Error("Computer pixels require the native visual route.");
+    if (data.__mivletComputerTool ?? data.__fableComputerTool) throw new Error("Computer pixels require the native visual route.");
     pending.controller.enqueue(encoder.encode(`${typeof data.type === "string" ? `event: ${data.type}\n` : ""}data: ${value.line}\n\n`));
     return;
   }

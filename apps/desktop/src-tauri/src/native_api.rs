@@ -1,7 +1,7 @@
 //! Native-API transport boundary: Rust owns the API key + HTTP/SSE egress.
 //!
 //! TypeScript shapes the request body (pure, fixture-tested in
-//! `@fable/connectors/native-api/`) and hands Rust an opaque
+//! `@mivlet/connectors/native-api/`) and hands Rust an opaque
 //! `{ providerId, requestId, model, body }`. Rust looks the key up from the
 //! credential store, adds the provider-specific auth header, issues the
 //! streaming `reqwest` request, and relays normalized SSE lines back over the
@@ -1261,7 +1261,7 @@ fn request_error_code(error: &reqwest::Error) -> &'static str {
 
 fn emit_control(emit: &(dyn Fn(String) + Send + Sync), event: TransportControlEvent<'_>) {
     if let Ok(payload) = serde_json::to_string(&serde_json::json!({
-        "__fableTransport": event
+        "__mivletTransport": event
     })) {
         emit(payload);
     }

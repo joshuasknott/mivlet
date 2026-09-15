@@ -1,5 +1,5 @@
 {
-  "name": "@fable/opencode-compatibility-probe",
+  "name": "@mivlet/opencode-compatibility-probe",
   "version": "0.0.0",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",

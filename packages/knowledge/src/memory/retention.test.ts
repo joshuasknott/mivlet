@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MemoryRecord } from "@fable/protocol";
+import type { MemoryRecord } from "@mivlet/protocol";
 import { applyRetention, DEFAULT_RETENTION_POLICY } from "./retention";
 
 const NOW = "2026-06-28T12:00:00.000Z";

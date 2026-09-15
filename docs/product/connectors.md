@@ -132,10 +132,10 @@ Redirects are disabled, responses are bounded, and secret-bearing response field
 and tokenized URL parameters are removed. Local fixture tests establish transport
 and authorization behavior, not a live connection to these providers.
 
-Google needs `FABLE_GOOGLE_OAUTH_CLIENT_ID` and
-`FABLE_GOOGLE_OAUTH_CLIENT_SECRET`; the secret is provisioned from the ignored local
+Google needs `MIVLET_GOOGLE_OAUTH_CLIENT_ID` and
+`MIVLET_GOOGLE_OAUTH_CLIENT_SECRET`; the secret is provisioned from the ignored local
 environment into the OS credential store and enters only native token exchanges. Confidential connectors
-need `FABLE_AUTH_BROKER_URL` plus the matching provider credentials at the broker.
+need `MIVLET_AUTH_BROKER_URL` plus the matching provider credentials at the broker.
 The checked-in templates at `apps/desktop/.env.example`,
 `apps/broker/.env.example`, and `apps/broker/.dev.vars.example` are the current
 configuration reference.
@@ -268,13 +268,13 @@ and [threat model](../security/threat-model.md) for the security boundary.
 
 ### Local broker development
 
-The Node entry `pnpm --filter @fable/broker dev` serves `dist/server.js` (default
+The Node entry `pnpm --filter @mivlet/broker dev` serves `dist/server.js` (default
 `http://127.0.0.1:8788`). Wrangler local Worker development is
-`pnpm --filter @fable/broker worker:dev` on the same port. Copy
+`pnpm --filter @mivlet/broker worker:dev` on the same port. Copy
 `apps/broker/.dev.vars.example` to `apps/broker/.dev.vars` for Worker bindings.
 Point the desktop at either process with `FABLE_AUTH_BROKER_URL=http://127.0.0.1:8788/`
 from `apps/desktop/.env.example`. Staging packaging is
-`pnpm --filter @fable/broker worker:deploy:dry-run`; it does not deploy.
+`pnpm --filter @mivlet/broker worker:deploy:dry-run`; it does not deploy.
 
 ## Native OAuth scopes
 

@@ -1,4 +1,4 @@
-import type { AccountWorkspaceStatus, IdentityStatus } from "@fable/protocol";
+import type { AccountWorkspaceStatus, IdentityStatus } from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";

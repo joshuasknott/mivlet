@@ -1,4 +1,4 @@
-import type { LocalComputerArtifact, LocalComputerArtifactPreview, LocalComputerOpenArtifactRequest } from "@fable/protocol";
+import type { LocalComputerArtifact, LocalComputerArtifactPreview, LocalComputerOpenArtifactRequest } from "@mivlet/protocol";
 import { getRuntimeAdapter, hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 
 const artifactTypes: Readonly<Record<string, string>> = {

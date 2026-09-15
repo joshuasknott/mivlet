@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import {
   chatConnectorIds,
   chatConnectorTools,

@@ -7,7 +7,7 @@ import type {
   ProviderRoutePricingEvidence,
   ProviderRouteQualitySnapshot,
   Spine,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, invokeNative, listen } from "../bridge";
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ export interface RuntimeStreamRequest {
   requestId: string;
   model: string;
   body: unknown;
-  providerRoute?: import("@fable/protocol").ProviderRouteExecutionBinding;
+  providerRoute?: import("@mivlet/protocol").ProviderRouteExecutionBinding;
   computerSessionId?: string;
 }
 
@@ -95,7 +95,7 @@ export async function beginRuntimeComputerSession(request: {
   providerId: string;
   model: string;
   computer: { workspaceId: string; agentId: string };
-  providerRoute: import("@fable/protocol").ProviderRouteExecutionBinding;
+  providerRoute: import("@mivlet/protocol").ProviderRouteExecutionBinding;
 }): Promise<string> {
   if (!hasTauriRuntime())
     throw new Error("Native screenshot delivery requires the desktop runtime.");
@@ -160,8 +160,8 @@ interface RuntimeDiscoveredModel {
   id: string;
   available: boolean;
   label?: string;
-  capabilities?: import("@fable/protocol").ModelCapabilities;
-  reasoning?: import("@fable/protocol").BackendModel["reasoning"];
+  capabilities?: import("@mivlet/protocol").ModelCapabilities;
+  reasoning?: import("@mivlet/protocol").BackendModel["reasoning"];
 }
 
 export interface RuntimeModelDiscoveryResult {
@@ -266,7 +266,7 @@ export type RuntimeCodexEvent =
       callId: string;
       tool: string;
       arguments: string;
-      approval: import("@fable/protocol").ApprovalRequest;
+      approval: import("@mivlet/protocol").ApprovalRequest;
     }
   | { type: "text-delta"; text: string }
   | {
@@ -329,7 +329,7 @@ export async function listenRuntimeCodexEvents(
   if (!hasTauriRuntime()) return null;
   try {
     const unlisten = await listen<RuntimeCodexEvent>(
-      `fable://codex/${requestId}`,
+      `mivlet://codex/${requestId}`,
       (event) => {
         onEvent(event.payload);
       },
@@ -439,7 +439,7 @@ export async function listenRuntimeAntigravityEvents(
   if (!hasTauriRuntime()) return null;
   try {
     return await listen<RuntimeAntigravityEvent>(
-      `fable://antigravity/${requestId}`,
+      `mivlet://antigravity/${requestId}`,
       (event) => onEvent(event.payload),
     );
   } catch {
@@ -550,7 +550,7 @@ export async function listenRuntimeManagedEvents(
   if (!hasTauriRuntime()) return null;
   try {
     return await listen<RuntimeManagedEvent>(
-      `fable://managed-runtime/${providerId}/${requestId}`,
+      `mivlet://managed-runtime/${providerId}/${requestId}`,
       (event) => onEvent(event.payload),
     );
   } catch {

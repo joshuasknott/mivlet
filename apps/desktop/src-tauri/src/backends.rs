@@ -684,7 +684,7 @@ fn log_pre_release_warning_once() {
     PRE_RELEASE_WARNING_LOGGED.get_or_init(|| {
         if BACKENDS_PRE_RELEASE {
             eprintln!(
-                "fable: backend credential storage is PRE-RELEASE. Secrets are held in the \
+                "mivlet: backend credential storage is PRE-RELEASE. Secrets are held in the \
                  OS secure store (with a process-scoped fallback). Do not ship pre-release."
             );
         }
@@ -2141,23 +2141,23 @@ mod provider_route_tests {
             "member-1",
             &rows,
             &HashMap::from([("custom".to_string(), true)]),
-            &HashMap::from([("custom".to_string(), "fable-smoke".to_string())]),
+            &HashMap::from([("custom".to_string(), "mivlet-smoke".to_string())]),
             &std::collections::BTreeMap::new(),
             &std::collections::BTreeMap::new(),
         );
 
         assert_eq!(routes.len(), 1);
         assert_eq!(routes[0]["providerFamily"], "custom");
-        assert_eq!(routes[0]["modelOrRuntimeReference"], "fable-smoke");
-        assert_eq!(routes[0]["displayName"], "Custom provider fable-smoke");
+        assert_eq!(routes[0]["modelOrRuntimeReference"], "mivlet-smoke");
+        assert_eq!(routes[0]["displayName"], "Custom provider mivlet-smoke");
         assert_eq!(routes[0]["state"], "available");
         assert_eq!(
             native_provider_route_boundary("custom"),
             "boundary:installation-private:user-owned-provider:custom:local-credential-egress"
         );
-        assert!(native_provider_route_reason("custom", "fable-smoke")
+        assert!(native_provider_route_reason("custom", "mivlet-smoke")
             .unwrap()
-            .contains("Custom provider fable-smoke"));
+            .contains("Custom provider mivlet-smoke"));
         assert!(native_provider_route_reason("custom", "  ").is_err());
     }
 

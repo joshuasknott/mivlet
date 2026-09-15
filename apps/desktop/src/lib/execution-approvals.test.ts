@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
 import { ExecutionApprovalRouter } from "./execution-approvals";
 
 describe("execution approval ownership", () => {

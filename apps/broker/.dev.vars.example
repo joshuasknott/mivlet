@@ -1,34 +1,34 @@
 # Local Cloudflare Worker development bindings.
 #
-# Copy to `.dev.vars` for `pnpm --filter @fable/broker worker:dev`.
+# Copy to `.dev.vars` for `pnpm --filter @mivlet/broker worker:dev`.
 # Do not commit `.dev.vars`; real deployed secrets are set with `wrangler secret put`.
 
-FABLE_BROKER_ENVIRONMENT=local
-FABLE_BROKER_PUBLIC_URL=http://127.0.0.1:8788/
-FABLE_BROKER_RATE_LIMIT_PER_MINUTE=60
-FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS=
+MIVLET_BROKER_ENVIRONMENT=local
+MIVLET_BROKER_PUBLIC_URL=http://127.0.0.1:8788/
+MIVLET_BROKER_RATE_LIMIT_PER_MINUTE=60
+MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS=
 
 # Configure only the providers you are testing locally. Missing provider pairs
 # fail closed with configuration-required.
-FABLE_BROKER_GITHUB_CLIENT_ID=
-FABLE_BROKER_GITHUB_CLIENT_SECRET=
-FABLE_BROKER_VERCEL_CLIENT_ID=
-FABLE_BROKER_VERCEL_CLIENT_SECRET=
-FABLE_BROKER_LINEAR_CLIENT_ID=
-FABLE_BROKER_LINEAR_CLIENT_SECRET=
-FABLE_BROKER_NOTION_CLIENT_ID=
-FABLE_BROKER_NOTION_CLIENT_SECRET=
-FABLE_BROKER_SLACK_CLIENT_ID=
-FABLE_BROKER_SLACK_CLIENT_SECRET=
+MIVLET_BROKER_GITHUB_CLIENT_ID=
+MIVLET_BROKER_GITHUB_CLIENT_SECRET=
+MIVLET_BROKER_VERCEL_CLIENT_ID=
+MIVLET_BROKER_VERCEL_CLIENT_SECRET=
+MIVLET_BROKER_LINEAR_CLIENT_ID=
+MIVLET_BROKER_LINEAR_CLIENT_SECRET=
+MIVLET_BROKER_NOTION_CLIENT_ID=
+MIVLET_BROKER_NOTION_CLIENT_SECRET=
+MIVLET_BROKER_SLACK_CLIENT_ID=
+MIVLET_BROKER_SLACK_CLIENT_SECRET=
 
 # --- Durable Object broker storage (ephemeral OAuth state) ---
 # Local/default Worker dev uses memory. Staging and production Wrangler envs set
-# FABLE_BROKER_STORAGE_BACKEND=durable and require Durable Object bindings plus
-# FABLE_BROKER_STORE_ENCRYPTION_KEY (32-byte base64url secret).
+# MIVLET_BROKER_STORAGE_BACKEND=durable and require Durable Object bindings plus
+# MIVLET_BROKER_STORE_ENCRYPTION_KEY (32-byte base64url secret).
 #
 # Generate a local-only key for durable Worker dev:
 #   node -e "const b=crypto.getRandomValues(new Uint8Array(32)); console.log(Buffer.from(b).toString('base64url'))"
 #
 # For Cloudflare staging, set secrets with wrangler; never paste live values here.
-# FABLE_BROKER_STORAGE_BACKEND=memory
-# FABLE_BROKER_STORE_ENCRYPTION_KEY=
+# MIVLET_BROKER_STORAGE_BACKEND=memory
+# MIVLET_BROKER_STORE_ENCRYPTION_KEY=

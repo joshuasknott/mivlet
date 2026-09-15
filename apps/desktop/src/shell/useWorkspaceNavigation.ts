@@ -1,4 +1,4 @@
-import type { ConversationLayout, LocalProject } from "@fable/protocol";
+import type { ConversationLayout, LocalProject } from "@mivlet/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RightPanelTab } from "../components/navigation/right-panel-state";
 import { scopedRoomIds, scopeWork } from "../components/navigation/work-order";

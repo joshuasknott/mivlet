@@ -11,12 +11,12 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   BackendProvider,
   BackendVerifyResult,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
-import { enabledFableProviders } from "../../lib/provider-availability";
+import { enabledMivletProviders } from "../../lib/provider-availability";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { ProviderIcon } from "../ProviderIcon";
-import { additionalNativeProviderCatalog, providerEndpointSetup } from "@fable/connectors/backends/additional-native";
+import { additionalNativeProviderCatalog, providerEndpointSetup } from "@mivlet/connectors/backends/additional-native";
 
 type ProviderConnectionMethodKind =
   "api-key" | "oauth-browser" | "provider-cli" | "custom";
@@ -185,7 +185,7 @@ export function buildProviderFamilies(
   providers: BackendProvider[],
 ): ProviderFamily[] {
   const grouped = new Map<string, BackendProvider[]>();
-  for (const provider of enabledFableProviders(providers)) {
+  for (const provider of enabledMivletProviders(providers)) {
     const familyId = providerFamilyIdFor(provider.id);
     grouped.set(familyId, [...(grouped.get(familyId) ?? []), provider]);
   }

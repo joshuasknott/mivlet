@@ -966,7 +966,7 @@ async fn runner_json(
         .map_err(|_| "Mivlet could not initialize the hosted runner connection.".to_string())?;
     let mut request = client
         .request(method, url)
-        .header(header::AUTHORIZATION, format!("FableCapability {token}"))
+        .header(header::AUTHORIZATION, format!("MivletCapability {token}"))
         .header(header::ACCEPT, "application/json");
     if let Some(body) = body {
         request = request.json(&body);

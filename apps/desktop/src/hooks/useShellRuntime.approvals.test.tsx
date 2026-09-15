@@ -1,17 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AccountWorkspaceStatus, RuntimeSnapshot } from "@fable/protocol";
-import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
-import { FableQueryProvider } from "../lib/query-client";
+import type { AccountWorkspaceStatus, RuntimeSnapshot } from "@mivlet/protocol";
+import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
+import { MivletQueryProvider } from "../lib/query-client";
 import { clearActiveRuntimeDataScope } from "../runtime-scope";
 import { PREVIEW_ACCOUNT_WORKSPACE_STATUS } from "./shell-runtime/defaults";
 import { useShellRuntime } from "./useShellRuntime";
 import { defaultShellState } from "./shell-runtime/defaults";
 import { shellStateToRuntimeSnapshot } from "../lib/persistence";
 import { resolveApprovalFallback } from "../lib/approval-fallbacks";
-import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@fable/protocol";
+import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@mivlet/protocol";
 
 const mocks = vi.hoisted(() => ({ status: null as AccountWorkspaceStatus | null,
   resolveApproval: vi.fn<(request: ApprovalResolutionRequest) => Promise<ApprovalResolutionResponse>>(),
@@ -37,7 +37,7 @@ vi.mock("../lib/persistence", async (original) => ({
   hasTauriRuntime: () => true,
 }));
 
-function wrapper({ children }: PropsWithChildren) { return <FableQueryProvider>{children}</FableQueryProvider>; }
+function wrapper({ children }: PropsWithChildren) { return <MivletQueryProvider>{children}</MivletQueryProvider>; }
 
 describe("approval queue workspace hydration", () => {
   it("confirms an exact pending connector action with one Approve click", async () => {

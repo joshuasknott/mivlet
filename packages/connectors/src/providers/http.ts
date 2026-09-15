@@ -4,7 +4,7 @@ import type {
   ConnectorId,
   ConnectorPage,
   ConnectorTokenSet
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type {
   ConnectorAuthCallback,
   ConnectorAuthContext,

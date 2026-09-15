@@ -21,14 +21,14 @@ import type {
   AgentTurnRequest,
   ContextSummaryRecord,
   KnowledgeScope
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   foldHistorySummary,
   planBoundedHistory,
   summariesForThread,
   type BoundedHistoryBudget,
   type HistoryEntry
-} from "@fable/knowledge";
+} from "@mivlet/knowledge";
 import { parseComputerArtifact } from "./computer-artifacts";
 import type { ConversationMessageView } from "./conversation-runtime";
 import {

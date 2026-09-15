@@ -207,12 +207,12 @@ Final local validation for this follow-up (historical; pre-#50 allowance):
 | Check | Result |
 | --- | --- |
 | Focused desktop Vitest runs | 154 tests passed across 20 affected files. |
-| `pnpm --filter @fable/desktop typecheck` | Passed. |
+| `pnpm --filter @mivlet/desktop typecheck` | Passed. |
 | `pnpm quality` | Passed: lint, required formatting, dead-code and cycle checks. |
 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -j 1` | 548 passed, 0 failed, 5 ignored. The ignored tests require live credentials or explicitly prepared fixtures. |
 | `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -j 1 -- -D warnings` | Passed. |
 | `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check` | Passed. |
-| `pnpm --filter @fable/desktop build` | Passed, including application and build-tool typechecks. |
+| `pnpm --filter @mivlet/desktop build` | Passed, including application and build-tool typechecks. |
 | `pnpm perf:check` | Failed on total raw and gzip JS/CSS; entry, CSS and named route ceilings pass. |
 
 The follow-up build contains 1,105,677 raw JS/CSS bytes and 317,995 gzip bytes.

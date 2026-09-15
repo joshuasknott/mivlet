@@ -207,7 +207,7 @@
         assert!(validate_dynamic_client_response(&implicit_secret_auth, redirect).is_err());
 
         let document_url =
-            validate_remote_endpoint("https://fable.example.com/oauth/client.json").unwrap();
+            validate_remote_endpoint("https://mivlet.example.com/oauth/client.json").unwrap();
         let document = serde_json::json!({
             "client_id": document_url.as_str(),
             "redirect_uris": ["http://127.0.0.1/callback"],
@@ -217,7 +217,7 @@
         });
         validate_client_metadata_document(&document, &document_url, redirect).unwrap();
         let mut wrong_document = document;
-        wrong_document["redirect_uris"] = serde_json::json!(["https://fable.example.com/callback"]);
+        wrong_document["redirect_uris"] = serde_json::json!(["https://mivlet.example.com/callback"]);
         assert!(
             validate_client_metadata_document(&wrong_document, &document_url, redirect).is_err()
         );

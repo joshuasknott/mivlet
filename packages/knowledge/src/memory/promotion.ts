@@ -9,7 +9,7 @@
  * native boundary still canonicalizes authority and owner).
  */
 
-import type { KnowledgeScope, MemoryKind, MemoryProvenance, MemoryRecord } from "@fable/protocol";
+import type { KnowledgeScope, MemoryKind, MemoryProvenance, MemoryRecord } from "@mivlet/protocol";
 
 export const MAX_PROMOTED_RECORDS = 6;
 export const MAX_PROMOTED_TITLE_CHARACTERS = 120;

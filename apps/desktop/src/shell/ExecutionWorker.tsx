@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { CollaborationAgentCommand, LocalProject } from "@fable/protocol";
+import type { CollaborationAgentCommand, LocalProject } from "@mivlet/protocol";
 import {
   collaborationToolSpecs,
   isCollaborationTool,
-} from "@fable/connectors/native-api/tools";
-import { supportsSharedComputerTools } from "@fable/connectors/native-api/computer-vision";
+} from "@mivlet/connectors/native-api/tools";
+import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { useExecutionController } from "./useExecutionController";
 import type {

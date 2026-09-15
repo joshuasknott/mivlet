@@ -42,8 +42,8 @@ import {
   assertBrokerPkceVerifier,
   assertContractVersion,
   isBrokerProvider
-} from "@fable/connectors";
-import type { ConnectorTokenSet } from "@fable/protocol";
+} from "@mivlet/connectors";
+import { withLegacyFableEnv, type ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
 import { generatePkcePair, verifierMatchesS256Challenge } from "./pkce.js";
@@ -103,7 +103,7 @@ export interface BrokerCallbackOutput {
   redirect: URL;
 }
 
-export class FableBroker {
+export class MivletBroker {
   private readonly clock: BrokerClock;
   private readonly fetcher?: BrokerFetch;
   private readonly pending: PendingExchangeStore;
@@ -122,7 +122,7 @@ export class FableBroker {
   private readonly allowedDesktopRedirects: Set<string>;
 
   constructor(options: BrokerOptions) {
-    this.env = options.env;
+    this.env = withLegacyFableEnv(options.env);
     this.requirePublicBaseUrl = options.requirePublicBaseUrl ?? false;
     try {
       this.publicBaseUrl = options.publicBaseUrl ? new URL(options.publicBaseUrl) : undefined;
@@ -136,7 +136,7 @@ export class FableBroker {
     this.handoff = options.handoff ?? stores.handoff;
     this.ephemeralOps = options.ephemeralOps;
     this.allowedDesktopRedirects = parseAllowedDesktopRedirects(
-      this.env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS
+      this.env.MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS
     );
   }
 
@@ -416,7 +416,7 @@ export class FableBroker {
 }
 
 /**
- * Parse the `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` env value into an exact-match
+ * Parse the `MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS` env value into an exact-match
  * set once, at construction. Comma-separated entries are trimmed and empties
  * dropped, preserving the prior split/trim/filter semantics.
  */

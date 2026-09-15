@@ -4,7 +4,7 @@ import type {
   ApprovalRequest,
   ApprovalRiskLevel,
   PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import {
   DECISION_LABELS,

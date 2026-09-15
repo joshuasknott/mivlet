@@ -6,8 +6,8 @@ import {
   SpeechToTextError,
   type SpeechToTextProvider,
   type SpeechToTextSession
-} from "@fable/connectors";
-import type { VoiceCapability } from "@fable/protocol";
+} from "@mivlet/connectors";
+import type { VoiceCapability } from "@mivlet/protocol";
 import { useVoice } from "./useVoice";
 
 function deferred<T>() {

@@ -91,9 +91,10 @@ still belong to the private packaged-app test matrix.
 The app window, interface, native icons and release notes use Mivlet. The lowercase
 mivlet wordmark is reserved for logo lockups; agents retain their own portraits.
 
-Keep `com.fable.workspace`, `@fable/*`, the Rust binary/crate names, credential
-namespaces, local storage keys, database filenames, saved computer paths and OAuth
-configuration stable. The pinned MSI upgrade code is the existing Fable code,
+Keep `com.fable.workspace`, credential namespaces, local storage keys, database
+filenames, saved computer paths, and OAuth client configuration stable. Package
+names are `@mivlet/*` and operator env keys are `MIVLET_*` (with a one-cycle
+`FABLE_*` fallback). The pinned MSI upgrade code is the existing Fable code,
 verified against the previously generated WiX manifest.
 
 `tauri.conf.json` now uses productName and publisher Mivlet. The custom NSIS

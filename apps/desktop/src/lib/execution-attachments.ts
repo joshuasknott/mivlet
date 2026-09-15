@@ -3,7 +3,7 @@ import type {
   LocalComputerSnapshot,
   Spine,
   WorkAttachment,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { ComposerAttachment } from "./types";
 import type { useLocalComputer } from "../hooks/useLocalComputer";
 import {

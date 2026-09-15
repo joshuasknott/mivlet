@@ -1,4 +1,4 @@
-import type { ConnectorAccountOption, ConnectorManifest } from "@fable/protocol";
+import type { ConnectorAccountOption, ConnectorManifest } from "@mivlet/protocol";
 import { PluginPanel } from "../PluginPanel";
 
 export function MarketplacePage({

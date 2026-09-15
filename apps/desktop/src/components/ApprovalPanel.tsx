@@ -6,7 +6,7 @@ import type {
   ApprovalDecision,
   ApprovalGrant,
   ApprovalRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { SectionHeading } from "./primitives";
 import type {
   ApprovalModificationDraft,

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { ConversationVoice, FableAgentProfile, VoiceConversationPhase, VoiceConversationScope } from "@fable/protocol";
-import { INITIAL_CONVERSATION_STATE, VoiceConversationController, type VoicePromptControl } from "@fable/connectors/voice";
+import type { ConversationVoice, MivletAgentProfile, VoiceConversationPhase, VoiceConversationScope } from "@mivlet/protocol";
+import { INITIAL_CONVERSATION_STATE, VoiceConversationController, type VoicePromptControl } from "@mivlet/connectors/voice";
 import { createNativeVoiceConversationPort } from "../../lib/native-speech";
 import { openConversationMicrophone, playConversationAudio } from "../../lib/conversation-audio";
 import { VoiceConversationView } from "./VoiceConversationView";
 
 export function VoiceConversation({ agent, modelLabel, scope, unavailable, approvals, onPrompt, onClose, onOpenProviders, onPhase }: {
-  agent: FableAgentProfile;
+  agent: MivletAgentProfile;
   modelLabel: string;
   scope: VoiceConversationScope;
   unavailable?: string;

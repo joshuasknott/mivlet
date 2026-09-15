@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { LocalProject, LocalProjectRunAuthor } from "@fable/protocol";
+import type { LocalProject, LocalProjectRunAuthor } from "@mivlet/protocol";
 import { listLocalProjects, listLocalProjectRunAuthors } from "../runtime/domains/local-projects";
 
 export function useLocalProjects(workspaceId: string | undefined, projectId: string | undefined, enabled: boolean) {

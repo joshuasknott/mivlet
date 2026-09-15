@@ -25,7 +25,7 @@ function collect(directory) {
   }
   if (pkg.name.startsWith("@opencode/")) notices.push(readFileSync(resolve(destination, "LICENSE-OpenCode.txt"), "utf8"));
   for (const name of Object.keys(pkg.dependencies ?? {})) {
-    if (name === "@fable/protocol") continue;
+    if (name === "@mivlet/protocol") continue;
     let ancestor = directory;
     while (dirname(ancestor) !== ancestor) {
       const candidate = resolve(ancestor, "node_modules", name);

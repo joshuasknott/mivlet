@@ -7,7 +7,7 @@ import type {
   LocalFileImport,
   MemoryRecord,
   PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /**
  * Local shell-only types derived from protocol types. Keeping them in one
@@ -36,14 +36,14 @@ export interface ComposerAttachment {
   sizeBytes: number;
   previewUrl?: string;
   /** Prepared transient model input. Its data URL must never enter durable state. */
-  imageInput?: import("@fable/protocol").NativeImageInput;
+  imageInput?: import("@mivlet/protocol").NativeImageInput;
   sourceId?: string;
   /** Original upload bytes for one pending send. Never persisted in a draft. */
   transientBytes?: Uint8Array;
-  workspaceFile?: import("@fable/protocol").LocalComputerAttachmentReceipt;
+  workspaceFile?: import("@mivlet/protocol").LocalComputerAttachmentReceipt;
   /** Durable reference restored for a continued request. Native code re-verifies
    * the exact workspace path, size and content hash before dispatch. */
-  durableRef?: import("@fable/protocol").WorkAttachment;
+  durableRef?: import("@mivlet/protocol").WorkAttachment;
   status?: string;
 }
 
@@ -52,11 +52,11 @@ export interface PersistedShellState {
   composerValue: string;
   voiceEnabled: boolean;
   voiceProvider?: "browser" | "openai";
-  approvalAudit: import("@fable/protocol").ApprovalAuditEntry[];
+  approvalAudit: import("@mivlet/protocol").ApprovalAuditEntry[];
   dismissedApprovalIds: string[];
-  approvalRules: import("@fable/protocol").ApprovalGrant[];
+  approvalRules: import("@mivlet/protocol").ApprovalGrant[];
   /** User-owned agents. Optional only for snapshots created before agents existed. */
-  agents?: import("@fable/protocol").FableAgentProfile[];
+  agents?: import("@mivlet/protocol").MivletAgentProfile[];
   activeAgentId?: string;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConnectorManifest } from "@fable/protocol";
-import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
+import type { ConnectorManifest } from "@mivlet/protocol";
+import { tokenPluginFor } from "@mivlet/connectors/providers/token-plugins";
 import { TokenPluginDetails } from "./TokenPluginDetails";
 const connect = vi.hoisted(() => vi.fn());
 vi.mock("../../runtime/domains/connectors", () => ({

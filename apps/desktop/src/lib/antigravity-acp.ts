@@ -2,8 +2,8 @@ import type {
   AntigravityAcpEvent,
   AntigravityAcpHandle,
   AntigravityAcpHandlers
-} from "@fable/connectors";
-import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
+} from "@mivlet/connectors";
+import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
 import { getRuntimeAntigravityStatus, interruptRuntimeAntigravityTurn, listenRuntimeAntigravityEvents, respondRuntimeAntigravityApproval, shutdownRuntimeAntigravityTurn, startRuntimeAntigravityTurn } from "../runtime/domains/providers";
 
 function hasDesktopRuntime() {

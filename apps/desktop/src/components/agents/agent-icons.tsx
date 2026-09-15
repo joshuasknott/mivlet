@@ -1,4 +1,4 @@
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { AVATAR_COLOURS, avatarVariant } from "../../lib/blob-avatar";
 import type { AgentPresence } from "../../lib/agent-presence";
@@ -77,6 +77,6 @@ function useAvatarVisibility(root: RefObject<HTMLSpanElement | null>, enabled: b
   return visible;
 }
 
-export function ProfileAgentAvatar({ agent, ...props }: { agent: FableAgentProfile } & Omit<AvatarProps, "seed" | "color" | "imageDataUrl">) {
+export function ProfileAgentAvatar({ agent, ...props }: { agent: MivletAgentProfile } & Omit<AvatarProps, "seed" | "color" | "imageDataUrl">) {
   return <AgentAvatar key={agent.id} seed={agent.avatarSeed ?? `blob-v1:${agent.id}`} imageDataUrl={agent.iconImageDataUrl} color={agent.iconColor} {...props} />;
 }

@@ -12,9 +12,9 @@ import {
   BROKER_HANDOFF_TTL_SECONDS,
   BROKER_PKCE_S256_EXAMPLE,
   BrokerContractError
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { fixedClock } from "./clock.js";
 import { createSerialInMemoryEphemeralOps } from "./ephemeral-rpc.js";
 import {
@@ -29,8 +29,8 @@ import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
 import type { BrokerFetch } from "./provider-client.js";
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
 };
 
 const VICTIM_REDIRECT = "http://127.0.0.1:43123/callback";
@@ -73,7 +73,7 @@ describe("pending create-if-absent (redirect hijack)", () => {
   it("memory: second authorize with the same state cannot steal the desktop redirect", async () => {
     const clock = fixedClock(1_000_000);
     const stores = createStores(clock);
-    const broker = new FableBroker({
+    const broker = new MivletBroker({
       env: ENV, clock, fetch: githubFetch(), pending: stores.pending, handoff: stores.handoff
     });
 
@@ -93,7 +93,7 @@ describe("pending create-if-absent (redirect hijack)", () => {
     const clock = fixedClock(2_000_000);
     const secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const { ops } = await createSerialInMemoryEphemeralOps(clock, secret);
-    const broker = new FableBroker({
+    const broker = new MivletBroker({
       env: ENV, clock, fetch: githubFetch(), publicBaseUrl: "https://b.test/", ephemeralOps: ops
     });
 
@@ -157,11 +157,11 @@ describe("pending create-if-absent (redirect hijack)", () => {
 describe("authorize state entropy", () => {
   it("rejects short and non-unreserved state on memory and durable authorize", async () => {
     const clock = fixedClock(5_000_000);
-    const memory = new FableBroker({
+    const memory = new MivletBroker({
       env: ENV, clock, fetch: githubFetch(), pending: createStores(clock).pending
     });
     const { ops } = await createSerialInMemoryEphemeralOps(clock, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
-    const durable = new FableBroker({
+    const durable = new MivletBroker({
       env: ENV, clock, fetch: githubFetch(), publicBaseUrl: "https://b.test/", ephemeralOps: ops
     });
 

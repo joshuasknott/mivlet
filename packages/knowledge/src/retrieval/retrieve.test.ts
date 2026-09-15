@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { filterRetrievable, retrieve, type RetrievalSource } from "./retrieve";
 import { cosineSimilarity, type EmbeddingProvider } from "./semantic";
 

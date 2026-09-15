@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CollaborationWorkItem, WorkAttachment } from "@fable/protocol";
+import type { CollaborationWorkItem, WorkAttachment } from "@mivlet/protocol";
 import type { ComposerAttachment } from "./types";
 import {
   missingRestagedPaths,

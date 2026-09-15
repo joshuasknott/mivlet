@@ -11,10 +11,10 @@ state. Local development and deterministic tests may keep this state in one
 process. Staging and production must use the encrypted Durable Object backend
 declared in `apps/broker/wrangler.jsonc`.
 
-Memory storage is refused when `FABLE_BROKER_PUBLIC_URL` is public HTTPS
+Memory storage is refused when `MIVLET_BROKER_PUBLIC_URL` is public HTTPS
 (HTTPS and not loopback). Unlabeled or `local` Workers with a public URL fail
 closed (503), even if durable storage is selected. Staging and production
-still require durable bindings and `FABLE_BROKER_STORE_ENCRYPTION_KEY`.
+still require durable bindings and `MIVLET_BROKER_STORE_ENCRYPTION_KEY`.
 Long-lived user tokens are returned once to the native desktop credential
 boundary and are not retained by the broker.
 
@@ -41,5 +41,5 @@ A live release still requires provider-console callback registration, deployed
 secrets and bindings, concurrent callback/replay testing, log inspection, and
 revocation testing against configured provider applications.
 
-The broker remains separate from Fable accounts, model-provider
+The broker remains separate from Mivlet accounts, model-provider
 credentials, workspace data, and optional sync services.

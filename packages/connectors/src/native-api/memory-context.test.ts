@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, MemoryRecord } from "@fable/protocol";
+import type { KnowledgeSource, MemoryRecord } from "@mivlet/protocol";
 import { buildContextPrefix } from "./memory-context";
 
 const memory = (over: Partial<MemoryRecord> = {}): MemoryRecord => ({

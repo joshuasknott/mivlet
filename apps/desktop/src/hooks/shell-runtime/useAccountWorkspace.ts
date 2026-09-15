@@ -1,4 +1,4 @@
-import type { AccountWorkspaceStatus, IdentityStatus } from "@fable/protocol";
+import type { AccountWorkspaceStatus, IdentityStatus } from "@mivlet/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { hasTauriRuntime } from "../../lib/persistence";
 import {

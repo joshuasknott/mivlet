@@ -259,10 +259,10 @@ cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
 Hosted-runner changes require its focused tests, build, and
-`pnpm --filter @fable/hosted-runner worker:deploy:dry-run`.
+`pnpm --filter @mivlet/hosted-runner worker:deploy:dry-run`.
 A dry-run validates packaging and bindings only; it does not validate a live
 Cloudflare environment. Local hosted-runner Worker dev is
-`pnpm --filter @fable/hosted-runner worker:dev` on port 8789.
+`pnpm --filter @mivlet/hosted-runner worker:dev` on port 8789.
 
 ## Working principles
 
@@ -279,9 +279,10 @@ Contributor guidance is in [AGENTS.md](AGENTS.md). Product direction is in
 
 ## Compatibility
 
-Mivlet keeps the existing `@fable/*` package names, `FABLE_*` configuration keys,
-native application identifier, database and credential namespaces, and computer
-paths. These are compatibility identifiers, not product branding; changing them
-without a migration could disconnect existing installations from their data.
-See the [Windows release guide](docs/operations/windows-private-release.md) for
-installer upgrade behavior and verification limits.
+Package names are `@mivlet/*`. Operator environment keys are `MIVLET_*`; missing
+values fall back once to the former `FABLE_*` aliases for one deploy cycle (a
+present empty `MIVLET_*` value does not fall through). Native application
+identifier (`com.fable.workspace`), database filenames, credential namespaces,
+local storage keys, and computer paths stay on their existing on-disk names so
+installs keep their data. See the [Windows release guide](docs/operations/windows-private-release.md)
+for installer upgrade behavior and verification limits.

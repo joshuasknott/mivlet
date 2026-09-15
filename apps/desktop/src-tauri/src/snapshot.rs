@@ -13,7 +13,7 @@ use crate::knowledge::import_local_text_file;
 use crate::memory::normalize_memory_state;
 use crate::models::MemoryControlState;
 use crate::models::{
-    ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, FableAgentProfile,
+    ApprovalAuditEntry, ApprovalGrant, ContextRecordAuthorityScope, MivletAgentProfile,
     LocalFileImport, LocalKnowledgeRefreshResponse, LocalTextFileCandidate,
     RefreshLocalKnowledgeSourceRequest, RuntimeSnapshot, RuntimeStatus, APPROVAL_MODES,
     MAX_APPROVAL_AUDIT_ENTRIES, MAX_IMPORTED_KNOWLEDGE_SOURCES, MAX_LOCAL_FILE_BYTES,
@@ -568,8 +568,8 @@ pub(crate) fn normalize_runtime_snapshot(
 }
 
 fn normalize_runtime_agents(
-    agents: Vec<FableAgentProfile>,
-) -> Result<Vec<FableAgentProfile>, String> {
+    agents: Vec<MivletAgentProfile>,
+) -> Result<Vec<MivletAgentProfile>, String> {
     const ICON_COLORS: [&str; 10] = [
         "#6D5DF7", "#2672E8", "#13966F", "#D07A19", "#D6537D", "#A14FD1", "#0E8FA4", "#D2543D",
         "#626B78", "#202124",
@@ -621,7 +621,7 @@ fn normalize_runtime_agents(
                             }))
             })
             .unwrap_or_else(|| format!("blob-v1:{id}"));
-        normalized.push(FableAgentProfile {
+        normalized.push(MivletAgentProfile {
             id,
             name,
             reasoning_effort: agent.reasoning_effort.filter(|value| {
@@ -835,7 +835,7 @@ mod tests {
             "unknown:3:invalid".into(),
             format!("robot-v3:2:{}", "a".repeat(160)),
         ] {
-            let agent: FableAgentProfile = serde_json::from_value(serde_json::json!({
+            let agent: MivletAgentProfile = serde_json::from_value(serde_json::json!({
                 "id": "avatar-agent", "name": "Avatar", "instructions": "", "modelId": "",
                 "icon": "agent", "permissionLabel": "Ask Me", "avatarSeed": seed
             }))
@@ -850,7 +850,7 @@ mod tests {
 
     #[test]
     fn teammate_preferences_and_skills_survive_native_roundtrip() {
-        let agent: FableAgentProfile = serde_json::from_value(serde_json::json!({
+        let agent: MivletAgentProfile = serde_json::from_value(serde_json::json!({
             "id": "ava", "name": "Ava", "instructions": "Keep things simple.",
             "modelId": "codex::model", "reasoningEffort": "high", "icon": "agent",
             "avatarSeed": "blob-v1:stable-ava",
@@ -859,7 +859,7 @@ mod tests {
         })).unwrap();
         let normalized = normalize_runtime_agents(vec![agent]).unwrap().remove(0);
         let encoded = serde_json::to_value(&normalized).unwrap();
-        let restored: FableAgentProfile = serde_json::from_value(encoded).unwrap();
+        let restored: MivletAgentProfile = serde_json::from_value(encoded).unwrap();
         assert_eq!(restored.reasoning_effort.as_deref(), Some("high"));
         assert_eq!(restored.avatar_seed.as_deref(), Some("blob-v1:stable-ava"));
         assert_eq!(restored.thread_ids, vec!["old-chat", "new-chat"]);

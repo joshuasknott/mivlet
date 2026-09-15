@@ -1,5 +1,5 @@
-import type { BackendProvider, FableAgentProfile } from "@fable/protocol";
-import { supportsSharedComputerTools } from "@fable/connectors/native-api/computer-vision";
+import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
+import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import {
   resolveProviderModelOption,
   type ProviderModelOption,
@@ -28,7 +28,7 @@ export interface TeamRouteReadiness {
  */
 export function teamRouteReadiness(
   participantIds: string[],
-  agents: FableAgentProfile[],
+  agents: MivletAgentProfile[],
   models: ProviderModelOption[],
   providers: BackendProvider[],
 ): TeamRouteReadiness[] {
@@ -94,7 +94,7 @@ export function TeamReadiness({
   compact = false,
 }: {
   participantIds: string[];
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   models: ProviderModelOption[];
   providers: BackendProvider[];
   compact?: boolean;

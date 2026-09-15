@@ -2,7 +2,7 @@ import type {
   BackendAuthState,
   BackendProvider,
   ProviderDriverKind,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { resolveAntigravityProvider } from "./antigravity";
 import { resolveCodexProvider } from "./codex";
 import { resolveManagedProvider } from "./managed";

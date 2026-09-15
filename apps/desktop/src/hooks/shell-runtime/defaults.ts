@@ -1,5 +1,5 @@
-import type { AccountWorkspaceStatus, IdentityStatus } from "@fable/protocol";
-import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@fable/connectors";
+import type { AccountWorkspaceStatus, IdentityStatus } from "@mivlet/protocol";
+import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@mivlet/connectors";
 import { knowledgeSources, memoryRecords } from "../../data/workspace";
 import { DEFAULT_PERMISSION_LABEL } from "../../lib/agent-run";
 import type { PersistedShellState } from "../../lib/types";
@@ -73,12 +73,12 @@ export const PREVIEW_IDENTITY_STATUS: IdentityStatus = {
   enabled: true,
   state: "signed-in",
   message: "Preview account signed in.",
-  issuer: "https://preview.fable.invalid",
-  audience: "fable-preview",
+  issuer: "https://preview.mivlet.invalid",
+  audience: "mivlet-preview",
   scopes: ["account:preview"],
   authentication: {
     provider: "clerk",
-    normalizedIssuer: "https://preview.fable.invalid",
+    normalizedIssuer: "https://preview.mivlet.invalid",
     subject: "preview-user",
     authenticationEventRef: "preview-auth-event",
     sessionRef: "preview-session",

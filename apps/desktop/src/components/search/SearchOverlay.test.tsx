@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { SearchResponse, SearchResult } from "@fable/protocol";
+import type { SearchResponse, SearchResult } from "@mivlet/protocol";
 import { SearchOverlay } from "./SearchOverlay";
 
 const mocks = vi.hoisted(() => ({ searchWorkspace: vi.fn() }));

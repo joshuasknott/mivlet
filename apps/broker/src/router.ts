@@ -24,9 +24,9 @@ import {
   type BrokerErrorResponse,
   type BrokerProviderId,
   isBrokerProvider
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import type { FableBroker } from "./broker.js";
+import type { MivletBroker } from "./broker.js";
 import {
   createRateLimiter,
   newCorrelationId,
@@ -37,10 +37,10 @@ import {
 
 export type { RateLimiter };
 
-export const CORRELATION_HEADER = "x-fable-request-id";
+export const CORRELATION_HEADER = "x-mivlet-request-id";
 
 export interface BrokerRouterOptions {
-  broker: FableBroker;
+  broker: MivletBroker;
   /** Requests per minute per route. Default 60. */
   requestsPerMinute?: number;
   /** Allowed CORS origins. Default: loopback only. */
@@ -154,7 +154,7 @@ async function route(
   request: Request,
   url: URL,
   segments: string[],
-  broker: FableBroker,
+  broker: MivletBroker,
   corsHeaders: Record<string, string>,
   correlation: string
 ): Promise<Response> {

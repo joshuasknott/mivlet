@@ -3,7 +3,7 @@ import {
   SECRET_CONTENT_OMITTED,
   SECRET_REDACTED,
   SECRET_REDACTION_CASES
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { redactKnowledgeChunk, redactKnowledgeText } from "./redact";
 
 describe("knowledge secret redaction", () => {

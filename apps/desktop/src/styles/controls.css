@@ -72,10 +72,10 @@
   border-right-color: transparent;
   border-radius: var(--radius-pill);
   content: "";
-  animation: fable-spin 700ms linear infinite;
+  animation: mivlet-spin 700ms linear infinite;
 }
 
-@keyframes fable-spin {
+@keyframes mivlet-spin {
   to {
     transform: rotate(1turn);
   }

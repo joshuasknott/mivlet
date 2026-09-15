@@ -3,15 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   CollaborationWorkItem,
   ConversationRoom,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalProject,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { WorkspaceRightNav, type NavContext } from "./WorkspaceRightNav";
 
 vi.mock("../../hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 
-const agent: FableAgentProfile = {
+const agent: MivletAgentProfile = {
   id: "agent",
   name: "Mira",
   instructions: "Help.",

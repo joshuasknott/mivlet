@@ -22,7 +22,7 @@ import {
   type NativeCompletionRequest,
   type NativeMessage,
   type PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { catalogueCapabilities } from "./model-catalogue";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";

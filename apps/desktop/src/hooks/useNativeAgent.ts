@@ -17,8 +17,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { isRoutineConnectorRead } from "@fable/connectors/native-api/tool-executor";
-import { isCollaborationTool } from "@fable/connectors/native-api/tools";
+import { isRoutineConnectorRead } from "@mivlet/connectors/native-api/tool-executor";
+import { isCollaborationTool } from "@mivlet/connectors/native-api/tools";
 import type {
   AgentTurnRequest,
   BackendAgentEvent,
@@ -31,15 +31,15 @@ import type {
   ProviderRouteExecutionBinding,
   ExecutionContextReceipt,
   Spine,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   resolveAgentBackend,
   type AgentBackend,
   type BackendDeps,
   type ToolExecutor,
-} from "@fable/connectors";
-import type { HistoryEntry } from "@fable/knowledge";
-import { validateReasoningEffort } from "@fable/connectors/native-api/reasoning";
+} from "@mivlet/connectors";
+import type { HistoryEntry } from "@mivlet/knowledge";
+import { validateReasoningEffort } from "@mivlet/connectors/native-api/reasoning";
 import { describeBackendError } from "../lib/backend-errors";
 import {
   createAttemptPersistence,
@@ -169,7 +169,7 @@ export interface UseNativeAgentOptions {
   execute?: ToolExecutor;
   /** Approval-only gate for provider-owned tools such as Antigravity ACP. */
   authorize?: (
-    approval: import("@fable/protocol").ApprovalRequest,
+    approval: import("@mivlet/protocol").ApprovalRequest,
   ) => Promise<void>;
   /**
    * Cooperative cancellation hook, checked between events. When omitted the loop

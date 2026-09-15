@@ -32,7 +32,7 @@ import type {
   BackendAgentEvent,
   BackendCapability,
   BackendProvider,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { HttpTransport } from "../native-api/transport";
 import type { ModelDiscoveryResult } from "../native-api/discovery";
 
@@ -79,7 +79,7 @@ export interface AgentBackend {
 }
 
 /**
- * Dependency bag the desktop shell injects so `@fable/connectors` stays pure
+ * Dependency bag the desktop shell injects so `@mivlet/connectors` stays pure
  * (no network, no Tauri import). The native-API adapter uses `createTransport`
  * to build its HTTP/SSE seam over the Rust boundary; tests inject a
  * `FixtureTransport`. The returned transport is paired with a cancel handle so

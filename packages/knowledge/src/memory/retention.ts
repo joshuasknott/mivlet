@@ -6,7 +6,7 @@
  * the result (e.g. forget the pruned ids) — this function does not mutate.
  */
 
-import type { MemoryRecord, MemoryRetentionResult } from "@fable/protocol";
+import type { MemoryRecord, MemoryRetentionResult } from "@mivlet/protocol";
 import { isLiveMemory } from "../store";
 import { isNearIdenticalNormalized, normalizeMemoryValue } from "./duplicate";
 
