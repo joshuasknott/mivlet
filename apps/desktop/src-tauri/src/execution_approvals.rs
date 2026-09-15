@@ -21,7 +21,15 @@ struct ExecutionApproval {
     invalidated_at: Option<String>,
 }
 
-const EXECUTION_APPROVAL_TTL_SECONDS: i64 = 15 * 60;
+pub(crate) const EXECUTION_APPROVAL_TTL_SECONDS: i64 = 15 * 60;
+
+/// Wall-clock consume time for a persisted execution permit.
+///
+/// Production callers must pass this (or another current timestamp) as
+/// `consumed_at`. Reusing `decided_at` makes the freshness fence a no-op.
+pub(crate) fn wall_clock_consumed_at() -> String {
+    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
 
 fn parse_rfc3339_utc_seconds(value: &str) -> Option<i64> {
     let value = value.strip_suffix('Z')?;
@@ -171,6 +179,9 @@ pub(crate) fn invalidate_execution_approvals(
     Ok(())
 }
 
+/// Consume a persisted one-time permit if it is still within the freshness
+/// fence. `consumed_at` is wall-clock consume time, never the decision
+/// timestamp: elapsed time is `consumed_at - decided_at`.
 pub(crate) fn verify_and_consume_execution_approval(
     path: &Path,
     request: &ApprovalRequest,
@@ -359,6 +370,22 @@ mod tests {
         verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:05.123Z")
             .expect("fresh permit remains usable");
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn wall_clock_consume_time_rejects_a_permit_older_than_the_ttl() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("approvals.json");
+        let approved = request();
+        let mut stale = response(approved.clone());
+        stale.audit_entry.decided_at = (chrono::Utc::now()
+            - chrono::Duration::seconds(EXECUTION_APPROVAL_TTL_SECONDS + 1))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        record_execution_decision(&path, &stale).expect("record");
+        let error =
+            verify_and_consume_execution_approval(&path, &approved, &wall_clock_consumed_at())
+                .expect_err("TTL must elapse against wall-clock consume time");
+        assert!(error.contains("stale"), "{error}");
     }
 
     #[test]

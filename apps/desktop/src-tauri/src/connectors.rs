@@ -2456,7 +2456,7 @@ pub async fn execute_approved_connector_action(
             command_error("approval-required", &action.connector_id, &message, false)
         })?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )
     .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
     update_connector_action_result(

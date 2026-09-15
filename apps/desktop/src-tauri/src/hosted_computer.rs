@@ -1232,15 +1232,16 @@ pub async fn hosted_process_launch(
     if resolution.audit_entry.decision != "once" {
         return Err("Hosted process launches require a fresh one-time approval.".into());
     }
+    let consumed_at = crate::execution_approvals::wall_clock_consumed_at();
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &source_resolution.effective_request,
-        &source_resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
@@ -1362,7 +1363,7 @@ pub async fn hosted_browser_navigate(
         crate::execution_approvals::verify_and_consume_execution_approval(
             &crate::paths::execution_approvals_path(&app)?,
             &source_resolution.effective_request,
-            &source_resolution.audit_entry.decided_at,
+            &crate::execution_approvals::wall_clock_consumed_at(),
         )?;
     }
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
@@ -1372,7 +1373,7 @@ pub async fn hosted_browser_navigate(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
@@ -1485,10 +1486,11 @@ pub async fn hosted_browser_action(
         &source_arguments,
         &source_resolution.effective_request,
     )?;
+    let consumed_at = crate::execution_approvals::wall_clock_consumed_at();
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &source_resolution.effective_request,
-        &source_resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
     if resolution.audit_entry.decision != "once" {
@@ -1497,7 +1499,7 @@ pub async fn hosted_browser_action(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
