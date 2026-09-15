@@ -43,9 +43,10 @@ export const CONNECTION_HEALTH_STATES = [
 ] as const;
 export type ConnectionHealthState = (typeof CONNECTION_HEALTH_STATES)[number];
 
+/** Includes persisted `fable-reviewed`; do not rename without a store migration. */
 export const CONNECTION_TRUST_LEVELS = [
   "first-party",
-  "fable-reviewed", // persisted trust token; do not rename without a store migration
+  "fable-reviewed",
   "verified-publisher",
   "user-managed",
   "untrusted"
@@ -89,9 +90,10 @@ export type McpTransport = (typeof MCP_TRANSPORTS)[number];
 export const MCP_DISCOVERY_STATES = ["not-started", "discovered", "stale", "failed"] as const;
 export type McpDiscoveryState = (typeof MCP_DISCOVERY_STATES)[number];
 
+/** Includes persisted `fable-managed`; do not rename without a store migration. */
 export const EXECUTION_PLACEMENT_KINDS = [
   "local-desktop",
-  "fable-managed", // persisted placement token; do not rename without a store migration
+  "fable-managed",
   "customer-hosted"
 ] as const;
 export type ExecutionPlacementKind = (typeof EXECUTION_PLACEMENT_KINDS)[number];
@@ -494,7 +496,7 @@ export interface CapabilityResolutionFailure {
 }
 
 export const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION =
-  "fable.connected-source-search.v1" as const; // persisted MCP contract version
+  "fable.connected-source-search.v1" as const;
 
 /** Mivlet-owned citation shape shared by native and MCP source-search routes. */
 export interface ConnectedSourceCitation {
