@@ -554,7 +554,13 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "child",
             delegate("researcher", "Question"),
         )?;
-        commands::apply(ctx, Command::StopWork { id: "root".into() })?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: None,
+            },
+        )?;
         assert_eq!(ctx.item("root")?.status, WorkStatus::Cancelled);
         assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-lead")).is_err());
         assert!(work::agent_command(
@@ -718,6 +724,136 @@ fn remount_recovery_fences_orphaned_executing_work_and_rejects_late_writes() {
         assert_eq!(ctx.item("queued")?.generation, 1);
         Ok(())
     });
+}
+
+#[test]
+fn generation_fenced_stop_work_is_a_noop_after_remount_recovery() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(root.reason.as_deref().unwrap().contains("execution owner"));
+        Ok(())
+    });
+}
+
+#[test]
+fn generation_fenced_stop_work_does_not_cancel_a_continued_assignment() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "root".into(),
+                expected_generation: 2,
+                reconcile: true,
+            },
+        )?;
+        bind(ctx, "root", "run-continued")?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::Running);
+        assert_eq!(root.current_run_id.as_deref(), Some("run-continued"));
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-continued")).is_ok());
+        Ok(())
+    });
+}
+
+#[test]
+fn generation_fenced_stop_work_still_cancels_the_captured_generation() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::Cancelled);
+        assert_eq!(root.generation, 2);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn stop_work_omitting_expected_generation_deserializes_as_unfenced() {
+    let command: Command = serde_json::from_str(r#"{"action":"stop-work","id":"root"}"#).unwrap();
+    match command {
+        Command::StopWork {
+            id,
+            expected_generation,
+        } => {
+            assert_eq!(id, "root");
+            assert_eq!(expected_generation, None);
+        }
+        other => panic!("expected StopWork, got {other:?}"),
+    }
 }
 
 #[test]

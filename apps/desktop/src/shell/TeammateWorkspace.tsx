@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type MutableRefObject,
 } from "react";
 import {
   AgentSidebar,
@@ -54,7 +55,7 @@ import {
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import { navigationTargetFor } from "../lib/search/navigation";
 import { promoteWorkOutputToMemory } from "../lib/work-memory";
-import { activeWork, WorkspaceExecution } from "../lib/workspace-execution";
+import { activeWork, enqueueWorkspaceDispose, WorkspaceExecution } from "../lib/workspace-execution";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { runtimeAccountTheme } from "../runtime/domains/account";
 import { saveRuntimeConversationDraft } from "../runtime/domains/conversations";
@@ -125,10 +126,14 @@ const ComputerInspector = lazy(() =>
 export function TeammateWorkspace() {
   const [approvals] = useState(() => new ExecutionApprovalRouter());
   const current = useRef<WorkspaceExecution | null>(null);
+  const priorClose = useRef<Promise<void>>(Promise.resolve());
   const runtime = useShellRuntime({
     approvalGate: approvals,
     onScopeReset: () => {
-      current.current?.dispose();
+      priorClose.current = enqueueWorkspaceDispose(
+        priorClose.current,
+        current.current,
+      );
       current.current = null;
     },
   });
@@ -181,6 +186,7 @@ export function TeammateWorkspace() {
       approvals={approvals}
       theme={theme}
       onTheme={changeTheme}
+      priorClose={priorClose}
       onService={(service) => {
         current.current = service;
       }}
@@ -194,12 +200,14 @@ function ActiveWorkspace({
   theme,
   onTheme,
   onService,
+  priorClose,
 }: {
   runtime: ShellRuntime;
   approvals: ExecutionApprovalRouter;
   theme: "light" | "dark";
   onTheme: (theme: "light" | "dark") => void;
   onService: (service: WorkspaceExecution) => void;
+  priorClose: MutableRefObject<Promise<void>>;
 }) {
   const workspaceId =
     runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId;
@@ -271,6 +279,7 @@ function ActiveWorkspace({
     if (!initialized.current) {
       initialized.current = true;
       void (async () => {
+        await priorClose.current;
         await recoverRuntimeExecutionAttempts(new Date().toISOString());
         await service.refresh();
       })().catch((error) => service.report(error));
@@ -278,10 +287,15 @@ function ActiveWorkspace({
     return () => {
       mounts.current--;
       queueMicrotask(() => {
-        if (!mounts.current) service.dispose();
+        if (!mounts.current) {
+          priorClose.current = enqueueWorkspaceDispose(
+            priorClose.current,
+            service,
+          );
+        }
       });
     };
-  }, [service]);
+  }, [service, priorClose]);
   useEffect(() => {
     for (const session of state.sessions) {
       const profile = runtime.agents.find(

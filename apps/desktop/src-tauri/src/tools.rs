@@ -1237,6 +1237,21 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
+    if let Err(error) = crate::execution_control::ensure_active_execution_allowed() {
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "blocked",
+                error_code: "execution-paused",
+                message: &error,
+            },
+            None,
+        );
+        return Err(error);
+    }
     if let Err(error) = verify_tool_authority(&execution_approvals_path(&app)?, &request) {
         audit_tool_outcome(
             ToolOutcomeAudit {
@@ -2455,5 +2470,24 @@ mod connector_authority_tests {
             )
             .unwrap_or_else(|_| panic!("{decision} permit must remain consumable after refusal"));
         }
+    }
+
+    #[test]
+    fn execute_tool_call_checks_workspace_pause_before_permit_consume() {
+        let source = include_str!("tools.rs");
+        let start = source
+            .find("pub async fn execute_tool_call")
+            .expect("execute_tool_call");
+        let body = &source[start..];
+        let pause = body
+            .find("ensure_active_execution_allowed")
+            .expect("pause gate on execute_tool_call");
+        let consume = body
+            .find("verify_tool_authority")
+            .expect("permit consume on execute_tool_call");
+        assert!(
+            pause < consume,
+            "paused workspaces must fail closed before a permit is consumed"
+        );
     }
 }

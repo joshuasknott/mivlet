@@ -281,8 +281,16 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             status,
             reason,
         } => work::finish(ctx, &id, generation, &run_id, status, reason)?,
-        Command::StopWork { id } => {
-            ctx.item(&id)?;
+        Command::StopWork {
+            id,
+            expected_generation,
+        } => {
+            let item = ctx.item(&id)?;
+            if let Some(expected) = expected_generation {
+                if item.generation != expected || !item.status.executing() {
+                    return Ok(());
+                }
+            }
             work::invalidate_descendants(
                 ctx,
                 &id,

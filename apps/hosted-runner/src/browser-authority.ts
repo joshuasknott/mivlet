@@ -13,6 +13,7 @@ import {
   replaceCurrentBrowserHistory,
   type BrowserHistoryState
 } from "./browser-history";
+import { browserSessionAfterFence } from "./generation-fence";
 
 const KEEP_ALIVE_MS = 10 * 60_000;
 const MAX_PREVIEW_BYTES = 300 * 1024;
@@ -242,10 +243,21 @@ export class BrowserAuthority extends DurableObject<Env> {
 
   private async page(computerId: string, generation: number): Promise<Page> {
     const state = this.readState();
-    if (state && (state.computer_id !== computerId || state.generation !== generation)) {
+    const fence = browserSessionAfterFence(
+      state
+        ? {
+            computerId: state.computer_id,
+            generation: state.generation,
+            sessionId: state.session_id
+          }
+        : null,
+      computerId,
+      generation
+    );
+    if (fence.destroyPrevious) {
       await this.destroy(computerId);
     }
-    const browser = await this.ensureBrowser(state?.session_id ?? null);
+    const browser = await this.ensureBrowser(fence.resumeSessionId);
     const contexts = browser.contexts();
     const context = contexts[0] ?? await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const pages = context.pages();
