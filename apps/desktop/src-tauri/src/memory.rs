@@ -160,25 +160,8 @@ fn encode_memory_export_scoped(
 }
 
 fn redact_export_value(value: &serde_json::Value) -> serde_json::Value {
-    const MARKERS: &[&str] = &[
-        "bearer ",
-        "authorization:",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "github_pat_",
-        "ghp_",
-        "xoxb-",
-        "xoxp-",
-        "ya29.",
-        "sk-",
-    ];
     match value {
-        serde_json::Value::String(text)
-            if MARKERS
-                .iter()
-                .any(|marker| text.to_ascii_lowercase().contains(marker)) =>
-        {
+        serde_json::Value::String(text) if crate::secret_redaction::looks_secret(text) => {
             serde_json::Value::String("[redacted secret-bearing memory data]".to_string())
         }
         serde_json::Value::Array(values) => {

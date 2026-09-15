@@ -364,19 +364,7 @@ pub(crate) fn act(
     ticket.finish(Ok(json!({"generation":generation,"status":"input-dispatched","outcome":"Observe the application to confirm the effect.","requiresObservation":true,"trust":"external-untrusted"}).to_string()))
 }
 fn credential_shaped(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    [
-        "sk-",
-        "github_pat_",
-        "ghp_",
-        "bearer ",
-        "-----begin private key",
-        "password=",
-        "api_key=",
-        "access_token=",
-    ]
-    .iter()
-    .any(|p| lower.contains(p))
+    crate::secret_redaction::looks_secret(text)
 }
 pub(crate) fn delivery_ticket(
     computers: &Arc<LocalComputerState>,

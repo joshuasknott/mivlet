@@ -203,4 +203,59 @@ describe("conversation runtime", () => {
     expect(transport.views[2].currentRevision.content).toContain("[REDACTED]");
     expect(transport.views[2].currentRevision.content).not.toContain("leaked-refresh-token");
   });
+
+  it("redacts GitHub, Slack, and Google token shapes that used to survive TypeScript-only patterns", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({
+      kind: "tool-result",
+      content: [
+        "ghp_abcdefghijklmnopqrstuvwx1234567890",
+        "github_pat_11AAAAAAA0abcdefghijklmnopqrstuvwxyz012345",
+        "xoxb-fixturenotarealslacktoken",
+        "AIzaSy123456789012345678901234567890abc",
+        "ya29.a0ATt-leaked-google-access-token"
+      ].join("\n"),
+      callId: "call-gaps",
+      toolName: "run-shell",
+      ok: true
+    });
+    await writer.record({
+      kind: "tool-result",
+      content: "export GITHUB_TOKEN=ghp_short",
+      callId: "call-omit",
+      toolName: "run-shell",
+      ok: true
+    });
+
+    const redacted = transport.views[0].currentRevision.content;
+    expect(redacted).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234567890");
+    expect(redacted).not.toContain("github_pat_11AAAAAAA0abcdefghijklmnopqrstuvwxyz012345");
+    expect(redacted).not.toContain("xoxb-fixturenotarealslacktoken");
+    expect(redacted).not.toContain("AIzaSy123456789012345678901234567890abc");
+    expect(redacted).not.toContain("ya29.a0ATt-leaked-google-access-token");
+    expect(redacted).toContain("[REDACTED]");
+    expect(transport.views[1].currentRevision.content).toBe("[content omitted: secret-shaped content]");
+  });
+
+  it("redacts assistant checkpoints and non-tool durable kinds before persist", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({
+      kind: "user",
+      content: "paste ghp_abcdefghijklmnopqrstuvwx1234567890"
+    });
+    await writer.checkpointAssistant("I saw ghp_abcdefghijklmnopqrstuvwx1234567890");
+    await writer.record({
+      kind: "interruption",
+      content: "stopped after xoxb-fixturenotarealslacktoken",
+      reason: "user-stop"
+    });
+
+    expect(transport.views[0].currentRevision.content).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234567890");
+    expect(transport.views[1].currentRevision.content).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234567890");
+    expect(transport.views[2].currentRevision.content).not.toContain("xoxb-fixturenotarealslacktoken");
+    expect(transport.views[0].currentRevision.content).toContain("[REDACTED]");
+    expect(transport.views[1].currentRevision.content).toContain("[REDACTED]");
+  });
 });

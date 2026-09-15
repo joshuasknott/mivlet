@@ -61,6 +61,7 @@ mod permission_policy;
 mod product_spine_parity;
 mod provider_process;
 mod search;
+mod secret_redaction;
 mod snapshot;
 mod store;
 mod token_plugins;

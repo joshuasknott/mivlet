@@ -1,4 +1,5 @@
 import { redactSecretsFromObject, redactSecretsFromString } from "@fable/connectors/agent-runtime";
+import { SECRET_CONTENT_OMITTED, secretMarkerSurvives } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
 
 export type ConversationThread = Spine.Conversations.Thread;
@@ -185,7 +186,7 @@ export function createDurableRunWriter(
 
   const checkpoint = async (transcript: string, terminal = false) => {
       latestTranscript = transcript;
-      const content = transcript.slice(transcriptOffset);
+      const content = redactPersistedContent(transcript.slice(transcriptOffset));
       if (!assistant) {
         if (!content) return;
         await append({ kind: "assistant", content, state: terminal ? "terminal" : "streaming" });
@@ -225,23 +226,24 @@ export function createDurableRunWriter(
 }
 
 function redactDurableRecord(record: DurableRunRecord): DurableRunRecord {
-  if (record.kind !== "tool-call" && record.kind !== "tool-result" && record.kind !== "error") {
-    return record;
-  }
-  return { ...record, content: redactPersistedToolContent(record.content) };
+  return { ...record, content: redactPersistedContent(record.content) };
 }
 
-function redactPersistedToolContent(content: string): string {
+function redactPersistedContent(content: string): string {
   const trimmed = content.trim();
   if (
     (trimmed.startsWith("{") && trimmed.endsWith("}"))
     || (trimmed.startsWith("[") && trimmed.endsWith("]"))
   ) {
     try {
-      return JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown));
+      return omitIfSecretSurvives(JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown)));
     } catch {
       // Marker-free JSON that failed to parse is still scrubbed as text.
     }
   }
-  return redactSecretsFromString(content);
+  return omitIfSecretSurvives(redactSecretsFromString(content));
+}
+
+function omitIfSecretSurvives(redacted: string): string {
+  return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
 }

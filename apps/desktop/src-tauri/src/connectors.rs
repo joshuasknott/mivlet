@@ -1306,27 +1306,8 @@ pub(crate) fn validate_connector_action(
 
 pub(crate) fn redact_connector_text(value: &str) -> String {
     let normalized = normalize_spaces(value);
-    let lowercase = normalized.to_ascii_lowercase();
-    let sensitive_markers = [
-        "authorization:",
-        "bearer ",
-        "cookie:",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "xoxb-",
-        "xoxp-",
-        "ghp_",
-        "github_pat_",
-        "email body",
-        "message body",
-        "raw payload",
-    ];
-
-    if sensitive_markers
-        .iter()
-        .any(|marker| lowercase.contains(marker))
-    {
+    const CONNECTOR_SECRET_EXTRAS: &[&str] = &["email body", "message body", "raw payload"];
+    if crate::secret_redaction::looks_secret_with(&normalized, CONNECTOR_SECRET_EXTRAS) {
         return "[redacted connector data]".to_string();
     }
 
