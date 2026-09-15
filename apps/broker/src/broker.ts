@@ -470,6 +470,3 @@ function brokerErrorFrom(error: unknown): BrokerContractError {
     true
   );
 }
-
-/** Re-export for the desktop-side contract helper (tokens type only). */
-export type { ConnectorTokenSet, BrokerHandoffTicket };

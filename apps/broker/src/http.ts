@@ -178,6 +178,3 @@ function peerOf(req: IncomingMessage, trustProxy: boolean): string | undefined {
   }
   return req.socket?.remoteAddress;
 }
-
-// Re-export the correlation header constant for tests that referenced it via http.
-export { CORRELATION_HEADER };

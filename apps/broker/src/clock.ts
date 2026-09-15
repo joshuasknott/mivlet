@@ -6,10 +6,6 @@ export interface BrokerClock {
   nowMs(): number;
 }
 
-export const systemClock: BrokerClock = {
-  nowMs: () => Date.now()
-};
-
 /** Fixed clock for tests. */
 export function fixedClock(ms: number): BrokerClock {
   let current = ms;

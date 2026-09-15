@@ -15,10 +15,10 @@ import type { BrokerProviderId } from "@fable/connectors";
  * - `broker-pkce`: the broker generates its own verifier/challenge and presents it
  *   to the provider, then uses the verifier in the confidential exchange.
  */
-export type BrokerPkceMode = "none" | "broker-pkce";
+type BrokerPkceMode = "none" | "broker-pkce";
 
-export type ProviderTokenRequestStyle = "form" | "form-without-grant-type" | "json-basic";
-export type ProviderRevocationStyle = "none" | "form" | "github-oauth-app";
+type ProviderTokenRequestStyle = "form" | "form-without-grant-type" | "json-basic";
+type ProviderRevocationStyle = "none" | "form" | "github-oauth-app";
 
 export interface ProviderProfile {
   /** Display only; never a secret. */
