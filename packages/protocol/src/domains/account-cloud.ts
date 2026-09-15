@@ -52,7 +52,6 @@ export type AccountWorkspaceLifecycleState =
 
 /** Hosted account workspace available to the optional computer service. */
 export interface AccountWorkspaceSummary {
-  /** Persisted Convex/workspace id field name; renaming would break existing records. */
   fableWorkspaceId: string;
   localWorkspaceId: string;
   name: string;
