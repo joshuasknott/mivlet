@@ -16,6 +16,7 @@ describe("buildToolApproval", () => {
     expect(approval.riskLevel).toBe("low");
     expect(approval.dataUsed).toContain("path: a.md");
     expect(approval.confirmationPhrase).toBeUndefined();
+    expect(approval.decisions).toEqual(["once", "modify", "deny"]);
   });
 
   it("shapes a write tool into full-access, high-risk requiring confirmation", () => {

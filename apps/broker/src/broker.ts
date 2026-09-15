@@ -7,19 +7,21 @@
  *
  * 1. Authorization + handoff issuance:
  *    - desktop calls authorize(redirect, state, desktopChallenge)
- *    - broker builds the provider authorization URL with its confidential client_id
- *      and (for broker-pkce providers) its OWN verifier, stores a pending exchange
- *      keyed by the desktop state, returns the URL
+ *    - broker validates the desktop S256 challenge (never forwards it), builds
+ *      the provider authorization URL with its confidential client_id and (for
+ *      broker-pkce providers) its OWN verifier, stores a pending exchange keyed
+ *      by the desktop state + desktop challenge, returns the URL
  *    - the provider calls the broker callback with code+state
  *    - broker consumes the single-use pending exchange, validates state, performs
  *      the confidential exchange with the provider secret + its verifier, resolves
- *      identity, issues a single-use short-lived handoff ticket bound to the state,
- *      and 302-redirects the browser to the desktop's exact redirect_uri with the
- *      handoff + state as query params
+ *      identity, issues a single-use short-lived handoff ticket bound to the state
+ *      and desktop challenge, and 302-redirects the browser to the desktop's exact
+ *      redirect_uri with the handoff + state as query params
  *
  * 2. Handoff redemption, refresh, revocation: direct (non-browser) POSTs from the
- *    desktop. The token set crosses ONLY at handoff redemption, after the single-use
- *    ticket + bound state are validated.
+ *    desktop. Redeem requires the desktop PKCE verifier. The token set crosses
+ *    ONLY at handoff redemption, after the single-use ticket + bound state +
+ *    verifier are validated.
  */
 
 import {
@@ -36,13 +38,15 @@ import {
   type BrokerRefreshResponse,
   type BrokerRevokeRequest,
   type BrokerRevokeResponse,
+  assertBrokerPkceChallenge,
+  assertBrokerPkceVerifier,
   assertContractVersion,
   isBrokerProvider
 } from "@fable/connectors";
 import type { ConnectorTokenSet } from "@fable/protocol";
 
 import type { BrokerClock } from "./clock.js";
-import { generatePkcePair } from "./pkce.js";
+import { generatePkcePair, verifierMatchesS256Challenge } from "./pkce.js";
 import {
   normalizeAccount,
   exchangeCode,
@@ -159,6 +163,7 @@ export class FableBroker {
     validateDesktopRedirect(request.redirectUri, this.allowedDesktopRedirects);
     const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
     assertAuthorizeState(request.state);
+    assertBrokerPkceChallenge(request.codeChallenge, request.codeChallengeMethod);
 
     const url = new URL(resolveAuthorizationEndpoint(profile, this.env, credentials));
     url.searchParams.set("client_id", credentials.clientId);
@@ -190,6 +195,7 @@ export class FableBroker {
         providerRedirectUri,
         state: request.state,
         verifier,
+        codeChallenge: request.codeChallenge
       });
     } else {
       this.pending.create({
@@ -198,6 +204,7 @@ export class FableBroker {
         providerRedirectUri,
         state: request.state,
         verifier,
+        codeChallenge: request.codeChallenge
       });
     }
 
@@ -251,6 +258,9 @@ export class FableBroker {
     if (pending.provider !== provider) {
       throw new BrokerContractError("invalid-state", "Authorization state did not match the provider.", false);
     }
+    if (!pending.codeChallenge) {
+      throw new BrokerContractError("invalid-state", "Authorization state is missing the desktop PKCE challenge.", false);
+    }
 
     const credentials = resolveCredentials(provider, this.env, profile);
     const clientOptions = { provider, credentials, profile, fetch: this.fetcher, clock: this.clock };
@@ -282,12 +292,14 @@ export class FableBroker {
           tokens: exchange.tokens,
           account,
           state,
+          codeChallenge: pending.codeChallenge
         })
       : this.handoff.issue({
           provider,
           tokens: exchange.tokens,
           account,
           state,
+          codeChallenge: pending.codeChallenge
         });
 
     const redirect = new URL(pending.redirectUri);
@@ -300,6 +312,7 @@ export class FableBroker {
   async redeem(request: BrokerHandoffRedeemRequest): Promise<BrokerHandoffRedeemResponse> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
+    assertBrokerPkceVerifier(request.codeVerifier);
     const entry = this.ephemeralOps
       ? await this.ephemeralOps.redeemHandoff(request.handoff, request.state)
       : this.handoff.redeem(request.handoff, request.state);
@@ -312,6 +325,16 @@ export class FableBroker {
     }
     if (entry.provider !== request.provider) {
       throw new BrokerContractError("invalid-handoff", "The handoff token did not match the provider.", false);
+    }
+    if (
+      !entry.codeChallenge
+      || !(await verifierMatchesS256Challenge(request.codeVerifier, entry.codeChallenge))
+    ) {
+      throw new BrokerContractError(
+        "invalid-handoff",
+        "The handoff token did not match the desktop PKCE verifier.",
+        false
+      );
     }
     return {
       contractVersion: BROKER_CONTRACT_VERSION,

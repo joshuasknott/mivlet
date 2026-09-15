@@ -11,6 +11,17 @@ export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
 export * from "./domains/search.js";
 export * from "./domains/voice.js";
+export {
+  isSensitiveSecretKey,
+  looksLikeSecret,
+  redactSecretText,
+  redactSecretTextOrOmit,
+  secretMarkerSurvives,
+  SECRET_CONTENT_OMITTED,
+  SECRET_REDACTED,
+  SECRET_REDACTION_CASES
+} from "./secret-redaction.js";
+export type { SecretRedactionCase } from "./secret-redaction.js";
 
 import type {
   ApprovalAuditEntry,
@@ -360,16 +371,8 @@ export interface ConnectorImportResult {
 }
 
 export type ConnectorActionKind =
-  | "github.draft-pull-request"
-  | "github.comment"
   | "vercel.promote"
   | "vercel.rollback"
-  | "github.create-issue"
-  | "github.update-issue"
-  | "github.create-review"
-  | "github.update-file"
-  | "github.create-branch"
-  | "github.dispatch-workflow"
   | "vercel.create-deployment"
   | "vercel.cancel-deployment"
   | "vercel.update-project"
@@ -387,7 +390,6 @@ export type ConnectorActionKind =
   | "google-drive.delete-file"
   | "gmail.create-draft"
   | "gmail.send"
-  | "slack.create-draft"
   | "slack.post"
   | "slack.reply"
   | "slack.edit"

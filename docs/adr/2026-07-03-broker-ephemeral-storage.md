@@ -11,16 +11,19 @@ state. Local development and deterministic tests may keep this state in one
 process. Staging and production must use the encrypted Durable Object backend
 declared in `apps/broker/wrangler.jsonc`.
 
-The Worker refuses a non-local deployment when durable bindings or
-`FABLE_BROKER_STORE_ENCRYPTION_KEY` are missing. Long-lived user tokens are
-returned once to the native desktop credential boundary and are not retained by
-the broker.
+Memory storage is refused when `FABLE_BROKER_PUBLIC_URL` is public HTTPS
+(HTTPS and not loopback). Unlabeled or `local` Workers with a public URL fail
+closed (503), even if durable storage is selected. Staging and production
+still require durable bindings and `FABLE_BROKER_STORE_ENCRYPTION_KEY`.
+Long-lived user tokens are returned once to the native desktop credential
+boundary and are not retained by the broker.
 
 ## Required properties
 
 - Authorization state is high entropy, expires, binds the provider and exact
   desktop redirect, and is consumed before token exchange.
-- Handoff tickets expire, bind the original state, and can be redeemed once.
+- Handoff tickets expire, bind the original state and the desktop S256
+  challenge, and can be redeemed once with the matching verifier.
 - Durable values are encrypted with versioned associated data; plaintext
   tokens, verifiers, client secrets, and redirects never enter logs.
 - Rate limits are shared across Worker isolates and keyed by route and a derived

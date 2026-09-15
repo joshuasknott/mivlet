@@ -82,7 +82,6 @@ export function useHostedBrowserController({
         request: prepared.approval,
         decision: "once",
         decidedAt: new Date().toISOString(),
-        confirmationText: prepared.approval.confirmationPhrase,
       };
       const snapshot = await navigateRuntimeHostedBrowser(
         prepared.proposal,

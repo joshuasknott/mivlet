@@ -196,8 +196,8 @@ export function buildToolApproval(
     dataUsed,
     consequence,
     requestedAt: new Date(0).toISOString(),
-    // Tool execution permits are one-time. Saved/session grants are not offered
-    // until the native boundary can mint a fresh exact permit from them.
+    // Tool execution permits are one-time. Session/rule shortcuts are not
+    // offered; a standing grant cannot mint or skip a native permit.
     decisions: ["once", "modify", "deny"],
     // High/critical full-access risk requires exact confirmation (existing system).
     confirmationPhrase:

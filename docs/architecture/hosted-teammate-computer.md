@@ -27,7 +27,13 @@ current protocol.
 A model-originated process or browser effect needs Mivlet's normal exact tool
 approval and the prepared hosted proposal. The native boundary consumes the
 single-use permit, obtains a scope-specific hosted capability, and sends it to
-the runner. The runner rechecks the computer, generation, scope, expiry, nonce,
+the runner. Native mints that capability through Convex HTTP
+`/native/execution-capability` with the OS-keyring Clerk session. The HTTP
+gate asserts Clerk issuer and subject before the internal mint action; missing
+or invalid identity is `401 authentication-required`. Membership, role, and
+soft device binding (claimed `deviceId` must be this principal's active device
+and workspace link; no public-key challenge) are rechecked inside the mint
+path. The runner rechecks the computer, generation, scope, expiry, nonce,
 and one-time use.
 
 Bearer `FABLE_HOSTED_RUNNER_API_KEY` authorizes only computer lifecycle

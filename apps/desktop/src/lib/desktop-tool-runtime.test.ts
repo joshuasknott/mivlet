@@ -4,6 +4,7 @@ import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { McpClient } from "@fable/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
 
 vi.mock("./native-mcp-client", () => ({ McpClient }));
 
@@ -50,8 +51,9 @@ describe("computer authority across approvals", () => {
     await expect(execute(approval(), args)).resolves.toBe("Saved");
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 4, workspaceId: "workspace-a", agentId: "agent-a" }));
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
-      approval: expect.objectContaining({ decision: "once", confirmationText: "approve write-file" }),
+      approval: expect.objectContaining({ decision: "once" }),
     }));
+    expect(runtime.executeTool.mock.calls[0]?.[0]?.approval?.confirmationText).toBeUndefined();
   });
   it("discards an in-flight result after a scope/control change", async () => {
     const current = computer();
@@ -81,6 +83,36 @@ describe("computer authority across approvals", () => {
       computerGeneration: 4,
     }));
     expect(runtime.prepareHosted).not.toHaveBeenCalled();
+  });
+  it("does not auto-satisfy a standing grant before native minting", async () => {
+    runtime.executeTool.mockReset().mockResolvedValue({ ok: true, output: "Saved" });
+    const gate = createApprovalGate();
+    const source = approval();
+    gate.replaceStandingGrants([
+      {
+        id: "session-write",
+        requestId: source.id,
+        scope: "session",
+        service: source.service,
+        action: source.action,
+        mode: source.mode,
+        dataUsed: source.dataUsed,
+        createdAt: new Date(0).toISOString(),
+      },
+    ]);
+    const execute = createDesktopToolExecutor(gate, { localComputer: computer() });
+    const pending = execute(source, args);
+    await Promise.resolve();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+    expect(gate.pendingCount()).toBe(1);
+    gate.resolveGrant(source.id);
+    await expect(pending).resolves.toBe("Saved");
+    expect(runtime.executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "write-file",
+        approval: expect.objectContaining({ decision: "once", request: expect.objectContaining({ id: source.id }) }),
+      }),
+    );
   });
 });
 
@@ -500,6 +532,8 @@ describe("hosted cloud browser execution", () => {
       expect.objectContaining({ request: browserApproval, decision: "once" }),
       expect.objectContaining({ request: sourceApproval, decision: "once" })
     );
+    expect(runtime.navigateBrowser.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
+    expect(runtime.navigateBrowser.mock.calls[0]?.[2]?.confirmationText).toBeUndefined();
     expect(onHostedBrowserSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ takeoverAvailable: true })
     );
@@ -784,10 +818,10 @@ describe("desktop semantic capability grants", () => {
       },
       expect.objectContaining({
         request: grantApproval,
-        decision: "once",
-        confirmationText: "allow connected source search"
+        decision: "once"
       })
     );
+    expect(runtime.commitGrant.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
     expect(runtime.executeTool).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "connection-read",

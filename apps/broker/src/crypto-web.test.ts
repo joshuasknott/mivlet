@@ -11,7 +11,8 @@ import {
   base64String,
   base64url,
   randomBytes,
-  sha256
+  sha256,
+  timingSafeEqualUtf8
 } from "./crypto-web.js";
 import {
   providerProfile,
@@ -45,6 +46,12 @@ describe("web crypto helpers", () => {
     const bytes = new Uint8Array([0xff, 0xfb, 0xff, 0xff, 0xf0]);
     const url = base64url(bytes);
     expect(url).not.toMatch(/[+/=]/);
+  });
+
+  it("timingSafeEqualUtf8 is length-aware and equal for identical strings", () => {
+    expect(timingSafeEqualUtf8("abc", "abc")).toBe(true);
+    expect(timingSafeEqualUtf8("abc", "abd")).toBe(false);
+    expect(timingSafeEqualUtf8("abc", "ab")).toBe(false);
   });
 
   it("sha256 matches a known vector for the empty string", async () => {

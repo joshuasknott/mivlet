@@ -14,7 +14,6 @@ import {
 } from "./http";
 import {
   classifyConnectorError,
-  prepareConnectorAction,
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
@@ -54,41 +53,15 @@ export function shapeGitHubSearch(query: string, limit?: number) {
   return shapeConnectorSearchRequest("github", query, limit);
 }
 
-export function prepareGitHubDraftPullRequest(payload: {
-  repository: string;
-  head: string;
-  base: string;
-  title: string;
-}) {
-  return prepareConnectorAction(
-    "github",
-    "GitHub",
-    "github.draft-pull-request",
-    { ...payload, targetId: payload.repository },
-    "medium",
-    "Creates a draft pull request after Mivlet approval."
-  );
-}
-
-export function prepareGitHubComment(payload: {
-  repository: string;
-  targetId: string;
-  body: string;
-}) {
-  return prepareConnectorAction(
-    "github",
-    "GitHub",
-    "github.comment",
-    payload,
-    "medium",
-    "Publishes a comment to the selected GitHub item after Mivlet approval."
-  );
-}
-
 export function mapGitHubError(error: ProviderErrorLike) {
   return classifyConnectorError("github", error);
 }
 
+/**
+ * REST read capabilities the adapter implements. Connect grants identity and
+ * organization membership only; repository-scoped reads are not a private-repo
+ * grant and typically succeed only for public repositories.
+ */
 export const GITHUB_CAPABILITIES = [
   "identity.read", "organizations.read", "repositories.list", "repositories.search",
   "branches.read", "commits.read", "files.read", "issues.read", "pull-requests.read",
@@ -107,10 +80,11 @@ export interface GitHubAdapterOptions extends Omit<OAuthClientOptions, "connecto
 }
 
 /**
- * Classic GitHub OAuth scopes Mivlet requests. GitHub's `repo` scope is
- * write-capable (private repository admin, including contents and webhooks) and
- * is not requested; private-repository reads require a GitHub App registered
- * with read-only repository permissions rather than a classic OAuth App.
+ * Classic GitHub OAuth App scopes Mivlet requests on Connect. This is not a
+ * GitHub App. GitHub's `repo` scope is write-capable (private repository admin,
+ * including contents and webhooks) and is not requested. Private-repository
+ * reads are not granted. Public-repository REST can still succeed with these
+ * scopes when GitHub allows the token.
  */
 export const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"] as const;
 

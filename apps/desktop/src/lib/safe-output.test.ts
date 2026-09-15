@@ -9,6 +9,7 @@ import {
   MAX_SAFE_LINK_CHARS,
   TRUNCATION_MARKER
 } from "./safe-output";
+import { SECRET_REDACTION_CASES } from "@fable/protocol";
 
 /**
  * Safe connector-output inspection. The invariant under test: an arbitrary
@@ -34,9 +35,10 @@ describe("redactSecrets", () => {
 
   it("scrubs inline credentials out of string values", () => {
     const input = "Authorization: Bearer abcdefghij1234567890 for sk-ant-12345678901234567890";
-    expect(redactSecrets(input)).toBe("Authorization: [REDACTED] for [REDACTED]");
+    expect(redactSecrets(input)).not.toContain("abcdefghij");
     expect(redactSecrets(input)).not.toContain("Bearer abcdef");
     expect(redactSecrets(input)).not.toContain("sk-ant-");
+    expect(redactSecrets(input)).toContain("[REDACTED]");
   });
 
   it("drops non-JSON-safe values (functions/symbols) to keep output stable", () => {
@@ -44,6 +46,19 @@ describe("redactSecrets", () => {
     const input = { keep: 1, fn: () => "x", sym };
     expect(redactSecrets(input)).toEqual({ keep: 1, fn: undefined, sym: undefined });
   });
+
+  for (const fixture of SECRET_REDACTION_CASES) {
+    it(`shared fixture ${fixture.id} cannot leak through inspection redaction`, () => {
+      const redacted = redactSecrets(fixture.input);
+      expect(typeof redacted).toBe("string");
+      for (const leaked of fixture.mustNotContain) {
+        expect(redacted).not.toContain(leaked);
+      }
+      if (!fixture.looksSecret) {
+        expect(redacted).toBe(fixture.input);
+      }
+    });
+  }
 });
 
 describe("formatForInspection", () => {
