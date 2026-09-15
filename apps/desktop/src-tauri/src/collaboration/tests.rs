@@ -658,6 +658,185 @@ fn collaboration_restart_marks_work_for_review_and_does_not_replay_attempts() {
 }
 
 #[test]
+fn remount_recovery_fences_orphaned_executing_work_and_rejects_late_writes() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        work::start(
+            ctx,
+            "queued".into(),
+            "group".into(),
+            "reviewer".into(),
+            "Later".into(),
+            false,
+            None,
+            None,
+        )?;
+        work::start(
+            ctx,
+            "approval".into(),
+            "group".into(),
+            "researcher".into(),
+            "Permit".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "approval", "run-approval")?;
+        let mut approval = ctx.item("approval")?;
+        approval.status = WorkStatus::AwaitingApproval;
+        ctx.work(&approval)?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(root.reason.as_deref().unwrap().contains("execution owner"));
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        let approval = ctx.item("approval")?;
+        assert_eq!(approval.status, WorkStatus::AwaitingUser);
+        assert_eq!(approval.generation, 2);
+        assert_eq!(approval.current_run_id, None);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-approval")).is_err());
+        assert_eq!(ctx.item("queued")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("queued")?.generation, 1);
+        Ok(())
+    });
+}
+
+#[test]
+fn recover_interrupted_attempts_fences_executing_work_and_marks_the_journal() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    let recovered =
+        crate::execution_attempts::recover_interrupted_attempts_in_store(&store, TIME).unwrap();
+    assert!(recovered
+        .iter()
+        .any(|attempt| attempt.id == "run" && attempt.status == "interrupted"));
+    fixture(&store, |ctx| {
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        Ok(())
+    });
+}
+
+fn attempt_record(
+    run: &str,
+    room: &str,
+    status: &str,
+    transcript: &str,
+) -> crate::models::ExecutionAttempt {
+    serde_json::from_value(json!({
+        "id": run,
+        "providerId": "openai",
+        "model": "fixture-model",
+        "status": status,
+        "transcript": transcript,
+        "threadId": room,
+        "exchanges": [],
+        "turn": 1,
+        "usage": {"inputTokens": 100, "outputTokens": 100, "costUsd": 0.0},
+        "pendingApprovalIds": [],
+        "recoverable": true,
+        "retryCount": 0,
+        "createdAt": TIME,
+        "updatedAt": TIME,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn save_path_rejects_interrupted_to_completed_and_allows_exact_replay() {
+    let store = store();
+    let room = fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(ctx.item("root")?.conversation_id)
+    });
+    let interrupted = attempt_record("run", &room, "interrupted", "partial");
+    fixture(&store, |ctx| {
+        let payload = serde_json::to_value(&interrupted).unwrap();
+        execution_attempt::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            "run",
+            Some(&room),
+            "openai",
+            "fixture-model",
+            "interrupted",
+            1,
+            true,
+            0,
+            TIME,
+            TIME,
+            &payload,
+        )?;
+        Ok(())
+    });
+    let mut completed = interrupted.clone();
+    completed.status = "completed".into();
+    completed.transcript = "final".into();
+    completed.updated_at = "2026-09-12T10:01:00.000Z".into();
+    let error =
+        crate::execution_attempts::save_execution_attempt_record(&store, completed).unwrap_err();
+    assert!(
+        error.contains("immutable"),
+        "expected terminal immutability, got {error}"
+    );
+    crate::execution_attempts::save_execution_attempt_record(&store, interrupted.clone())
+        .expect("exact replay of a terminal attempt is allowed");
+    fixture(&store, |ctx| {
+        assert_eq!(ctx.item("root")?.status, WorkStatus::Running);
+        assert_eq!(ctx.item("root")?.current_run_id.as_deref(), Some("run"));
+        Ok(())
+    });
+}
+
+#[test]
 fn collaboration_project_correction_invalidates_work_and_never_reads_private_history() {
     fixture(&store(), |ctx| {
         project(ctx, "project", "main")?;

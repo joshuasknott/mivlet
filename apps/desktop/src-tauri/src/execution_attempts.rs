@@ -550,19 +550,34 @@ pub(crate) fn persist_execution_attempt(
                 "Execution attempt ownership and creation identity are immutable.".to_string(),
             );
         }
-        if is_terminal_status(&existing.status) {
-            if existing == &attempt {
-                return Ok(attempt);
-            }
-            return Err("A terminal execution attempt is immutable.".to_string());
-        }
         ensure_attempt_evidence_immutable(existing, &attempt)?;
+        reject_nonidentical_terminal_overwrite(existing, &attempt)?;
+        if is_terminal_status(&existing.status) {
+            return Ok(attempt);
+        }
     }
     attempts.retain(|existing| existing.id != attempt.id);
     attempts.insert(0, attempt.clone());
     attempts.truncate(MAX_EXECUTION_ATTEMPTS);
     write_execution_attempts(path, &attempts)?;
     Ok(attempt)
+}
+
+fn reject_nonidentical_terminal_overwrite(
+    existing: &ExecutionAttempt,
+    incoming: &ExecutionAttempt,
+) -> Result<(), String> {
+    if !is_terminal_status(&existing.status) {
+        return Ok(());
+    }
+    if existing == incoming {
+        return Ok(());
+    }
+    Err("A terminal execution attempt is immutable.".to_string())
+}
+
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
 }
 
 fn ensure_attempt_evidence_immutable(
@@ -576,11 +591,6 @@ fn ensure_attempt_evidence_immutable(
         return Err("A attempt provider route cannot be changed or removed.".to_string());
     }
     Ok(())
-}
-
-#[cfg(test)]
-fn is_terminal_status(status: &str) -> bool {
-    matches!(status, "completed" | "cancelled" | "failed" | "interrupted")
 }
 
 #[cfg(test)]
@@ -701,35 +711,36 @@ pub fn save_execution_attempt(
     let attempt = normalize_execution_attempt(attempt)?;
     let store = crate::store::try_global()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
-    let scope = runtime_scope()?;
     if let Some(receipt) = attempt.context_receipt.as_ref() {
         validate_context_receipt_authority(receipt)?;
     }
+    save_execution_attempt_record(store, attempt)
+}
+
+pub(crate) fn save_execution_attempt_record(
+    store: &crate::store::Store,
+    attempt: ExecutionAttempt,
+) -> Result<ExecutionAttempt, String> {
+    let attempt = normalize_execution_attempt(attempt)?;
+    let scope = runtime_scope()?;
     store
         .transaction(|tx| {
             crate::collaboration::ensure_run_current(tx, store, Some(&attempt.id))?;
             if let Some(existing) = execution_attempt::get_scoped(tx, store, &scope, &attempt.id)? {
-                let existing_value: ExecutionAttempt =
+                let existing_value = normalize_execution_attempt(
                     serde_json::from_value(existing.payload.clone()).map_err(|_| {
                         crate::store::StoreError::Invalid(
                             "Execution attempt payload is invalid.".into(),
                         )
-                    })?;
+                    })?,
+                )
+                .map_err(crate::store::StoreError::Invalid)?;
                 ensure_attempt_evidence_immutable(&existing_value, &attempt)
                     .map_err(crate::store::StoreError::Invalid)?;
-                let terminal = matches!(
-                    existing.status.as_str(),
-                    "completed" | "cancelled" | "failed" | "interrupted"
-                );
-                if terminal
-                    && matches!(
-                        attempt.status.as_str(),
-                        "queued" | "streaming" | "awaiting-approval" | "retrying"
-                    )
-                {
-                    return Err(crate::store::StoreError::Invalid(
-                        "A terminal execution attempt cannot return to an in-flight state.".into(),
-                    ));
+                reject_nonidentical_terminal_overwrite(&existing_value, &attempt)
+                    .map_err(crate::store::StoreError::Invalid)?;
+                if is_terminal_status(&existing_value.status) {
+                    return Ok(());
                 }
             }
             let payload = serde_json::to_value(&attempt).map_err(|_| {
@@ -836,8 +847,21 @@ pub fn recover_interrupted_execution_attempts(
         &pending_approval_ids,
         &recovered_at,
     )?;
+    recover_interrupted_attempts_in_store(store, &recovered_at)
+}
+
+pub(crate) fn recover_interrupted_attempts_in_store(
+    store: &crate::store::Store,
+    recovered_at: &str,
+) -> Result<Vec<ExecutionAttempt>, String> {
+    let scope = runtime_scope()?;
+    let recovered_at = normalize_spaces(recovered_at);
+    if recovered_at.is_empty() {
+        return Err("Recovery time is required.".to_string());
+    }
     store
         .transaction(|tx| {
+            crate::collaboration::fence_orphaned_executing_work(tx, store, &recovered_at)?;
             let ids = execution_attempt::list_by_status_scoped(
                 tx,
                 &scope,
@@ -987,6 +1011,40 @@ mod tests {
         assert!(ensure_attempt_evidence_immutable(&initial, &changed).is_err());
         let legacy = fixture("streaming");
         assert!(ensure_attempt_evidence_immutable(&legacy, &initial).is_err());
+    }
+
+    #[test]
+    fn reject_nonidentical_terminal_overwrite_blocks_interrupted_to_completed() {
+        let interrupted = fixture("interrupted");
+        assert!(reject_nonidentical_terminal_overwrite(&interrupted, &interrupted).is_ok());
+        let mut completed = interrupted.clone();
+        completed.status = "completed".into();
+        completed.transcript = "final response".into();
+        assert!(
+            reject_nonidentical_terminal_overwrite(&interrupted, &completed)
+                .unwrap_err()
+                .contains("immutable")
+        );
+    }
+
+    #[test]
+    fn file_journal_rejects_interrupted_to_completed_and_allows_exact_replay() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-agent-attempts-interrupted-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let interrupted = fixture("interrupted");
+        persist_execution_attempt(&path, interrupted.clone()).expect("persist interrupted");
+        persist_execution_attempt(&path, interrupted.clone()).expect("exact replay");
+        let mut completed = interrupted.clone();
+        completed.status = "completed".into();
+        completed.transcript = "late completion".into();
+        assert!(persist_execution_attempt(&path, completed)
+            .unwrap_err()
+            .contains("immutable"));
+        assert_eq!(read_execution_attempts(&path).unwrap(), vec![interrupted]);
+        let _ = fs::remove_file(path);
     }
 
     #[test]
