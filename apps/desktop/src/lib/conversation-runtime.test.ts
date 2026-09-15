@@ -237,4 +237,25 @@ describe("conversation runtime", () => {
     expect(redacted).toContain("[REDACTED]");
     expect(transport.views[1].currentRevision.content).toBe("[content omitted: secret-shaped content]");
   });
+
+  it("redacts assistant checkpoints and non-tool durable kinds before persist", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({
+      kind: "user",
+      content: "paste ghp_abcdefghijklmnopqrstuvwx1234567890"
+    });
+    await writer.checkpointAssistant("I saw ghp_abcdefghijklmnopqrstuvwx1234567890");
+    await writer.record({
+      kind: "interruption",
+      content: "stopped after xoxb-fixturenotarealslacktoken",
+      reason: "user-stop"
+    });
+
+    expect(transport.views[0].currentRevision.content).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234567890");
+    expect(transport.views[1].currentRevision.content).not.toContain("ghp_abcdefghijklmnopqrstuvwx1234567890");
+    expect(transport.views[2].currentRevision.content).not.toContain("xoxb-fixturenotarealslacktoken");
+    expect(transport.views[0].currentRevision.content).toContain("[REDACTED]");
+    expect(transport.views[1].currentRevision.content).toContain("[REDACTED]");
+  });
 });

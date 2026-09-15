@@ -17,6 +17,7 @@ export interface SecretRedactionCase {
 
 interface SecretRedactionVocabulary {
   redacted: string;
+  omitted: string;
   inlinePatterns: Array<{
     id: string;
     pattern: string;
@@ -32,6 +33,7 @@ interface SecretRedactionVocabulary {
 
 const SECRET_REDACTION_VOCABULARY = vocabulary as SecretRedactionVocabulary;
 export const SECRET_REDACTED = SECRET_REDACTION_VOCABULARY.redacted;
+export const SECRET_CONTENT_OMITTED = SECRET_REDACTION_VOCABULARY.omitted;
 const SECRET_SUBSTRING_MARKERS = SECRET_REDACTION_VOCABULARY.substringMarkers;
 export const SECRET_REDACTION_CASES = SECRET_REDACTION_VOCABULARY.cases;
 
@@ -67,6 +69,12 @@ export function secretMarkerSurvives(value: string): boolean {
     pattern.lastIndex = 0;
     return pattern.test(value);
   });
+}
+
+/** Surgical redaction, then omit the whole string if a marker still remains. */
+export function redactSecretTextOrOmit(value: string): string {
+  const redacted = redactSecretText(value);
+  return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
 }
 
 /** True when an object key name is always treated as a credential field. */

@@ -1,8 +1,6 @@
 import { redactSecretsFromObject, redactSecretsFromString } from "@fable/connectors/agent-runtime";
-import { secretMarkerSurvives } from "@fable/protocol";
+import { SECRET_CONTENT_OMITTED, secretMarkerSurvives } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
-
-const PERSISTED_SECRET_OMITTED = "[content omitted: secret-shaped content]";
 
 export type ConversationThread = Spine.Conversations.Thread;
 type ConversationMessage = Spine.Conversations.Message;
@@ -188,7 +186,7 @@ export function createDurableRunWriter(
 
   const checkpoint = async (transcript: string, terminal = false) => {
       latestTranscript = transcript;
-      const content = transcript.slice(transcriptOffset);
+      const content = redactPersistedContent(transcript.slice(transcriptOffset));
       if (!assistant) {
         if (!content) return;
         await append({ kind: "assistant", content, state: terminal ? "terminal" : "streaming" });
@@ -228,13 +226,10 @@ export function createDurableRunWriter(
 }
 
 function redactDurableRecord(record: DurableRunRecord): DurableRunRecord {
-  if (record.kind !== "tool-call" && record.kind !== "tool-result" && record.kind !== "error") {
-    return record;
-  }
-  return { ...record, content: redactPersistedToolContent(record.content) };
+  return { ...record, content: redactPersistedContent(record.content) };
 }
 
-function redactPersistedToolContent(content: string): string {
+function redactPersistedContent(content: string): string {
   const trimmed = content.trim();
   if (
     (trimmed.startsWith("{") && trimmed.endsWith("}"))
@@ -250,5 +245,5 @@ function redactPersistedToolContent(content: string): string {
 }
 
 function omitIfSecretSurvives(redacted: string): string {
-  return secretMarkerSurvives(redacted) ? PERSISTED_SECRET_OMITTED : redacted;
+  return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
 }
