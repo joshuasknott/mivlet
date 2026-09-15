@@ -256,13 +256,13 @@ async function runOfficialConnector(
 }
 
 /** Point Rust at the exact request whose native permit was already minted.
- *  This is not a user decision and must not mint a new permit. */
+ *  This is not a user decision and must not mint a new permit. Never copy
+ *  confirmationPhrase into confirmationText. */
 function resolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {
   return {
     request: approval,
     decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: approval.confirmationPhrase
+    decidedAt: new Date().toISOString()
   };
 }
 
@@ -275,12 +275,7 @@ async function runOnHostedBrowser(
   const computer = options.hostedComputer;
   const url = typeof parsed.url === "string" ? parsed.url.trim() : "";
   if (!computer?.ready || !url) throw new Error("The hosted browser is unavailable.");
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
+  const sourceResolution: ApprovalResolutionRequest = resolutionFor(sourceApproval);
   const prepared = await prepareRuntimeHostedBrowser({
     workspaceId: computer.workspaceId,
     agentId: computer.agentId,
@@ -296,12 +291,7 @@ async function runOnHostedBrowser(
   if (await gate.waitForDecision(prepared.approval) !== "granted") {
     throw new Error("Cloud browser navigation was denied.");
   }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
+  const resolution: ApprovalResolutionRequest = resolutionFor(prepared.approval);
   const snapshot = await navigateRuntimeHostedBrowser(prepared.proposal, resolution, sourceResolution);
   if (!snapshot) throw new Error("Cloud browser navigation requires the desktop runtime.");
   options.onHostedBrowserSnapshot?.(toPublicHostedBrowserSnapshot(snapshot));
@@ -330,12 +320,7 @@ async function runHostedBrowserAction(
   ) {
     throw new Error("The hosted browser action is unavailable or malformed.");
   }
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
+  const sourceResolution: ApprovalResolutionRequest = resolutionFor(sourceApproval);
   const prepared = await prepareRuntimeHostedBrowserAction({
     workspaceId: computer.workspaceId,
     agentId: computer.agentId,
@@ -357,12 +342,7 @@ async function runHostedBrowserAction(
   if (await gate.waitForDecision(prepared.approval) !== "granted") {
     throw new Error("Cloud browser action was denied.");
   }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
+  const resolution: ApprovalResolutionRequest = resolutionFor(prepared.approval);
   const snapshot = await actRuntimeHostedBrowser(prepared.proposal, resolution, sourceResolution);
   if (!snapshot) throw new Error("Cloud browser actions require the desktop runtime.");
   options.onHostedBrowserSnapshot?.(toPublicHostedBrowserSnapshot(snapshot));
@@ -400,12 +380,7 @@ async function runOnHostedComputer(
   if (command.length > 200 || /[\u0000-\u001f\u007f]/u.test(command)) {
     throw new Error("Cloud shell commands must be a single visible line of at most 200 characters. Write a script into the cloud workspace, then run that script.");
   }
-  const sourceResolution: ApprovalResolutionRequest = {
-    request: sourceApproval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: sourceApproval.confirmationPhrase
-  };
+  const sourceResolution: ApprovalResolutionRequest = resolutionFor(sourceApproval);
   const safeRunId = `hosted-${sourceApproval.id.replace(/[^A-Za-z0-9._:-]/g, "-").slice(0, 145)}`;
   const prepared = await prepareRuntimeHostedProcess({
     workspaceId: computer.workspaceId,
@@ -428,12 +403,7 @@ async function runOnHostedComputer(
   if (decision !== "granted") {
     throw new Error("Cloud computer execution was denied.");
   }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    confirmationText: prepared.approval.confirmationPhrase
-  };
+  const resolution: ApprovalResolutionRequest = resolutionFor(prepared.approval);
   let snapshot = await launchRuntimeHostedProcess(prepared.proposal, resolution, sourceResolution);
   if (snapshot === null) {
     throw new Error("Cloud computer execution requires the desktop runtime.");
@@ -513,15 +483,7 @@ async function ensureCapabilityGrant(
   if (decision !== "granted") {
     throw new Error(`Capability grant denied: ${capabilityId}.`);
   }
-  const resolution: ApprovalResolutionRequest = {
-    request: prepared.approval,
-    decision: "once",
-    decidedAt: new Date().toISOString(),
-    // The UI already validated this phrase before persisting the one-time
-    // execution permit. Replaying the exact expected value lets Rust validate
-    // the same immutable request while the persisted permit remains authority.
-    confirmationText: prepared.approval.confirmationPhrase
-  };
+  const resolution: ApprovalResolutionRequest = resolutionFor(prepared.approval);
   const committed = await commitRuntimeCapabilityGrant(proposal, resolution);
   if (committed === null) {
     throw new Error("Capability grants require the desktop runtime.");

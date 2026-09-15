@@ -78,8 +78,9 @@ stale permits, changed browser controls, unknown tools, and scope changes fail.
 ### Native application control
 
 The bundled driver operates one exactly selected Windows window. The existing
-global policy authorizes each tool; Full Access resolves approvals automatically
-without a separate app grant. Native authority binds workspace, agent, request,
+global policy authorizes each tool; Full Access still uses the same exact
+single-use permit. High-risk minting requires a native OS confirm; WebView
+cannot mint by echoing a confirmation phrase. There is no separate app grant. Native authority binds workspace, agent, request,
 generation, process identity and a native window
 marker. The driver receives a bounded manifest and a cleared environment, and
 runs in an owned kill-on-close job. No shell, registry, arbitrary driver method,

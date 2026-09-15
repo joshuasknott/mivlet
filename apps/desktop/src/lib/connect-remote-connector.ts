@@ -6,7 +6,7 @@ import { openConnectorTools } from "./connector-mcp";
 import { connectorConnectionsChanged, remoteConnectionReady } from "./connector-connections";
 
 const connecting = new Map<string, Promise<RuntimeMcpConnectionDetails>>();
-const once = (request: ApprovalRequest): ApprovalResolutionRequest => ({ request, decision: "once", decidedAt: new Date().toISOString(), confirmationText: request.confirmationPhrase });
+const once = (request: ApprovalRequest): ApprovalResolutionRequest => ({ request, decision: "once", decidedAt: new Date().toISOString() });
 
 /** A single Connect action owns setup through readiness, even if its dialog is
  * closed. Every native step still resolves the exact account/workspace scope. */

@@ -51,8 +51,9 @@ describe("computer authority across approvals", () => {
     await expect(execute(approval(), args)).resolves.toBe("Saved");
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 4, workspaceId: "workspace-a", agentId: "agent-a" }));
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
-      approval: expect.objectContaining({ decision: "once", confirmationText: "approve write-file" }),
+      approval: expect.objectContaining({ decision: "once" }),
     }));
+    expect(runtime.executeTool.mock.calls[0]?.[0]?.approval?.confirmationText).toBeUndefined();
   });
   it("discards an in-flight result after a scope/control change", async () => {
     const current = computer();
@@ -531,6 +532,8 @@ describe("hosted cloud browser execution", () => {
       expect.objectContaining({ request: browserApproval, decision: "once" }),
       expect.objectContaining({ request: sourceApproval, decision: "once" })
     );
+    expect(runtime.navigateBrowser.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
+    expect(runtime.navigateBrowser.mock.calls[0]?.[2]?.confirmationText).toBeUndefined();
     expect(onHostedBrowserSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({ takeoverAvailable: true })
     );
@@ -815,10 +818,10 @@ describe("desktop semantic capability grants", () => {
       },
       expect.objectContaining({
         request: grantApproval,
-        decision: "once",
-        confirmationText: "allow connected source search"
+        decision: "once"
       })
     );
+    expect(runtime.commitGrant.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
     expect(runtime.executeTool).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "connection-read",

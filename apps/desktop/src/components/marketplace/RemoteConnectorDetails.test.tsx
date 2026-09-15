@@ -49,7 +49,8 @@ describe("official connector setup", () => {
   });
   it("connects with one click and enables discovered tools after sign-in", async () => {
     show(); await connect(); await screen.findByText("Connected");
-    expect(api.commit).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", endpoint: "https://mcp.notion.com/mcp" }), expect.objectContaining({ decision: "once", confirmationText: "approve" }));
+    expect(api.commit).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace-1", endpoint: "https://mcp.notion.com/mcp" }), expect.objectContaining({ decision: "once" }));
+    expect(api.commit.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
     expect(api.auth).toHaveBeenCalledWith("workspace-1", "marketplace-notion");
     expect(api.enable).toHaveBeenCalledWith("workspace-1", "connection-1", 2, ["search", "update"], [], []);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();

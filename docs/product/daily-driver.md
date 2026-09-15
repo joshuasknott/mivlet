@@ -23,7 +23,8 @@ single-use approvals, workspace/agent/request and window identity, freshness,
 generation fences, one-agent control leases and immediate Stop. Supported
 accessibility actions use background delivery; screenshots, keyboard and pixel
 actions require explicitly approved foreground selection. Minimized windows are
-unavailable. Full Access resolves the same exact approval without extra app grants.
+unavailable. Full Access uses the same exact approval without extra app grants;
+high-risk minting still requires a native OS confirm, not a WebView-echoed phrase.
 There is no host-shell fallback or separate local desktop.
 
 ### Browsing capabilities stay distinct

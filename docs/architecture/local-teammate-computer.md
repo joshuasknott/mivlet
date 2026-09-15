@@ -46,9 +46,10 @@ is not used or bundled. Cua cloud services and orchestration are not dependencie
 
 ## Permission and input
 
-Computer Use follows the existing global approvals setting. Full Access resolves
-exact single-use tool approvals automatically; other modes use the existing
-approval queue. There is no separate per-app permission prompt. The agent lists
+Computer Use follows the existing global approvals setting. Full Access still
+queues the same exact single-use tool approval; high-risk minting requires a
+native OS confirm, and WebView cannot mint by echoing a confirmation phrase.
+Other modes use the existing approval queue. There is no separate per-app permission prompt. The agent lists
 open applications and selects an opaque window ID itself, asking only when the
 user's intended target is ambiguous. Native execution consumes the exact approval
 and binds workspace, agent, request, window identity and turn generation. Only

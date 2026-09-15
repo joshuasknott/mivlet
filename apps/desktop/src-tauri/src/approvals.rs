@@ -363,23 +363,8 @@ pub(crate) fn resolve_approval(
         return Err("Modified approvals need a consequence explanation.".to_string());
     }
 
-    let approving = matches!(decision.as_str(), "once" | "session" | "rule" | "modify");
-    let high_risk = matches!(effective_request.risk_level.as_str(), "high" | "critical")
-        || effective_request.mode == "full-access";
-    if approving && high_risk {
-        let expected = effective_request
-            .confirmation_phrase
-            .as_deref()
-            .ok_or_else(|| "High-risk approvals need a confirmation phrase.".to_string())?;
-        let provided = request
-            .confirmation_text
-            .as_deref()
-            .map(normalize_spaces)
-            .unwrap_or_default();
-        if provided != expected {
-            return Err("Confirmation phrase did not match.".to_string());
-        }
-    }
+    // confirmation_text is not consume authority. Minting rejects WebView echo
+    // in `resolve_approval_for_mint` and requires a native OS confirm instead.
 
     let grant = match decision.as_str() {
         // Session/rule grants are display records. They do not mint reusable
@@ -454,6 +439,92 @@ pub fn list_approval_rules(app: tauri::AppHandle) -> Result<Vec<ApprovalGrant>, 
     read_approval_rules(&path)
 }
 
+/// True when WebView copied the request's own confirmation phrase into
+/// `confirmationText`. That equality cannot distinguish typing from XSS or
+/// Full Access auto-mint, so minting treats it as untrusted echo.
+pub(crate) fn webview_echoed_confirmation(
+    confirmation_text: Option<&str>,
+    confirmation_phrase: Option<&str>,
+) -> bool {
+    let expected = confirmation_phrase
+        .map(normalize_spaces)
+        .filter(|phrase| !phrase.is_empty());
+    let Some(expected) = expected else {
+        return false;
+    };
+    let provided = confirmation_text.map(normalize_spaces).unwrap_or_default();
+    !provided.is_empty() && provided == expected
+}
+
+fn approval_is_high_risk(request: &ApprovalRequest) -> bool {
+    matches!(request.risk_level.as_str(), "high" | "critical") || request.mode == "full-access"
+}
+
+fn decision_approves(decision: &str) -> bool {
+    matches!(decision, "once" | "session" | "rule" | "modify")
+}
+
+/// Fail closed on echoed WebView phrases even if `native_confirm` would pass.
+/// High-risk mint requires a native OS dialog, not renderer-supplied text.
+pub(crate) fn ensure_permit_mint_confirmation(
+    confirmation_text: Option<&str>,
+    decision: &str,
+    effective_request: &ApprovalRequest,
+    native_confirm: impl FnOnce(&ApprovalRequest) -> Result<bool, String>,
+) -> Result<(), String> {
+    if !decision_approves(decision) || !approval_is_high_risk(effective_request) {
+        return Ok(());
+    }
+    let phrase = effective_request
+        .confirmation_phrase
+        .as_deref()
+        .ok_or_else(|| "High-risk approvals need a confirmation phrase.".to_string())?;
+    if webview_echoed_confirmation(confirmation_text, Some(phrase)) {
+        return Err(
+            "WebView cannot mint a high-risk permit by echoing the confirmation phrase."
+                .to_string(),
+        );
+    }
+    if !native_confirm(effective_request)? {
+        return Err("High-risk approval was not confirmed in the native dialog.".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn resolve_approval_for_mint(
+    request: ApprovalResolutionRequest,
+    native_confirm: impl FnOnce(&ApprovalRequest) -> Result<bool, String>,
+) -> Result<ApprovalResolutionResponse, String> {
+    let confirmation_text = request.confirmation_text.clone();
+    let response = resolve_approval(request)?;
+    ensure_permit_mint_confirmation(
+        confirmation_text.as_deref(),
+        &response.audit_entry.decision,
+        &response.effective_request,
+        native_confirm,
+    )?;
+    Ok(response)
+}
+
+fn high_risk_permit_dialog_copy(request: &ApprovalRequest) -> String {
+    format!(
+        "{}\n\n{} — {}\n\nConfirm in this system dialog. Repeating the phrase from the app window cannot mint this permit.",
+        request.consequence, request.service, request.action
+    )
+}
+
+fn native_high_risk_permit_confirmed(request: &ApprovalRequest) -> Result<bool, String> {
+    Ok(matches!(
+        rfd::MessageDialog::new()
+            .set_level(rfd::MessageLevel::Warning)
+            .set_title("Approve this action?")
+            .set_description(high_risk_permit_dialog_copy(request))
+            .set_buttons(rfd::MessageButtons::OkCancel)
+            .show(),
+        rfd::MessageDialogResult::Ok
+    ))
+}
+
 #[tauri::command]
 pub fn resolve_approval_request(
     app: tauri::AppHandle,
@@ -461,7 +532,7 @@ pub fn resolve_approval_request(
 ) -> Result<ApprovalResolutionResponse, String> {
     let req = request.request.clone();
     let decision = request.decision.clone();
-    let response = resolve_approval(request)?;
+    let response = resolve_approval_for_mint(request, native_high_risk_permit_confirmed)?;
     let audit_path = approval_audit_path(&app)?;
     let audit = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
     let grant = match response.grant {
@@ -506,4 +577,96 @@ pub fn resolve_approval_request(
     }))
     .record();
     Ok(persisted_response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{ApprovalRequest, ApprovalResolutionRequest};
+
+    fn high_risk_request() -> ApprovalRequest {
+        ApprovalRequest {
+            id: "approval-1".into(),
+            service: "Mivlet tools".into(),
+            action: "write-file a.txt".into(),
+            mode: "full-access".into(),
+            risk_level: "high".into(),
+            data_used: vec!["path".into(), "content".into()],
+            consequence: "Writes a workspace file.".into(),
+            requested_at: "2026-06-27T12:00:00Z".into(),
+            decisions: vec!["once".into(), "deny".into()],
+            confirmation_phrase: Some("write file".into()),
+        }
+    }
+
+    fn resolution(
+        request: ApprovalRequest,
+        confirmation_text: Option<&str>,
+    ) -> ApprovalResolutionRequest {
+        ApprovalResolutionRequest {
+            request,
+            decision: "once".into(),
+            decided_at: "2026-06-27T12:00:01Z".into(),
+            confirmation_text: confirmation_text.map(str::to_string),
+            modification: None,
+        }
+    }
+
+    #[test]
+    fn echoed_confirmation_matches_normalized_phrase() {
+        assert!(webview_echoed_confirmation(
+            Some("  write file  "),
+            Some("write file")
+        ));
+        assert!(!webview_echoed_confirmation(None, Some("write file")));
+        assert!(!webview_echoed_confirmation(
+            Some("other"),
+            Some("write file")
+        ));
+        assert!(!webview_echoed_confirmation(Some("write file"), None));
+    }
+
+    #[test]
+    fn resolve_approval_does_not_treat_echo_as_consume_authority() {
+        resolve_approval(resolution(high_risk_request(), Some("write file")))
+            .expect("shape-only resolve ignores echoed confirmation text");
+        resolve_approval(resolution(high_risk_request(), None))
+            .expect("shape-only resolve does not require confirmation text");
+    }
+
+    #[test]
+    fn echoed_phrase_cannot_mint_even_when_native_confirm_would_pass() {
+        let mut native_called = false;
+        let error =
+            resolve_approval_for_mint(resolution(high_risk_request(), Some("write file")), |_| {
+                native_called = true;
+                Ok(true)
+            })
+            .expect_err("echoed confirmation text cannot mint");
+        assert!(error.contains("echoing the confirmation phrase"), "{error}");
+        assert!(
+            !native_called,
+            "echo reject must not fall through to native confirm"
+        );
+    }
+
+    #[test]
+    fn omitted_confirmation_text_mints_only_after_native_confirm() {
+        resolve_approval_for_mint(resolution(high_risk_request(), None), |_| Ok(true))
+            .expect("native confirm mints without WebView phrase replay");
+
+        let error = resolve_approval_for_mint(resolution(high_risk_request(), None), |_| Ok(false))
+            .expect_err("declined native dialog cannot mint");
+        assert!(error.contains("native dialog"), "{error}");
+    }
+
+    #[test]
+    fn deny_does_not_require_native_confirm() {
+        let mut request = resolution(high_risk_request(), None);
+        request.decision = "deny".into();
+        resolve_approval_for_mint(request, |_| {
+            panic!("deny must not open a native confirm dialog")
+        })
+        .expect("deny is not a high-risk mint");
+    }
 }

@@ -189,8 +189,9 @@ Choose Connect and complete the provider's browser sign-in. Mivlet discovers and
 enables the returned tools automatically, then shows Connected only once usable
 tool access is saved. Native providers are health-checked automatically; Vercel
 additionally performs an authenticated account read because public discovery is
-insufficient. The Connect click authorizes the exact official endpoint;
-its native configuration receipt is retained without a second typed confirmation.
+insufficient. The Connect click authorizes the exact official endpoint. Native minting uses a
+system confirm dialog; WebView does not copy the confirmation phrase into the
+permit request. The native configuration receipt is retained after that mint.
 Reopening the detail view checks existing access without restarting OAuth or
 expanding a previously restricted tool list. Tools are used in conversations;
 manual server configuration remains in advanced Settings.

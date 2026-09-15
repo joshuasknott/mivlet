@@ -129,8 +129,8 @@ export function useWorkspaceApprovals(options: {
     };
   }, [workspaceScopeGeneration]);
 
-  // Full access makes the decision automatically, through the same persisted
-  // single-use authorization boundary. Other modes retain the interactive queue.
+  // Full Access still records the same exact one-time permit. High-risk minting
+  // requires a native OS confirm; WebView never copies confirmationPhrase.
   const recordBackendToolCall = (event: {
     allowAutomatic?: boolean;
     callId: string;
@@ -149,7 +149,6 @@ export function useWorkspaceApprovals(options: {
         event.approval,
         "once",
         undefined,
-        event.approval.confirmationPhrase,
         true,
       );
       return;
@@ -225,17 +224,17 @@ export function useWorkspaceApprovals(options: {
     approval: ApprovalRequest,
     decision: ApprovalDecision,
     modification?: ApprovalModification,
-    confirmationText?: string,
     automatic = false,
   ) => {
     const gate = approvalGateRef.current;
     const identity = workspaceIdentityRef.current;
+    // Never copy confirmationPhrase into confirmationText. Native minting
+    // treats that equality as WebView echo and refuses to persist a permit.
     const request = {
       request: approval,
       decision,
       decidedAt: new Date().toISOString(),
       modification,
-      confirmationText,
     };
 
     try {
@@ -333,8 +332,9 @@ export function useWorkspaceApprovals(options: {
     decision: ApprovalDecision,
     modification?: ApprovalModification,
   ) => {
-    // The visible Approve button confirms this exact queued connector operation.
-    // Preserve the native single-use receipt without a second typing ceremony.
+    // The visible Approve button confirms this exact queued connector operation
+    // in the panel. Native minting still requires the OS dialog; WebView must
+    // not copy the confirmation phrase into confirmationText.
     const queued = connectorApprovalRequests.current.get(approval.id);
     if (
       decision === "once" &&
@@ -342,12 +342,7 @@ export function useWorkspaceApprovals(options: {
       queued === approval &&
       approvalGateRef.current?.hasPending(approval.id)
     ) {
-      void resolveApprovalDecision(
-        approval,
-        decision,
-        undefined,
-        approval.confirmationPhrase,
-      );
+      void resolveApprovalDecision(approval, decision);
       return;
     }
     if (
@@ -405,7 +400,6 @@ export function useWorkspaceApprovals(options: {
       pendingApprovalConfirmation.request,
       pendingApprovalConfirmation.decision,
       pendingApprovalConfirmation.modification,
-      approvalConfirmationText,
     );
   };
 
