@@ -23,9 +23,16 @@ import {
   resolveCredentials,
   type BrokerEnv
 } from "./provider-profiles.js";
-import { createStores } from "./stores.js";
+import { BROKER_AUTHORIZE_STATE_MIN_LENGTH, createStores } from "./stores.js";
 import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
 import type { BrokerFetch } from "./provider-client.js";
+
+/** Pad fixture tags to the authorize entropy floor. Not a source of live randomness. */
+function oauthState(tag: string): string {
+  return tag.length >= BROKER_AUTHORIZE_STATE_MIN_LENGTH
+    ? tag
+    : `${tag}${"x".repeat(BROKER_AUTHORIZE_STATE_MIN_LENGTH - tag.length)}`;
+}
 
 const ENV: BrokerEnv = {
   FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
@@ -47,7 +54,7 @@ function authorizeRequest(provider: BrokerProviderId, state = "desktop-state"): 
     contractVersion: BROKER_CONTRACT_VERSION,
     provider,
     redirectUri: REDIRECT,
-    state,
+    state: oauthState(state),
     codeChallenge: "desktop-challenge",
     codeChallengeMethod: "S256"
   };
@@ -130,7 +137,7 @@ describe("broker authorize", () => {
     const url = new URL(response.authorizationUrl);
     expect(url.origin + url.pathname).toBe("https://github.com/login/oauth/authorize");
     expect(url.searchParams.get("client_id")).toBe("gh-id");
-    expect(url.searchParams.get("state")).toBe("s1");
+    expect(url.searchParams.get("state")).toBe(oauthState("s1"));
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:8788/oauth/github/callback");
     expect(url.searchParams.get("scope")).toBe("read:user read:org repo");
     // The broker performs the exchange, so its verifier (not the desktop's) is used.
@@ -196,12 +203,12 @@ describe("broker callback + handoff", () => {
     const fetch = providerFetch("github");
     const { broker } = makeBroker("github", fetch);
     await broker.authorize(authorizeRequest("github", "state-1"));
-    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "provider-code", state: "state-1" }));
+    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "provider-code", state: oauthState("state-1") }));
     expect(redirect.origin + redirect.pathname).toBe(REDIRECT);
     const handoff = redirect.searchParams.get("handoff");
     const state = redirect.searchParams.get("state");
     expect(handoff).toBeTruthy();
-    expect(state).toBe("state-1");
+    expect(state).toBe(oauthState("state-1"));
     // The token never appears in the redirect URL — only the opaque handoff.
     expect(redirect.toString()).not.toContain("provider-access-token");
 
@@ -218,9 +225,9 @@ describe("broker callback + handoff", () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "state-once"));
     // First use succeeds.
-    await broker.callback("github", new URLSearchParams({ code: "c", state: "state-once" }));
+    await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("state-once") }));
     // Replaying the same state is rejected (state was consumed).
-    await expect(broker.callback("github", new URLSearchParams({ code: "c", state: "state-once" })))
+    await expect(broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("state-once") })))
       .rejects.toThrow(/unknown, expired, or already used/);
     // Unknown state is rejected.
     await expect(broker.callback("github", new URLSearchParams({ code: "c", state: "never-issued" })))
@@ -230,17 +237,17 @@ describe("broker callback + handoff", () => {
   it("rejects callback substitution: provider mismatch on the same state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "state-mismatch"));
-    await expect(broker.callback("slack", new URLSearchParams({ code: "c", state: "state-mismatch" })))
+    await expect(broker.callback("slack", new URLSearchParams({ code: "c", state: oauthState("state-mismatch") })))
       .rejects.toThrow(/did not match the provider/);
   });
 
   it("rejects a callback reporting a provider error, or missing code/state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "e1"));
-    await expect(broker.callback("github", new URLSearchParams({ error: "access_denied", state: "e1" })))
+    await expect(broker.callback("github", new URLSearchParams({ error: "access_denied", state: oauthState("e1") })))
       .rejects.toThrow(/authorization error/i);
     await broker.authorize(authorizeRequest("github", "e2"));
-    await expect(broker.callback("github", new URLSearchParams({ state: "e2" })))
+    await expect(broker.callback("github", new URLSearchParams({ state: oauthState("e2") })))
       .rejects.toThrow(/missing a code/);
     await broker.authorize(authorizeRequest("github", "e3"));
     await expect(broker.callback("github", new URLSearchParams({ code: "x" })))
@@ -250,7 +257,7 @@ describe("broker callback + handoff", () => {
   it("token replay is impossible: a redeemed handoff cannot be redeemed twice", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "replay"));
-    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "replay" }));
+    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("replay") }));
     const handoff = redirect.searchParams.get("handoff")!;
     const state = redirect.searchParams.get("state")!;
     await broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state });
@@ -261,7 +268,7 @@ describe("broker callback + handoff", () => {
   it("rejects a handoff redeemed with the wrong bound state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "right"));
-    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "right" }));
+    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("right") }));
     const handoff = redirect.searchParams.get("handoff")!;
     await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "wrong" }))
       .rejects.toThrow(/unknown, expired, already used/);
@@ -271,27 +278,27 @@ describe("broker callback + handoff", () => {
     const clock = fixedClock(1_000_000);
     const { broker } = makeBroker("github", providerFetch("github"), clock);
     await broker.authorize(authorizeRequest("github", "ttl"));
-    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "ttl" }));
+    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("ttl") }));
     const handoff = redirect.searchParams.get("handoff")!;
     clock.advance(BROKER_HANDOFF_TTL_SECONDS * 1000 + 1);
-    await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "ttl" }))
+    await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: oauthState("ttl") }))
       .rejects.toThrow(/unknown, expired, already used/);
   });
 
   it("normalizes provider exchange/identity errors into structured broker errors", async () => {
     const { broker: rejected } = makeBroker("github", providerFetch("github", { tokenStatus: 401 }));
     await rejected.authorize(authorizeRequest("github", "n1"));
-    await expect(rejected.callback("github", new URLSearchParams({ code: "c", state: "n1" })))
+    await expect(rejected.callback("github", new URLSearchParams({ code: "c", state: oauthState("n1") })))
       .rejects.toMatchObject({ error: "needs-auth" });
 
     const { broker: limited } = makeBroker("github", providerFetch("github", { tokenStatus: 429 }));
     await limited.authorize(authorizeRequest("github", "n2"));
-    await expect(limited.callback("github", new URLSearchParams({ code: "c", state: "n2" })))
+    await expect(limited.callback("github", new URLSearchParams({ code: "c", state: oauthState("n2") })))
       .rejects.toMatchObject({ error: "rate-limited", retryable: true });
 
     const { broker: unavailable } = makeBroker("github", providerFetch("github", { tokenStatus: 503 }));
     await unavailable.authorize(authorizeRequest("github", "n3"));
-    await expect(unavailable.callback("github", new URLSearchParams({ code: "c", state: "n3" })))
+    await expect(unavailable.callback("github", new URLSearchParams({ code: "c", state: oauthState("n3") })))
       .rejects.toMatchObject({ error: "provider-unavailable", retryable: true });
   });
 
@@ -300,7 +307,7 @@ describe("broker callback + handoff", () => {
       const fetch = providerFetch(provider);
       const { broker } = makeBroker(provider, fetch);
       await broker.authorize(authorizeRequest(provider, `shape-${provider}`));
-      await broker.callback(provider, new URLSearchParams({ code: "provider-code", state: `shape-${provider}` }));
+      await broker.callback(provider, new URLSearchParams({ code: "provider-code", state: oauthState(`shape-${provider}`) }));
       const tokenCall = (fetch as unknown as { mock: { calls: [string, RequestInit][] } }).mock.calls
         .find(([url]) => url === providerProfile(provider).tokenEndpoint);
       expect(tokenCall, `${provider} token call`).toBeTruthy();
@@ -345,9 +352,9 @@ describe("broker callback + handoff", () => {
   it("rejects duplicate callback parameters before consuming state", async () => {
     const { broker } = makeBroker("github", providerFetch("github"));
     await broker.authorize(authorizeRequest("github", "dupe"));
-    await expect(broker.callback("github", new URLSearchParams("code=a&code=b&state=dupe")))
+    await expect(broker.callback("github", new URLSearchParams(`code=a&code=b&state=${oauthState("dupe")}`)))
       .rejects.toMatchObject({ error: "invalid-request" });
-    await expect(broker.callback("github", new URLSearchParams({ code: "ok", state: "dupe" })))
+    await expect(broker.callback("github", new URLSearchParams({ code: "ok", state: oauthState("dupe") })))
       .resolves.toBeTruthy();
   });
 });
@@ -394,7 +401,7 @@ describe("broker refresh + revoke", () => {
     const fetch = providerFetch("github");
     const { broker } = makeBroker("github", fetch);
     await broker.authorize(authorizeRequest("github", "github-headers"));
-    await broker.callback("github", new URLSearchParams({ code: "c", state: "github-headers" }));
+    await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("github-headers") }));
     await broker.revoke({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github", token: "provider-refresh-token"
     });
@@ -418,7 +425,7 @@ describe("broker token redaction invariant", () => {
     const { response } = await broker.authorize(authorizeRequest("github", "redact"));
     expect(response.authorizationUrl).not.toContain("gh-secret");
     expect(response.authorizationUrl).not.toContain("provider-access-token");
-    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "redact" }));
+    const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("redact") }));
     expect(redirect.toString()).not.toContain("provider-access-token");
     expect(redirect.toString()).not.toContain("gh-secret");
     const health = broker.health();
@@ -432,10 +439,10 @@ describe("broker provider coverage", () => {
     it(`${provider} completes the full confidential flow + handoff`, async () => {
       const { broker } = makeBroker(provider, providerFetch(provider));
       await broker.authorize(authorizeRequest(provider, `state-${provider}`));
-      const { redirect } = await broker.callback(provider, new URLSearchParams({ code: "c", state: `state-${provider}` }));
+      const { redirect } = await broker.callback(provider, new URLSearchParams({ code: "c", state: oauthState(`state-${provider}`) }));
       const handoff = redirect.searchParams.get("handoff")!;
       const redeemed = await broker.redeem({
-        contractVersion: BROKER_CONTRACT_VERSION, provider, handoff, state: `state-${provider}`
+        contractVersion: BROKER_CONTRACT_VERSION, provider, handoff, state: oauthState(`state-${provider}`)
       });
       expect(redeemed.tokens.accessToken).toBe("provider-access-token");
       expect(redeemed.account.id).toBeTruthy();
@@ -445,8 +452,8 @@ describe("broker provider coverage", () => {
   it("normalizes Slack, Notion, and Linear account metadata to stable workspace-aware summaries", async () => {
     const { broker: slackBroker } = makeBroker("slack", providerFetch("slack"));
     await slackBroker.authorize(authorizeRequest("slack", "slack-state"));
-    const { redirect: slackRedirect } = await slackBroker.callback("slack", new URLSearchParams({ code: "c", state: "slack-state" }));
-    const slack = await slackBroker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "slack", handoff: slackRedirect.searchParams.get("handoff")!, state: "slack-state" });
+    const { redirect: slackRedirect } = await slackBroker.callback("slack", new URLSearchParams({ code: "c", state: oauthState("slack-state") }));
+    const slack = await slackBroker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "slack", handoff: slackRedirect.searchParams.get("handoff")!, state: oauthState("slack-state") });
     expect(slack.account).toMatchObject({ id: "T1:U1", displayName: "Slack User", workspace: "Fable Slack" });
 
     expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
@@ -465,12 +472,12 @@ describe("broker provider coverage", () => {
       }
     }));
     await broker.authorize(authorizeRequest("linear", "linear-array-scope"));
-    const { redirect } = await broker.callback("linear", new URLSearchParams({ code: "c", state: "linear-array-scope" }));
+    const { redirect } = await broker.callback("linear", new URLSearchParams({ code: "c", state: oauthState("linear-array-scope") }));
     const redeemed = await broker.redeem({
       contractVersion: BROKER_CONTRACT_VERSION,
       provider: "linear",
       handoff: redirect.searchParams.get("handoff")!,
-      state: "linear-array-scope"
+      state: oauthState("linear-array-scope")
     });
     expect(redeemed.tokens.scopes).toEqual(["read", "write"]);
   });
