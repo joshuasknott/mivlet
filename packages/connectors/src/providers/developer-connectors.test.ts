@@ -115,6 +115,7 @@ describe("GitHub production adapter", () => {
     const authorize = new URL(started.authorizationUrl);
     expect(authorize.pathname).toBe("/oauth/github/authorize");
     expect(authorize.searchParams.get("code_challenge")).toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
+    expect(authorize.searchParams.get("code_challenge_method")).toBe("S256");
     expect(authorize.searchParams.get("scope")).toBe("read:user read:org");
 
     const completed = await adapter.completeAuth({

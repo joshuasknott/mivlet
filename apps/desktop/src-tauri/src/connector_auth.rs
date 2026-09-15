@@ -3097,8 +3097,13 @@ mod tests {
         );
         assert!(!query.contains_key("include_granted_scopes"));
         let pending = store.get(&pending_key("fixture", state)).unwrap().unwrap();
-        assert!(pending.contains("\"verifier\""));
-        assert!(!result.authorization_url.unwrap().contains("verifier"));
+        let pending: PendingOAuth = serde_json::from_str(&pending).unwrap();
+        let expected_challenge = pkce_challenge(&pending.verifier);
+        assert_eq!(
+            query.get("code_challenge").map(|value| value.as_ref()),
+            Some(expected_challenge.as_str())
+        );
+        assert!(!result.authorization_url.unwrap().contains(&pending.verifier));
     }
 
     #[test]
@@ -4059,6 +4064,14 @@ mod tests {
         let broker = BrokerMock::start(200, body.to_string(), None).await;
         let handoff_url = broker.handoff_url();
         let state = start_brokered_flow(&store, &handoff_url);
+        let pending: PendingOAuth = serde_json::from_str(
+            &store
+                .get(&pending_key("github", &state))
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let verifier = pending.verifier.clone();
         let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
 
         let (tokens, account, credential_ref) = complete_with_store("github", &callback, &store)
@@ -4094,7 +4107,7 @@ mod tests {
         assert!(request.contains("\"provider\":\"github\""));
         assert!(request.contains("\"handoff\":\"ticket\""));
         assert!(request.contains(&format!("\"state\":\"{state}\"")));
-        assert!(request.contains("\"codeVerifier\":"));
+        assert!(request.contains(&format!("\"codeVerifier\":\"{verifier}\"")));
     }
 
     #[tokio::test]

@@ -150,6 +150,43 @@ describe("desktop↔broker PKCE contract", () => {
     expect(redeemed.tokens.accessToken).toBe("provider-access-token");
   });
 
+  it("rejects a loopback observer who has only the handoff ticket and state", async () => {
+    const { broker } = makeBroker();
+    const router = createBrokerRouter({ broker });
+    await broker.authorize(authorize("url-observer"));
+    const { redirect } = await broker.callback("github", new URLSearchParams({
+      code: "c",
+      state: oauthState("url-observer")
+    }));
+    const handoff = redirect.searchParams.get("handoff")!;
+    const state = redirect.searchParams.get("state")!;
+
+    const observed = await router.handle(
+      new Request("http://127.0.0.1/oauth/github/handoff", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          contractVersion: BROKER_CONTRACT_VERSION,
+          provider: "github",
+          handoff,
+          state
+        })
+      }),
+      "127.0.0.1"
+    );
+    expect(observed.status).toBe(400);
+    expect((await observed.json() as { error: string }).error).toBe("invalid-request");
+
+    const redeemed = await broker.redeem({
+      contractVersion: BROKER_CONTRACT_VERSION,
+      provider: "github",
+      handoff,
+      state,
+      codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier
+    });
+    expect(redeemed.tokens.accessToken).toBe("provider-access-token");
+  });
+
   it("router rejects duplicate PKCE parameters, missing method, and plain", async () => {
     const { broker } = makeBroker();
     const router = createBrokerRouter({ broker });
