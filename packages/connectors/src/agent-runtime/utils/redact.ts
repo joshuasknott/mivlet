@@ -3,14 +3,14 @@
  *
  * Scans strings and JSON objects for common patterns of API keys, bearer tokens,
  * passwords, and other credentials, masking them with `[REDACTED]`. Pattern
- * vocabulary lives in `@fable/protocol` so TypeScript and Rust cannot drift.
+ * vocabulary lives in `@mivlet/protocol` so TypeScript and Rust cannot drift.
  */
 
 import {
   isSensitiveSecretKey,
   redactSecretText,
   SECRET_REDACTED
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /**
  * Scan a string for sensitive credentials and redact them.
