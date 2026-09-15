@@ -19,6 +19,7 @@ use url::Url;
 
 use crate::clerk_identity::{self, ConvexFunctionType, ConvexIdentityCallRequest};
 use crate::models::{ApprovalRequest, ApprovalResolutionRequest};
+use crate::store::repos::workspace_directory as directory;
 
 const ACCOUNT_CHANGED_ERROR: &str = "Mivlet account changed during the request. Please try again.";
 const MAX_RUNNER_RESPONSE_BYTES: usize = 600 * 1024;
@@ -343,6 +344,24 @@ async fn call_convex(
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&before)?;
     unwrap_success(envelope)
+}
+
+fn require_matching_hosted_scope(
+    workspace_id: &str,
+    device_id: Option<&str>,
+) -> Result<directory::HostedComputerScope, String> {
+    let store =
+        crate::store::try_global().ok_or_else(|| "Account storage unavailable.".to_string())?;
+    let scope = store
+        .with_conn(directory::resolve_hosted_computer_scope_for_current_user)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "Select an available hosted workspace before using its computer.".to_string()
+        })?;
+    if !directory::hosted_scope_matches(&scope, workspace_id, device_id) {
+        return Err("The hosted computer request does not match the selected workspace.".into());
+    }
+    Ok(scope)
 }
 
 fn validate_process_id(value: &str) -> bool {
@@ -823,9 +842,10 @@ async fn request_execution_capability(
     device_id: &str,
     scope: &str,
 ) -> Result<(HostedExecutionCapabilityReceipt, Url), String> {
-    let value = call_convex(
-        ConvexFunctionType::Action,
-        "hostedExecution:requestExecutionCapability",
+    require_matching_hosted_scope(workspace_id, Some(device_id))?;
+    let before = clerk_identity::native_identity_generation_snapshot()?;
+    let envelope = clerk_identity::call_convex_http_route(
+        "/native/execution-capability",
         json!({
             "workspaceId": workspace_id,
             "agentId": agent_id,
@@ -834,6 +854,13 @@ async fn request_execution_capability(
         }),
     )
     .await?;
+    let after = clerk_identity::native_identity_generation_snapshot()
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if after != before {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let _identity_guard = clerk_identity::lock_native_identity_generation(&before)?;
+    let value = unwrap_success(envelope)?;
     let receipt: HostedExecutionCapabilityReceipt = serde_json::from_value(value)
         .map_err(|_| "The hosted execution capability failed validation.".to_string())?;
     validate_capability(receipt)
@@ -1119,6 +1146,7 @@ pub async fn hosted_computer_status(
     if !valid_id(&workspace_id) || !valid_id(&agent_id) {
         return Err("The hosted computer scope is invalid.".into());
     }
+    require_matching_hosted_scope(&workspace_id, None)?;
     let value = call_convex(
         ConvexFunctionType::Query,
         "hostedExecution:getComputer",
@@ -1143,6 +1171,7 @@ pub async fn hosted_computer_provision(
     if !valid_id(&workspace_id) || !valid_id(&agent_id) || !valid_id(&device_id) {
         return Err("The hosted computer scope is invalid.".into());
     }
+    require_matching_hosted_scope(&workspace_id, Some(&device_id))?;
     let request_key = opaque_key("provision")?;
     let value = call_convex(
         ConvexFunctionType::Mutation,
@@ -1172,6 +1201,7 @@ pub fn hosted_process_prepare(
     draft: HostedProcessDraft,
 ) -> Result<PreparedHostedProcessLaunch, String> {
     let draft = normalize_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedProcessLaunchProposal {
         request_key: opaque_key("process")?,
         workspace_id: draft.workspace_id,
@@ -1310,6 +1340,7 @@ pub fn hosted_browser_prepare(
     draft: HostedBrowserNavigateDraft,
 ) -> Result<PreparedHostedBrowserNavigation, String> {
     let draft = normalize_browser_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedBrowserNavigateProposal {
         request_key: opaque_key("browser")?,
         workspace_id: draft.workspace_id,
@@ -1406,6 +1437,7 @@ pub fn hosted_browser_action_prepare(
     draft: HostedBrowserActionDraft,
 ) -> Result<PreparedHostedBrowserAction, String> {
     let draft = normalize_browser_action_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedBrowserActionProposal {
         request_key: opaque_key("browser-action")?,
         workspace_id: draft.workspace_id,
@@ -1836,5 +1868,33 @@ mod tests {
         assert!(normalize_browser_action_draft(download.clone()).is_ok());
         download.value = Some("report.pdf".into());
         assert!(normalize_browser_action_draft(download).is_err());
+    }
+
+    #[test]
+    fn mismatched_hosted_drafts_are_rejected() {
+        let scope = directory::HostedComputerScope {
+            workspace_id: "workspace:alpha".into(),
+            device_id: "device-desktop".into(),
+        };
+        let draft = normalize_draft(draft()).unwrap();
+        assert!(directory::hosted_scope_matches(
+            &scope,
+            &draft.workspace_id,
+            Some(&draft.device_id)
+        ));
+        let mut mismatched = draft;
+        mismatched.workspace_id = "workspace:beta".into();
+        assert!(!directory::hosted_scope_matches(
+            &scope,
+            &mismatched.workspace_id,
+            Some(&mismatched.device_id)
+        ));
+        mismatched.workspace_id = "workspace:alpha".into();
+        mismatched.device_id = "device-other".into();
+        assert!(!directory::hosted_scope_matches(
+            &scope,
+            &mismatched.workspace_id,
+            Some(&mismatched.device_id)
+        ));
     }
 }

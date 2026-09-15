@@ -441,7 +441,7 @@ fn local_status(
 ) -> Result<AccountWorkspaceStatus, String> {
     let ready = crate::account_session::ensure_current().is_ok();
     let (internal_user_id, member_id) = crate::account_session::principals().unwrap_or_default();
-    let (workspaces, devices) = if ready {
+    let (workspaces, devices, selected) = if ready {
         let store = crate::store::try_global().ok_or("Account storage unavailable.")?;
         store
             .with_conn(|conn| {
@@ -450,12 +450,15 @@ fn local_status(
                         .unwrap_or_default(),
                     directory::list_account_device_summaries_for_current_user(conn)?
                         .unwrap_or_default(),
+                    directory::hosted_workspace_selection_for_current_user(conn)?,
                 ))
             })
             .map_err(|error| error.to_string())?
     } else {
-        (Vec::new(), Vec::new())
+        (Vec::new(), Vec::new(), None)
     };
+    let hosted_workspace_id =
+        directory::resolve_hosted_workspace_id(&workspaces, selected.as_ref());
     Ok(AccountWorkspaceStatus {
         configured: identity.enabled,
         state: if ready { "ready" } else { "signed-out" }.into(),
@@ -465,7 +468,7 @@ fn local_status(
         devices,
         active_workspace: directory::ActiveWorkspaceSelection {
             local_workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
-            fable_workspace_id: None,
+            fable_workspace_id: hosted_workspace_id,
             name: "On this PC".into(), source: "local".into(),
         },
         active_context_owner: ActiveContextOwner { internal_user_id, member_id },

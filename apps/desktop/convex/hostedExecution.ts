@@ -7,7 +7,7 @@ import {
 import { v } from "convex/values";
 import { requireActiveDevice, requireActiveMembership, requireRole } from "./authorization";
 import { internal } from "./_generated/api";
-import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import {
   hostedComputerId,
   hostedRunnerBaseUrl,
@@ -98,26 +98,31 @@ export const authorizeExecutionCapability = internalQuery({
   }
 });
 
+const executionCapabilityArgs = {
+  workspaceId: v.string(),
+  deviceId: v.string(),
+  agentId: v.string(),
+  scope: v.union(
+    v.literal("process:launch"),
+    v.literal("process:inspect"),
+    v.literal("process:kill"),
+    v.literal("browser:navigate"),
+    v.literal("browser:act"),
+    v.literal("browser:snapshot")
+  )
+};
+
 /**
- * Mints a short-lived bearer capability for the native boundary. The runner
- * signing secret remains in Convex/Worker secrets and never reaches the
- * renderer. Capabilities are generation-fenced and cannot provision or destroy
- * computers. The service Bearer (`FABLE_HOSTED_RUNNER_API_KEY`) is lifecycle-only.
+ * Mints a short-lived bearer capability for the native boundary. Internal so a
+ * renderer Convex client cannot pull tokens into WebView state. Native calls
+ * `/native/execution-capability` with the OS-keyring Clerk session.
+ * The runner signing secret remains in Convex/Worker secrets and never reaches
+ * the renderer. Capabilities are generation-fenced and cannot provision or
+ * destroy computers. The service Bearer (`FABLE_HOSTED_RUNNER_API_KEY`) is
+ * lifecycle-only.
  */
-export const requestExecutionCapability = action({
-  args: {
-    workspaceId: v.string(),
-    deviceId: v.string(),
-    agentId: v.string(),
-    scope: v.union(
-      v.literal("process:launch"),
-      v.literal("process:inspect"),
-      v.literal("process:kill"),
-      v.literal("browser:navigate"),
-      v.literal("browser:act"),
-      v.literal("browser:snapshot")
-    )
-  },
+export const requestExecutionCapability = internalAction({
+  args: executionCapabilityArgs,
   handler: async (ctx, args): Promise<HostedExecutionCapabilityReceipt> => {
     const authorized: { computerId: string; generation: number } = await ctx.runQuery(
       internal.hostedExecution.authorizeExecutionCapability,
