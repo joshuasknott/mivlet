@@ -5,7 +5,7 @@ import {
   SECRET_REDACTED,
   SECRET_REDACTION_CASES,
   secretMarkerSurvives
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { redactSecretsFromString } from "./redact";
 
 describe("shared secret-redaction fixtures", () => {

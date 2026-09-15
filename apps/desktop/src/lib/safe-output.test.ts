@@ -9,7 +9,7 @@ import {
   MAX_SAFE_LINK_CHARS,
   TRUNCATION_MARKER
 } from "./safe-output";
-import { SECRET_REDACTION_CASES } from "@fable/protocol";
+import { SECRET_REDACTION_CASES } from "@mivlet/protocol";
 
 /**
  * Safe connector-output inspection. The invariant under test: an arbitrary

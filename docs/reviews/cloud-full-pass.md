@@ -17,7 +17,7 @@ This is a source review of a pre-release local-first product. Hosted, broker, an
 | 2 | **L2** | P1 | Medium | Permit consume is read-modify-write JSON/SQLite without compare-and-swap. |
 | 3 | **H1–H3** | P1 (P0 before deploy) | Medium | Hosted runner admin Bearer skips generation; nonce is unused; one secret both mints and administers. |
 | 4 | **T1–T3** | P1 | Medium | Tests that would have caught L1, H1, and account-switch invalidation do not exist at the call-site layer. |
-| 5 | **C1** | P1 | Small | CI `pnpm test` on Linux cannot run `@fable/agent-host`; several host tests lack a `win32` skip and fail closed with `ENOENT`. |
+| 5 | **C1** | P1 | Small | CI `pnpm test` on Linux cannot run `@mivlet/agent-host`; several host tests lack a `win32` skip and fail closed with `ENOENT`. |
 
 Everything else in this document is real, but those five close the gap between **claimed fences** and **what the code actually checks**.
 
@@ -68,7 +68,7 @@ ADRs of record: account-first onboarding, broker ephemeral storage, MCP OAuth re
 | --- | --- | --- |
 | `pnpm typecheck` | **Pass** | Protocol spine parity, connectors/knowledge build, agent-host/broker/hosted-runner/desktop `tsc` |
 | `pnpm quality` | **Pass** | ESLint max-warnings=0; explicit-any ratchet **127/127**; Prettier on a **narrow** file set; knip clean; 0 cycles across 556 modules |
-| `pnpm --filter '!@fable/agent-host' -r test` | **Pass** | connectors 612 (5 skipped); knowledge 307; broker 109; hosted-runner 28; desktop 961 + 2 node tests |
+| `pnpm --filter '!@mivlet/agent-host' -r test` | **Pass** | connectors 612 (5 skipped); knowledge 307; broker 109; hosted-runner 28; desktop 961 + 2 node tests |
 | `pnpm test` (includes agent-host) | **Fail (expected here)** | 50/50 agent-host tests: `spawn .../mivlet-agent-host.exe ENOENT`. CI already excludes this package on Linux. Some test files assert `win32`; `additional-providers.test.mjs` / `providers.test.mjs` do not. |
 | `pnpm perf:test` | **Pass** | 12/12 budget unit tests (no production bundle measured) |
 | `pnpm release:test` | **Pass** | 6/6 Windows manifest contract tests |
@@ -149,7 +149,7 @@ Unit tests in the same module pass an independent later timestamp (`2026-06-27T1
 if (await serviceAuthorized(request, rootSecret)) return { authorized: true };
 ```
 
-No `expectedGeneration`. `ComputerAuthority.requireCapabilityGeneration(undefined)` is a no-op. Process launch/inspect/kill and browser routes therefore skip generation fencing when `Authorization: Bearer <FABLE_HOSTED_RUNNER_API_KEY>` is present.
+No `expectedGeneration`. `ComputerAuthority.requireCapabilityGeneration(undefined)` is a no-op. Process launch/inspect/kill and browser routes therefore skip generation fencing when `Authorization: Bearer <MIVLET_HOSTED_RUNNER_API_KEY>` is present.
 
 Architecture (`docs/architecture/hosted-teammate-computer.md`) says admin is provision/destroy; scoped operations use generation-fenced capabilities.
 
@@ -171,9 +171,9 @@ Architecture (`docs/architecture/hosted-teammate-computer.md`) says admin is pro
 
 **Status:** Confirmed.
 
-`FABLE_HOSTED_RUNNER_API_KEY` is used as Bearer for provision (`convex/hostedExecution.ts` `provisionScheduled`) and as HMAC key for `signHostedExecutionCapability`.
+`MIVLET_HOSTED_RUNNER_API_KEY` is used as Bearer for provision (`convex/hostedExecution.ts` `provisionScheduled`) and as HMAC key for `signHostedExecutionCapability`.
 
-**Fix:** Split `FABLE_HOSTED_RUNNER_SERVICE_KEY` (provision/destroy only) from `FABLE_HOSTED_RUNNER_SIGNING_KEY` (capabilities only). Renderer still must never see either.
+**Fix:** Split `MIVLET_HOSTED_RUNNER_SERVICE_KEY` (provision/destroy only) from `MIVLET_HOSTED_RUNNER_SIGNING_KEY` (capabilities only). Renderer still must never see either.
 
 ### H4. Convex `requestExecutionCapability` is a public action
 
@@ -197,7 +197,7 @@ Anyone who obtains a refresh token can rotate or revoke via the broker (IP rate 
 
 **Status:** Confirmed this run.
 
-`packages/agent-host/test/support/host-process.mjs` always spawns `mivlet-agent-host.exe`. `agent-host.test.mjs` asserts `win32`; several other files do not. Root `pnpm test` runs agent-host first and fails 50/50 here. PR CI works around this with `pnpm --filter '!@fable/agent-host'`.
+`packages/agent-host/test/support/host-process.mjs` always spawns `mivlet-agent-host.exe`. `agent-host.test.mjs` asserts `win32`; several other files do not. Root `pnpm test` runs agent-host first and fails 50/50 here. PR CI works around this with `pnpm --filter '!@mivlet/agent-host'`.
 
 **Fix:** Skip (not fail) when `process.platform !== "win32"` or the exe is missing, in **every** host test file. Keep Windows CI as the real gate.
 

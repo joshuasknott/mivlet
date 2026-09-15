@@ -1,4 +1,4 @@
-import { redactSecretText, secretMarkerSurvives } from "@fable/protocol";
+import { redactSecretText, secretMarkerSurvives } from "@mivlet/protocol";
 
 const OMITTED = "[output omitted: secret-shaped content]";
 
