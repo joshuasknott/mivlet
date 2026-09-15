@@ -12,6 +12,13 @@ use std::sync::OnceLock;
 const VOCABULARY_JSON: &str =
     include_str!("../../../../packages/protocol/src/secret-redaction.json");
 
+/// Matches the JSON PEM pattern's `[\s\S]{0,16384}` body bound. Compiling that
+/// quantified any-char class overflows the default regex DFA size limit.
+const PEM_BODY_LIMIT: usize = 16_384;
+const PEM_LABEL: &str = "-----BEGIN ";
+const PEM_END_LABEL: &str = "-----END ";
+const PEM_TAIL: &str = "PRIVATE KEY-----";
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct InlinePattern {
@@ -32,12 +39,13 @@ struct Vocabulary {
     sensitive_key_stems: Vec<String>,
 }
 
+enum InlineRedactor {
+    Regex { regex: Regex, replacement: String },
+    Pem { replacement: String },
+}
+
 struct CompiledVocabulary {
-    redacted: String,
-    omitted: String,
-    substring_markers: Vec<String>,
-    sensitive_key_stems: Vec<String>,
-    inline: Vec<(Regex, String)>,
+    inline: Vec<InlineRedactor>,
     surviving: Vec<Regex>,
 }
 
@@ -70,14 +78,7 @@ fn compiled() -> &'static CompiledVocabulary {
                     })
             })
             .collect();
-        CompiledVocabulary {
-            redacted: vocabulary.redacted.clone(),
-            omitted: vocabulary.omitted.clone(),
-            substring_markers: vocabulary.substring_markers.clone(),
-            sensitive_key_stems: vocabulary.sensitive_key_stems.clone(),
-            inline,
-            surviving,
-        }
+        CompiledVocabulary { inline, surviving }
     })
 }
 
@@ -99,9 +100,17 @@ fn rewrite_backref_pattern(pattern: &str) -> String {
         .replace(r#"(\2)"#, "")
 }
 
-fn compile_inline_pattern(pattern: &InlinePattern) -> (Regex, String) {
+fn compile_inline_pattern(pattern: &InlinePattern) -> InlineRedactor {
+    if pattern.id == "pem-private-key" {
+        return InlineRedactor::Pem {
+            replacement: pattern.replacement.clone(),
+        };
+    }
     match compile_js_regex(&pattern.pattern, &pattern.flags) {
-        Ok(regex) => (regex, pattern.replacement.clone()),
+        Ok(regex) => InlineRedactor::Regex {
+            regex,
+            replacement: pattern.replacement.clone(),
+        },
         Err(_) if pattern.pattern.contains(r"\2") => {
             let rewritten = rewrite_backref_pattern(&pattern.pattern);
             let regex = compile_js_regex(&rewritten, &pattern.flags).unwrap_or_else(|error| {
@@ -110,10 +119,76 @@ fn compile_inline_pattern(pattern: &InlinePattern) -> (Regex, String) {
                     pattern.id
                 )
             });
-            (regex, "$1[REDACTED]".to_string())
+            InlineRedactor::Regex {
+                regex,
+                replacement: "$1[REDACTED]".to_string(),
+            }
         }
         Err(error) => panic!("shared inline pattern {} must compile: {error}", pattern.id),
     }
+}
+
+/// `-----BEGIN [A-Z ]{0,64}PRIVATE KEY-----` (and the matching END fence).
+fn pem_fence_len(after_label: &str) -> Option<usize> {
+    let bytes = after_label.as_bytes();
+    for prefix_len in 0..=64.min(bytes.len()) {
+        if prefix_len > 0 {
+            let previous = bytes[prefix_len - 1];
+            if !(previous.is_ascii_uppercase() || previous == b' ') {
+                return None;
+            }
+        }
+        if after_label
+            .get(prefix_len..)
+            .is_some_and(|rest| rest.starts_with(PEM_TAIL))
+        {
+            return Some(prefix_len + PEM_TAIL.len());
+        }
+    }
+    None
+}
+
+fn bounded_char_end(value: &str, start: usize, max_chars: usize) -> usize {
+    value[start..]
+        .char_indices()
+        .nth(max_chars)
+        .map(|(index, _)| start + index)
+        .unwrap_or(value.len())
+}
+
+/// Linear stand-in for the shared PEM regex. The quantified `[\s\S]{0,16384}`
+/// body cannot be compiled by the Rust regex DFA (size-limit overflow).
+fn redact_pem_private_keys(value: &str, replacement: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut pos = 0;
+    while let Some(relative) = value[pos..].find(PEM_LABEL) {
+        let begin_at = pos + relative;
+        out.push_str(&value[pos..begin_at]);
+        let after_begin = begin_at + PEM_LABEL.len();
+        let Some(header_len) = pem_fence_len(&value[after_begin..]) else {
+            out.push_str(PEM_LABEL);
+            pos = after_begin;
+            continue;
+        };
+        let header_end = after_begin + header_len;
+        let window_end = bounded_char_end(value, header_end, PEM_BODY_LIMIT);
+        let window = &value[header_end..window_end];
+        if let Some(end_relative) = window.find(PEM_END_LABEL) {
+            let after_end = header_end + end_relative + PEM_END_LABEL.len();
+            if let Some(footer_len) = pem_fence_len(&value[after_end..]) {
+                let block_end = after_end + footer_len;
+                if block_end <= window_end {
+                    out.push_str(replacement);
+                    pos = block_end;
+                    continue;
+                }
+            }
+        }
+        out.push_str(PEM_LABEL);
+        pos = after_begin;
+    }
+    out.push_str(&value[pos..]);
+    out
 }
 
 /// Case-insensitive substring match against the shared credential-shape markers.
@@ -125,7 +200,7 @@ pub fn looks_secret(value: &str) -> bool {
 /// they must not be used to drop a shared marker.
 pub fn looks_secret_with(value: &str, extra: &[&str]) -> bool {
     let lower = value.to_ascii_lowercase();
-    compiled()
+    vocabulary()
         .substring_markers
         .iter()
         .any(|marker| lower.contains(&marker.to_ascii_lowercase()))
@@ -141,7 +216,7 @@ pub fn is_sensitive_key(key: &str) -> bool {
         .filter(|character| *character != '-' && *character != '_')
         .collect::<String>()
         .to_ascii_lowercase();
-    compiled()
+    vocabulary()
         .sensitive_key_stems
         .iter()
         .any(|candidate| candidate == &stem)
@@ -149,12 +224,12 @@ pub fn is_sensitive_key(key: &str) -> bool {
 
 /// Shared surgical replacement marker (`[REDACTED]`).
 pub fn redacted_marker() -> &'static str {
-    &compiled().redacted
+    &vocabulary().redacted
 }
 
 /// Shared omit sentinel when a marker survives surgical redaction.
 pub fn omitted_marker() -> &'static str {
-    &compiled().omitted
+    &vocabulary().omitted
 }
 
 /// Scan a string for known credential shapes and replace them in place.
@@ -163,10 +238,13 @@ pub fn redact_secret_text(value: &str) -> String {
         return value.to_string();
     }
     let mut redacted = value.to_string();
-    for (regex, replacement) in &compiled().inline {
-        redacted = regex
-            .replace_all(&redacted, replacement.as_str())
-            .into_owned();
+    for redactor in &compiled().inline {
+        redacted = match redactor {
+            InlineRedactor::Regex { regex, replacement } => regex
+                .replace_all(&redacted, replacement.as_str())
+                .into_owned(),
+            InlineRedactor::Pem { replacement } => redact_pem_private_keys(&redacted, replacement),
+        };
     }
     redacted
 }
@@ -315,5 +393,18 @@ mod tests {
         assert!(redacted.contains("then deploy"));
         assert!(!redacted.contains("ghp_abcdefghijklmnopqrstuvwx1234567890"));
         assert!(redacted.contains(redacted_marker()));
+    }
+
+    #[test]
+    fn pem_blocks_are_redacted_without_compiling_the_json_body_quantifier() {
+        let leaked = "MIIBfakePrivateKeyMaterial";
+        let redacted = redact_secret_text_or_omit(&format!(
+            "keep this -----BEGIN PRIVATE KEY-----\n{leaked}\n-----END PRIVATE KEY----- and this"
+        ));
+        assert!(redacted.contains("keep this"));
+        assert!(redacted.contains("and this"));
+        assert!(!redacted.contains(leaked));
+        assert!(redacted.contains(redacted_marker()));
+        assert!(!looks_secret("read-file src/index.ts"));
     }
 }
