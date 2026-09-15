@@ -14,7 +14,9 @@
  * They are read into broker memory only and sent solely to provider token/
  * revocation endpoints over TLS; never logged, returned, or persisted. The
  * default memory backend keeps short-lived pending exchanges and handoff
- * tickets per isolate. The opt-in durable backend routes those values through
+ * tickets per isolate and is refused whenever the public URL is public HTTPS
+ * (HTTPS and not loopback). Unlabeled or `local` Workers with a public URL
+ * fail closed. The opt-in durable backend routes those values through
  * encrypted, SQLite-backed Durable Objects and coordinates rate limits across
  * isolates.
  */
@@ -160,9 +162,19 @@ export default {
 
 function validateWorkerConfig(env: Env): string | undefined {
   const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
-  const deployment = (env.FABLE_BROKER_ENVIRONMENT ?? "local").toLowerCase();
+  const rawDeployment = env.FABLE_BROKER_ENVIRONMENT;
+  const deployment = (rawDeployment ?? "local").toLowerCase();
+  const unlabeledOrLocal = !rawDeployment?.trim() || deployment === "local";
   if (backend !== "memory" && backend !== "durable") {
     return "Storage backend must be memory or durable.";
+  }
+  // Label is not a reachability control. Public callback URLs cannot use the
+  // local/unlabeled environment, and in-memory OAuth state cannot back public HTTPS.
+  if (unlabeledOrLocal && isPublicUrl(env.FABLE_BROKER_PUBLIC_URL)) {
+    return "Local Workers cannot use a public URL.";
+  }
+  if (backend === "memory" && isPublicHttpsUrl(env.FABLE_BROKER_PUBLIC_URL)) {
+    return "Public HTTPS Workers require durable storage.";
   }
   if ((deployment === "staging" || deployment === "production") && backend !== "durable") {
     return "Staging and production Workers require durable storage.";
@@ -179,20 +191,42 @@ function validateWorkerConfig(env: Env): string | undefined {
     } catch {
       return "Durable storage encryption key is invalid.";
     }
-    if (!isHttpsPublicUrl(env.FABLE_BROKER_PUBLIC_URL)) {
+    if (!isHttpsUrl(env.FABLE_BROKER_PUBLIC_URL)) {
       return "Durable Worker deployments require an explicit HTTPS public URL.";
     }
   }
   return undefined;
 }
 
-function isHttpsPublicUrl(value: string | undefined): boolean {
-  if (!value) return false;
+function parseBrokerUrl(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
   try {
-    return new URL(value).protocol === "https:";
+    return new URL(value);
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]" || host === "::1";
+}
+
+/** Any non-loopback origin, including public HTTP. */
+function isPublicUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && !isLoopbackHostname(url.hostname));
+}
+
+/** HTTPS origin that is not loopback — the public Internet callback case. */
+function isPublicHttpsUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && url.protocol === "https:" && !isLoopbackHostname(url.hostname));
+}
+
+function isHttpsUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && url.protocol === "https:");
 }
 
 function configurationRequired(message: string): Response {
