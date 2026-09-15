@@ -75,7 +75,7 @@ describe("broker Worker entrypoint", () => {
       FABLE_BROKER_STORAGE_BACKEND: "memory"
     };
     const response = await worker.fetch(new Request(
-      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch"
+      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch&code_challenge_method=S256"
     ), envLocalPublic);
     expect(response.status).toBe(503);
     const body = await response.json() as { error: string; message: string };
