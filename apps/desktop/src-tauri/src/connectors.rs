@@ -23,9 +23,9 @@ use crate::models::{
     ConnectorAuthRequest, ConnectorAuthResult, ConnectorCapabilityRequest,
     ConnectorCapabilityResult, ConnectorCommandError, ConnectorHealth, ConnectorImportRequest,
     ConnectorImportResult, ConnectorKnowledgeSource, ConnectorManifest, ConnectorPermission,
-    ConnectorSearchRequest, ConnectorSearchResult, CONNECTOR_ACTIONS,
-    CONNECTOR_AUTH_STATES, MAX_CONNECTOR_PAYLOAD_FIELDS, MAX_CONNECTOR_QUERY_CHARACTERS,
-    MAX_CONNECTOR_RESULT_LIMIT, SUPPORTED_CONNECTOR_IDS,
+    ConnectorSearchRequest, ConnectorSearchResult, CONNECTOR_ACTIONS, CONNECTOR_AUTH_STATES,
+    MAX_CONNECTOR_PAYLOAD_FIELDS, MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
+    SUPPORTED_CONNECTOR_IDS,
 };
 use crate::oauth_loopback;
 use crate::paths::{

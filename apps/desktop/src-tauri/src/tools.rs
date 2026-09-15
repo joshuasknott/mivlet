@@ -2424,8 +2424,8 @@ mod connector_authority_tests {
         let _ = std::fs::remove_file(&path);
         let mut forged = request("web-fetch");
         forged.approval.decision = "once".into();
-        let error = verify_tool_authority(&path, &forged)
-            .expect_err("WebView JSON is not a minted permit");
+        let error =
+            verify_tool_authority(&path, &forged).expect_err("WebView JSON is not a minted permit");
         assert!(
             error.contains("no persisted user approval"),
             "expected a missing native permit, got {error}"
