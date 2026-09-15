@@ -738,13 +738,11 @@ fn recover_interrupted_attempts_fences_executing_work_and_marks_the_journal() {
         bind(ctx, "root", "run")?;
         Ok(())
     });
-    let recovered = crate::execution_attempts::recover_interrupted_attempts_in_store(&store, TIME)
-        .unwrap();
-    assert!(
-        recovered
-            .iter()
-            .any(|attempt| attempt.id == "run" && attempt.status == "interrupted")
-    );
+    let recovered =
+        crate::execution_attempts::recover_interrupted_attempts_in_store(&store, TIME).unwrap();
+    assert!(recovered
+        .iter()
+        .any(|attempt| attempt.id == "run" && attempt.status == "interrupted"));
     fixture(&store, |ctx| {
         let root = ctx.item("root")?;
         assert_eq!(root.status, WorkStatus::AwaitingUser);
@@ -755,7 +753,12 @@ fn recover_interrupted_attempts_fences_executing_work_and_marks_the_journal() {
     });
 }
 
-fn attempt_record(run: &str, room: &str, status: &str, transcript: &str) -> crate::models::ExecutionAttempt {
+fn attempt_record(
+    run: &str,
+    room: &str,
+    status: &str,
+    transcript: &str,
+) -> crate::models::ExecutionAttempt {
     serde_json::from_value(json!({
         "id": run,
         "providerId": "openai",
@@ -818,8 +821,8 @@ fn save_path_rejects_interrupted_to_completed_and_allows_exact_replay() {
     completed.status = "completed".into();
     completed.transcript = "final".into();
     completed.updated_at = "2026-09-12T10:01:00.000Z".into();
-    let error = crate::execution_attempts::save_execution_attempt_record(&store, completed)
-        .unwrap_err();
+    let error =
+        crate::execution_attempts::save_execution_attempt_record(&store, completed).unwrap_err();
     assert!(
         error.contains("immutable"),
         "expected terminal immutability, got {error}"
