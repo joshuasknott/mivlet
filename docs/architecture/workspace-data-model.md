@@ -1,8 +1,8 @@
 # Workspace data model
 
-The durable local ownership root is a workspace. Mivlet currently prepares a
-stable local workspace during onboarding; future account or collaboration code
-must not replace that local authority implicitly.
+The durable local ownership root is a workspace inside the validated account's
+native store. Signed-in users open that local workspace directly; provider setup
+gates execution. Future synchronization must not replace local authority implicitly.
 
 ## Current relationships
 

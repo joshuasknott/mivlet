@@ -71,8 +71,8 @@ cleanup and expiry. Audio tests cover silence/click rejection, pre-roll,
 discarding input, PCM bounds and speech text shaping. Native tests cover scope,
 owner, lease, replay, generation, concurrency, quotas and format validation.
 
-`design-preview.html?view=voice` is a labelled preview of the production view at
-different sizes and states. It does not use a microphone or a provider.
+Inspect the voice view in the actual app at relevant sizes and states. Focused
+component/controller tests cover synthetic states without duplicating the shell.
 
 Live acceptance still requires the packaged Windows app with a connected agent
 and OpenAI API account: actual device permissions, ambient noise, speaker echo,

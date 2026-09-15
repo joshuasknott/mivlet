@@ -1,10 +1,10 @@
 # Bounded Work execution and presentation
 
-P4 owns the local Work surface: Chat-to-Work handoff, execution ownership, safe
+The local Work surface owns Chat-to-Work handoff, execution ownership, safe
 recovery, and reusable presentation components. This is local behavior only;
 hosted execution, general scheduled execution and new providers are out of
 scope. See the [parallel roadmap contract](../development/roadmap-parallel-contract.md)
-for the shared interfaces and track ownership.
+for the account and collaboration contracts.
 
 ## Handoff: explicit Chat-to-Work
 
