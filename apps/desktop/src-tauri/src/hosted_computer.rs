@@ -1707,6 +1707,8 @@ fn validate_live_view_url(value: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
