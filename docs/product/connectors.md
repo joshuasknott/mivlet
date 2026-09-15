@@ -254,9 +254,13 @@ without durable storage or its encryption key fails closed. The broker never
 stores long-lived user tokens after handoff.
 
 The desktop callback is an ephemeral loopback URL or an explicitly allowed
-HTTPS URL. State and handoff tickets are short-lived and single-use. Logs and
-responses are redacted, request bodies are bounded, and every OAuth route is
-rate-limited.
+HTTPS URL. State and handoff tickets are short-lived and single-use. Desktop
+PKCE is independent of broker-to-provider PKCE: authorize requires an S256
+`code_challenge` (never forwarded to the provider), and handoff redeem
+requires the matching `code_verifier` from the desktop keyring. GitHub,
+Vercel, and Linear use a second, broker-owned PKCE pair on the confidential
+exchange; Notion and Slack omit provider PKCE. Logs and responses are
+redacted, request bodies are bounded, and every OAuth route is rate-limited.
 
 See the [broker storage decision](../adr/2026-07-03-broker-ephemeral-storage.md)
 and [threat model](../security/threat-model.md) for the security boundary.

@@ -19,8 +19,8 @@ import { pendingStateInUseError, assertAuthorizeState, type PendingExchange, typ
 import {
   computeStateHash,
   computeHandoffHash,
-  encryptVerifier,
-  decryptVerifier,
+  encryptPendingSecrets,
+  decryptPendingSecrets,
   encryptHandoffPayload,
   decryptHandoffPayload,
   assertStoreEncryptionKey,
@@ -55,10 +55,10 @@ export function createEphemeralOps(
       const stateHash = await computeStateHash(entry.state);
       const id = pendingNS.idFromName(stateHash);
       const stub = pendingNS.get(id);
-      let verifierEnc: Uint8Array | null = null;
-      if (entry.verifier) {
-        verifierEnc = await encryptVerifier(secret, entry.state, entry.provider, entry.verifier);
-      }
+      const verifierEnc = await encryptPendingSecrets(secret, entry.state, entry.provider, {
+        verifier: entry.verifier,
+        codeChallenge: entry.codeChallenge
+      });
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
       const created = await stub.putPending({
@@ -81,19 +81,24 @@ export function createEphemeralOps(
       const row: any = await stub.consumePending(state);
       if (!row) return undefined;
       let verifier: string | undefined;
+      let codeChallenge = "";
       if (row.verifierEnc && secret) {
         try {
-          verifier = await decryptVerifier(secret, stateHash, row.provider, row.verifierEnc);
+          const secrets = await decryptPendingSecrets(secret, stateHash, row.provider, row.verifierEnc);
+          verifier = secrets.verifier;
+          codeChallenge = secrets.codeChallenge;
         } catch {
           return undefined; // corruption -> miss
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         redirectUri: row.redirectUri,
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
         verifier,
+        codeChallenge,
         createdAt: row.createdAt ?? row.created_at_ms,
       } as PendingExchange;
     },
@@ -106,7 +111,8 @@ export function createEphemeralOps(
       const payloadEnc = await encryptHandoffPayload(secret, ticket, entry.provider, entry.state, {
         tokens: entry.tokens,
         account: entry.account,
-      } as any);
+        codeChallenge: entry.codeChallenge
+      });
       const ticketHash = await computeHandoffHash(ticket);
       const id = handoffNS.idFromName(ticketHash);
       const stub = handoffNS.get(id);
@@ -128,22 +134,26 @@ export function createEphemeralOps(
       const stub = handoffNS.get(id);
       const row: any = await stub.redeemHandoff(handoff, state);
       if (!row) return undefined;
-      let tokens: ConnectorTokenSet = {} as any;
-      let account: ConnectorAccountSummary = {} as any;
+      let tokens: ConnectorTokenSet = {} as ConnectorTokenSet;
+      let account: ConnectorAccountSummary = {} as ConnectorAccountSummary;
+      let codeChallenge = "";
       if (row.payloadEnc && secret) {
         try {
           const p = await decryptHandoffPayload(secret, ticketHash, row.provider, row.state ?? state, row.payloadEnc);
-          tokens = p.tokens as any;
-          account = p.account as any;
+          tokens = p.tokens as ConnectorTokenSet;
+          account = p.account as ConnectorAccountSummary;
+          codeChallenge = p.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         tokens,
         account,
         state: row.state,
+        codeChallenge,
         createdAt: row.createdAt ?? row.created_at_ms,
       } as HandoffEntry;
     },
@@ -247,11 +257,12 @@ export async function createSerialInMemoryEphemeralOps(
   const ops: EphemeralOps = {
     async createPending(entry) {
       assertAuthorizeState(entry.state);
-      const stateHash = await computeStateHash(entry.state);
-      // simulate idFromName by using the inst directly via stub
       let verifierEnc: Uint8Array | null = null;
-      if (entry.verifier && secret) {
-        verifierEnc = await encryptVerifier(secret, entry.state, entry.provider, entry.verifier);
+      if (secret) {
+        verifierEnc = await encryptPendingSecrets(secret, entry.state, entry.provider, {
+          verifier: entry.verifier,
+          codeChallenge: entry.codeChallenge
+        });
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
@@ -271,20 +282,25 @@ export async function createSerialInMemoryEphemeralOps(
       const row: any = await pendingStub.invoke("consumePending", state);
       if (!row) return undefined;
       let verifier: string | undefined;
+      let codeChallenge = "";
       if (row.verifierEnc && secret) {
         const h = await computeStateHash(state);
         try {
-          verifier = await decryptVerifier(secret, h, row.provider, row.verifierEnc);
+          const secrets = await decryptPendingSecrets(secret, h, row.provider, row.verifierEnc);
+          verifier = secrets.verifier;
+          codeChallenge = secrets.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         redirectUri: row.redirectUri || row.redirect_uri,
         providerRedirectUri: row.providerRedirectUri || row.provider_redirect_uri,
         state: row.state,
         verifier,
+        codeChallenge,
         createdAt: row.createdAt || row.created_at_ms,
       } as PendingExchange;
     },
@@ -296,7 +312,8 @@ export async function createSerialInMemoryEphemeralOps(
         payloadEnc = await encryptHandoffPayload(secret, ticket, entry.provider, entry.state, {
           tokens: entry.tokens,
           account: entry.account,
-        } as any);
+          codeChallenge: entry.codeChallenge
+        });
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
@@ -314,23 +331,27 @@ export async function createSerialInMemoryEphemeralOps(
     async redeemHandoff(handoff, state) {
       const row: any = await handoffStub.invoke("redeemHandoff", handoff, state);
       if (!row) return undefined;
-      let tokens: any = {};
-      let account: any = {};
+      let tokens: ConnectorTokenSet = {} as ConnectorTokenSet;
+      let account: ConnectorAccountSummary = {} as ConnectorAccountSummary;
+      let codeChallenge = "";
       if (row.payloadEnc && secret) {
         const h = await computeHandoffHash(handoff);
         try {
           const p = await decryptHandoffPayload(secret, h, row.provider, row.state || state, row.payloadEnc);
-          tokens = p.tokens;
-          account = p.account;
+          tokens = p.tokens as ConnectorTokenSet;
+          account = p.account as ConnectorAccountSummary;
+          codeChallenge = p.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         tokens,
         account,
         state: row.state,
+        codeChallenge,
         createdAt: row.createdAt || row.created_at_ms,
       } as HandoffEntry;
     },

@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BROKER_CONTRACT_VERSION } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@fable/connectors";
 
 import { FableBroker } from "./broker.js";
 import { createBrokerRouter } from "./router.js";
@@ -37,11 +37,11 @@ describe("durable backend E2E (async ephemeral-ops with serial in-mem DO)", () =
     const { ops, pendingInst, handoffInst } = await createSerialInMemoryEphemeralOps(clock, secret);
     const broker = new FableBroker({ env: ENV, clock, fetch: pfetch(), publicBaseUrl: "https://b.test/", ephemeralOps: ops });
 
-    await broker.authorize({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", redirectUri: "http://127.0.0.1:1/callback", state: "d1-12345678901234567890", codeChallenge: "ch", codeChallengeMethod: "S256" });
+    await broker.authorize({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", redirectUri: "http://127.0.0.1:1/callback", state: "d1-12345678901234567890", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256" });
 
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: "d1-12345678901234567890" }));
     const handoff = redirect.searchParams.get("handoff")!;
-    const redeemed = await broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "d1-12345678901234567890" });
+    const redeemed = await broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "d1-12345678901234567890", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(redeemed.tokens.accessToken).toBe("tok");
 
     // Verify roundtripped data and no plaintext in the simulated storage
@@ -67,13 +67,35 @@ describe("durable backend E2E (async ephemeral-ops with serial in-mem DO)", () =
     const clock = fixedClock(2_000);
     const secret = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     const calls: string[] = [];
+    const stored: { pending?: { verifierEnc: Uint8Array }; handoff?: { payloadEnc: Uint8Array } } = {};
     const mockBinding: any = {
       idFromName: (h: string) => h,
       get: (id: string) => ({
-        putPending: async (a: any) => { calls.push("putPending"); },
-        consumePending: async (s: string) => { calls.push("consumePending"); return { state: s, provider: "github", redirectUri: "r", providerRedirectUri: "pr", verifierEnc: null, createdAt: 2000, expiresAt: 2000 + 300000 }; },
-        putHandoff: async (a: any) => { calls.push("putHandoff"); },
-        redeemHandoff: async (t: string, s: string) => { calls.push("redeemHandoff"); return { ticket: t, provider: "github", state: s, payloadEnc: null, createdAt: 2000, expiresAt: 2000 + 300000 }; }
+        putPending: async (a: any) => { calls.push("putPending"); stored.pending = { verifierEnc: a.verifierEnc }; },
+        consumePending: async (s: string) => {
+          calls.push("consumePending");
+          return {
+            state: s,
+            provider: "github",
+            redirectUri: "r",
+            providerRedirectUri: "pr",
+            verifierEnc: stored.pending?.verifierEnc ?? null,
+            createdAt: 2000,
+            expiresAt: 2000 + 300000
+          };
+        },
+        putHandoff: async (a: any) => { calls.push("putHandoff"); stored.handoff = { payloadEnc: a.payloadEnc }; },
+        redeemHandoff: async (t: string, s: string) => {
+          calls.push("redeemHandoff");
+          return {
+            ticket: t,
+            provider: "github",
+            state: s,
+            payloadEnc: stored.handoff?.payloadEnc ?? null,
+            createdAt: 2000,
+            expiresAt: 2000 + 300000
+          };
+        }
       })
     };
     // Use real createEphemeralOps + mock binding to exercise the RPC path
@@ -84,14 +106,15 @@ describe("durable backend E2E (async ephemeral-ops with serial in-mem DO)", () =
       provider: "github",
       redirectUri: "r",
       providerRedirectUri: "pr",
-      verifier: "verifier"
+      verifier: "verifier",
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
     });
     const consumed = await ops.consumePending("bindteststate1234567890");
     expect(consumed).toBeDefined();
     expect(consumed?.provider).toBe("github");
     expect(consumed?.state).toBe("bindteststate1234567890");
 
-    const ticket = await ops.issueHandoff({ provider: "github", tokens: { accessToken: "tkn" } as any, account: {} as any, state: "st" });
+    const ticket = await ops.issueHandoff({ provider: "github", tokens: { accessToken: "tkn" } as any, account: {} as any, state: "st", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
     expect(typeof ticket).toBe("string");
     const redeemed = await ops.redeemHandoff(ticket, "st");
     expect(redeemed).toBeDefined();
