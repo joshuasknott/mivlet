@@ -239,7 +239,7 @@ describe("Linear production adapter — broker auth contract", () => {
     const authorize = new URL(start.authorizationUrl);
     expect(authorize.pathname).toBe("/oauth/linear/authorize");
     expect(authorize.searchParams.get("code_challenge")).toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
-    expect(authorize.searchParams.get("scope")).toBe("read write issues:create comments:create");
+    expect(authorize.searchParams.get("scope")).toBe("read write");
     expect(start.state).toBe("state-1");
   });
 

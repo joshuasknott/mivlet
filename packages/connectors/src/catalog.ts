@@ -97,14 +97,18 @@ export const connectorCatalog: ConnectorManifest[] = [
   disconnectedConnector({
     id: "vercel",
     name: "Vercel",
-    permissions: ["read projects and deployments", "prepare approved deployment changes"],
+    permissions: [
+      "read projects and deployments",
+      "change deployments, projects, and domains only after approval"
+    ],
     authMode: "provider-installation",
     scopes: [
       permission("project:read", "Projects", "read", true),
       permission("deployment:read", "Deployments", "read", true),
-      permission("deployment:write", "Deployment changes", "write", false)
+      permission("deployment:write", "Approved deployment, project, and domain changes", "write", false)
     ],
-    setupMessage: "Create a Vercel integration and configure its External Flow redirect."
+    setupMessage:
+      "Create a Vercel integration with read and write access and configure its External Flow redirect. Mivlet requests `deployment:write` because native promote, rollback, create, cancel, project, and domain actions exist."
   }),
   disconnectedConnector({
     id: "google-drive",
@@ -155,10 +159,16 @@ export const connectorCatalog: ConnectorManifest[] = [
     scopes: [
       permission("channels:read", "Channel list", "read", true),
       permission("channels:history", "Selected channel history", "read", true),
+      permission("groups:read", "Private channel list", "read", false),
+      permission("groups:history", "Selected private channel history", "read", false),
+      permission("im:read", "Direct message list", "read", false),
+      permission("mpim:read", "Group direct message list", "read", false),
       permission("users:read", "Workspace users", "read", true),
-      permission("chat:write", "Post approved messages", "write", false)
+      permission("chat:write", "Post, reply, edit, or delete after approval", "write", false),
+      permission("reactions:write", "Add or remove reactions after approval", "write", false)
     ],
-    setupMessage: "Create a Slack app and configure the Mivlet auth broker."
+    setupMessage:
+      "Create a Slack app with bot scopes for channel reads plus `chat:write` and `reactions:write`, and configure the Mivlet auth broker. Those write scopes match native post, reply, edit, delete, and reaction actions."
   }),
   disconnectedConnector({
     id: "google-calendar",
@@ -195,10 +205,10 @@ export const connectorCatalog: ConnectorManifest[] = [
     authMode: "oauth-broker",
     scopes: [
       permission("read", "Workspace data", "read", true),
-      permission("write", "Issue changes", "write", false),
-      permission("comments:create", "Create comments", "write", false)
+      permission("write", "Create or change issues and comments after approval", "write", false)
     ],
-    setupMessage: "Create a Linear OAuth application and configure the Mivlet auth broker."
+    setupMessage:
+      "Create a Linear OAuth application with `read` and `write` and configure the Mivlet auth broker. `write` is requested because native issue create, issue update, and comment actions exist; create-only Linear scopes are not requested separately."
   }),
   ...tokenPluginDefinitions.map((plugin) => disconnectedConnector({
     id: plugin.id, name: plugin.name, authMode: "api-token", permissions: [plugin.description],

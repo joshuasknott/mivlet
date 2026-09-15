@@ -7,7 +7,7 @@ import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol
 import { ConnectorRuntime } from "../sdk";
 import type { ProviderFetch } from "./http";
 import { createNotionAdapter, NOTION_CAPABILITIES } from "./notion-api";
-import { createSlackAdapter, SLACK_CAPABILITIES } from "./slack-api";
+import { createSlackAdapter, SLACK_CAPABILITIES, SLACK_OAUTH_SCOPES } from "./slack-api";
 
 const tokens: ConnectorTokenSet = { accessToken: "test-token", tokenType: "Bearer", scopes: [] };
 const json = (body: unknown, status = 200, headers?: Record<string, string>) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -258,7 +258,12 @@ describe("Slack production adapter", () => {
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
     const start = await slack(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s2", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
+    const authorize = new URL(start.authorizationUrl);
+    expect(authorize.pathname).toBe("/oauth/slack/authorize");
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/slack/authorize");
+    expect(authorize.searchParams.get("scope")).toBe(SLACK_OAUTH_SCOPES.join(" "));
+    expect(authorize.searchParams.get("scope")).toContain("chat:write");
+    expect(authorize.searchParams.get("scope")).toContain("reactions:write");
   });
 
   it("redeems, refreshes, and revokes only through Slack broker contract routes", async () => {

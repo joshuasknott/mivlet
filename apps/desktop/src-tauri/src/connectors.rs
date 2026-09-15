@@ -132,7 +132,12 @@ const GITHUB_DISALLOWED_SCOPES: &[&str] = &["repo", "public_repo", "delete_repo"
 const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("project:read", "Projects", "read", true),
     ("deployment:read", "Deployments", "read", true),
-    ("deployment:write", "Promote or rollback", "write", false),
+    (
+        "deployment:write",
+        "Approved deployment, project, and domain changes",
+        "write",
+        false,
+    ),
 ];
 const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
     (
@@ -189,11 +194,18 @@ const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
         "read",
         false,
     ),
+    ("im:read", "Direct message list", "read", false),
+    ("mpim:read", "Group direct message list", "read", false),
     ("users:read", "Workspace users", "read", true),
-    ("chat:write", "Post approved messages", "write", false),
+    (
+        "chat:write",
+        "Post, reply, edit, or delete after approval",
+        "write",
+        false,
+    ),
     (
         "reactions:write",
-        "Change approved reactions",
+        "Add or remove reactions after approval",
         "write",
         false,
     ),
@@ -220,8 +232,12 @@ const CALENDAR_SCOPES: &[(&str, &str, &str, bool)] = &[
 ];
 const LINEAR_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read", "Workspace data", "read", true),
-    ("write", "Issue changes", "write", false),
-    ("comments:create", "Create comments", "write", false),
+    (
+        "write",
+        "Create or change issues and comments after approval",
+        "write",
+        false,
+    ),
 ];
 
 const DRIVE_FILE_ACTION_SCOPES: &[&str] = &["https://www.googleapis.com/auth/drive.file"];
@@ -231,6 +247,10 @@ const GMAIL_SEND_ACTION_SCOPES: &[&str] = &[
     "https://www.googleapis.com/auth/gmail.compose",
 ];
 const CALENDAR_WRITE_ACTION_SCOPES: &[&str] = &["https://www.googleapis.com/auth/calendar.events"];
+const VERCEL_WRITE_ACTION_SCOPES: &[&str] = &["deployment:write"];
+const LINEAR_WRITE_ACTION_SCOPES: &[&str] = &["write"];
+const SLACK_CHAT_ACTION_SCOPES: &[&str] = &["chat:write"];
+const SLACK_REACTION_ACTION_SCOPES: &[&str] = &["reactions:write"];
 
 const CATALOG: &[ConnectorCatalogEntry] = &[
     ConnectorCatalogEntry {
@@ -251,10 +271,10 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         auth_mode: "provider-installation",
         permissions: &[
             "read projects and deployments",
-            "prepare promote or rollback requests",
+            "change deployments, projects, and domains only after approval",
         ],
         scopes: VERCEL_SCOPES,
-        setup_message: "Create a Vercel integration and configure its External Flow redirect.",
+        setup_message: "Create a Vercel integration with read and write access and configure its External Flow redirect. Mivlet requests deployment:write because native promote, rollback, create, cancel, project, and domain actions exist.",
         actions: &[
             "vercel.promote",
             "vercel.rollback",
@@ -328,7 +348,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare messages; never post by default",
         ],
         scopes: SLACK_SCOPES,
-        setup_message: "Create a Slack app and configure its HTTPS broker callback.",
+        setup_message: "Create a Slack app with bot scopes for channel reads plus chat:write and reactions:write, and configure its HTTPS broker callback. Those write scopes match native post, reply, edit, delete, and reaction actions.",
         actions: &[
             "slack.create-draft",
             "slack.post",
@@ -365,7 +385,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "create and update issues and comments after approval",
         ],
         scopes: LINEAR_SCOPES,
-        setup_message: "Create a Linear OAuth application and configure the Mivlet auth broker.",
+        setup_message: "Create a Linear OAuth application with read and write and configure the Mivlet auth broker. write is requested because native issue create, issue update, and comment actions exist; create-only Linear scopes are not requested separately.",
         actions: &[
             "linear.create-issue",
             "linear.update-issue",
@@ -831,6 +851,19 @@ fn action_required_scopes(action: &str) -> &'static [&'static str] {
         | "google-calendar.update-draft"
         | "google-calendar.cancel-event"
         | "google-calendar.delete-event" => CALENDAR_WRITE_ACTION_SCOPES,
+        "vercel.promote"
+        | "vercel.rollback"
+        | "vercel.create-deployment"
+        | "vercel.cancel-deployment"
+        | "vercel.update-project"
+        | "vercel.create-domain"
+        | "vercel.update-domain"
+        | "vercel.delete-domain" => VERCEL_WRITE_ACTION_SCOPES,
+        "linear.create-issue" | "linear.update-issue" | "linear.comment" => {
+            LINEAR_WRITE_ACTION_SCOPES
+        }
+        "slack.post" | "slack.reply" | "slack.edit" | "slack.delete" => SLACK_CHAT_ACTION_SCOPES,
+        "slack.react-add" | "slack.react-remove" => SLACK_REACTION_ACTION_SCOPES,
         _ => &[],
     }
 }
@@ -2754,7 +2787,7 @@ mod workspace_scope_tests {
     }
 
     #[test]
-    fn github_catalog_does_not_request_or_label_write_capable_repo_scope() {
+    fn oauth_catalog_keeps_write_scopes_only_for_product_writes() {
         let github = CATALOG.iter().find(|entry| entry.id == "github").unwrap();
         assert!(github
             .scopes
@@ -2768,6 +2801,32 @@ mod workspace_scope_tests {
         assert!(drive.scopes.iter().any(|(id, _, access, required)| {
             *id == "https://www.googleapis.com/auth/drive.file" && *access == "write" && *required
         }));
+        let vercel = CATALOG.iter().find(|entry| entry.id == "vercel").unwrap();
+        assert!(vercel.scopes.iter().any(|(id, _, access, _)| {
+            *id == "deployment:write" && *access == "write"
+        }));
+        let linear = CATALOG.iter().find(|entry| entry.id == "linear").unwrap();
+        assert!(linear
+            .scopes
+            .iter()
+            .all(|(id, _, access, _)| (*id != "issues:create" && *id != "comments:create")
+                && (*id != "write" || *access == "write")));
+        assert!(linear
+            .scopes
+            .iter()
+            .any(|(id, _, access, _)| *id == "write" && *access == "write"));
+        let slack = CATALOG.iter().find(|entry| entry.id == "slack").unwrap();
+        assert!(slack.scopes.iter().any(|(id, _, access, _)| {
+            *id == "chat:write" && *access == "write"
+        }));
+        assert!(slack.scopes.iter().any(|(id, _, access, _)| {
+            *id == "reactions:write" && *access == "write"
+        }));
+        assert_eq!(action_required_scopes("vercel.promote"), &["deployment:write"]);
+        assert_eq!(action_required_scopes("linear.update-issue"), &["write"]);
+        assert_eq!(action_required_scopes("slack.post"), &["chat:write"]);
+        assert_eq!(action_required_scopes("slack.react-add"), &["reactions:write"]);
+        assert!(action_required_scopes("slack.create-draft").is_empty());
     }
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;

@@ -292,7 +292,12 @@ describe("Vercel production adapter", () => {
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
     const start = await createVercelAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
+    const authorize = new URL(start.authorizationUrl);
+    expect(authorize.pathname).toBe("/oauth/vercel/authorize");
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/vercel/authorize");
+    expect(authorize.searchParams.get("scope")).toBe(
+      "user:read team:read project:read deployment:read deployment:write"
+    );
     expect(start.state).toBe("s");
   });
 

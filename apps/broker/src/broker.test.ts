@@ -177,7 +177,7 @@ describe("broker authorize", () => {
     const { broker: linear } = makeBroker("linear", providerFetch("linear"));
     const linearAuth = new URL((await linear.authorize(authorizeRequest("linear", "linear-auth"))).response.authorizationUrl);
     expect(linearAuth.origin + linearAuth.pathname).toBe("https://linear.app/oauth/authorize");
-    expect(linearAuth.searchParams.get("scope")).toBe("read,write,issues:create,comments:create");
+    expect(linearAuth.searchParams.get("scope")).toBe("read,write");
     expect(linearAuth.searchParams.get("code_challenge")).not.toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
 
     const { broker: notion } = makeBroker("notion", providerFetch("notion"));
@@ -470,7 +470,11 @@ describe("broker provider coverage", () => {
 
     expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
     expect(providerProfile("linear").normalizeIdentity(identityFor("linear"))).toMatchObject({ id: "linear-id", displayName: "Linear User", workspace: "Fable Linear" });
-    expect(providerProfile("slack").scopes).toEqual(expect.arrayContaining(["channels:history", "groups:history"]));
+    expect(providerProfile("slack").scopes).toEqual(expect.arrayContaining(["channels:history", "groups:history", "chat:write", "reactions:write"]));
+    expect(providerProfile("linear").scopes).toEqual(["read", "write"]);
+    expect(providerProfile("linear").scopes).not.toContain("issues:create");
+    expect(providerProfile("linear").scopes).not.toContain("comments:create");
+    expect(providerProfile("vercel").scopes).toContain("deployment:write");
   });
 
   it("parses legacy Linear array scopes without dropping granted-scope metadata", async () => {
