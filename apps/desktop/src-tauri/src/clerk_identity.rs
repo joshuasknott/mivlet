@@ -642,30 +642,26 @@ fn load_config_from(
 }
 
 fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
-    load_config_with_packaged(
-        !cfg!(debug_assertions),
-        |key| crate::env_compat::var_opt(key),
-        |key| {
-            // Public OAuth client settings only. Never embed credentials or tokens.
-            match key {
-                "MIVLET_CLERK_ISSUER" => {
-                    option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER"))
-                }
-                "MIVLET_CLERK_OAUTH_CLIENT_ID" => option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID")
-                    .or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID")),
-                "MIVLET_CLERK_AUDIENCE" => {
-                    option_env!("MIVLET_CLERK_AUDIENCE").or(option_env!("FABLE_CLERK_AUDIENCE"))
-                }
-                "MIVLET_CLERK_AUTHORIZED_PARTY" => option_env!("MIVLET_CLERK_AUTHORIZED_PARTY")
-                    .or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY")),
-                "MIVLET_CLERK_SCOPES" => {
-                    option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES"))
-                }
-                _ => None,
+    load_config_with_packaged(!cfg!(debug_assertions), crate::env_compat::var_opt, |key| {
+        // Public OAuth client settings only. Never embed credentials or tokens.
+        match key {
+            "MIVLET_CLERK_ISSUER" => {
+                option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER"))
             }
-            .map(str::to_owned)
-        },
-    )
+            "MIVLET_CLERK_OAUTH_CLIENT_ID" => option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID")
+                .or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID")),
+            "MIVLET_CLERK_AUDIENCE" => {
+                option_env!("MIVLET_CLERK_AUDIENCE").or(option_env!("FABLE_CLERK_AUDIENCE"))
+            }
+            "MIVLET_CLERK_AUTHORIZED_PARTY" => option_env!("MIVLET_CLERK_AUTHORIZED_PARTY")
+                .or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY")),
+            "MIVLET_CLERK_SCOPES" => {
+                option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES"))
+            }
+            _ => None,
+        }
+        .map(str::to_owned)
+    })
 }
 
 fn load_config_with_packaged(
