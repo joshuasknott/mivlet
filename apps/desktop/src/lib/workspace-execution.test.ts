@@ -302,7 +302,8 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
       action: "stop-work",
       id: "root",
     });
-    await service.dispose();
+    root.cancel = vi.fn(async () => {});
+    service.dispose();
   });
   it("dispose freezes like Stop then issues native stop-work for executing work", async () => {
     const { service, command } = fixture([
