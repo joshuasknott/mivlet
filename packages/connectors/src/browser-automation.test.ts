@@ -3,7 +3,7 @@ import {
   BrowserAutomationBoundary,
   createBrowserAutomationSession
 } from "./browser-automation";
-import type { BrowserAutomationActionRequest } from "@fable/protocol";
+import type { BrowserAutomationActionRequest } from "@mivlet/protocol";
 
 const session = createBrowserAutomationSession({
   id: "browser-session-1",

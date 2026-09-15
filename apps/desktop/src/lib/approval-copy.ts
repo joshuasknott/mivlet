@@ -4,7 +4,7 @@ import type {
   ApprovalRequest,
   ApprovalRiskLevel,
   PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   permissionDescriptionFor,
   permissionLabelFor

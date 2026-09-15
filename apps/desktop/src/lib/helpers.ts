@@ -1,7 +1,7 @@
 import type {
   ApprovalAuditEntry,
   KnowledgeSource
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { MAX_APPROVAL_AUDIT_ENTRIES } from "./constants";
 
 /**

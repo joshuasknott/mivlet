@@ -14,7 +14,7 @@ lines.on("line", (line) => {
     result = {
       protocolVersion: "2025-11-25",
       capabilities: { tools: {}, resources: {} },
-      serverInfo: { name: "fable-test-mcp", version: "1" }
+      serverInfo: { name: "mivlet-test-mcp", version: "1" }
     };
   } else if (request.method === "tools/list") {
     result = {

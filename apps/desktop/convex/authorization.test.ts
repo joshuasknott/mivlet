@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requireActiveDevice, requireActiveMembership, requireFableUser } from "./authorization";
+import { requireActiveDevice, requireActiveMembership, requireMivletUser } from "./authorization";
 
 type Doc = Record<string, any> & { _id: string };
 type Tables = Record<string, Doc[]>;
@@ -167,7 +167,7 @@ describe("soft device binding", () => {
       account_devices: [],
       workspace_device_links: [],
     });
-    await expect(requireFableUser(ctx)).resolves.toMatchObject({
+    await expect(requireMivletUser(ctx)).resolves.toMatchObject({
       user: { internalUserId: "usr_1" },
     });
     await expect(requireActiveMembership(ctx, "workspace_1")).resolves.toMatchObject({

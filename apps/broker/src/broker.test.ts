@@ -14,9 +14,9 @@ import {
   BrokerContractError,
   type BrokerAuthorizeRequest,
   type BrokerProviderId
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { fixedClock } from "./clock.js";
 import {
   configuredProviders,
@@ -25,7 +25,7 @@ import {
   type BrokerEnv
 } from "./provider-profiles.js";
 import { BROKER_AUTHORIZE_STATE_MIN_LENGTH, createStores } from "./stores.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 import type { BrokerFetch } from "./provider-client.js";
 
 /** Pad fixture tags to the authorize entropy floor. Not a source of live randomness. */
@@ -36,16 +36,16 @@ function oauthState(tag: string): string {
 }
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
-  FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
-  FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret",
-  FABLE_BROKER_LINEAR_CLIENT_ID: "ln-id",
-  FABLE_BROKER_LINEAR_CLIENT_SECRET: "ln-secret",
-  FABLE_BROKER_NOTION_CLIENT_ID: "nt-id",
-  FABLE_BROKER_NOTION_CLIENT_SECRET: "nt-secret",
-  FABLE_BROKER_SLACK_CLIENT_ID: "sl-id",
-  FABLE_BROKER_SLACK_CLIENT_SECRET: "sl-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
+  MIVLET_BROKER_VERCEL_CLIENT_ID: "vc-id",
+  MIVLET_BROKER_VERCEL_CLIENT_SECRET: "vc-secret",
+  MIVLET_BROKER_LINEAR_CLIENT_ID: "ln-id",
+  MIVLET_BROKER_LINEAR_CLIENT_SECRET: "ln-secret",
+  MIVLET_BROKER_NOTION_CLIENT_ID: "nt-id",
+  MIVLET_BROKER_NOTION_CLIENT_SECRET: "nt-secret",
+  MIVLET_BROKER_SLACK_CLIENT_ID: "sl-id",
+  MIVLET_BROKER_SLACK_CLIENT_SECRET: "sl-secret"
 };
 
 const REDIRECT = "http://127.0.0.1:43123/callback";
@@ -120,17 +120,17 @@ function providerFetch(provider: BrokerProviderId, overrides: Partial<{
 
 function identityFor(provider: BrokerProviderId): unknown {
   switch (provider) {
-    case "github": return { id: 1234, login: "fable-user", name: "Fable User", avatar_url: "https://github.com/a.png" };
+    case "github": return { id: 1234, login: "mivlet-user", name: "Mivlet User", avatar_url: "https://github.com/a.png" };
     case "vercel": return { user: { uid: "vercel-uid", email: "user@example.invalid" } };
-    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "user@example.invalid", organization: { id: "org-1", name: "Fable Linear", urlKey: "fable" } } } };
-    case "notion": return { id: "notion-bot", bot: { workspace_id: "ws-1", workspace_name: "Fable Notion" } };
-    case "slack": return { ok: true, team_id: "T1", user_id: "U1", user: "Slack User", team: "Fable Slack", url: "https://x.slack.com" };
+    case "linear": return { data: { viewer: { id: "linear-id", name: "Linear User", email: "user@example.invalid", organization: { id: "org-1", name: "Mivlet Linear", urlKey: "mivlet" } } } };
+    case "notion": return { id: "notion-bot", bot: { workspace_id: "ws-1", workspace_name: "Mivlet Notion" } };
+    case "slack": return { ok: true, team_id: "T1", user_id: "U1", user: "Slack User", team: "Mivlet Slack", url: "https://x.slack.com" };
   }
 }
 
 function makeBroker(provider: BrokerProviderId, fetch?: BrokerFetch, clock = fixedClock(1_000_000_000_000)) {
   const stores = createStores(clock);
-  const broker = new FableBroker({ env: ENV, clock, fetch, pending: stores.pending, handoff: stores.handoff });
+  const broker = new MivletBroker({ env: ENV, clock, fetch, pending: stores.pending, handoff: stores.handoff });
   return { broker, clock, stores };
 }
 
@@ -142,7 +142,7 @@ describe("broker provider profiles", () => {
 
   it("resolves credentials only when both id and secret are present", () => {
     expect(resolveCredentials("github", ENV)).toEqual({ clientId: "gh-id", clientSecret: "gh-secret" });
-    expect(() => resolveCredentials("github", { FABLE_BROKER_GITHUB_CLIENT_ID: "x" })).toThrow(/GitHub is not configured/);
+    expect(() => resolveCredentials("github", { MIVLET_BROKER_GITHUB_CLIENT_ID: "x" })).toThrow(/GitHub is not configured/);
   });
 });
 
@@ -212,7 +212,7 @@ describe("broker authorize", () => {
   });
 
   it("fails closed when the provider is not configured", async () => {
-    const unconfigured = new FableBroker({ env: {} });
+    const unconfigured = new MivletBroker({ env: {} });
     await expect(unconfigured.authorize(authorizeRequest("github"))).rejects.toThrow(/GitHub is not configured/);
   });
 
@@ -243,7 +243,7 @@ describe("broker callback + handoff", () => {
     const redeemed = await broker.redeem(redeemRequest("github", handoff!, state!));
     expect(redeemed.tokens.accessToken).toBe("provider-access-token");
     expect(redeemed.account.id).toBe("1234");
-    expect(redeemed.account.displayName).toBe("Fable User");
+    expect(redeemed.account.displayName).toBe("Mivlet User");
   });
 
   it("rejects a callback with an unknown / replayed state (single-use)", async () => {
@@ -434,11 +434,11 @@ describe("broker refresh + revoke", () => {
     const identityCall = calls.find(([url]) => url === "https://api.github.com/user");
     const revokeCall = calls.find(([url]) => url === "https://api.github.com/applications/gh-id/token");
     expect(identityCall?.[1].headers).toMatchObject({
-      "user-agent": "fable-auth-broker",
+      "user-agent": "mivlet-auth-broker",
       "x-github-api-version": "2022-11-28"
     });
     expect(revokeCall?.[1].headers).toMatchObject({
-      "user-agent": "fable-auth-broker",
+      "user-agent": "mivlet-auth-broker",
       "x-github-api-version": "2022-11-28"
     });
   });
@@ -477,10 +477,10 @@ describe("broker provider coverage", () => {
     await slackBroker.authorize(authorizeRequest("slack", "slack-state"));
     const { redirect: slackRedirect } = await slackBroker.callback("slack", new URLSearchParams({ code: "c", state: oauthState("slack-state") }));
     const slack = await slackBroker.redeem(redeemRequest("slack", slackRedirect.searchParams.get("handoff")!, oauthState("slack-state")));
-    expect(slack.account).toMatchObject({ id: "T1:U1", displayName: "Slack User", workspace: "Fable Slack" });
+    expect(slack.account).toMatchObject({ id: "T1:U1", displayName: "Slack User", workspace: "Mivlet Slack" });
 
-    expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
-    expect(providerProfile("linear").normalizeIdentity(identityFor("linear"))).toMatchObject({ id: "linear-id", displayName: "Linear User", workspace: "Fable Linear" });
+    expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Mivlet Notion", workspace: "Mivlet Notion" });
+    expect(providerProfile("linear").normalizeIdentity(identityFor("linear"))).toMatchObject({ id: "linear-id", displayName: "Linear User", workspace: "Mivlet Linear" });
     expect(providerProfile("slack").scopes).toEqual(expect.arrayContaining(["channels:history", "groups:history", "chat:write", "reactions:write"]));
     expect(providerProfile("linear").scopes).toEqual(["read", "write"]);
     expect(providerProfile("linear").scopes).not.toContain("issues:create");

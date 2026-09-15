@@ -8,7 +8,7 @@ import type {
   ProjectFact,
   ProjectShareMode,
   ProjectShareSourceKind,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import {
   activeWork,

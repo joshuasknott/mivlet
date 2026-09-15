@@ -1,4 +1,4 @@
-import type { BackendAgentEvent } from "@fable/protocol";
+import type { BackendAgentEvent } from "@mivlet/protocol";
 import { redactSecretsFromString } from "./redact";
 
 export interface BackendErrorMetadata {

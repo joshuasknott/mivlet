@@ -1,4 +1,4 @@
-import type { AgentTurnRequest } from "@fable/protocol";
+import type { AgentTurnRequest } from "@mivlet/protocol";
 
 export const CODEX_HISTORY_MAX_UTF8_BYTES = 64 * 1024;
 const CONTEXT_WINDOW_USAGE_PERCENT = 80;

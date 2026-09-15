@@ -1,4 +1,4 @@
-import type { SearchObjectKind, SearchResult } from "@fable/protocol";
+import type { SearchObjectKind, SearchResult } from "@mivlet/protocol";
 
 const KIND_LABELS: Record<SearchObjectKind, string> = {
   agent: "Agent",

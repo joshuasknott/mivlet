@@ -15,7 +15,7 @@
         "tauri-winrt-notification",
         "notify-rust",
         "tauri-plugin-notification",
-        "fable-desktop"
+        "mivlet-desktop"
       ],
       "allowedSourceReference": "quick_xml::escape::escape",
       "expiresOn": "2026-10-31",

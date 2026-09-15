@@ -14,9 +14,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE, type BrokerProviderId } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE, type BrokerProviderId } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerRouter, CORRELATION_HEADER } from "./router.js";
 import {
   providerProfile,
@@ -34,10 +34,10 @@ function oauthState(tag: string): string {
 }
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
-  FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
-  FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
+  MIVLET_BROKER_VERCEL_CLIENT_ID: "vc-id",
+  MIVLET_BROKER_VERCEL_CLIENT_SECRET: "vc-secret"
 };
 
 /** A fetch that serves canned token/identity/revoke responses for a provider. */
@@ -105,7 +105,7 @@ function creds(provider: BrokerProviderId): ProviderCredentials {
 }
 
 function makeRouter(env: BrokerEnv, fetch?: BrokerFetch) {
-  const broker = new FableBroker({ env, fetch, publicBaseUrl: "https://broker.test/" });
+  const broker = new MivletBroker({ env, fetch, publicBaseUrl: "https://broker.test/" });
   const router = createBrokerRouter({ broker });
   return { broker, router };
 }
@@ -120,7 +120,7 @@ function makeRequest(method: string, path: string, body?: unknown, headers: Reco
 }
 
 /** Run the full authorize → callback → redeem lifecycle to obtain a token set. */
-async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broker: FableBroker, provider: BrokerProviderId, state: string) {
+async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broker: MivletBroker, provider: BrokerProviderId, state: string) {
   const authorizeState = oauthState(state);
   await broker.authorize({
     contractVersion: BROKER_CONTRACT_VERSION, provider,
@@ -200,7 +200,7 @@ describe("router: lifecycle + transport", () => {
 
   it("missing config: an unconfigured provider fails closed with configuration-required (503)", async () => {
     // GitHub has no credentials in this env.
-    const { router } = makeRouter({ FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id", FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret" }, providerFetch("github"));
+    const { router } = makeRouter({ MIVLET_BROKER_VERCEL_CLIENT_ID: "vc-id", MIVLET_BROKER_VERCEL_CLIENT_SECRET: "vc-secret" }, providerFetch("github"));
     const res = await router.handle(
       makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1"
     );
@@ -277,7 +277,7 @@ describe("router: lifecycle + transport", () => {
     const log = (line: string) => lines.push(line);
     const { router } = makeRouter(ENV, providerFetch("github"));
     // Build a tight-budget router to exercise the limiter path directly.
-    const broker = new FableBroker({ env: ENV, fetch: providerFetch("github"), publicBaseUrl: "https://broker.test/" });
+    const broker = new MivletBroker({ env: ENV, fetch: providerFetch("github"), publicBaseUrl: "https://broker.test/" });
     const limited = createBrokerRouter({ broker, requestsPerMinute: 1 });
     const ok = await limited.handle(
       makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("a")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1", log

@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn connector_record_captures_required_audit_fields_and_binds_payload() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-approval-{}.json",
+            "mivlet-connector-approval-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn gmail_send_preview_shows_account_recipients_body_and_attachments() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-approval-preview-{}.json",
+            "mivlet-connector-approval-preview-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn prepared_account_bind_fails_closed_when_selection_switches() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-approval-account-bind-{}.json",
+            "mivlet-connector-approval-account-bind-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);

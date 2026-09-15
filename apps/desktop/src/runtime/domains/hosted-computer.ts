@@ -15,7 +15,7 @@ import type {
   PreparedHostedBrowserAction,
   PreparedHostedBrowserNavigation,
   PreparedHostedProcessLaunch,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";

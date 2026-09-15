@@ -10,7 +10,7 @@ import type {
   PermissionMode,
   PermissionProfileId,
   RecordActionHistoryRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   effectForBrowserAction,
   evaluatePermissionPolicy,

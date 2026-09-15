@@ -378,7 +378,7 @@ impl ComputerStream {
             }
             let approval_id = format!("api-visual-{}", desktop_tools::opaque_id()?);
             bindings.push(
-                json!({"__fableComputerTool":{"callId":call.call_id,"approvalId":approval_id}}),
+                json!({"__mivletComputerTool":{"callId":call.call_id,"approvalId":approval_id}}),
             );
             state.calls.insert(
                 approval_id,

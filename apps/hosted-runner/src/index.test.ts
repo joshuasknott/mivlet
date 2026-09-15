@@ -13,7 +13,7 @@ describe("hosted-runner fetch router", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       status: "ok",
-      service: "fable-hosted-runner"
+      service: "mivlet-hosted-runner"
     });
   });
 

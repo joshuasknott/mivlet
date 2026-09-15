@@ -10,11 +10,11 @@
  * This is the production path for durable; sync store contracts remain untouched for memory/default.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import type { BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 import { pendingStateInUseError, assertAuthorizeState, type PendingExchange, type HandoffEntry } from "./stores.js";
 import {
   computeStateHash,
@@ -172,7 +172,7 @@ function urlSafeTokenForRpc(bytes: number): string {
 /**
  * Create deterministic async ops for tests using SerialDurableStub + real DO class instances.
  * Uses real encrypt/decrypt, in-memory "storage" via mock ctx, serial execution for races.
- * The returned ops can be passed as ephemeralOps to FableBroker for durable-path E2E tests.
+ * The returned ops can be passed as ephemeralOps to MivletBroker for durable-path E2E tests.
  */
 export async function createSerialInMemoryEphemeralOps(
   clock: BrokerClock,

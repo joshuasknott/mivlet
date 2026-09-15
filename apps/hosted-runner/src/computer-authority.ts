@@ -5,7 +5,7 @@ import type {
   HostedProcessLaunchRequest,
   HostedProcessLifecycle,
   HostedProcessSnapshot
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 import {
   validateComputerId,
@@ -57,8 +57,8 @@ export class ComputerAuthority extends DurableObject<Env> {
     const sandbox = this.sandbox(computerId);
     try {
       await sandbox.setKeepAlive(true);
-      await sandbox.mkdir("/workspace/.fable", { recursive: true });
-      await sandbox.writeFile("/workspace/.fable/computer.json", JSON.stringify({ computerId, generation, provisionedAt: now }));
+      await sandbox.mkdir("/workspace/.mivlet", { recursive: true });
+      await sandbox.writeFile("/workspace/.mivlet/computer.json", JSON.stringify({ computerId, generation, provisionedAt: now }));
       if (!this.isCurrentGeneration(generation)) {
         await sandbox.destroy();
         return this.snapshot(false);

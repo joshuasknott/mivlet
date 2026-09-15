@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MemoryRecord } from "@fable/protocol";
+import type { MemoryRecord } from "@mivlet/protocol";
 import { suggestMemories } from "./suggest";
 
 function makeMemory(overrides: Partial<MemoryRecord> = {}): MemoryRecord {

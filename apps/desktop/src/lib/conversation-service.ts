@@ -5,7 +5,7 @@ import type {
   KnowledgeScope,
   MemoryControlState,
   MemoryRecord,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { loadRuntimeMemoryState, saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /**

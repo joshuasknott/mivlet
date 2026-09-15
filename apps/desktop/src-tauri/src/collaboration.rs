@@ -12,7 +12,7 @@ pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_pro
 mod tests;
 
 use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
-use crate::models::FableAgentProfile;
+use crate::models::MivletAgentProfile;
 use crate::store::repos::{collaboration as repo, collaboration::Kind, local_project, thread};
 use crate::store::{Store, StoreError};
 use chrono::{SecondsFormat, Utc};
@@ -104,14 +104,17 @@ fn id(value: &str) -> Result<()> {
     }
     Ok(())
 }
-fn profile<'a>(profiles: &'a [FableAgentProfile], agent_id: &str) -> Result<&'a FableAgentProfile> {
+fn profile<'a>(
+    profiles: &'a [MivletAgentProfile],
+    agent_id: &str,
+) -> Result<&'a MivletAgentProfile> {
     profiles
         .iter()
         .find(|p| p.id == agent_id)
         .ok_or_else(|| invalid("This agent profile is unavailable. Choose an existing teammate."))
 }
 fn participants(
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     ids: &[String],
     facilitator: Option<&str>,
 ) -> Result<Vec<Participant>> {
@@ -142,7 +145,7 @@ struct Context<'a> {
     conn: &'a Connection,
     store: &'a Store,
     scope: &'a AuthorizedCommandScope,
-    profiles: &'a [FableAgentProfile],
+    profiles: &'a [MivletAgentProfile],
     time: &'a str,
 }
 impl Context<'_> {
@@ -323,7 +326,7 @@ impl Context<'_> {
 pub(crate) fn native_profiles(
     app: tauri::AppHandle,
     workspace: &str,
-) -> std::result::Result<Vec<FableAgentProfile>, String> {
+) -> std::result::Result<Vec<MivletAgentProfile>, String> {
     Ok(
         crate::snapshot::load_runtime_snapshot(app, Some(workspace.into()), None)?
             .map(|s| s.agents)

@@ -3,7 +3,7 @@ AgentTurnRequest,
 BackendProvider,
 ExecutionAttempt,
 PreparedExecutionContext
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { beforeEach,vi } from "vitest";
 import { listRuntimeContextSummaries,saveRuntimeContextSummary } from "../runtime/domains/memory";
 

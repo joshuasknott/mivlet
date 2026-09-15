@@ -20,13 +20,13 @@ import type {
   ExecutionAttempt,
   ExecutionContextAudience,
   Spine
-} from "@fable/protocol";
-import { buildContextPrefix } from "@fable/connectors/native-api/memory-context";
+} from "@mivlet/protocol";
+import { buildContextPrefix } from "@mivlet/connectors/native-api/memory-context";
 import {
   MAX_TOKENS_DEFAULT,
   validateModelForRun
-} from "@fable/connectors/native-api/model-catalogue";
-import { authorityScopeAllowsAudience } from "@fable/knowledge";
+} from "@mivlet/connectors/native-api/model-catalogue";
+import { authorityScopeAllowsAudience } from "@mivlet/knowledge";
 import { parseComputerArtifact } from "./computer-artifacts";
 
 /**

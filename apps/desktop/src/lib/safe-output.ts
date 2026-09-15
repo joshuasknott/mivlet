@@ -1,4 +1,4 @@
-import { isSensitiveSecretKey, redactSecretText, SECRET_REDACTED } from "@fable/protocol";
+import { isSensitiveSecretKey, redactSecretText, SECRET_REDACTED } from "@mivlet/protocol";
 
 /**
  * Safe output boundary for untrusted content.

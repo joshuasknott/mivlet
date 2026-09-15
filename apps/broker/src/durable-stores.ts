@@ -16,12 +16,12 @@
  * - No real DO/SQLite or credentials touched on test/Node paths.
  */
 
-import { BrokerContractError, type BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import { BrokerContractError, type BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 
 import type { BrokerClock } from "./clock.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 import {
   PendingExchange,
   HandoffEntry,
@@ -457,7 +457,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
 /* ------------------------------------------------------------------ */
 
 export interface BrokerDurableEnv {
-  FABLE_BROKER_STORE_ENCRYPTION_KEY?: string;
+  MIVLET_BROKER_STORE_ENCRYPTION_KEY?: string;
 }
 
 export class BrokerPending extends DurableObject<BrokerDurableEnv> {

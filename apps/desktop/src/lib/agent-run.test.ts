@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AccountWorkspaceStatus, KnowledgeSource, MemoryRecord } from "@fable/protocol";
+import type { AccountWorkspaceStatus, KnowledgeSource, MemoryRecord } from "@mivlet/protocol";
 import {
   buildAgentRequest,
   buildContinuationMessages,

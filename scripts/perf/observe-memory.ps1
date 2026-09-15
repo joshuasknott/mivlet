@@ -1,5 +1,5 @@
 param(
-  [string[]]$ProcessName = @("fable-desktop", "msedgewebview2", "node", "cargo"),
+  [string[]]$ProcessName = @("mivlet-desktop", "msedgewebview2", "node", "cargo"),
   [int]$DurationSeconds = 60,
   [int]$IntervalMilliseconds = 1000,
   [string]$Output
@@ -41,7 +41,7 @@ $summary = $samples |
 
 if ($Output) {
   $lines = @(
-    "# Fable Memory Observation"
+    "# Mivlet Memory Observation"
     ""
     "Generated: $((Get-Date).ToString("o"))"
     ""

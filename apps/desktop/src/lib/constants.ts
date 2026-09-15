@@ -1,10 +1,11 @@
-import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@fable/connectors/local-files";
+import { SUPPORTED_LOCAL_FILE_EXTENSIONS } from "@mivlet/connectors/local-files";
 
 /**
  * Workspace shell constants. Extracted from App.tsx so the persistence,
  * snapshot, and runtime layers can share a single source of truth.
  */
 
+/** On-disk localStorage key. Do not rename: existing installs persist here. */
 export const STORAGE_KEY = "fable.shell.v1";
 /**
  * Read-only compatibility keys. Do not rename or remove: existing installs

@@ -1,5 +1,5 @@
-import type { ProviderRouteExecutionBinding } from "@fable/protocol";
-import { catalogueCapabilities, selectProviderRoute } from "@fable/connectors";
+import type { ProviderRouteExecutionBinding } from "@mivlet/protocol";
+import { catalogueCapabilities, selectProviderRoute } from "@mivlet/connectors";
 import { listRuntimeNativeProviderRoutes } from "../runtime/domains/providers";
 
 export async function selectNativeProviderRoute(input: {

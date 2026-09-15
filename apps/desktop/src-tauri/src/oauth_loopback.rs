@@ -37,7 +37,7 @@ const MAX_HEADERS: usize = 32;
 const MAX_TOTAL_HEADER_BYTES: usize = 8192;
 const MAX_CALLBACK_CONNECTIONS: usize = 8;
 
-/// Event payload emitted on the `fable://connector/auth` channel when an
+/// Event payload emitted on the `mivlet://connector/auth` channel when an
 /// in-flight OAuth attempt resolves. The shell re-reads connector statuses on
 /// `status: "connected"` or surfaces `message` for any other outcome.
 #[derive(Clone, serde::Serialize)]
@@ -1032,7 +1032,7 @@ fn connector_redirect(origin: &str, auth_mode: &str) -> String {
 
 fn emit_auth_event(app: &tauri::AppHandle, connector_id: &str, status: &str, message: &str) {
     let _ = app.emit(
-        "fable://connector/auth",
+        "mivlet://connector/auth",
         ConnectorAuthEvent {
             connector_id: connector_id.to_string(),
             status: status.to_string(),

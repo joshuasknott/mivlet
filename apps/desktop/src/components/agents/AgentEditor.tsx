@@ -1,7 +1,7 @@
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
+import type { MivletAgentProfile, MivletLearnedTask } from "@mivlet/protocol";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
@@ -13,7 +13,7 @@ const AgentLearningDialog = lazy(() => import("./AgentLearningDialog").then((mod
 import { ModelPicker } from "../ModelPicker";
 
 
-type AgentDraft = Omit<FableAgentProfile, "id" | "threadId">;
+type AgentDraft = Omit<MivletAgentProfile, "id" | "threadId">;
 
 const emptyDraft: AgentDraft = {
   name: "",
@@ -86,15 +86,15 @@ export function AgentEditor({
   onUseSkill,
 }: {
   open: boolean;
-  agent: FableAgentProfile | null;
+  agent: MivletAgentProfile | null;
   models: ProviderModelOption[];
   existingAvatarSeeds?: string[];
   canDelete: boolean;
   onClose: () => void;
   onSave: (draft: AgentDraft) => void;
   onDelete: () => void;
-  onSkillsChange?: (tasks: FableLearnedTask[]) => void;
-  onUseSkill?: (task: FableLearnedTask) => void;
+  onSkillsChange?: (tasks: MivletLearnedTask[]) => void;
+  onUseSkill?: (task: MivletLearnedTask) => void;
 }) {
   const [draft, setDraft] = useState<AgentDraft>(emptyDraft);
   const modalRef = useRef<HTMLDivElement>(null);

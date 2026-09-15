@@ -2,7 +2,7 @@ import { StrictMode, type PropsWithChildren } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LocalComputerSnapshot } from "@fable/protocol";
+import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useLocalComputer } from "./useLocalComputer";
 const mocks=vi.hoisted(()=>({load:vi.fn(),files:vi.fn(),preview:vi.fn(),stop:vi.fn(),cancel:vi.fn()}));
 vi.mock("../runtime/domains/local-computer", ()=>({
@@ -58,7 +58,7 @@ describe("native local computer",()=>{
   });
   it("refreshes immediately on plugin changes and polls active control every two seconds",async()=>{
     vi.useFakeTimers();const{result}=hook();await act(async()=>{await vi.advanceTimersByTimeAsync(50);});mocks.load.mockResolvedValue(active());
-    await act(async()=>{window.dispatchEvent(new Event("fable-builtin-plugins-changed"));await vi.advanceTimersByTimeAsync(50);});expect(result.current.node?.control.status).toBe("active");
+    await act(async()=>{window.dispatchEvent(new Event("mivlet-builtin-plugins-changed"));await vi.advanceTimersByTimeAsync(50);});expect(result.current.node?.control.status).toBe("active");
     await act(async()=>{await vi.advanceTimersByTimeAsync(2_000);});expect(mocks.load).toHaveBeenCalledTimes(3);
   });
   it("prepares model discovery through the ordinary tool route without a UI permission grant",async()=>{

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest, BackendProvider } from "@fable/protocol";
+import type { ApprovalRequest, BackendProvider } from "@mivlet/protocol";
 import type { AntigravityAcpEvent, AntigravityAcpHandle, BackendDeps } from "../contract";
 import { createAntigravityBackend } from "./antigravity";
 

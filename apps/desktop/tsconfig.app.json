@@ -20,10 +20,10 @@
     "types": ["vite/client", "vitest/globals", "@testing-library/jest-dom"],
     "baseUrl": ".",
     "paths": {
-      "@fable/protocol": ["../../packages/protocol/src/index.ts"],
-      "@fable/connectors": ["../../packages/connectors/src/index.ts"],
-      "@fable/connectors/*": ["../../packages/connectors/src/*"],
-      "@fable/knowledge": ["../../packages/knowledge/src/index.ts"]
+      "@mivlet/protocol": ["../../packages/protocol/src/index.ts"],
+      "@mivlet/connectors": ["../../packages/connectors/src/index.ts"],
+      "@mivlet/connectors/*": ["../../packages/connectors/src/*"],
+      "@mivlet/knowledge": ["../../packages/knowledge/src/index.ts"]
     }
   },
   "include": ["src", "../../packages/protocol/src", "../../packages/connectors/src", "../../packages/knowledge/src"],

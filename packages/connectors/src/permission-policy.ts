@@ -3,7 +3,7 @@ import type {
   CustomApprovalSettings,
   PermissionMode,
   PermissionProfileId
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export type PermissionEffect =
   | "coordination"

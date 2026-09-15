@@ -33,7 +33,7 @@ test("Mivlet installers retain the existing Windows upgrade and data identities"
 });
 
 test("rejects a mismatch across release version sources", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-versions-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-versions-"));
   const paths = {
     rootPackagePath: join(root, "package.json"),
     desktopPackagePath: join(root, "desktop-package.json"),
@@ -43,33 +43,33 @@ test("rejects a mismatch across release version sources", async () => {
   await writeFile(paths.rootPackagePath, JSON.stringify({ version: "0.1.0" }));
   await writeFile(paths.desktopPackagePath, JSON.stringify({ version: "0.1.0" }));
   await writeFile(paths.tauriConfigPath, JSON.stringify({ version: "0.2.0" }));
-  await writeFile(paths.cargoManifestPath, '[package]\nname = "fable"\nversion = "0.1.0"\n');
+  await writeFile(paths.cargoManifestPath, '[package]\nname = "mivlet"\nversion = "0.1.0"\n');
   await assert.rejects(assertReleaseVersionAlignment(paths), /Release versions are not aligned/);
 });
 
 test("collects one MSI and one NSIS installer with stable hashes", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-release-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-release-"));
   await mkdir(join(root, "msi"));
   await mkdir(join(root, "nsis"));
-  await writeFile(join(root, "msi", "Fable_0.1.0_x64_en-US.msi"), "msi");
-  await writeFile(join(root, "nsis", "Fable_0.1.0_x64-setup.exe"), "nsis");
+  await writeFile(join(root, "msi", "Mivlet_0.1.0_x64_en-US.msi"), "msi");
+  await writeFile(join(root, "nsis", "Mivlet_0.1.0_x64-setup.exe"), "nsis");
   const artifacts = await collectWindowsArtifacts(root);
   assert.deepEqual(artifacts.map(({ kind, relativePath, signed }) => ({ kind, relativePath, signed })), [
-    { kind: "windows-msi", relativePath: "msi/Fable_0.1.0_x64_en-US.msi", signed: false },
-    { kind: "windows-nsis", relativePath: "nsis/Fable_0.1.0_x64-setup.exe", signed: false }
+    { kind: "windows-msi", relativePath: "msi/Mivlet_0.1.0_x64_en-US.msi", signed: false },
+    { kind: "windows-nsis", relativePath: "nsis/Mivlet_0.1.0_x64-setup.exe", signed: false }
   ]);
   assert.match(artifacts[0].sha256, /^[0-9a-f]{64}$/);
 });
 
 test("rejects missing and duplicate installer kinds", async () => {
-  const missing = await mkdtemp(join(tmpdir(), "fable-release-"));
-  await writeFile(join(missing, "Fable.msi"), "msi");
+  const missing = await mkdtemp(join(tmpdir(), "mivlet-release-"));
+  await writeFile(join(missing, "Mivlet.msi"), "msi");
   await assert.rejects(collectWindowsArtifacts(missing), /Missing required windows-nsis/);
 
-  const duplicate = await mkdtemp(join(tmpdir(), "fable-release-"));
-  await writeFile(join(duplicate, "Fable.msi"), "msi");
-  await writeFile(join(duplicate, "Fable.exe"), "nsis");
-  await writeFile(join(duplicate, "Fable-copy.exe"), "nsis");
+  const duplicate = await mkdtemp(join(tmpdir(), "mivlet-release-"));
+  await writeFile(join(duplicate, "Mivlet.msi"), "msi");
+  await writeFile(join(duplicate, "Mivlet.exe"), "nsis");
+  await writeFile(join(duplicate, "Mivlet-copy.exe"), "nsis");
   await assert.rejects(collectWindowsArtifacts(duplicate), /duplicate installer kinds/);
 });
 
@@ -80,8 +80,8 @@ test("manifest is private-only, unsigned, unpublished, and deterministic", () =>
     commit: "0123456789abcdef",
     createdAt: "2026-07-24T08:00:00.000Z",
     artifacts: [
-      { kind: "windows-msi", fileName: "Fable.msi", relativePath: "msi/Fable.msi", bytes: 3, sha256: "a".repeat(64), signed: false },
-      { kind: "windows-nsis", fileName: "Fable.exe", relativePath: "nsis/Fable.exe", bytes: 4, sha256: "b".repeat(64), signed: false }
+      { kind: "windows-msi", fileName: "Mivlet.msi", relativePath: "msi/Mivlet.msi", bytes: 3, sha256: "a".repeat(64), signed: false },
+      { kind: "windows-nsis", fileName: "Mivlet.exe", relativePath: "nsis/Mivlet.exe", bytes: 4, sha256: "b".repeat(64), signed: false }
     ]
   };
   const first = buildManifest(input);

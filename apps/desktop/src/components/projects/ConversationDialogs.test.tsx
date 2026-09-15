@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import { ConversationDialog, MigrateGroupDialog } from "./ConversationDialogs";
 
-const agents: FableAgentProfile[] = ["Chief", "Product", "Researcher"].map(name => ({
+const agents: MivletAgentProfile[] = ["Chief", "Product", "Researcher"].map(name => ({
   id: name.toLowerCase(), name, instructions: "Help with this project.",
   modelId: "codex::gpt-5.6-luna", icon: "agent", iconColor: "#865DFA",
   connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me",

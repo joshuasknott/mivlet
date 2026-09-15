@@ -1,4 +1,4 @@
-import type { LocalFileImport } from "@fable/protocol";
+import type { LocalFileImport } from "@mivlet/protocol";
 
 export const MAX_LOCAL_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_LOCAL_FILE_PREVIEW_CHARACTERS = 6_000;

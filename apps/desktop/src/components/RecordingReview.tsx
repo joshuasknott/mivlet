@@ -1,4 +1,4 @@
-import type { SpeechRecordingReview } from "@fable/connectors/voice";
+import type { SpeechRecordingReview } from "@mivlet/connectors/voice";
 
 function durationLabel(durationMs: number) {
   const seconds = Math.max(1, Math.ceil(durationMs / 1_000));

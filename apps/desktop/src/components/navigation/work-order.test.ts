@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   CollaborationWorkItem,
   ConversationRoom,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   attentionOrder,
   scopeWork,

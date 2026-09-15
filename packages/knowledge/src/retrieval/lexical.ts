@@ -8,7 +8,7 @@
  * embedding provider is configured.
  */
 
-import type { SourceChunk } from "@fable/protocol";
+import type { SourceChunk } from "@mivlet/protocol";
 
 /** Tokenize for lexical matching: lowercase, split on non-alphanumeric, drop 1-char noise. */
 export function tokenize(value: string): string[] {

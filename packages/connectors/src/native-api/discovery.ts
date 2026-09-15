@@ -17,7 +17,7 @@
  * GET; this module only merges the result with the catalogue. Fixture-testable.
  */
 
-import type { BackendModel } from "@fable/protocol";
+import type { BackendModel } from "@mivlet/protocol";
 import { catalogueCapabilities } from "./model-catalogue";
 import { modelReasoning } from "./reasoning";
 

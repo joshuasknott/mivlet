@@ -1,4 +1,4 @@
-import type { ConnectorCapability, ConnectorPage, ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorPage, ConnectorSearchItem } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest } from "../sdk";
 import {
   ProviderHttpClient,

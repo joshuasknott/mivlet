@@ -1,4 +1,4 @@
-import type { ConversationParticipant } from "@fable/protocol";
+import type { ConversationParticipant } from "@mivlet/protocol";
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

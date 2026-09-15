@@ -10,7 +10,7 @@ import {
   createSerialPendingStoresForTest,
   createSerialHandoffStoresForTest
 } from "./durable-stores.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 
 const clock = fixedClock(100_000);
 const TTL = BROKER_HANDOFF_TTL_SECONDS * 1000;

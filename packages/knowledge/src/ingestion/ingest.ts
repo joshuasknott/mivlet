@@ -1,7 +1,7 @@
 /**
  * The ingestion pipeline: candidate -> IngestionOutcome.
  *
- * Pure, synchronous, no transport. Depends on @fable/protocol types and the
+ * Pure, synchronous, no transport. Depends on @mivlet/protocol types and the
  * hashing/extraction/chunking helpers in this folder only. The pipeline NEVER
  * throws for ordinary problems — unsupported / malformed / binary / oversized
  * inputs become a bounded `skipped` outcome.
@@ -18,8 +18,8 @@ import type {
   KnowledgeScope,
   KnowledgeSource,
   SkipReason
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { chunkSourceText } from "./chunk";
 import { classifyCandidate } from "./extract";
 import { contentHash, normalizeText, slug } from "./hash";

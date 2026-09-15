@@ -4,7 +4,7 @@ import type {
   CollaborationWorkItem,
   LocalProject,
   ProjectFact,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   attributeConversation,
   collaborationContext,

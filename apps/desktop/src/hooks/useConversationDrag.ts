@@ -3,7 +3,7 @@ import {
   useRef,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import type { ConversationLayout } from "@fable/protocol";
+import type { ConversationLayout } from "@mivlet/protocol";
 import { MAX_PANES, type DockEdge, type LayoutAction } from "../lib/conversation-layout";
 
 type Drop =

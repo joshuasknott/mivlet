@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
+import { readMivletEnvValue, type ConnectorApprovalRecord, type ConnectorTokenSet } from "@mivlet/protocol";
 import { ConnectorRuntime, type ConnectorApprovalBoundary } from "../sdk";
 import { createGoogleDriveAdapter, GOOGLE_DRIVE_CAPABILITIES } from "./google-drive";
 import { createGmailAdapter, GMAIL_CAPABILITIES } from "./gmail";
@@ -658,20 +658,20 @@ describe("google connector capability and approval registration", () => {
   });
 });
 
-describe.skipIf(!process.env.FABLE_LIVE_CONNECTOR_TESTS)("opt-in live google connectors", () => {
+describe.skipIf(!readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS"))("opt-in live google connectors", () => {
   it("requires deliberately supplied credentials and expected scope claims", () => {
-    expect(process.env.FABLE_LIVE_CONNECTOR_TESTS).toBeTruthy();
+    expect(readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS")).toBeTruthy();
     expect(
-      process.env.FABLE_GOOGLE_TEST_TOKEN
+      readMivletEnvValue(process.env, "GOOGLE_TEST_TOKEN")
     ).toBeTruthy();
     expect(
-      process.env.FABLE_GOOGLE_TEST_EXPECTED_SCOPES
+      readMivletEnvValue(process.env, "GOOGLE_TEST_EXPECTED_SCOPES")
     ).toBeTruthy();
   });
 
   it("validates the supplied token's active granted scopes without running OAuth", async () => {
-    const token = process.env.FABLE_GOOGLE_TEST_TOKEN;
-    const expectedScopes = (process.env.FABLE_GOOGLE_TEST_EXPECTED_SCOPES ?? "")
+    const token = readMivletEnvValue(process.env, "GOOGLE_TEST_TOKEN");
+    const expectedScopes = (readMivletEnvValue(process.env, "GOOGLE_TEST_EXPECTED_SCOPES") ?? "")
       .split(/[,\s]+/)
       .map((scope) => scope.trim())
       .filter(Boolean);
@@ -685,8 +685,8 @@ describe.skipIf(!process.env.FABLE_LIVE_CONNECTOR_TESTS)("opt-in live google con
     for (const scope of expectedScopes) {
       expect(granted.has(scope)).toBe(true);
     }
-    if (process.env.FABLE_GOOGLE_TEST_EMAIL) {
-      expect(body.email).toBe(process.env.FABLE_GOOGLE_TEST_EMAIL);
+    if (readMivletEnvValue(process.env, "GOOGLE_TEST_EMAIL")) {
+      expect(body.email).toBe(readMivletEnvValue(process.env, "GOOGLE_TEST_EMAIL"));
     }
   });
 });

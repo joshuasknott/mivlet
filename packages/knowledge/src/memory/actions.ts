@@ -7,7 +7,7 @@
  * retrieval / context / Knowledge-page path while staying auditable.
  */
 
-import type { MemoryKind, MemoryRecord } from "@fable/protocol";
+import type { MemoryKind, MemoryRecord } from "@mivlet/protocol";
 import { isLiveMemory } from "../store";
 
 /** Edit a memory's editable fields. Bumps updatedAt. */

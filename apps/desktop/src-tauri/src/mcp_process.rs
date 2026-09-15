@@ -28,7 +28,7 @@ use tokio::{
 use url::Url;
 
 const MAX_MCP_FRAME_BYTES: usize = 10 * 1024 * 1024;
-const MCP_EVENT_CHANNEL_PREFIX: &str = "fable://mcp/";
+const MCP_EVENT_CHANNEL_PREFIX: &str = "mivlet://mcp/";
 const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
 struct McpChild {

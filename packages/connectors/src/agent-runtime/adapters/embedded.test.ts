@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentTurnRequest, BackendAgentEvent, BackendProvider } from "@fable/protocol";
+import type { AgentTurnRequest, BackendAgentEvent, BackendProvider } from "@mivlet/protocol";
 import type { BackendDeps, EmbeddedRuntimeEvent, EmbeddedRuntimeHandle } from "../contract";
 import { registeredToolSpecs } from "../../native-api/tools";
 import { createEmbeddedBackend } from "./embedded";

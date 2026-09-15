@@ -9,7 +9,7 @@ import type {
   LocalComputerAttachmentStageRequest,
   LocalComputerAttachmentReceipt,
   LocalComputerAttachmentDiscardRequest,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 export async function importRuntimeRepository(

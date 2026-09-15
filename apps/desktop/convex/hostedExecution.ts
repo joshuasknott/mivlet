@@ -1,9 +1,10 @@
 import {
+  readMivletEnvValue,
   signHostedExecutionCapability,
   type HostedComputerSnapshot,
   type HostedExecutionCapabilityReceipt,
   type HostedExecutionCapabilityScope
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { v } from "convex/values";
 import { requireActiveDevice, requireActiveMembership, requireRole } from "./authorization";
 import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
@@ -124,7 +125,7 @@ const executionCapabilityArgs = {
  * not forward auth into internals. The runner signing secret remains in
  * Convex/Worker secrets and never reaches the renderer. Capabilities are
  * generation-fenced and cannot provision or destroy computers. The service
- * Bearer (`FABLE_HOSTED_RUNNER_API_KEY`) is lifecycle-only.
+ * Bearer (`MIVLET_HOSTED_RUNNER_API_KEY`) is lifecycle-only.
  */
 export async function mintExecutionCapability(
   ctx: ConvexAuthReader & {
@@ -146,9 +147,9 @@ export async function mintExecutionCapability(
       agentId: args.agentId,
     },
   );
-  const signingKey = process.env.FABLE_HOSTED_RUNNER_SIGNING_KEY;
+  const signingKey = readMivletEnvValue(process.env, "HOSTED_RUNNER_SIGNING_KEY");
   if (!signingKey || signingKey.length < 32) throw new Error("runner-configuration-required");
-  const runnerUrl = hostedRunnerBaseUrl(process.env.FABLE_HOSTED_RUNNER_URL).toString().replace(/\/$/, "");
+  const runnerUrl = hostedRunnerBaseUrl(readMivletEnvValue(process.env, "HOSTED_RUNNER_URL")).toString().replace(/\/$/, "");
   const issuedAt = Date.now();
   const expiresAt = issuedAt + EXECUTION_CAPABILITY_LIFETIME_MS;
   const token = await signHostedExecutionCapability(signingKey, {
@@ -221,8 +222,8 @@ export const provisionScheduled = internalAction({
     let snapshot: HostedComputerSnapshot | undefined;
     let errorCode: string | undefined;
     try {
-      const baseUrl = hostedRunnerBaseUrl(process.env.FABLE_HOSTED_RUNNER_URL);
-      const apiKey = process.env.FABLE_HOSTED_RUNNER_API_KEY;
+      const baseUrl = hostedRunnerBaseUrl(readMivletEnvValue(process.env, "HOSTED_RUNNER_URL"));
+      const apiKey = readMivletEnvValue(process.env, "HOSTED_RUNNER_API_KEY");
       if (!apiKey || apiKey.length < 32) throw new Error("runner-configuration-required");
       const response = await fetch(new URL(`/v1/computers/${request.computerId}`, baseUrl), {
         method: "PUT",

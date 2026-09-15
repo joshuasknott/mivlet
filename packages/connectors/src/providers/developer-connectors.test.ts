@@ -4,7 +4,7 @@ import {
   BROKER_CONTRACT_VERSION,
   BROKER_PKCE_S256_EXAMPLE
 } from "./broker-contract";
-import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
+import { readMivletEnvValue, type ConnectorApprovalRecord, type ConnectorTokenSet } from "@mivlet/protocol";
 import { ConnectorRuntime, type ConnectorApprovalBoundary } from "../sdk";
 import type { ProviderFetch } from "./http";
 import { createGitHubAdapter, GITHUB_CAPABILITIES } from "./github";
@@ -22,7 +22,7 @@ function response(body: unknown, status = 200, headers?: Record<string, string>)
 
 describe("GitHub production adapter", () => {
   it("maps repository reads, pagination, and rate limits", async () => {
-    const fetcher = vi.fn(async () => response([{ id: 1, full_name: "acme/fable" }], 200, {
+    const fetcher = vi.fn(async () => response([{ id: 1, full_name: "acme/mivlet" }], 200, {
       link: '<https://api.github.com/user/repos?page=2>; rel="next"',
       "x-ratelimit-remaining": "42", "x-ratelimit-reset": "1782600000"
     }));
@@ -30,7 +30,7 @@ describe("GitHub production adapter", () => {
     const result = await adapter.read({ capability: "repositories.list", input: { limit: 10 } }, tokens);
     expect(fetcher).toHaveBeenCalledWith(expect.stringMatching(/user\/repos.*per_page=10/), expect.objectContaining({ method: "GET" }));
     expect(result).toMatchObject({ nextCursor: "2", rateLimit: { remaining: 42 } });
-    expect(result.items[0]).toMatchObject({ id: 1, full_name: "acme/fable" });
+    expect(result.items[0]).toMatchObject({ id: 1, full_name: "acme/mivlet" });
   });
 
   it("maps issue and pull request reads to repository REST paths", async () => {
@@ -38,18 +38,18 @@ describe("GitHub production adapter", () => {
     const adapter = createGitHubAdapter({ ...common, fetch: fetcher });
     await adapter.read({
       capability: "issues.read",
-      input: { repository: "acme/fable", state: "open", limit: 5 }
+      input: { repository: "acme/mivlet", state: "open", limit: 5 }
     }, tokens);
     expect(fetcher).toHaveBeenLastCalledWith(
-      expect.stringMatching(/repos\/acme\/fable\/issues.*per_page=5.*state=open/),
+      expect.stringMatching(/repos\/acme\/mivlet\/issues.*per_page=5.*state=open/),
       expect.objectContaining({ method: "GET" })
     );
     await adapter.read({
       capability: "pull-requests.read",
-      input: { repository: "acme/fable", limit: 5 }
+      input: { repository: "acme/mivlet", limit: 5 }
     }, tokens);
     expect(fetcher).toHaveBeenLastCalledWith(
-      expect.stringMatching(/repos\/acme\/fable\/pulls.*state=all/),
+      expect.stringMatching(/repos\/acme\/mivlet\/pulls.*state=all/),
       expect.objectContaining({ method: "GET" })
     );
   });
@@ -220,8 +220,8 @@ describe("Vercel production adapter", () => {
   it("never returns environment variable values", async () => {
     const fetcher = vi.fn(async (_url: string) => response({ envs: [{ id: "env_1", key: "DATABASE_URL", value: "postgres://secret", target: ["production"] }] }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
-    const result = await adapter.read({ capability: "environment-metadata.read", input: { project: "fable", teamId: "team_1" } }, tokens);
-    expect(fetcher.mock.calls[0][0]).toContain("/v9/projects/fable/env");
+    const result = await adapter.read({ capability: "environment-metadata.read", input: { project: "mivlet", teamId: "team_1" } }, tokens);
+    expect(fetcher.mock.calls[0][0]).toContain("/v9/projects/mivlet/env");
     expect(result.items[0]).toEqual({ id: "env_1", key: "DATABASE_URL", target: ["production"] });
     expect(JSON.stringify(result)).not.toContain("postgres://secret");
   });
@@ -229,12 +229,12 @@ describe("Vercel production adapter", () => {
   it("maps approved deployment operations to the official REST paths", async () => {
     const fetcher = vi.fn(async () => response({ id: "dpl_1", readyState: "READY" }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
-    await adapter.write({ capability: "deployments.promote", input: { teamId: "team_1", project: "fable", deploymentId: "dpl_1" }, target: "team_1/fable/dpl_1", preview: "Promote dpl_1 to production", riskLevel: "high" }, tokens);
-    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/v10/projects/fable/promote/dpl_1"), expect.objectContaining({ method: "POST" }));
+    await adapter.write({ capability: "deployments.promote", input: { teamId: "team_1", project: "mivlet", deploymentId: "dpl_1" }, target: "team_1/mivlet/dpl_1", preview: "Promote dpl_1 to production", riskLevel: "high" }, tokens);
+    expect(fetcher).toHaveBeenCalledWith(expect.stringContaining("/v10/projects/mivlet/promote/dpl_1"), expect.objectContaining({ method: "POST" }));
   });
 
   it("maps project reads, the teamId query param, and cursor pagination", async () => {
-    const fetcher = vi.fn(async (_url: string) => response({ projects: [{ id: "prj_1", name: "fable" }], pagination: { next: 1700000000000 } }));
+    const fetcher = vi.fn(async (_url: string) => response({ projects: [{ id: "prj_1", name: "mivlet" }], pagination: { next: 1700000000000 } }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     const result = await adapter.read({ capability: "projects.read", input: { teamId: "team_1", limit: 5 }, cursor: "1690000000000" }, tokens);
     const [url] = fetcher.mock.calls[0];
@@ -242,12 +242,12 @@ describe("Vercel production adapter", () => {
     expect(String(url)).toContain("teamId=team_1");
     expect(String(url)).toContain("limit=5");
     expect(String(url)).toContain("until=1690000000000");
-    expect(result.items[0]).toMatchObject({ id: "prj_1", name: "fable" });
+    expect(result.items[0]).toMatchObject({ id: "prj_1", name: "mivlet" });
     expect(result.nextCursor).toBe("1700000000000");
   });
 
   it("scopes deployments reads to a project and team", async () => {
-    const fetcher = vi.fn(async (_url: string) => response({ deployments: [{ id: "dpl_1", name: "fable", state: "READY", url: "fable.vercel.app" }] }));
+    const fetcher = vi.fn(async (_url: string) => response({ deployments: [{ id: "dpl_1", name: "mivlet", state: "READY", url: "mivlet.vercel.app" }] }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     const result = await adapter.read({ capability: "deployments.read", input: { teamId: "team_1", projectId: "prj_1", state: "READY" } }, tokens);
     const [url] = fetcher.mock.calls[0];
@@ -337,7 +337,7 @@ describe("Vercel production adapter", () => {
       complete: vi.fn(async () => undefined)
     };
     const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);
-    await expect(runtime.write({ connectorId: "vercel", account: { id: "vercel-uid", displayName: "Vercel User" }, tokens }, { capability: "deployments.promote", input: { teamId: "team_1", project: "fable", deploymentId: "dpl_1" }, target: "team_1/fable/dpl_1", preview: "Promote dpl_1", riskLevel: "high" })).rejects.toMatchObject({ code: "approval-required" });
+    await expect(runtime.write({ connectorId: "vercel", account: { id: "vercel-uid", displayName: "Vercel User" }, tokens }, { capability: "deployments.promote", input: { teamId: "team_1", project: "mivlet", deploymentId: "dpl_1" }, target: "team_1/mivlet/dpl_1", preview: "Promote dpl_1", riskLevel: "high" })).rejects.toMatchObject({ code: "approval-required" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -583,15 +583,19 @@ describe("developer connector capability and approval registration", () => {
       complete: vi.fn(async () => undefined)
     };
     const runtime = new ConnectorRuntime({ approvals: boundary }); runtime.register(adapter);
-    await expect(runtime.write({ connectorId: "github", account: { id: "u1", displayName: "User" }, tokens }, { capability: "issues.create", input: { repository: "acme/fable", title: "Issue" }, target: "acme/fable", preview: "Create issue Issue", riskLevel: "high" })).rejects.toThrow(/does not support write capability/);
+    await expect(runtime.write({ connectorId: "github", account: { id: "u1", displayName: "User" }, tokens }, { capability: "issues.create", input: { repository: "acme/mivlet", title: "Issue" }, target: "acme/mivlet", preview: "Create issue Issue", riskLevel: "high" })).rejects.toThrow(/does not support write capability/);
     expect(boundary.approve).not.toHaveBeenCalled();
     expect(fetcher).not.toHaveBeenCalled();
   });
 });
 
-describe.skipIf(!process.env.FABLE_LIVE_CONNECTOR_TESTS)("opt-in live developer connectors", () => {
+describe.skipIf(!readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS"))("opt-in live developer connectors", () => {
   it("requires deliberately supplied credentials", () => {
-    expect(process.env.FABLE_LIVE_CONNECTOR_TESTS).toBeTruthy();
-    expect(process.env.FABLE_GITHUB_TEST_TOKEN || process.env.FABLE_VERCEL_TEST_TOKEN || process.env.FABLE_LINEAR_TEST_TOKEN).toBeTruthy();
+    expect(readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS")).toBeTruthy();
+    expect(
+      readMivletEnvValue(process.env, "GITHUB_TEST_TOKEN")
+        || readMivletEnvValue(process.env, "VERCEL_TEST_TOKEN")
+        || readMivletEnvValue(process.env, "LINEAR_TEST_TOKEN")
+    ).toBeTruthy();
   });
 });

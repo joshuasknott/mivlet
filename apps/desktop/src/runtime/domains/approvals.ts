@@ -6,7 +6,7 @@ import type {
   ApprovalGrant,
   ApprovalResolutionRequest,
   ApprovalResolutionResponse,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
 
 interface ApprovalAuditRecordResponse {

@@ -1,4 +1,4 @@
-import type { IdentityStatus } from "@fable/protocol";
+import type { IdentityStatus } from "@mivlet/protocol";
 import { GoogleLogo } from "@phosphor-icons/react/dist/csr/GoogleLogo";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { useEffect, useRef, useState } from "react";

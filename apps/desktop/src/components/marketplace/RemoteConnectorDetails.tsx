@@ -1,4 +1,4 @@
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import { useEffect, useState } from "react";
 import { connectRemoteConnector } from "../../lib/connect-remote-connector";
 import {

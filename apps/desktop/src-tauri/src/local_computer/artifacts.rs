@@ -664,7 +664,7 @@ pub(crate) fn publish_artifact(
         let bytes = read_bounded(workspace, &workspace.join(relative_path))?;
         check_content(&bytes, extension)?;
         let id = random_id()?;
-        let export_name = format!("fable-{}.{}", crate::paths::file_slug(&title), extension);
+        let export_name = format!("mivlet-{}.{}", crate::paths::file_slug(&title), extension);
         let artifact = LocalComputerArtifact {
             kind: "computer-artifact".into(),
             version: 1,
@@ -736,7 +736,7 @@ pub(crate) fn publish_generated_png(
             let _ = fs::remove_dir(&workspace_directory);
             return Err("The generated-image workspace path is unsafe.".into());
         }
-        let export_name = format!("fable-{}.png", crate::paths::file_slug(&title));
+        let export_name = format!("mivlet-{}.png", crate::paths::file_slug(&title));
         let workspace_file = canonical_workspace_directory.join(&export_name);
         let mut options = OpenOptions::new();
         options.write(true).create_new(true);
@@ -823,7 +823,7 @@ fn validate_receipt(
         || receipt.artifact.size_bytes > MAX_BYTES
         || receipt.export_name
             != format!(
-                "fable-{}.{}",
+                "mivlet-{}.{}",
                 crate::paths::file_slug(&receipt.artifact.title),
                 extension
             )
@@ -1342,7 +1342,7 @@ mod tests {
             },
             workspace_id: "workspace".into(),
             agent_id: "agent-a".into(),
-            export_name: format!("fable-{}.{extension}", crate::paths::file_slug(title)),
+            export_name: format!("mivlet-{}.{extension}", crate::paths::file_slug(title)),
             sha256: digest(bytes),
         }
     }
@@ -1381,11 +1381,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires explicit generated Office/PDF fixtures in FABLE_ARTIFACT_FIXTURE_DIR"]
+    #[ignore = "requires explicit generated Office/PDF fixtures in MIVLET_ARTIFACT_FIXTURE_DIR"]
     fn generated_documents_pass_the_native_validator() {
         let fixture_root =
-            PathBuf::from(std::env::var("FABLE_ARTIFACT_FIXTURE_DIR").expect(
-                "set FABLE_ARTIFACT_FIXTURE_DIR to the approved document fixture directory",
+            PathBuf::from(std::env::var("MIVLET_ARTIFACT_FIXTURE_DIR").expect(
+                "set MIVLET_ARTIFACT_FIXTURE_DIR to the approved document fixture directory",
             ));
         for (relative, extension) in [
             ("source/document.docx", "docx"),
@@ -1493,7 +1493,7 @@ mod tests {
             let prepared = prepare_open_copy(&open_root, &receipt, &bytes).unwrap();
             assert_eq!(
                 prepared.file_name().unwrap().to_str().unwrap(),
-                format!("fable-valid-document.{extension}")
+                format!("mivlet-valid-document.{extension}")
             );
             assert_eq!(fs::read(&prepared).unwrap(), bytes);
             verify_prepared_copy(&open_root, &prepared, &receipt).unwrap();
@@ -1556,7 +1556,7 @@ mod tests {
             },
             workspace_id: "workspace".into(),
             agent_id: "agent-a".into(),
-            export_name: "fable-report.txt".into(),
+            export_name: "mivlet-report.txt".into(),
             sha256: digest(b"first"),
         };
         assert!(validate_receipt(&receipt, &request, "computer").is_ok());

@@ -2,7 +2,7 @@ import { OpenCode, type OpenCodeEvent } from "@opencode/sdk";
 import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import type { SessionContext } from "@opencode/plugin/promise/session";
-import type { AgentTurnRequest, BackendAgentEvent } from "@fable/protocol";
+import type { AgentTurnRequest, BackendAgentEvent } from "@mivlet/protocol";
 
 export interface HostInput {
   request: AgentTurnRequest;

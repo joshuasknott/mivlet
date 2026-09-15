@@ -3,8 +3,8 @@ import type {
   CodexAppServerHandle,
   CodexAppServerHandlers,
   CodexTurnRequest
-} from "@fable/connectors";
-import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
+} from "@mivlet/connectors";
+import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
 import { interruptRuntimeCodexTurn, listenRuntimeCodexEvents, respondRuntimeCodexApproval, shutdownRuntimeCodexTurn, startRuntimeCodexTurn } from "../runtime/domains/providers";
 
 function hasDesktopRuntime(): boolean {

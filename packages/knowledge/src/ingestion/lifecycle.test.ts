@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource } from "@fable/protocol";
+import type { KnowledgeSource } from "@mivlet/protocol";
 import { disableSource, enableSource, markFailed, markHealthy, markIndexing } from "./lifecycle";
 import { isLiveSource } from "../store";
 

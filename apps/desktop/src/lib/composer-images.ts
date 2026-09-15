@@ -1,4 +1,4 @@
-import type { NativeImageInput, NativeImageMediaType } from "@fable/protocol";
+import type { NativeImageInput, NativeImageMediaType } from "@mivlet/protocol";
 import { readFileAsDataUrl } from "./helpers";
 import type { ComposerAttachment } from "./types";
 

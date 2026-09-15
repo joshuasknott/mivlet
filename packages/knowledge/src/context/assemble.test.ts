@@ -6,8 +6,8 @@ import type {
   NativeMessage,
   PinnedContextEntry,
   ExecutionContextAudience
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { assembleContext } from "./assemble";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 
@@ -73,12 +73,12 @@ describe("assembleContext — deterministic order", () => {
   it("emits system instructions, memory, then sources in order", () => {
     const assembled = assembleContext({
       attemptId: "r1",
-      systemInstructions: "You are Fable.",
+      systemInstructions: "You are Mivlet.",
       memory: [makeMemory()],
       citations: [makeCitation()]
     });
 
-    const instrIdx = assembled.systemPrefix.indexOf("You are Fable.");
+    const instrIdx = assembled.systemPrefix.indexOf("You are Mivlet.");
     const memIdx = assembled.systemPrefix.indexOf("Approved memory");
     const srcIdx = assembled.systemPrefix.indexOf("Relevant sources");
     expect(instrIdx).toBeLessThan(memIdx);

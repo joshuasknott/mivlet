@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { NativeCompletionRequest } from "@fable/protocol";
+import type { NativeCompletionRequest } from "@mivlet/protocol";
 import { FixtureTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 

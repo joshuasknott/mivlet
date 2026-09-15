@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ContextSummaryRecord, NativeMessage } from "@fable/protocol";
+import type { ContextSummaryRecord, NativeMessage } from "@mivlet/protocol";
 import type { HistoryEntry } from "./history";
 import {
   foldHistorySummary,

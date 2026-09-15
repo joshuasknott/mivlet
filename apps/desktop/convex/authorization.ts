@@ -1,6 +1,6 @@
 import { requireConvexAccountIdentity } from "./convexAuth";
 
-export async function requireFableUser(ctx: any) {
+export async function requireMivletUser(ctx: any) {
   const account = await requireConvexAccountIdentity(ctx);
   const external = account.external;
   const links = await ctx.db.query("external_identity_links").withIndex("by_external_identity", (q: any) => q.eq("provider", external.provider).eq("normalizedIssuer", external.normalizedIssuer).eq("subject", external.subject)).collect();
@@ -14,7 +14,7 @@ export async function requireFableUser(ctx: any) {
 }
 
 export async function requireActiveMembership(ctx: any, workspaceId: string) {
-  const principal = await requireFableUser(ctx);
+  const principal = await requireMivletUser(ctx);
   const workspaces = await ctx.db.query("workspaces").withIndex("by_workspace", (q: any) => q.eq("workspaceId", workspaceId)).collect();
   if (workspaces.length !== 1 || workspaces[0].status !== "active") throw new Error("The requested workspace is unavailable.");
   const workspace = workspaces[0];

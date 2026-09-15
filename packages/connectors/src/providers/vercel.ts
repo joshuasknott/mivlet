@@ -1,4 +1,4 @@
-import type { ConnectorCapability, ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorSearchItem } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
 import { ProviderHttpClient, asObjects, isObject, oauthClient, page, type FetchLike, type JsonObject, type OAuthClientOptions, type ProviderRequest } from "./http";
 import {

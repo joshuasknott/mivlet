@@ -1,6 +1,6 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
-import { requireActiveMembership, requireFableUser } from "./authorization";
+import { requireActiveMembership, requireMivletUser } from "./authorization";
 
 const kind = v.union(v.literal("desktop"), v.literal("mobile"), v.literal("web"));
 
@@ -32,7 +32,7 @@ export const link = mutationGeneric({
 export const listMine = queryGeneric({
   args: {},
   handler: async (ctx) => {
-    const { user } = await requireFableUser(ctx);
+    const { user } = await requireMivletUser(ctx);
     const devices = await ctx.db.query("account_devices").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", user.internalUserId)).collect();
     return devices.map((device: any) => ({ deviceId: device.deviceId, kind: device.kind, label: device.label, status: device.status, registeredAt: device.registeredAt, lastSeenAt: device.lastSeenAt, ...(device.revokedAt === undefined ? {} : { revokedAt: device.revokedAt }) })).sort((left: any, right: any) => left.deviceId.localeCompare(right.deviceId));
   }
@@ -42,7 +42,7 @@ export const listMine = queryGeneric({
 export const revoke = mutationGeneric({
   args: { deviceId: v.string() },
   handler: async (ctx, args) => {
-    const { user } = await requireFableUser(ctx);
+    const { user } = await requireMivletUser(ctx);
     const devices = await ctx.db.query("account_devices").withIndex("by_device", (q: any) => q.eq("deviceId", args.deviceId)).collect();
     if (devices.length !== 1 || devices[0].internalUserId !== user.internalUserId) throw new Error("This device is unavailable.");
     const device = devices[0];

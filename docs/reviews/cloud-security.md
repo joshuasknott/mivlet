@@ -115,7 +115,7 @@ the value signed into the token.
 `destroying` then `destroyed` (or `degraded` on failure), clears keep-alive,
 and destroys the sandbox. Process and browser capability routes then reject
 the token: `requireCapabilityGeneration` and `requireReady` fail on
-non-ready or mismatched generation. An unexpired `FableCapability` does
+non-ready or mismatched generation. An unexpired `MivletCapability` does
 **not** survive computer deletion.
 
 While that original ready generation remains active, the holder can call the
@@ -143,7 +143,7 @@ them in Rust; preserve that).
 
 **What the code does.** `authorizeCapabilityRequest` returns `{ authorized: true }`
 with no `expectedGeneration` when `Authorization: Bearer <root>` matches
-`FABLE_HOSTED_RUNNER_API_KEY`. `requireCapabilityGeneration(undefined)` is a
+`MIVLET_HOSTED_RUNNER_API_KEY`. `requireCapabilityGeneration(undefined)` is a
 no-op. Lifecycle routes (PUT/GET/DELETE computer) already require the root
 secret by design. Process and browser routes accept that same secret *and*
 skip the generation fence.
@@ -158,14 +158,14 @@ as they hit the current generation or use Bearer (which ignores generation).
 that execution routes do not force the scoped-capability path, so there is no
 blast-radius split between “admin lifecycle” and “agent execution”. Desktop
 and Convex correctly keep the root key off the renderer and mint
-`FableCapability` for tools. That client path is sound; the runner API is
+`MivletCapability` for tools. That client path is sound; the runner API is
 wider than the protocol comments suggest.
 
 **Prerequisite for Critical impact:** possession of the 32+ character root
 secret.
 
 **Mitigation direction.** Accept Bearer only on explicit admin routes
-(ensure/status/destroy). Require `FableCapability` plus generation on
+(ensure/status/destroy). Require `MivletCapability` plus generation on
 `/processes/*` and `/browser/*`. Split provisioning vs execution secrets.
 Rotate the root key on any suspected leak.
 
@@ -175,8 +175,8 @@ Rotate the root key on any suspected leak.
 `apps/broker/src/worker.ts`,
 `apps/broker/wrangler.jsonc`
 
-**What the code does.** Defaults are `FABLE_BROKER_ENVIRONMENT=local` and
-`FABLE_BROKER_STORAGE_BACKEND=memory`. Durable encrypted storage is required
+**What the code does.** Defaults are `MIVLET_BROKER_ENVIRONMENT=local` and
+`MIVLET_BROKER_STORAGE_BACKEND=memory`. Durable encrypted storage is required
 only when environment is exactly `staging` or `production`. A Worker deployed
 with the top-level vars (or `environment=local`) plus a public URL will run.
 Memory stores are per-isolate: single-use pending/handoff is not coordinated
@@ -195,7 +195,7 @@ on “am I reachable on the public Internet?”. Production env in
 `wrangler.jsonc` is declared “for review only” and not to be deployed — that
 comment is not a runtime control.
 
-**Mitigation direction.** Refuse `memory` whenever `FABLE_BROKER_PUBLIC_URL`
+**Mitigation direction.** Refuse `memory` whenever `MIVLET_BROKER_PUBLIC_URL`
 is HTTPS and not loopback. Treat unlabeled or `local` + public URL as 503.
 Add a deploy gate that rejects non-durable public brokers. Keep the existing
 durable encryption-key and DO-binding checks.
@@ -347,7 +347,7 @@ stripping and credential rejection.
 **Paths:** `apps/broker/src/router.ts`, `apps/broker/src/broker.ts`,
 `packages/connectors/src/providers/broker-contract.ts`
 
-Authorize requires `code_challenge` with S256. `FableBroker.authorize` never
+Authorize requires `code_challenge` with S256. `MivletBroker.authorize` never
 stores or checks it. Provider PKCE is generated inside the broker for
 GitHub/Vercel/Linear (`broker-pkce`). Notion and Slack use `pkce: "none"`.
 
@@ -394,7 +394,7 @@ as defense in depth, not as the control. Keep redacted logging
 
 **Path:** `apps/broker/src/server.ts`
 
-`FABLE_BROKER_HOST` defaults to all interfaces when `NODE_ENV=production`. A
+`MIVLET_BROKER_HOST` defaults to all interfaces when `NODE_ENV=production`. A
 bare Node deploy without a proxy exposes handoff/refresh.
 
 **Mitigation direction.** Default to loopback; require an explicit opt-in to
@@ -602,7 +602,7 @@ keeping sensitive MCP traffic renderer-free.
 ### M18 — Google desktop client secret may live in process environment
 
 **Path:** `apps/desktop/src-tauri/src/connector_auth.rs`
-(`FABLE_GOOGLE_OAUTH_CLIENT_SECRET`)
+(`MIVLET_GOOGLE_OAUTH_CLIENT_SECRET`)
 
 Documented for some Google desktop clients; the secret is copied into the OS
 store keyed by client id. Process env still increases crash-dump and child
@@ -675,23 +675,23 @@ cannot be reliably classified.
 **What the code does.**
 
 ```ts
-domain: process.env.FABLE_CLERK_ISSUER ?? "https://mock-clerk.fable.local",
-applicationID: process.env.FABLE_CLERK_AUDIENCE ?? "fable-convex-test"
+domain: process.env.MIVLET_CLERK_ISSUER ?? "https://mock-clerk.mivlet.local",
+applicationID: process.env.MIVLET_CLERK_AUDIENCE ?? "mivlet-convex-test"
 ```
 
-Desktop Clerk setup *does* fail closed without `FABLE_CLERK_ISSUER` and, in
+Desktop Clerk setup *does* fail closed without `MIVLET_CLERK_ISSUER` and, in
 production, without an explicit audience
 (`apps/desktop/src-tauri/src/clerk_identity.rs`). Convex falls back to the
 mock issuer/audience when those env vars are unset.
 
 This is **not** a token-forgery or identity-bypass path. Convex still
 verifies the JWT signature against the configured issuer’s JWKS.
-`https://mock-clerk.fable.local` is not an attacker-controlled issuer or
+`https://mock-clerk.mivlet.local` is not an attacker-controlled issuer or
 JWKS endpoint. Omitting the env vars does not let someone authenticate by
 minting a JWT that merely copies that issuer and audience.
 
-**Scenario.** A Convex deployment is created without `FABLE_CLERK_ISSUER` /
-`FABLE_CLERK_AUDIENCE`. Real Clerk tokens fail to authenticate because the
+**Scenario.** A Convex deployment is created without `MIVLET_CLERK_ISSUER` /
+`MIVLET_CLERK_AUDIENCE`. Real Clerk tokens fail to authenticate because the
 deployment is pointed at a non-existent mock issuer (availability /
 misconfiguration). Local tests that rely on the mock stay coupled to the
 same config file used for deploy. A JWT that is not signed by that issuer’s
@@ -724,7 +724,7 @@ is the right pattern.
 
 **Path:** `apps/hosted-runner/src/index.ts`
 
-Returns `{ status: "ok", service: "fable-hosted-runner" }`. Minimal
+Returns `{ status: "ok", service: "mivlet-hosted-runner" }`. Minimal
 disclosure. Fine for probes; do not expand.
 
 ### L3 — Rate limit 60/min; health unbounded; peer from `CF-Connecting-IP`
@@ -780,10 +780,10 @@ Separate Workerd fixture with synthetic data. Keep it unwired from production
 Tests use `sk-FAKESECRET…`, `ghp_…` placeholders. Not production credentials.
 Keep scanners and “credentials never in fixtures” policy.
 
-### L10 — Keyring / vault error copy and Fable vs Mivlet naming
+### L10 — Keyring / vault error copy and legacy Fable identifiers vs Mivlet naming
 
-Widespread `com.fable.*` keyring services, `FABLE_*` env, `FableCapability`,
-`fable-auth-broker`. No weaker parallel “legacy Fable” auth route was found;
+Widespread `com.fable.*` keyring services, `MIVLET_*` env, `MivletCapability`,
+`mivlet-auth-broker`. No weaker parallel “legacy Fable” auth route was found;
 Clerk org keys are rejected. Renaming is operational hygiene, not a bypass.
 Do not break keyring services without a migration.
 
@@ -975,10 +975,10 @@ Do not regress these without a replacement:
 
 When these areas change, add or extend tests that:
 
-- Replay the same `FableCapability` token with a new `requestKey` after first
+- Replay the same `MivletCapability` token with a new `requestKey` after first
   success and expect rejection once nonce consumption exists.
 - Call process/browser routes with root Bearer and expect 401 if H2 is fixed.
-- Boot a Worker with `FABLE_BROKER_ENVIRONMENT=local`, memory backend, and an
+- Boot a Worker with `MIVLET_BROKER_ENVIRONMENT=local`, memory backend, and an
   HTTPS public URL; expect 503 (`apps/broker/src/worker.test.ts`).
 - Persist a tool result containing a non-`sk-` secret and assert it is not in
   the next provider payload.
@@ -998,7 +998,7 @@ Do not weaken those assertions to pass a suite.
 | --- | --- |
 | Secrets never enter React / transcripts / logs | Mostly true for credentials; **false for tool output replay (H5)** and Live View URLs in React (M6) |
 | Exact single-use approval at final boundary | True for native permits; Full Access is explicit; hosted capability nonce is **not** single-use (H1) |
-| Hosted capabilities generation-fenced and single-use | Generation-fenced on `FableCapability`; **not** on root Bearer (H2); **not** single-use (H1) |
+| Hosted capabilities generation-fenced and single-use | Generation-fenced on `MivletCapability`; **not** on root Bearer (H2); **not** single-use (H1) |
 | Undeployed hosted config stays unavailable | True on desktop/Convex missing secrets |
 | Broker stores no conversation or provider API keys | True; it does store connector client secrets and briefly holds user tokens |
 | Fixture ≠ live evidence | Still true; this review is source analysis only |

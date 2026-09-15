@@ -13,7 +13,7 @@ import type {
 } from "../contract";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import type { HttpTransport } from "../../native-api/transport";
-import type { AgentTurnRequest, NativeCompletionRequest } from "@fable/protocol";
+import type { AgentTurnRequest, NativeCompletionRequest } from "@mivlet/protocol";
 
 /**
  * A highly configurable mock implementation of CodexAppServerHandle.

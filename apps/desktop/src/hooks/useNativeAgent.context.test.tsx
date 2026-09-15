@@ -1,7 +1,7 @@
 import { baseRequest,connectedCodexProvider,connectedOpenAiProvider,finishStop,installDesktopRuntime,mocks,openAiChunk } from "./native-agent-test-harness";
 import type {
 ExecutionAttempt
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { act,renderHook,waitFor } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import type { DurableRunWriter } from "../lib/conversation-runtime";

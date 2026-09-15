@@ -34,9 +34,9 @@ import {
   BROKER_HANDOFF_TTL_SECONDS,
   BROKER_PKCE_S256_EXAMPLE,
   type BrokerProviderId
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { fixedClock, type BrokerClock } from "./clock.js";
 import { createSerialInMemoryEphemeralOps } from "./ephemeral-rpc.js";
 import { createBrokerRouter } from "./router.js";
@@ -45,10 +45,10 @@ import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
 import type { BrokerFetch } from "./provider-client.js";
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
-  FABLE_BROKER_LINEAR_CLIENT_ID: "ln-id",
-  FABLE_BROKER_LINEAR_CLIENT_SECRET: "ln-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
+  MIVLET_BROKER_LINEAR_CLIENT_ID: "ln-id",
+  MIVLET_BROKER_LINEAR_CLIENT_SECRET: "ln-secret"
 };
 
 /** 32 zero bytes base64url — test-only encryption key (never a real secret). */
@@ -65,10 +65,10 @@ async function makeDurableBroker(
   provider: BrokerProviderId,
   fetch: BrokerFetch,
   clock: BrokerClock
-): Promise<{ broker: FableBroker; pendingInst: any; handoffInst: any; secret: string }> {
+): Promise<{ broker: MivletBroker; pendingInst: any; handoffInst: any; secret: string }> {
   const secret = testStoreKey();
   const { ops, pendingInst, handoffInst } = await createSerialInMemoryEphemeralOps(clock, secret);
-  const broker = new FableBroker({
+  const broker = new MivletBroker({
     env: ENV,
     clock,
     fetch,

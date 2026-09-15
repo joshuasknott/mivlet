@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
-import type { ConversationVoice, FableAgentProfile, VoiceConversationState } from "@fable/protocol";
+import type { ConversationVoice, MivletAgentProfile, VoiceConversationState } from "@mivlet/protocol";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
 import { MicrophoneSlash } from "@phosphor-icons/react/dist/csr/MicrophoneSlash";
 import { PhoneDisconnect } from "@phosphor-icons/react/dist/csr/PhoneDisconnect";
@@ -13,7 +13,7 @@ const labels: Record<VoiceConversationState["phase"], string> = {
 };
 
 export interface VoiceConversationViewProps {
-  agent: FableAgentProfile;
+  agent: MivletAgentProfile;
   modelLabel: string;
   state: VoiceConversationState;
   voice: ConversationVoice;

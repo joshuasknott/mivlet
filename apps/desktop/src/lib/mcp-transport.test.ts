@@ -45,7 +45,7 @@ beforeEach(() => {
   unlisten = vi.fn();
   runtime.spawn.mockReset().mockResolvedValue({
     sessionId: "mcp-1234567890abcdef1234567890abcdef",
-    channel: "fable://mcp/mcp-1234567890abcdef1234567890abcdef",
+    channel: "mivlet://mcp/mcp-1234567890abcdef1234567890abcdef",
     launchReference: "files"
   });
   runtime.listen.mockReset().mockImplementation(async (_channel, handler) => {

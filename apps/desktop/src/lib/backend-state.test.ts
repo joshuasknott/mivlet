@@ -3,8 +3,8 @@ import {
   BACKEND_AUTH_FAIL_CLOSED_STATES,
   BACKEND_AUTH_STATE_PARITY,
   BACKEND_AUTH_STATE_VALUES,
-} from "@fable/protocol";
-import type { BackendProvider } from "@fable/protocol";
+} from "@mivlet/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import {
   actionLabelForProvider,
   authKindForProvider,

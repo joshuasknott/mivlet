@@ -1,4 +1,4 @@
-import type { AgentTurnOptions, AgentTurnRequest, BackendAgentEvent, BackendProvider } from "@fable/protocol";
+import type { AgentTurnOptions, AgentTurnRequest, BackendAgentEvent, BackendProvider } from "@mivlet/protocol";
 import type { AgentBackend, BackendDeps, EmbeddedRuntimeHandle } from "../contract";
 import { buildToolApproval } from "../../native-api/approvals";
 import { lookupTool, registeredToolSpecs, CONNECTED_SOURCE_BRIEF_GUIDANCE, WEB_SOURCE_BRIEF_GUIDANCE } from "../../native-api/tools";

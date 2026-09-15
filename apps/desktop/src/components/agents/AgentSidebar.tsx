@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ConnectorManifest, FableAgentProfile } from "@fable/protocol";
+import type { ConnectorManifest, MivletAgentProfile } from "@mivlet/protocol";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
@@ -59,15 +59,15 @@ export function AgentSidebar({
   onSelectConversation,
   onSearch,
 }: {
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   activeAgentId: string;
   previews: Record<string, AgentSidebarPreview>;
   profileName: string;
   connectors: ConnectorManifest[];
   marketplaceActive: boolean;
-  onSelectAgent: (agent: FableAgentProfile) => void;
+  onSelectAgent: (agent: MivletAgentProfile) => void;
   onCreateAgent: () => void;
-  onEditAgent: (agent: FableAgentProfile) => void;
+  onEditAgent: (agent: MivletAgentProfile) => void;
   onOpenMarketplace: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;

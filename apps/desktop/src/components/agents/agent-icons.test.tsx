@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import { AgentAvatar, ProfileAgentAvatar } from "./agent-icons";
 import { AVATAR_COLOURS } from "../../lib/blob-avatar";
 
@@ -92,7 +92,7 @@ describe("vector agent characters", () => {
   });
 
   it("fences agents even when both profiles use the same saved seed", () => {
-    const profile = { id: "a", avatarSeed: seed } as FableAgentProfile;
+    const profile = { id: "a", avatarSeed: seed } as MivletAgentProfile;
     const view = render(<ProfileAgentAvatar agent={profile} presence="working" />);
     view.rerender(<ProfileAgentAvatar agent={{ ...profile, id: "b" }} presence="done" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");

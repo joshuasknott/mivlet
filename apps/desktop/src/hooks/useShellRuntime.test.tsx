@@ -2,12 +2,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime0 from "../runtime/domains/account";
-import { FableQueryProvider } from "../lib/query-client";
+import { MivletQueryProvider } from "../lib/query-client";
 import { clearActiveRuntimeDataScope } from "../runtime-scope";
 import { useShellRuntime } from "./useShellRuntime";
 
 function wrapper({ children }: PropsWithChildren) {
-  return <FableQueryProvider>{children}</FableQueryProvider>;
+  return <MivletQueryProvider>{children}</MivletQueryProvider>;
 }
 
 describe("conversation shell runtime", () => {

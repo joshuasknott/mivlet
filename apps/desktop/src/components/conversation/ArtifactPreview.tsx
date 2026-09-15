@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { LocalComputerArtifactPreview } from "@fable/protocol";
+import type { LocalComputerArtifactPreview } from "@mivlet/protocol";
 import { parseComputerArtifact, previewComputerArtifact } from "../../lib/computer-artifacts";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";

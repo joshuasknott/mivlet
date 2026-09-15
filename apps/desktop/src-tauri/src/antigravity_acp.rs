@@ -401,7 +401,7 @@ fn write_json(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<(), Strin
 }
 
 fn initialize_request(id: u64) -> Value {
-    json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},"clientInfo":{"name":"Fable","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}}})
+    json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},"clientInfo":{"name":"Mivlet","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}}})
 }
 
 fn validate_initialize(value: &Value) -> Result<(), String> {
@@ -814,7 +814,7 @@ fn approval_payload(
         .and_then(|option| option.get("optionId"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    let fable_mode = if mode == "read-only" {
+    let permission_mode = if mode == "read-only" {
         "read-only"
     } else if mode == "full-access" {
         "full-access"
@@ -823,7 +823,7 @@ fn approval_payload(
     };
     let payload = json!({
         "type":"approval-request", "requestId":request_id, "callId":call_id, "tool":format!("antigravity:{kind}"), "arguments":args_text.clone(),
-        "approval": {"id":crate::paths::truncate_characters(&format!("antigravity-{run_id}-{request_id}-{call_id}"),120),"service":"antigravity","action":title.clone(),"mode":fable_mode,"riskLevel":if fable_mode == "full-access" { "high" } else { "medium" },"dataUsed":[args_text],"consequence":format!("Allow Antigravity to {title}."),"requestedAt":chrono::Utc::now().to_rfc3339(),"decisions":["once","deny"],"confirmationPhrase":if fable_mode == "full-access" { Value::String("approve antigravity action".into()) } else { Value::Null }}
+        "approval": {"id":crate::paths::truncate_characters(&format!("antigravity-{run_id}-{request_id}-{call_id}"),120),"service":"antigravity","action":title.clone(),"mode":permission_mode,"riskLevel":if permission_mode == "full-access" { "high" } else { "medium" },"dataUsed":[args_text],"consequence":format!("Allow Antigravity to {title}."),"requestedAt":chrono::Utc::now().to_rfc3339(),"decisions":["once","deny"],"confirmationPhrase":if permission_mode == "full-access" { Value::String("approve antigravity action".into()) } else { Value::Null }}
     });
     (
         call_id,
@@ -927,7 +927,7 @@ pub fn start_antigravity_acp_turn(
             },
         );
     let request_id = request.request_id.clone();
-    let channel = format!("fable://antigravity/{request_id}");
+    let channel = format!("mivlet://antigravity/{request_id}");
     thread::spawn(move || {
         let outcome = (|| -> Result<(), String> {
             write_json(&stdin, &initialize_request(1))?;

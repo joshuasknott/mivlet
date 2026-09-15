@@ -105,8 +105,8 @@ describe("hosted runner contracts", () => {
       controlRole: "textbox",
       controlName: "Search",
       action: "fill",
-      value: "Fable"
-    })).toMatchObject({ action: "fill", controlName: "Search", value: "Fable" });
+      value: "Mivlet"
+    })).toMatchObject({ action: "fill", controlName: "Search", value: "Mivlet" });
     expect(validateBrowserActionRequest({
       requestKey: "browser-action:request-124",
       observationId: "observation-1234567890abcdef",
