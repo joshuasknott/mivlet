@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import {
   getComputer,
+  mintExecutionCapability,
   requestExecutionCapability,
   requestProvision,
 } from "./hostedExecution";
@@ -32,6 +33,23 @@ describe("hosted execution capability minting", () => {
     expect(isPublicClientFunction(requestExecutionCapability)).toBe(false);
     expect(isPublicClientFunction(requestProvision)).toBe(true);
     expect(isPublicClientFunction(getComputer)).toBe(true);
+  });
+
+  it("fails closed in the mint action when Clerk identity is absent", async () => {
+    const ctx = {
+      auth: { getUserIdentity: async () => null },
+      runQuery: async () => {
+        throw new Error("authorize should not run without Clerk identity");
+      },
+    };
+    await expect(
+      mintExecutionCapability(ctx, {
+        workspaceId: "workspace_1",
+        deviceId: "device_1",
+        agentId: "agent_1",
+        scope: "process:launch",
+      }),
+    ).rejects.toThrow("authentication-required");
   });
 
   it("exposes minting only on the internal function table", () => {

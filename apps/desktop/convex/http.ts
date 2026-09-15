@@ -1,6 +1,7 @@
 import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
+import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
 
 const EXECUTION_CAPABILITY_SCOPES = [
   "process:launch",
@@ -13,11 +14,54 @@ const EXECUTION_CAPABILITY_SCOPES = [
 
 type ExecutionCapabilityScope = (typeof EXECUTION_CAPABILITY_SCOPES)[number];
 
+const AUTHENTICATION_CODE = "authentication-required";
+
+const KNOWN_FAILURES: ReadonlyArray<{
+  match: string;
+  status: number;
+  errorMessage: string;
+}> = [
+  { match: "A validated issuer and subject are required.", status: 401, errorMessage: AUTHENTICATION_CODE },
+  { match: AUTHENTICATION_CODE, status: 401, errorMessage: AUTHENTICATION_CODE },
+  { match: "Mivlet identity link is ambiguous.", status: 403, errorMessage: "identity-link-ambiguous" },
+  { match: "Mivlet identity link is unavailable.", status: 403, errorMessage: "identity-link-unavailable" },
+  { match: "Mivlet account is unavailable.", status: 403, errorMessage: "account-unavailable" },
+  { match: "The requested workspace is unavailable.", status: 403, errorMessage: "workspace-unavailable" },
+  { match: "Active Mivlet workspace membership is required.", status: 403, errorMessage: "membership-required" },
+  { match: "An active Mivlet device link is required.", status: 403, errorMessage: "device-required" },
+  { match: "This Mivlet role is not permitted for the requested operation.", status: 403, errorMessage: "role-not-permitted" },
+  { match: "The hosted computer is not ready.", status: 409, errorMessage: "computer-not-ready" },
+  { match: "The hosted execution node is unavailable.", status: 409, errorMessage: "computer-unavailable" },
+  { match: "invalid-request", status: 400, errorMessage: "invalid-request" },
+  { match: "runner-configuration-required", status: 503, errorMessage: "runner-configuration-required" },
+  { match: "runner-configuration-invalid", status: 503, errorMessage: "runner-configuration-invalid" },
+];
+
+const KEBAB_STATUS: Record<string, number> = {
+  [AUTHENTICATION_CODE]: 401,
+  "identity-link-ambiguous": 403,
+  "identity-link-unavailable": 403,
+  "account-unavailable": 403,
+  "workspace-unavailable": 403,
+  "membership-required": 403,
+  "device-required": 403,
+  "role-not-permitted": 403,
+  "computer-not-ready": 409,
+  "computer-unavailable": 409,
+  "runner-configuration-required": 503,
+  "runner-configuration-invalid": 503,
+  "invalid-request": 400,
+};
+
+export type ExecutionCapabilityHttpCtx = ConvexAuthReader & {
+  runAction: Function;
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function parseExecutionCapabilityArgs(value: unknown): {
+export function parseExecutionCapabilityArgs(value: unknown): {
   workspaceId: string;
   deviceId: string;
   agentId: string;
@@ -43,37 +87,77 @@ function parseExecutionCapabilityArgs(value: unknown): {
   };
 }
 
+function rawErrorText(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "string" && error) return error;
+  return "capability-unavailable";
+}
+
+/** Map Convex/auth failures to a stable kebab-case code and HTTP status. */
+export function classifyCapabilityHttpFailure(error: unknown): {
+  status: number;
+  errorMessage: string;
+} {
+  const raw = rawErrorText(error);
+  for (const known of KNOWN_FAILURES) {
+    if (raw === known.match || raw.includes(known.match)) {
+      return { status: known.status, errorMessage: known.errorMessage };
+    }
+  }
+  if (/^[a-z0-9-]{1,80}$/.test(raw)) {
+    return { status: KEBAB_STATUS[raw] ?? 400, errorMessage: raw };
+  }
+  return { status: 400, errorMessage: "capability-unavailable" };
+}
+
+function jsonError(status: number, errorMessage: string): Response {
+  return Response.json({ status: "error", errorMessage }, { status });
+}
+
+/**
+ * Native-only capability mint. Clerk identity is asserted here before the
+ * internal action so a missing or invalid session is 401 (native clears the
+ * OS-keyring session) rather than a generic 400.
+ */
+export async function handleNativeExecutionCapability(
+  ctx: ExecutionCapabilityHttpCtx,
+  request: Request,
+): Promise<Response> {
+  try {
+    await requireHttpClerkIdentity(ctx);
+  } catch (error) {
+    const failure = classifyCapabilityHttpFailure(error);
+    return jsonError(failure.status, failure.errorMessage);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError(400, "invalid-request");
+  }
+
+  try {
+    const args = parseExecutionCapabilityArgs(body);
+    const receipt = await ctx.runAction(
+      internal.hostedExecution.requestExecutionCapability,
+      args,
+    );
+    return Response.json({ status: "success", value: receipt });
+  } catch (error) {
+    const failure = classifyCapabilityHttpFailure(error);
+    return jsonError(failure.status, failure.errorMessage);
+  }
+}
+
 const http = httpRouter();
 
 http.route({
   path: "/native/execution-capability",
   method: "POST",
-  handler: httpAction(async (ctx, request) => {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { status: "error", errorMessage: "invalid-request" },
-        { status: 400 },
-      );
-    }
-    try {
-      const args = parseExecutionCapabilityArgs(body);
-      const receipt = await ctx.runAction(
-        internal.hostedExecution.requestExecutionCapability,
-        args,
-      );
-      return Response.json({ status: "success", value: receipt });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "capability-unavailable";
-      const errorMessage = /^[a-z0-9-]{1,80}$/.test(message)
-        ? message
-        : "capability-unavailable";
-      return Response.json({ status: "error", errorMessage }, { status: 400 });
-    }
-  }),
+  handler: httpAction(async (ctx, request) =>
+    handleNativeExecutionCapability(ctx, request),
+  ),
 });
 
 export default http;
