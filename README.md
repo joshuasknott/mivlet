@@ -98,8 +98,8 @@ a deployed or production-validated service.
   interaction can be opened in the browser. Frames receive no native capabilities,
   while the application renderer retains its IPC-only network policy.
 - Conversation tabs and two-pane splits arrange durable conversations and
-  supported artifacts. Closing a tab leaves work running and discoverable in
-  Activity. Projects contain focused chats, shared files and occurrence-tracked
+  supported artifacts. Closing a tab leaves work running and discoverable from
+  Work mode and the contextual right panel. Projects contain focused chats, shared files and occurrence-tracked
   local research schedules. Work runs while the app is open and Windows is awake;
   interrupted work requires review before continuation. Steering and explicit
   continuation are recorded at safe boundaries without replaying external
@@ -230,7 +230,10 @@ related capability unavailable rather than substituting a fixture.
 
 ## Verification
 
-The broad repository gates are:
+The aggregate local/release gate is `pnpm check` (quality, `verify:build`, tests,
+perf, release manifest, `tauri:check`, and `audit:all`). The Windows embedded host
+is skipped on non-Windows `pnpm test` rather than failing with `ENOENT`. Focused
+gates:
 
 ```bash
 pnpm typecheck
@@ -239,6 +242,7 @@ pnpm quality
 pnpm verify:build
 pnpm perf:check
 pnpm perf:test
+pnpm perf:runtime
 pnpm release:test
 pnpm tauri:check
 ```
@@ -254,9 +258,11 @@ cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --a
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 ```
 
-Hosted-runner changes require its focused tests, build, and a Wrangler dry-run.
+Hosted-runner changes require its focused tests, build, and
+`pnpm --filter @fable/hosted-runner worker:deploy:dry-run`.
 A dry-run validates packaging and bindings only; it does not validate a live
-Cloudflare environment.
+Cloudflare environment. Local hosted-runner Worker dev is
+`pnpm --filter @fable/hosted-runner worker:dev` on port 8789.
 
 ## Working principles
 

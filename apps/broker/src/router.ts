@@ -422,6 +422,5 @@ function redactLog(event: string, method: string | undefined, path: string, corr
 }
 
 const defaultLog: BrokerLogger = (line) => {
-  // eslint-disable-next-line no-console
   console.log(line);
 };

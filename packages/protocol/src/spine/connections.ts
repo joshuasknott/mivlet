@@ -517,7 +517,7 @@ export interface ConnectedSourceSearchResult {
   contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
   capabilityId: "knowledge.content.search";
   query: string;
-  scope: { workspaceId: string; threadId?: string };
+  scope: { workspaceId: string; projectId?: string };
   citations: readonly ConnectedSourceCitation[];
   nextCursor?: string;
   trust: "external-untrusted";

@@ -48,8 +48,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm quality
-      - run: pnpm --filter '!@fable/agent-host' -r --if-present test
-      - run: node --test scripts/ci/affected.test.mjs
+      - run: pnpm test
 
   windows:
     needs: changes

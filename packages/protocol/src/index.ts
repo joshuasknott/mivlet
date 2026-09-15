@@ -3,6 +3,7 @@ export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
 export * from "./domains/agent-runtime.js";
 export * from "./domains/connectors.js";
+export * from "./domains/connected-source-search.js";
 export * from "./domains/provider-routing.js";
 export * from "./domains/hosted-computer.js";
 export * from "./domains/hosted-execution-capability.js";

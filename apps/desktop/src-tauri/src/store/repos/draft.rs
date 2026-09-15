@@ -98,8 +98,4 @@ pub fn delete(tx: &Connection, id: &str) -> Result<()> {
     delete_scoped(tx, &DataScope::legacy_default(), None, id)
 }
 
-fn aad(id: &str) -> String {
-    format!("draft:{id}")
-}
-
 use rusqlite::OptionalExtension as _;

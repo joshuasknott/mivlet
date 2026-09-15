@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && vite build --configLoader runner",
     "preview": "vite preview --host 127.0.0.1",
-    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit",
+    "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p convex/tsconfig.json --noEmit",
     "test": "node --test scripts/local-env.node-test.mjs && vitest run --configLoader runner",
     "test:convex": "vitest run --configLoader runner --dir convex",
     "convex:typecheck": "tsc -p convex/tsconfig.json --noEmit",

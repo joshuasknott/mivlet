@@ -128,10 +128,12 @@ account and validated model provider. Provider-specific runtime, network and
 entitlement prerequisites remain separate. A build on a developer machine does
 not establish a clean-machine installation or every provider route.
 
-No source was committed or pushed, and no installer was published or installed
+At the time of original acceptance (September 2026): no source was committed or
+pushed, and no installer was published or installed
 over the user's existing installation during this task. Existing account data
 was read by the extracted package; the additional disposable acceptance turns
-remain in its normal local conversation history.
+remain in its normal local conversation history. That checkout has since been
+committed; the note is historical, not a current publication constraint.
 
 ## Visual provider expansion
 

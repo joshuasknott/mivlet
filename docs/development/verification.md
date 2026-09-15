@@ -18,7 +18,7 @@ snapshot persistence and execution ownership explicit when separating shell code
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
-`useWorkspaceNavigation` owns view restoration and navigation, while
+`shell/useWorkspaceNavigation.ts` owns view restoration and navigation, while
 `WorkspaceExecution` retains execution ownership. Native-agent regressions are
 split into context, persistence, recovery, cancellation and provider suites;
 their shared `native-agent-test-harness.ts` supplies deterministic native transport.
@@ -52,16 +52,16 @@ Require the aggregate CI check before merging and rerun affected checks after co
 
 | Scope | Commands |
 | --- | --- |
-| Repository types and tests | `pnpm typecheck`, `pnpm test` |
+| Repository types and tests | `pnpm typecheck`, `pnpm test` (host fixture tests skip unless Windows + bundled executable) |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
 | Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
-| Code quality | `pnpm quality` |
-| Production build validation | `pnpm verify:build` |
+| Code quality | `pnpm quality` (`format:check` is an allowlisted ratchet, not repository-wide Prettier) |
+| Production build validation | `pnpm verify:build` (includes hosted-runner `tsc` emit) |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
 | Embedded Windows agent host | `pnpm test:host`; `pnpm --filter @fable/agent-host typecheck`, `pnpm --filter @fable/agent-host build` |
-| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build` |
+| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build`, `pnpm --filter @fable/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
 
 `pnpm test` still runs every workspace test, including `@fable/agent-host`. Host
