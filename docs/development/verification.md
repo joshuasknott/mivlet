@@ -54,7 +54,7 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | --- | --- |
 | Repository types and tests | `pnpm typecheck`, `pnpm test` |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
-| Linux package tests without agent-host | `pnpm test:ci` |
+| Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
 | Code quality | `pnpm quality` |
 | Production build validation | `pnpm verify:build` |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
@@ -65,9 +65,10 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Full repository gate | `pnpm check` |
 
 `pnpm test` still runs every workspace test, including `@fable/agent-host`. Host
-fixture tests skip off Windows so the chain no longer aborts on Linux.
-`pnpm test:ci` matches PR CI, which excludes that package entirely.
-`pnpm check:pr` is the Linux TypeScript job (`typecheck`, `quality`, `test:ci`).
+fixture tests skip unless they are on Windows with the bundled executable present,
+so the chain no longer aborts on Linux.
+`pnpm test:pr` matches PR CI, which excludes that package entirely.
+`pnpm check:pr` is the Linux TypeScript job (`typecheck`, `quality`, `test:pr`).
 `pnpm check` / `verify:build` compile the Windows Bun host even on Linux.
 Changing root `package.json` is a native path and schedules the 35-minute
 Windows job.

@@ -243,8 +243,8 @@ pnpm release:test
 pnpm tauri:check
 ```
 
-Daily Linux PR loops can use `pnpm check:pr`. The Windows embedded-host suite is
-`pnpm test:host`.
+Daily Linux PR loops can use `pnpm check:pr` (or `pnpm test:pr` for the package
+tests). The Windows embedded-host suite is `pnpm test:host`.
 
 For Rust changes, also run:
 

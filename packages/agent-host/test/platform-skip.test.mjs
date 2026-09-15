@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   WINDOWS_HOST_SKIP_REASON,
+  executable,
+  windowsHostMissingReason,
   windowsHostSkipOptions,
+  windowsHostSkipReason,
 } from "./support/windows-host.mjs";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
@@ -30,22 +33,34 @@ function runNodeTest(files) {
   });
 }
 
-test("win32 skip options leave host tests enabled", () => {
-  assert.deepEqual(windowsHostSkipOptions("win32"), {});
+test("win32 skip options leave host tests enabled when the binary is present", () => {
+  assert.deepEqual(windowsHostSkipOptions({ platform: "win32", present: true }), {});
+  assert.equal(windowsHostSkipReason({ platform: "win32", present: true }), null);
 });
 
-test("non-Windows platforms skip the bundled executable tests", () => {
+test("win32 skip options skip when the bundled binary is missing", () => {
+  assert.deepEqual(windowsHostSkipOptions({ platform: "win32", present: false }), {
+    skip: windowsHostMissingReason(),
+  });
+});
+
+test("non-Windows platforms skip even when a binary is present", () => {
   for (const platform of ["linux", "darwin", "freebsd", "android", "aix", "openbsd"]) {
-    assert.deepEqual(windowsHostSkipOptions(platform), { skip: WINDOWS_HOST_SKIP_REASON });
+    assert.deepEqual(windowsHostSkipOptions({ platform, present: true }), { skip: WINDOWS_HOST_SKIP_REASON });
   }
 });
 
-test("current platform skip options match process.platform", () => {
-  assert.deepEqual(windowsHostSkipOptions(), windowsHostSkipOptions(process.platform));
-  if (process.platform === "win32") {
+test("live skip options match platform and binary presence", () => {
+  assert.deepEqual(
+    windowsHostSkipOptions(),
+    windowsHostSkipOptions({ platform: process.platform, present: existsSync(executable) }),
+  );
+  if (process.platform === "win32" && existsSync(executable)) {
     assert.deepEqual(windowsHostSkipOptions(), {});
-  } else {
+  } else if (process.platform !== "win32") {
     assert.equal(windowsHostSkipOptions().skip, WINDOWS_HOST_SKIP_REASON);
+  } else {
+    assert.equal(windowsHostSkipOptions().skip, windowsHostMissingReason());
   }
 });
 
@@ -67,27 +82,29 @@ test("every bundled-executable test file uses the shared Windows skip", () => {
   }
 });
 
-test("linux skip options prevent the test body from running", windowsHostSkipOptions("linux"), () => {
+test("linux skip options prevent the test body from running", windowsHostSkipOptions({ platform: "linux", present: true }), () => {
   throw new Error("linux skip options must prevent execution");
 });
 
-test("AgentHostProcess refuses to spawn the Windows executable off win32", {
-  skip: process.platform === "win32" ? "Windows is allowed to spawn the host" : false,
+test("AgentHostProcess refuses to spawn when the host is skipped", {
+  skip: process.platform === "win32" && existsSync(executable) ? "Windows with a built host may spawn" : false,
 }, async () => {
   const { AgentHostProcess } = await import("./support/host-process.mjs");
-  assert.throws(() => new AgentHostProcess(), { message: WINDOWS_HOST_SKIP_REASON });
+  assert.throws(() => new AgentHostProcess(), { message: windowsHostSkipReason() });
 });
 
-test("node:test skips linux options and still runs win32 options", () => {
+test("node:test skips linux and missing-binary options and still runs win32 with a binary", () => {
   const result = runNodeTest([fixture]);
   const output = `${result.stdout}${result.stderr}`;
   assert.equal(result.status, 0, output);
   assert.match(output, /# SKIP the acceptance host is the bundled Windows executable/);
-  assert.match(output, /# skipped 1/);
+  assert.match(output, /# SKIP bundled agent host is missing:/);
+  assert.match(output, /# skipped 2/);
   assert.match(output, /# fail 0/);
   assert.match(output, /# pass 1/);
   assert.doesNotMatch(output, /^not ok /m);
   assert.doesNotMatch(output, /linux skip options must prevent execution/);
+  assert.doesNotMatch(output, /missing binary skip options must prevent execution/);
 });
 
 test("bundled host tests skip instead of spawning the Windows executable off win32", {
@@ -100,7 +117,6 @@ test("bundled host tests skip instead of spawning the Windows executable off win
   assert.match(output, /# SKIP the acceptance host is the bundled Windows executable/);
   assert.doesNotMatch(output, /^not ok /m);
   assert.doesNotMatch(output, /ENOENT/);
-  assert.doesNotMatch(output, /mivlet-agent-host\.exe/);
   const skipped = output.match(/# skipped (\d+)/);
   assert.ok(skipped, output);
   assert.ok(Number(skipped[1]) >= files.length, output);

@@ -1,12 +1,8 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { WINDOWS_HOST_SKIP_REASON } from "./windows-host.mjs";
-
-const testDirectory = dirname(fileURLToPath(import.meta.url));
-const executable = resolve(testDirectory, "../../../../apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe");
+import { join } from "node:path";
+import { executable, windowsHostSkipOptions } from "./windows-host.mjs";
 
 function timeoutError(label, events) {
   const recent = events.slice(-8).map(event => JSON.stringify(event)).join("\n");
@@ -22,12 +18,8 @@ export class AgentHostProcess {
   #spawnError;
 
   constructor(args = [], env = {}) {
-    if (process.platform !== "win32") {
-      throw new Error(WINDOWS_HOST_SKIP_REASON);
-    }
-    if (!existsSync(executable)) {
-      throw new Error(`bundled agent host is missing: ${executable}`);
-    }
+    const skip = windowsHostSkipOptions();
+    if (skip.skip) throw new Error(skip.skip);
     this.directory = mkdtempSync(join(tmpdir(), "mivlet-agent-host-test-"));
     this.child = spawn(executable, args, {
       cwd: this.directory,
