@@ -126,14 +126,9 @@ struct ConnectorActionPolicy {
 
 const GITHUB_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read:user", "Account identity", "read", true),
-    (
-        "repo",
-        "Repositories, issues, and pull requests",
-        "read",
-        true,
-    ),
     ("read:org", "Organization membership", "read", false),
 ];
+const GITHUB_DISALLOWED_SCOPES: &[&str] = &["repo", "public_repo", "delete_repo"];
 const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("project:read", "Projects", "read", true),
     ("deployment:read", "Deployments", "read", true),
@@ -148,8 +143,8 @@ const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
     ),
     (
         "https://www.googleapis.com/auth/drive.file",
-        "Selected Drive files",
-        "read",
+        "Selected Drive files you create or change",
+        "write",
         true,
     ),
     (
@@ -247,7 +242,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "read repositories, issues, and pull requests",
         ],
         scopes: GITHUB_SCOPES,
-        setup_message: "Register a GitHub OAuth App and configure the Mivlet auth broker.",
+        setup_message: "Register a GitHub App with read-only repository permissions (contents, issues, pull requests, metadata) and configure the Mivlet auth broker.",
         actions: &[],
     },
     ConnectorCatalogEntry {
@@ -814,6 +809,16 @@ fn missing_required_scopes(
         .any(|(id, _, _, required)| *required && !connection_has_scope(connection, id))
 }
 
+pub(crate) fn connection_has_disallowed_github_scope(
+    connection: &ConnectorConnection,
+) -> bool {
+    connection.connector_id == "github"
+        && connection
+            .scopes
+            .iter()
+            .any(|scope| GITHUB_DISALLOWED_SCOPES.contains(&scope.as_str()))
+}
+
 fn action_required_scopes(action: &str) -> &'static [&'static str] {
     match action {
         "google-drive.create-file"
@@ -870,7 +875,11 @@ fn build_manifest_with_health(
         && connection
             .as_ref()
             .is_some_and(|connection| missing_required_scopes(entry, connection));
-    let connector_available = connected && !missing_required;
+    let overprivileged = connected
+        && connection
+            .as_ref()
+            .is_some_and(connection_has_disallowed_github_scope);
+    let connector_available = connected && !missing_required && !overprivileged;
     debug_assert!(CONNECTOR_AUTH_STATES.contains(&status));
 
     let health = health.unwrap_or(ConnectorHealth {
@@ -886,6 +895,10 @@ fn build_manifest_with_health(
         retry_after: None,
     });
     let health_summary = match health.state.as_str() {
+        _ if overprivileged => {
+            "Write-capable GitHub scopes are no longer requested; reconnect this provider."
+                .to_string()
+        }
         _ if missing_required => {
             "Missing required OAuth scopes; reconnect this provider.".to_string()
         }
@@ -2759,6 +2772,23 @@ mod workspace_scope_tests {
             bound_prepared_connection_id(workspace, "gmail", &record, None).unwrap_err();
         assert_eq!(disconnected.code, "conflict");
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn github_catalog_does_not_request_or_label_write_capable_repo_scope() {
+        let github = CATALOG.iter().find(|entry| entry.id == "github").unwrap();
+        assert!(github
+            .scopes
+            .iter()
+            .all(|(id, _, access, _)| *id != "repo" && *access == "read"));
+        assert!(github.scopes.iter().any(|(id, _, _, _)| *id == "read:user"));
+        let drive = CATALOG
+            .iter()
+            .find(|entry| entry.id == "google-drive")
+            .unwrap();
+        assert!(drive.scopes.iter().any(|(id, _, access, required)| {
+            *id == "https://www.googleapis.com/auth/drive.file" && *access == "write" && *required
+        }));
     }
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;

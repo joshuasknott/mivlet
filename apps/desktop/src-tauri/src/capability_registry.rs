@@ -155,7 +155,7 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
         capability_id: "source.repository.list",
         connector_id: "github",
         adapter: NativeReadAdapter::Capability("repositories.list"),
-        required_scopes: &["repo"],
+        required_scopes: &["read:user"],
     },
     NativeReadImplementation {
         capability_id: "software.deployment.list",
@@ -287,6 +287,16 @@ fn availability_for(
             "credential-unavailable",
             implementation.capability_id,
             "The selected Connection credential is unavailable.",
+            false,
+        ));
+    }
+    if implementation.connector_id == "github"
+        && crate::connectors::connection_has_disallowed_github_scope(connection)
+    {
+        return Err(error(
+            "scope-denied",
+            implementation.capability_id,
+            "The selected Connection still has write-capable GitHub scopes; reconnect this provider.",
             false,
         ));
     }
@@ -1072,11 +1082,21 @@ mod tests {
             "provider-boundary"
         );
         assert_eq!(
-            availability_for(registered, &connection(&["repo"]), &canonical("healthy")).unwrap(),
+            availability_for(
+                registered,
+                &connection(&["read:user"]),
+                &canonical("healthy")
+            )
+            .unwrap(),
             "available"
         );
         assert_eq!(
-            availability_for(registered, &connection(&["repo"]), &canonical("unknown")).unwrap(),
+            availability_for(
+                registered,
+                &connection(&["read:user"]),
+                &canonical("unknown")
+            )
+            .unwrap(),
             "degraded"
         );
         assert_eq!(
@@ -1086,9 +1106,23 @@ mod tests {
             "scope-denied"
         );
         assert_eq!(
-            availability_for(registered, &connection(&["repo"]), &canonical("offline"))
-                .unwrap_err()
-                .code,
+            availability_for(
+                registered,
+                &connection(&["read:user", "repo"]),
+                &canonical("healthy")
+            )
+            .unwrap_err()
+            .code,
+            "scope-denied"
+        );
+        assert_eq!(
+            availability_for(
+                registered,
+                &connection(&["read:user"]),
+                &canonical("offline")
+            )
+            .unwrap_err()
+            .code,
             "connection-unhealthy"
         );
         assert!(implementation("unknown.capability").is_none());

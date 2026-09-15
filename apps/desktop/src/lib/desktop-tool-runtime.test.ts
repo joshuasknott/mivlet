@@ -497,8 +497,9 @@ describe("hosted cloud browser execution", () => {
       expect.objectContaining({ request: sourceApproval, decision: "once" })
     );
     expect(onHostedBrowserSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ liveViewUrl: expect.stringContaining("live.browser.run") })
+      expect.objectContaining({ takeoverAvailable: true })
     );
+    expect(onHostedBrowserSnapshot.mock.calls[0][0].liveViewUrl).toBeUndefined();
     expect(output).toContain('"title":"Example Domain"');
     expect(output).toContain('"name":"More information"');
     expect(output).toContain('"canScrollDown":true');

@@ -308,6 +308,7 @@ pub fn run() {
             hosted_computer::hosted_browser_action_prepare,
             hosted_computer::hosted_browser_action,
             hosted_computer::hosted_browser_snapshot,
+            hosted_computer::hosted_browser_open_live_view,
             local_computer::plugins::builtin_plugins_status,
             local_computer::plugins::builtin_plugin_set,
             local_computer::plugins::builtin_plugin_prepare_computer,

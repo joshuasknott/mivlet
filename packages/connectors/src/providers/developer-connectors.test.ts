@@ -78,7 +78,7 @@ describe("GitHub production adapter", () => {
         expect(body).toMatchObject({ contractVersion: 1, provider: "github", handoff: "ticket", state: "state-1" });
         return response({
           contractVersion: 1,
-          tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: ["repo", "read:user"] },
+          tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: ["read:user", "read:org"] },
           account: { id: "123", displayName: "The Octocat", handle: "octocat" }
         });
       }
@@ -86,7 +86,7 @@ describe("GitHub production adapter", () => {
         expect(body).toMatchObject({ contractVersion: 1, provider: "github", refreshToken: "synthetic-refresh" });
         return response({
           contractVersion: 1,
-          tokens: { accessToken: "synthetic-access-2", tokenType: "Bearer", scopes: ["repo"] }
+          tokens: { accessToken: "synthetic-access-2", tokenType: "Bearer", scopes: ["read:user", "read:org"] }
         });
       }
       if (target.pathname === "/oauth/github/revoke") {
@@ -104,7 +104,7 @@ describe("GitHub production adapter", () => {
     const authorize = new URL(started.authorizationUrl);
     expect(authorize.pathname).toBe("/oauth/github/authorize");
     expect(authorize.searchParams.get("code_challenge")).toBe("challenge");
-    expect(authorize.searchParams.get("scope")).toBe("read:user read:org repo");
+    expect(authorize.searchParams.get("scope")).toBe("read:user read:org");
 
     const completed = await adapter.completeAuth({
       callbackUrl: `${common.redirectUri}?handoff=ticket&state=state-1`,

@@ -89,10 +89,10 @@ export const connectorCatalog: ConnectorManifest[] = [
     authMode: "oauth-broker",
     scopes: [
       permission("read:user", "Account identity", "read", true),
-      permission("repo", "Repositories, issues, and pull requests", "read", true),
       permission("read:org", "Organization membership", "read", false)
     ],
-    setupMessage: "Register a GitHub OAuth App and configure the Mivlet auth broker."
+    setupMessage:
+      "Register a GitHub App with read-only repository permissions (contents, issues, pull requests, metadata) and configure the Mivlet auth broker."
   }),
   disconnectedConnector({
     id: "vercel",
@@ -114,8 +114,8 @@ export const connectorCatalog: ConnectorManifest[] = [
     scopes: [
       permission(
         "https://www.googleapis.com/auth/drive.file",
-        "Selected Drive files",
-        "read",
+        "Selected Drive files you create or change",
+        "write",
         true
       )
     ],

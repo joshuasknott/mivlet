@@ -171,4 +171,36 @@ describe("conversation runtime", () => {
     expect(transport.views[1].currentRevision.state).toBe("terminal");
     expect(new Set(transport.views.map((view) => view.currentRevision.id)).size).toBe(5);
   });
+
+  it("redacts tool arguments and results before they are persisted for replay", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-1");
+    await writer.record({
+      kind: "tool-call",
+      content: JSON.stringify({ command: "env", token: "super-secret-token" }),
+      callId: "call-secret",
+      toolName: "run-shell"
+    });
+    await writer.record({
+      kind: "tool-result",
+      content: "Authorization: Bearer abcdefghij1234567890 and sk-ant-12345678901234567890",
+      callId: "call-secret",
+      toolName: "run-shell",
+      ok: true
+    });
+    await writer.record({
+      kind: "error",
+      content: "provider failed: token=leaked-refresh-token",
+      code: "provider-error",
+      retryable: true
+    });
+
+    expect(transport.views[0].currentRevision.content).toContain("[REDACTED]");
+    expect(transport.views[0].currentRevision.content).not.toContain("super-secret-token");
+    expect(transport.views[1].currentRevision.content).toContain("[REDACTED]");
+    expect(transport.views[1].currentRevision.content).not.toContain("abcdefghij1234567890");
+    expect(transport.views[1].currentRevision.content).not.toContain("sk-ant-");
+    expect(transport.views[2].currentRevision.content).toContain("[REDACTED]");
+    expect(transport.views[2].currentRevision.content).not.toContain("leaked-refresh-token");
+  });
 });

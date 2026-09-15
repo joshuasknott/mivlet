@@ -14,6 +14,8 @@ use reqwest::{header, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
 
@@ -31,6 +33,64 @@ const HOSTED_COMPUTER_SERVICE: &str = "Mivlet cloud computer";
 const HOSTED_PROCESS_CONFIRMATION: &str = "run on cloud computer";
 const HOSTED_BROWSER_CONFIRMATION: &str = "open cloud browser";
 const HOSTED_BROWSER_ACTION_CONFIRMATION: &str = "act in cloud browser";
+const LIVE_VIEW_TTL: Duration = Duration::from_secs(5 * 60);
+
+struct LiveViewHandle {
+    url: String,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+fn live_view_handles() -> &'static Mutex<HashMap<String, LiveViewHandle>> {
+    static HANDLES: OnceLock<Mutex<HashMap<String, LiveViewHandle>>> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn live_view_key(workspace_id: &str, agent_id: &str, device_id: &str) -> String {
+    format!("{workspace_id}\0{agent_id}\0{device_id}")
+}
+
+fn store_live_view(workspace_id: &str, agent_id: &str, device_id: &str, url: String) {
+    let Ok(mut handles) = live_view_handles().lock() else {
+        return;
+    };
+    handles.insert(
+        live_view_key(workspace_id, agent_id, device_id),
+        LiveViewHandle {
+            url,
+            expires_at: Utc::now() + chrono::Duration::from_std(LIVE_VIEW_TTL).unwrap_or(chrono::Duration::minutes(5)),
+        },
+    );
+}
+
+fn live_view_handle(workspace_id: &str, agent_id: &str, device_id: &str) -> Option<String> {
+    let Ok(mut handles) = live_view_handles().lock() else {
+        return None;
+    };
+    let key = live_view_key(workspace_id, agent_id, device_id);
+    let now = Utc::now();
+    match handles.get(&key) {
+        Some(handle) if handle.expires_at > now => Some(handle.url.clone()),
+        Some(_) => {
+            handles.remove(&key);
+            None
+        }
+        None => None,
+    }
+}
+
+fn retain_live_view_for_frontend(
+    mut snapshot: HostedBrowserSnapshot,
+    workspace_id: &str,
+    agent_id: &str,
+    device_id: &str,
+) -> HostedBrowserSnapshot {
+    if let Some(url) = snapshot.live_view_url.take() {
+        store_live_view(workspace_id, agent_id, device_id, url);
+    }
+    snapshot.takeover_available = live_view_handle(workspace_id, agent_id, device_id).is_some();
+    snapshot.live_view_url = None;
+    snapshot
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -255,6 +315,8 @@ pub struct HostedBrowserSnapshot {
     preview_data_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_view_url: Option<String>,
+    #[serde(default)]
+    takeover_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_download: Option<HostedBrowserDownloadSnapshot>,
     updated_at: String,
@@ -1429,7 +1491,12 @@ pub async fn hosted_browser_navigate(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &proposal.workspace_id,
+        &proposal.agent_id,
+        &proposal.device_id,
+    ))
 }
 
 #[tauri::command]
@@ -1570,7 +1637,12 @@ pub async fn hosted_browser_action(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &proposal.workspace_id,
+        &proposal.agent_id,
+        &proposal.device_id,
+    ))
 }
 
 #[tauri::command]
@@ -1600,10 +1672,40 @@ pub async fn hosted_browser_snapshot(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &target.workspace_id,
+        &target.agent_id,
+        &target.device_id,
+    ))
 }
 
-#[cfg(test)]
+#[tauri::command]
+pub fn hosted_browser_open_live_view(target: HostedBrowserTarget) -> Result<(), String> {
+    let target = normalize_browser_target(target)?;
+    let url = live_view_handle(&target.workspace_id, &target.agent_id, &target.device_id)
+        .ok_or_else(|| "The cloud browser Live View session is no longer available.".to_string())?;
+    validate_live_view_url(&url)?;
+    crate::oauth_loopback::open_browser(&url);
+    Ok(())
+}
+
+fn validate_live_view_url(value: &str) -> Result<(), String> {
+    let url = Url::parse(value)
+        .map_err(|_| "The cloud browser Live View link failed validation.".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("live.browser.run")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !url.path().starts_with("/ui/")
+        || !url
+            .query_pairs()
+            .any(|(key, value)| key == "wss" && !value.is_empty())
+    {
+        return Err("The cloud browser Live View link failed validation.".into());
+    }
+    Ok(())
+}
 mod tests {
     use super::*;
 
@@ -1896,5 +1998,51 @@ mod tests {
             &mismatched.workspace_id,
             Some(&mismatched.device_id)
         ));
+    }
+
+    #[test]
+    fn live_view_secrets_stay_native_and_are_omitted_from_frontend_snapshots() {
+        let snapshot = HostedBrowserSnapshot {
+            current_url: "https://example.com/".into(),
+            title: "Example".into(),
+            observation_id: "observation-1234567890abcdef".into(),
+            viewport: HostedBrowserViewportSnapshot {
+                scroll_x: 0,
+                scroll_y: 0,
+                width: 1280,
+                height: 800,
+                document_width: 1280,
+                document_height: 1600,
+                can_scroll_up: false,
+                can_scroll_down: true,
+            },
+            navigation: HostedBrowserNavigationSnapshot {
+                can_go_back: false,
+                can_go_forward: false,
+            },
+            controls: vec![],
+            preview_data_url: "data:image/jpeg;base64,cHJldmlldw==".into(),
+            live_view_url: Some("https://live.browser.run/ui/token?wss=secret".into()),
+            takeover_available: false,
+            last_download: None,
+            updated_at: "2026-08-25T12:00:02.000Z".into(),
+        };
+        let public = retain_live_view_for_frontend(
+            snapshot,
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+        );
+        assert!(public.live_view_url.is_none());
+        assert!(public.takeover_available);
+        let encoded = serde_json::to_string(&public).unwrap();
+        assert!(!encoded.contains("wss"));
+        assert!(!encoded.contains("liveViewUrl"));
+        assert_eq!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").as_deref(),
+            Some("https://live.browser.run/ui/token?wss=secret")
+        );
+        assert!(validate_live_view_url("https://live.browser.run/ui/token?wss=secret").is_ok());
+        assert!(validate_live_view_url("https://evil.example/?wss=secret").is_err());
     }
 }

@@ -75,8 +75,8 @@ const GOOGLE_PROFILES: Record<GoogleConnectorId, GoogleConnectorProfile> = {
       },
       {
         id: "https://www.googleapis.com/auth/drive.file",
-        label: "Selected Drive files",
-        access: "read",
+        label: "Selected Drive files you create or change",
+        access: "write",
         required: true,
         description: "See, create, and edit only Google Drive files the user opens or creates with Mivlet."
       }

@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   HostedRunnerRequestError,
+  assertPublicHttpsUrl,
+  setPublicAddressLookupForTests,
   validateBrowserActionRequest,
   validateBrowserNavigateRequest,
   validateComputerId,
@@ -10,6 +12,9 @@ import {
 } from "./contracts";
 
 describe("hosted runner contracts", () => {
+  afterEach(() => {
+    setPublicAddressLookupForTests();
+  });
   it("accepts a bounded argv launch rooted in the workspace", () => {
     expect(validateLaunchRequest({
       requestKey: "request:run-123:1",
@@ -67,9 +72,29 @@ describe("hosted runner contracts", () => {
     "https://10.1.2.3/",
     "https://192.168.1.2/",
     "https://[::1]/",
-    "https://user:secret@example.com/"
+    "https://[::ffff:127.0.0.1]/",
+    "https://user:secret@example.com/",
+    "https://0x7f000001/",
+    "https://2130706433/",
+    "https://127.1/",
+    "https://0177.0.0.1/",
+    "https://0x7f.0.0.1/"
   ])("rejects a non-public browser target: %s", (url) => {
     expect(() => validatePublicHttpsUrl(url)).toThrowError(HostedRunnerRequestError);
+  });
+
+  it("resolves hostnames and rejects DNS answers that are private or loopback", async () => {
+    setPublicAddressLookupForTests(async (hostname) => {
+      if (hostname === "example.com") return ["93.184.216.34"];
+      if (hostname === "127.0.0.1.nip.io") return ["127.0.0.1"];
+      if (hostname === "metadata.example") return ["169.254.169.254"];
+      if (hostname === "mapped.example") return ["::ffff:127.0.0.1"];
+      return [];
+    });
+    await expect(assertPublicHttpsUrl("https://example.com/path")).resolves.toBe("https://example.com/path");
+    await expect(assertPublicHttpsUrl("https://127.0.0.1.nip.io/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+    await expect(assertPublicHttpsUrl("https://metadata.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+    await expect(assertPublicHttpsUrl("https://mapped.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
   });
 
   it("accepts only an observed control action with the matching visible description", () => {
