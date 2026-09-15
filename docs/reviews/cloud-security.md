@@ -1,7 +1,9 @@
 # Cloud and local security review
 
 - **Date:** 2026-09-15
-- **Revision:** `090a47ff` (`main` at review start)
+- **Revision:** `090a47ff` (`main` at review start); P2 corrections from
+  Codex review on PR #61 (replay window, mock Clerk issuer severity, Codex
+  screenshot bridge).
 - **Kind:** analysis only. No application code was changed.
 - **Scope:** secrets custody, account/session, confidential OAuth broker, exact
   approvals and computer leases, native and hosted computer use, provider
@@ -53,7 +55,8 @@ or when a secret that is supposed to stay server-side leaks:
 
 1. Hosted execution capabilities are HMAC-bound and generation-fenced, but the
    signed `nonce` is never consumed, so a stolen capability is reusable until
-   expiry.
+   expiry **while that computer remains ready at the signed generation**.
+   Destroying the computer ends that window.
 2. The hosted-runner root Bearer credential is a generation-unfenced superuser
    on process and browser routes, not only on provision/destroy.
 3. The broker can run public HTTPS with in-memory OAuth state if the Worker is
@@ -88,7 +91,7 @@ rather than as stand-alone Critical bugs in undeployed source.
 
 ## High
 
-### H1 — Hosted execution capabilities are replayable until expiry
+### H1 — Hosted execution capabilities are replayable while the signed generation stays ready
 
 **Paths:**
 `packages/protocol/src/domains/hosted-execution-capability.ts`,
@@ -102,12 +105,23 @@ nonce. `requestKey` idempotency on launch/navigate prevents *duplicate keys*,
 not reuse of the same token with new keys.
 
 **Scenario.** A capability token leaves the native process (crash dump, debug
-log, compromised renderer that already has IPC, operator paste). Until
-`expiresAt`, the holder can call the scoped route repeatedly: many distinct
-`process:launch` jobs, repeated `process:inspect` of stdout, or repeated
-`browser:act` with fresh request keys. Destroying the computer invalidates
-generation for *new* tokens; an unexpired token for the *current* generation
-still works.
+log, compromised renderer that already has IPC, operator paste). Replay is
+possible only while **all** of these hold: the token is unexpired, the
+computer is still `ready` with `keep_alive`, and `generation` still matches
+the value signed into the token.
+
+`ComputerAuthority.destroy` increments generation, writes lifecycle
+`destroying` then `destroyed` (or `degraded` on failure), clears keep-alive,
+and destroys the sandbox. Process and browser capability routes then reject
+the token: `requireCapabilityGeneration` and `requireReady` fail on
+non-ready or mismatched generation. An unexpired `FableCapability` does
+**not** survive computer deletion.
+
+While that original ready generation remains active, the holder can call the
+scoped route repeatedly: many distinct `process:launch` jobs, repeated
+`process:inspect` of stdout, or repeated `browser:act` with fresh request
+keys. `requestKey` idempotency only collapses duplicate keys, not new keys
+on the same token.
 
 **Why it matters.** Architecture and comments describe capabilities as
 short-lived, scoped, generation-fenced, and single-use. The first three are
@@ -286,36 +300,7 @@ or a POST from a loopback page that holds a pre-image). Bind redeem to a
 desktop-only secret established at authorize (hash of a redeem nonce stored
 in pending). Consume pending *and* require that nonce. Shorten TTL further.
 
-### H7 — Convex auth config defaults to a mock Clerk issuer
-
-**Paths:** `apps/desktop/convex/auth.config.ts`
-
-**What the code does.**
-
-```ts
-domain: process.env.FABLE_CLERK_ISSUER ?? "https://mock-clerk.fable.local",
-applicationID: process.env.FABLE_CLERK_AUDIENCE ?? "fable-convex-test"
-```
-
-Desktop Clerk setup *does* fail closed without `FABLE_CLERK_ISSUER` and, in
-production, without an explicit audience
-(`apps/desktop/src-tauri/src/clerk_identity.rs`). Convex does not.
-
-**Scenario.** A Convex deployment is created without the Clerk env vars. The
-deployment trusts JWTs for the mock issuer/audience. Anyone who can mint or
-replay tokens for that pair (or who points a test IdP at it) would be treated
-as an authenticated Convex caller. Membership tables may still be empty, but
-the identity gate is wrong.
-
-**Why it matters.** Hosted identity is the root of workspace, device, and
-capability minting. A mock fallback is appropriate only in unit tests, not in
-deployed `auth.config.ts`.
-
-**Mitigation direction.** Fail Convex auth configuration when issuer/audience
-are unset. Keep mock values in test-only config. Add a deploy check that
-rejects the mock domain.
-
-### H8 — Hosted browser “public HTTPS” policy is hostname-only
+### H7 — Hosted browser “public HTTPS” policy is hostname-only
 
 **Paths:**
 `apps/hosted-runner/src/contracts.ts` (`validatePublicHttpsUrl`,
@@ -674,6 +659,45 @@ UIA checks fail closed; arbitrary screen content cannot be classified
 secret-shaped persistence at write boundaries; keep the honesty that pixels
 cannot be reliably classified.
 
+### M23 — Convex auth config defaults to a mock Clerk issuer
+
+**Paths:** `apps/desktop/convex/auth.config.ts`
+
+**What the code does.**
+
+```ts
+domain: process.env.FABLE_CLERK_ISSUER ?? "https://mock-clerk.fable.local",
+applicationID: process.env.FABLE_CLERK_AUDIENCE ?? "fable-convex-test"
+```
+
+Desktop Clerk setup *does* fail closed without `FABLE_CLERK_ISSUER` and, in
+production, without an explicit audience
+(`apps/desktop/src-tauri/src/clerk_identity.rs`). Convex falls back to the
+mock issuer/audience when those env vars are unset.
+
+This is **not** a token-forgery or identity-bypass path. Convex still
+verifies the JWT signature against the configured issuer’s JWKS.
+`https://mock-clerk.fable.local` is not an attacker-controlled issuer or
+JWKS endpoint. Omitting the env vars does not let someone authenticate by
+minting a JWT that merely copies that issuer and audience.
+
+**Scenario.** A Convex deployment is created without `FABLE_CLERK_ISSUER` /
+`FABLE_CLERK_AUDIENCE`. Real Clerk tokens fail to authenticate because the
+deployment is pointed at a non-existent mock issuer (availability /
+misconfiguration). Local tests that rely on the mock stay coupled to the
+same config file used for deploy. A JWT that is not signed by that issuer’s
+JWKS is rejected before membership or device checks run.
+
+**Why it matters.** Hosted identity is the root of workspace, device, and
+capability minting. A mock fallback belongs in test-only config, not in
+deployed `auth.config.ts`. The right control is still fail-closed when
+issuer/audience are unset; the impact is an operator footgun, not an
+unauthenticated bypass.
+
+**Mitigation direction.** Fail Convex auth configuration when issuer/audience
+are unset. Keep mock values in test-only config. Add a deploy check that
+rejects the mock domain.
+
 ---
 
 ## Low
@@ -853,10 +877,20 @@ only on a curated list.
 
 ### I9 — Provider-owned ACP/SDK routes mediate yes/no through Mivlet approvals
 
-Claude, Cursor, Grok, Antigravity, OpenCode, Codex: consequential permissions
-are supposed to hit the same boundary. Screenshot delivery is unavailable on
-those routes until a native tool-result/image bridge exists (fail closed,
-vision metadata is not enough).
+Claude, Cursor, Grok, Antigravity, and OpenCode: consequential permissions
+are supposed to hit the same exact-approval boundary. Screenshot delivery is
+unavailable on those routes until a native tool-result/image bridge exists
+(fail closed; vision metadata is not enough).
+
+**Codex is not in that unavailable set.** The Codex app-server route has a
+native screenshot bridge: `codex_app_server.rs` enables visual desktop tools
+for models that advertise image input and implements `claim_desktop_tool`
+(dynamic-tool claim, then native `inputImage` response).
+`packages/connectors/src/native-api/computer-vision.ts` treats
+`backendType === "codex-app-server"` as a shared computer-tool route and
+returns available when `model.capabilities.vision === true`. Screenshot
+control still fails closed when the current Codex catalogue model has not
+advertised image input.
 
 ---
 
@@ -878,14 +912,16 @@ vision metadata is not enough).
 | Remote MCP private IP / DNS to private | Rejected; HTTP client pins resolved addrs; no redirects |
 | `web-fetch` private/link-local/metadata / DNS rebinding | Rejected and pinned |
 | Desktop `run-shell` | Hard error; hosted path only |
-| Unknown model / unaudited vision | Screenshot delivery unavailable |
+| Unknown model / unaudited vision | Screenshot delivery unavailable (Codex app-server and audited OpenAI/Anthropic/xAI routes are the exceptions when the model advertises vision) |
 | Approval fingerprint change, replay, TTL, interrupt | Consume fails |
 | Connector writes with `session`/`rule` | Rejected |
 | Password UIA / credential-shaped observe | Observation refused |
 | Background screenshot | Disabled (desktop-crop fallback risk) |
 
-Gaps in this table are H1 (nonce), H2 (Bearer generation), H3 (local+public
-memory), H7 (Convex mock issuer), H8 (browser DNS).
+Gaps in this table are H1 (nonce while the signed generation stays ready),
+H2 (Bearer generation skip on execution routes), H3 (local+public memory),
+H7 (hosted-browser DNS), and M23 (Convex mock issuer as a deploy footgun,
+not an identity bypass).
 
 ---
 
@@ -903,7 +939,10 @@ Do not regress these without a replacement:
   a React Convex client (`apps/desktop/src` has no `ConvexReactClient`).
 - Native screenshot sessions: renderer sees opaque ids; PNG held in Rust;
   generation, window identity, observation, privacy, and foreground rechecked
-  at capture and before egress; one screenshot per provider response.
+  at capture and before egress; one screenshot per provider response. Codex
+  app-server uses `claim_desktop_tool` for vision-capable models; audited
+  direct OpenAI/Anthropic/xAI routes have a separate native image bridge.
+  Other provider-owned ACP/SDK routes do not.
 - CUA: hash pin, deny-write handle, cleared env, method allowlist, delivery
   forced from grant, Stop on a native thread, generation bump on load.
 - Markdown: no HTML, images as text, `safeConversationLink`, depth cap.
@@ -936,7 +975,7 @@ When these areas change, add or extend tests that:
 - Authorize GitHub and assert requested scopes no longer include write-capable
   `repo` if H4 is fixed.
 - Navigate the hosted browser to a public name that resolves to a forbidden
-  IP and expect abort (once H8 is fixed).
+  IP and expect abort (once H7 is fixed).
 - Keep existing replay, TTL, HWND, Stop, CSP, and MCP argument tests.
 
 Do not weaken those assertions to pass a suite.
@@ -961,11 +1000,11 @@ Do not weaken those assertions to pass a suite.
 
 1. Consume hosted capability nonces (H1) and stop treating root Bearer as an
    execution credential (H2).
-2. Fail closed on public broker + memory (H3) and mock Convex issuer (H7).
+2. Fail closed on public broker + memory (H3).
 3. Cut GitHub OAuth to read-only power (H4).
 4. Redact tool I/O at the durable conversation boundary (H5).
-5. Bind desktop redeem (H6 / M1) and pin hosted-browser DNS (H8).
-6. Then the Medium backlog: TOCTOU, CSP frames, Live View custody, argv
-   pinning, MCP frame redaction.
+5. Bind desktop redeem (H6 / M1) and pin hosted-browser DNS (H7).
+6. Then the Medium backlog: Convex mock-issuer deploy guard (M23), TOCTOU,
+   CSP frames, Live View custody, argv pinning, MCP frame redaction.
 
 No application code was modified for this review.
