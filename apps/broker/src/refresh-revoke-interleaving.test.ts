@@ -56,7 +56,7 @@ function testStoreKey(): string {
   return btoa(String.fromCharCode(...z)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
-const STATE = "race-state-1234567890";
+const STATE = "race-state-1234567890x";
 const REDIRECT = "http://127.0.0.1:43123/callback";
 
 /** Durable-path broker: real DO classes + encrypted RPC + serial stub. */

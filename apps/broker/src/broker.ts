@@ -62,7 +62,7 @@ import {
   type BrokerEnv,
   type ProviderProfile
 } from "./provider-profiles.js";
-import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
+import { assertAuthorizeState, createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
 import type { EphemeralOps } from "./ephemeral-rpc.js";
 
 export interface BrokerOptions {
@@ -158,6 +158,7 @@ export class FableBroker {
     const credentials = resolveCredentials(request.provider, this.env, profile);
     validateDesktopRedirect(request.redirectUri, this.allowedDesktopRedirects);
     const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
+    assertAuthorizeState(request.state);
 
     const url = new URL(resolveAuthorizationEndpoint(profile, this.env, credentials));
     url.searchParams.set("client_id", credentials.clientId);
@@ -180,6 +181,8 @@ export class FableBroker {
     }
 
     // Store the single-use pending exchange keyed by the desktop state.
+    // Create-if-absent: a second authorize with the same state cannot replace
+    // the bound desktop redirect before the provider callback.
     if (this.ephemeralOps) {
       await this.ephemeralOps.createPending({
         provider: request.provider,

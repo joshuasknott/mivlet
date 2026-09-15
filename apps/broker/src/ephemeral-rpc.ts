@@ -15,7 +15,7 @@ import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol
 
 import type { BrokerClock } from "./clock.js";
 import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
-import type { PendingExchange, HandoffEntry } from "./stores.js";
+import { pendingStateInUseError, assertAuthorizeState, type PendingExchange, type HandoffEntry } from "./stores.js";
 import {
   computeStateHash,
   computeHandoffHash,
@@ -51,6 +51,7 @@ export function createEphemeralOps(
   return {
     async createPending(entry) {
       if (!pendingNS) throw new Error("BROKER_PENDING binding required");
+      assertAuthorizeState(entry.state);
       const stateHash = await computeStateHash(entry.state);
       const id = pendingNS.idFromName(stateHash);
       const stub = pendingNS.get(id);
@@ -60,7 +61,7 @@ export function createEphemeralOps(
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
-      await stub.putPending({
+      const created = await stub.putPending({
         state: entry.state,
         provider: entry.provider,
         redirectUri: entry.redirectUri,
@@ -69,6 +70,7 @@ export function createEphemeralOps(
         createdAt: now,
         expiresAt,
       });
+      if (created === false) throw pendingStateInUseError();
     },
 
     async consumePending(state) {
@@ -193,7 +195,8 @@ export async function createSerialInMemoryEphemeralOps(
             row.expires_at_ms = bindings[5]; row.expiresAt = bindings[5];
           }
           const idx = rows.findIndex((r: any) => (tableName === "pending" ? r.state_hash === hash : r.ticket_hash === hash));
-          if (idx >= 0) rows[idx] = row; else rows.push(row);
+          if (idx >= 0) throw new Error("UNIQUE constraint failed");
+          rows.push(row);
           return [];
         }
         if (q.includes("select")) {
@@ -204,7 +207,13 @@ export async function createSerialInMemoryEphemeralOps(
         if (q.includes("delete")) {
           const hash = bindings[0];
           const idx = rows.findIndex((r: any) => (tableName === "pending" ? r.state_hash === hash : r.ticket_hash === hash));
-          if (idx >= 0) rows.splice(idx, 1);
+          if (idx < 0) return [];
+          if (q.includes("expires_at_ms") && bindings.length >= 2) {
+            const expiresAt = rows[idx].expires_at_ms ?? rows[idx].expiresAt;
+            if (expiresAt <= bindings[1]) rows.splice(idx, 1);
+            return [];
+          }
+          rows.splice(idx, 1);
           return [];
         }
         return [];
@@ -237,6 +246,7 @@ export async function createSerialInMemoryEphemeralOps(
   // Now build ops that go through the stubs (for serial) + real enc
   const ops: EphemeralOps = {
     async createPending(entry) {
+      assertAuthorizeState(entry.state);
       const stateHash = await computeStateHash(entry.state);
       // simulate idFromName by using the inst directly via stub
       let verifierEnc: Uint8Array | null = null;
@@ -245,7 +255,7 @@ export async function createSerialInMemoryEphemeralOps(
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
-      await pendingStub.invoke("putPending", {
+      const created = await pendingStub.invoke("putPending", {
         state: entry.state,
         provider: entry.provider,
         redirectUri: entry.redirectUri,
@@ -254,6 +264,7 @@ export async function createSerialInMemoryEphemeralOps(
         createdAt: now,
         expiresAt,
       });
+      if (created === false) throw pendingStateInUseError();
     },
 
     async consumePending(state) {

@@ -27,7 +27,9 @@ import {
   HandoffEntry,
   type PendingExchangeStore,
   type HandoffStore,
-  urlSafeToken
+  urlSafeToken,
+  pendingStateInUseError,
+  assertAuthorizeState
 } from "./stores.js";
 import {
   createRateLimiter,
@@ -99,8 +101,17 @@ export function createDurableMemoryPendingStore(
 
   return {
     create(entry) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
       maybePrune(now);
+      const existing = pending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
+      if (existing) {
+        pending.delete(entry.state);
+        plainVerifiers.delete(entry.state);
+      }
       const expiresAt = now + TTL_MS;
       let verifierEnc: Uint8Array | null = null;
       if (entry.verifier) {
@@ -277,7 +288,12 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
   const sharedPending = new Map<string, MemPendingRow>();
   const impl = {
     async create(entry: Omit<PendingExchange, "createdAt">) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
+      const existing = sharedPending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
       const expiresAt = now + TTL_MS;
       sharedPending.set(entry.state, {
         provider: entry.provider,
@@ -325,7 +341,12 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
   const stub = new SerialDurableStub(impl);
   const makeAdapter = (): PendingExchangeStore => ({
     create(entry) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
+      const existing = sharedPending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
       const expiresAt = now + TTL_MS;
       sharedPending.set(entry.state, {
         provider: entry.provider,
@@ -337,7 +358,6 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         expiresAt
       } as any);
       if (entry.verifier) (sharedPending.get(entry.state) as any)._plainVerifier = entry.verifier;
-      void stub.invoke("create", entry);
     },
     consume(state) {
       const row = sharedPending.get(state);
@@ -456,14 +476,27 @@ export class BrokerPending extends DurableObject<BrokerDurableEnv> {
     verifierEnc?: Uint8Array | null;
     createdAt: number;
     expiresAt: number;
-  }) {
+  }): Promise<boolean> {
     const stateHash = await computeStateHash(args.state);
+    const injectedNow = (this.ctx as DurableObjectState & { nowMs?: () => number }).nowMs;
+    const now = typeof injectedNow === "function" ? injectedNow() : Date.now();
+    // Treat an expired row as absent so a new flow may reuse the state after TTL.
     this.ctx.storage.sql.exec(
-      `INSERT OR REPLACE INTO pending (state_hash, provider, redirect_uri, provider_redirect_uri, state, verifier_enc, created_at_ms, expires_at_ms)
+      `DELETE FROM pending WHERE state_hash = ? AND expires_at_ms <= ?`,
+      stateHash,
+      now
+    );
+    const existing = Array.from(
+      this.ctx.storage.sql.exec(`SELECT 1 FROM pending WHERE state_hash = ?`, stateHash)
+    );
+    if (existing.length > 0) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO pending (state_hash, provider, redirect_uri, provider_redirect_uri, state, verifier_enc, created_at_ms, expires_at_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       stateHash, args.provider, args.redirectUri, args.providerRedirectUri, args.state, args.verifierEnc ?? null, args.createdAt, args.expiresAt
     );
     await this.ctx.storage.setAlarm(args.expiresAt);
+    return true;
   }
 
   async consumePending(state: string): Promise<PendingExchange | undefined> {

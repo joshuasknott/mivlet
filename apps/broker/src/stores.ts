@@ -4,8 +4,10 @@
  * Two stores back the broker:
  *   - {@link PendingExchangeStore}: holds the desktop's `redirect_uri`, `state`,
  *     and (for broker-pkce providers) the broker-generated verifier, between the
- *     authorize request and the provider callback. Consumed exactly once on
- *     callback — a replayed callback finds no pending exchange and is rejected.
+ *     authorize request and the provider callback. Created if-absent only — a
+ *     second write for a live `state` is `invalid-state`, so an observer cannot
+ *     replace the bound desktop redirect before callback. Consumed exactly once
+ *     on callback — a replayed callback finds no pending exchange and is rejected.
  *   - {@link HandoffStore}: holds the redeemed token set + account behind a
  *     short-lived opaque ticket. Consumed exactly once when the desktop redeems
  *     it; a second redemption is rejected, preventing token replay.
@@ -14,11 +16,45 @@
  * broker is stateless across restarts, and an in-flight OAuth flow simply restarts.
  */
 
-import { BROKER_HANDOFF_TTL_SECONDS, type BrokerProviderId } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS, BrokerContractError, type BrokerProviderId } from "@fable/connectors";
 import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
 
 import type { BrokerClock } from "./clock.js";
 import { base64url, randomBytes } from "./crypto-web.js";
+
+/**
+ * Minimum unreserved length so a base64url `state` can encode 128 bits.
+ * Desktop mints 32 random bytes (~43 chars); this floor rejects guessable values
+ * on every authorize backend without requiring a live CSPRNG at the broker.
+ */
+export const BROKER_AUTHORIZE_STATE_MIN_LENGTH = 22;
+const BROKER_AUTHORIZE_STATE_MAX_LENGTH = 256;
+const BROKER_AUTHORIZE_STATE_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/** Reject a reused live pending `state`. First write is immutable until consume or TTL. */
+export function pendingStateInUseError(): BrokerContractError {
+  return new BrokerContractError(
+    "invalid-state",
+    "Authorization state is already in use.",
+    false
+  );
+}
+
+/**
+ * Authorize is public; `state` is the only unguessable binding between the
+ * desktop redirect and the provider callback. Enforce the entropy floor on
+ * every backend before a pending row is created.
+ */
+export function assertAuthorizeState(state: string): void {
+  if (
+    typeof state !== "string"
+    || state.length < BROKER_AUTHORIZE_STATE_MIN_LENGTH
+    || state.length > BROKER_AUTHORIZE_STATE_MAX_LENGTH
+    || !BROKER_AUTHORIZE_STATE_PATTERN.test(state)
+  ) {
+    throw new BrokerContractError("invalid-state", "Authorization state is invalid.", false);
+  }
+}
 
 export interface PendingExchange {
   provider: BrokerProviderId;
@@ -43,6 +79,10 @@ export interface HandoffEntry {
 }
 
 export interface PendingExchangeStore {
+  /**
+   * Create-if-absent. A second create for a live `state` must throw
+   * `invalid-state` so an observer cannot replace the bound desktop redirect.
+   */
   create(entry: Omit<PendingExchange, "createdAt">): void;
   consume(state: string): PendingExchange | undefined;
   /** Test-only: peek without consuming. */
@@ -100,7 +140,12 @@ export function createStores(clock: BrokerClock): {
   return {
     pending: {
       create(entry) {
+        assertAuthorizeState(entry.state);
         maybePrune(pending);
+        const existing = pending.get(entry.state);
+        if (existing && !isExpired(existing, clock.nowMs())) {
+          throw pendingStateInUseError();
+        }
         pending.set(entry.state, { ...entry, createdAt: clock.nowMs() });
       },
       consume(state) {
