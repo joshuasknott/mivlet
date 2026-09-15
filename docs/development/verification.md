@@ -53,14 +53,24 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Scope | Commands |
 | --- | --- |
 | Repository types and tests | `pnpm typecheck`, `pnpm test` |
+| Linux PR loop (matches CI) | `pnpm check:pr` |
+| Linux package tests without agent-host | `pnpm test:ci` |
 | Code quality | `pnpm quality` |
 | Production build validation | `pnpm verify:build` |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
-| Embedded Windows agent host | `pnpm --filter @fable/agent-host typecheck`, `pnpm --filter @fable/agent-host build`, `pnpm --filter @fable/agent-host test` |
+| Embedded Windows agent host | `pnpm test:host`; `pnpm --filter @fable/agent-host typecheck`, `pnpm --filter @fable/agent-host build` |
 | Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build` |
 | Full repository gate | `pnpm check` |
+
+`pnpm test` still runs every workspace test, including `@fable/agent-host`. Host
+fixture tests skip off Windows so the chain no longer aborts on Linux.
+`pnpm test:ci` matches PR CI, which excludes that package entirely.
+`pnpm check:pr` is the Linux TypeScript job (`typecheck`, `quality`, `test:ci`).
+`pnpm check` / `verify:build` compile the Windows Bun host even on Linux.
+Changing root `package.json` is a native path and schedules the 35-minute
+Windows job.
 
 For Rust changes, use the affected tests plus:
 
@@ -73,8 +83,10 @@ For Rust changes, use the affected tests plus:
 UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
 
 `verify:build` builds the embedded host before the test gate runs its actual
-Windows executable. The fixture tests use the same cleared environment and
-stdio framing as native custody, with deterministic OpenAI-compatible,
+Windows executable. That compile runs on Linux as part of `pnpm check`; it is
+not a substitute for `pnpm test:host` on Windows. The fixture tests use the
+same cleared environment and stdio framing as native custody, with
+deterministic OpenAI-compatible,
 DeepSeek and Anthropic SSE. They verify tool results, denial, ordering, Stop,
 replay rejection, provider failures and absence of plaintext prompt/tool
 canaries on disk. These tests do not establish live provider or signed-installer

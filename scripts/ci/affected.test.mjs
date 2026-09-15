@@ -1,11 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { affected } from './affected.mjs';
+
+const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
+const linuxPackageTests = "pnpm --filter '!@fable/agent-host' -r --if-present test";
+const linuxAffectedTests = 'node --test scripts/ci/affected.test.mjs';
+const windowsHostTests = 'pnpm --filter @fable/agent-host test';
 
 test('documentation skips expensive jobs', () => {
   assert.deepEqual(affected(['README.md', 'docs/development/verification.md']), { code: false, native: false });
@@ -14,7 +21,7 @@ test('renderer changes run TypeScript without Windows compilation', () => {
   assert.deepEqual(affected(['apps/desktop/src/App.tsx']), { code: true, native: false });
 });
 test('native, shared host dependencies, lockfile and workflow changes require Windows', () => {
-  for (const path of ['apps/desktop/src-tauri/src/lib.rs', 'apps/desktop/scripts/prepare-cua-driver.mjs', 'packages/agent-host/src/main.ts', 'packages/connectors/src/index.ts', 'packages/protocol/src/index.ts', 'pnpm-lock.yaml', '.github/workflows/ci.yml', 'scripts/release/windows-manifest.mjs']) {
+  for (const path of ['apps/desktop/src-tauri/src/lib.rs', 'apps/desktop/scripts/prepare-cua-driver.mjs', 'packages/agent-host/src/main.ts', 'packages/connectors/src/index.ts', 'packages/protocol/src/index.ts', 'package.json', 'pnpm-lock.yaml', '.github/workflows/ci.yml', 'scripts/release/windows-manifest.mjs']) {
     assert.deepEqual(affected([path]), { code: true, native: true }, path);
   }
 });
@@ -48,4 +55,24 @@ test('moving native code into docs still checks the deleted native path', () => 
     assert.ok(basename(directory).startsWith('mivlet-ci-paths-'));
     rmSync(directory, { recursive: true, force: true });
   }
+});
+
+test('test:ci matches the Linux CI package-test skip gate', () => {
+  assert.equal(pkg.scripts['test:ci'], `${linuxPackageTests} && ${linuxAffectedTests}`);
+  assert.ok(ci.includes(linuxPackageTests));
+  assert.ok(ci.includes(linuxAffectedTests));
+});
+
+test('check:pr matches the Linux TypeScript CI job order', () => {
+  assert.equal(pkg.scripts['check:pr'], 'pnpm typecheck && pnpm quality && pnpm test:ci');
+  const typecheck = ci.indexOf('pnpm typecheck');
+  const quality = ci.indexOf('pnpm quality');
+  const packageTests = ci.indexOf(linuxPackageTests);
+  const affectedTests = ci.indexOf(linuxAffectedTests);
+  assert.ok(typecheck >= 0 && typecheck < quality && quality < packageTests && packageTests < affectedTests, ci);
+});
+
+test('test:host matches the Windows CI agent-host suite', () => {
+  assert.equal(pkg.scripts['test:host'], windowsHostTests);
+  assert.ok(ci.includes(windowsHostTests));
 });
