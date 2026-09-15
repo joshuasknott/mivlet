@@ -267,22 +267,27 @@ and [threat model](../security/threat-model.md) for the security boundary.
 
 ## Native OAuth scopes
 
-The confidential broker requests the scopes below on Connect. Write-capable
-grants stay in the request when native write actions exist; they are labeled
-write. GitHub remains read-only at the product surface and does not request
-classic `repo`. Local drafts (Gmail compose, Slack create-draft) are not a
-reason to hide a live write scope that posts or changes provider data.
+The confidential broker requests the scopes below on every Connect. There is
+no native read-only Connect for Vercel, Linear, or Slack: matching write
+actions exist, so the write-capable grants are **required**, labeled write,
+and always included in the authorize URL. Per-action approval still gates
+execution. A stolen token remains write-capable; that residual is documented
+here rather than labeled as read. GitHub remains read-only at the product
+surface and does not request classic `repo`. Gmail compose/send and Calendar
+event writes stay optional because those public PKCE connects can omit them.
+Local drafts (Gmail compose, Slack create-draft) are not a reason to hide a
+live write scope that posts or changes provider data.
 
-| Connector | Requested scopes | Decision |
+| Connector | Requested on Connect | Decision |
 | --- | --- | --- |
 | GitHub | `read:user`, `read:org` | Keep reads. Classic `repo` is not requested; register a GitHub App with read-only repository permissions. |
-| Vercel | `user:read`, `team:read`, `project:read`, `deployment:read`, `deployment:write` | Keep `deployment:write`. Native actions promote, roll back, create, and cancel deployments, and change projects and domains, after exact approval. |
-| Linear | `read`, `write` | Keep `write` for issue create, issue update, and comments. Trim `issues:create` and `comments:create`; they are create-only subsets of `write` and cannot cover issue updates. |
-| Slack | channel/group/IM reads, `users:read`, `chat:write`, `reactions:write` | Keep `chat:write` (post, reply, edit, delete) and `reactions:write` (react-add, react-remove). Local `slack.create-draft` does not need a write scope. |
+| Vercel | `user:read`, `team:read`, `project:read`, `deployment:read`, **`deployment:write` (required)** | Keep always-on `deployment:write`. Native actions promote, roll back, create, and cancel deployments, and change projects and domains, after exact approval. |
+| Linear | `read`, **`write` (required)** | Keep always-on `write` for issue create, issue update, and comments. Trim `issues:create` and `comments:create`; they are create-only subsets of `write` and cannot cover issue updates. |
+| Slack | channel/group/IM reads, `users:read`, **`chat:write` (required)**, **`reactions:write` (required)** | Keep always-on `chat:write` (post, reply, edit, delete) and `reactions:write` (react-add, react-remove). Local `slack.create-draft` does not need a write scope. |
 | Notion | none on the authorize URL | Notion uses integration capabilities (`read_content`, `insert_content`, `update_content`) configured in the Notion console, not OAuth scope query parameters. |
-| Google Drive | `drive.file` (and optional broader Drive grants) | `drive.file` is write-capable and labeled write. |
-| Gmail | `gmail.readonly`, `gmail.compose`, `gmail.send` | Keep compose and send; they match draft and send actions. |
-| Google Calendar | calendar list/event reads, `calendar.events` | Keep `calendar.events` for create, update, cancel, and delete. |
+| Google Drive | `drive.file` (and optional broader Drive grants) | `drive.file` is write-capable, labeled write, and required on Connect. |
+| Gmail | `gmail.readonly` required; `gmail.compose`, `gmail.send` optional | Keep compose and send in the catalog; default PKCE Connect can omit them. |
+| Google Calendar | calendar list/event reads required; `calendar.events` optional | Keep `calendar.events` for create, update, cancel, and delete; default PKCE Connect can omit it. |
 
 Register the matching provider app with those permissions. Existing Linear
 connections that still list `issues:create` or `comments:create` keep working;

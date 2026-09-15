@@ -136,7 +136,7 @@ const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
         "deployment:write",
         "Approved deployment, project, and domain changes",
         "write",
-        false,
+        true,
     ),
 ];
 const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
@@ -201,13 +201,13 @@ const SLACK_SCOPES: &[(&str, &str, &str, bool)] = &[
         "chat:write",
         "Post, reply, edit, or delete after approval",
         "write",
-        false,
+        true,
     ),
     (
         "reactions:write",
         "Add or remove reactions after approval",
         "write",
-        false,
+        true,
     ),
 ];
 const CALENDAR_SCOPES: &[(&str, &str, &str, bool)] = &[
@@ -236,7 +236,7 @@ const LINEAR_SCOPES: &[(&str, &str, &str, bool)] = &[
         "write",
         "Create or change issues and comments after approval",
         "write",
-        false,
+        true,
     ),
 ];
 
@@ -2802,31 +2802,25 @@ mod workspace_scope_tests {
             *id == "https://www.googleapis.com/auth/drive.file" && *access == "write" && *required
         }));
         let vercel = CATALOG.iter().find(|entry| entry.id == "vercel").unwrap();
-        assert!(vercel
-            .scopes
-            .iter()
-            .any(|(id, _, access, _)| { *id == "deployment:write" && *access == "write" }));
+        assert!(vercel.scopes.iter().any(|(id, _, access, required)| {
+            *id == "deployment:write" && *access == "write" && *required
+        }));
         let linear = CATALOG.iter().find(|entry| entry.id == "linear").unwrap();
         assert!(linear
             .scopes
             .iter()
-            .all(
-                |(id, _, access, _)| (*id != "issues:create" && *id != "comments:create")
-                    && (*id != "write" || *access == "write")
-            ));
+            .all(|(id, _, _, _)| *id != "issues:create" && *id != "comments:create"));
         assert!(linear
             .scopes
             .iter()
-            .any(|(id, _, access, _)| *id == "write" && *access == "write"));
+            .any(|(id, _, access, required)| *id == "write" && *access == "write" && *required));
         let slack = CATALOG.iter().find(|entry| entry.id == "slack").unwrap();
-        assert!(slack
-            .scopes
-            .iter()
-            .any(|(id, _, access, _)| { *id == "chat:write" && *access == "write" }));
-        assert!(slack
-            .scopes
-            .iter()
-            .any(|(id, _, access, _)| { *id == "reactions:write" && *access == "write" }));
+        assert!(slack.scopes.iter().any(|(id, _, access, required)| {
+            *id == "chat:write" && *access == "write" && *required
+        }));
+        assert!(slack.scopes.iter().any(|(id, _, access, required)| {
+            *id == "reactions:write" && *access == "write" && *required
+        }));
         assert_eq!(
             action_required_scopes("vercel.promote"),
             &["deployment:write"]

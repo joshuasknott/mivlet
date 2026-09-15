@@ -173,6 +173,17 @@ describe("broker authorize", () => {
     expect(url.searchParams.get("code_challenge_method")).toBe("S256");
   });
 
+  it("always requests product write scopes on Connect rather than a fake read-only grant", async () => {
+    const vercel = new URL((await makeBroker("vercel", providerFetch("vercel")).broker.authorize(authorizeRequest("vercel", "vercel-write"))).response.authorizationUrl);
+    const linear = new URL((await makeBroker("linear", providerFetch("linear")).broker.authorize(authorizeRequest("linear", "linear-write"))).response.authorizationUrl);
+    const slack = new URL((await makeBroker("slack", providerFetch("slack")).broker.authorize(authorizeRequest("slack", "slack-write"))).response.authorizationUrl);
+    expect(vercel.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining(["deployment:write"]));
+    expect(linear.searchParams.get("scope")?.split(",")).toEqual(["read", "write"]);
+    expect(slack.searchParams.get("scope")?.split(",")).toEqual(
+      expect.arrayContaining(["chat:write", "reactions:write"])
+    );
+  });
+
   it("serializes provider-specific authorization parameters", async () => {
     const { broker: linear } = makeBroker("linear", providerFetch("linear"));
     const linearAuth = new URL((await linear.authorize(authorizeRequest("linear", "linear-auth"))).response.authorizationUrl);

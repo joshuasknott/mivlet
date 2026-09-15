@@ -43,7 +43,7 @@ describe("connector catalogue", () => {
     expect(driveFile?.access).toBe("write");
   });
 
-  it("keeps write-capable Vercel, Linear, and Slack scopes only where native writes exist", () => {
+  it("keeps write-capable Vercel, Linear, and Slack scopes required on Connect", () => {
     const vercel = connectorCatalog.find((connector) => connector.id === "vercel");
     const linear = connectorCatalog.find((connector) => connector.id === "linear");
     const slack = connectorCatalog.find((connector) => connector.id === "slack");
@@ -63,14 +63,14 @@ describe("connector catalogue", () => {
     expect(SLACK_OAUTH_SCOPES).toContain("chat:write");
     expect(SLACK_OAUTH_SCOPES).toContain("reactions:write");
 
-    expect(vercelWrite).toMatchObject({ access: "write", required: false });
-    expect(linearWrite).toMatchObject({ access: "write", required: false });
+    expect(vercelWrite).toMatchObject({ access: "write", required: true });
+    expect(linearWrite).toMatchObject({ access: "write", required: true });
     expect(linear?.scopes?.map((scope) => scope.id)).toEqual(["read", "write"]);
     expect(linear?.scopes?.some((scope) => scope.id === "issues:create" || scope.id === "comments:create")).toBe(
       false
     );
-    expect(slackChat).toMatchObject({ access: "write", required: false });
-    expect(slackReactions).toMatchObject({ access: "write", required: false });
+    expect(slackChat).toMatchObject({ access: "write", required: true });
+    expect(slackReactions).toMatchObject({ access: "write", required: true });
     expect(slack?.scopes?.filter((scope) => scope.access === "write").map((scope) => scope.id)).toEqual([
       "chat:write",
       "reactions:write"

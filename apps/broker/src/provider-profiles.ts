@@ -37,7 +37,7 @@ export interface ProviderProfile {
   revocationEndpoint: string;
   /** Endpoint the broker hits to resolve connected account identity. */
   identityEndpoint: string;
-  /** Scopes the broker requests on the desktop's behalf. */
+  /** Scopes the broker always requests on Connect for this provider. */
   scopes: readonly string[];
   /** Extra fixed authorization parameters required by the provider. */
   authorizationParams?: Readonly<Record<string, string>>;

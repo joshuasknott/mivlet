@@ -105,7 +105,7 @@ export const connectorCatalog: ConnectorManifest[] = [
     scopes: [
       permission("project:read", "Projects", "read", true),
       permission("deployment:read", "Deployments", "read", true),
-      permission("deployment:write", "Approved deployment, project, and domain changes", "write", false)
+      permission("deployment:write", "Approved deployment, project, and domain changes", "write", true)
     ],
     setupMessage:
       "Create a Vercel integration with read and write access and configure its External Flow redirect. Mivlet requests `deployment:write` because native promote, rollback, create, cancel, project, and domain actions exist."
@@ -164,8 +164,8 @@ export const connectorCatalog: ConnectorManifest[] = [
       permission("im:read", "Direct message list", "read", false),
       permission("mpim:read", "Group direct message list", "read", false),
       permission("users:read", "Workspace users", "read", true),
-      permission("chat:write", "Post, reply, edit, or delete after approval", "write", false),
-      permission("reactions:write", "Add or remove reactions after approval", "write", false)
+      permission("chat:write", "Post, reply, edit, or delete after approval", "write", true),
+      permission("reactions:write", "Add or remove reactions after approval", "write", true)
     ],
     setupMessage:
       "Create a Slack app with bot scopes for channel reads plus `chat:write` and `reactions:write`, and configure the Mivlet auth broker. Those write scopes match native post, reply, edit, delete, and reaction actions."
@@ -205,7 +205,7 @@ export const connectorCatalog: ConnectorManifest[] = [
     authMode: "oauth-broker",
     scopes: [
       permission("read", "Workspace data", "read", true),
-      permission("write", "Create or change issues and comments after approval", "write", false)
+      permission("write", "Create or change issues and comments after approval", "write", true)
     ],
     setupMessage:
       "Create a Linear OAuth application with `read` and `write` and configure the Mivlet auth broker. `write` is requested because native issue create, issue update, and comment actions exist; create-only Linear scopes are not requested separately."
