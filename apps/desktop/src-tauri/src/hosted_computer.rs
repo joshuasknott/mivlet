@@ -49,10 +49,19 @@ fn live_view_key(workspace_id: &str, agent_id: &str, device_id: &str) -> String 
     format!("{workspace_id}\0{agent_id}\0{device_id}")
 }
 
-fn store_live_view(workspace_id: &str, agent_id: &str, device_id: &str, url: String) {
-    let Ok(mut handles) = live_view_handles().lock() else {
-        return;
-    };
+fn store_live_view(
+    workspace_id: &str,
+    agent_id: &str,
+    device_id: &str,
+    url: String,
+) -> Result<(), String> {
+    validate_live_view_url(&url)?;
+    let mut handles = live_view_handles()
+        .lock()
+        .map_err(|_| "The cloud browser Live View session is unavailable.".to_string())?;
+    // One native secret at a time. A later snapshot for another hosted
+    // workspace must not leave the previous takeover URL reachable.
+    handles.clear();
     handles.insert(
         live_view_key(workspace_id, agent_id, device_id),
         LiveViewHandle {
@@ -61,6 +70,7 @@ fn store_live_view(workspace_id: &str, agent_id: &str, device_id: &str, url: Str
                 + chrono::Duration::from_std(LIVE_VIEW_TTL).unwrap_or(chrono::Duration::minutes(5)),
         },
     );
+    Ok(())
 }
 
 fn live_view_handle(workspace_id: &str, agent_id: &str, device_id: &str) -> Option<String> {
@@ -86,7 +96,7 @@ fn retain_live_view_for_frontend(
     device_id: &str,
 ) -> HostedBrowserSnapshot {
     if let Some(url) = snapshot.live_view_url.take() {
-        store_live_view(workspace_id, agent_id, device_id, url);
+        let _ = store_live_view(workspace_id, agent_id, device_id, url);
     }
     snapshot.takeover_available = live_view_handle(workspace_id, agent_id, device_id).is_some();
     snapshot.live_view_url = None;
@@ -1683,12 +1693,18 @@ pub async fn hosted_browser_snapshot(
 
 #[tauri::command]
 pub fn hosted_browser_open_live_view(target: HostedBrowserTarget) -> Result<(), String> {
+    let url = live_view_url_for_open(target)?;
+    crate::oauth_loopback::open_browser(&url);
+    Ok(())
+}
+
+fn live_view_url_for_open(target: HostedBrowserTarget) -> Result<String, String> {
     let target = normalize_browser_target(target)?;
+    require_matching_hosted_scope(&target.workspace_id, Some(&target.device_id))?;
     let url = live_view_handle(&target.workspace_id, &target.agent_id, &target.device_id)
         .ok_or_else(|| "The cloud browser Live View session is no longer available.".to_string())?;
     validate_live_view_url(&url)?;
-    crate::oauth_loopback::open_browser(&url);
-    Ok(())
+    Ok(url)
 }
 
 fn validate_live_view_url(value: &str) -> Result<(), String> {
@@ -2003,8 +2019,24 @@ mod tests {
         ));
     }
 
+    fn clear_live_view_handles() {
+        live_view_handles()
+            .lock()
+            .expect("live view handle lock")
+            .clear();
+    }
+
+    fn live_view_target(workspace_id: &str) -> HostedBrowserTarget {
+        HostedBrowserTarget {
+            workspace_id: workspace_id.into(),
+            agent_id: "agent-research".into(),
+            device_id: "device-desktop".into(),
+        }
+    }
+
     #[test]
     fn live_view_secrets_stay_native_and_are_omitted_from_frontend_snapshots() {
+        clear_live_view_handles();
         let snapshot = HostedBrowserSnapshot {
             current_url: "https://example.com/".into(),
             title: "Example".into(),
@@ -2047,5 +2079,105 @@ mod tests {
         );
         assert!(validate_live_view_url("https://live.browser.run/ui/token?wss=secret").is_ok());
         assert!(validate_live_view_url("https://evil.example/?wss=secret").is_err());
+    }
+
+    #[test]
+    fn storing_a_live_view_drops_other_workspace_secrets() {
+        clear_live_view_handles();
+        store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/alpha?wss=secret-a".into(),
+        )
+        .expect("store alpha");
+        store_live_view(
+            "workspace:beta",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/beta?wss=secret-b".into(),
+        )
+        .expect("store beta");
+        assert!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none(),
+            "previous hosted workspace takeover URL must not survive a later snapshot"
+        );
+        assert_eq!(
+            live_view_handle("workspace:beta", "agent-research", "device-desktop").as_deref(),
+            Some("https://live.browser.run/ui/beta?wss=secret-b")
+        );
+        clear_live_view_handles();
+    }
+
+    #[test]
+    fn invalid_live_view_urls_are_not_stored() {
+        clear_live_view_handles();
+        assert!(store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://evil.example/ui/token?wss=secret".into(),
+        )
+        .is_err());
+        assert!(live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none());
+        let public = retain_live_view_for_frontend(
+            HostedBrowserSnapshot {
+                current_url: "https://example.com/".into(),
+                title: "Example".into(),
+                observation_id: "observation-1234567890abcdef".into(),
+                viewport: HostedBrowserViewportSnapshot {
+                    scroll_x: 0,
+                    scroll_y: 0,
+                    width: 1280,
+                    height: 800,
+                    document_width: 1280,
+                    document_height: 1600,
+                    can_scroll_up: false,
+                    can_scroll_down: true,
+                },
+                navigation: HostedBrowserNavigationSnapshot {
+                    can_go_back: false,
+                    can_go_forward: false,
+                },
+                controls: vec![],
+                preview_data_url: "data:image/jpeg;base64,cHJldmlldw==".into(),
+                live_view_url: Some("https://evil.example/ui/token?wss=secret".into()),
+                takeover_available: true,
+                last_download: None,
+                updated_at: "2026-08-25T12:00:02.000Z".into(),
+            },
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+        );
+        assert!(public.live_view_url.is_none());
+        assert!(!public.takeover_available);
+        assert!(live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none());
+        clear_live_view_handles();
+    }
+
+    #[test]
+    fn live_view_open_requires_selected_hosted_scope_even_when_a_handle_exists() {
+        clear_live_view_handles();
+        store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/token?wss=secret".into(),
+        )
+        .expect("store");
+        let error = live_view_url_for_open(live_view_target("workspace:alpha"))
+            .expect_err("open must not skip the selected hosted workspace fence");
+        assert!(
+            error.contains("Account storage unavailable")
+                || error.contains("Select an available hosted workspace")
+                || error.contains("does not match the selected workspace"),
+            "{error}"
+        );
+        assert!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_some(),
+            "scope refusal must not be confused with a missing handle"
+        );
+        clear_live_view_handles();
     }
 }
