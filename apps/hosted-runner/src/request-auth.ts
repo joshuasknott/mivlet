@@ -1,27 +1,42 @@
 import {
-  verifyHostedExecutionCapability,
+  assertHostedExecutionCapability,
+  readHostedExecutionCapability,
   type HostedExecutionCapabilityScope
 } from "@fable/protocol";
 
+export interface CapabilityNonceStore {
+  consume(input: { nonce: string; generation: number; expiresAt: number }): Promise<void>;
+}
+
 export async function authorizeCapabilityRequest(
   request: Request,
-  rootSecret: string | undefined,
+  signingKey: string | undefined,
   computerId: string,
-  scope: HostedExecutionCapabilityScope
+  scope: HostedExecutionCapabilityScope,
+  nonceStore: CapabilityNonceStore
 ): Promise<{ authorized: boolean; expectedGeneration?: number }> {
-  if (await serviceAuthorized(request, rootSecret)) return { authorized: true };
-  if (!rootSecret || rootSecret.length < 32) return { authorized: false };
   const value = request.headers.get("Authorization");
   if (!value?.startsWith("FableCapability ")) return { authorized: false };
+  if (!signingKey || signingKey.length < 32) return { authorized: false };
   try {
-    const payload = await verifyHostedExecutionCapability(
-      rootSecret,
-      value.slice("FableCapability ".length),
-      { computerId, scope }
+    const payload = await readHostedExecutionCapability(
+      signingKey,
+      value.slice("FableCapability ".length)
     );
+    assertHostedExecutionCapability(payload, {
+      computerId,
+      scope,
+      generation: payload.generation
+    });
+    await nonceStore.consume({
+      nonce: payload.nonce,
+      generation: payload.generation,
+      expiresAt: payload.expiresAt
+    });
     return { authorized: true, expectedGeneration: payload.generation };
-  } catch {
-    return { authorized: false };
+  } catch (error) {
+    if (isCapabilityCredentialError(error)) return { authorized: false };
+    throw error;
   }
 }
 
@@ -38,4 +53,11 @@ export async function serviceAuthorized(request: Request, expected: string | und
   const timingSafeEqual = Reflect.get(crypto.subtle, "timingSafeEqual");
   if (typeof timingSafeEqual !== "function") return false;
   return Reflect.apply(timingSafeEqual, crypto.subtle, [providedHash, expectedHash]) === true;
+}
+
+function isCapabilityCredentialError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.message === "invalid-capability"
+    || error.message === "capability-rejected"
+    || error.message === "capability-configuration-required";
 }

@@ -30,6 +30,15 @@ single-use permit, obtains a scope-specific hosted capability, and sends it to
 the runner. The runner rechecks the computer, generation, scope, expiry, nonce,
 and one-time use.
 
+Bearer `FABLE_HOSTED_RUNNER_API_KEY` authorizes only computer lifecycle
+(provision/ensure, status, destroy). Process and browser effect routes reject
+Bearer and require a `FableCapability` signed with the distinct
+`FABLE_HOSTED_RUNNER_SIGNING_KEY`. The runner consumes the capability nonce in
+Durable Object storage before the effect; a replay of the same token fails
+closed, including when the nonce store is unavailable. Re-running ensure on a
+computer that already has a generation bumps that generation so prior
+capabilities cannot target the replacement.
+
 Browser navigation accepts only public HTTPS targets, rejects embedded
 credentials and private or reserved destinations, strips fragments, and
 revalidates redirects and subrequests. Observations and actions are bounded to

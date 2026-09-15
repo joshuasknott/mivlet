@@ -122,8 +122,10 @@ profiles, container state, raw connector caches, and host paths.
 
 Hosted capabilities are short-lived, scoped, generation-fenced, and single-use.
 The runner independently validates the capability and public-network policy.
-Undeployed or incomplete configuration must remain unavailable rather than
-falling back to a fixture.
+Service Bearer credentials cannot launch process or browser effects. HMAC
+signing uses a distinct secret from the lifecycle Bearer. Undeployed or
+incomplete configuration must remain unavailable rather than falling back to a
+fixture.
 
 ### Supply chain and release
 

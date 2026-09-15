@@ -100,9 +100,9 @@ export const authorizeExecutionCapability = internalQuery({
 
 /**
  * Mints a short-lived bearer capability for the native boundary. The runner
- * root credential remains in Convex/Worker secrets and never reaches the
+ * signing secret remains in Convex/Worker secrets and never reaches the
  * renderer. Capabilities are generation-fenced and cannot provision or destroy
- * computers.
+ * computers. The service Bearer (`FABLE_HOSTED_RUNNER_API_KEY`) is lifecycle-only.
  */
 export const requestExecutionCapability = action({
   args: {
@@ -123,12 +123,12 @@ export const requestExecutionCapability = action({
       internal.hostedExecution.authorizeExecutionCapability,
       args
     );
-    const rootSecret = process.env.FABLE_HOSTED_RUNNER_API_KEY;
-    if (!rootSecret || rootSecret.length < 32) throw new Error("runner-configuration-required");
+    const signingKey = process.env.FABLE_HOSTED_RUNNER_SIGNING_KEY;
+    if (!signingKey || signingKey.length < 32) throw new Error("runner-configuration-required");
     const runnerUrl = hostedRunnerBaseUrl(process.env.FABLE_HOSTED_RUNNER_URL).toString().replace(/\/$/, "");
     const issuedAt = Date.now();
     const expiresAt = issuedAt + EXECUTION_CAPABILITY_LIFETIME_MS;
-    const token = await signHostedExecutionCapability(rootSecret, {
+    const token = await signHostedExecutionCapability(signingKey, {
       version: 1,
       computerId: authorized.computerId,
       generation: authorized.generation,

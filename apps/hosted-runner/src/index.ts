@@ -36,9 +36,26 @@ export default {
       const authority = env.COMPUTER_AUTHORITY.getByName(computerId);
       const capabilityScope = requestedCapabilityScope(parts, request.method);
       const authorization = capabilityScope
-        ? await authorizeCapabilityRequest(request, env.FABLE_HOSTED_RUNNER_API_KEY, computerId, capabilityScope)
+        ? await authorizeCapabilityRequest(
+          request,
+          env.FABLE_HOSTED_RUNNER_SIGNING_KEY,
+          computerId,
+          capabilityScope,
+          {
+            consume: (input) => authority.consumeCapabilityNonce(
+              computerId,
+              input.nonce,
+              input.generation,
+              input.expiresAt
+            )
+          }
+        )
         : { authorized: await serviceAuthorized(request, env.FABLE_HOSTED_RUNNER_API_KEY) };
       if (!authorization.authorized) {
+        route = "unauthorized";
+        return json({ error: "unauthorized" }, 401);
+      }
+      if (capabilityScope && authorization.expectedGeneration === undefined) {
         route = "unauthorized";
         return json({ error: "unauthorized" }, 401);
       }
@@ -57,6 +74,10 @@ export default {
         return json(snapshot);
       }
       if (parts[3] === "browser") {
+        if (authorization.expectedGeneration === undefined) {
+          route = "unauthorized";
+          return json({ error: "unauthorized" }, 401);
+        }
         const generation = await authority.requireReady(computerId, authorization.expectedGeneration);
         const browser = env.BROWSER_AUTHORITY.getByName(computerId);
         if (parts.length === 5 && parts[4] === "navigate" && request.method === "POST") {
@@ -76,6 +97,9 @@ export default {
       if (parts[3] !== "processes") return json({ error: "not-found" }, 404);
       if (parts.length === 4 && request.method === "POST") {
         route = "process.launch";
+        if (authorization.expectedGeneration === undefined) {
+          return json({ error: "unauthorized" }, 401);
+        }
         const launch = validateLaunchRequest(await readBoundedJson(request)) satisfies HostedProcessLaunchRequest;
         return json(await authority.launch(computerId, launch, authorization.expectedGeneration), 202);
       }
@@ -83,10 +107,16 @@ export default {
       const processId = validateProcessId(parts[4]);
       if (parts.length === 5 && request.method === "GET") {
         route = "process.inspect";
+        if (authorization.expectedGeneration === undefined) {
+          return json({ error: "unauthorized" }, 401);
+        }
         return json(await authority.inspect(computerId, processId, authorization.expectedGeneration));
       }
       if (parts.length === 6 && parts[5] === "kill" && request.method === "POST") {
         route = "process.kill";
+        if (authorization.expectedGeneration === undefined) {
+          return json({ error: "unauthorized" }, 401);
+        }
         return json(await authority.kill(computerId, processId, authorization.expectedGeneration), 202);
       }
       return json({ error: "not-found" }, 404);
@@ -96,7 +126,7 @@ export default {
       }
       const code = safeOperationCode(error);
       const status = code === "process-not-found" || code === "computer-not-found" ? 404
-        : code === "computer-not-ready" || code === "capability-stale" ? 409
+        : code === "computer-not-ready" || code === "capability-stale" || code === "capability-replayed" ? 409
         : 503;
       console.error(JSON.stringify({ level: "error", message: "hosted runner request failed", requestId, route, code }));
       return json({ error: code }, status);

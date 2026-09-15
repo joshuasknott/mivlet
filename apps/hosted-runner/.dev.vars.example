@@ -1,2 +1,4 @@
-# Copy to .dev.vars for local development. Never commit the real value.
-FABLE_HOSTED_RUNNER_API_KEY=replace-with-a-long-random-secret
+# Copy to .dev.vars for local development. Never commit the real values.
+# Service Bearer (lifecycle provision/status/destroy) and HMAC signing must be distinct.
+FABLE_HOSTED_RUNNER_API_KEY=replace-with-a-long-random-service-secret
+FABLE_HOSTED_RUNNER_SIGNING_KEY=replace-with-a-different-long-random-signing-secret
