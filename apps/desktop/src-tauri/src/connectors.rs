@@ -2802,30 +2802,41 @@ mod workspace_scope_tests {
             *id == "https://www.googleapis.com/auth/drive.file" && *access == "write" && *required
         }));
         let vercel = CATALOG.iter().find(|entry| entry.id == "vercel").unwrap();
-        assert!(vercel.scopes.iter().any(|(id, _, access, _)| {
-            *id == "deployment:write" && *access == "write"
-        }));
+        assert!(vercel
+            .scopes
+            .iter()
+            .any(|(id, _, access, _)| { *id == "deployment:write" && *access == "write" }));
         let linear = CATALOG.iter().find(|entry| entry.id == "linear").unwrap();
         assert!(linear
             .scopes
             .iter()
-            .all(|(id, _, access, _)| (*id != "issues:create" && *id != "comments:create")
-                && (*id != "write" || *access == "write")));
+            .all(
+                |(id, _, access, _)| (*id != "issues:create" && *id != "comments:create")
+                    && (*id != "write" || *access == "write")
+            ));
         assert!(linear
             .scopes
             .iter()
             .any(|(id, _, access, _)| *id == "write" && *access == "write"));
         let slack = CATALOG.iter().find(|entry| entry.id == "slack").unwrap();
-        assert!(slack.scopes.iter().any(|(id, _, access, _)| {
-            *id == "chat:write" && *access == "write"
-        }));
-        assert!(slack.scopes.iter().any(|(id, _, access, _)| {
-            *id == "reactions:write" && *access == "write"
-        }));
-        assert_eq!(action_required_scopes("vercel.promote"), &["deployment:write"]);
+        assert!(slack
+            .scopes
+            .iter()
+            .any(|(id, _, access, _)| { *id == "chat:write" && *access == "write" }));
+        assert!(slack
+            .scopes
+            .iter()
+            .any(|(id, _, access, _)| { *id == "reactions:write" && *access == "write" }));
+        assert_eq!(
+            action_required_scopes("vercel.promote"),
+            &["deployment:write"]
+        );
         assert_eq!(action_required_scopes("linear.update-issue"), &["write"]);
         assert_eq!(action_required_scopes("slack.post"), &["chat:write"]);
-        assert_eq!(action_required_scopes("slack.react-add"), &["reactions:write"]);
+        assert_eq!(
+            action_required_scopes("slack.react-add"),
+            &["reactions:write"]
+        );
         assert!(action_required_scopes("slack.create-draft").is_empty());
     }
     use crate::authorized_scope::{resolve, ScopeAccess};
