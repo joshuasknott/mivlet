@@ -85,10 +85,10 @@ describe("performance baseline guardrails", () => {
 
     const action = timed("connector action shaping", () =>
       prepareConnectorAction(
-        "github",
-        "GitHub",
-        "github.comment",
-        { repository: "acme/fable", targetId: "42", body: "Prepared comment." },
+        "linear",
+        "Linear",
+        "linear.comment",
+        { targetId: "ISS-1", body: "Prepared comment." },
         "high",
         "Posts the exact reviewed comment."
       )

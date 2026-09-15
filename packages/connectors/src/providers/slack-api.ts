@@ -19,8 +19,7 @@ export interface SlackAdapterOptions extends Omit<OAuthClientOptions, "connector
 /**
  * Slack bot scopes Mivlet requests. `chat:write` covers post, reply, edit, and
  * delete; `reactions:write` covers react-add and react-remove. Both match native
- * write actions and are labeled write. Local `slack.create-draft` does not need
- * a write scope.
+ * write actions and are labeled write.
  */
 export const SLACK_OAUTH_SCOPES = [
   "channels:read",

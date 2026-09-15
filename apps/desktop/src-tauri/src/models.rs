@@ -164,17 +164,9 @@ pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 45] = [
-    "github.draft-pull-request",
-    "github.comment",
+pub const CONNECTOR_ACTIONS: [&str; 36] = [
     "vercel.promote",
     "vercel.rollback",
-    "github.create-issue",
-    "github.update-issue",
-    "github.create-review",
-    "github.update-file",
-    "github.create-branch",
-    "github.dispatch-workflow",
     "vercel.create-deployment",
     "vercel.cancel-deployment",
     "vercel.update-project",
@@ -192,7 +184,6 @@ pub const CONNECTOR_ACTIONS: [&str; 45] = [
     "google-drive.delete-file",
     "gmail.create-draft",
     "gmail.send",
-    "slack.create-draft",
     "slack.post",
     "slack.reply",
     "slack.edit",

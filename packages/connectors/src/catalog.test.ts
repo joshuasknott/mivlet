@@ -33,14 +33,23 @@ describe("connector catalogue", () => {
   it("requests read-appropriate GitHub scopes and does not label write power as read", () => {
     const github = connectorCatalog.find((connector) => connector.id === "github");
     expect(github?.scopes?.map((scope) => scope.id)).toEqual(["read:user", "read:org"]);
-    expect(github?.scopes?.some((scope) => scope.id === "repo" || scope.access !== "read")).toBe(
-      false
-    );
+    expect(github?.scopes?.every((scope) => scope.required && scope.access === "read")).toBe(true);
+    expect(github?.scopes?.some((scope) => scope.id === "repo")).toBe(false);
+    expect(github?.setupMessage).toMatch(/classic GitHub OAuth App/i);
+    expect(github?.setupMessage).not.toMatch(/GitHub App with read-only repository permissions/i);
+    expect(github?.permissions.join(" ")).toMatch(/private repositories are not granted/i);
+    expect(github?.permissions.join(" ")).not.toMatch(/GitHub App/i);
     const drive = connectorCatalog.find((connector) => connector.id === "google-drive");
     const driveFile = drive?.scopes?.find(
       (scope) => scope.id === "https://www.googleapis.com/auth/drive.file"
     );
     expect(driveFile?.access).toBe("write");
+  });
+
+  it("does not list Notion console capabilities as OAuth scope ids", () => {
+    const notion = connectorCatalog.find((connector) => connector.id === "notion");
+    expect(notion?.scopes).toEqual([]);
+    expect(notion?.setupMessage).toMatch(/does not take OAuth scope query parameters/i);
   });
 
   it("keeps write-capable Vercel, Linear, and Slack scopes required on Connect", () => {

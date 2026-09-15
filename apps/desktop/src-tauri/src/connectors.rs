@@ -126,7 +126,7 @@ struct ConnectorActionPolicy {
 
 const GITHUB_SCOPES: &[(&str, &str, &str, bool)] = &[
     ("read:user", "Account identity", "read", true),
-    ("read:org", "Organization membership", "read", false),
+    ("read:org", "Organization membership", "read", true),
 ];
 const GITHUB_DISALLOWED_SCOPES: &[&str] = &["repo", "public_repo", "delete_repo"];
 const VERCEL_SCOPES: &[(&str, &str, &str, bool)] = &[
@@ -159,11 +159,7 @@ const DRIVE_SCOPES: &[(&str, &str, &str, bool)] = &[
         false,
     ),
 ];
-const NOTION_SCOPES: &[(&str, &str, &str, bool)] = &[
-    ("read_content", "Read selected content", "read", true),
-    ("insert_content", "Create content", "write", false),
-    ("update_content", "Update content", "write", false),
-];
+const NOTION_SCOPES: &[(&str, &str, &str, bool)] = &[];
 const GMAIL_SCOPES: &[(&str, &str, &str, bool)] = &[
     (
         "https://www.googleapis.com/auth/gmail.readonly",
@@ -258,11 +254,11 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         name: "GitHub",
         auth_mode: "oauth-broker",
         permissions: &[
-            "read authenticated account identity",
-            "read repositories, issues, and pull requests",
+            "read authenticated account identity and organization membership",
+            "read public repositories, issues, and pull requests; private repositories are not granted",
         ],
         scopes: GITHUB_SCOPES,
-        setup_message: "Register a GitHub App with read-only repository permissions (contents, issues, pull requests, metadata) and configure the Mivlet auth broker.",
+        setup_message: "Register a classic GitHub OAuth App (not a GitHub App) and configure the Mivlet auth broker. The broker requests read:user and read:org only. Classic repo is not requested. Public-repository REST may work; private-repository reads are not granted.",
         actions: &[],
     },
     ConnectorCatalogEntry {
@@ -315,7 +311,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "prepare approval-gated page, block, comment, and database entry changes",
         ],
         scopes: NOTION_SCOPES,
-        setup_message: "Create a Notion public connection and broker callback.",
+        setup_message: "Create a Notion public integration and configure the Mivlet auth broker. Notion does not take OAuth scope query parameters; capabilities are set in the Notion console, and sharing is Notion's page-sharing model.",
         actions: &[
             "notion.create-page",
             "notion.update-page",
@@ -350,7 +346,6 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         scopes: SLACK_SCOPES,
         setup_message: "Create a Slack app with bot scopes for channel reads plus chat:write and reactions:write, and configure its HTTPS broker callback. Those write scopes match native post, reply, edit, delete, and reaction actions.",
         actions: &[
-            "slack.create-draft",
             "slack.post",
             "slack.reply",
             "slack.edit",
@@ -497,20 +492,6 @@ fn require_connector(
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {
-        "github.draft-pull-request" => ConnectorActionPolicy {
-            label: "Draft Pull Request",
-            mode: "trusted-scope",
-            risk_level: "medium",
-            consequence: "Creates a draft pull request after Mivlet approval.",
-            confirmation_phrase: None,
-        },
-        "github.comment" => ConnectorActionPolicy {
-            label: "Comment",
-            mode: "trusted-scope",
-            risk_level: "medium",
-            consequence: "Publishes a comment to the selected GitHub item after Mivlet approval.",
-            confirmation_phrase: None,
-        },
         "vercel.promote" => ConnectorActionPolicy {
             label: "Promote",
             mode: "full-access",
@@ -525,30 +506,6 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             consequence: "Rolls production back to the selected deployment.",
             confirmation_phrase: Some("rollback deployment"),
         },
-        "github.create-issue" => external_policy(
-            "Create Issue",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
-        "github.update-issue" => external_policy(
-            "Update Issue",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
-        "github.create-review" => external_policy(
-            "Create Review",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
-        "github.update-file" => external_policy(
-            "Update File",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
-        "github.create-branch" => external_policy(
-            "Create Branch",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
-        "github.dispatch-workflow" => external_policy(
-            "Dispatch Workflow",
-            "Changes the identified GitHub repository resource after explicit approval.",
-        ),
         "vercel.create-deployment" => external_policy(
             "Create Deployment",
             "Changes the identified Vercel team or project resource after explicit approval.",
@@ -633,13 +590,6 @@ fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
             risk_level: "high",
             consequence: "Sends the selected email to external recipients.",
             confirmation_phrase: Some("send email"),
-        },
-        "slack.create-draft" => ConnectorActionPolicy {
-            label: "Create Draft",
-            mode: "trusted-scope",
-            risk_level: "medium",
-            consequence: "Creates a local Slack message draft. It does not post the message.",
-            confirmation_phrase: None,
         },
         "slack.post" => ConnectorActionPolicy {
             label: "Post",
@@ -1020,6 +970,9 @@ fn selected_auth_scopes(
 
     match requested_scopes {
         Some([]) => {
+            if declared.is_empty() {
+                return Ok(Vec::new());
+            }
             return Err(command_error(
                 "invalid-request",
                 entry.id,
@@ -2793,7 +2746,17 @@ mod workspace_scope_tests {
             .scopes
             .iter()
             .all(|(id, _, access, _)| *id != "repo" && *access == "read"));
-        assert!(github.scopes.iter().any(|(id, _, _, _)| *id == "read:user"));
+        assert!(github
+            .scopes
+            .iter()
+            .any(|(id, _, _, required)| *id == "read:user" && *required));
+        assert!(github
+            .scopes
+            .iter()
+            .any(|(id, _, _, required)| *id == "read:org" && *required));
+        assert!(!github.setup_message.contains("GitHub App with read-only"));
+        assert!(github.setup_message.contains("classic GitHub OAuth App"));
+        assert!(github.actions.is_empty());
         let drive = CATALOG
             .iter()
             .find(|entry| entry.id == "google-drive")
@@ -2831,7 +2794,12 @@ mod workspace_scope_tests {
             action_required_scopes("slack.react-add"),
             &["reactions:write"]
         );
-        assert!(action_required_scopes("slack.create-draft").is_empty());
+        assert!(!slack.actions.contains(&"slack.create-draft"));
+        let notion = CATALOG.iter().find(|entry| entry.id == "notion").unwrap();
+        assert!(notion.scopes.is_empty());
+        assert!(notion
+            .setup_message
+            .contains("does not take OAuth scope query parameters"));
     }
     use crate::authorized_scope::{resolve, ScopeAccess};
     use crate::models::ConnectorAccountSummary;
@@ -2892,6 +2860,14 @@ mod workspace_scope_tests {
             error.message,
             "Requested OAuth scope set requires at least one scope."
         );
+    }
+
+    #[test]
+    fn notion_connect_allows_empty_oauth_scope_set() {
+        let entry = require_connector("notion").unwrap();
+        let scopes = selected_auth_scopes(entry, Some(&[])).unwrap();
+        assert!(scopes.is_empty());
+        assert!(selected_auth_scopes(entry, None).unwrap().is_empty());
     }
 
     #[test]

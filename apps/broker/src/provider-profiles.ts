@@ -73,6 +73,7 @@ export interface ProviderProfile {
   };
 }
 
+/** Classic GitHub OAuth App (`login/oauth/authorize`), not a GitHub App. */
 const GITHUB_PROFILE: ProviderProfile = {
   label: "GitHub",
   authorizationEndpoint: "https://github.com/login/oauth/authorize",

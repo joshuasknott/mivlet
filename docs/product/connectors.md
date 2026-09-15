@@ -273,18 +273,19 @@ actions exist, so the write-capable grants are **required**, labeled write,
 and always included in the authorize URL. Per-action approval still gates
 execution. A stolen token remains write-capable; that residual is documented
 here rather than labeled as read. GitHub remains read-only at the product
-surface and does not request classic `repo`. Gmail compose/send and Calendar
-event writes stay optional because those public PKCE connects can omit them.
-Local drafts (Gmail compose, Slack create-draft) are not a reason to hide a
-live write scope that posts or changes provider data.
+surface, uses a classic OAuth App with `read:user`/`read:org`, and does not
+request classic `repo` or claim GitHub App repository permissions. Gmail
+compose/send and Calendar event writes stay optional because those public
+PKCE connects can omit them. Local Gmail compose drafts are not a reason to
+hide a live write scope that posts or changes provider data.
 
 | Connector | Requested on Connect | Decision |
 | --- | --- | --- |
-| GitHub | `read:user`, `read:org` | Keep reads. Classic `repo` is not requested; register a GitHub App with read-only repository permissions. |
+| GitHub | `read:user`, `read:org` (required) | Classic OAuth App, not a GitHub App. Keep identity and org reads. Classic `repo` is not requested. Public-repository REST may work; private-repository reads are not granted. Live GitHub writes are not enabled. |
 | Vercel | `user:read`, `team:read`, `project:read`, `deployment:read`, **`deployment:write` (required)** | Keep always-on `deployment:write`. Native actions promote, roll back, create, and cancel deployments, and change projects and domains, after exact approval. |
 | Linear | `read`, **`write` (required)** | Keep always-on `write` for issue create, issue update, and comments. Trim `issues:create` and `comments:create`; they are create-only subsets of `write` and cannot cover issue updates. |
-| Slack | channel/group/IM reads, `users:read`, **`chat:write` (required)**, **`reactions:write` (required)** | Keep always-on `chat:write` (post, reply, edit, delete) and `reactions:write` (react-add, react-remove). Local `slack.create-draft` does not need a write scope. |
-| Notion | none on the authorize URL | Notion uses integration capabilities (`read_content`, `insert_content`, `update_content`) configured in the Notion console, not OAuth scope query parameters. |
+| Slack | channel/group/IM reads, `users:read`, **`chat:write` (required)**, **`reactions:write` (required)** | Keep always-on `chat:write` (post, reply, edit, delete) and `reactions:write` (react-add, react-remove). `slack.create-draft` is not an advertised native action. |
+| Notion | none on the authorize URL | Notion OAuth sends no scope query parameters. Catalogs do not list fake OAuth scope ids. Capabilities (`read_content`, `insert_content`, `update_content`) are configured in the Notion console. |
 | Google Drive | `drive.file` (and optional broader Drive grants) | `drive.file` is write-capable, labeled write, and required on Connect. |
 | Gmail | `gmail.readonly` required; `gmail.compose`, `gmail.send` optional | Keep compose and send in the catalog; default PKCE Connect can omit them. |
 | Google Calendar | calendar list/event reads required; `calendar.events` optional | Keep `calendar.events` for create, update, cancel, and delete; default PKCE Connect can omit it. |

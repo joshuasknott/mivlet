@@ -38,17 +38,6 @@ export function shapeSlackSearch(query: string, limit?: number) {
   return shapeConnectorSearchRequest("slack", query, limit);
 }
 
-export function prepareSlackDraft(channelId: string, text: string) {
-  return prepareConnectorAction(
-    "slack",
-    "Slack",
-    "slack.create-draft",
-    { channelId, text, targetId: channelId },
-    "medium",
-    "Creates a local Slack message draft. It does not post the message."
-  );
-}
-
 export function prepareSlackPost(channelId: string, text: string) {
   return prepareConnectorAction(
     "slack",

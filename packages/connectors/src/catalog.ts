@@ -85,14 +85,17 @@ export const connectorCatalog: ConnectorManifest[] = [
   disconnectedConnector({
     id: "github",
     name: "GitHub",
-    permissions: ["read repositories, issues, and pull requests"],
+    permissions: [
+      "read authenticated account identity and organization membership",
+      "read public repositories, issues, and pull requests; private repositories are not granted"
+    ],
     authMode: "oauth-broker",
     scopes: [
       permission("read:user", "Account identity", "read", true),
-      permission("read:org", "Organization membership", "read", false)
+      permission("read:org", "Organization membership", "read", true)
     ],
     setupMessage:
-      "Register a GitHub App with read-only repository permissions (contents, issues, pull requests, metadata) and configure the Mivlet auth broker."
+      "Register a classic GitHub OAuth App (not a GitHub App) and configure the Mivlet auth broker. The broker requests `read:user` and `read:org` only. Classic `repo` is not requested. Public-repository REST may work; private-repository reads are not granted."
   }),
   disconnectedConnector({
     id: "vercel",
@@ -129,14 +132,14 @@ export const connectorCatalog: ConnectorManifest[] = [
   disconnectedConnector({
     id: "notion",
     name: "Notion",
-    permissions: ["read selected pages and databases", "prepare approved content changes"],
-    authMode: "oauth-broker",
-    scopes: [
-      permission("read_content", "Read selected content", "read", true),
-      permission("insert_content", "Create content", "write", false),
-      permission("update_content", "Update content", "write", false)
+    permissions: [
+      "read pages and databases shared with the integration",
+      "prepare approved content changes using Notion console capabilities"
     ],
-    setupMessage: "Create a Notion public integration and configure the Mivlet auth broker."
+    authMode: "oauth-broker",
+    scopes: [],
+    setupMessage:
+      "Create a Notion public integration and configure the Mivlet auth broker. Notion does not take OAuth scope query parameters; capabilities are set in the Notion console, and sharing is Notion's page-sharing model."
   }),
   disconnectedConnector({
     id: "gmail",
