@@ -1,4 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+
+import {
+  BROKER_CONTRACT_VERSION,
+  BROKER_PKCE_S256_EXAMPLE
+} from "./broker-contract";
 import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
 import { ConnectorRuntime, type ConnectorApprovalBoundary } from "../sdk";
 import type { ProviderFetch } from "./http";
@@ -75,7 +80,13 @@ describe("GitHub production adapter", () => {
       const target = new URL(url);
       const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
       if (target.pathname === "/oauth/github/handoff") {
-        expect(body).toMatchObject({ contractVersion: 1, provider: "github", handoff: "ticket", state: "state-1" });
+        expect(body).toMatchObject({
+          contractVersion: BROKER_CONTRACT_VERSION,
+          provider: "github",
+          handoff: "ticket",
+          state: "state-1",
+          codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier
+        });
         return response({
           contractVersion: 1,
           tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh", tokenType: "Bearer", scopes: ["read:user", "read:org"] },
@@ -99,17 +110,17 @@ describe("GitHub production adapter", () => {
     const started = await adapter.startAuth({
       redirectUri: common.redirectUri,
       state: "state-1",
-      codeChallenge: "challenge"
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
     });
     const authorize = new URL(started.authorizationUrl);
     expect(authorize.pathname).toBe("/oauth/github/authorize");
-    expect(authorize.searchParams.get("code_challenge")).toBe("challenge");
+    expect(authorize.searchParams.get("code_challenge")).toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
     expect(authorize.searchParams.get("scope")).toBe("read:user read:org");
 
     const completed = await adapter.completeAuth({
       callbackUrl: `${common.redirectUri}?handoff=ticket&state=state-1`,
       expectedState: "state-1",
-      codeVerifier: "verifier"
+      codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier
     });
     expect(completed.account).toMatchObject({ id: "123", handle: "octocat" });
     expect(completed.tokens.accessToken).toBe("synthetic-access");
@@ -132,7 +143,7 @@ describe("GitHub production adapter", () => {
     await expect(adapter.completeAuth({
       callbackUrl: `${common.redirectUri}?handoff=ticket&state=state-1`,
       expectedState: "state-1",
-      codeVerifier: "verifier"
+      codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier
     })).rejects.toMatchObject({
       code: "configuration-required",
       message: "GitHub is not configured on this broker.",
@@ -279,7 +290,7 @@ describe("Vercel production adapter", () => {
   });
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
-    const start = await createVercelAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: "c" });
+    const start = await createVercelAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/vercel/authorize");
     expect(start.state).toBe("s");
   });
@@ -295,7 +306,7 @@ describe("Vercel production adapter", () => {
       return response({ contractVersion: 1, revoked: true });
     });
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
-    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(auth).toMatchObject({ tokens: { accessToken: "a", refreshToken: "r" }, account: { id: "vercel-uid" } });
     await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "a2", refreshToken: "r" });
     await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
@@ -308,7 +319,7 @@ describe("Vercel production adapter", () => {
     const fetcher = vi.fn(async () => response({ contractVersion: 1, tokens: { accessToken: "a", tokenType: "Bearer", scopes: [] }, account: { id: "vercel-uid", displayName: "Vercel User" } }));
     const adapter = createVercelAdapter({ ...common, fetch: fetcher });
     // State mismatch fails closed with an invalid-request before the broker is contacted.
-    await expect(adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=attacker`, expectedState: "expected", codeVerifier: "unused" })).rejects.toMatchObject({ code: "invalid-request" });
+    await expect(adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=attacker`, expectedState: "expected", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })).rejects.toMatchObject({ code: "invalid-request" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
@@ -404,7 +415,7 @@ describe("Linear production adapter", () => {
       return response({ error: "invalid route" }, 404);
     });
     const adapter = createLinearAdapter({ ...common, fetch: fetcher });
-    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     await adapter.refresh(auth.tokens);
     await adapter.revoke(auth.tokens);
     expect(seen).toEqual(["/oauth/linear/handoff", "/oauth/linear/refresh", "/oauth/linear/revoke"]);
@@ -430,7 +441,7 @@ describe("Linear production adapter", () => {
   });
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
-    const start = await createLinearAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: "c" });
+    const start = await createLinearAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "s", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/linear/authorize");
     expect(start.state).toBe("s");
   });
@@ -446,7 +457,7 @@ describe("Linear production adapter", () => {
       return response({ contractVersion: 1, revoked: true });
     });
     const adapter = createLinearAdapter({ ...common, fetch: fetcher });
-    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(auth).toMatchObject({ tokens: { accessToken: "a", refreshToken: "r" }, account: { id: "ws" } });
     await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "a2", refreshToken: "r" });
     await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();

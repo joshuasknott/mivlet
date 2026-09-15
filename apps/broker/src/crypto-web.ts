@@ -88,3 +88,18 @@ export function utf8Encode(s: string): Uint8Array {
 export function utf8Decode(bytes: Uint8Array): string {
   return TEXT_DECODER.decode(bytes);
 }
+
+/**
+ * Constant-time equality for UTF-8 strings. Length mismatches still compare
+ * against a dummy walk so short values do not return early.
+ */
+export function timingSafeEqualUtf8(left: string, right: string): boolean {
+  const a = TEXT_ENCODER.encode(left);
+  const b = TEXT_ENCODER.encode(right);
+  const n = Math.max(a.length, b.length);
+  let mismatch = a.length ^ b.length;
+  for (let i = 0; i < n; i++) {
+    mismatch |= (a[i] ?? 0) ^ (b[i] ?? 0);
+  }
+  return mismatch === 0;
+}

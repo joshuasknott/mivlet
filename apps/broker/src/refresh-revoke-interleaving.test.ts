@@ -32,6 +32,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BROKER_CONTRACT_VERSION,
   BROKER_HANDOFF_TTL_SECONDS,
+  BROKER_PKCE_S256_EXAMPLE,
   type BrokerProviderId
 } from "@fable/connectors";
 
@@ -172,7 +173,7 @@ describe("production durable contract: single-use under deterministic interleavi
       provider: "github",
       redirectUri: REDIRECT,
       state: STATE,
-      codeChallenge: "desktop-challenge",
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
       codeChallengeMethod: "S256"
     });
 
@@ -211,14 +212,14 @@ describe("production durable contract: single-use under deterministic interleavi
       provider: "github",
       redirectUri: REDIRECT,
       state: STATE,
-      codeChallenge: "desktop-challenge",
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
       codeChallengeMethod: "S256"
     });
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: STATE }));
     const handoff = redirect.searchParams.get("handoff")!;
 
     const attempts = Array.from({ length: 8 }, () =>
-      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE })
+      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })
     );
     const settled = await Promise.allSettled(attempts);
     const winners = settled.filter((r) => r.status === "fulfilled");
@@ -239,7 +240,7 @@ describe("production durable contract: single-use under deterministic interleavi
       provider: "github",
       redirectUri: REDIRECT,
       state: STATE,
-      codeChallenge: "desktop-challenge",
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
       codeChallengeMethod: "S256"
     });
     (clock as any).advance(ttlMs + 1000);
@@ -266,7 +267,7 @@ describe("production durable contract: single-use under deterministic interleavi
       provider: "github",
       redirectUri: REDIRECT,
       state: STATE,
-      codeChallenge: "desktop-challenge",
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
       codeChallengeMethod: "S256"
     });
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: STATE }));
@@ -274,10 +275,10 @@ describe("production durable contract: single-use under deterministic interleavi
 
     (clock as any).advance(ttlMs + 1000);
     await expect(
-      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE })
+      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })
     ).rejects.toMatchObject({ error: "invalid-handoff" });
     await expect(
-      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE })
+      broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: STATE, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })
     ).rejects.toMatchObject({ error: "invalid-handoff" });
     expect((handoffInst as any)._rowsForTest ?? []).toHaveLength(0);
   });

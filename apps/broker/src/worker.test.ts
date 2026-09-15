@@ -17,7 +17,7 @@ const DURABLE_BINDING = {
 describe("broker Worker entrypoint", () => {
   it("fails closed when the Worker public URL binding is missing", async () => {
     const response = await worker.fetch(new Request(
-      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch"
+      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch&code_challenge_method=S256"
     ), ENV);
     expect(response.status).toBe(503);
     expect((await response.json() as { error: string }).error).toBe("configuration-required");
@@ -33,7 +33,7 @@ describe("broker Worker entrypoint", () => {
       BROKER_RATELIMIT: DURABLE_BINDING as DurableObjectNamespace<any>
     };
     const response = await worker.fetch(new Request(
-      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch"
+      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch&code_challenge_method=S256"
     ), envDurable);
     expect(response.status).toBe(503);
     expect((await response.json() as { error: string }).error).toBe("configuration-required");
@@ -47,7 +47,7 @@ describe("broker Worker entrypoint", () => {
       FABLE_BROKER_STORE_ENCRYPTION_KEY: VALID_STORE_KEY
     };
     const response = await worker.fetch(new Request(
-      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch"
+      "https://auth.example.test/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=state-1234567890123456&code_challenge=ch&code_challenge_method=S256"
     ), envDurable);
     expect(response.status).toBe(503);
     expect((await response.json() as { error: string }).error).toBe("configuration-required");

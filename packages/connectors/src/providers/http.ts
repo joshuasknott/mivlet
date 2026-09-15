@@ -11,6 +11,12 @@ import type {
   ConnectorAuthResult,
   ConnectorAuthStart
 } from "../sdk";
+import {
+  BROKER_CONTRACT_VERSION,
+  BROKER_PKCE_CHALLENGE_METHOD,
+  assertBrokerPkceChallenge,
+  assertBrokerPkceVerifier
+} from "./broker-contract";
 
 export type JsonObject = Record<string, unknown>;
 export type ProviderFetch = (input: string, init?: RequestInit) => Promise<Response>;
@@ -149,6 +155,7 @@ export function oauthClient(options: OAuthClientOptions) {
   };
   return {
     async startAuth(context: ConnectorAuthContext): Promise<ConnectorAuthStart> {
+      assertBrokerPkceChallenge(context.codeChallenge, BROKER_PKCE_CHALLENGE_METHOD);
       const url = new URL(options.authorizationEndpoint);
       url.searchParams.set("client_id", options.clientId);
       url.searchParams.set("redirect_uri", context.redirectUri);
@@ -156,7 +163,7 @@ export function oauthClient(options: OAuthClientOptions) {
       url.searchParams.set("scope", options.scopes.join(" "));
       url.searchParams.set("state", context.state);
       url.searchParams.set("code_challenge", context.codeChallenge);
-      url.searchParams.set("code_challenge_method", "S256");
+      url.searchParams.set("code_challenge_method", BROKER_PKCE_CHALLENGE_METHOD);
       return { authorizationUrl: url.toString(), state: context.state };
     },
     async completeAuth(callback: ConnectorAuthCallback): Promise<ConnectorAuthResult> {
@@ -166,10 +173,17 @@ export function oauthClient(options: OAuthClientOptions) {
       }
       const handoff = callbackUrl.searchParams.get("handoff");
       if (!handoff) throw providerError(options.connectorId, 400, "missing_handoff");
+      assertBrokerPkceVerifier(callback.codeVerifier);
       const response = await fetcher(brokerEndpoint("handoff"), {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, handoff, state: callback.expectedState })
+        body: JSON.stringify({
+          contractVersion: BROKER_CONTRACT_VERSION,
+          provider: options.connectorId,
+          handoff,
+          state: callback.expectedState,
+          codeVerifier: callback.codeVerifier
+        })
       });
       if (!response.ok) throw await brokerError(options.connectorId, "handoff", response);
       const body = await safeJson(response);
@@ -183,7 +197,7 @@ export function oauthClient(options: OAuthClientOptions) {
       const response = await fetcher(brokerEndpoint("refresh"), {
         method: "POST",
         headers: { accept: "application/json", "content-type": "application/json" },
-        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, refreshToken: tokens.refreshToken })
+        body: JSON.stringify({ contractVersion: BROKER_CONTRACT_VERSION, provider: options.connectorId, refreshToken: tokens.refreshToken })
       });
       if (!response.ok) throw await brokerError(options.connectorId, "refresh", response);
       const body = await safeJson(response);
@@ -196,7 +210,7 @@ export function oauthClient(options: OAuthClientOptions) {
       const response = await fetcher(brokerEndpoint("revoke"), {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ contractVersion: 1, provider: options.connectorId, token: tokens.refreshToken ?? tokens.accessToken, tokenTypeHint: tokens.refreshToken ? "refresh_token" : "access_token" })
+        body: JSON.stringify({ contractVersion: BROKER_CONTRACT_VERSION, provider: options.connectorId, token: tokens.refreshToken ?? tokens.accessToken, tokenTypeHint: tokens.refreshToken ? "refresh_token" : "access_token" })
       });
       if (!response.ok && response.status !== 404) {
         throw await brokerError(options.connectorId, "revoke", response);

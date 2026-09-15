@@ -5,6 +5,10 @@
 //! broker. Access/refresh tokens and pending PKCE verifiers are stored only in
 //! the OS credential store; the local connection file contains non-secret
 //! account identity and expiry metadata.
+//!
+//! Brokered connectors keep a desktop S256 verifier in the keyring and prove it
+//! at handoff redeem. The broker does not forward that challenge to the
+//! provider; it mints its own PKCE pair for providers that require it.
 
 use std::{
     collections::BTreeMap,
@@ -828,6 +832,7 @@ async fn redeem_handoff(
     handoff_endpoint: &str,
     handoff: &str,
     state: &str,
+    code_verifier: &str,
 ) -> Result<TokenResponse, ConnectorCommandError> {
     let response = reqwest::Client::new()
         .post(handoff_endpoint)
@@ -836,6 +841,7 @@ async fn redeem_handoff(
             "provider": connector_id,
             "handoff": handoff,
             "state": state,
+            "codeVerifier": code_verifier,
         }))
         .send()
         .await
@@ -1026,6 +1032,7 @@ async fn prepare_with_store(
             &handoff_endpoint,
             &handoff_ticket,
             state.as_ref(),
+            pending.verifier.as_str(),
         )
         .await?
     } else {
@@ -4087,6 +4094,7 @@ mod tests {
         assert!(request.contains("\"provider\":\"github\""));
         assert!(request.contains("\"handoff\":\"ticket\""));
         assert!(request.contains(&format!("\"state\":\"{state}\"")));
+        assert!(request.contains("\"codeVerifier\":"));
     }
 
     #[tokio::test]

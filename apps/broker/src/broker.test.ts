@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   BROKER_CONTRACT_VERSION,
+  BROKER_PKCE_S256_EXAMPLE,
   BrokerContractError,
   type BrokerAuthorizeRequest,
   type BrokerProviderId
@@ -55,8 +56,23 @@ function authorizeRequest(provider: BrokerProviderId, state = "desktop-state"): 
     provider,
     redirectUri: REDIRECT,
     state: oauthState(state),
-    codeChallenge: "desktop-challenge",
+    codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
     codeChallengeMethod: "S256"
+  };
+}
+
+function redeemRequest(
+  provider: BrokerProviderId,
+  handoff: string,
+  state: string,
+  codeVerifier = BROKER_PKCE_S256_EXAMPLE.verifier
+) {
+  return {
+    contractVersion: BROKER_CONTRACT_VERSION,
+    provider,
+    handoff,
+    state,
+    codeVerifier
   };
 }
 
@@ -141,7 +157,7 @@ describe("broker authorize", () => {
     expect(url.searchParams.get("redirect_uri")).toBe("http://127.0.0.1:8788/oauth/github/callback");
     expect(url.searchParams.get("scope")).toBe("read:user read:org");
     // The broker performs the exchange, so its verifier (not the desktop's) is used.
-    expect(url.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
+    expect(url.searchParams.get("code_challenge")).not.toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
     expect(response.authorizationUrl).not.toContain("secret");
   });
 
@@ -162,7 +178,7 @@ describe("broker authorize", () => {
     const linearAuth = new URL((await linear.authorize(authorizeRequest("linear", "linear-auth"))).response.authorizationUrl);
     expect(linearAuth.origin + linearAuth.pathname).toBe("https://linear.app/oauth/authorize");
     expect(linearAuth.searchParams.get("scope")).toBe("read,write,issues:create,comments:create");
-    expect(linearAuth.searchParams.get("code_challenge")).not.toBe("desktop-challenge");
+    expect(linearAuth.searchParams.get("code_challenge")).not.toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
 
     const { broker: notion } = makeBroker("notion", providerFetch("notion"));
     const notionAuth = new URL((await notion.authorize(authorizeRequest("notion", "notion-auth"))).response.authorizationUrl);
@@ -213,9 +229,7 @@ describe("broker callback + handoff", () => {
     expect(redirect.toString()).not.toContain("provider-access-token");
 
     // Redeem the single-use handoff for the tokens over a direct call.
-    const redeemed = await broker.redeem({
-      contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff: handoff!, state: state!
-    });
+    const redeemed = await broker.redeem(redeemRequest("github", handoff!, state!));
     expect(redeemed.tokens.accessToken).toBe("provider-access-token");
     expect(redeemed.account.id).toBe("1234");
     expect(redeemed.account.displayName).toBe("Fable User");
@@ -260,8 +274,8 @@ describe("broker callback + handoff", () => {
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("replay") }));
     const handoff = redirect.searchParams.get("handoff")!;
     const state = redirect.searchParams.get("state")!;
-    await broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state });
-    await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state }))
+    await broker.redeem(redeemRequest("github", handoff, state));
+    await expect(broker.redeem(redeemRequest("github", handoff, state)))
       .rejects.toThrow(/unknown, expired, already used/);
   });
 
@@ -270,7 +284,7 @@ describe("broker callback + handoff", () => {
     await broker.authorize(authorizeRequest("github", "right"));
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("right") }));
     const handoff = redirect.searchParams.get("handoff")!;
-    await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: "wrong" }))
+    await expect(broker.redeem(redeemRequest("github", handoff, "wrong")))
       .rejects.toThrow(/unknown, expired, already used/);
   });
 
@@ -281,7 +295,7 @@ describe("broker callback + handoff", () => {
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("ttl") }));
     const handoff = redirect.searchParams.get("handoff")!;
     clock.advance(BROKER_HANDOFF_TTL_SECONDS * 1000 + 1);
-    await expect(broker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "github", handoff, state: oauthState("ttl") }))
+    await expect(broker.redeem(redeemRequest("github", handoff, oauthState("ttl"))))
       .rejects.toThrow(/unknown, expired, already used/);
   });
 
@@ -441,9 +455,7 @@ describe("broker provider coverage", () => {
       await broker.authorize(authorizeRequest(provider, `state-${provider}`));
       const { redirect } = await broker.callback(provider, new URLSearchParams({ code: "c", state: oauthState(`state-${provider}`) }));
       const handoff = redirect.searchParams.get("handoff")!;
-      const redeemed = await broker.redeem({
-        contractVersion: BROKER_CONTRACT_VERSION, provider, handoff, state: oauthState(`state-${provider}`)
-      });
+      const redeemed = await broker.redeem(redeemRequest(provider, handoff, oauthState(`state-${provider}`)));
       expect(redeemed.tokens.accessToken).toBe("provider-access-token");
       expect(redeemed.account.id).toBeTruthy();
     });
@@ -453,7 +465,7 @@ describe("broker provider coverage", () => {
     const { broker: slackBroker } = makeBroker("slack", providerFetch("slack"));
     await slackBroker.authorize(authorizeRequest("slack", "slack-state"));
     const { redirect: slackRedirect } = await slackBroker.callback("slack", new URLSearchParams({ code: "c", state: oauthState("slack-state") }));
-    const slack = await slackBroker.redeem({ contractVersion: BROKER_CONTRACT_VERSION, provider: "slack", handoff: slackRedirect.searchParams.get("handoff")!, state: oauthState("slack-state") });
+    const slack = await slackBroker.redeem(redeemRequest("slack", slackRedirect.searchParams.get("handoff")!, oauthState("slack-state")));
     expect(slack.account).toMatchObject({ id: "T1:U1", displayName: "Slack User", workspace: "Fable Slack" });
 
     expect(providerProfile("notion").normalizeIdentity(identityFor("notion"))).toMatchObject({ id: "ws-1", displayName: "Fable Notion", workspace: "Fable Notion" });
@@ -473,12 +485,11 @@ describe("broker provider coverage", () => {
     }));
     await broker.authorize(authorizeRequest("linear", "linear-array-scope"));
     const { redirect } = await broker.callback("linear", new URLSearchParams({ code: "c", state: oauthState("linear-array-scope") }));
-    const redeemed = await broker.redeem({
-      contractVersion: BROKER_CONTRACT_VERSION,
-      provider: "linear",
-      handoff: redirect.searchParams.get("handoff")!,
-      state: oauthState("linear-array-scope")
-    });
+    const redeemed = await broker.redeem(redeemRequest(
+      "linear",
+      redirect.searchParams.get("handoff")!,
+      oauthState("linear-array-scope")
+    ));
     expect(redeemed.tokens.scopes).toEqual(["read", "write"]);
   });
 });

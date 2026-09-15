@@ -63,7 +63,8 @@ Plaintext query columns must remain non-secret.
 Rust owns credential injection, endpoint allowlists, HTTPS policy, timeouts, and
 bounded responses. Remote custom-provider HTTP is rejected; loopback is the
 only plaintext exception. Connector OAuth uses system-browser authorization,
-PKCE where applicable, exact callback state, and isolated credential custody.
+PKCE (public Google and desktop↔broker S256, plus broker-owned PKCE where the
+provider documents it), exact callback state, and isolated credential custody.
 The broker handles only confidential connector authorization and stores no
 conversation or provider secrets.
 

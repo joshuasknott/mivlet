@@ -3,11 +3,12 @@
  *
  * Two stores back the broker:
  *   - {@link PendingExchangeStore}: holds the desktop's `redirect_uri`, `state`,
- *     and (for broker-pkce providers) the broker-generated verifier, between the
- *     authorize request and the provider callback. Created if-absent only — a
- *     second write for a live `state` is `invalid-state`, so an observer cannot
- *     replace the bound desktop redirect before callback. Consumed exactly once
- *     on callback — a replayed callback finds no pending exchange and is rejected.
+ *     desktop S256 `codeChallenge`, and (for broker-pkce providers) the
+ *     broker-generated verifier, between the authorize request and the provider
+ *     callback. Created if-absent only — a second write for a live `state` is
+ *     `invalid-state`, so an observer cannot replace the bound desktop redirect
+ *     before callback. Consumed exactly once on callback — a replayed callback
+ *     finds no pending exchange and is rejected.
  *   - {@link HandoffStore}: holds the redeemed token set + account behind a
  *     short-lived opaque ticket. Consumed exactly once when the desktop redeems
  *     it; a second redemption is rejected, preventing token replay.
@@ -66,6 +67,8 @@ export interface PendingExchange {
   state: string;
   /** Broker-generated PKCE verifier (broker-pkce providers only). */
   verifier?: string;
+  /** Desktop S256 challenge; copied onto the handoff and proven at redeem. */
+  codeChallenge: string;
   createdAt: number;
 }
 
@@ -75,6 +78,8 @@ export interface HandoffEntry {
   account: ConnectorAccountSummary;
   /** Desktop state the handoff is bound to; must match on redeem. */
   state: string;
+  /** Desktop S256 challenge bound at authorize; must match `codeVerifier`. */
+  codeChallenge: string;
   createdAt: number;
 }
 
