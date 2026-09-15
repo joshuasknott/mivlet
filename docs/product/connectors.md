@@ -246,7 +246,9 @@ authorize, callback, single-use handoff, refresh, and revoke routes. It contains
 no account, model-provider, sync, or product-data endpoints.
 
 Pending authorization state, handoff tickets, and rate limits may use memory in
-local development and tests. Staging or production must use the encrypted
+local development and tests on loopback URLs. A public HTTPS callback URL
+refuses the memory backend, and a Worker labeled `local` (or unlabeled) with a
+public URL fails closed. Staging or production must use the encrypted
 Durable Object binding declared in `apps/broker/wrangler.jsonc`; deployment
 without durable storage or its encryption key fails closed. The broker never
 stores long-lived user tokens after handoff.

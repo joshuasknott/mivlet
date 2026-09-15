@@ -11,7 +11,9 @@
     "FABLE_BROKER_ENVIRONMENT": "local",
     "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
     // Local/default Worker development keeps memory storage for deterministic tests.
-    // Staging and production envs below override this to "durable".
+    // Memory is refused when FABLE_BROKER_PUBLIC_URL is public HTTPS.
+    // Unlabeled or local plus a public URL fails closed. Staging and production
+    // envs below override this to "durable".
     "FABLE_BROKER_STORAGE_BACKEND": "memory"
   },
 
@@ -20,6 +22,7 @@
       "name": "fable-auth-broker-local",
       "vars": {
         "FABLE_BROKER_ENVIRONMENT": "local",
+        // Loopback only. A public HTTPS URL with this local label fails closed.
         "FABLE_BROKER_PUBLIC_URL": "http://127.0.0.1:8788/",
         "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
         "FABLE_BROKER_STORAGE_BACKEND": "memory"
