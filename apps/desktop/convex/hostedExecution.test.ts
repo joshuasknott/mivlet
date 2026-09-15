@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
-import { getComputer, requestExecutionCapability, requestProvision } from "./hostedExecution";
+import {
+  getComputer,
+  requestExecutionCapability,
+  requestProvision,
+} from "./hostedExecution";
 
 type ConvexFunctionVisibility = {
   isAction?: boolean;
@@ -15,7 +19,10 @@ function visibility(value: unknown): ConvexFunctionVisibility {
 
 function isPublicClientFunction(value: unknown): boolean {
   const fn = visibility(value);
-  return Boolean(fn.isQuery || fn.isMutation || fn.isAction) && fn.isInternal !== true;
+  return (
+    Boolean(fn.isQuery || fn.isMutation || fn.isAction) &&
+    fn.isInternal !== true
+  );
 }
 
 describe("hosted execution capability minting", () => {
@@ -30,8 +37,16 @@ describe("hosted execution capability minting", () => {
   it("exposes minting only on the internal function table", () => {
     type PublicHosted = typeof api.hostedExecution;
     type InternalHosted = typeof internal.hostedExecution;
-    type PublicMint = PublicHosted extends { requestExecutionCapability: unknown } ? true : false;
-    type InternalMint = InternalHosted extends { requestExecutionCapability: unknown } ? true : false;
+    type PublicMint = PublicHosted extends {
+      requestExecutionCapability: unknown;
+    }
+      ? true
+      : false;
+    type InternalMint = InternalHosted extends {
+      requestExecutionCapability: unknown;
+    }
+      ? true
+      : false;
     const publicClientCannotMint: PublicMint = false;
     const internalCanMint: InternalMint = true;
     expect(publicClientCannotMint).toBe(false);

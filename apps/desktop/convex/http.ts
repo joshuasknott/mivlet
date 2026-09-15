@@ -8,7 +8,7 @@ const EXECUTION_CAPABILITY_SCOPES = [
   "process:kill",
   "browser:navigate",
   "browser:act",
-  "browser:snapshot"
+  "browser:snapshot",
 ] as const;
 
 type ExecutionCapabilityScope = (typeof EXECUTION_CAPABILITY_SCOPES)[number];
@@ -24,12 +24,14 @@ function parseExecutionCapabilityArgs(value: unknown): {
   scope: ExecutionCapabilityScope;
 } {
   if (
-    !isRecord(value)
-    || typeof value.workspaceId !== "string"
-    || typeof value.deviceId !== "string"
-    || typeof value.agentId !== "string"
-    || typeof value.scope !== "string"
-    || !EXECUTION_CAPABILITY_SCOPES.includes(value.scope as ExecutionCapabilityScope)
+    !isRecord(value) ||
+    typeof value.workspaceId !== "string" ||
+    typeof value.deviceId !== "string" ||
+    typeof value.agentId !== "string" ||
+    typeof value.scope !== "string" ||
+    !EXECUTION_CAPABILITY_SCOPES.includes(
+      value.scope as ExecutionCapabilityScope,
+    )
   ) {
     throw new Error("invalid-request");
   }
@@ -37,7 +39,7 @@ function parseExecutionCapabilityArgs(value: unknown): {
     workspaceId: value.workspaceId,
     deviceId: value.deviceId,
     agentId: value.agentId,
-    scope: value.scope as ExecutionCapabilityScope
+    scope: value.scope as ExecutionCapabilityScope,
   };
 }
 
@@ -51,18 +53,27 @@ http.route({
     try {
       body = await request.json();
     } catch {
-      return Response.json({ status: "error", errorMessage: "invalid-request" }, { status: 400 });
+      return Response.json(
+        { status: "error", errorMessage: "invalid-request" },
+        { status: 400 },
+      );
     }
     try {
       const args = parseExecutionCapabilityArgs(body);
-      const receipt = await ctx.runAction(internal.hostedExecution.requestExecutionCapability, args);
+      const receipt = await ctx.runAction(
+        internal.hostedExecution.requestExecutionCapability,
+        args,
+      );
       return Response.json({ status: "success", value: receipt });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "capability-unavailable";
-      const errorMessage = /^[a-z0-9-]{1,80}$/.test(message) ? message : "capability-unavailable";
+      const message =
+        error instanceof Error ? error.message : "capability-unavailable";
+      const errorMessage = /^[a-z0-9-]{1,80}$/.test(message)
+        ? message
+        : "capability-unavailable";
       return Response.json({ status: "error", errorMessage }, { status: 400 });
     }
-  })
+  }),
 });
 
 export default http;
