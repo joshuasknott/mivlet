@@ -104,7 +104,10 @@ fn id(value: &str) -> Result<()> {
     }
     Ok(())
 }
-fn profile<'a>(profiles: &'a [MivletAgentProfile], agent_id: &str) -> Result<&'a MivletAgentProfile> {
+fn profile<'a>(
+    profiles: &'a [MivletAgentProfile],
+    agent_id: &str,
+) -> Result<&'a MivletAgentProfile> {
     profiles
         .iter()
         .find(|p| p.id == agent_id)
