@@ -84,22 +84,7 @@ fn optional_bounded(
 }
 
 fn contains_secret_shape(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    [
-        "authorization:",
-        "bearer ",
-        "cookie:",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "xoxb-",
-        "xoxp-",
-        "ghp_",
-        "github_pat_",
-        "sk-",
-    ]
-    .iter()
-    .any(|marker| lower.contains(marker))
+    crate::secret_redaction::looks_secret(value)
 }
 
 fn normalize_context_scope(

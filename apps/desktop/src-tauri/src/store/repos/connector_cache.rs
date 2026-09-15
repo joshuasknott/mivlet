@@ -37,29 +37,17 @@ pub const TRUST_VALUES: &[&str] = &["trusted", "untrusted", "verified"];
 /// never carries a secret, even if a provider response leaked one into a field.
 pub const REDACTED: &str = "[redacted connector data]";
 
-/// Marker substrings that indicate a value is secret/token-shaped. Mirrors the
-/// runtime redaction vocabulary in `connectors::redact_connector_text` and the
-/// cache invariant: cached data must never include provider secrets/tokens.
-const SECRET_MARKERS: &[&str] = &[
-    "authorization:",
-    "bearer ",
-    "cookie:",
-    "access_token",
-    "refresh_token",
-    "client_secret",
-    "xoxb-",
-    "xoxp-",
-    "ghp_",
-    "github_pat_",
-    "ya29.", // Google access-token prefix
-    "1//",   // Google refresh-token prefix
-    "sk-",   // generic API-key prefix
+/// Marker substrings that indicate a value is secret/token-shaped. The shared
+/// vocabulary in `packages/protocol/src/secret-redaction.json` is the baseline;
+/// Google refresh tokens (`1//`) stay cache-local because that prefix is too
+/// collision-prone for free-form tool output.
+const CACHE_SECRET_EXTRAS: &[&str] = &[
+    "1//", // Google refresh-token prefix
 ];
 
 /// True when `value` (case-insensitively) contains a known secret marker.
 fn looks_secret(value: &str) -> bool {
-    let lower = value.to_ascii_lowercase();
-    SECRET_MARKERS.iter().any(|marker| lower.contains(marker))
+    crate::secret_redaction::looks_secret_with(value, CACHE_SECRET_EXTRAS)
 }
 
 /// Lifecycle values of a canonical Connection that still authorize cached
@@ -150,7 +138,8 @@ pub(crate) fn redact_value(value: &Value) -> Value {
                 // A key named like a secret field is always redacted regardless
                 // of its value, so a `null`/empty secret field is still dropped.
                 let lower_key = key.to_ascii_lowercase();
-                if SECRET_MARKERS.iter().any(|m| lower_key.contains(m))
+                if crate::secret_redaction::is_sensitive_key(key)
+                    || looks_secret(key)
                     || matches!(
                         lower_key.as_str(),
                         "token"

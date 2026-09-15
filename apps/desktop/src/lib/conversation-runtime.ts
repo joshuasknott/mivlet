@@ -1,5 +1,8 @@
 import { redactSecretsFromObject, redactSecretsFromString } from "@fable/connectors/agent-runtime";
+import { secretMarkerSurvives } from "@fable/protocol";
 import type { Spine } from "@fable/protocol";
+
+const PERSISTED_SECRET_OMITTED = "[content omitted: secret-shaped content]";
 
 export type ConversationThread = Spine.Conversations.Thread;
 type ConversationMessage = Spine.Conversations.Message;
@@ -238,10 +241,14 @@ function redactPersistedToolContent(content: string): string {
     || (trimmed.startsWith("[") && trimmed.endsWith("]"))
   ) {
     try {
-      return JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown));
+      return omitIfSecretSurvives(JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown)));
     } catch {
       // Marker-free JSON that failed to parse is still scrubbed as text.
     }
   }
-  return redactSecretsFromString(content);
+  return omitIfSecretSurvives(redactSecretsFromString(content));
+}
+
+function omitIfSecretSurvives(redacted: string): string {
+  return secretMarkerSurvives(redacted) ? PERSISTED_SECRET_OMITTED : redacted;
 }
