@@ -13,7 +13,7 @@ import {
   type HostedExecutionCapabilityScope,
   type HostedProcessLaunchRequest,
   type HostedProcessSnapshot
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import worker from "../index";
 import type { CapabilityNonceStore } from "../request-auth";
 
@@ -226,8 +226,8 @@ export function createHostedRunnerHarness(
   let nonceSeq = 0;
 
   const env = {
-    FABLE_HOSTED_RUNNER_API_KEY: HOSTED_RUNNER_SERVICE_KEY,
-    FABLE_HOSTED_RUNNER_SIGNING_KEY: HOSTED_RUNNER_SIGNING_KEY,
+    MIVLET_HOSTED_RUNNER_API_KEY: HOSTED_RUNNER_SERVICE_KEY,
+    MIVLET_HOSTED_RUNNER_SIGNING_KEY: HOSTED_RUNNER_SIGNING_KEY,
     COMPUTER_AUTHORITY: { getByName: () => computer },
     BROWSER_AUTHORITY: { getByName: () => browser },
     MYBROWSER: {},
@@ -271,7 +271,7 @@ export function createHostedRunnerHarness(
     },
     signCapability,
     capabilityHeaders(token: string): HeadersInit {
-      return { Authorization: `FableCapability ${token}` };
+      return { Authorization: `MivletCapability ${token}` };
     },
     serviceHeaders(): HeadersInit {
       return { Authorization: `Bearer ${HOSTED_RUNNER_SERVICE_KEY}` };
@@ -280,7 +280,7 @@ export function createHostedRunnerHarness(
       return jsonRequest(
         "POST",
         `/v1/computers/${computerId}/processes`,
-        { Authorization: `FableCapability ${token}` },
+        { Authorization: `MivletCapability ${token}` },
         {
           requestKey: "request:run-123:1",
           runId: "run-123",
@@ -292,7 +292,7 @@ export function createHostedRunnerHarness(
       return jsonRequest(
         "POST",
         `/v1/computers/${computerId}/browser/navigate`,
-        { Authorization: `FableCapability ${token}` },
+        { Authorization: `MivletCapability ${token}` },
         {
           requestKey: "browser:request-123",
           url: "https://example.com/path"
@@ -302,7 +302,7 @@ export function createHostedRunnerHarness(
     browserSnapshotRequest(token: string): Request {
       return new Request(
         `${HOSTED_RUNNER_BASE_URL}/v1/computers/${computerId}/browser/snapshot`,
-        { headers: { Authorization: `FableCapability ${token}` } }
+        { headers: { Authorization: `MivletCapability ${token}` } }
       );
     }
   };
