@@ -49,4 +49,11 @@ describe("native application action schemas", () => {
     expect(desktop.properties.input.anyOf.filter((branch: { properties: object }) =>
       "x" in branch.properties)).toHaveLength(2);
   });
+
+  it("describes github-read as a classic OAuth App without private-repo grant", () => {
+    const github = registeredToolSpecs().find((tool) => tool.name === "github-read");
+    expect(github?.description).toMatch(/Classic OAuth App/);
+    expect(github?.description).toMatch(/does not grant private repositories/);
+    expect(github?.description).not.toMatch(/GitHub App with read-only/);
+  });
 });

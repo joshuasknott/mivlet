@@ -265,6 +265,37 @@ redacted, request bodies are bounded, and every OAuth route is rate-limited.
 See the [broker storage decision](../adr/2026-07-03-broker-ephemeral-storage.md)
 and [threat model](../security/threat-model.md) for the security boundary.
 
+## Native OAuth scopes
+
+The confidential broker requests the scopes below on every Connect. There is
+no native read-only Connect for Vercel, Linear, or Slack: matching write
+actions exist, so the write-capable grants are **required**, labeled write,
+and always included in the authorize URL. Per-action approval still gates
+execution. A stolen token remains write-capable; that residual is documented
+here rather than labeled as read. GitHub remains read-only at the product
+surface, uses a classic OAuth App with `read:user`/`read:org`, and does not
+request classic `repo` or claim GitHub App repository permissions. Gmail
+compose/send and Calendar event writes stay optional because those public
+PKCE connects can omit them. Local Gmail compose drafts are not a reason to
+hide a live write scope that posts or changes provider data.
+
+| Connector | Requested on Connect | Decision |
+| --- | --- | --- |
+| GitHub | `read:user`, `read:org` (required) | Classic OAuth App, not a GitHub App. Keep identity and org reads. Classic `repo` is not requested. Public-repository REST may work; private-repository reads are not granted. Live GitHub writes are not enabled. |
+| Vercel | `user:read`, `team:read`, `project:read`, `deployment:read`, **`deployment:write` (required)** | Keep always-on `deployment:write`. Native actions promote, roll back, create, and cancel deployments, and change projects and domains, after exact approval. |
+| Linear | `read`, **`write` (required)** | Keep always-on `write` for issue create, issue update, and comments. Trim `issues:create` and `comments:create`; they are create-only subsets of `write` and cannot cover issue updates. |
+| Slack | channel/group/IM reads, `users:read`, **`chat:write` (required)**, **`reactions:write` (required)** | Keep always-on `chat:write` (post, reply, edit, delete) and `reactions:write` (react-add, react-remove). `slack.create-draft` is not an advertised native action. |
+| Notion | none on the authorize URL | Notion OAuth sends no scope query parameters. Catalogs do not list fake OAuth scope ids. Capabilities (`read_content`, `insert_content`, `update_content`) are configured in the Notion console. |
+| Google Drive | `drive.file` (and optional broader Drive grants) | `drive.file` is write-capable, labeled write, and required on Connect. |
+| Gmail | `gmail.readonly` required; `gmail.compose`, `gmail.send` optional | Keep compose and send in the catalog; default PKCE Connect can omit them. |
+| Google Calendar | calendar list/event reads required; `calendar.events` optional | Keep `calendar.events` for create, update, cancel, and delete; default PKCE Connect can omit it. |
+
+Register the matching provider app with those permissions. Existing Linear
+connections that still list `issues:create` or `comments:create` keep working;
+reconnect if you want the consent screen to drop the redundant create-only
+grants. Vercel integrations must be created with read and write access so
+`deployment:write` can be granted.
+
 ## MCP
 
 MCP servers are optional Connections behind the same credential and approval
@@ -277,10 +308,12 @@ exact approval fail closed.
 
 ChatGPT app connections belong to ChatGPT. Signing into the same model account
 does not supply those credentials or tools to Mivlet. Connect a native adapter or
-an official remote MCP route inside Mivlet. Setup requests all permissions that
-the implemented adapter supports; provider consent and organization restrictions
-still determine access. Drive offers full read/write access as well as its
-limited selected-files scope. Existing grants need reconnection to expand them.
+an official remote MCP route inside Mivlet. Native OAuth requests the scopes
+documented above; write-capable grants are labeled write and kept only when a
+matching native write action exists. Provider consent and organization
+restrictions still determine access. Drive offers full read/write access as well
+as its limited selected-files scope. Existing grants need reconnection to expand
+them.
 
 For a local debug build, `node apps/desktop/scripts/check-connectors.mjs` runs a
 bounded real read through the native executor for each connected native adapter.

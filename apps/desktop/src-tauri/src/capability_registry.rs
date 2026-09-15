@@ -185,7 +185,7 @@ const NATIVE_READ_IMPLEMENTATIONS: &[NativeReadImplementation] = &[
         capability_id: "knowledge.content.search",
         connector_id: "notion",
         adapter: NativeReadAdapter::Search(NativeSearchAdapter::Notion),
-        required_scopes: &["read_content"],
+        required_scopes: &[],
     },
     NativeReadImplementation {
         capability_id: "communication.email.search",
@@ -961,7 +961,7 @@ mod tests {
             implementation("knowledge.content.search")
                 .unwrap()
                 .required_scopes,
-            &["read_content"]
+            &[] as &[&str]
         );
         assert_eq!(
             implementation("communication.email.search")
@@ -1019,7 +1019,7 @@ mod tests {
             .unwrap(),
             "available"
         );
-        let mut notion_connection = connection(&["read_content"]);
+        let mut notion_connection = connection(&[]);
         notion_connection.connector_id = "notion".into();
         let mut notion_canonical = canonical("healthy");
         notion_canonical.connector_definition_key = "notion".into();

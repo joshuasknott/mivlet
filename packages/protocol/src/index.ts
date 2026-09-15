@@ -371,16 +371,8 @@ export interface ConnectorImportResult {
 }
 
 export type ConnectorActionKind =
-  | "github.draft-pull-request"
-  | "github.comment"
   | "vercel.promote"
   | "vercel.rollback"
-  | "github.create-issue"
-  | "github.update-issue"
-  | "github.create-review"
-  | "github.update-file"
-  | "github.create-branch"
-  | "github.dispatch-workflow"
   | "vercel.create-deployment"
   | "vercel.cancel-deployment"
   | "vercel.update-project"
@@ -398,7 +390,6 @@ export type ConnectorActionKind =
   | "google-drive.delete-file"
   | "gmail.create-draft"
   | "gmail.send"
-  | "slack.create-draft"
   | "slack.post"
   | "slack.reply"
   | "slack.edit"

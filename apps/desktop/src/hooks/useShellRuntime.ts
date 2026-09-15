@@ -895,7 +895,9 @@ export function useShellRuntime(
         // exchange through the configured broker and fail closed if it is absent.
         const result = await beginRuntimeConnectorOAuth({
           connectorId: connector.id,
-          requestedScopes: connector.scopes?.map((scope) => scope.id),
+          requestedScopes: connector.scopes?.length
+            ? connector.scopes.map((scope) => scope.id)
+            : undefined,
         });
         if (!result) {
           const message = `${connector.name} connections require the installed desktop app.`;

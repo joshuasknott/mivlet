@@ -331,7 +331,7 @@ function connectorReadTool(connector: "github" | "vercel" | "linear"): BackendTo
     linear: ["identity.read", "teams.read", "projects.read", "cycles.read", "issues.read", "issues.search", "labels.read", "users.read", "comments.read"],
   };
   const guidance = {
-    github: "Start with repositories.list and input {}. Repository reads take input.repository as owner/repo; files.read also needs path; comments/reviews need number; checks need ref. Search takes query. Use input.limit for bounded lists.",
+    github: "Classic OAuth App Connect grants identity.read and organizations.read (`read:user`/`read:org`); this is not a GitHub App and does not grant private repositories. Public-repo REST may still work. Start with identity.read or repositories.list and input {}. Repository reads take input.repository as owner/repo; files.read also needs path; comments/reviews need number; checks need ref. Search takes query. Use input.limit for bounded lists.",
     vercel: "Start with projects.read and input {}. Optional teamId scopes lists. logs.read needs deploymentId; environment-metadata.read needs project and returns metadata only.",
     linear: "Start with issues.read or teams.read and input {}. issues.search needs query, cycles.read needs teamId, comments.read needs issueId. Use input.limit for bounded lists.",
   };

@@ -237,10 +237,14 @@ read-only repository scopes and drop `repo`. Stop labeling `repo` as read in
 the catalog. Document that existing connections must re-authorize after a
 scope cut.
 
-Related over-scope (Medium if writes are product-intentional, High if not):
-Vercel `deployment:write`, Linear `write` / `issues:create`, Slack
-`chat:write` / `reactions:write`. Those match existing write actions with
-per-action approvals. GitHub does not.
+Related over-scope (accepted residual, not a fake read-only Connect):
+Vercel `deployment:write`, Linear `write`, and Slack `chat:write` /
+`reactions:write` match native write actions and are **required on every
+Connect**. Execution still needs a fresh exact approval. A stolen token is
+write-capable by design; catalogs label these grants write. Linear
+`issues:create` / `comments:create` were trimmed as create-only subsets of
+`write`. See [native OAuth scopes](../product/connectors.md#native-oauth-scopes).
+GitHub does not have that write surface.
 
 ### H5 — Durable tool arguments and results are not redacted before persistence or model replay
 
