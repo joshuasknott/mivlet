@@ -44,6 +44,7 @@ export class ExecutionApprovalRouter implements ToolApprovalGate {
     this.pending(id)?.resolveDeny(id);
   }
   replaceStandingGrants(grants: ApprovalGrant[]) {
+    // Display-only sync. Standing grants never auto-satisfy execution.
     this.grants = grants;
     for (const gate of this.gates.values()) gate.replaceStandingGrants(grants);
   }

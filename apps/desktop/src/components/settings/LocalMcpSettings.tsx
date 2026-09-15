@@ -125,7 +125,6 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
       request: pending.approval,
       decision,
       decidedAt: new Date().toISOString(),
-      ...(decision === "once" ? { confirmationText: confirmation } : {})
     };
     try {
       await resolveRuntimeApprovalRequest(resolution);

@@ -23,15 +23,19 @@ use crate::models::{
     ConnectorAuthRequest, ConnectorAuthResult, ConnectorCapabilityRequest,
     ConnectorCapabilityResult, ConnectorCommandError, ConnectorHealth, ConnectorImportRequest,
     ConnectorImportResult, ConnectorKnowledgeSource, ConnectorManifest, ConnectorPermission,
-    ConnectorSearchRequest, ConnectorSearchResult, APPROVAL_DECISIONS, CONNECTOR_ACTIONS,
-    CONNECTOR_AUTH_STATES, MAX_CONNECTOR_PAYLOAD_FIELDS, MAX_CONNECTOR_QUERY_CHARACTERS,
-    MAX_CONNECTOR_RESULT_LIMIT, SUPPORTED_CONNECTOR_IDS,
+    ConnectorSearchRequest, ConnectorSearchResult, CONNECTOR_ACTIONS, CONNECTOR_AUTH_STATES,
+    MAX_CONNECTOR_PAYLOAD_FIELDS, MAX_CONNECTOR_QUERY_CHARACTERS, MAX_CONNECTOR_RESULT_LIMIT,
+    SUPPORTED_CONNECTOR_IDS,
 };
 use crate::oauth_loopback;
 use crate::paths::{
     connector_approval_records_path, connector_connections_path, connector_knowledge_path,
     execution_approvals_path, normalize_spaces, truncate_characters,
 };
+
+/// Connector writes offer a fresh one-time permit. Session/rule shortcuts cannot
+/// authorize a later mutation.
+const CONNECTOR_ACTION_DECISIONS: [&str; 3] = ["once", "modify", "deny"];
 
 pub(crate) trait ConnectorCredentialBoundary {
     fn connection(&self, connector_id: &str) -> Option<ConnectorConnection>;
@@ -1257,7 +1261,7 @@ pub(crate) fn validate_connector_action(
         || request.approval.consequence != policy.consequence
         || request.approval.confirmation_phrase.as_deref() != policy.confirmation_phrase
         || request.approval.requested_at.trim().is_empty()
-        || approval_decisions != APPROVAL_DECISIONS
+        || approval_decisions != CONNECTOR_ACTION_DECISIONS
         || request.approval.data_used.len() != expected_fields.len()
         || approval_fields != expected_fields
     {
@@ -2339,7 +2343,7 @@ fn connector_tool_action_request(
             risk_level: policy.risk_level.into(),
             consequence: policy.consequence.into(),
             requested_at: chrono::Utc::now().to_rfc3339(),
-            decisions: APPROVAL_DECISIONS
+            decisions: CONNECTOR_ACTION_DECISIONS
                 .iter()
                 .map(|value| (*value).into())
                 .collect(),

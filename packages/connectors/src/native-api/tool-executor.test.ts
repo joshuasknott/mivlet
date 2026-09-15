@@ -41,7 +41,7 @@ describe("routine connector consent", () => {
  *   (a) read-file executes after a once grant and returns content to the loop
  *   (b) write-file/run-shell refuse without an actual grant (high/critical risk)
  *   (c) deny does not execute (no side effect)
- *   (d) a session grant auto-satisfies the next matching call without re-prompt
+ *   (d) a session/rule standing grant never auto-satisfies; native minting stays required
  *   (e) executor errors surface as rejected promises (the loop turns them into
  *       tool-role error messages it continues from)
  *
@@ -516,16 +516,23 @@ describe("createToolExecutor — error handling", () => {
 // ---------------------------------------------------------------------------
 
 describe("createApprovalGate — standing grants + register/resolve", () => {
-  it("(d) a session grant auto-satisfies a matching call without re-prompting", async () => {
+  it("(d) a session grant does not auto-satisfy; the call stays pending for a native permit", async () => {
     const gate = createApprovalGate();
-    gate.addStandingGrant(grant("g1")); // service+action+mode match the read-file approval
+    gate.addStandingGrant(grant("g1"));
     const approval = approvalFor("c1", "read-file");
 
-    expect(gate.register(approval)).toBe(false);
-    const decision = await gate.waitForDecision(approval);
-    expect(decision).toBe("granted");
-    // No pending entry was created (auto-satisfied, never blocked).
-    expect(gate.pendingCount()).toBe(0);
+    expect(gate.register(approval)).toBe(true);
+    let resolved: DecisionResult | undefined;
+    const pending = gate.waitForDecision(approval).then((decision) => {
+      resolved = decision;
+    });
+    await Promise.resolve();
+    expect(resolved).toBeUndefined();
+    expect(gate.pendingCount()).toBe(1);
+
+    gate.resolveGrant("c1");
+    await pending;
+    expect(resolved).toBe("granted");
   });
 
   it("blocks (pending) when no standing grant covers the call", async () => {
@@ -542,12 +549,23 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
     expect(resolved).toBe("granted");
   });
 
-  it("a rule grant (persisted) also auto-satisfies matching calls", async () => {
+  it("a persisted rule grant also leaves matching calls pending for a native permit", async () => {
     const gate = createApprovalGate();
     gate.addStandingGrant({ ...grant("g2"), scope: "rule" });
+    const approval = approvalFor("c1", "read-file");
 
-    const decision = await gate.waitForDecision(approvalFor("c1", "read-file"));
-    expect(decision).toBe("granted");
+    expect(gate.register(approval)).toBe(true);
+    let resolved = false;
+    const pending = gate.waitForDecision(approval).then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    expect(gate.pendingCount()).toBe(1);
+
+    gate.resolveGrant("c1");
+    await pending;
+    expect(resolved).toBe(true);
   });
 
   it("a standing grant does NOT match a different action (no cross-args auto-satisfy)", async () => {
@@ -601,6 +619,7 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
       dataUsed: approval.dataUsed
     });
 
+    expect(gate.register(approval)).toBe(true);
     let resolved = false;
     const pending = gate.waitForDecision(approval).then(() => {
       resolved = true;
@@ -611,6 +630,29 @@ describe("createApprovalGate — standing grants + register/resolve", () => {
     gate.resolveGrant("c1");
     await pending;
     expect(resolved).toBe(true);
+  });
+
+  it("a standing grant never auto-satisfies a medium-risk web-fetch", async () => {
+    const gate = createApprovalGate();
+    const approval = approvalFor("c1", "web-fetch");
+    gate.replaceStandingGrants([
+      {
+        ...grant("g-fetch"),
+        action: approval.action,
+        mode: approval.mode,
+        dataUsed: approval.dataUsed
+      }
+    ]);
+
+    expect(gate.register(approval)).toBe(true);
+    let resolved = false;
+    const pending = gate.waitForDecision(approval).then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    gate.resolveGrant("c1");
+    await pending;
   });
 
   it("a legacy standing approval never replaces a semantic capability grant or exact search approval", async () => {

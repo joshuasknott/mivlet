@@ -997,7 +997,7 @@ pub struct ApprovalGrant {
     pub created_at: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalResolutionRequest {
     pub request: ApprovalRequest,
