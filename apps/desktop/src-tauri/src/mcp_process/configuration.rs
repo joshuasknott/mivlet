@@ -48,7 +48,7 @@ pub fn commit_mcp_server_configuration(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )?;
     let scope = crate::authorized_scope::command_scope(
         Some(request.configuration.workspace_id),
@@ -858,7 +858,7 @@ pub fn authorize_mcp_tool_call(
         crate::execution_approvals::verify_and_consume_execution_approval(
             &crate::paths::execution_approvals_path(&app)?,
             &resolution.effective_request,
-            &resolution.audit_entry.decided_at,
+            &crate::execution_approvals::wall_clock_consumed_at(),
         )?;
     }
     // Re-resolve every authority after permit I/O so an account, session,

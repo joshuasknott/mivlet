@@ -339,7 +339,7 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
     verify_and_consume_execution_approval(
         path,
         &request.approval.request,
-        &request.approval.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )
 }
 
@@ -2048,15 +2048,42 @@ mod connector_authority_tests {
 
     fn request(tool: &str) -> ToolExecutionRequest {
         let (mode, risk) = tool_policy(tool).unwrap_or(("full-access", "critical"));
+        let now = crate::execution_approvals::wall_clock_consumed_at();
         serde_json::from_value(json!({
             "tool": tool, "arguments": {"query": "test"}, "approval": {
-                "decision": "once", "decidedAt": "2026-09-05T20:00:00Z", "request": {
+                "decision": "once", "decidedAt": now, "request": {
                     "id": "connector-test", "service": "Mivlet", "action": tool,
                     "mode": mode, "riskLevel": risk, "dataUsed": ["query: test"],
-                    "consequence": "Read data", "requestedAt": "2026-09-05T20:00:00Z", "decisions": ["once", "deny"]
+                    "consequence": "Read data", "requestedAt": now, "decisions": ["once", "deny"]
                 }
             }
-        })).unwrap()
+        }))
+        .unwrap()
+    }
+
+    fn persist_permit(path: &Path, request: &ToolExecutionRequest) {
+        crate::execution_approvals::record_execution_decision(
+            path,
+            &crate::models::ApprovalResolutionResponse {
+                persisted: true,
+                audit_entry: crate::models::ApprovalAuditEntry {
+                    id: format!("permit-{}", request.approval.request.id),
+                    request_id: request.approval.request.id.clone(),
+                    decision: request.approval.decision.clone(),
+                    decided_at: request.approval.decided_at.clone(),
+                    note: "approved".into(),
+                },
+                effective_request: request.approval.request.clone(),
+                dismissed: true,
+                grant: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn decided_at_offset(seconds: i64) -> String {
+        (chrono::Utc::now() + chrono::Duration::seconds(seconds))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
     }
 
     #[test]
@@ -2338,5 +2365,44 @@ mod connector_authority_tests {
         let mut downgraded = request("gmail-read");
         downgraded.approval.request.risk_level = "low".into();
         assert!(verify_tool_authority(path, &downgraded).is_err());
+    }
+
+    #[test]
+    fn tool_authority_rejects_stale_permits_against_wall_clock_consume_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("web-fetch");
+        let decided_at =
+            decided_at_offset(-(crate::execution_approvals::EXECUTION_APPROVAL_TTL_SECONDS + 1));
+        approved.approval.decided_at = decided_at.clone();
+        approved.approval.request.requested_at = decided_at;
+        persist_permit(&path, &approved);
+        let error = verify_tool_authority(&path, &approved)
+            .expect_err("reusing decided_at as consumed_at would keep this permit inside the TTL");
+        assert!(
+            error.contains("stale"),
+            "expected the freshness fence, got {error}"
+        );
+    }
+
+    #[test]
+    fn tool_authority_records_wall_clock_consume_time_not_decided_at() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("web-fetch");
+        let decided_at = decided_at_offset(-30);
+        approved.approval.decided_at = decided_at.clone();
+        approved.approval.request.requested_at = decided_at.clone();
+        persist_permit(&path, &approved);
+        verify_tool_authority(&path, &approved).expect("permit within the TTL consumes");
+        let records: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let consumed = records[0]["consumedAt"]
+            .as_str()
+            .expect("consume must persist wall-clock time");
+        assert_ne!(
+            consumed, decided_at,
+            "production consume must not reuse decided_at as consumed_at"
+        );
     }
 }
