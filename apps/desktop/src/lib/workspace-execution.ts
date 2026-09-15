@@ -168,6 +168,7 @@ export class WorkspaceExecution {
   private stopping = new Set<string>();
   private external = new Map<string, () => Promise<void>>();
   private disposed = false;
+  private closing: Promise<void> | null = null;
   constructor(
     readonly workspaceId: string,
     private transport = {
@@ -230,6 +231,11 @@ export class WorkspaceExecution {
       });
     this.tail = next;
     return next;
+  }
+  private executingWork() {
+    return this.state.data.work.filter(
+      (work) => work.status === "running" || work.status === "awaiting-approval",
+    );
   }
   private accept(data: CollaborationSnapshot) {
     if (this.disposed) return;
@@ -515,18 +521,41 @@ export class WorkspaceExecution {
     const failure = cancelled.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") this.report(failure.reason);
   }
+  /** Freeze like Stop, then native `stop-work` for executing assignments. */
   dispose() {
+    if (this.closing) return this.closing;
     this.disposed = true;
-    for (const cancel of this.external.values())
-      void cancel().catch(() => undefined);
-    this.external.clear();
-    for (const session of this.state.sessions) {
-      session.cancelled = true;
-      void session.cancel?.().catch(() => undefined);
+    this.closing = this.closeOwnedExecution();
+    return this.closing;
+  }
+  private async closeOwnedExecution() {
+    const affected = new Set(this.executingWork().map((work) => work.id));
+    for (const id of affected) this.stopping.add(id);
+    for (const session of this.state.sessions) session.cancelled = true;
+    await Promise.allSettled([
+      ...this.state.sessions.map((session) => session.cancel?.()),
+      ...[...this.external.values()].map((cancel) => cancel()),
+    ]);
+    await this.tail.catch(() => undefined);
+    for (const work of this.executingWork()) affected.add(work.id);
+    try {
+      for (const id of affected) {
+        try {
+          await this.transport.command(this.workspaceId, {
+            action: "stop-work",
+            id,
+          });
+        } catch {
+          /* remount recovery fences leftover executing Work */
+        }
+      }
+    } finally {
+      for (const id of affected) this.stopping.delete(id);
+      this.external.clear();
+      this.approvals.cancelPending();
+      this.listeners.clear();
+      this.attachments.clear();
+      this.voiceReplies.clear();
     }
-    this.approvals.cancelPending();
-    this.listeners.clear();
-    this.attachments.clear();
-    this.voiceReplies.clear();
   }
 }

@@ -302,7 +302,64 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
       action: "stop-work",
       id: "root",
     });
-    service.dispose();
+    await service.dispose();
+  });
+  it("dispose freezes like Stop then issues native stop-work for executing work", async () => {
+    const { service, command } = fixture([
+      fixtureWork("run", "a", { status: "running" }),
+      fixtureWork("queued", "b"),
+    ]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "trusted-scope");
+    const session = service.getSnapshot().sessions.find((item) => item.work.id === "queued")!;
+    let finish!: () => void;
+    session.cancel = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const closed = service.dispose();
+    expect(service.current(session)).toBe(false);
+    expect(service.canSchedule("c", "fixture")).toBe(false);
+    await expect(service.refresh()).rejects.toThrow("This workspace has closed.");
+    expect(command).not.toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "run",
+    });
+    finish();
+    await closed;
+    expect(command).toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "run",
+    });
+    expect(command).not.toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "queued",
+    });
+    expect(session.cancel).toHaveBeenCalledOnce();
+  });
+  it("dispose issues native stop-work for executing orphans with no session", async () => {
+    const { service, command } = fixture([
+      fixtureWork("orphan-run", "a", { status: "running" }),
+      fixtureWork("orphan-approval", "b", { status: "awaiting-approval" }),
+      fixtureWork("queued", "c"),
+    ]);
+    await service.refresh();
+    expect(service.getSnapshot().sessions).toEqual([]);
+    await service.dispose();
+    expect(command).toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "orphan-run",
+    });
+    expect(command).toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "orphan-approval",
+    });
+    expect(command).not.toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "queued",
+    });
   });
   it("rejects stale published streams after a membership generation changes", async () => {
     const { service, update } = fixture([fixtureWork("one", "a")]);

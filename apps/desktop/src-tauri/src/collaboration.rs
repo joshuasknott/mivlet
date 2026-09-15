@@ -613,6 +613,37 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
     })
 }
 
+/// Remount recovery for executing Work that lost its renderer owner.
+/// Does not grant execution authority or replay an attempt.
+pub(crate) fn fence_orphaned_executing_work(
+    conn: &Connection,
+    store: &Store,
+    time: &str,
+) -> Result<()> {
+    let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
+    let ctx = Context {
+        conn,
+        store,
+        scope: &scope,
+        profiles: &[],
+        time,
+    };
+    for mut item in ctx.all_work()? {
+        if item.status.executing() {
+            item.status = WorkStatus::AwaitingUser;
+            item.generation += 1;
+            item.current_run_id = None;
+            item.reason = Some(
+                "This assignment lost its execution owner. Inspect saved results and reconcile any external actions before continuing. Nothing was replayed."
+                    .into(),
+            );
+            item.updated_at = time.into();
+            ctx.work(&item)?;
+        }
+    }
+    work::wake_waiters(&ctx)
+}
+
 pub(crate) fn suspend_account(
     conn: &Connection,
     store: &Store,
