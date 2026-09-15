@@ -180,14 +180,16 @@ pub(crate) fn invalidate_execution_approvals(
 /// fence. `consumed_at` is wall-clock consume time, never the decision
 /// timestamp: elapsed time is `consumed_at - decided_at`.
 ///
-/// Check-and-set of `consumed_at` runs inside one document transaction (or the
-/// test-file lock), so two concurrent callers cannot both observe an unused
-/// permit and both succeed.
+/// Workspace pause is checked before the document transaction so a paused
+/// workspace cannot burn a permit. Check-and-set of `consumed_at` then runs
+/// inside one document transaction (or the test-file lock), so two concurrent
+/// callers cannot both observe an unused permit and both succeed.
 pub(crate) fn verify_and_consume_execution_approval(
     path: &Path,
     request: &ApprovalRequest,
     consumed_at: &str,
 ) -> Result<(), String> {
+    crate::execution_control::ensure_active_execution_allowed()?;
     let expected = request_fingerprint(request)?;
     mutate_records(path, |records| {
         consume_unconsumed_record(records, request, &expected, consumed_at)
@@ -529,5 +531,22 @@ mod tests {
         let error = verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:02Z")
             .expect_err("WebView resolve_approval is not a minted permit");
         assert!(error.contains("no persisted user approval"), "{error}");
+    }
+
+    #[test]
+    fn consume_consults_workspace_pause_before_the_permit_transaction() {
+        let source = include_str!("execution_approvals.rs");
+        let start = source
+            .find("pub(crate) fn verify_and_consume_execution_approval")
+            .expect("consume entry");
+        let body = &source[start..];
+        let pause = body
+            .find("ensure_active_execution_allowed")
+            .expect("pause gate on consume");
+        let mutate = body.find("mutate_records").expect("permit transaction");
+        assert!(
+            pause < mutate,
+            "pause must fail closed before the consume transaction"
+        );
     }
 }

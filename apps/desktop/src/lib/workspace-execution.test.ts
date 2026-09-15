@@ -8,6 +8,7 @@ import type {
 import {
   WorkspaceExecution,
   restrictedPermission,
+  enqueueWorkspaceDispose,
 } from "./workspace-execution";
 import { providerModelOptions } from "./provider-models";
 import { runWorkspaceVoice } from "./workspace-voice";
@@ -324,14 +325,15 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(service.current(session)).toBe(false);
     expect(service.canSchedule("c", "fixture")).toBe(false);
     await expect(service.refresh()).rejects.toThrow("This workspace has closed.");
-    expect(command).not.toHaveBeenCalled();
-    finish();
-    await closed;
+    await Promise.resolve();
     expect(command).toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "run",
       expectedGeneration: 4,
     });
+    expect(session.cancel).toHaveBeenCalledOnce();
+    finish();
+    await closed;
     expect(command).not.toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "queued",
@@ -340,7 +342,6 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
       action: "stop-work",
       id: "run",
     });
-    expect(session.cancel).toHaveBeenCalledOnce();
   });
   it("dispose issues generation-fenced stop-work for executing orphans with no session", async () => {
     const { service, command } = fixture([
@@ -437,5 +438,33 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(restrictedPermission("full-access", "trusted-scope")).toBe(
       "trusted-scope",
     );
+  });
+  it("enqueueWorkspaceDispose waits for the previous owner before the next dispose", async () => {
+    let released = false;
+    const first = {
+      dispose: () =>
+        new Promise<void>((resolve) => {
+          queueMicrotask(() => {
+            released = true;
+            resolve();
+          });
+        }),
+    };
+    const second = {
+      dispose: vi.fn(async () => {
+        expect(released).toBe(true);
+      }),
+    };
+    const gate = enqueueWorkspaceDispose(Promise.resolve(), first);
+    await enqueueWorkspaceDispose(gate, second);
+    expect(second.dispose).toHaveBeenCalledOnce();
+  });
+  it("enqueueWorkspaceDispose ignores a missing owner and a rejected previous close", async () => {
+    await expect(
+      enqueueWorkspaceDispose(Promise.reject(new Error("prior")), null),
+    ).resolves.toBeUndefined();
+    const service = { dispose: vi.fn(async () => {}) };
+    await enqueueWorkspaceDispose(Promise.reject(new Error("prior")), service);
+    expect(service.dispose).toHaveBeenCalledOnce();
   });
 });

@@ -521,7 +521,7 @@ export class WorkspaceExecution {
     const failure = cancelled.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") this.report(failure.reason);
   }
-  /** Freeze like Stop, then native generation-fenced `stop-work`. */
+  /** Freeze like Stop, then native generation-fenced `stop-work` immediately. */
   dispose() {
     if (this.closing) return this.closing;
     this.disposed = true;
@@ -535,12 +535,7 @@ export class WorkspaceExecution {
     }));
     for (const { id } of targets) this.stopping.add(id);
     for (const session of this.state.sessions) session.cancelled = true;
-    await Promise.allSettled([
-      ...this.state.sessions.map((session) => session.cancel?.()),
-      ...[...this.external.values()].map((cancel) => cancel()),
-    ]);
-    await this.tail.catch(() => undefined);
-    try {
+    const nativeStop = (async () => {
       for (const target of targets) {
         try {
           await this.transport.command(this.workspaceId, {
@@ -552,13 +547,37 @@ export class WorkspaceExecution {
           /* remount recovery fences leftover executing Work */
         }
       }
-    } finally {
-      for (const { id } of targets) this.stopping.delete(id);
-      this.external.clear();
-      this.approvals.cancelPending();
-      this.listeners.clear();
-      this.attachments.clear();
-      this.voiceReplies.clear();
-    }
+    })();
+    await Promise.allSettled([
+      ...this.state.sessions.map((session) => session.cancel?.()),
+      ...[...this.external.values()].map((cancel) => cancel()),
+      nativeStop,
+    ]);
+    await this.tail.catch(() => undefined);
+    await nativeStop;
+    this.external.clear();
+    this.approvals.cancelPending();
+    this.listeners.clear();
+    this.attachments.clear();
+    this.voiceReplies.clear();
+    for (const { id } of targets) this.stopping.delete(id);
   }
+}
+
+/** Serialize dispose across a pending unmount so remount recovery waits. */
+export function enqueueWorkspaceDispose(
+  previous: Promise<unknown>,
+  service: { dispose(): Promise<void> | void } | null | undefined,
+): Promise<void> {
+  const settled = Promise.resolve(previous).then(
+    () => undefined,
+    () => undefined,
+  );
+  if (!service) return settled;
+  return settled
+    .then(() => Promise.resolve(service.dispose()))
+    .then(
+      () => undefined,
+      () => undefined,
+    );
 }

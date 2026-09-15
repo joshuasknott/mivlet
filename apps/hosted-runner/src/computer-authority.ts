@@ -13,6 +13,7 @@ import {
   validateProcessId
 } from "./contracts";
 import { consumeCapabilityNonceRecord, nextEnsureGeneration } from "./capability-nonce";
+import { hostedProcessReplayKind } from "./generation-fence";
 import { redactHostedProcessOutput } from "./secret-redact";
 
 interface ComputerRow extends Record<string, SqlStorageValue> {
@@ -116,12 +117,18 @@ export class ComputerAuthority extends DurableObject<Env> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const request = validateLaunchRequest(rawRequest);
-    return this.launchValidated(computerId, request);
+    return this.launchValidated(computerId, request, expectedGeneration);
   }
 
-  private async launchValidated(computerId: string, request: HostedProcessLaunchRequest): Promise<HostedProcessSnapshot> {
+  private async launchValidated(
+    computerId: string,
+    request: HostedProcessLaunchRequest,
+    expectedGeneration: number
+  ): Promise<HostedProcessSnapshot> {
     const replay = this.readProcessByRequestKey(request.requestKey);
-    if (replay) return processSnapshot(replay);
+    const replayKind = hostedProcessReplayKind(replay?.generation, expectedGeneration);
+    if (replayKind === "stale") throw this.operationError("capability-stale");
+    if (replayKind === "hit" && replay) return processSnapshot(replay);
     const computer = this.readComputer();
     if (!computer || computer.lifecycle !== "ready" || !computer.keep_alive) {
       throw this.operationError("computer-not-ready");
@@ -158,6 +165,9 @@ export class ComputerAuthority extends DurableObject<Env> {
     const processId = validateProcessId(rawProcessId);
     const stored = this.readProcessByProcessId(processId);
     if (!stored) throw this.operationError("process-not-found");
+    if (hostedProcessReplayKind(stored.generation, expectedGeneration) !== "hit") {
+      throw this.operationError("capability-stale");
+    }
     const process = await this.sandbox(computerId).getProcess(processId);
     if (!process) {
       this.markProcess(stored.request_key, "stale", { errorCode: "process-container-replaced", endedAt: new Date().toISOString() });
@@ -194,6 +204,9 @@ export class ComputerAuthority extends DurableObject<Env> {
     const processId = validateProcessId(rawProcessId);
     const stored = this.readProcessByProcessId(processId);
     if (!stored) throw this.operationError("process-not-found");
+    if (hostedProcessReplayKind(stored.generation, expectedGeneration) !== "hit") {
+      throw this.operationError("capability-stale");
+    }
     const process = await this.sandbox(computerId).getProcess(processId);
     if (!process) {
       this.markProcess(stored.request_key, "stale", { errorCode: "process-container-replaced", endedAt: new Date().toISOString() });

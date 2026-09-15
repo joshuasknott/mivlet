@@ -53,7 +53,11 @@ WebAuthn fields are excluded or blocked. Screens and temporary human takeover
 credentials stay in the trusted UI path.
 
 Deleting a hosted computer invalidates its computer and browser authority. A
-stale generation or capability cannot target its replacement.
+stale generation or capability cannot target its replacement. Process
+`requestKey` idempotency is generation-fenced: a launch replay whose stored
+process belongs to a previous computer lifetime is `capability-stale`. Browser
+generation mismatch destroys stored browser state and does **not** reconnect
+the previous Browser Run session.
 
 ## Deployment prerequisites
 
