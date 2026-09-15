@@ -57,7 +57,8 @@ fn store_live_view(workspace_id: &str, agent_id: &str, device_id: &str, url: Str
         live_view_key(workspace_id, agent_id, device_id),
         LiveViewHandle {
             url,
-            expires_at: Utc::now() + chrono::Duration::from_std(LIVE_VIEW_TTL).unwrap_or(chrono::Duration::minutes(5)),
+            expires_at: Utc::now()
+                + chrono::Duration::from_std(LIVE_VIEW_TTL).unwrap_or(chrono::Duration::minutes(5)),
         },
     );
 }

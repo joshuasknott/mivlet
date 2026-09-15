@@ -129,9 +129,9 @@ function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
         : Promise.resolve(null),
     snapshotBrowser: (target) =>
       native
-        ? invoke<HostedBrowserSnapshot>("hosted_browser_snapshot", { target }).then(
-            toPublicHostedBrowserSnapshot,
-          )
+        ? invoke<HostedBrowserSnapshot>("hosted_browser_snapshot", {
+            target,
+          }).then(toPublicHostedBrowserSnapshot)
         : Promise.resolve(null),
     openLiveView: (target) =>
       native

@@ -809,9 +809,7 @@ fn missing_required_scopes(
         .any(|(id, _, _, required)| *required && !connection_has_scope(connection, id))
 }
 
-pub(crate) fn connection_has_disallowed_github_scope(
-    connection: &ConnectorConnection,
-) -> bool {
+pub(crate) fn connection_has_disallowed_github_scope(connection: &ConnectorConnection) -> bool {
     connection.connector_id == "github"
         && connection
             .scopes

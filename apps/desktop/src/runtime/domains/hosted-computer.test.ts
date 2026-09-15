@@ -321,8 +321,11 @@ describe("hosted computer runtime boundary", () => {
     expect(JSON.stringify(snapshot)).not.toContain("wss=secret");
     mocks.invoke.mockResolvedValueOnce(undefined);
     await expect(openRuntimeHostedLiveView(target)).resolves.toBe(true);
-    expect(mocks.invoke).toHaveBeenLastCalledWith("hosted_browser_open_live_view", {
-      target,
-    });
+    expect(mocks.invoke).toHaveBeenLastCalledWith(
+      "hosted_browser_open_live_view",
+      {
+        target,
+      },
+    );
   });
 });
