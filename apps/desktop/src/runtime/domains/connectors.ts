@@ -248,10 +248,12 @@ export async function prepareRuntimeConnectorToolAction(
     action: ConnectorActionRequest;
     preview: string;
     connectionId?: string | null;
-  }>(
-    "prepare_connector_tool_action",
-    { workspaceId, connectorId, action, payload },
-  );
+  }>("prepare_connector_tool_action", {
+    workspaceId,
+    connectorId,
+    action,
+    payload,
+  });
 }
 
 export async function executeRuntimeConnectorAction(request: {
