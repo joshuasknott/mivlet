@@ -334,7 +334,8 @@ pub(crate) fn provision_connector_configuration() -> Result<(), String> {
 pub(crate) fn google_oauth_client_id() -> Option<String> {
     public_configuration(
         "MIVLET_GOOGLE_OAUTH_CLIENT_ID",
-        option_env!("MIVLET_GOOGLE_OAUTH_CLIENT_ID").or(option_env!("FABLE_GOOGLE_OAUTH_CLIENT_ID")),
+        option_env!("MIVLET_GOOGLE_OAUTH_CLIENT_ID")
+            .or(option_env!("FABLE_GOOGLE_OAUTH_CLIENT_ID")),
     )
 }
 
@@ -3564,8 +3565,10 @@ mod tests {
 
     #[test]
     fn multiple_accounts_have_one_explicit_active_selection() {
-        let path =
-            std::env::temp_dir().join(format!("mivlet-google-accounts-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "mivlet-google-accounts-{}.json",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
         let connection = |id: &str, active: bool| ConnectorConnection {
             connector_id: "gmail".to_string(),
@@ -4190,8 +4193,10 @@ mod tests {
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = authorized_test_scope(&durable);
-        let path =
-            std::env::temp_dir().join(format!("mivlet-disconnect-test-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "mivlet-disconnect-test-{}.json",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
 
         // Spin up a mock server for the revocation endpoint

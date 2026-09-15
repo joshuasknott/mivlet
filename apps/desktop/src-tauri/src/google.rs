@@ -92,19 +92,24 @@ fn require_scope(
 fn api_url(base: &str, path: &str) -> Result<Url, ConnectorCommandError> {
     let resolved_base = match base {
         "https://www.googleapis.com/drive/v3/" => {
-            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://www.googleapis.com/upload/drive/v3/" => {
-            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_UPLOAD_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_UPLOAD_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://gmail.googleapis.com/gmail/v1/" => {
-            crate::env_compat::var_named("MIVLET_GOOGLE_GMAIL_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_GMAIL_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://www.googleapis.com/calendar/v3/" => {
-            crate::env_compat::var_named("MIVLET_GOOGLE_CALENDAR_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_CALENDAR_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://openidconnect.googleapis.com/v1/" => {
-            crate::env_compat::var_named("MIVLET_GOOGLE_OPENID_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_OPENID_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         _ => base.to_string(),
     };

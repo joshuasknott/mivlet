@@ -648,17 +648,19 @@ fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
         |key| {
             // Public OAuth client settings only. Never embed credentials or tokens.
             match key {
-                "MIVLET_CLERK_ISSUER" => option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER")),
-                "MIVLET_CLERK_OAUTH_CLIENT_ID" => {
-                    option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID").or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID"))
+                "MIVLET_CLERK_ISSUER" => {
+                    option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER"))
                 }
+                "MIVLET_CLERK_OAUTH_CLIENT_ID" => option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID")
+                    .or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID")),
                 "MIVLET_CLERK_AUDIENCE" => {
                     option_env!("MIVLET_CLERK_AUDIENCE").or(option_env!("FABLE_CLERK_AUDIENCE"))
                 }
-                "MIVLET_CLERK_AUTHORIZED_PARTY" => {
-                    option_env!("MIVLET_CLERK_AUTHORIZED_PARTY").or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY"))
+                "MIVLET_CLERK_AUTHORIZED_PARTY" => option_env!("MIVLET_CLERK_AUTHORIZED_PARTY")
+                    .or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY")),
+                "MIVLET_CLERK_SCOPES" => {
+                    option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES"))
                 }
-                "MIVLET_CLERK_SCOPES" => option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES")),
                 _ => None,
             }
             .map(str::to_owned)

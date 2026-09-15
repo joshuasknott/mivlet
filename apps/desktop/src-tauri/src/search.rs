@@ -16,7 +16,7 @@ use serde_json::Value;
 use crate::authorized_scope::{AuthorizedCommandScope, ScopeAccess};
 use crate::collaboration::models::{ObjectReference, Work, WorkStatus};
 use crate::local_computer::artifacts::ArtifactReceipt;
-use crate::models::{MivletAgentProfile, LocalFileImport};
+use crate::models::{LocalFileImport, MivletAgentProfile};
 use crate::store::repos::collaboration::{self as collaboration_repo, Kind};
 use crate::store::repos::{
     local_project, message as message_repo, preferences, scope::PrivateDataScope,
