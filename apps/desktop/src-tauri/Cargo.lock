@@ -1268,6 +1268,7 @@ dependencies = [
  "lopdf",
  "png 0.17.16",
  "quick-xml 0.42.0",
+ "regex",
  "reqwest",
  "rfd",
  "rusqlite",

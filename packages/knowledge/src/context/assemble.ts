@@ -29,6 +29,7 @@ import type {
   ExecutionContextReceipt
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
+import { redactKnowledgeText } from "../redact";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
 import { splitsSurrogatePair } from "../retrieval/retrieve";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
@@ -317,7 +318,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     // run does not satisfy must not enter (retrieval already filters; this is
     // the same defense-in-depth the memory path applies).
     if (!scopeSatisfies(citation.scope ?? GLOBAL_SCOPE, scope)) continue;
-    const excerpt = truncate(citation.snippet, MAX_EXCERPT_CHARS);
+    const excerpt = truncate(redactKnowledgeText(citation.snippet), MAX_EXCERPT_CHARS);
     if (!excerpt) continue;
     const line = `- [${citation.sourceId}] ${citation.title}: ${excerpt}`;
     // Skip (not stop): a later, smaller line may still fit — inclusion stays

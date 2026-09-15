@@ -698,3 +698,22 @@ describe("assembleContext — derived conversation history", () => {
     expect(assembled.systemPrefix).not.toContain("x".repeat(200));
   });
 });
+
+describe("assembleContext — secret-shaped content", () => {
+  it("does not copy leaked credentials from retrieved snippets into model context", () => {
+    const leaked = "sk-ant-12345678901234567890abc123";
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [
+        makeCitation({
+          snippet: `connector recovery milestone bearer ${leaked}`
+        })
+      ]
+    });
+    expect(assembled.systemPrefix).toContain("connector recovery milestone");
+    expect(assembled.systemPrefix).not.toContain(leaked);
+    expect(assembled.citations[0].snippet).not.toContain(leaked);
+    expect(assembled.receipt.citations[0].snippet).not.toContain(leaked);
+  });
+});

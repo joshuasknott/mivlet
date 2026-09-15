@@ -4,7 +4,8 @@
  * Pure, synchronous, no transport. Depends on @fable/protocol types and the
  * hashing/extraction/chunking helpers in this folder only. The pipeline NEVER
  * throws for ordinary problems — unsupported / malformed / binary / oversized
- * inputs become a bounded `skipped` outcome.
+ * inputs become a bounded `skipped` outcome. Secret-shaped spans in previews
+ * and chunks are redacted or omitted before the outcome is returned for storage.
  *
  * Re-importing identical content yields the same source id (the id is derived
  * from the content hash), so a moved/renamed file with identical bytes matches
@@ -20,6 +21,7 @@ import type {
   SkipReason
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
+import { redactKnowledgeChunks, redactKnowledgeSourcePreview, redactKnowledgeText } from "../redact";
 import { chunkSourceText } from "./chunk";
 import { classifyCandidate } from "./extract";
 import { contentHash, normalizeText, slug } from "./hash";
@@ -93,7 +95,7 @@ function buildSource(
     freshness: freshnessFor(candidate.modifiedAt, candidate.fetchedAt),
     pinned: false,
     trust: "untrusted",
-    contentPreview: candidate.content.slice(0, PREVIEW_CHARS),
+    contentPreview: redactKnowledgeText(candidate.content.slice(0, PREVIEW_CHARS)),
     contentFingerprint: fingerprint,
     sizeBytes: candidate.sizeBytes,
     importedAt: candidate.fetchedAt || new Date().toISOString(),
@@ -137,7 +139,7 @@ export function ingestCandidate(
 
   const existing = options.existing;
   if (existing && existing.contentFingerprint === fingerprint) {
-    return { kind: "unchanged", source: existing };
+    return { kind: "unchanged", source: redactKnowledgeSourcePreview(existing) };
   }
 
   const source = buildSource(candidate, options.connectorId, fingerprint);
@@ -155,11 +157,13 @@ export function ingestCandidate(
     source.status = existing.status;
     if (existing.statusMessage) source.statusMessage = existing.statusMessage;
   }
-  const chunks = chunkSourceText(classified.text, {
-    sourceId: source.id,
-    type: classified.type,
-    mimeType: candidate.mimeType
-  });
+  const chunks = redactKnowledgeChunks(
+    chunkSourceText(classified.text, {
+      sourceId: source.id,
+      type: classified.type,
+      mimeType: candidate.mimeType
+    })
+  );
 
   if (existing) {
     return {
