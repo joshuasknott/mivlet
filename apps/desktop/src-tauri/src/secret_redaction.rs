@@ -121,7 +121,7 @@ fn compile_inline_pattern(pattern: &InlinePattern) -> InlineRedactor {
             });
             InlineRedactor::Regex {
                 regex,
-                replacement: "$1[REDACTED]".to_string(),
+                replacement: format!("$1{}", vocabulary().redacted),
             }
         }
         Err(error) => panic!("shared inline pattern {} must compile: {error}", pattern.id),
@@ -223,7 +223,8 @@ pub fn is_sensitive_key(key: &str) -> bool {
 }
 
 /// Shared surgical replacement marker (`[REDACTED]`).
-pub fn redacted_marker() -> &'static str {
+#[cfg(test)]
+fn redacted_marker() -> &'static str {
     &vocabulary().redacted
 }
 
