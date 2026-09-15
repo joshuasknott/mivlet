@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BackendProvider } from "@fable/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import { listBackendProviders } from "../backends/registry";
 import { computerVisionUnavailableReason, supportsNativeComputerVision, supportsSharedComputerTools } from "./computer-vision";
 

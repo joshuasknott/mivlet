@@ -1,6 +1,6 @@
 import { Moon } from "@phosphor-icons/react/dist/csr/Moon";
 import { Sun } from "@phosphor-icons/react/dist/csr/Sun";
-import type { VoiceCapability } from "@fable/protocol";
+import type { VoiceCapability } from "@mivlet/protocol";
 import { PERMISSION_PROFILES } from "../../lib/agent-run";
 import type { SettingsRuntime } from "./settings-runtime";
 

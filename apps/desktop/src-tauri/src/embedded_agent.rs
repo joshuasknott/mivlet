@@ -18,7 +18,7 @@ use tokio::{
 
 const MAX_FRAME: usize = 3 * 1024 * 1024;
 const STALE: &str = "This embedded agent attempt is no longer current.";
-const CHANNEL: &str = "fable://embedded-agent/";
+const CHANNEL: &str = "mivlet://embedded-agent/";
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -361,7 +361,7 @@ pub async fn start_embedded_agent(app: AppHandle, input: StartRequest) -> Result
                         };
                         let emit = |line: String| {
                             if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                                if let Some(binding) = value.get("__fableComputerTool") {
+                                if let Some(binding) = value.get("__mivletComputerTool") {
                                     if let (Some(id), Some(approval)) =
                                         (binding["callId"].as_str(), binding["approvalId"].as_str())
                                     {

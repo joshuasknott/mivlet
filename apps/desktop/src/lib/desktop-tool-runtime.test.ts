@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@fable/protocol";
-import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
-import { McpClient } from "@fable/connectors/mcp/sdk-client";
+import type { ApprovalRequest } from "@mivlet/protocol";
+import type { McpFrame, McpNotification, McpRequest } from "@mivlet/connectors";
+import { McpClient } from "@mivlet/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
-import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
+import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
 
 vi.mock("./native-mcp-client", () => ({ McpClient }));
 

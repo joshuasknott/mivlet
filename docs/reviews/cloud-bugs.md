@@ -14,13 +14,13 @@ Traced Chat → `WorkspaceExecution.submit` → native `collaboration/work` → 
 
 | Check | Result |
 | --- | --- |
-| `pnpm --filter @fable/protocol check:spine-parity` | pass |
-| `pnpm --filter @fable/desktop typecheck` | pass |
-| `pnpm --filter @fable/hosted-runner typecheck` | pass (after protocol build) |
+| `pnpm --filter @mivlet/protocol check:spine-parity` | pass |
+| `pnpm --filter @mivlet/desktop typecheck` | pass |
+| `pnpm --filter @mivlet/hosted-runner typecheck` | pass (after protocol build) |
 | Desktop vitest: `workspace-execution`, `native-connector-actions`, `useShellRuntime.approvals` | 29 pass (gaps below are untested) |
-| `pnpm --filter @fable/knowledge test` | 307 pass |
-| `pnpm --filter @fable/hosted-runner test` | 28 pass |
-| `pnpm --filter @fable/broker test` | 109 pass |
+| `pnpm --filter @mivlet/knowledge test` | 307 pass |
+| `pnpm --filter @mivlet/hosted-runner test` | 28 pass |
+| `pnpm --filter @mivlet/broker test` | 109 pass |
 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml` | skipped: Cargo 1.83 cannot parse `edition2024` crates |
 | GitHub issues | none open |
 

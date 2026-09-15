@@ -1,6 +1,6 @@
 /** Honest capability fallback for the direct providers Mivlet currently ships. */
 
-import type { BackendModel, ModelCapabilities } from "@fable/protocol";
+import type { BackendModel, ModelCapabilities } from "@mivlet/protocol";
 import { additionalModelCapabilities, additionalNativeProviderCatalog } from "../backends/additional-native";
 
 export const MAX_TOKENS_DEFAULT = 2_048;

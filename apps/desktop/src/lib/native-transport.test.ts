@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BackendProvider, NativeCompletionRequest } from "@fable/protocol";
+import type { BackendProvider, NativeCompletionRequest } from "@mivlet/protocol";
 import { createDesktopTransport } from "./native-transport";
 
 const native = vi.hoisted(() => ({ begin: vi.fn(), end: vi.fn(), listen: vi.fn(), stream: vi.fn(), cancel: vi.fn() }));
@@ -33,7 +33,7 @@ describe("native screenshot transport lifecycle", () => {
     native.listen.mockImplementation(async (_id, receive) => { callback = receive; return unlisten; });
     let turn = 0;
     native.stream.mockImplementation(async () => {
-      if (++turn === 1) callback(JSON.stringify({ __fableComputerTool: { callId: "observe", approvalId: `api-visual-${"a".repeat(48)}` } }));
+      if (++turn === 1) callback(JSON.stringify({ __mivletComputerTool: { callId: "observe", approvalId: `api-visual-${"a".repeat(48)}` } }));
       callback('{"choices":[{"finish_reason":"stop"}]}');
       callback("[DONE]");
     });

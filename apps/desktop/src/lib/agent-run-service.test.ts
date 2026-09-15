@@ -1,10 +1,10 @@
-import type { AgentBackend } from "@fable/connectors";
+import type { AgentBackend } from "@mivlet/connectors";
 import type {
   BackendAgentEvent,
   BackendModel,
   BackendProvider,
-  FableAgentProfile,
-} from "@fable/protocol";
+  MivletAgentProfile,
+} from "@mivlet/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -19,7 +19,7 @@ const mocks = vi.hoisted(() => ({
   createThread: vi.fn(async () => ({ id: "thread-scheduled" })),
 }));
 
-vi.mock("@fable/connectors", () => ({
+vi.mock("@mivlet/connectors", () => ({
   resolveAgentBackend: () => mocks.backend,
 }));
 vi.mock("../hooks/useDurableConversation", () => ({
@@ -85,7 +85,7 @@ const agent = {
   connectorIds: [],
   knowledgeSourceIds: [],
   permissionLabel: "Ask Me",
-} as FableAgentProfile;
+} as MivletAgentProfile;
 
 function backendFor(events: BackendAgentEvent[]): AgentBackend {
   return {

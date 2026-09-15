@@ -4,8 +4,8 @@ import {
   type SpeechToTextProvider,
   type SpeechToTextSession,
   type SpeechRecordingReview
-} from "@fable/connectors/voice";
-import type { VoiceInputState } from "@fable/protocol";
+} from "@mivlet/connectors/voice";
+import type { VoiceInputState } from "@mivlet/protocol";
 
 export type VoiceStatus = VoiceInputState["status"];
 export type VoiceState = VoiceInputState;

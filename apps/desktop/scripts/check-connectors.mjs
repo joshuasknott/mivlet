@@ -8,7 +8,7 @@ applyLocalEnvironment(resolve(root, ".env.local"));
 const chat = process.argv.includes("--chat");
 const connectIndex = process.argv.indexOf("--connect");
 const connectArgs = connectIndex >= 0 ? ["--connect", process.argv[connectIndex + 1] ?? ""] : [];
-const child = spawn(resolve(root, "src-tauri/target/debug/fable-desktop.exe"), ["--check-connectors", ...(chat ? ["--chat"] : []), ...connectArgs], {
+const child = spawn(resolve(root, "src-tauri/target/debug/mivlet-desktop.exe"), ["--check-connectors", ...(chat ? ["--chat"] : []), ...connectArgs], {
   cwd: root, env: process.env, stdio: [chat ? "pipe" : "ignore", "inherit", "inherit"], windowsHide: true,
 });
 if (chat) {

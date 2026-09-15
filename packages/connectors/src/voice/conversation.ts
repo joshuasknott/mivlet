@@ -1,4 +1,4 @@
-import type { ConversationVoice, VoiceConversationRequest, VoiceConversationScope, VoiceConversationSession } from "@fable/protocol";
+import type { ConversationVoice, VoiceConversationRequest, VoiceConversationScope, VoiceConversationSession } from "@mivlet/protocol";
 
 export interface VoiceConversationPort {
   start(scope: VoiceConversationScope): Promise<VoiceConversationSession>;

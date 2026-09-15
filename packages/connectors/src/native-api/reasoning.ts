@@ -1,4 +1,4 @@
-import type { BackendModel } from "@fable/protocol";
+import type { BackendModel } from "@mivlet/protocol";
 
 type Reasoning = NonNullable<BackendModel["reasoning"]>;
 const levels = (supportedEfforts: string[], defaultEffort: string): Reasoning => ({

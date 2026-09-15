@@ -184,7 +184,7 @@ test("OpenRouter rate limiting surfaces as a classified error and stops the turn
     host.write({ type: "start", input: openRouterInput() });
     const request = await host.nextType("model-request");
     sendChunks(host, request.id, [
-      JSON.stringify({ __fableTransport: { kind: "error", code: "rate-limited", message: "Provider returned HTTP 429.", retryable: true } }),
+      JSON.stringify({ __mivletTransport: { kind: "error", code: "rate-limited", message: "Provider returned HTTP 429.", retryable: true } }),
     ]);
     const error = await host.nextType("error");
     assert.equal(error.code, "rate-limited");

@@ -17,8 +17,8 @@
  * broker is stateless across restarts, and an in-flight OAuth flow simply restarts.
  */
 
-import { BROKER_HANDOFF_TTL_SECONDS, BrokerContractError, type BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import { BROKER_HANDOFF_TTL_SECONDS, BrokerContractError, type BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
 import { base64url, randomBytes } from "./crypto-web.js";

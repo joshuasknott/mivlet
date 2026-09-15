@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BackendModel } from "@fable/protocol";
+import type { BackendModel } from "@mivlet/protocol";
 import { nativeProviderCatalog } from "../backends/catalog";
 import {
   catalogueCapabilities,

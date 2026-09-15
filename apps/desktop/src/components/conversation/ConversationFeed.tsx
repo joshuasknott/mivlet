@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import type { ConnectorManifest, FableAgentProfile, ProjectFact, Spine } from "@fable/protocol";
+import type { ConnectorManifest, MivletAgentProfile, ProjectFact, Spine } from "@mivlet/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { conversationTurns, toolActivity, toolFailureSummary, type ConversationTurn, type ResponsePart } from "../../lib/conversation-presentation";
@@ -14,13 +14,13 @@ import "./conversation.css";
 
 interface Props {
   messages: ConversationMessageView[];
-  agent: FableAgentProfile;
-  authors?: Record<string, FableAgentProfile>;
+  agent: MivletAgentProfile;
+  authors?: Record<string, MivletAgentProfile>;
   requireAuthor?: boolean;
   showAuthor?: boolean;
   suppressLivePrompt?: boolean;
   state: NativeAgentState;
-  liveStates?: { state: NativeAgentState; agent: FableAgentProfile; suppressPrompt: boolean }[];
+  liveStates?: { state: NativeAgentState; agent: MivletAgentProfile; suppressPrompt: boolean }[];
   presence?: AgentPresence;
   threadId?: string;
   profileName: string;

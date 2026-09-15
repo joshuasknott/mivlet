@@ -22,8 +22,8 @@ import type {
   PinnedContextEntry,
   ExecutionContextAudience,
   SourceChunk
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 
 /** True when a memory record is live (not forgotten/disabled). */
 export function isLiveMemory(record: MemoryRecord): boolean {

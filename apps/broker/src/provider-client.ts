@@ -9,8 +9,8 @@
  * {@link BrokerOAuthError} with human-safe, redacted messages.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import type { BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
 import { base64String } from "./crypto-web.js";
@@ -409,7 +409,7 @@ function basicAuth(credentials: ProviderCredentials): string | undefined {
 function githubApiHeaders(provider: BrokerProviderId = "github"): Record<string, string> {
   if (provider !== "github") return {};
   return {
-    "user-agent": "fable-auth-broker",
+    "user-agent": "mivlet-auth-broker",
     "x-github-api-version": "2022-11-28"
   };
 }

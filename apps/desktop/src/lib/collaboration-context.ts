@@ -2,7 +2,7 @@ import type {
   CollaborationSnapshot,
   CollaborationWorkItem,
   LocalProject,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { HydratedConversation } from "./conversation-runtime";
 
 function boundedJson(value: unknown, limit: number) {

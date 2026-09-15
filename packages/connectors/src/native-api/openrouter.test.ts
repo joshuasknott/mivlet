@@ -14,7 +14,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import type { BackendModel } from "@fable/protocol";
+import type { BackendModel } from "@mivlet/protocol";
 import { mergeDiscoveredModels, type DiscoveredModel } from "./discovery";
 import { newOpenAiStreamState, parseOpenAiStreamLine, shapeOpenAiRequest } from "./openai-compat";
 

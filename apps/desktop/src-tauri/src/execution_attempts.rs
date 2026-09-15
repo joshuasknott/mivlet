@@ -1015,7 +1015,7 @@ mod tests {
     #[test]
     fn file_journal_rejects_interrupted_to_completed_and_allows_exact_replay() {
         let path = std::env::temp_dir().join(format!(
-            "fable-agent-attempts-interrupted-{}.json",
+            "mivlet-agent-attempts-interrupted-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -1234,7 +1234,7 @@ mod tests {
     #[test]
     fn context_receipt_round_trips_restart_and_becomes_immutable() {
         let path = std::env::temp_dir().join(format!(
-            "fable-agent-context-receipt-{}.json",
+            "mivlet-agent-context-receipt-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -1314,7 +1314,7 @@ mod tests {
     #[test]
     fn restart_marks_inflight_run_interrupted_without_losing_state() {
         let path =
-            std::env::temp_dir().join(format!("fable-agent-attempts-{}.json", std::process::id()));
+            std::env::temp_dir().join(format!("mivlet-agent-attempts-{}.json", std::process::id()));
         let _ = fs::remove_file(&path);
         persist_execution_attempt(&path, fixture("streaming")).expect("persist");
         let recovered =
@@ -1331,7 +1331,7 @@ mod tests {
     #[test]
     fn file_journal_rejects_terminal_replacement_and_late_inflight_writer() {
         let path = std::env::temp_dir().join(format!(
-            "fable-agent-attempts-terminal-{}.json",
+            "mivlet-agent-attempts-terminal-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);

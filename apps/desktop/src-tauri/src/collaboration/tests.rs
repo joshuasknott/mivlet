@@ -12,7 +12,7 @@ const TIME: &str = "2026-09-12T10:00:00.000Z";
 fn store() -> Store {
     Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
 }
-fn profiles() -> Vec<FableAgentProfile> {
+fn profiles() -> Vec<MivletAgentProfile> {
     ["lead", "researcher", "reviewer"].iter().map(|id| serde_json::from_value(json!({"id":id,"name":id,"instructions":"Fixture teammate","modelId":"openai::fixture-model","icon":"sparkle","permissionLabel":"Ask Me"})).unwrap()).collect()
 }
 fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
@@ -20,7 +20,7 @@ fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
 }
 fn fixture_with_profiles<T>(
     store: &Store,
-    profiles: Vec<FableAgentProfile>,
+    profiles: Vec<MivletAgentProfile>,
     f: impl FnOnce(&Context<'_>) -> Result<T>,
 ) -> T {
     store

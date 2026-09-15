@@ -51,14 +51,14 @@ pub(crate) struct NativeIdentityGenerationGuard {
 }
 
 const CLERK_CONFIG_KEYS: [&str; 8] = [
-    "FABLE_CLERK_ISSUER",
-    "FABLE_CLERK_OAUTH_CLIENT_ID",
-    "FABLE_CLERK_AUDIENCE",
-    "FABLE_CLERK_AUTHORIZED_PARTY",
-    "FABLE_CLERK_SCOPES",
-    "FABLE_CLERK_REQUEST_ORG",
-    "FABLE_CLERK_REQUIRE_ORG",
-    "FABLE_CLERK_ALLOWED_ORG_IDS",
+    "MIVLET_CLERK_ISSUER",
+    "MIVLET_CLERK_OAUTH_CLIENT_ID",
+    "MIVLET_CLERK_AUDIENCE",
+    "MIVLET_CLERK_AUTHORIZED_PARTY",
+    "MIVLET_CLERK_SCOPES",
+    "MIVLET_CLERK_REQUEST_ORG",
+    "MIVLET_CLERK_REQUIRE_ORG",
+    "MIVLET_CLERK_ALLOWED_ORG_IDS",
 ];
 
 #[derive(Debug, Clone)]
@@ -552,9 +552,9 @@ fn load_config_from(
         return Ok(None);
     }
     for legacy_key in [
-        "FABLE_CLERK_REQUEST_ORG",
-        "FABLE_CLERK_REQUIRE_ORG",
-        "FABLE_CLERK_ALLOWED_ORG_IDS",
+        "MIVLET_CLERK_REQUEST_ORG",
+        "MIVLET_CLERK_REQUIRE_ORG",
+        "MIVLET_CLERK_ALLOWED_ORG_IDS",
     ] {
         if values
             .get(legacy_key)
@@ -571,7 +571,7 @@ fn load_config_from(
         }
     }
     let issuer = values
-        .get("FABLE_CLERK_ISSUER")
+        .get("MIVLET_CLERK_ISSUER")
         .and_then(|value| value.clone())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
@@ -582,7 +582,7 @@ fn load_config_from(
             )
         })?;
     let client_id = values
-        .get("FABLE_CLERK_OAUTH_CLIENT_ID")
+        .get("MIVLET_CLERK_OAUTH_CLIENT_ID")
         .and_then(|value| value.clone())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
@@ -602,7 +602,7 @@ fn load_config_from(
     }
     let issuer = normalize_issuer(&issuer)?;
     let audience = values
-        .get("FABLE_CLERK_AUDIENCE")
+        .get("MIVLET_CLERK_AUDIENCE")
         .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -616,7 +616,7 @@ fn load_config_from(
         })?;
     let mut scopes = split_env_list(
         values
-            .get("FABLE_CLERK_SCOPES")
+            .get("MIVLET_CLERK_SCOPES")
             .and_then(|value| value.clone()),
     );
     if scopes.is_empty() {
@@ -628,7 +628,7 @@ fn load_config_from(
         }
     }
     let authorized_party = values
-        .get("FABLE_CLERK_AUTHORIZED_PARTY")
+        .get("MIVLET_CLERK_AUTHORIZED_PARTY")
         .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
@@ -644,15 +644,21 @@ fn load_config_from(
 fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
     load_config_with_packaged(
         !cfg!(debug_assertions),
-        |key| std::env::var(key).ok(),
+        |key| crate::env_compat::var_opt(key),
         |key| {
             // Public OAuth client settings only. Never embed credentials or tokens.
             match key {
-                "FABLE_CLERK_ISSUER" => option_env!("FABLE_CLERK_ISSUER"),
-                "FABLE_CLERK_OAUTH_CLIENT_ID" => option_env!("FABLE_CLERK_OAUTH_CLIENT_ID"),
-                "FABLE_CLERK_AUDIENCE" => option_env!("FABLE_CLERK_AUDIENCE"),
-                "FABLE_CLERK_AUTHORIZED_PARTY" => option_env!("FABLE_CLERK_AUTHORIZED_PARTY"),
-                "FABLE_CLERK_SCOPES" => option_env!("FABLE_CLERK_SCOPES"),
+                "MIVLET_CLERK_ISSUER" => option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER")),
+                "MIVLET_CLERK_OAUTH_CLIENT_ID" => {
+                    option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID").or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID"))
+                }
+                "MIVLET_CLERK_AUDIENCE" => {
+                    option_env!("MIVLET_CLERK_AUDIENCE").or(option_env!("FABLE_CLERK_AUDIENCE"))
+                }
+                "MIVLET_CLERK_AUTHORIZED_PARTY" => {
+                    option_env!("MIVLET_CLERK_AUTHORIZED_PARTY").or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY"))
+                }
+                "MIVLET_CLERK_SCOPES" => option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES")),
                 _ => None,
             }
             .map(str::to_owned)
@@ -737,7 +743,7 @@ fn load_convex_site_url_from(raw: Option<String>) -> Result<Url, IdentityError> 
 }
 
 fn load_convex_site_url() -> Result<Url, IdentityError> {
-    load_convex_site_url_from(std::env::var("FABLE_CONVEX_URL").ok())
+    load_convex_site_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
 }
 
 fn validate_convex_http_path(path: &str) -> Result<(), IdentityError> {
@@ -760,7 +766,7 @@ fn validate_convex_http_path(path: &str) -> Result<(), IdentityError> {
 
 #[allow(dead_code)]
 fn load_convex_url() -> Result<Url, IdentityError> {
-    load_convex_url_from(std::env::var("FABLE_CONVEX_URL").ok())
+    load_convex_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
 }
 
 fn disabled_status() -> IdentityStatus {
@@ -2674,7 +2680,7 @@ mod tests {
         ClerkIdentityConfig {
             issuer: "https://issuer.example".to_string(),
             client_id: "client_123".to_string(),
-            audience: "fable-desktop".to_string(),
+            audience: "mivlet-desktop".to_string(),
             authorized_party: Some("client_123".to_string()),
             scopes: vec!["openid".into(), "profile".into(), "email".into()],
         }
@@ -2684,7 +2690,7 @@ mod tests {
         TokenClaims {
             iss: "https://issuer.example".to_string(),
             sub: "user_123".to_string(),
-            aud: Some(AudienceClaim::One("fable-desktop".to_string())),
+            aud: Some(AudienceClaim::One("mivlet-desktop".to_string())),
             exp: now_epoch() + 3600,
             nbf: Some(now_epoch() - 5),
             iat: Some(now_epoch() - 5),
@@ -2737,17 +2743,17 @@ mod tests {
     #[test]
     fn packaged_identity_works_without_launch_environment_and_rejects_partial_overrides() {
         let packaged = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_AUDIENCE", "mivlet-desktop"),
         ]);
         let config = load_config_with_packaged(true, |_| None, |key| packaged.get(key).cloned())
             .unwrap()
             .unwrap();
-        assert_eq!(config.audience, "fable-desktop");
+        assert_eq!(config.audience, "mivlet-desktop");
         let error = load_config_with_packaged(
             true,
-            |key| (key == "FABLE_CLERK_ISSUER").then(|| "https://override.example".to_string()),
+            |key| (key == "MIVLET_CLERK_ISSUER").then(|| "https://override.example".to_string()),
             |key| packaged.get(key).cloned(),
         )
         .unwrap_err();
@@ -2760,8 +2766,8 @@ mod tests {
     #[test]
     fn enabled_production_config_requires_explicit_security_fields() {
         let incomplete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
         ]);
         let error = load_config_from(true, |key| incomplete.get(key).cloned()).unwrap_err();
         assert_eq!(error.code, "configuration-required");
@@ -2771,20 +2777,20 @@ mod tests {
         );
 
         let complete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_AUDIENCE", "mivlet-desktop"),
         ]);
         let config = load_config_from(true, |key| complete.get(key).cloned())
             .unwrap()
             .unwrap();
-        assert_eq!(config.audience, "fable-desktop");
+        assert_eq!(config.audience, "mivlet-desktop");
         assert_eq!(config.authorized_party, None);
     }
 
     #[test]
     fn partial_or_obsolete_clerk_configuration_fails_closed() {
-        let partial = config_values(&[("FABLE_CLERK_AUDIENCE", "fable-desktop")]);
+        let partial = config_values(&[("MIVLET_CLERK_AUDIENCE", "mivlet-desktop")]);
         assert_eq!(
             load_config_from(false, |key| partial.get(key).cloned())
                 .unwrap_err()
@@ -2793,9 +2799,9 @@ mod tests {
         );
 
         let obsolete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_REQUIRE_ORG", "true"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_REQUIRE_ORG", "true"),
         ]);
         assert!(load_config_from(false, |key| obsolete.get(key).cloned())
             .unwrap_err()
@@ -2921,7 +2927,7 @@ mod tests {
         let claims_with_organization: TokenClaims = serde_json::from_value(serde_json::json!({
             "iss": "https://issuer.example",
             "sub": "user_123",
-            "aud": "fable-desktop",
+            "aud": "mivlet-desktop",
             "exp": now + 3600,
             "iat": now - 5,
             "azp": "client_123",
@@ -3034,7 +3040,7 @@ mod tests {
             expires_at: now_epoch() + 3600,
             scopes: vec!["openid".to_string()],
             issuer: "https://issuer.example".to_string(),
-            audience: "fable-desktop".to_string(),
+            audience: "mivlet-desktop".to_string(),
             client_id: "client_123".to_string(),
             authorized_party: Some("client_123".to_string()),
             authentication: Some(authentication),
@@ -3131,7 +3137,7 @@ mod tests {
             "expires_at": now_epoch() + 3600,
             "scopes": ["openid", "profile", "email"],
             "issuer": "https://issuer.example",
-            "audience": "fable-desktop",
+            "audience": "mivlet-desktop",
             "client_id": "client_123",
             "authorized_party": "client_123",
             "identity": {

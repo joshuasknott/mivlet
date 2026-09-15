@@ -32,7 +32,7 @@ pub(crate) fn bind_schedule(
     conn: &Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     project: &str,
     agent: &str,
     run: &str,
@@ -104,7 +104,7 @@ pub(crate) fn finish_schedule(
     conn: &Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     run: &str,
     time: &str,
 ) -> Result<()> {

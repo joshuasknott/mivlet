@@ -1,6 +1,6 @@
 import { connect, launch, type Browser, type Download, type Page } from "@cloudflare/playwright";
 import { getSandbox } from "@cloudflare/sandbox";
-import type { HostedBrowserActionRequest, HostedBrowserControl, HostedBrowserDownloadSnapshot, HostedBrowserNavigateRequest, HostedBrowserSnapshot } from "@fable/protocol";
+import type { HostedBrowserActionRequest, HostedBrowserControl, HostedBrowserDownloadSnapshot, HostedBrowserNavigateRequest, HostedBrowserSnapshot } from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 import { Readable } from "node:stream";
 import { safeDownloadFileName } from "./browser-download";
@@ -131,13 +131,13 @@ export class BrowserAuthority extends DurableObject<Env> {
           window.scrollBy({ top: delta, left: 0, behavior: "instant" });
         }, distance * direction);
     } else {
-        const locator = page.locator(`[data-fable-control-ref="${request.elementRef}"]`);
+        const locator = page.locator(`[data-mivlet-control-ref="${request.elementRef}"]`);
         if (await locator.count() !== 1 || !await locator.isVisible() || !await locator.isEnabled()) {
           throw new Error("browser-control-stale");
         }
         if (
-          await locator.getAttribute("data-fable-control-role") !== request.controlRole
-          || await locator.getAttribute("data-fable-control-name") !== request.controlName
+          await locator.getAttribute("data-mivlet-control-role") !== request.controlRole
+          || await locator.getAttribute("data-mivlet-control-name") !== request.controlName
         ) {
           throw new Error("browser-control-changed");
         }
@@ -332,7 +332,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     const fileName = safeDownloadFileName(download.suggestedFilename());
     const suffix = requestKey.replace(/^browser-action-/u, "").replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 48);
     const workspacePath = `/workspace/downloads/${suffix}-${fileName}`;
-    const temporaryPath = `/workspace/.fable/download-${suffix}.part`;
+    const temporaryPath = `/workspace/.mivlet/download-${suffix}.part`;
     const source = Readable.toWeb(await download.createReadStream()) as ReadableStream<Uint8Array>;
     let bytesWritten = 0;
     const bounded = source.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
@@ -422,9 +422,9 @@ export class BrowserAuthority extends DurableObject<Env> {
         const ref = `control-${prefix}-${index + 1}`;
         const role = clean(roleFor(element)).slice(0, 40);
         const name = nameFor(element);
-        element.setAttribute("data-fable-control-ref", ref);
-        element.setAttribute("data-fable-control-role", role);
-        element.setAttribute("data-fable-control-name", name);
+        element.setAttribute("data-mivlet-control-ref", ref);
+        element.setAttribute("data-mivlet-control-role", role);
+        element.setAttribute("data-mivlet-control-name", name);
         const options = element instanceof HTMLSelectElement
           ? [...new Set([...element.options]
             .filter((option) => !option.disabled)

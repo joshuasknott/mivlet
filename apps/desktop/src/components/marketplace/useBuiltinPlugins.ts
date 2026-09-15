@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { BuiltinPlugins } from "@fable/protocol";
+import type { BuiltinPlugins } from "@mivlet/protocol";
 import { loadRuntimeBuiltinPlugins, setRuntimeBuiltinPlugin } from "../../runtime/domains/local-computer";
 import { connectorErrorMessage } from "../../lib/connector-errors";
 
@@ -55,7 +55,7 @@ export function useBuiltinPlugins(workspaceId?: string) {
       const result = await setRuntimeBuiltinPlugin(workspaceId, plugin, enabled);
       if (current !== epoch.current) return false;
       setPlugins(result);
-      window.dispatchEvent(new Event("fable-builtin-plugins-changed"));
+      window.dispatchEvent(new Event("mivlet-builtin-plugins-changed"));
       setNotice(enabled
         ? "Enabled. A compatible model route, the bundled Windows runtime and fresh approval are still required before any application control."
         : "Disabled. Active application control was stopped immediately; enabling again requires fresh permission.");
@@ -67,7 +67,7 @@ export function useBuiltinPlugins(workspaceId?: string) {
         const refreshed = await loadRuntimeBuiltinPlugins(workspaceId);
         if (current === epoch.current) setPlugins(refreshed);
       } catch { if (current === epoch.current) setPlugins(null); }
-      window.dispatchEvent(new Event("fable-builtin-plugins-changed"));
+      window.dispatchEvent(new Event("mivlet-builtin-plugins-changed"));
       return false;
     } finally {
       if (current === epoch.current) {

@@ -1,4 +1,4 @@
-import type { Spine } from "@fable/protocol";
+import type { Spine } from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
 
 // ---------------------------------------------------------------------------

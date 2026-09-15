@@ -1,5 +1,5 @@
 /**
- * Public barrel for the @fable/connectors package.
+ * Public barrel for the @mivlet/connectors package.
  *
  * The desktop shell imports provider-neutral connector logic and the
  * secret-free disconnected catalogue from this surface. Live status, content,

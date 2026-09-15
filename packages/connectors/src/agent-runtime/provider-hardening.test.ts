@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { BackendProvider, BackendAgentEvent } from "@fable/protocol";
+import type { BackendProvider, BackendAgentEvent } from "@mivlet/protocol";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { createCodexBackend } from "./adapters/codex";
 import { MockCodexAppServer } from "./testing/fake-backend-utils";
-import type { AgentTurnRequest } from "@fable/protocol";
+import type { AgentTurnRequest } from "@mivlet/protocol";
 
 function mockNativeProvider(overrides: Partial<BackendProvider> = {}): BackendProvider {
   return {

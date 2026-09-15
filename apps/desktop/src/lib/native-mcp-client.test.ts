@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { McpFrame, McpTransport } from "@fable/connectors";
+import type { McpFrame, McpTransport } from "@mivlet/connectors";
 
 const native = vi.hoisted(() => ({
   start: vi.fn(async () => undefined), send: vi.fn(async () => undefined), close: vi.fn(async () => undefined),

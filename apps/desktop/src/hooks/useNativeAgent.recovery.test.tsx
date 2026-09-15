@@ -1,8 +1,8 @@
 import { connectedCodexProvider,connectedOpenAiProvider,finishStop,installDesktopRuntime,mocks,openAiChunk,preparedContext } from "./native-agent-test-harness";
-import { registeredToolSpecs } from "@fable/connectors/native-api/tools";
+import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
 import type {
 ExecutionAttempt
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { act,renderHook,waitFor } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import type { DurableRunWriter } from "../lib/conversation-runtime";

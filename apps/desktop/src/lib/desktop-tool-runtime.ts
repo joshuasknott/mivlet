@@ -26,7 +26,7 @@ import type {
   ApprovalRequest,
   ApprovalResolutionRequest,
   HostedBrowserSnapshot
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { assertConnectorToolSucceeded } from "./connector-errors";
 import { McpClient } from "./native-mcp-client";
 import {
@@ -34,7 +34,7 @@ import {
   type ApprovalGate,
   type McpUntrustedToolResult,
   type ToolExecutor
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 import { actRuntimeHostedBrowser, inspectRuntimeHostedProcess, launchRuntimeHostedProcess, navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, prepareRuntimeHostedBrowserAction, prepareRuntimeHostedProcess, toPublicHostedBrowserSnapshot } from "../runtime/domains/hosted-computer";
 import { commitRuntimeCapabilityGrant, prepareRuntimeCapabilityGrant, resolveRuntimeMcpCapabilityRoute, type RuntimeCapabilityGrantProposal } from "../runtime/domains/mcp";
 import { executeRuntimeToolCall } from "../runtime/domains/tools";

@@ -1,4 +1,4 @@
-import type { BackendProvider } from "@fable/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import { resolveCapabilities } from "./capabilities";
 
 export const ANTIGRAVITY_PROVIDER_ID = "antigravity";

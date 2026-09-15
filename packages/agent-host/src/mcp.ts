@@ -3,9 +3,10 @@ import {
   type McpFrame,
   type McpNotification,
   type McpRequest
-} from "@fable/connectors/mcp/protocol";
-import { McpClient } from "@fable/connectors/mcp/sdk-client";
-import type { McpTransport } from "@fable/connectors/mcp/client";
+} from "@mivlet/connectors/mcp/protocol";
+import { McpClient } from "@mivlet/connectors/mcp/sdk-client";
+import type { McpTransport } from "@mivlet/connectors/mcp/client";
+import { readMivletEnvValue } from "@mivlet/protocol";
 
 const MAX_IPC_LINE_CHARACTERS = 10 * 1024 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
@@ -15,7 +16,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
  * stays inert there and the host always runs the production default.
  */
 function requestTimeoutMs(): number {
-  const raw = process.env.MIVLET_MCP_REQUEST_TIMEOUT_MS;
+  const raw = readMivletEnvValue(process.env, "MCP_REQUEST_TIMEOUT_MS");
   if (raw === undefined) return DEFAULT_REQUEST_TIMEOUT_MS;
   const value = Number(raw);
   return Number.isSafeInteger(value) && value >= 100 && value <= DEFAULT_REQUEST_TIMEOUT_MS

@@ -2,7 +2,7 @@ import type {
   ApprovalGrant,
   ApprovalResolutionRequest,
   ApprovalResolutionResponse
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { toSlug } from "./helpers";
 
 /**

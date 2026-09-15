@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConnectorSourceCandidate, KnowledgeSource } from "@fable/protocol";
+import type { ConnectorSourceCandidate, KnowledgeSource } from "@mivlet/protocol";
 import {
   ingestCandidate,
   ingestFolder,

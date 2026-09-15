@@ -1,5 +1,5 @@
 /**
- * Provider-neutral records for Fable-managed execution computers.
+ * Provider-neutral records for Mivlet-managed execution computers.
  *
  * These records deliberately exclude credentials, environment variables,
  * filesystem contents, command output, approval permits, and lease tokens.

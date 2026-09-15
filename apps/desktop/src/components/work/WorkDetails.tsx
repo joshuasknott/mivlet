@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CollaborationWorkItem, WorkOutput } from "@fable/protocol";
+import type { CollaborationWorkItem, WorkOutput } from "@mivlet/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 import {
   MAX_PROMOTED_MEMORY_VALUE,

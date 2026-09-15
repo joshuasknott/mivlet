@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ConversationRoom } from "@fable/protocol";
+import type { ConversationRoom } from "@mivlet/protocol";
 import { SideChatList } from "./SideChats";
 
 const room = (over: Partial<ConversationRoom> = {}): ConversationRoom => ({

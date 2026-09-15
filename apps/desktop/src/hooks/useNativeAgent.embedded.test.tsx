@@ -1,8 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createApprovalGate, type EmbeddedRuntimeEvent } from "@fable/connectors";
-import { registeredToolSpecs } from "@fable/connectors/native-api/tools";
-import type { AgentTurnRequest, ApprovalRequest, BackendProvider, ExecutionAttempt } from "@fable/protocol";
+import { createApprovalGate, type EmbeddedRuntimeEvent } from "@mivlet/connectors";
+import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
+import type { AgentTurnRequest, ApprovalRequest, BackendProvider, ExecutionAttempt } from "@mivlet/protocol";
 import { createDesktopToolExecutor } from "../lib/desktop-tool-runtime";
 import type { DurableRunWriter } from "../lib/conversation-runtime";
 import { useNativeAgent } from "./useNativeAgent";

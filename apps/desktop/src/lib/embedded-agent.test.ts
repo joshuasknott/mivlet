@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BackendProvider } from "@fable/protocol";
-import type { EmbeddedRuntimeEvent } from "@fable/connectors";
+import type { BackendProvider } from "@mivlet/protocol";
+import type { EmbeddedRuntimeEvent } from "@mivlet/connectors";
 
 const mocks = vi.hoisted(() => ({
   start: vi.fn(async () => undefined),
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => ({
   receive: undefined as ((event: EmbeddedRuntimeEvent) => void) | undefined,
 }));
 
-vi.mock("@fable/connectors", () => ({
+vi.mock("@mivlet/connectors", () => ({
   resolveModelCapabilities: vi.fn(() => ({ contextWindow: 16_384 })),
 }));
 vi.mock("../runtime/domains/embedded-agent", () => ({

@@ -1,8 +1,8 @@
-import type { ApprovalGrant, ApprovalRequest } from "@fable/protocol";
+import type { ApprovalGrant, ApprovalRequest } from "@mivlet/protocol";
 import {
   createApprovalGate,
   type ToolApprovalGate,
-} from "@fable/connectors/native-api/tool-executor";
+} from "@mivlet/connectors/native-api/tool-executor";
 
 /** Root routes exact decisions; each worker owns and can cancel only its gate. */
 export class ExecutionApprovalRouter implements ToolApprovalGate {

@@ -51,7 +51,7 @@ async fn request_json(
     crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
-        .user_agent("Fable/0.1 connector-runtime")
+        .user_agent("Mivlet/0.1 connector-runtime")
         .build()
         .map_err(|_| {
             error(
@@ -1035,19 +1035,19 @@ mod tests {
         let issues = github_request(
             "issues.read",
             [
-                ("repository", json!("acme/fable")),
+                ("repository", json!("acme/mivlet")),
                 ("state", json!("open")),
                 ("limit", json!(10)),
             ],
         );
         let (_, issue_url, issue_query, _) = map_read(&issues).expect("issues mapped");
-        assert_eq!(issue_url, "https://api.github.com/repos/acme/fable/issues");
+        assert_eq!(issue_url, "https://api.github.com/repos/acme/mivlet/issues");
         assert!(issue_query.contains(&("per_page".to_string(), "10".to_string())));
         assert!(issue_query.contains(&("state".to_string(), "open".to_string())));
 
-        let pulls = github_request("pull-requests.read", [("repository", json!("acme/fable"))]);
+        let pulls = github_request("pull-requests.read", [("repository", json!("acme/mivlet"))]);
         let (_, pulls_url, pulls_query, _) = map_read(&pulls).expect("pulls mapped");
-        assert_eq!(pulls_url, "https://api.github.com/repos/acme/fable/pulls");
+        assert_eq!(pulls_url, "https://api.github.com/repos/acme/mivlet/pulls");
         assert!(pulls_query.contains(&("state".to_string(), "all".to_string())));
     }
 
@@ -1055,7 +1055,7 @@ mod tests {
     fn github_repository_input_must_be_owner_slash_name() {
         let request = github_request(
             "issues.read",
-            [("repository", json!("https://github.com/acme/fable"))],
+            [("repository", json!("https://github.com/acme/mivlet"))],
         );
         let error = map_read(&request).expect_err("invalid repo rejected");
         assert_eq!(error.code, "invalid-request");

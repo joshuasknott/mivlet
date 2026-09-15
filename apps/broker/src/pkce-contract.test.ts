@@ -9,9 +9,9 @@ import {
   BROKER_CONTRACT_VERSION,
   BROKER_PKCE_CHALLENGE_METHOD,
   BROKER_PKCE_S256_EXAMPLE
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { fixedClock } from "./clock.js";
 import { s256Challenge } from "./pkce.js";
 import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
@@ -26,10 +26,10 @@ function oauthState(tag: string): string {
 }
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
-  FABLE_BROKER_NOTION_CLIENT_ID: "nt-id",
-  FABLE_BROKER_NOTION_CLIENT_SECRET: "nt-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
+  MIVLET_BROKER_NOTION_CLIENT_ID: "nt-id",
+  MIVLET_BROKER_NOTION_CLIENT_SECRET: "nt-secret"
 };
 
 const REDIRECT = "http://127.0.0.1:43123/callback";
@@ -59,7 +59,7 @@ function githubFetch(): BrokerFetch {
 function makeBroker() {
   const clock = fixedClock(1_000_000_000_000);
   const stores = createStores(clock);
-  const broker = new FableBroker({
+  const broker = new MivletBroker({
     env: ENV,
     clock,
     fetch: githubFetch(),
@@ -92,7 +92,7 @@ describe("desktop↔broker PKCE contract", () => {
 
   it("omits provider PKCE for pkce:none while still requiring the desktop challenge", async () => {
     const clock = fixedClock(2_000_000_000_000);
-    const broker = new FableBroker({
+    const broker = new MivletBroker({
       env: ENV,
       clock,
       fetch: vi.fn(async () => new Response("{}", { status: 404 })) as BrokerFetch

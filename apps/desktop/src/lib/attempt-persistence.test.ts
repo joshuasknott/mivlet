@@ -1,4 +1,4 @@
-import type { ExecutionAttempt } from "@fable/protocol";
+import type { ExecutionAttempt } from "@mivlet/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type {
   DurableRunRecord,

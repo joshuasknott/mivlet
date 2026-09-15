@@ -3,7 +3,7 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "paths": { "@fable/connectors/*": ["../connectors/src/*"] },
+    "paths": { "@mivlet/connectors/*": ["../connectors/src/*"] },
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,

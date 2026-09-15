@@ -8,7 +8,7 @@ vulnerability findings fail the gate.
 The lockfile currently contains `quick-xml` 0.37.5 only through:
 
 ```text
-fable-desktop
+mivlet-desktop
   -> tauri-plugin-notification
   -> notify-rust
   -> tauri-winrt-notification 0.7.2

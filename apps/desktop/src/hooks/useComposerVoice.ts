@@ -2,7 +2,7 @@ import { useEffect, useMemo } from "react";
 import {
   createBrowserSpeechProvider,
   createOpenAiRecordingProvider,
-} from "@fable/connectors/voice";
+} from "@mivlet/connectors/voice";
 import type { ShellRuntime } from "./useShellRuntime";
 import { createNativeSpeechPort } from "../lib/native-speech";
 import { useVoice } from "./useVoice";

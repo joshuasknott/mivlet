@@ -3,7 +3,7 @@ import type {
   AccountDeviceSummary,
   AccountWorkspaceStatus,
   AccountWorkspaceSummary,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   resolveHostedComputerScope,
   resolveHostedDeviceId,

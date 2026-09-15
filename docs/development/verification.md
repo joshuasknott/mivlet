@@ -53,7 +53,7 @@ Require the aggregate CI check before merging and rerun affected checks after co
 
 | Scope | Commands |
 | --- | --- |
-| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@fable/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
+| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@mivlet/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
 | Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
 | Code quality | `pnpm quality` (`format:check` is an allowlisted ratchet, not repository-wide Prettier) |
@@ -62,11 +62,11 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
-| Embedded Windows agent host | `pnpm test:host` (also `pnpm --filter @fable/agent-host typecheck` / `build`) |
-| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build`, `pnpm --filter @fable/hosted-runner worker:deploy:dry-run` |
+| Embedded Windows agent host | `pnpm test:host` (also `pnpm --filter @mivlet/agent-host typecheck` / `build`) |
+| Hosted runner | `pnpm --filter @mivlet/hosted-runner test`, `pnpm --filter @mivlet/hosted-runner build`, `pnpm --filter @mivlet/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
 
-`pnpm test` still runs every workspace test, including `@fable/agent-host`. Host
+`pnpm test` still runs every workspace test, including `@mivlet/agent-host`. Host
 fixture tests skip unless they are on Windows with the bundled executable present,
 so the chain no longer aborts on Linux.
 `pnpm test:pr` matches PR CI, which excludes that package entirely.

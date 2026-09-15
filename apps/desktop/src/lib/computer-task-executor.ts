@@ -1,4 +1,4 @@
-import type { ToolExecutor } from "@fable/connectors";
+import type { ToolExecutor } from "@mivlet/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
 const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe"]);

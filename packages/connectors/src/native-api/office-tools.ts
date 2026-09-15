@@ -1,4 +1,4 @@
-import type { BackendTool } from "@fable/protocol";
+import type { BackendTool } from "@mivlet/protocol";
 
 const textCell = {
   oneOf: [

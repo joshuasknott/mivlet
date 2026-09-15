@@ -3,7 +3,7 @@ import type {
   ConnectorManifest,
   ConnectorPermission,
   SupportedConnectorId
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export const SUPPORTED_CONNECTOR_IDS = [
   "github",

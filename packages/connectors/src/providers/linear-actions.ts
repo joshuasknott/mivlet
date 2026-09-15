@@ -1,4 +1,4 @@
-import type { ConnectorActionKind } from "@fable/protocol";
+import type { ConnectorActionKind } from "@mivlet/protocol";
 import { prepareConnectorAction } from "./shared";
 
 export function prepareLinearAction(

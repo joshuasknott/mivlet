@@ -2,7 +2,7 @@ import type {
   CollaborationWorkItem,
   ConversationRoom,
   LocalProject,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 
 /** Work whose outcome blocks the person, ordered newest first. */

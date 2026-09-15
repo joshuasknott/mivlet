@@ -2,7 +2,7 @@ import type {
   HostedBrowserActionRequest,
   HostedBrowserNavigateRequest,
   HostedProcessLaunchRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 const COMPUTER_ID = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])?$/;
 const REQUEST_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/;

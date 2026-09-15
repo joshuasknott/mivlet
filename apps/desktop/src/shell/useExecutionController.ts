@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { LocalComputerSnapshot } from "@fable/protocol";
+import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useHostedBrowserController } from "../hooks/useHostedBrowserController";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
@@ -8,7 +8,7 @@ import {
   createDesktopDurableRunWriter,
   loadDesktopConversation,
 } from "../hooks/useDurableConversation";
-import { isCollaborationTool } from "@fable/connectors/native-api/tools";
+import { isCollaborationTool } from "@mivlet/connectors/native-api/tools";
 import {
   createDesktopToolExecutor,
   type DesktopToolExecutorOptions,
@@ -30,10 +30,10 @@ export function useExecutionController({
   executionProviderId,
 }: {
   runtime: import("../hooks/useShellRuntime").ShellRuntime;
-  approvalGate: import("@fable/connectors/native-api/tool-executor").ToolApprovalGate;
+  approvalGate: import("@mivlet/connectors/native-api/tool-executor").ToolApprovalGate;
   wrapExecutor: (
-    executor: import("@fable/connectors").ToolExecutor,
-  ) => import("@fable/connectors").ToolExecutor;
+    executor: import("@mivlet/connectors").ToolExecutor,
+  ) => import("@mivlet/connectors").ToolExecutor;
   onApproval: (id: string) => void;
   attributeHistory: NonNullable<
     import("../hooks/useNativeAgent").UseNativeAgentOptions["attributeHistory"]

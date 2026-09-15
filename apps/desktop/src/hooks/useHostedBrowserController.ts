@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import type {
   ApprovalResolutionRequest,
   HostedBrowserSnapshot,
-} from "@fable/protocol";
-import type { ToolApprovalGate } from "@fable/connectors/native-api/tool-executor";
+} from "@mivlet/protocol";
+import type { ToolApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
 import type { useHostedComputer } from "./useHostedComputer";
 import type { ShellRuntime } from "./useShellRuntime";
 import { navigateRuntimeHostedBrowser, openRuntimeHostedLiveView, prepareRuntimeHostedBrowser, snapshotRuntimeHostedBrowser, toPublicHostedBrowserSnapshot } from "../runtime/domains/hosted-computer";

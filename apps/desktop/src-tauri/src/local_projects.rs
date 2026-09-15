@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 
 use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
 use crate::collaboration::models::{Author, ChatBinding, Conversation, Participant, Team, Work};
-use crate::models::FableAgentProfile;
+use crate::models::MivletAgentProfile;
 use crate::store::repos::collaboration::{self as collab, Kind};
 use crate::store::repos::local_project::{self as repo, LocalProjectRow, LocalProjectRunAuthorRow};
 use crate::store::repos::{execution_attempt, thread};
@@ -1150,7 +1150,7 @@ fn migrate_group_at(
     tx: &rusqlite::Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     request: MigrateLegacyGroupRequest,
     now: &str,
 ) -> crate::store::Result<LocalProject> {
@@ -1284,7 +1284,7 @@ fn migrate_group_at(
 }
 
 fn validated_participants(
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     ids: &[String],
     lead: Option<&str>,
 ) -> crate::store::Result<Vec<Participant>> {
@@ -1326,7 +1326,7 @@ pub(crate) fn backfill_thread_authors(
     scope: &AuthorizedCommandScope,
     project_id: &str,
     room_id: &str,
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
 ) -> crate::store::Result<usize> {
     let runs: Vec<(String, String, String)> = {
         let mut statement = tx.prepare(
@@ -2139,7 +2139,7 @@ mod tests {
     #[test]
     fn migrates_legacy_group_preserving_history_authorship_and_agent_identity() {
         let (store, scope) = store_and_scope();
-        let profiles: Vec<FableAgentProfile> = serde_json::from_value(serde_json::json!([
+        let profiles: Vec<MivletAgentProfile> = serde_json::from_value(serde_json::json!([
             {"id":"agent-a","name":"Alpha","instructions":"Keep alpha","modelId":"openai::alpha-model","icon":"sparkle","permissionLabel":"Ask Me"},
             {"id":"agent-b","name":"Beta","instructions":"Keep beta","modelId":"anthropic::beta-model","icon":"sparkle","permissionLabel":"Ask Me"}
         ]))

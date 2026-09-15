@@ -2,10 +2,10 @@ import { lazy, Suspense, useState } from "react";
 import type {
   ApprovalRequest,
   CollaborationWorkItem,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalProject,
   WorkOutput,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import type { WorkspaceExecution } from "../../lib/workspace-execution";
 import { useLocalComputer } from "../../hooks/useLocalComputer";
@@ -28,7 +28,7 @@ function ComputerSummary({
   workspaceId,
   onOpenComputer,
 }: {
-  agent: FableAgentProfile;
+  agent: MivletAgentProfile;
   workspaceId: string;
   onOpenComputer: (agentId: string) => void;
 }) {
@@ -72,7 +72,7 @@ export function WorkModeView({
   onOpenPlugins,
 }: {
   project?: LocalProject;
-  agent?: FableAgentProfile;
+  agent?: MivletAgentProfile;
   work: CollaborationWorkItem[];
   runtime: ShellRuntime;
   service: WorkspaceExecution;

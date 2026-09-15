@@ -3,7 +3,7 @@ import type {
   ConversationLayoutNode,
   WorkspaceView,
   ObjectReference,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /** View identity resolves an existing object; it never creates a conversation. */
 function referenceForView(workspaceId: string, view: WorkspaceView): ObjectReference {

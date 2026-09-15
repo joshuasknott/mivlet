@@ -27,8 +27,8 @@ import type {
   ExecutionContextAudience,
   SourceChunk,
   SourceStatus
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { authorityScopeAllowsAudience, isLiveSource, scopeSatisfies } from "../store";
 import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
@@ -81,7 +81,7 @@ export interface RetrieveOptions {
   connectorId?: string;
   /** Restrict to sources from this account. Undefined = no restriction. */
   account?: string;
-  /** Restrict to one exact authorized Fable Connection before scoring. */
+  /** Restrict to one exact authorized Mivlet Connection before scoring. */
   connectionId?: string;
   /** Restrict to these source ids. Undefined = no restriction. */
   sourceIds?: string[];

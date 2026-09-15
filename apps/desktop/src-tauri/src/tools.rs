@@ -1,6 +1,6 @@
 //! Mivlet-owned tool execution boundary (Rust side).
 //!
-//! The TypeScript executor (see `@fable/connectors` `tool-executor.ts`) runs only
+//! The TypeScript executor (see `@mivlet/connectors` `tool-executor.ts`) runs only
 //! after the shell's permission gate allows it. This module is the defense-in-depth Rust
 //! layer each tool call must still cross: it re-validates the approval, confines
 //! file paths to the teammate's Mivlet-owned workspace, and performs the actual
@@ -1935,7 +1935,7 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
             // Re-check host for current hop (hostname DNS or IP literal).
             let mut client_builder = reqwest::Client::builder()
                 .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-                .user_agent("Fable/0.1 (web-fetch)")
+                .user_agent("Mivlet/0.1 (web-fetch)")
                 // Manual redirects ensure every destination gets a fresh
                 // policy check and pinned DNS answer.
                 .redirect(reqwest::redirect::Policy::none())
@@ -2344,7 +2344,7 @@ mod connector_authority_tests {
     #[test]
     fn native_connector_reads_do_not_require_a_persisted_user_prompt() {
         let path = std::env::temp_dir()
-            .join(format!("fable-no-read-permits-{}", std::process::id()))
+            .join(format!("mivlet-no-read-permits-{}", std::process::id()))
             .join("missing.json");
         for tool in [
             "gmail-read",

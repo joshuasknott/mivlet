@@ -3,8 +3,8 @@ import type {
   BackendProvider,
   CollaborationSnapshot,
   CollaborationWorkItem,
-  FableAgentProfile,
-} from "@fable/protocol";
+  MivletAgentProfile,
+} from "@mivlet/protocol";
 import {
   WorkspaceExecution,
   restrictedPermission,
@@ -69,7 +69,7 @@ const agents = ["a", "b", "c", "d"].map(
       modelId: models[0].id,
       instructions: "Fixture",
       permissionLabel: "Ask Me",
-    }) as FableAgentProfile,
+    }) as MivletAgentProfile,
 );
 
 function fixture(work: CollaborationWorkItem[]) {

@@ -20,7 +20,7 @@ import type {
   BackendCapability,
   BackendProvider,
   NativeCompletionRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { runAgentLoop, type ToolExecutor } from "../../native-api/agent-loop";
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { resolveModelCapabilities } from "../../native-api/model-catalogue";

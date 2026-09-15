@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import { PluginPanel, resolveDetailedStatus, connectorAccessSummary } from "./PluginPanel";
 import { mergeConnectorConnections } from "../lib/connector-connections";
 

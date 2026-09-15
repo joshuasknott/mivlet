@@ -8,7 +8,7 @@
  * the Knowledge page can drive without losing the source record.
  */
 
-import type { KnowledgeSource, SourceStatus } from "@fable/protocol";
+import type { KnowledgeSource, SourceStatus } from "@mivlet/protocol";
 
 /**
  * Disable a source: set `disabled: true`. The source record is preserved so it

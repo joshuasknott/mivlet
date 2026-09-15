@@ -18,7 +18,7 @@
 
 /**
  * The closed set of error codes the native-API Rust boundary emits on its
- * transport control channel (`__fableTransport`). Kept here as a type so the UI
+ * transport control channel (`__mivletTransport`). Kept here as a type so the UI
  * classification stays in lockstep with the boundary vocabulary. A code outside
  * this set is treated as a generic runtime failure.
  */

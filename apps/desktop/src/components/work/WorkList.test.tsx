@@ -1,7 +1,7 @@
 import { act } from "@testing-library/react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CollaborationWorkItem } from "@fable/protocol";
+import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { WorkList } from "./WorkCard";
 
 const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem => ({

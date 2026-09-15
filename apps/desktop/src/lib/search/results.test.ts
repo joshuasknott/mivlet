@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { SearchResult } from "@fable/protocol";
+import type { SearchResult } from "@mivlet/protocol";
 import {
   describeSearchContext,
   highlightSegments,

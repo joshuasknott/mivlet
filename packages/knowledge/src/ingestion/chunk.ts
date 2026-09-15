@@ -25,7 +25,7 @@
  * Bounded: the loop is driven by finite input, never unbounded.
  */
 
-import type { SourceChunk } from "@fable/protocol";
+import type { SourceChunk } from "@mivlet/protocol";
 import { contentHash } from "./hash";
 import type { ExtractedType } from "./extract";
 
@@ -647,7 +647,7 @@ function chunkYaml(
 
   // A top-level mapping key: a line at column 0 (no leading whitespace) whose
   // first token is `key:` or `"key":`. Matches inline values too
-  // (`name: Fable`). Indented keys (nested mappings) are excluded by the `^`
+  // (`name: Mivlet`). Indented keys (nested mappings) are excluded by the `^`
   // anchor requiring col 0.
   const topLevelKey = /^(?:[A-Za-z0-9_.\-]+|"[^"]*"|'[^']*'):(?:\s.*)?$/;
 

@@ -81,7 +81,7 @@ jobs:
             -AllowMachineChanges
       - uses: actions/upload-artifact@v4
         with:
-          name: fable-windows-${{ inputs.channel }}-${{ github.sha }}
+          name: mivlet-windows-${{ inputs.channel }}-${{ github.sha }}
           path: output/windows
           if-no-files-found: error
           retention-days: 14

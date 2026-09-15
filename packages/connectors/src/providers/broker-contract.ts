@@ -25,7 +25,7 @@
 import type {
   ConnectorAccountSummary,
   ConnectorTokenSet
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /** Confidential-client providers the broker serves. Google is direct public-client PKCE. */
 export const BROKER_PROVIDER_IDS = [

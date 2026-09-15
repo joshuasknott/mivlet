@@ -16,7 +16,7 @@
 import type {
   BackendProvider,
   NativeCompletionRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   BackendRuntimeError,
   classifyBackendError,
@@ -26,7 +26,7 @@ import {
   type HttpTransport,
   type TransportHandle,
   type TransportHandlers
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 import { cancelRuntimeCompletion, beginRuntimeComputerSession, endRuntimeComputerSession, listenRuntimeBackendEvents, streamRuntimeCompletion } from "../runtime/domains/providers";
 
 /** Shape the request body for the provider; the loop sends a NativeCompletionRequest. */
@@ -122,23 +122,28 @@ function tauriTransport(
         }
         try {
           const parsed = JSON.parse(line) as {
+            __mivletTransport?: NativeTransportControlPayload;
+            __mivletComputerTool?: { callId?: string; approvalId?: string };
+            // In-flight frames from mixed-version hosts during the rename.
             __fableTransport?: NativeTransportControlPayload;
             __fableComputerTool?: { callId?: string; approvalId?: string };
           };
-          if (parsed.__fableComputerTool) {
-            const { callId, approvalId } = parsed.__fableComputerTool;
+          const computerTool = parsed.__mivletComputerTool ?? parsed.__fableComputerTool;
+          const transport = parsed.__mivletTransport ?? parsed.__fableTransport;
+          if (computerTool) {
+            const { callId, approvalId } = computerTool;
             if (computerSession && typeof callId === "string" && typeof approvalId === "string"
               && /^api-visual-[a-f0-9]{48}$/.test(approvalId)) approvalIds.set(callId, approvalId);
             return;
           }
-          if (parsed.__fableTransport) {
-            if (parsed.__fableTransport.kind === "error") {
+          if (transport) {
+            if (transport.kind === "error") {
               transportError = new BackendRuntimeError(
-                parsed.__fableTransport.message ?? "Provider request failed.",
-                parsed.__fableTransport.code ?? "transport",
-                parsed.__fableTransport.retryable ?? false
+                transport.message ?? "Provider request failed.",
+                transport.code ?? "transport",
+                transport.retryable ?? false
               );
-            } else if (parsed.__fableTransport.kind === "retrying") {
+            } else if (transport.kind === "retrying") {
               handlers.onRetry();
             }
             return;

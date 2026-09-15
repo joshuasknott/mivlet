@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { ConversationRoom } from "@fable/protocol";
+import type { ConversationRoom } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
   partitionSideChats,

@@ -1,4 +1,4 @@
-import type { RuntimeSnapshot } from "@fable/protocol";
+import type { RuntimeSnapshot } from "@mivlet/protocol";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import {

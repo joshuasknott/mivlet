@@ -14,9 +14,9 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { BrokerContractError } from "@fable/connectors";
+import { BrokerContractError } from "@mivlet/connectors";
 
-import type { FableBroker } from "./broker.js";
+import type { MivletBroker } from "./broker.js";
 import {
   createBrokerRouter,
   type BrokerRouterOptions,

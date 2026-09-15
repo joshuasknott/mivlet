@@ -1,9 +1,9 @@
 /**
- * Public barrel for the @fable/knowledge package.
+ * Public barrel for the @mivlet/knowledge package.
  *
  * The knowledge + adaptive memory layer: ingestion, retrieval, memory, the
  * bounded context assembler, and the storage repository interface. Everything
- * is pure (no React, no transport) and depends on @fable/protocol only. The
+ * is pure (no React, no transport) and depends on @mivlet/protocol only. The
  * storage seam (`KnowledgeStore`) is where Goal 5 swaps in encrypted SQLite.
  *
  * Re-exports grow as each pipeline module lands (ingestion, retrieval, memory,

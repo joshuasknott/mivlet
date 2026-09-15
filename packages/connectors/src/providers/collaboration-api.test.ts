@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BROKER_PKCE_S256_EXAMPLE
 } from "./broker-contract";
-import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
+import { readMivletEnvValue, type ConnectorApprovalRecord, type ConnectorTokenSet } from "@mivlet/protocol";
 import { ConnectorRuntime } from "../sdk";
 import type { ProviderFetch } from "./http";
 import { createNotionAdapter, NOTION_CAPABILITIES } from "./notion-api";
@@ -375,6 +375,6 @@ describe("Slack production adapter", () => {
   });
 });
 
-describe.runIf(Boolean(process.env.FABLE_LIVE_CONNECTOR_TESTS))("live collaboration connectors", () => {
+describe.runIf(Boolean(readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS")))("live collaboration connectors", () => {
   it.skip("runs only when deliberately supplied credentials are handled by the native keyring boundary", () => undefined);
 });

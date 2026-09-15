@@ -181,7 +181,7 @@ Hosted browser/process tools retain their separate deployment boundary.
 The scope hash and `local-computers/<scope>/workspace` directory are unchanged.
 File listing, reading, writing, repository ZIP import and artifact publication
 remain confined to this explicit Mivlet-owned scope. Paths are relative; legacy
-`/home/fable` or `/home/agent` paths never become arbitrary host filesystem access.
+`/home/mivlet` or `/home/agent` paths never become arbitrary host filesystem access.
 Artifacts retain strict type/content validation and immutable publication copies.
 Opening an artifact writes a fresh private launch copy of the receipt-verified
 bytes and re-verifies that exact copy against the receipt digest immediately

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { VoiceConversationState } from "@fable/protocol";
+import type { VoiceConversationState } from "@mivlet/protocol";
 import { VoiceConversationController, type VoiceConversationAudio, type VoicePromptControl } from "./conversation-controller";
 import type { VoiceConversationPort } from "./conversation";
 

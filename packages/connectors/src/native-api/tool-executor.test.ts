@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/protocol";
+import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@mivlet/protocol";
 import type { HttpTransport } from "./transport";
 import { runAgentLoop } from "./agent-loop";
 import { registeredToolSpecs } from "./tools";

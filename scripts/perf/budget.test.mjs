@@ -37,7 +37,7 @@ test("logicalChunkId ignores hashed suffixes and handles real hyphenated Vite na
 });
 
 test("summarizeBundle groups totals and route chunks", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-perf-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-perf-"));
   const distDir = join(root, "dist", "assets");
   await mkdir(distDir, { recursive: true });
   await writeFile(join(distDir, "index-abc123.js"), "a".repeat(100));
@@ -101,7 +101,7 @@ test("checkBudget fails on material regression", async () => {
   );
 });
 test("collectAssets throws on missing build (nonexistent dist dir)", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-perf-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-perf-"));
   const missingDist = join(root, "nonexistent-dist");
   await assert.rejects(
     async () => collectAssets(missingDist, root),
@@ -110,7 +110,7 @@ test("collectAssets throws on missing build (nonexistent dist dir)", async () =>
 });
 
 test("loadBudget throws on malformed configuration (invalid JSON)", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-perf-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-perf-"));
   const badBudgetPath = join(root, "bad-budget.json");
   await writeFile(
     badBudgetPath,
@@ -123,7 +123,7 @@ test("loadBudget throws on malformed configuration (invalid JSON)", async () => 
 });
 
 test("collectAssets normalizes paths to POSIX separators on Windows and mixed inputs", async () => {
-  const root = await mkdtemp(join(tmpdir(), "fable-perf-"));
+  const root = await mkdtemp(join(tmpdir(), "mivlet-perf-"));
   const distDir = join(root, "dist", "assets");
   await mkdir(distDir, { recursive: true });
   await writeFile(join(distDir, "index-xyz.js"), "x".repeat(10));

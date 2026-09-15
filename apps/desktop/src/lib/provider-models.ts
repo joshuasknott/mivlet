@@ -1,5 +1,5 @@
-import type { BackendModel, BackendProvider } from "@fable/protocol";
-import { modelReasoning } from "@fable/connectors/native-api/reasoning";
+import type { BackendModel, BackendProvider } from "@mivlet/protocol";
+import { modelReasoning } from "@mivlet/connectors/native-api/reasoning";
 
 /**
  * A model option carries its owning backend alongside the provider model id.

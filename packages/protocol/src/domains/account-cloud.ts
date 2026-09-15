@@ -1,7 +1,7 @@
 import type { ExternalAuthenticationFacts, WorkspaceRole } from "../spine/identity.js";
 
 // ---------------------------------------------------------------------------
-// Optional Fable account state.
+// Optional Mivlet account state.
 //
 // The account is an opt-in boundary for hosted computers and future sync. It
 // never owns the local conversation workspace, provider credentials, or local
@@ -52,6 +52,7 @@ export type AccountWorkspaceLifecycleState =
 
 /** Hosted account workspace available to the optional computer service. */
 export interface AccountWorkspaceSummary {
+  /** Persisted Convex/workspace id field name; renaming would break existing records. */
   fableWorkspaceId: string;
   localWorkspaceId: string;
   name: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { MAX_LOCAL_FILE_BYTES } from "@fable/connectors/local-files";
+import { MAX_LOCAL_FILE_BYTES } from "@mivlet/connectors/local-files";
 import {
   composerSubmissionText,
   prepareReadableComposerAttachment,

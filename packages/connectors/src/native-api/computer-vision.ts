@@ -1,4 +1,4 @@
-import type { BackendModel, BackendProvider } from "@fable/protocol";
+import type { BackendModel, BackendProvider } from "@mivlet/protocol";
 import { catalogueCapabilities, resolveModelCapabilities } from "./model-catalogue";
 
 /** Image input and Mivlet tool execution must both exist on the actual route. */

@@ -8,7 +8,7 @@ import type {
   ConnectorId,
   ConnectorPage,
   ConnectorTokenSet
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export interface ConnectorAuthContext {
   redirectUri: string;

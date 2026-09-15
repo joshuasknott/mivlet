@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 
 vi.mock("./lib/query-client", () => ({
-  FableQueryProvider: ({ children }: { children: React.ReactNode }) => (
+  MivletQueryProvider: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="query-boundary">{children}</div>
   )
 }));

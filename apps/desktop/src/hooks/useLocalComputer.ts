@@ -1,4 +1,4 @@
-import type { LocalComputerSnapshot, LocalComputerTarget } from "@fable/protocol";
+import type { LocalComputerSnapshot, LocalComputerTarget } from "@mivlet/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { cancelRuntimeLocalComputer, listRuntimeLocalComputerFiles, loadRuntimeLocalComputer, previewRuntimeLocalComputerFile, stopRuntimeAppControl } from "../runtime/domains/local-computer";
@@ -50,8 +50,8 @@ export function useLocalComputer({ workspaceId, agentId, executionOwner = true }
     refetchInterval: query => query.state.data?.control.status === "active" || query.state.data?.control.status === "connecting" ? 2_000 : 30_000 });
   useEffect(() => {
     const refresh = () => { void queries.invalidateQueries({ queryKey: ["local-computer"] }); };
-    window.addEventListener("fable-builtin-plugins-changed", refresh);
-    return () => window.removeEventListener("fable-builtin-plugins-changed", refresh);
+    window.addEventListener("mivlet-builtin-plugins-changed", refresh);
+    return () => window.removeEventListener("mivlet-builtin-plugins-changed", refresh);
   }, [queries]);
   useEffect(() => {
     active.current = scope;

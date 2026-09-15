@@ -1,4 +1,4 @@
-import type { SearchRequest, SearchResponse } from "@fable/protocol";
+import type { SearchRequest, SearchResponse } from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 

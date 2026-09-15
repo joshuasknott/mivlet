@@ -93,7 +93,7 @@ pub async fn start_embedded_mcp(app: AppHandle, request_id: String) -> Result<()
     tauri::async_runtime::spawn(async move {
         let _image_lease = image_lease;
         let _directory = directory;
-        let channel = format!("fable://embedded-mcp/{request_id}");
+        let channel = format!("mivlet://embedded-mcp/{request_id}");
         let mut line = Vec::new();
         loop {
             line.clear();
