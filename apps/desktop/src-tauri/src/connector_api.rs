@@ -7,7 +7,7 @@ use reqwest::{Method, Response, StatusCode};
 use serde_json::{json, Map, Value};
 
 use crate::{
-    connector_auth::provider_access_token,
+    connector_auth::{provider_access_token, provider_access_token_for_connection},
     models::{
         ConnectorActionRequest, ConnectorCapabilityRequest, ConnectorCapabilityResult,
         ConnectorCommandError, ConnectorHealth, ConnectorSearchItem, ConnectorSearchRequest,
@@ -738,9 +738,10 @@ fn redact_environment(mut value: Value) -> Value {
 pub(crate) async fn execute_action(
     app: &tauri::AppHandle,
     action: &ConnectorActionRequest,
+    expected_connection_id: &str,
 ) -> Result<Option<String>, ConnectorCommandError> {
     let id = action.connector_id.as_str();
-    let token = provider_access_token(app, id).await?;
+    let token = provider_access_token_for_connection(app, id, Some(expected_connection_id)).await?;
     let (method, url, query, body) = map_write(action)?;
     let response = request_json(id, &token, method, &url, &query, Some(body), false).await?;
     Ok(response

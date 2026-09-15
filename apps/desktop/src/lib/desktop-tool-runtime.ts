@@ -51,6 +51,8 @@ import {
 export interface DesktopToolExecutorOptions {
   connectorIds?: readonly string[];
   connectorAccessCurrent?: (connectorId: string) => boolean;
+  /** Connection identity selected now; mutations bind to the prepared account instead. */
+  connectorAccountCurrent?: (connectorId: string) => string | undefined;
   workspaceId?: string;
   localComputer?: {
     workspaceId: string;
@@ -110,10 +112,16 @@ export function createDesktopToolExecutor(
         || Object.values(payload).some((value) => typeof value !== "string")) throw new Error("Supply an action and a payload of string values.");
       const prepared = await prepareRuntimeConnectorToolAction(options.workspaceId, connectorId, action, payload as Record<string, string>);
       if (!prepared || !options.queueApproval) throw new Error("Connector actions require the desktop runtime.");
+      if (!prepared.connectionId) throw new Error("Connect this account before approving a connector action.");
+      const preparedConnectionId = prepared.connectionId;
+      const accountUnchanged = () => !options.connectorAccountCurrent
+        || options.connectorAccountCurrent(connectorId) === preparedConnectionId;
       if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      if (!accountUnchanged()) throw new Error("The connected account changed.");
       options.queueApproval(prepared.action.approval, "connector-action", JSON.stringify({ preview: prepared.preview, payload }));
       if (await gate.waitForDecision(prepared.action.approval) !== "granted") throw new Error("Connector action was denied.");
       if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      if (!accountUnchanged()) throw new Error("The connected account changed.");
       const result = await executeRuntimeConnectorAction({ action: prepared.action, approval: resolutionFor(prepared.action.approval) });
       if (!result) throw new Error("Connector execution is unavailable.");
       if (!accessCurrent()) throw new Error("The workspace or connector access changed.");

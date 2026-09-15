@@ -244,7 +244,11 @@ export async function prepareRuntimeConnectorToolAction(
   action: string,
   payload: Record<string, string>,
 ) {
-  return invokeNative<{ action: ConnectorActionRequest; preview: string }>(
+  return invokeNative<{
+    action: ConnectorActionRequest;
+    preview: string;
+    connectionId?: string | null;
+  }>(
     "prepare_connector_tool_action",
     { workspaceId, connectorId, action, payload },
   );

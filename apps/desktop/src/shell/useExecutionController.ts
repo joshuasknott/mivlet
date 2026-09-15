@@ -63,6 +63,7 @@ export function useExecutionController({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId,
     ids: [] as string[],
+    accounts: {} as Record<string, string>,
   });
   const turnConnectorsRef = useRef({
     workspaceId: activeWorkspaceId,
@@ -85,6 +86,11 @@ export function useExecutionController({
                 )?.connectionRoute ?? "native"),
           )
         : [],
+    accounts: Object.fromEntries(
+      runtime.connectorManifests.flatMap((manifest) =>
+        manifest.account?.id ? [[manifest.id, manifest.account.id]] : [],
+      ),
+    ),
   };
   const hostedWorkspaceId =
     runtime.accountWorkspaceStatus.workspaces.find(
@@ -167,6 +173,11 @@ export function useExecutionController({
           connectorAccessRef.current.workspaceId === activeWorkspaceId &&
           connectorAccessRef.current.agentId === activeAgentId &&
           connectorAccessRef.current.ids.includes(connectorId),
+        connectorAccountCurrent: (connectorId) =>
+          connectorAccessRef.current.workspaceId === activeWorkspaceId &&
+          connectorAccessRef.current.agentId === activeAgentId
+            ? connectorAccessRef.current.accounts[connectorId]
+            : undefined,
         workspaceId: activeWorkspaceId,
         localComputerCurrent: () => localComputerRef.current,
         prepareLocalComputer: async (tool) => {
@@ -376,6 +387,11 @@ export function useExecutionController({
         workspaceId: activeWorkspaceId,
         agentId: activeAgentId,
         ids,
+        accounts: Object.fromEntries(
+          manifests.flatMap((manifest) =>
+            manifest.account?.id ? [[manifest.id, manifest.account.id]] : [],
+          ),
+        ),
       };
       return { ids, tools: chatConnectorTools(ids, manifests) };
     },
@@ -391,6 +407,7 @@ export function useExecutionController({
         connectorAccessRef.current.agentId === activeAgentId
       ) {
         connectorAccessRef.current.ids = [];
+        connectorAccessRef.current.accounts = {};
       }
     },
   };
