@@ -4,15 +4,7 @@ import type {
   ManagedRuntimeHandlers,
 } from "@fable/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
-import {
-  getRuntimeManagedStatus,
-  interruptRuntimeManagedTurn,
-  listenRuntimeManagedEvents,
-  respondRuntimeManagedApproval,
-  shutdownRuntimeManagedTurn,
-  startRuntimeManagedTurn,
-  type ManagedRuntimeProviderId,
-} from "../runtime";
+import { getRuntimeManagedStatus, interruptRuntimeManagedTurn, listenRuntimeManagedEvents, respondRuntimeManagedApproval, shutdownRuntimeManagedTurn, startRuntimeManagedTurn, type ManagedRuntimeProviderId } from "../runtime/domains/providers";
 
 const MANAGED_PROVIDER_IDS = new Set<ManagedRuntimeProviderId>([
   "claude",

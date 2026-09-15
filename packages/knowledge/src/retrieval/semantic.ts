@@ -17,7 +17,7 @@ export interface EmbeddingProvider {
 }
 
 /** L2 norm of a vector. */
-export function norm(vec: number[]): number {
+function norm(vec: number[]): number {
   let sum = 0;
   for (const v of vec) sum += v * v;
   return Math.sqrt(sum);

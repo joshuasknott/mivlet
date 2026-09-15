@@ -1,10 +1,6 @@
 import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
-import {
-  beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration,
-  listRuntimeMcpServerConfigurations, prepareRuntimeMcpServerConfiguration,
-  resolveRuntimeApprovalRequest, setRuntimeMcpEnablement,
-  type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration,
-} from "../runtime";
+import { beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration, listRuntimeMcpServerConfigurations, prepareRuntimeMcpServerConfiguration, setRuntimeMcpEnablement, type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration } from "../runtime/domains/mcp";
+import { resolveRuntimeApprovalRequest } from "../runtime/domains/approvals";
 import { remoteConnectorServerId, type RemoteConnector } from "../components/marketplace/remote-connectors";
 import { openConnectorTools } from "./connector-mcp";
 import { connectorConnectionsChanged, remoteConnectionReady } from "./connector-connections";

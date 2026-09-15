@@ -23,7 +23,7 @@ import { ExecutionApprovalRouter } from "./execution-approvals";
 
 export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
-export const workKey = (work: CollaborationWorkItem) =>
+const workKey = (work: CollaborationWorkItem) =>
   `${work.id}:${work.generation}:${work.runIds.length}`;
 export const restrictedPermission = (
   ...modes: PermissionMode[]

@@ -66,6 +66,12 @@ describe("tauri csp config (production)", () => {
     expect(cspStr).not.toMatch(/convex|api\.|openai|anthropic|xai|googleapis|localhost:1420/i);
   });
 
+  it("allows HTTPS previews only in frames", () => {
+    const { csp } = loadCsp(prodConfigPath);
+    expect(csp["frame-src"]).toBe("https:");
+    expect(csp["script-src"]).toBe("'self'");
+  });
+
   it("uses object form without forbidden broad patterns", () => {
     const { csp } = loadCsp(prodConfigPath);
     const cspStr = typeof csp === "string" ? csp : JSON.stringify(csp);
@@ -127,11 +133,12 @@ describe("tauri csp config (production)", () => {
     const { csp } = loadCsp(prodConfigPath);
     const cspObj = csp as Record<string, string | string[]>;
     const allowed = Object.keys(cspObj).sort();
-    // Voice playback uses temporary local media; no extra network/worker/frame directives.
+    // Remote previews are isolated frames; app scripts and connect-src remain local.
     const expected = [
       "connect-src",
       "default-src",
       "font-src",
+      "frame-src",
       "img-src",
       "media-src",
       "object-src",

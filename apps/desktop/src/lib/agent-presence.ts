@@ -74,7 +74,3 @@ export function agentPresence(
   }
   return state.status === "completed" ? "done" : "idle";
 }
-
-export function presenceLabel(presence: AgentPresence, activity?: string) {
-  return presence === "working" && activity?.trim() ? activity : PRESENCE_LABELS[presence];
-}

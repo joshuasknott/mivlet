@@ -3,7 +3,10 @@ import { buildToolApproval } from "@fable/connectors/native-api/approvals";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 
 const native = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));
-vi.mock("../runtime", () => ({ prepareRuntimeConnectorToolAction: native.prepare, executeRuntimeConnectorAction: native.execute }));
+vi.mock("../runtime/domains/connectors", () => ({
+prepareRuntimeConnectorToolAction: native.prepare,
+executeRuntimeConnectorAction: native.execute
+}));
 const payload = { to: "recipient@example.test", subject: "Review", body: "Proposed text" };
 const args = JSON.stringify({ connectorId: "gmail", action: "gmail.send", payload });
 const wrapper = buildToolApproval("Codex", "connector-action", args);

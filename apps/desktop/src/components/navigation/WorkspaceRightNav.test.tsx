@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CollaborationWorkItem,
@@ -7,10 +7,7 @@ import type {
   LocalProject,
 } from "@fable/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
-import {
-  WorkspaceRightNav,
-  type NavContext,
-} from "./WorkspaceRightNav";
+import { WorkspaceRightNav, type NavContext } from "./WorkspaceRightNav";
 
 vi.mock("../../hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 
@@ -49,7 +46,9 @@ const room = (patch: Partial<ConversationRoom> = {}): ConversationRoom => ({
   updatedAt: "2026-09-12T10:00:00Z",
   ...patch,
 });
-const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem => ({
+const item = (
+  patch: Partial<CollaborationWorkItem> = {},
+): CollaborationWorkItem => ({
   id: "work",
   rootId: "work",
   workspaceId: "workspace",
@@ -83,19 +82,73 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
 const runtime = {
   agents: [agent],
   managedMemoryRecords: [
-    { id: "mine", kind: "fact", title: "Writing", value: "Short replies", source: "You", freshness: "Today", approved: true, pinned: false, scope: { level: "agent", agentId: "agent" } },
-    { id: "theirs", kind: "fact", title: "Other", value: "Other value", source: "You", freshness: "Today", approved: true, pinned: false, scope: { level: "agent", agentId: "other" } },
-    { id: "global", kind: "fact", title: "Global", value: "Global value", source: "You", freshness: "Today", approved: true, pinned: false },
+    {
+      id: "mine",
+      kind: "fact",
+      title: "Writing",
+      value: "Short replies",
+      source: "You",
+      freshness: "Today",
+      approved: true,
+      pinned: false,
+      scope: { level: "agent", agentId: "agent" },
+    },
+    {
+      id: "theirs",
+      kind: "fact",
+      title: "Other",
+      value: "Other value",
+      source: "You",
+      freshness: "Today",
+      approved: true,
+      pinned: false,
+      scope: { level: "agent", agentId: "other" },
+    },
+    {
+      id: "global",
+      kind: "fact",
+      title: "Global",
+      value: "Global value",
+      source: "You",
+      freshness: "Today",
+      approved: true,
+      pinned: false,
+    },
   ],
   connectorManifests: [],
 } as unknown as ShellRuntime;
 const base = {
   rooms: [
-    room({ id: "side", title: "Side chat", chat: { role: "side", ownerKind: "agent", ownerId: "agent" } }),
-    room({ id: "main", projectId: "project", kind: "group", title: "Launch main" }),
-    room({ id: "pside", projectId: "project", kind: "group", title: "Launch side", chat: { role: "side", ownerKind: "project", ownerId: "project" } }),
+    room({
+      id: "side",
+      title: "Side chat",
+      chat: { role: "side", ownerKind: "agent", ownerId: "agent" },
+    }),
+    room({
+      id: "main",
+      projectId: "project",
+      kind: "group",
+      title: "Launch main",
+    }),
+    room({
+      id: "pside",
+      projectId: "project",
+      kind: "group",
+      title: "Launch side",
+      chat: { role: "side", ownerKind: "project", ownerId: "project" },
+    }),
   ],
-  work: [item({ id: "a" }), item({ id: "b", agentId: "other", agentName: "Theo", projectId: "project", conversationId: "pside", status: "completed" })],
+  work: [
+    item({ id: "a" }),
+    item({
+      id: "b",
+      agentId: "other",
+      agentName: "Theo",
+      projectId: "project",
+      conversationId: "pside",
+      status: "completed",
+    }),
+  ],
   runtime,
   open: true,
   onClose: vi.fn(),
@@ -110,77 +163,141 @@ const base = {
 };
 const context = (value: NavContext) => ({ ...base, context: value });
 
-describe("contextual right navigation", () => {
-  it("shows agent sections with scoped memory and work", () => {
-    render(<WorkspaceRightNav {...context({ kind: "agent", agent })} />);
-    expect(screen.getByRole("button", { name: "New side chat" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Side chat" })).toBeVisible();
-    const work = screen.getByRole("region", { name: "Work" });
-    expect(within(work).getByText("Original request")).toBeVisible();
-    // The other agent's queued work is out of scope here.
-    expect(within(work).queryByText("Theo")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Memory/ }));
-    const memory = screen.getByRole("region", { name: "Memory" });
-    expect(within(memory).getByText("2 in scope for this agent.")).toBeVisible();
-  });
-
-  it("scopes project sections and never lists the main chat as a side chat", () => {
-    render(
-      <WorkspaceRightNav
-        {...context({ kind: "project", project })}
-        team={{ projectId: "project", participantIds: ["agent"], leadAgentId: "agent", revision: 1 }}
-        onSchedules={vi.fn()}
-      />,
+describe("multifunctional right panel", () => {
+  it("keeps utilities available while a document is open and deduplicates repeated opens", () => {
+    const request = {
+      id: "file:a",
+      kind: "artifact" as const,
+      title: "Launch brief",
+      output: "file",
+      agentId: "agent",
+    };
+    const props = {
+      ...context({ kind: "agent", agent }),
+      renderTab: () => <p>Document contents</p>,
+    };
+    const view = render(<WorkspaceRightNav {...props} request={request} />);
+    expect(screen.getByText("Document contents")).toBeInTheDocument();
+    for (const name of ["Files", "Side chats", "Schedules"])
+      expect(screen.getByRole("button", { name })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    expect(screen.queryByText("Document contents")).toBeNull();
+    view.rerender(<WorkspaceRightNav {...props} request={{ ...request }} />);
+    expect(screen.getAllByRole("tab")).toHaveLength(1);
+    expect(screen.getByText("Document contents")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Launch brief" }));
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    expect(screen.queryByText("Launch main")).toBeNull();
-    const chats = screen.getByRole("region", { name: "Side Chats" });
-    expect(within(chats).getByText("Launch side")).toBeVisible();
-    expect(within(chats).queryByText("Launch main")).toBeNull();
-    const work = screen.getByRole("region", { name: "Work" });
-    expect(within(work).queryByText("Mira")).toBeNull();
-    expect(screen.getByRole("button", { name: "View schedules" })).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: /Team/ }));
-    expect(screen.getByText("Lead: Mira")).toBeVisible();
   });
-
-  it("opens one work item into its detailed view and back", () => {
-    const onOpenWork = vi.fn();
+  it("shows only the selected owner's side chats", () => {
+    const view = render(
+      <WorkspaceRightNav {...context({ kind: "agent", agent })} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Side chats" }));
+    fireEvent.click(screen.getByRole("button", { name: "Side chat" }));
+    expect(base.onOpenConversation).toHaveBeenCalledWith("side");
+    expect(screen.queryByText("Launch side")).toBeNull();
+    view.rerender(
+      <WorkspaceRightNav {...context({ kind: "project", project })} />,
+    );
+    expect(screen.getByText("Launch side")).toBeInTheDocument();
+    expect(screen.queryByText("Side chat")).toBeNull();
+    expect(screen.queryByText("Launch main")).toBeNull();
+  });
+  it("embeds schedules and removes the old inventory sections", () => {
     render(
       <WorkspaceRightNav
         {...context({ kind: "agent", agent })}
-        onOpenWork={onOpenWork}
+        schedules={<p>Create a routine</p>}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Work details" }));
-    expect(onOpenWork).toHaveBeenCalledWith("a");
+    fireEvent.click(screen.getByRole("button", { name: "Schedules" }));
+    expect(screen.getByText("Create a routine")).toBeInTheDocument();
+    for (const name of ["Memory", "Work", "Tools", "Approvals", "Team"])
+      expect(screen.queryByRole("heading", { name })).toBeNull();
   });
-
-  it("renders the selected work item with its original request and recovery", () => {
-    const onOpenWork = vi.fn();
-    const { container } = render(
+  it("switches tabs by keyboard and closes onto the neighbouring document", () => {
+    const first = {
+      id: "web:a",
+      kind: "web" as const,
+      title: "Website",
+      url: "https://example.com",
+    };
+    const props = {
+      ...context(null),
+      renderTab: (tab: { title: string }) => <p>{tab.title} contents</p>,
+    };
+    const view = render(<WorkspaceRightNav {...props} request={first} />);
+    view.rerender(
       <WorkspaceRightNav
-        {...context({ kind: "work", item: item({ id: "a" }) })}
-        onOpenWork={onOpenWork}
+        {...props}
+        request={{ id: "chat:b", kind: "chat", title: "Ideas", roomId: "side" }}
       />,
     );
-    const requests = [...container.querySelectorAll("p.work-details-request")].map(
-      (node) => node.textContent,
-    );
-    expect(requests).toEqual(["Original request", "Assignment"]);
-    expect(screen.getByText("Computer status unavailable")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Back to context" }));
-    expect(onOpenWork).toHaveBeenCalledWith(null);
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Ideas" }), {
+      key: "ArrowLeft",
+    });
+    expect(screen.getByRole("tab", { name: "Website" })).toHaveFocus();
+    expect(screen.getByText("Website contents")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Close Website" }));
+    expect(screen.getByText("Ideas contents")).toBeInTheDocument();
   });
-
-  it("keeps the attention summary scoped to the context", () => {
-    const onOpenConversation = vi.fn();
+  it("keeps background work untouched when the panel closes", () => {
+    const onClose = vi.fn();
+    render(<WorkspaceRightNav {...context(null)} onClose={onClose} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Close workspace panel" }),
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(base.onStopWork).not.toHaveBeenCalled();
+  });
+  it("lists only validated files in the selected agent scope", () => {
+    const output = (title: string) => ({
+      runId: title,
+      conversationId: "side",
+      evidence: "agent-report" as const,
+      createdAt: "2026-09-14T00:00:00Z",
+      text: JSON.stringify({
+        kind: "computer-artifact",
+        version: 1,
+        id: `artifact-${"a".repeat(64)}`,
+        computerId: `local-${"b".repeat(24)}`,
+        title,
+        relativePath: "brief.md",
+        mimeType: "text/markdown",
+        sizeBytes: 20,
+        createdAt: "2026-09-14T00:00:00Z",
+      }),
+    });
     render(
       <WorkspaceRightNav
-        {...context({ kind: "project", project })}
-        onOpenConversation={onOpenConversation}
+        {...context({ kind: "agent", agent })}
+        work={[
+          item({ outputs: [output("My brief"), output("My brief")] }),
+          item({ agentId: "other", outputs: [output("Private brief")] }),
+        ]}
+        renderTab={(tab) => <p>{tab.title} contents</p>}
       />,
     );
-    // Only the project's failed work is pinned; the agent's failed work is out of scope.
-    expect(screen.queryByRole("heading", { name: "Work needing attention" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "My brief" })).toHaveLength(1);
+    expect(screen.queryByText("Private brief")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "My brief" }));
+    expect(screen.getByText("My brief contents")).toBeInTheDocument();
+  });
+  it("releases side-chat focus when switching to a utility", () => {
+    const active = vi.fn();
+    render(
+      <WorkspaceRightNav
+        {...context(null)}
+        request={{ id: "chat:a", kind: "chat", roomId: "a", title: "Ideas" }}
+        onChatActiveChange={active}
+      />,
+    );
+    expect(active).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    expect(active).toHaveBeenLastCalledWith(false);
   });
 });

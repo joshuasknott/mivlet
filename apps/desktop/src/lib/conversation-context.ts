@@ -7,7 +7,7 @@ const REQUEST_OVERHEAD_TOKENS = 64;
 
 type NativeMessage = AgentTurnRequest["messages"][number];
 
-export interface ConversationContextDiagnostics {
+interface ConversationContextDiagnostics {
   /** A local estimate, never presented as provider-billed usage. */
   estimatedInputTokens: number;
   tokenizer: "local-utf8-estimate";

@@ -5,9 +5,11 @@ const native = vi.hoisted(() => ({
   start: vi.fn(async () => undefined), send: vi.fn(async () => undefined), close: vi.fn(async () => undefined),
   listen: vi.fn(), unlisten: vi.fn(), receive: undefined as ((frame: unknown) => void) | undefined,
 }));
-vi.mock("../runtime", () => ({
-  startRuntimeEmbeddedMcp: native.start, sendRuntimeEmbeddedMcp: native.send,
-  closeRuntimeEmbeddedMcp: native.close, listenRuntimeEmbeddedMcp: native.listen,
+vi.mock("../runtime/domains/embedded-agent", () => ({
+startRuntimeEmbeddedMcp: native.start,
+sendRuntimeEmbeddedMcp: native.send,
+closeRuntimeEmbeddedMcp: native.close,
+listenRuntimeEmbeddedMcp: native.listen
 }));
 import { McpClient } from "./native-mcp-client";
 

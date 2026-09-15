@@ -143,32 +143,25 @@ describe("SettingsPage", () => {
     renderTab("providers", stubRuntime({ backendProviders: [provider] }));
 
     expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
-    expect(screen.getByText(/connect at least one model provider/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /OpenAI \/ ChatGPT/ })).toBeInTheDocument();
+    expect(screen.getByText(/connect your AI providers/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /ChatGPT/ })).toBeInTheDocument();
     expect(screen.getByText(/credentials in your device.s secure storage/i)).toBeInTheDocument();
   });
 
-  it("keeps advanced tool servers separate from the connector marketplace", async () => {
-    renderTab("connections");
-
-    expect(screen.getByRole("heading", { name: "Tool servers" })).toBeInTheDocument();
-    expect(screen.getByText(/App connections live in Plugins/i)).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Installed" })).not.toBeInTheDocument();
-    expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeInTheDocument();
+  it("gives models their own page and keeps them out of Providers", () => {
+    const view = renderTab("models");
+    expect(screen.getByRole("heading", { name: "Models" })).toBeVisible();
+    expect(screen.getByRole("searchbox", { name: "Search models" })).toBeVisible();
+    view.rerender(<SettingsPage runtime={stubRuntime()} theme="light" onThemeChange={() => {}} activeTab="providers" workspaceName="Workspace" />);
+    expect(screen.queryByRole("searchbox", { name: "Search models" })).toBeNull();
   });
-
-  it("keeps memory and explicit local data controls in privacy", async () => {
-    const view = renderTab("privacy");
-
-    expect(screen.getByRole("heading", { name: "Privacy & data" })).toBeInTheDocument();
-    expect(screen.getByText("Personal memory")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Manage local data"));
-    expect(screen.getByText("Local data recovery")).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Approvals" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete local data" })).toBeDisabled();
-    expect(view.container.textContent).not.toMatch(/\b(?:mission|routine|schedule|workflow|run history)\b/i);
-    fireEvent.click(screen.getByRole("button", { name: "Check local health" }));
-    await screen.findByText(/local health checks are available in the installed desktop app/i);
+  it("keeps memory focused on saved facts without backup or privacy information", () => {
+    renderTab("privacy");
+    expect(screen.getByRole("heading", { name: "Memory", level: 1 })).toBeVisible();
+    expect(screen.getByText("Personal memory")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Export memory" })).toBeVisible();
+    expect(screen.queryByText(/backup|recovery|how your data is used/i)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Dictation/ })).toBeNull();
   });
 
   it("keeps action feedback in the settings section that produced it", () => {

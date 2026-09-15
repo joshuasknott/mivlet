@@ -13,6 +13,8 @@ Thumbs.db
 *.tsbuildinfo
 apps/desktop/src-tauri/target/
 output/
+tmp/
+.local-probe/
 coverage/
 .npm-cache/
 .vite/

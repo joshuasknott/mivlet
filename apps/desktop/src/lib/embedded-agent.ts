@@ -1,6 +1,6 @@
 import type { BackendProvider } from "@fable/protocol";
 import { resolveModelCapabilities, type EmbeddedRuntimeEvent, type EmbeddedRuntimeHandle } from "@fable/connectors";
-import { startRuntimeEmbeddedAgent, cancelRuntimeEmbeddedAgent, replyRuntimeEmbeddedAgent, listenRuntimeEmbeddedAgent } from "../runtime";
+import { startRuntimeEmbeddedAgent, cancelRuntimeEmbeddedAgent, replyRuntimeEmbeddedAgent, listenRuntimeEmbeddedAgent } from "../runtime/domains/embedded-agent";
 
 export function createDesktopEmbeddedRuntime(_provider: BackendProvider): EmbeddedRuntimeHandle | null {
   if (typeof window === "undefined" || !(window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return null;

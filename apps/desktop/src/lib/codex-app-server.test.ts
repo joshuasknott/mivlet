@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
-import type { RuntimeCodexEvent } from "../runtime";
+import type { RuntimeCodexEvent } from "../runtime/domains/providers";
 import { createDesktopCodexAppServer } from "./codex-app-server";
 
 const runtimeMocks = vi.hoisted(() => {
@@ -33,7 +33,7 @@ const runtimeMocks = vi.hoisted(() => {
   };
 });
 
-vi.mock("../runtime", () => runtimeMocks);
+vi.mock("../runtime/domains/providers", () => runtimeMocks);
 
 const provider: BackendProvider = {
   id: "codex",

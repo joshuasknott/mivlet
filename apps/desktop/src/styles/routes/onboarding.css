@@ -1,4 +1,4 @@
-/* First-run onboarding shares the workspace's quiet palette and compact scale. */
+/* Account entry shares the workspace's quiet palette and compact scale. */
 
 .og-frame {
   position: relative;
@@ -13,29 +13,6 @@
   background: var(--surface);
 }
 
-.og-back-button {
-  position: fixed;
-  top: 28px;
-  left: 28px;
-  z-index: 2;
-  display: inline-flex;
-  min-height: 40px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 10px;
-  color: var(--ink-muted);
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  font-size: var(--text-13);
-  font-weight: 500;
-}
-
-.og-back-button:hover {
-  color: var(--ink);
-  background: var(--surface-hover);
-}
-
 .og-center {
   display: flex;
   width: min(100%, 560px);
@@ -43,27 +20,6 @@
   padding-block: 16px;
   flex-direction: column;
   align-items: center;
-}
-
-.og-progress {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 14px;
-  min-height: 12px;
-  margin-top: 40px;
-}
-
-.og-progress span {
-  width: 6px;
-  height: 6px;
-  background: color-mix(in srgb, var(--ink) 14%, transparent);
-  border-radius: 999px;
-  transition: background 160ms ease;
-}
-
-.og-progress span.is-current {
-  background: var(--ink);
 }
 
 .og-screen {
@@ -101,9 +57,7 @@
   line-height: 1.55;
 }
 
-.og-account-actions,
-.og-provider-action,
-.og-connector-actions {
+.og-account-actions {
   display: flex;
   width: min(100%, 360px);
   flex-direction: column;
@@ -112,14 +66,6 @@
 }
 
 .og-account-actions {
-  margin-top: 40px;
-}
-
-.og-provider-action {
-  margin-top: 26px;
-}
-
-.og-connector-actions {
   margin-top: 40px;
 }
 
@@ -154,16 +100,12 @@
 }
 
 .og-primary-button:disabled,
-.og-text-button:disabled,
-.og-icon-choice:disabled,
-.og-provider-alternative:disabled,
-.og-extra-provider:disabled {
+.og-text-button:disabled {
   cursor: default;
   opacity: 0.5;
 }
 
 .og-text-button,
-.og-provider-alternative,
 .og-privacy-link {
   color: var(--ink);
   background: transparent;
@@ -181,19 +123,13 @@
 }
 
 .og-text-button:hover:not(:disabled),
-.og-provider-alternative:hover:not(:disabled),
 .og-privacy-link:hover {
   text-decoration: underline;
 }
 
 .og-primary-button:focus-visible,
-.og-back-button:focus-visible,
 .og-text-button:focus-visible,
-.og-provider-alternative:focus-visible,
-.og-icon-choice:focus-visible,
-.og-provider-form input:focus-visible,
-.og-privacy-link:focus-visible,
-.og-extra-provider:focus-visible {
+.og-privacy-link:focus-visible {
   outline: 0;
   box-shadow: var(--focus-ring);
 }
@@ -204,141 +140,6 @@
   padding: 8px;
   color: var(--ink-muted);
   font-size: var(--text-12);
-}
-
-.og-provider-alternative {
-  min-height: 40px;
-  padding: 6px 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-13);
-}
-
-.og-more-providers {
-  width: min(100%, 360px);
-  margin-top: 22px;
-  padding-top: 12px;
-  border-top: 1px solid var(--line);
-}
-
-.og-extra-providers {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
-  padding-top: 6px;
-}
-
-.og-extra-provider {
-  display: flex;
-  min-height: 44px;
-  align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
-  color: var(--ink);
-  background: transparent;
-  border: 0;
-  border-radius: 10px;
-  font-size: var(--text-12);
-  text-align: left;
-}
-
-.og-extra-provider:hover:not(:disabled),
-.og-extra-provider[aria-pressed="true"] {
-  background: var(--surface-hover);
-}
-
-.og-extra-provider svg {
-  flex-shrink: 0;
-}
-
-.og-icon-choices {
-  display: flex;
-  width: 100%;
-  justify-content: center;
-  gap: 14px;
-  margin-top: 32px;
-  flex-wrap: wrap;
-}
-
-.og-icon-choice {
-  position: relative;
-  display: grid;
-  width: 58px;
-  height: 58px;
-  place-items: center;
-  flex: 0 0 auto;
-  color: var(--ink);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: 0 3px 10px rgb(0 0 0 / 3%);
-  transition:
-    border-color 120ms ease,
-    background 120ms ease,
-    transform 120ms ease;
-}
-
-.og-icon-choice:hover:not(:disabled) {
-  background: var(--surface-hover);
-  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
-}
-
-.og-icon-choice:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
-.og-icon-choice.is-selected {
-  border-color: color-mix(in srgb, var(--ink) 22%, var(--line));
-  background: var(--surface-hover);
-}
-
-.og-icon-choice.is-connected:disabled {
-  opacity: 1;
-}
-
-.og-icon-choice .connector-icon-svg {
-  width: 28px;
-  height: 28px;
-}
-
-.og-icon-choice__check {
-  position: absolute;
-  top: -7px;
-  right: -7px;
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  color: var(--surface);
-  background: var(--ink);
-  border: 3px solid var(--surface);
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.og-provider-form {
-  display: grid;
-  gap: 14px;
-  width: 100%;
-}
-
-.og-provider-form label {
-  display: grid;
-  gap: 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
-  text-align: left;
-}
-
-.og-provider-form input {
-  width: 100%;
-  min-height: 46px;
-  padding: 0 14px;
-  color: var(--ink);
-  background: var(--surface-raised);
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  font: inherit;
 }
 
 .og-feedback {
@@ -358,41 +159,13 @@
     padding: 64px 20px 24px;
   }
 
-  .og-back-button {
-    position: absolute;
-    top: 16px;
-    left: 12px;
-  }
-
   .og-heading h1 {
     font-size: 27px;
-  }
-
-  .og-icon-choices {
-    gap: 9px;
-    margin-top: 28px;
-  }
-
-  .og-icon-choice {
-    width: clamp(50px, 14vw, 58px);
-    height: clamp(50px, 14vw, 58px);
-    border-radius: 12px;
-  }
-
-  .og-icon-choice .connector-icon-svg {
-    width: 28px;
-    height: 28px;
-  }
-
-  .og-connector-actions {
-    margin-top: 32px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .og-progress span,
-  .og-primary-button,
-  .og-icon-choice {
+  .og-primary-button {
     transition: none;
   }
 }

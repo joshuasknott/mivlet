@@ -5,8 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalComputerSnapshot } from "@fable/protocol";
 import { useLocalComputer } from "./useLocalComputer";
 const mocks=vi.hoisted(()=>({load:vi.fn(),files:vi.fn(),preview:vi.fn(),stop:vi.fn(),cancel:vi.fn()}));
-vi.mock("../runtime",()=>({loadRuntimeLocalComputer:mocks.load,listRuntimeLocalComputerFiles:mocks.files,previewRuntimeLocalComputerFile:mocks.preview,
-  stopRuntimeAppControl:mocks.stop,cancelRuntimeLocalComputer:mocks.cancel}));
+vi.mock("../runtime/domains/local-computer", ()=>({
+loadRuntimeLocalComputer:mocks.load,
+listRuntimeLocalComputerFiles:mocks.files,
+previewRuntimeLocalComputerFile:mocks.preview,
+stopRuntimeAppControl:mocks.stop,
+cancelRuntimeLocalComputer:mocks.cancel
+}));
 const idle={status:"idle" as const,requestId:null,generation:null,application:null,title:null,message:null};
 const node=(overrides:Partial<LocalComputerSnapshot>={}):LocalComputerSnapshot=>({computerId:"computer-a",workspaceId:"workspace-a",agentId:"agent-a",locality:"local",backend:"cua-driver",isolation:"windows-session",lifecycle:"ready",controller:"agent",generation:1,capabilities:["persistent-files"],runtimeAvailable:true,retiredComputer:false,plugins:{computer:true},control:idle,updatedAt:"2026-09-09T00:00:00Z",...overrides});
 const active=()=>node({control:{...idle,status:"active",requestId:"request-a",generation:1,application:"Disposable app",title:"Fixture"}});

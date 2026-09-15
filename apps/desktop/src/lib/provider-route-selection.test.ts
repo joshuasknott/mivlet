@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { selectNativeProviderRoute } from "./provider-route-selection";
 
 const mocks = vi.hoisted(() => ({ listRoutes: vi.fn() }));
-vi.mock("../runtime", () => ({
-  listRuntimeNativeProviderRoutes: mocks.listRoutes,
+vi.mock("../runtime/domains/providers", () => ({
+listRuntimeNativeProviderRoutes: mocks.listRoutes
 }));
 
 const route = {

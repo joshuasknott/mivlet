@@ -18,13 +18,19 @@ const mocks = vi.hoisted(() => ({ status: null as AccountWorkspaceStatus | null,
   loadSnapshot: vi.fn<() => Promise<RuntimeSnapshot | null>>(async () => null),
   saveSnapshot: vi.fn(async (_snapshot: RuntimeSnapshot, _workspaceId?: string) => null),
 }));
-vi.mock("../runtime", async (original) => ({
-  ...await original<typeof import("../runtime")>(),
-  loadRuntimeAccountWorkspaceStatus: async () => mocks.status,
-  reconcileRuntimeAccountWorkspace: async () => mocks.status,
-  loadRuntimeSnapshot: mocks.loadSnapshot,
-  saveRuntimeSnapshot: mocks.saveSnapshot,
-  resolveRuntimeApprovalRequest: mocks.resolveApproval,
+vi.mock("../runtime/domains/account", async (original) => ({
+...await original<typeof import("../runtime/domains/account")>(),
+loadRuntimeAccountWorkspaceStatus: async () => mocks.status,
+reconcileRuntimeAccountWorkspace: async () => mocks.status
+}));
+vi.mock("../runtime/domains/workspace", async (original) => ({
+...await original<typeof import("../runtime/domains/workspace")>(),
+loadRuntimeSnapshot: mocks.loadSnapshot,
+saveRuntimeSnapshot: mocks.saveSnapshot
+}));
+vi.mock("../runtime/domains/approvals", async (original) => ({
+...await original<typeof import("../runtime/domains/approvals")>(),
+resolveRuntimeApprovalRequest: mocks.resolveApproval
 }));
 vi.mock("../lib/persistence", async (original) => ({
   ...await original<typeof import("../lib/persistence")>(),
@@ -140,6 +146,49 @@ describe("approval queue workspace hydration", () => {
     expect(result.current.runtimeSnapshotError).toBeNull();
     await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalled());
     expect(mocks.saveSnapshot.mock.calls[0]).toMatchObject([{ composerDraft: "" }, "local-default"]);
+  });
+
+  it("ignores a manual approval response after its account owner changes", async () => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    act(() => result.current.selectPermissionLabel("Ask Me"));
+    let finish!: (value: ApprovalResolutionResponse) => void;
+    mocks.resolveApproval.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const approval = buildToolApproval("Codex", "connector-action", "{}");
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval).catch(() => "cancelled");
+    act(() => result.current.recordBackendToolCall({ callId: approval.id, tool: "connector-action", arguments: "{}", approval }));
+    act(() => result.current.requestApprovalDecision(approval, "once"));
+    mocks.status = { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
+    await act(async () => { await result.current.reconcileAccountWorkspace(); });
+    await act(async () => finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0][0])));
+    await expect(outcome).resolves.toBe("cancelled");
+    expect(result.current.approvalAudit).toEqual([]);
+    expect(result.current.openApprovals).toEqual([]);
+    expect(result.current.sessionApprovalGrants).toEqual([]);
+  });
+
+  it("ignores late snapshot hydration from a previous owner", async () => {
+    let finish!: (value: RuntimeSnapshot) => void;
+    mocks.loadSnapshot.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(mocks.loadSnapshot).toHaveBeenCalledTimes(1));
+    mocks.status = { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
+    await act(async () => { await result.current.reconcileAccountWorkspace(); });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    await act(async () => finish({ ...shellStateToRuntimeSnapshot(defaultShellState), activeItem: "old-owner-private-item" }));
+    expect(result.current.activeItem).toBe(defaultShellState.activeItem);
+    expect(result.current.runtimeSnapshotError).toBeNull();
+  });
+
+  it("flushes the final pending settings to their workspace on unmount", async () => {
+    const { result, unmount } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    mocks.saveSnapshot.mockClear();
+    act(() => result.current.setVoiceEnabled(false));
+    unmount();
+    await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalledWith(expect.objectContaining({ voiceEnabled: false }), "local-default"));
   });
 
   it.each(["workspace", "owner"] as const)("drops an old pending snapshot before switching %s", async (change) => {

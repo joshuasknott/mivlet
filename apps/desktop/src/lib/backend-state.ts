@@ -48,7 +48,7 @@ export function authKindForProvider(
 }
 
 /** The visual tone of a state badge / status note. */
-export type BackendStateTone =
+type BackendStateTone =
   "ready" | "neutral" | "info" | "caution" | "danger";
 
 export interface BackendStateView {
@@ -151,19 +151,6 @@ export function actionLabelForProvider(provider: BackendProvider): string {
   }
 }
 
-/**
- * Whether the provider offers a primary onboarding action the user can take on
- * this screen right now. API-key providers always do; provider-login providers
- * do only when they're already connected (otherwise they route to real setup).
- */
-export function canActOnProvider(provider: BackendProvider): boolean {
-  if (provider.authState === "connecting") return false;
-  if (authKindForProvider(provider) === "api-key") return true;
-  // Provider-owned runtimes: no fake connect here. The action is informational
-  // (routes to real setup) unless already connected.
-  return provider.authState === "connected" || provider.authState === "ready";
-}
-
 /** Token set of CSS class modifiers, kept off the hot path. */
 export function stateClassFor(state: BackendAuthState): string {
   const tone = stateViewFor(state).tone;
@@ -234,20 +221,6 @@ export function modelDiscoveryView(
     default:
       return { label: "Models", tone: "neutral" };
   }
-}
-
-/**
- * Whether a discovery outcome should surface the recoverable
- * "connected-but-degraded" treatment: connected key, but we cannot confirm the
- * model list. Used to keep the connected badge honest about runtime health.
- */
-export function isDiscoveryDegraded(outcome: ModelDiscoveryOutcome): boolean {
-  return (
-    outcome === "empty" ||
-    outcome === "offline" ||
-    outcome === "failed" ||
-    outcome === "unsupported"
-  );
 }
 
 export interface ConnectResultCopy {

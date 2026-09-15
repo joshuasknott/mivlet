@@ -4,14 +4,7 @@ import type {
   AntigravityAcpHandlers
 } from "@fable/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
-import {
-  getRuntimeAntigravityStatus,
-  interruptRuntimeAntigravityTurn,
-  listenRuntimeAntigravityEvents,
-  respondRuntimeAntigravityApproval,
-  shutdownRuntimeAntigravityTurn,
-  startRuntimeAntigravityTurn
-} from "../runtime";
+import { getRuntimeAntigravityStatus, interruptRuntimeAntigravityTurn, listenRuntimeAntigravityEvents, respondRuntimeAntigravityApproval, shutdownRuntimeAntigravityTurn, startRuntimeAntigravityTurn } from "../runtime/domains/providers";
 
 function hasDesktopRuntime() {
   return typeof window !== "undefined" && Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);

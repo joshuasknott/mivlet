@@ -12,7 +12,7 @@ export function resolveAntigravityProvider(
     instanceId: ANTIGRAVITY_PROVIDER_ID,
     driverKind: "antigravity-acp",
     backendType: ANTIGRAVITY_BACKEND_TYPE,
-    label: "Google Antigravity",
+    label: "Antigravity",
     description: "Use Gemini models through Google's official Antigravity ACP agent.",
     authState,
     capabilities: resolveCapabilities(ANTIGRAVITY_BACKEND_TYPE, authState, false),

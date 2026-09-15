@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { loadRuntimeConversationDraft, saveRuntimeConversationDraft } from "../runtime";
+import { loadRuntimeConversationDraft, saveRuntimeConversationDraft } from "../runtime/domains/conversations";
 import type { ComposerAttachment } from "../lib/types";
 
 export interface ComposerScope {

@@ -9,8 +9,8 @@ import type { SettingsTab } from "../pages/settings-tabs";
 const TAB_TITLES: Record<SettingsTab, string> = {
   general: "General",
   providers: "Providers",
-  connections: "Tool servers",
-  privacy: "Privacy & data",
+  models: "Models",
+  privacy: "Memory",
 };
 
 function SettingsHarness({
@@ -101,11 +101,11 @@ describe("SettingsModal", () => {
     );
     expect(trigger).toHaveAttribute("inert");
 
-    await user.click(screen.getByRole("button", { name: "Tool servers" }));
+    await user.click(screen.getByRole("button", { name: "Memory" }));
     expect(
-      screen.getByRole("heading", { name: "Tool servers" }),
+      screen.getByRole("heading", { name: "Memory" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Tool servers" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Memory" })).toHaveFocus();
 
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();

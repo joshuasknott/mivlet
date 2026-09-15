@@ -125,7 +125,6 @@ const runtime = vi.hoisted(() => ({
   prepareGrant: vi.fn(),
   commitGrant: vi.fn(),
   executeTool: vi.fn(),
-  searchConnector: vi.fn(),
   prepareHosted: vi.fn(),
   launchHosted: vi.fn(),
   inspectHosted: vi.fn(),
@@ -137,19 +136,22 @@ const runtime = vi.hoisted(() => ({
 }));
 const mcpFactory = vi.hoisted(() => vi.fn());
 
-vi.mock("../runtime", () => ({
-  searchRuntimeConnector: runtime.searchConnector,
-  prepareRuntimeCapabilityGrant: runtime.prepareGrant,
-  commitRuntimeCapabilityGrant: runtime.commitGrant,
-  executeRuntimeToolCall: runtime.executeTool,
-  prepareRuntimeHostedProcess: runtime.prepareHosted,
-  launchRuntimeHostedProcess: runtime.launchHosted,
-  inspectRuntimeHostedProcess: runtime.inspectHosted,
-  prepareRuntimeHostedBrowser: runtime.prepareBrowser,
-  navigateRuntimeHostedBrowser: runtime.navigateBrowser,
-  prepareRuntimeHostedBrowserAction: runtime.prepareBrowserAction,
-  actRuntimeHostedBrowser: runtime.actBrowser,
-  resolveRuntimeMcpCapabilityRoute: runtime.resolveRoute
+vi.mock("../runtime/domains/mcp", () => ({
+prepareRuntimeCapabilityGrant: runtime.prepareGrant,
+commitRuntimeCapabilityGrant: runtime.commitGrant,
+resolveRuntimeMcpCapabilityRoute: runtime.resolveRoute
+}));
+vi.mock("../runtime/domains/tools", () => ({
+executeRuntimeToolCall: runtime.executeTool
+}));
+vi.mock("../runtime/domains/hosted-computer", () => ({
+prepareRuntimeHostedProcess: runtime.prepareHosted,
+launchRuntimeHostedProcess: runtime.launchHosted,
+inspectRuntimeHostedProcess: runtime.inspectHosted,
+prepareRuntimeHostedBrowser: runtime.prepareBrowser,
+navigateRuntimeHostedBrowser: runtime.navigateBrowser,
+prepareRuntimeHostedBrowserAction: runtime.prepareBrowserAction,
+actRuntimeHostedBrowser: runtime.actBrowser
 }));
 vi.mock("./mcp-transport", () => ({
   createDesktopMcpTransport: mcpFactory,

@@ -66,7 +66,7 @@ export function BuiltinPluginDetails({
           <h3>About this plugin</h3>
           <p>{entry.about}</p>
           <dl>
-            <div><dt>Category</dt><dd>Built-in</dd></div>
+            <div><dt>Category</dt><dd>Computer</dd></div>
             <div><dt>Access</dt><dd>{entry.access}</dd></div>
           </dl>
         </section>

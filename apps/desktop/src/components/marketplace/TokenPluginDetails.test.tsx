@@ -4,7 +4,9 @@ import type { ConnectorManifest } from "@fable/protocol";
 import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
 import { TokenPluginDetails } from "./TokenPluginDetails";
 const connect = vi.hoisted(() => vi.fn());
-vi.mock("../../runtime", () => ({ connectRuntimeTokenPlugin: connect }));
+vi.mock("../../runtime/domains/connectors", () => ({
+connectRuntimeTokenPlugin: connect
+}));
 afterEach(cleanup);
 beforeEach(() => { connect.mockReset(); });
 const ready: ConnectorManifest = { id: "google-ads", name: "Google Ads", status: "connected", health: { state: "healthy", summary: "Verified", checkedAt: "now" }, healthSummary: "Verified", permissions: [], lastCheckedAt: "now" };

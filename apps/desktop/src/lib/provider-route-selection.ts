@@ -1,6 +1,6 @@
 import type { ProviderRouteExecutionBinding } from "@fable/protocol";
 import { catalogueCapabilities, selectProviderRoute } from "@fable/connectors";
-import { listRuntimeNativeProviderRoutes } from "../runtime";
+import { listRuntimeNativeProviderRoutes } from "../runtime/domains/providers";
 
 export async function selectNativeProviderRoute(input: {
   providerId: string;

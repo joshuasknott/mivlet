@@ -15,19 +15,19 @@ const runtime = vi.hoisted(() => ({
   write: vi.fn()
 }));
 
-vi.mock("../runtime", () => ({
-  authorizeRuntimeMcpToolCall: runtime.authorize,
-  closeRuntimeMcpProcess: runtime.close,
-  closeRuntimeRemoteMcpSession: runtime.closeRemote,
-  executeRuntimeApprovedMcpToolCall: runtime.execute,
-  listenRuntimeMcpFrames: runtime.listen,
-  recordRuntimeMcpDiscovery: runtime.record,
-  prepareRuntimeMcpToolCall: runtime.prepare,
-  openRuntimeRemoteMcpSession: runtime.openRemote,
-  pollRuntimeRemoteMcpMessages: runtime.pollRemote,
-  spawnRuntimeMcpProcess: runtime.spawn,
-  sendRuntimeRemoteMcpFrame: runtime.sendRemote,
-  writeRuntimeMcpFrame: runtime.write
+vi.mock("../runtime/domains/mcp", () => ({
+authorizeRuntimeMcpToolCall: runtime.authorize,
+closeRuntimeMcpProcess: runtime.close,
+closeRuntimeRemoteMcpSession: runtime.closeRemote,
+executeRuntimeApprovedMcpToolCall: runtime.execute,
+listenRuntimeMcpFrames: runtime.listen,
+recordRuntimeMcpDiscovery: runtime.record,
+prepareRuntimeMcpToolCall: runtime.prepare,
+openRuntimeRemoteMcpSession: runtime.openRemote,
+pollRuntimeRemoteMcpMessages: runtime.pollRemote,
+spawnRuntimeMcpProcess: runtime.spawn,
+sendRuntimeRemoteMcpFrame: runtime.sendRemote,
+writeRuntimeMcpFrame: runtime.write
 }));
 
 import { createDesktopMcpTransport, createDesktopRemoteMcpTransport } from "./mcp-transport";

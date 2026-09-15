@@ -22,7 +22,7 @@ const PANEL_MAX_HEIGHT = 400;
 const PANEL_MIN_HEIGHT = 96;
 const FLIP_BELOW_THRESHOLD = 176;
 
-export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false, scopeLabel }: {
+export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false, scopeLabel, hideTrigger = false }: {
   models: ProviderModelOption[];
   selectedId: string;
   label: string;
@@ -33,6 +33,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   onOpenChange: (open: boolean) => void;
   allowAutomatic?: boolean;
   scopeLabel?: string;
+  hideTrigger?: boolean;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -135,7 +136,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
     document.addEventListener("pointerdown", dismiss);
     return () => document.removeEventListener("pointerdown", dismiss);
   }, [open]);
-  const close = () => { onOpenChange(false); trigger.current?.focus(); };
+  const close = () => { onOpenChange(false); if (!hideTrigger) trigger.current?.focus(); };
   const navigate = (event: KeyboardEvent<HTMLDivElement>) => {
     if (open && event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return; }
     if (showEffort || !["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
@@ -157,7 +158,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   };
   return <div className="composer-control-anchor composer-control-anchor--model" ref={root}
     onKeyDown={navigate} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onOpenChange(false); }}>
-    <button ref={trigger} type="button" className={`composer-model${open ? " composer-trigger--open" : ""}`}
+    <button ref={trigger} hidden={hideTrigger} type="button" className={`composer-model${open ? " composer-trigger--open" : ""}`}
       aria-label={`Select model: ${label}${currentEffort ? `, ${effortLabel(currentEffort)}` : ""}`} title={scopeLabel}
       aria-haspopup="dialog" aria-controls={open ? panelId : undefined} aria-expanded={open}
       onClick={() => { if (!open) { setView("effort"); setQuery(""); setProvider(""); } onOpenChange(!open); }}>

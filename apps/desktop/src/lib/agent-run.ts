@@ -92,7 +92,7 @@ export function isApprovalPresetLabel(value: string): value is ApprovalPresetLab
   return PERMISSION_PROFILES.some((profile) => profile.label === value);
 }
 
-export const APPROVAL_BANNED_JARGON = [
+const APPROVAL_BANNED_JARGON = [
   "sandbox",
   "egress",
   "mcp",

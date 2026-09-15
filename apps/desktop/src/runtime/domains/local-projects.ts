@@ -1,6 +1,5 @@
 import type {
   AddProjectContextShareInput,
-  BindLocalProjectRunAuthorInput,
   CreateLocalProjectInput,
   LocalProject,
   LocalProjectRunAuthor,
@@ -38,12 +37,6 @@ export const listLocalProjects = (
 export const updateLocalProject = (request: UpdateLocalProjectInput) =>
   invoke<LocalProject>("local_project_update", request);
 
-export const archiveLocalProject = (request: {
-  workspaceId: string;
-  id: string;
-  expectedRevision: number;
-}) => invoke<LocalProject>("local_project_archive", request);
-
 export const addLocalProjectShare = (request: AddProjectContextShareInput) =>
   invoke<LocalProject>("local_project_share_add", request);
 
@@ -55,10 +48,6 @@ export const removeLocalProjectShare = (
 export const migrateLegacyGroup = (request: MigrateLegacyGroupInput) =>
   invoke<LocalProject>("local_project_migrate_group", request);
 
-export const bindLocalProjectRunAuthor = (
-  request: BindLocalProjectRunAuthorInput,
-) => invoke<LocalProjectRunAuthor>("local_project_run_author_bind", request);
-
 export const listLocalProjectRunAuthors = (
   workspaceId: string,
   projectId: string,
@@ -68,15 +57,4 @@ export const listLocalProjectRunAuthors = (
     workspaceId,
     projectId,
     limit,
-  });
-
-export const getLocalProjectRunAuthor = (
-  workspaceId: string,
-  projectId: string,
-  runId: string,
-) =>
-  invoke<LocalProjectRunAuthor | null>("local_project_run_author_get", {
-    workspaceId,
-    projectId,
-    runId,
   });

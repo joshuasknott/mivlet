@@ -33,23 +33,11 @@ import {
   type McpUntrustedToolResult,
   type ToolExecutor
 } from "@fable/connectors";
-import {
-  actRuntimeHostedBrowser,
-  commitRuntimeCapabilityGrant,
-  executeRuntimeToolCall,
-  executeRuntimeConnectorAction,
-  prepareRuntimeConnectorToolAction,
-  inspectRuntimeHostedProcess,
-  launchRuntimeHostedProcess,
-  navigateRuntimeHostedBrowser,
-  prepareRuntimeCapabilityGrant,
-  prepareRuntimeHostedBrowser,
-  prepareRuntimeHostedBrowserAction,
-  prepareRuntimeHostedProcess,
-  resolveRuntimeMcpCapabilityRoute,
-  type RuntimeCapabilityGrantProposal
-} from "../runtime";
-import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime";
+import { actRuntimeHostedBrowser, inspectRuntimeHostedProcess, launchRuntimeHostedProcess, navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, prepareRuntimeHostedBrowserAction, prepareRuntimeHostedProcess } from "../runtime/domains/hosted-computer";
+import { commitRuntimeCapabilityGrant, prepareRuntimeCapabilityGrant, resolveRuntimeMcpCapabilityRoute, type RuntimeCapabilityGrantProposal } from "../runtime/domains/mcp";
+import { executeRuntimeToolCall } from "../runtime/domains/tools";
+import { executeRuntimeConnectorAction, prepareRuntimeConnectorToolAction } from "../runtime/domains/connectors";
+import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime/domains/mcp";
 import { openConnectorTools } from "./connector-mcp";
 import { isLocalComputerTool } from "./computer-tools";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";

@@ -27,13 +27,7 @@ import {
   type TransportHandle,
   type TransportHandlers
 } from "@fable/connectors";
-import {
-  cancelRuntimeCompletion,
-  beginRuntimeComputerSession,
-  endRuntimeComputerSession,
-  listenRuntimeBackendEvents,
-  streamRuntimeCompletion
-} from "../runtime";
+import { cancelRuntimeCompletion, beginRuntimeComputerSession, endRuntimeComputerSession, listenRuntimeBackendEvents, streamRuntimeCompletion } from "../runtime/domains/providers";
 
 /** Shape the request body for the provider; the loop sends a NativeCompletionRequest. */
 function shapeBodyFor(request: NativeCompletionRequest): unknown {

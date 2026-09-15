@@ -61,13 +61,13 @@
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: center;
   width: 100%;
-  min-height: 34px;
+  min-height: 38px;
   gap: 8px;
   padding: 0 10px;
   color: var(--ink-muted);
   border: 1px solid transparent;
   border-radius: 8px;
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
 }
 

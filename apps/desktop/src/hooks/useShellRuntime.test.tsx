@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as runtime0 from "../runtime/domains/account";
 import { FableQueryProvider } from "../lib/query-client";
 import { clearActiveRuntimeDataScope } from "../runtime-scope";
 import { useShellRuntime } from "./useShellRuntime";
@@ -10,6 +11,7 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe("conversation shell runtime", () => {
+  afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     window.localStorage.clear();
     clearActiveRuntimeDataScope();
@@ -49,19 +51,24 @@ describe("conversation shell runtime", () => {
     expect(result.current.resolvedSelectedModelId).toBe(model.modelId);
   });
 
-  it("keeps entry gated until a provider is connected and setup is completed", async () => {
+  it("opens an authenticated workspace without a provider or completed onboarding", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
 
     await waitFor(() =>
       expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
     );
-    expect(result.current.onboardingRequired).toBe(true);
+    expect(result.current.identityStatus.state).toBe("signed-in");
+    expect(result.current.connectedBackendIds).toEqual([]);
+    expect(result.current.onboardingRequired).toBe(false);
+  });
 
-    act(() => result.current.dismissOnboarding());
+  it("requires authentication when the account is signed out", async () => {
+    vi.spyOn(runtime0, "loadRuntimeIdentityStatus").mockResolvedValue({
+      enabled: true, state: "signed-out", message: "Sign in to continue.", scopes: [],
+    });
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.identityStatus.state).toBe("signed-out"));
     expect(result.current.onboardingRequired).toBe(true);
-    expect(result.current.backendStatus).toBe(
-      "Connect and verify a model provider before entering Mivlet.",
-    );
   });
 
   it("connects the supported xAI API path without retaining the submitted key", async () => {
@@ -79,7 +86,6 @@ describe("conversation shell runtime", () => {
       "grok-4",
     );
 
-    act(() => result.current.dismissOnboarding());
     expect(result.current.onboardingRequired).toBe(false);
   });
 

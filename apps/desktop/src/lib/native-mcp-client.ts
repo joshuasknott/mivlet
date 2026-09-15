@@ -1,6 +1,6 @@
 import type { McpTransport } from "@fable/connectors/mcp/client";
 import { isMcpNotification, isMcpRequest, type McpFrame, type McpInitializeResult, type McpResource, type McpTool } from "@fable/connectors/mcp/protocol";
-import { startRuntimeEmbeddedMcp, sendRuntimeEmbeddedMcp, closeRuntimeEmbeddedMcp, listenRuntimeEmbeddedMcp } from "../runtime";
+import { startRuntimeEmbeddedMcp, sendRuntimeEmbeddedMcp, closeRuntimeEmbeddedMcp, listenRuntimeEmbeddedMcp } from "../runtime/domains/embedded-agent";
 
 type HostEvent = { type: "closed" } | { type: "send"; id: number; frame: McpFrame }
   | { type: "result"; id: number; ok: boolean; value?: unknown; message?: string };

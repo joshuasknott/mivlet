@@ -8,11 +8,11 @@ export interface RuntimeEvent<T> {
 
 export type RuntimeUnlisten = () => void;
 
-export interface RuntimeCommandPort {
+interface RuntimeCommandPort {
   invoke<T>(command: string, args?: Record<string, unknown>): Promise<T>;
 }
 
-export interface RuntimeEventPort {
+interface RuntimeEventPort {
   listen<T>(
     event: string,
     handler: (event: RuntimeEvent<T>) => void,
@@ -20,8 +20,7 @@ export interface RuntimeEventPort {
 }
 
 /**
- * The domain-neutral boundary used by the stable runtime façade. Domain ports
- * depend on this contract, not directly on Tauri.
+ * Domain modules depend on this adapter contract, not directly on Tauri.
  */
 export interface RuntimeAdapter extends RuntimeCommandPort, RuntimeEventPort {
   readonly kind: RuntimeAdapterKind;

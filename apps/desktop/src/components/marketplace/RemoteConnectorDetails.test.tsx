@@ -6,11 +6,16 @@ import { remoteConnectorFor, remoteConnectors } from "./remote-connectors";
 import { findMarketplaceConnector } from "./marketplace-catalog";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), prepare: vi.fn(), commit: vi.fn(), resolve: vi.fn(), auth: vi.fn(), disconnect: vi.fn(), enable: vi.fn(), open: vi.fn() }));
-vi.mock("../../runtime", () => ({
-  listRuntimeMcpServerConfigurations: api.list, prepareRuntimeMcpServerConfiguration: api.prepare,
-  commitRuntimeMcpServerConfiguration: api.commit, resolveRuntimeApprovalRequest: api.resolve,
-  beginRuntimeRemoteMcpAuthorization: api.auth, disconnectRuntimeRemoteMcpAuthorization: api.disconnect,
-  setRuntimeMcpEnablement: api.enable,
+vi.mock("../../runtime/domains/mcp", () => ({
+listRuntimeMcpServerConfigurations: api.list,
+prepareRuntimeMcpServerConfiguration: api.prepare,
+commitRuntimeMcpServerConfiguration: api.commit,
+beginRuntimeRemoteMcpAuthorization: api.auth,
+disconnectRuntimeRemoteMcpAuthorization: api.disconnect,
+setRuntimeMcpEnablement: api.enable
+}));
+vi.mock("../../runtime/domains/approvals", () => ({
+resolveRuntimeApprovalRequest: api.resolve
 }));
 vi.mock("../../lib/connector-mcp", () => ({ openConnectorTools: api.open }));
 const approval = { id: "approval-1", confirmationPhrase: "approve", consequence: "Connect to this provider." };
@@ -20,7 +25,7 @@ const fixture = () => ({
   client: { close: vi.fn().mockResolvedValue(undefined) },
 });
 function show() {
-  return render(<RemoteConnectorDetails entry={findMarketplaceConnector("notion")!} preset={remoteConnectors[0]} workspaceId="workspace-1" titleId="notion-title" onSaved={vi.fn()} />);
+  return render(<RemoteConnectorDetails entry={findMarketplaceConnector("notion")!} preset={remoteConnectors[0]} workspaceId="workspace-1" titleId="notion-title" />);
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -56,7 +61,7 @@ describe("official connector setup", () => {
       { id: "atlassian-rovo", name: "Atlassian Rovo", endpoint: "https://mcp.atlassian.com/v2/mcp" },
     ];
     for (const expected of cases) {
-      const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector(expected.id)!} preset={remoteConnectorFor(expected.id)!} workspaceId="workspace-1" titleId={`${expected.id}-title`} onSaved={vi.fn()} />);
+      const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector(expected.id)!} preset={remoteConnectorFor(expected.id)!} workspaceId="workspace-1" titleId={`${expected.id}-title`} />);
       await waitFor(() => expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled());
       fireEvent.click(screen.getByRole("button", { name: "Connect" }));
       await screen.findByText("Connected");
@@ -66,7 +71,7 @@ describe("official connector setup", () => {
   });
   it("keeps an official route unavailable until the desktop runtime lists servers", async () => {
     api.list.mockResolvedValue(null);
-    const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector("atlassian-rovo")!} preset={remoteConnectorFor("atlassian-rovo")!} workspaceId="workspace-1" titleId="rovo-title" onSaved={vi.fn()} />);
+    const view = render(<RemoteConnectorDetails entry={findMarketplaceConnector("atlassian-rovo")!} preset={remoteConnectorFor("atlassian-rovo")!} workspaceId="workspace-1" titleId="rovo-title" />);
     await screen.findByText("Account connections require the desktop app.");
     expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
     view.unmount();

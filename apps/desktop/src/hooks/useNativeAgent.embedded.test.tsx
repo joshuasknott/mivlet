@@ -23,22 +23,28 @@ vi.mock("../lib/provider-route-selection", () => ({
     providerRouteId: "route-openai", selectedAt: "2026-09-10T12:00:00Z", reason: "Fixture route", boundaryPolicyRef: "fixture-boundary",
   } })),
 }));
-vi.mock("../runtime", () => ({
-  listenRuntimeEmbeddedAgent: vi.fn(async (_id: string, receive: (event: EmbeddedRuntimeEvent) => void) => {
+vi.mock("../runtime/domains/embedded-agent", () => ({
+listenRuntimeEmbeddedAgent: vi.fn(async (_id: string, receive: (event: EmbeddedRuntimeEvent) => void) => {
     native.receive = receive;
     return () => undefined;
   }),
-  startRuntimeEmbeddedAgent: native.start,
-  cancelRuntimeEmbeddedAgent: native.cancel,
-  replyRuntimeEmbeddedAgent: native.reply,
-  saveRuntimeExecutionAttempt: vi.fn(async (attempt: ExecutionAttempt) => {
+startRuntimeEmbeddedAgent: native.start,
+cancelRuntimeEmbeddedAgent: native.cancel,
+replyRuntimeEmbeddedAgent: native.reply
+}));
+vi.mock("../runtime/domains/workspace", () => ({
+saveRuntimeExecutionAttempt: vi.fn(async (attempt: ExecutionAttempt) => {
     if (native.saveFailure) throw new Error("Fixture vault unavailable.");
     native.saved.push(attempt); native.order.push(`save:${attempt.status}`); return attempt;
   }),
-  listRuntimeExecutionAttempts: vi.fn(async () => []),
-  recoverRuntimeExecutionAttempts: vi.fn(async () => []),
-  listRuntimeBackendModels: vi.fn(async () => null),
-  executeRuntimeToolCall: native.execute,
+listRuntimeExecutionAttempts: vi.fn(async () => []),
+recoverRuntimeExecutionAttempts: vi.fn(async () => [])
+}));
+vi.mock("../runtime/domains/providers", () => ({
+listRuntimeBackendModels: vi.fn(async () => null)
+}));
+vi.mock("../runtime/domains/tools", () => ({
+executeRuntimeToolCall: native.execute
 }));
 
 const provider: BackendProvider = {

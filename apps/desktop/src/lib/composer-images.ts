@@ -2,14 +2,14 @@ import type { NativeImageInput, NativeImageMediaType } from "@fable/protocol";
 import { readFileAsDataUrl } from "./helpers";
 import type { ComposerAttachment } from "./types";
 
-export const COMPOSER_IMAGE_MEDIA_TYPES = new Set<NativeImageMediaType>([
+const COMPOSER_IMAGE_MEDIA_TYPES = new Set<NativeImageMediaType>([
   "image/png",
   "image/jpeg",
   "image/webp",
 ]);
-export const MAX_COMPOSER_IMAGE_COUNT = 4;
+const MAX_COMPOSER_IMAGE_COUNT = 4;
 export const MAX_COMPOSER_IMAGE_TOTAL_BYTES = 1024 * 1024;
-export const MAX_COMPOSER_IMAGE_DIMENSION = 8192;
+const MAX_COMPOSER_IMAGE_DIMENSION = 8192;
 
 function imageDimensions(dataUrl: string): Promise<{ width: number; height: number }> {
   return new Promise((resolve, reject) => {

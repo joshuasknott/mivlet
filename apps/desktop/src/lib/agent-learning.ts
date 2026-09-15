@@ -1,6 +1,6 @@
 import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
 
-export const MAX_LEARNED_TASKS = 24;
+const MAX_LEARNED_TASKS = 24;
 
 function compact(value: string, limit: number) {
   return value.replace(/\s+/g, " ").trim().slice(0, limit);

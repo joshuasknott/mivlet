@@ -1,4 +1,4 @@
-import { listRuntimeConnectorStatuses } from "../runtime";
+import { listRuntimeConnectorStatuses } from "../runtime/domains/connectors";
 import { openConnectorTools } from "./connector-mcp";
 import { getActiveRuntimeDataScope } from "../runtime-scope";
 

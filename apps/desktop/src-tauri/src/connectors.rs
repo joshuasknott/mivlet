@@ -13,9 +13,8 @@ use crate::connector_approvals::{
     verify_prepared_connector_action,
 };
 use crate::connector_auth::{
-    account_options_from_connections, complete_auth, connection_for, disconnect, read_connections,
-    refresh_connection, safe_account_projection, start_auth, usable_connection_for_scope,
-    ConnectorConnection,
+    account_options_from_connections, connection_for, disconnect, read_connections,
+    refresh_connection, safe_account_projection, usable_connection_for_scope, ConnectorConnection,
 };
 use crate::execution_approvals::verify_and_consume_execution_approval;
 use crate::models::{
@@ -1403,28 +1402,6 @@ pub fn list_connector_statuses(
     })
 }
 
-#[tauri::command]
-pub fn start_connector_auth(
-    request: ConnectorAuthRequest,
-    workspace_id: Option<String>,
-) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    let entry = require_connector(&request.connector_id)?;
-    let scopes = selected_auth_scopes(entry, request.requested_scopes.as_deref())?;
-    let scope = connector_authorization_context(workspace_id, entry.id)?;
-    start_auth(entry.id, entry.auth_mode, scopes, request, &scope)
-}
-
-#[tauri::command]
-pub async fn complete_connector_auth(
-    app: tauri::AppHandle,
-    request: ConnectorAuthRequest,
-    workspace_id: Option<String>,
-) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    let entry = require_connector(&request.connector_id)?;
-    let scope = connector_authorization_context(workspace_id, entry.id)?;
-    complete_auth(&app, entry.id, request, &scope).await
-}
-
 /// Begin a loopback OAuth flow end-to-end: bind an exact desktop redirect,
 /// start the transaction, open the browser, accept one callback, and complete
 /// token exchange inside the credential boundary. Confidential providers route
@@ -2389,8 +2366,7 @@ fn connector_tool_action_request(
     validate_connector_action(request)
 }
 
-#[tauri::command]
-pub fn prepare_connector_action(
+fn prepare_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionRequest,
     workspace_id: Option<String>,

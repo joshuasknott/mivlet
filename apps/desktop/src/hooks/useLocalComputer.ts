@@ -1,8 +1,7 @@
 import type { LocalComputerSnapshot, LocalComputerTarget } from "@fable/protocol";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { cancelRuntimeLocalComputer, listRuntimeLocalComputerFiles, loadRuntimeLocalComputer,
-  previewRuntimeLocalComputerFile, stopRuntimeAppControl } from "../runtime";
+import { cancelRuntimeLocalComputer, listRuntimeLocalComputerFiles, loadRuntimeLocalComputer, previewRuntimeLocalComputerFile, stopRuntimeAppControl } from "../runtime/domains/local-computer";
 
 /** Native permission never lives in this hook. Epochs discard late UI results. */
 export function useLocalComputer({ workspaceId, agentId, executionOwner = true }: { workspaceId?: string; agentId: string; executionOwner?: boolean }) {

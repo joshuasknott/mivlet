@@ -10,10 +10,10 @@
   grid-template-columns: 74px minmax(0, 1fr) !important;
 }
 .teammates-workspace--history {
-  grid-template-columns: 224px minmax(0, 1fr) 250px !important;
+  grid-template-columns: 224px minmax(0, 1fr) 380px !important;
 }
 .teammates-workspace--collapsed.teammates-workspace--history {
-  grid-template-columns: 74px minmax(0, 1fr) 250px !important;
+  grid-template-columns: 74px minmax(0, 1fr) 380px !important;
 }
 .team-loading {
   display: grid;
@@ -255,7 +255,7 @@
 }
 .conversation-pane-composer {
   flex-shrink: 0;
-  max-width: 860px;
+  max-width: 960px;
   width: 100%;
   margin: 0 auto;
   padding: 8px clamp(14px, 3vw, 42px) 14px;
@@ -286,9 +286,9 @@
 }
 .team-conversation-welcome {
   display: grid;
-  justify-items: start;
-  max-width: 500px;
-  margin: 12vh auto 9vh;
+  justify-items: center;
+  text-align: center;
+  margin: 0 auto 24px;
 }
 .team-conversation-welcome h1,
 .workspace-empty h1 {
@@ -666,10 +666,7 @@
 }
 @media (max-width: 1300px) {
   .teammates-workspace--history {
-    grid-template-columns: 74px minmax(0, 1fr) 240px !important;
-  }
-  .teammates-workspace--history .agent-sidebar {
-    overflow: hidden;
+    grid-template-columns: 224px minmax(0, 1fr) 360px !important;
   }
   .team-conversation-header {
     padding-inline: 15px;
@@ -683,7 +680,7 @@
     grid-template-columns: 74px minmax(0, 1fr) !important;
   }
   .teammates-workspace--history {
-    grid-template-columns: 74px minmax(0, 1fr) 240px !important;
+    grid-template-columns: 210px minmax(0, 1fr) 360px !important;
   }
   .conversation-pane-messages {
     padding-inline: 22px;
@@ -832,7 +829,7 @@
   border-bottom: 0;
 }
 .team-conversation-identity strong {
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 500;
 }
 .team-conversation-identity .agent-avatar {
@@ -877,7 +874,7 @@
 }
 .teammates-workspace .agent-row__copy strong {
   font-weight: 500;
-  font-size: 12px;
+  font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1094,4 +1091,46 @@
     flex-basis: auto;
     min-width: 0;
   }
+}
+
+/* The title owns conversation actions, leaving a single workspace panel toggle. */
+.conversation-title-menu { min-width: 0; }
+.team-conversation-actions.conversation-title-menu summary { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: auto; max-width: 100%; padding: 0; color: inherit; }
+.conversation-title-menu summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conversation-title-menu summary svg { flex-shrink: 0; color: var(--team-muted); }
+.team-conversation-actions.conversation-title-menu details > div { left: 0; right: auto; }
+
+.team-conversation-title { min-width: 0; }
+.conversation-title-menu details { min-width: 0; width: 100%; }
+
+/* Keep the first request and its greeting together without remounting the editor. */
+.conversation-pane-content--empty .conversation-pane-scroll { flex: 1 1 0; }
+.conversation-pane-content--empty .conversation-pane-messages { min-height: 0; padding-block: 0; }
+.conversation-pane-content--empty .conversation-pane-composer { flex: 0 0 auto; }
+.conversation-pane-content--empty::after { content: ""; flex: 1.25 1 0; }
+.teammates-workspace .conversation-pane-composer .composer { min-height: 96px; padding: 10px 12px 8px; gap: 4px; }
+.teammates-workspace .conversation-pane-composer .composer-input { min-height: 38px; }
+.team-conversation-header--with-mode {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  padding-inline: 18px;
+}
+.team-conversation-header--with-mode .team-conversation-identity { min-width: 0; }
+.team-conversation-header--with-mode .conversation-title-menu { min-width: 0; }
+.team-conversation-header--with-mode .conversation-title-menu details { min-width: 0; width: 100%; }
+.team-conversation-header--with-mode .conversation-title-menu summary { max-width: 100%; }
+.team-conversation-header .workspace-mode-bar { margin: 0; width: 144px; align-self: center; }
+.team-conversation-header .team-conversation-identity { flex: 1; overflow: visible; }
+.team-conversation-title { min-width: 0; }
+.conversation-title-menu summary strong { min-width: 0; }
+.teammates-workspace .agent-row__copy strong { display: block; }
+@media (max-height: 520px) {
+  .conversation-pane-content--empty::after { flex: 0; }
+  .conversation-pane-content--empty .team-conversation-welcome { margin-bottom: 12px; }
+}
+@container conversation-pane (max-width: 480px) {
+  .team-conversation-header { gap: 8px; }
+  .team-conversation-header .workspace-mode-bar { width: 112px; }
+  .team-conversation-header .workspace-mode-bar button { padding-inline: 8px; }
+  .team-conversation-welcome h1 { font-size: 22px; }
 }

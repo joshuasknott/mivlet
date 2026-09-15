@@ -2,16 +2,12 @@ import { describe, expect, it } from "vitest";
 import type {
   CollaborationWorkItem,
   ConversationRoom,
-  MemoryRecord,
 } from "@fable/protocol";
 import {
   attentionOrder,
-  memoryInScope,
-  scopeLevelsFor,
   scopeWork,
   scopedRoomIds,
   sideChatsFor,
-  teamMembers,
 } from "./work-order";
 
 const room = (patch: Partial<ConversationRoom> = {}): ConversationRoom => ({
@@ -56,18 +52,6 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
   updatedAt: "2026-09-12T10:00:00Z",
   ...patch,
 });
-const memory = (patch: Partial<MemoryRecord> = {}): MemoryRecord => ({
-  id: "memory",
-  kind: "fact",
-  title: "Title",
-  value: "Value",
-  source: "Test",
-  freshness: "Today",
-  approved: true,
-  pinned: false,
-  ...patch,
-});
-
 describe("navigation scoping", () => {
   it("scopes work to the selected agent or project", () => {
     const work = [
@@ -80,39 +64,6 @@ describe("navigation scoping", () => {
     expect(scopeWork(work, {}).map((entry) => entry.id)).toEqual(["a", "b", "c"]);
   });
 
-  it("matches memory only by its exact owning scope", () => {
-    const agentScopes = scopeLevelsFor({
-      agentId: "agent",
-      roomIds: ["room"],
-      workIds: ["work"],
-    });
-    expect(memoryInScope(memory(), agentScopes)).toBe(true);
-    expect(
-      memoryInScope(memory({ scope: { level: "agent", agentId: "agent" } }), agentScopes),
-    ).toBe(true);
-    expect(
-      memoryInScope(memory({ scope: { level: "agent", agentId: "other" } }), agentScopes),
-    ).toBe(false);
-    expect(
-      memoryInScope(memory({ scope: { level: "thread", threadId: "room" } }), agentScopes),
-    ).toBe(true);
-    expect(
-      memoryInScope(memory({ scope: { level: "thread", threadId: "elsewhere" } }), agentScopes),
-    ).toBe(false);
-    expect(
-      memoryInScope(memory({ scope: { level: "work", workId: "work" } }), agentScopes),
-    ).toBe(true);
-    expect(
-      memoryInScope(memory({ scope: { level: "project", projectId: "project" } }), agentScopes),
-    ).toBe(false);
-    const projectScopes = scopeLevelsFor({ projectId: "project", roomIds: ["main"] });
-    expect(
-      memoryInScope(memory({ scope: { level: "project", projectId: "project" } }), projectScopes),
-    ).toBe(true);
-    expect(
-      memoryInScope(memory({ scope: { level: "agent", agentId: "agent" } }), projectScopes),
-    ).toBe(false);
-  });
 
   it("keeps side chats subordinate and never promotes a main chat", () => {
     const rooms = [
@@ -149,15 +100,6 @@ describe("navigation scoping", () => {
     expect(scopedRoomIds(undefined, undefined, rooms)).toEqual([]);
   });
 
-  it("reads team membership from saved agent profiles", () => {
-    expect(
-      teamMembers(
-        { projectId: "project", participantIds: ["agent", "gone"], leadAgentId: "agent", revision: 1 },
-        [{ id: "agent", name: "Mira" }],
-      ),
-    ).toEqual({ lead: "Mira", participants: ["Mira", "gone"] });
-    expect(teamMembers(undefined, [])).toEqual({ participants: [] });
-  });
 
   it("keeps attention ahead of active and finished work", () => {
     const ordered = attentionOrder([

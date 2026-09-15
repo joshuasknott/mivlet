@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode, useState } from "react";
 
-export function createFableQueryClient() {
+function createFableQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
