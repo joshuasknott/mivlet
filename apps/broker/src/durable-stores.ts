@@ -478,7 +478,8 @@ export class BrokerPending extends DurableObject<BrokerDurableEnv> {
     expiresAt: number;
   }): Promise<boolean> {
     const stateHash = await computeStateHash(args.state);
-    const now = (this.ctx as any)?.nowMs?.() ?? Date.now();
+    const injectedNow = (this.ctx as DurableObjectState & { nowMs?: () => number }).nowMs;
+    const now = typeof injectedNow === "function" ? injectedNow() : Date.now();
     // Treat an expired row as absent so a new flow may reuse the state after TTL.
     this.ctx.storage.sql.exec(
       `DELETE FROM pending WHERE state_hash = ? AND expires_at_ms <= ?`,
@@ -487,7 +488,7 @@ export class BrokerPending extends DurableObject<BrokerDurableEnv> {
     );
     const existing = Array.from(
       this.ctx.storage.sql.exec(`SELECT 1 FROM pending WHERE state_hash = ?`, stateHash)
-    ) as any[];
+    );
     if (existing.length > 0) return false;
     this.ctx.storage.sql.exec(
       `INSERT INTO pending (state_hash, provider, redirect_uri, provider_redirect_uri, state, verifier_enc, created_at_ms, expires_at_ms)
