@@ -11,6 +11,9 @@
     "verify:build": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/agent-host typecheck && pnpm --filter @fable/agent-host build && pnpm --filter @fable/broker build && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop build",
     "typecheck": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/agent-host typecheck && pnpm --filter @fable/broker typecheck && pnpm --filter @fable/hosted-runner typecheck && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop typecheck",
     "test": "pnpm --filter @fable/agent-host test && pnpm --filter @fable/connectors test && pnpm --filter @fable/broker test && pnpm --filter @fable/hosted-runner test && pnpm --filter @fable/knowledge test && pnpm --filter @fable/desktop test",
+    "test:pr": "pnpm --filter '!@fable/agent-host' -r --if-present test && node --test scripts/ci/affected.test.mjs",
+    "test:ci": "pnpm test:pr",
+    "test:host": "pnpm --filter @fable/agent-host test",
     "lint": "eslint apps packages scripts --max-warnings=0 && node scripts/quality/check-explicit-any.mjs",
     "format:check": "prettier --check \"eslint.config.mjs\" \"knip.json\" \"scripts/quality/**/*.{mjs,json}\" \"apps/desktop/src/runtime/**/*.{ts,tsx}\" \"apps/desktop/src/components/settings/PreferencesSettingsViews.tsx\" \"apps/desktop/src/styles/routes/*.css\" \"packages/protocol/src/domains/connectors.ts\"",
     "dead-code": "knip --no-config-hints --include files,dependencies,devDependencies,unlisted,binaries,exports,types",
@@ -27,6 +30,7 @@
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "node apps/desktop/scripts/tauri-build.mjs",
     "tauri:dev": "pnpm --filter @fable/desktop tauri:dev",
+    "check:pr": "pnpm typecheck && pnpm quality && pnpm test:pr",
     "check": "pnpm quality && pnpm verify:build && pnpm test && pnpm perf:check && pnpm perf:test && pnpm perf:runtime && pnpm release:test && pnpm tauri:check && pnpm audit:all"
   },
   "engines": {
