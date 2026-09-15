@@ -6,11 +6,13 @@
  * Architecture:
  *   - The agent loop calls this executor once per tool-call event.
  *   - The executor first awaits the {@link ApprovalGate} — it blocks until the
- *     shell grants (once/session/rule) or denies the call, or auto-satisfies it
- *     from a standing session/rule grant. Nothing runs before a grant.
+ *     shell records a native-backed grant or deny. Standing session/rule grants
+ *     never auto-satisfy. Nothing runs before a grant.
  *   - On a grant, the executor hands the call to Rust (`execute_tool_call`),
- *     which RE-VALIDATES the approval, confines file paths to the workspace, and
- *     performs the side effect. The shell never spawns or writes files from JS.
+ *     which CONSUMES the already-minted native permit, confines file paths to
+ *     the workspace, and performs the side effect. The shell never mints a
+ *     permit from this synthesized once-resolution, and never spawns or writes
+ *     files from JavaScript.
  *   - A deny rejects (the loop turns it into a tool-role error message and
  *     continues); a Rust error rejects too.
  *
@@ -83,8 +85,9 @@ export interface DesktopToolExecutorOptions {
 /**
  * Build the desktop ToolExecutor from a shared approval gate. The executor
  * awaits the gate (blocking until the shell grants/denies), then runs the
- * granted tool through the Rust boundary — which re-validates the approval and
- * performs the side effect. Returns the agent-loop ToolExecutor contract.
+ * granted tool through the Rust boundary — which consumes the minted native
+ * permit and performs the side effect. Returns the agent-loop ToolExecutor
+ * contract.
  */
 export function createDesktopToolExecutor(
   gate: ApprovalGate,
@@ -252,6 +255,8 @@ async function runOfficialConnector(
   } finally { await connection.client.close().catch(() => undefined); }
 }
 
+/** Point Rust at the exact request whose native permit was already minted.
+ *  This is not a user decision and must not mint a new permit. */
 function resolutionFor(approval: ApprovalRequest): ApprovalResolutionRequest {
   return {
     request: approval,
@@ -540,9 +545,8 @@ async function runOnDesktop(
   computerGeneration?: number
 ): Promise<string> {
   const toolName = approval.action.split(/\s+/)[0];
-  // The gate already guaranteed a grant; synthesize the resolution request Rust
-  // re-validates (decision "once" — the standing session/rule grants are
-  // tracked separately on the gate and auto-satisfied before this point).
+  // The gate already waited for a native-backed grant. Pass the exact request
+  // so Rust can consume that permit; this JSON is not itself authority.
   const resolution = resolutionFor(approval);
 
   options.onExecuting?.(approval, toolName);

@@ -4,6 +4,7 @@ import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
 import { McpClient } from "@fable/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
 
 vi.mock("./native-mcp-client", () => ({ McpClient }));
 
@@ -81,6 +82,36 @@ describe("computer authority across approvals", () => {
       computerGeneration: 4,
     }));
     expect(runtime.prepareHosted).not.toHaveBeenCalled();
+  });
+  it("does not auto-satisfy a standing grant before native minting", async () => {
+    runtime.executeTool.mockReset().mockResolvedValue({ ok: true, output: "Saved" });
+    const gate = createApprovalGate();
+    const source = approval();
+    gate.replaceStandingGrants([
+      {
+        id: "session-write",
+        requestId: source.id,
+        scope: "session",
+        service: source.service,
+        action: source.action,
+        mode: source.mode,
+        dataUsed: source.dataUsed,
+        createdAt: new Date(0).toISOString(),
+      },
+    ]);
+    const execute = createDesktopToolExecutor(gate, { localComputer: computer() });
+    const pending = execute(source, args);
+    await Promise.resolve();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+    expect(gate.pendingCount()).toBe(1);
+    gate.resolveGrant(source.id);
+    await expect(pending).resolves.toBe("Saved");
+    expect(runtime.executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "write-file",
+        approval: expect.objectContaining({ decision: "once", request: expect.objectContaining({ id: source.id }) }),
+      }),
+    );
   });
 });
 

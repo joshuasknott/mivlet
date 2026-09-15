@@ -382,6 +382,9 @@ pub(crate) fn resolve_approval(
     }
 
     let grant = match decision.as_str() {
+        // Session/rule grants are display records. They do not mint reusable
+        // execution authority; the one-time permit for this request is recorded
+        // separately by `resolve_approval_request`.
         "session" | "rule" => Some(normalize_approval_grant(ApprovalGrant {
             id: format!(
                 "approval-{}-{}",

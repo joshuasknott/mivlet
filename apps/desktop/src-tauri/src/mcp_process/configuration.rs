@@ -855,6 +855,8 @@ pub fn authorize_mcp_tool_call(
     }
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
     if !routine_official_read(&request.proposal)? {
+        // WebView JSON cannot mint this permit. Consume the native one-time
+        // record created by `resolve_approval_request`.
         crate::execution_approvals::verify_and_consume_execution_approval(
             &crate::paths::execution_approvals_path(&app)?,
             &resolution.effective_request,

@@ -494,4 +494,40 @@ mod tests {
 
         let _ = fs::remove_file(path);
     }
+
+    #[test]
+    fn session_or_rule_decision_still_mints_a_single_use_permit() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("approvals.json");
+        let approved = request();
+        for decision in ["session", "rule"] {
+            let mut recorded = response(approved.clone());
+            recorded.audit_entry.decision = decision.into();
+            record_execution_decision(&path, &recorded).expect("record");
+            verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:02Z")
+                .expect("first consume");
+            let error =
+                verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:03Z")
+                    .expect_err("standing grants are not reusable execution authority");
+            assert!(error.contains("already consumed"), "{error}");
+        }
+    }
+
+    #[test]
+    fn resolve_approval_without_persist_cannot_be_consumed() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("approvals.json");
+        let approved = request();
+        crate::approvals::resolve_approval(crate::models::ApprovalResolutionRequest {
+            request: approved.clone(),
+            decision: "once".into(),
+            decided_at: "2026-06-27T12:00:01Z".into(),
+            modification: None,
+            confirmation_text: Some("write file".into()),
+        })
+        .expect("shape-only resolve must succeed");
+        let error = verify_and_consume_execution_approval(&path, &approved, "2026-06-27T12:00:02Z")
+            .expect_err("WebView resolve_approval is not a minted permit");
+        assert!(error.contains("no persisted user approval"), "{error}");
+    }
 }

@@ -10,9 +10,10 @@
 //! Hard invariants:
 //!   - Allowlisted native connector reads use scoped account consent, with exact
 //!     argument/policy binding, without a redundant persisted user decision.
-//!   - Consequential commands re-check their approval before the side effect. A granted
-//!     `once`/`session`/`rule` decision is honored; a `deny` (or missing/reshaped
-//!     approval) fails closed with `approval-required` and performs nothing.
+//!   - Consequential commands consume a native-minted one-time permit before
+//!     the side effect. A WebView-synthesized `session`/`rule` decision is not
+//!     authority. A `deny` (or missing/reshaped approval) fails closed with
+//!     `approval-required` and performs nothing.
 //!   - File paths are confined to the teammate's local-computer workspace (no
 //!     `..` escapes or absolute escapes). Process tools execute only inside the
 //!     agent's Docker/WSL computer and never through the user's host shell.
@@ -186,8 +187,9 @@ pub(crate) fn execute_tool_outcome(
     let workspace_id = request.workspace_id.clone();
     let mcp_session_id = request.mcp_session_id.clone();
 
-    // Defense in depth: re-resolve the approval exactly as the shell did. A deny
-    // (or an invalid/reshaped approval) fails closed here too — never executes.
+    // Defense in depth: re-check the WebView-supplied resolution shape. This
+    // does not mint a permit. Authority is the persisted record consumed by
+    // `verify_tool_authority` before this dispatch.
     let resolution = match resolve_approval(request.approval) {
         Ok(resolution) => resolution,
         Err(err) => {
@@ -335,6 +337,12 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
             return Err("Connector read was denied or has an invalid decision.".into());
         }
         return Ok(());
+    }
+    if matches!(request.approval.decision.as_str(), "session" | "rule") {
+        return Err(
+            "Execution blocked: standing session/rule decisions cannot authorize this effect."
+                .into(),
+        );
     }
     verify_and_consume_execution_approval(
         path,
@@ -2404,5 +2412,48 @@ mod connector_authority_tests {
             consumed, decided_at,
             "production consume must not reuse decided_at as consumed_at"
         );
+    }
+
+    #[test]
+    fn webview_synthesized_once_without_a_native_permit_cannot_execute() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-webview-mint-{}-{}",
+            std::process::id(),
+            "missing.json"
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut forged = request("web-fetch");
+        forged.approval.decision = "once".into();
+        let error = verify_tool_authority(&path, &forged)
+            .expect_err("WebView JSON is not a minted permit");
+        assert!(
+            error.contains("no persisted user approval"),
+            "expected a missing native permit, got {error}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn standing_session_or_rule_decision_cannot_authorize_execution() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        for decision in ["session", "rule"] {
+            let mut approved = request("web-fetch");
+            approved.approval.decision = decision.into();
+            persist_permit(&path, &approved);
+            let error = verify_tool_authority(&path, &approved).expect_err(decision);
+            assert!(
+                error.contains("standing session/rule"),
+                "expected standing-grant refusal, got {error}"
+            );
+            // The native permit must remain unconsumed so a later once-resolution
+            // can still use the user decision recorded by resolve_approval_request.
+            crate::execution_approvals::verify_and_consume_execution_approval(
+                &path,
+                &approved.approval.request,
+                &crate::execution_approvals::wall_clock_consumed_at(),
+            )
+            .unwrap_or_else(|_| panic!("{decision} permit must remain consumable after refusal"));
+        }
     }
 }

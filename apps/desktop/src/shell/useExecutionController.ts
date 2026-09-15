@@ -125,6 +125,7 @@ export function useExecutionController({
   });
 
   useEffect(() => {
+    // Display-only: session/rule grants never auto-satisfy the execution gate.
     approvalGate.replaceStandingGrants([
       ...runtime.sessionApprovalGrants,
       ...runtime.approvalRules,
