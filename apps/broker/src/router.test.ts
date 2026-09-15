@@ -14,7 +14,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BROKER_CONTRACT_VERSION, type BrokerProviderId } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE, type BrokerProviderId } from "@fable/connectors";
 
 import { FableBroker } from "./broker.js";
 import { createBrokerRouter, CORRELATION_HEADER } from "./router.js";
@@ -124,7 +124,7 @@ async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broke
   const authorizeState = oauthState(state);
   await broker.authorize({
     contractVersion: BROKER_CONTRACT_VERSION, provider,
-    redirectUri: "http://127.0.0.1:9999/callback", state: authorizeState, codeChallenge: "ch", codeChallengeMethod: "S256"
+    redirectUri: "http://127.0.0.1:9999/callback", state: authorizeState, codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
   });
   const callbackRes = await router.handle(
     makeRequest("GET", `/oauth/${provider}/callback?code=provider-code&state=${authorizeState}`),
@@ -161,7 +161,7 @@ describe("router: lifecycle + transport", () => {
 
     // Redeem the handoff for the token set over a direct POST.
     const redeemRes = await router.handle(
-      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state }), "127.0.0.1"
+      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier }), "127.0.0.1"
     );
     expect(redeemRes.status).toBe(200);
     const redeemed = await redeemRes.json();
@@ -169,7 +169,7 @@ describe("router: lifecycle + transport", () => {
     expect(redeemed.account.id).toBe("4242");
     // The single-use handoff cannot be redeemed twice (token replay impossible).
     const replayRes = await router.handle(
-      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state }), "127.0.0.1"
+      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier }), "127.0.0.1"
     );
     expect(replayRes.status).toBe(400);
     expect((await replayRes.json()).error).toBe("invalid-handoff");
@@ -187,7 +187,7 @@ describe("router: lifecycle + transport", () => {
     // Missing code.
     await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("no-code"), codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("no-code"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
     const noCode = await router.handle(makeRequest("GET", `/oauth/github/callback?state=${oauthState("no-code")}`), "127.0.0.1");
     expect(noCode.status).toBe(400);
@@ -202,7 +202,7 @@ describe("router: lifecycle + transport", () => {
     // GitHub has no credentials in this env.
     const { router } = makeRouter({ FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id", FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret" }, providerFetch("github"));
     const res = await router.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch`), "127.0.0.1"
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1"
     );
     expect(res.status).toBe(503);
     const body = await res.json();
@@ -252,7 +252,7 @@ describe("router: lifecycle + transport", () => {
     const { broker, router } = makeRouter(ENV, fetch);
     await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("id-fail"), codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("id-fail"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
     const res = await router.handle(makeRequest("GET", `/oauth/github/callback?code=c&state=${oauthState("id-fail")}`), "127.0.0.1");
     expect(res.status).toBe(502); // provider-unavailable (5xx from identity)
@@ -280,11 +280,11 @@ describe("router: lifecycle + transport", () => {
     const broker = new FableBroker({ env: ENV, fetch: providerFetch("github"), publicBaseUrl: "https://broker.test/" });
     const limited = createBrokerRouter({ broker, requestsPerMinute: 1 });
     const ok = await limited.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("a")}&code_challenge=ch`), "127.0.0.1", log
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("a")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1", log
     );
     expect(ok.status).toBe(302);
     const blocked = await limited.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("b")}&code_challenge=ch`), "127.0.0.1", log
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("b")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1", log
     );
     expect(blocked.status).toBe(429);
     expect((await blocked.json()).error).toBe("rate-limited");

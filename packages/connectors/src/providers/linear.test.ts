@@ -1,4 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+
+import {
+  BROKER_PKCE_S256_EXAMPLE
+} from "./broker-contract";
 import type { Mock } from "vitest";
 import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
 import { ConnectorRuntime } from "../sdk";
@@ -231,10 +235,10 @@ describe("Linear production adapter — capability registration", () => {
 
 describe("Linear production adapter — broker auth contract", () => {
   it("routes authorize through the broker oauth path with PKCE", async () => {
-    const start = await createLinearAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "state-1", codeChallenge: "challenge" });
+    const start = await createLinearAdapter({ ...common, fetch: vi.fn() }).startAuth({ redirectUri: common.redirectUri, state: "state-1", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
     const authorize = new URL(start.authorizationUrl);
     expect(authorize.pathname).toBe("/oauth/linear/authorize");
-    expect(authorize.searchParams.get("code_challenge")).toBe("challenge");
+    expect(authorize.searchParams.get("code_challenge")).toBe(BROKER_PKCE_S256_EXAMPLE.challenge);
     expect(authorize.searchParams.get("scope")).toBe("read write issues:create comments:create");
     expect(start.state).toBe("state-1");
   });
@@ -250,7 +254,7 @@ describe("Linear production adapter — broker auth contract", () => {
       return response({ contractVersion: 1, revoked: true });
     });
     const adapter = createLinearAdapter({ ...common, fetch: fetcher });
-    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(auth).toMatchObject({ tokens: { accessToken: "synthetic-access", refreshToken: "synthetic-refresh" }, account: { id: "lin-uid" } });
     await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "synthetic-access-2", refreshToken: "synthetic-refresh" });
     await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
@@ -262,13 +266,13 @@ describe("Linear production adapter — broker auth contract", () => {
   it("fails closed on a state mismatch before contacting the broker", async () => {
     const fetcher = vi.fn(async () => response({ contractVersion: 1, tokens: { accessToken: "a", tokenType: "Bearer", scopes: [] }, account: { id: "lin-uid", displayName: "Linear User" } }));
     const adapter = createLinearAdapter({ ...common, fetch: fetcher });
-    await expect(adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=attacker`, expectedState: "expected", codeVerifier: "unused" })).rejects.toMatchObject({ code: "invalid-request" });
+    await expect(adapter.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=attacker`, expectedState: "expected", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })).rejects.toMatchObject({ code: "invalid-request" });
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("surfaces missing broker configuration and expired refresh tokens", async () => {
     const unconfigured = createLinearAdapter({ ...common, fetch: vi.fn(async () => response({ error: "configuration-required", message: "Linear is not configured on this broker.", retryable: false }, 503)) });
-    await expect(unconfigured.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" })).rejects.toMatchObject({ code: "configuration-required", message: "Linear is not configured on this broker." });
+    await expect(unconfigured.completeAuth({ callbackUrl: `${common.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier })).rejects.toMatchObject({ code: "configuration-required", message: "Linear is not configured on this broker." });
 
     const expired = createLinearAdapter({ ...common, fetch: vi.fn(async () => response({ error: "needs-auth", message: "Refresh token was rejected.", retryable: false }, 401)) });
     await expect(expired.refresh({ ...tokens, refreshToken: "synthetic-refresh" })).rejects.toMatchObject({ code: "expired-auth", message: "Refresh token was rejected." });

@@ -22,7 +22,8 @@ boundary and are not retained by the broker.
 
 - Authorization state is high entropy, expires, binds the provider and exact
   desktop redirect, and is consumed before token exchange.
-- Handoff tickets expire, bind the original state, and can be redeemed once.
+- Handoff tickets expire, bind the original state and the desktop S256
+  challenge, and can be redeemed once with the matching verifier.
 - Durable values are encrypted with versioned associated data; plaintext
   tokens, verifiers, client secrets, and redirects never enter logs.
 - Rate limits are shared across Worker isolates and keyed by route and a derived

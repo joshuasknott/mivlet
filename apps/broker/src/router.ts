@@ -20,6 +20,7 @@
 import {
   BrokerContractError,
   BROKER_CONTRACT_VERSION,
+  BROKER_PKCE_CHALLENGE_METHOD,
   type BrokerErrorResponse,
   type BrokerProviderId,
   isBrokerProvider
@@ -162,13 +163,24 @@ async function route(
   // /oauth/{provider}/authorize
   if (request.method === "GET" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "authorize") {
     const provider = parseProvider(segments[1]);
+    rejectDuplicateQueryParams(url.searchParams, [
+      "redirect_uri",
+      "state",
+      "code_challenge",
+      "code_challenge_method"
+    ]);
+    const codeChallenge = requireQuery(url, "code_challenge");
+    const codeChallengeMethod = requireQuery(url, "code_challenge_method");
+    if (codeChallengeMethod !== BROKER_PKCE_CHALLENGE_METHOD) {
+      throw new BrokerContractError("invalid-request", "PKCE challenge method must be S256.", false);
+    }
     const { response } = await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION,
       provider,
       redirectUri: requireQuery(url, "redirect_uri"),
       state: requireQuery(url, "state"),
-      codeChallenge: requireQuery(url, "code_challenge"),
-      codeChallengeMethod: "S256" as const
+      codeChallenge,
+      codeChallengeMethod: BROKER_PKCE_CHALLENGE_METHOD
     });
     return new Response(null, {
       status: 302,
@@ -194,7 +206,8 @@ async function route(
       contractVersion: contractVersionOf(body),
       provider,
       handoff: stringRequired(body, "handoff"),
-      state: stringRequired(body, "state")
+      state: stringRequired(body, "state"),
+      codeVerifier: stringRequired(body, "codeVerifier")
     });
     return jsonResponse(200, response, headers, corsHeaders);
   }
@@ -240,6 +253,18 @@ function requireQuery(url: URL, key: string): string {
     throw new BrokerContractError("invalid-request", `Missing required "${key}" parameter.`, false);
   }
   return value;
+}
+
+function rejectDuplicateQueryParams(query: URLSearchParams, keys: readonly string[]): void {
+  for (const key of keys) {
+    if (query.getAll(key).length > 1) {
+      throw new BrokerContractError(
+        "invalid-request",
+        "Authorization request contains duplicate parameters.",
+        false
+      );
+    }
+  }
 }
 
 const MAX_BODY_BYTES = 64 * 1024;

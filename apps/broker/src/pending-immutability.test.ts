@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   BROKER_CONTRACT_VERSION,
   BROKER_HANDOFF_TTL_SECONDS,
+  BROKER_PKCE_S256_EXAMPLE,
   BrokerContractError
 } from "@fable/connectors";
 
@@ -63,7 +64,7 @@ function authorize(state = STATE, redirectUri = VICTIM_REDIRECT) {
     provider: "github" as const,
     redirectUri,
     state,
-    codeChallenge: "desktop-challenge",
+    codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge,
     codeChallengeMethod: "S256" as const
   };
 }
@@ -112,14 +113,16 @@ describe("pending create-if-absent (redirect hijack)", () => {
         provider: "github",
         redirectUri: VICTIM_REDIRECT,
         providerRedirectUri: "https://b/cb",
-        state: STATE
+        state: STATE,
+        codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
       });
       try {
         pending.create({
           provider: "github",
           redirectUri: ATTACKER_REDIRECT,
           providerRedirectUri: "https://b/cb",
-          state: STATE
+          state: STATE,
+          codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
         });
         expect.unreachable();
       } catch (error) {
@@ -136,14 +139,16 @@ describe("pending create-if-absent (redirect hijack)", () => {
       provider: "github",
       redirectUri: VICTIM_REDIRECT,
       providerRedirectUri: "https://b/cb",
-      state: STATE
+      state: STATE,
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
     });
     clock.advance(BROKER_HANDOFF_TTL_SECONDS * 1000 + 1);
     pending.create({
       provider: "github",
       redirectUri: ATTACKER_REDIRECT,
       providerRedirectUri: "https://b/cb",
-      state: STATE
+      state: STATE,
+      codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge
     });
     expect(pending.peek(STATE)?.redirectUri).toBe(ATTACKER_REDIRECT);
   });
