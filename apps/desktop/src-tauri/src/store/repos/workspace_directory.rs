@@ -783,7 +783,7 @@ pub fn hosted_scope_matches(
     device_id: Option<&str>,
 ) -> bool {
     scope.workspace_id == workspace_id
-        && device_id.map_or(true, |device_id| scope.device_id == device_id)
+        && device_id.is_none_or(|device_id| scope.device_id == device_id)
 }
 
 pub(crate) fn current_internal_user_id(conn: &Connection) -> Result<Option<String>> {
