@@ -11,7 +11,9 @@
       "project": ["src/**/*.ts"]
     },
     "apps/hosted-runner": {
-      "ignoreDependencies": ["cloudflare"]
+      "ignoreDependencies": ["cloudflare"],
+      "entry": ["src/index.ts", "src/**/*.test.ts", "vitest.config.ts"],
+      "project": ["src/**/*.ts", "vitest.config.ts"]
     },
     "apps/desktop": {
       "entry": [
