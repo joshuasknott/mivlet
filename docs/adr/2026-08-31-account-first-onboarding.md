@@ -36,7 +36,9 @@ available API-key path or an honest install-required state. Provider secrets
 remain outside React state after submission and cross through the existing
 native credential boundary.
 
-Settings contains General, Providers, Models, and Memory. App connections and
+Settings contains General, Providers, Models, and Memory. There is no Knowledge
+settings tab; imported files remain stored as knowledge sources and are managed
+from Memory and project files. App connections and
 custom tool servers are managed in Plugins. Model visibility is managed in Models. Providers has a secondary Add an API key
 action; Custom provider, SiliconFlow, and Together are omitted from its catalogue.
 Memory contains saved facts and their controls; backup, recovery, and privacy

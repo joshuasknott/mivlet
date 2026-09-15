@@ -231,13 +231,13 @@ related capability unavailable rather than substituting a fixture.
 ## Verification
 
 The aggregate local/release gate is `pnpm check` (quality, `verify:build`, tests,
-perf, release manifest, `tauri:check`, and `audit:all`). The Windows embedded host
-is skipped on non-Windows `pnpm test` rather than failing with `ENOENT`. Focused
-gates:
+perf, release manifest, `tauri:check`, and `audit:all`). Linux PR loops use
+`pnpm test:pr` (excludes the Windows agent-host executable). Host tests are
+`pnpm test:host` on Windows. Focused gates:
 
 ```bash
 pnpm typecheck
-pnpm test
+pnpm test:pr
 pnpm quality
 pnpm verify:build
 pnpm perf:check

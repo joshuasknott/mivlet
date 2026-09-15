@@ -10,7 +10,7 @@
     "build": "pnpm --filter @fable/protocol build && pnpm --filter @fable/connectors build && pnpm --filter @fable/agent-host build && pnpm --filter @fable/broker build && pnpm --filter @fable/hosted-runner build && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop build",
     "verify:build": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/agent-host typecheck && pnpm --filter @fable/agent-host build && pnpm --filter @fable/broker build && pnpm --filter @fable/hosted-runner build && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop build",
     "typecheck": "pnpm --filter @fable/protocol check:spine-parity && pnpm --filter @fable/connectors build && pnpm --filter @fable/agent-host typecheck && pnpm --filter @fable/broker typecheck && pnpm --filter @fable/hosted-runner typecheck && pnpm --filter @fable/knowledge build && pnpm --filter @fable/desktop typecheck",
-    "test": "pnpm -r --if-present test && node --test scripts/ci/affected.test.mjs",
+    "test": "pnpm -r --if-present test && node --test \"scripts/ci/*.test.mjs\"",
     "test:pr": "pnpm --filter '!@fable/agent-host' -r --if-present test && node --test scripts/ci/affected.test.mjs",
     "test:ci": "pnpm test:pr",
     "test:host": "pnpm --filter @fable/agent-host test",

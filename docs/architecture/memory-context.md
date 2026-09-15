@@ -1,5 +1,11 @@
 # Memory and bounded conversation context
 
+The operator surface is **Settings → Memory**. There is no Knowledge settings
+tab. `packages/knowledge` is the ingest/retrieve library for sources and
+compaction; durable facts live as Memory records. Persisted sidebar ids
+`Knowledge`, `Plugins`, `Connectors`, `Automations`, and `Schedules` reopen
+Settings (`normalizeActiveItem` in `apps/desktop/src/lib/helpers.ts`).
+
 Mivlet keeps a quiet conversation with named agents, so a model turn must not
 replay the whole lifetime transcript. This document describes the P6 boundary:
 explicit context budgets, recent turns, incremental durable summaries, scoped
