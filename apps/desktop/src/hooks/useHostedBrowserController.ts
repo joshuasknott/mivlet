@@ -35,7 +35,7 @@ export function useHostedBrowserController({
   useEffect(() => {
     setHostedBrowserSnapshot(null);
     setHostedBrowserError(null);
-  }, [hostedWorkspaceId, activeAgentId]);
+  }, [hostedWorkspaceId, activeHostedDeviceId, activeAgentId]);
 
   const openHostedBrowser = async (url: string) => {
     if (
