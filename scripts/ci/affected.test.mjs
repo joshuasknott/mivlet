@@ -60,20 +60,18 @@ test('moving native code into docs still checks the deleted native path', () => 
 test('test:pr matches the Linux CI package-test skip gate', () => {
   assert.equal(pkg.scripts['test:pr'], `${linuxPackageTests} && ${linuxAffectedTests}`);
   assert.equal(pkg.scripts['test:ci'], 'pnpm test:pr');
-  assert.ok(ci.includes(linuxPackageTests));
-  assert.ok(ci.includes(linuxAffectedTests));
+  assert.match(ci, /^\s+- run: pnpm test:pr$/m);
 });
 
 test('check:pr matches the Linux TypeScript CI job order', () => {
   assert.equal(pkg.scripts['check:pr'], 'pnpm typecheck && pnpm quality && pnpm test:pr');
   const typecheck = ci.indexOf('pnpm typecheck');
   const quality = ci.indexOf('pnpm quality');
-  const packageTests = ci.indexOf(linuxPackageTests);
-  const affectedTests = ci.indexOf(linuxAffectedTests);
-  assert.ok(typecheck >= 0 && typecheck < quality && quality < packageTests && packageTests < affectedTests, ci);
+  const testPr = ci.indexOf('pnpm test:pr');
+  assert.ok(typecheck >= 0 && typecheck < quality && quality < testPr, ci);
 });
 
 test('test:host matches the Windows CI agent-host suite', () => {
   assert.equal(pkg.scripts['test:host'], windowsHostTests);
-  assert.ok(ci.includes(windowsHostTests));
+  assert.match(ci, /^\s+- run: pnpm test:host$/m);
 });

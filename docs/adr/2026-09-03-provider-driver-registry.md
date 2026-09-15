@@ -59,7 +59,7 @@ provider egress. Native screenshots are hydrated only at that Rust boundary.
 Direct Gemini text/tool turns keep Mivlet's local wire loop (`shapeGeminiRequest`
 / `parseGeminiLine` over the same Rust egress boundary) rather than the embedded
 host: its SDK admission contract is not verified, and no second agent loop wraps
-the first. The Gemini API key stays in the same account-scoped OS secure-store
+the first. See [Gemini provider](../architecture/gemini-provider.md). The Gemini API key stays in the same account-scoped OS secure-store
 boundary as the other direct routes and never crosses into JavaScript. Gemini
 discovery uses the official `models.list` endpoint, and credential verification
 hit-tests the stored key the same way.

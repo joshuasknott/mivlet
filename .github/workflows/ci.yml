@@ -48,8 +48,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm quality
-      - run: pnpm --filter '!@fable/agent-host' -r --if-present test
-      - run: node --test scripts/ci/affected.test.mjs
+      - run: pnpm test:pr
 
   windows:
     needs: changes
@@ -76,7 +75,7 @@ jobs:
       - run: pnpm --filter @fable/protocol build
       - run: pnpm --filter @fable/connectors build
       - run: pnpm --filter @fable/agent-host build
-      - run: pnpm --filter @fable/agent-host test
+      - run: pnpm test:host
       - run: pnpm release:test
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml

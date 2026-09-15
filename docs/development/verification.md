@@ -18,7 +18,7 @@ snapshot persistence and execution ownership explicit when separating shell code
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
-`useWorkspaceNavigation` owns view restoration and navigation, while
+`shell/useWorkspaceNavigation.ts` owns view restoration and navigation, while
 `WorkspaceExecution` retains execution ownership. Native-agent regressions are
 split into context, persistence, recovery, cancellation and provider suites;
 their shared `native-agent-test-harness.ts` supplies deterministic native transport.
@@ -38,7 +38,8 @@ TypeScript changes run types, quality and package tests on Linux. Rust/Tauri,
 embedded host, protocol/connectors, dependency, release and workflow changes also
 run Windows host acceptance, Rust tests, Clippy and formatting with Cargo caching.
 The Windows Bun dependency is optional on other operating systems; Windows host
-builds still fail if it is absent. These tests never substitute a Linux host.
+builds still fail if it is absent. Linux daily loops use `pnpm test:pr`. Host
+executable tests remain `pnpm test:host` on Windows. These tests never substitute a Linux host.
 
 Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
 nightly at 03:17 UTC. Installer generation remains manual in the Windows
@@ -52,16 +53,17 @@ Require the aggregate CI check before merging and rerun affected checks after co
 
 | Scope | Commands |
 | --- | --- |
-| Repository types and tests | `pnpm typecheck`, `pnpm test` |
+| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@fable/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
 | Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
-| Code quality | `pnpm quality` |
-| Production build validation | `pnpm verify:build` |
+| Code quality | `pnpm quality` (`format:check` is an allowlisted ratchet, not repository-wide Prettier) |
+| Linux PR job | `pnpm check:pr` (`typecheck` + `quality` + `test:pr`) |
+| Production build validation | `pnpm verify:build` (includes hosted-runner `tsc` emit) |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
-| Embedded Windows agent host | `pnpm test:host`; `pnpm --filter @fable/agent-host typecheck`, `pnpm --filter @fable/agent-host build` |
-| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build` |
+| Embedded Windows agent host | `pnpm test:host` (also `pnpm --filter @fable/agent-host typecheck` / `build`) |
+| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build`, `pnpm --filter @fable/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
 
 `pnpm test` still runs every workspace test, including `@fable/agent-host`. Host

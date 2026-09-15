@@ -266,6 +266,16 @@ redacted, request bodies are bounded, and every OAuth route is rate-limited.
 See the [broker storage decision](../adr/2026-07-03-broker-ephemeral-storage.md)
 and [threat model](../security/threat-model.md) for the security boundary.
 
+### Local broker development
+
+The Node entry `pnpm --filter @fable/broker dev` serves `dist/server.js` (default
+`http://127.0.0.1:8788`). Wrangler local Worker development is
+`pnpm --filter @fable/broker worker:dev` on the same port. Copy
+`apps/broker/.dev.vars.example` to `apps/broker/.dev.vars` for Worker bindings.
+Point the desktop at either process with `FABLE_AUTH_BROKER_URL=http://127.0.0.1:8788/`
+from `apps/desktop/.env.example`. Staging packaging is
+`pnpm --filter @fable/broker worker:deploy:dry-run`; it does not deploy.
+
 ## Native OAuth scopes
 
 The confidential broker requests the scopes below on every Connect. There is
@@ -319,8 +329,10 @@ them.
 For a local debug build, `node apps/desktop/scripts/check-connectors.mjs` runs a
 bounded real read through the native executor for each connected native adapter.
 Add `--chat --model <connected-model-id>` to verify actual Codex tool requests,
-execution, result delivery, and completion across connected apps. Build Rust and
-the connectors package first. The report contains statuses and response sizes,
+execution, result delivery, and completion across connected apps. Build a **debug**
+native binary first (`cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml`
+or one `pnpm tauri:dev` session) so `apps/desktop/src-tauri/target/debug/fable-desktop.exe`
+exists, and build the connectors package. The report contains statuses and response sizes,
 not credentials or returned source content. Configured but unsigned-in apps are
 reported separately. This debug-only command does not exist in release builds.
 

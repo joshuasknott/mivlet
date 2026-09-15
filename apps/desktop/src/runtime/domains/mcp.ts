@@ -1,5 +1,8 @@
 import { toRuntimeError } from "../errors";
-import type { ApprovalResolutionRequest } from "@fable/protocol";
+import {
+  CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION,
+  type ApprovalResolutionRequest,
+} from "@fable/protocol";
 import { hasTauriRuntime, invoke, invokeNative, listen } from "../bridge";
 
 // Authenticated provider composition. These wrappers carry only prompt content and
@@ -31,7 +34,7 @@ export interface RuntimeMcpConnectionDetails {
   capabilityBindings: Array<{
     capabilityId: "knowledge.content.search";
     toolName: string;
-    contractVersion: "fable.connected-source-search.v1";
+    contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
     consequence: "read";
     trust: "untrusted";
   }>;

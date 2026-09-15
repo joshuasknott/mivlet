@@ -25,7 +25,6 @@ const trustProxy = /^(1|true)$/i.test(process.env.FABLE_BROKER_TRUST_PROXY ?? ""
 if (process.env.NODE_ENV === "production" && host === "127.0.0.1") {
   // Defensive: production should bind an externally reachable host behind HTTPS.
   // We do not refuse to start (the proxy may bind loopback), but we warn.
-  // eslint-disable-next-line no-console
   console.warn("[fable-broker] production host defaults to loopback; ensure an HTTPS reverse proxy fronts it.");
 }
 
@@ -33,7 +32,6 @@ const broker = new FableBroker({ env: process.env, publicBaseUrl });
 const server = createBrokerServer({ broker, host, port, requestsPerMinute, trustProxy });
 
 server.on("error", (error) => {
-  // eslint-disable-next-line no-console
   console.error(JSON.stringify({ level: "error", event: "server-error", message: error.message }));
   process.exit(1);
 });
@@ -41,7 +39,6 @@ server.on("error", (error) => {
 server.on("listening", () => {
   const address = server.address();
   const bound = typeof address === "object" && address ? `${address.address}:${address.port}` : "?";
-  // eslint-disable-next-line no-console
   console.log(JSON.stringify({ level: "info", event: "listening", host: bound }));
 });
 

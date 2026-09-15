@@ -201,7 +201,6 @@ export * from "./mcp/client";
 export * from "./mcp/protocol";
 export * from "./mcp/connected-source-search";
 
-// Browser automation foundation: pure run/session binding, shared permission
-// policy classification, and redacted audit shaping. Live transport is supplied
-// by a future native/browser boundary; unavailable runtimes fail closed.
-export * from "./browser-automation";
+// Browser automation stays internal until a native transport exists.
+// Tests import `./browser-automation` directly; do not re-export it from the
+// public barrel so the renderer cannot treat the fixture as a live capability.

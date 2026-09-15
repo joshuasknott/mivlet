@@ -7,7 +7,7 @@
     },
     "apps/broker": {
       "ignoreDependencies": ["cloudflare"],
-      "entry": ["src/worker.ts", "src/**/*.test.ts"],
+      "entry": ["src/worker.ts", "src/server.ts", "src/**/*.test.ts"],
       "project": ["src/**/*.ts"]
     },
     "apps/hosted-runner": {
