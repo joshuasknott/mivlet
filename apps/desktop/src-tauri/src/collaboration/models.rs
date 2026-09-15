@@ -389,6 +389,11 @@ pub enum Command {
     },
     StopWork {
         id: String,
+        /// When set, Stop is a compare-and-set against this generation.
+        /// Dispose uses it so a remount fence or Continue cannot be cancelled
+        /// by a late `stop-work` from the previous owner.
+        #[serde(default)]
+        expected_generation: Option<u32>,
     },
     StopProject {
         project_id: String,

@@ -305,9 +305,9 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     root.cancel = vi.fn(async () => {});
     service.dispose();
   });
-  it("dispose freezes like Stop then issues native stop-work for executing work", async () => {
+  it("dispose freezes like Stop then issues generation-fenced stop-work for executing work", async () => {
     const { service, command } = fixture([
-      fixtureWork("run", "a", { status: "running" }),
+      fixtureWork("run", "a", { status: "running", generation: 4 }),
       fixtureWork("queued", "b"),
     ]);
     await service.refresh();
@@ -324,26 +324,31 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(service.current(session)).toBe(false);
     expect(service.canSchedule("c", "fixture")).toBe(false);
     await expect(service.refresh()).rejects.toThrow("This workspace has closed.");
-    expect(command).not.toHaveBeenCalledWith("fixture", {
-      action: "stop-work",
-      id: "run",
-    });
+    expect(command).not.toHaveBeenCalled();
     finish();
     await closed;
     expect(command).toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "run",
+      expectedGeneration: 4,
     });
     expect(command).not.toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "queued",
     });
+    expect(command).not.toHaveBeenCalledWith("fixture", {
+      action: "stop-work",
+      id: "run",
+    });
     expect(session.cancel).toHaveBeenCalledOnce();
   });
-  it("dispose issues native stop-work for executing orphans with no session", async () => {
+  it("dispose issues generation-fenced stop-work for executing orphans with no session", async () => {
     const { service, command } = fixture([
-      fixtureWork("orphan-run", "a", { status: "running" }),
-      fixtureWork("orphan-approval", "b", { status: "awaiting-approval" }),
+      fixtureWork("orphan-run", "a", { status: "running", generation: 3 }),
+      fixtureWork("orphan-approval", "b", {
+        status: "awaiting-approval",
+        generation: 2,
+      }),
       fixtureWork("queued", "c"),
     ]);
     await service.refresh();
@@ -352,15 +357,18 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(command).toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "orphan-run",
+      expectedGeneration: 3,
     });
     expect(command).toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "orphan-approval",
+      expectedGeneration: 2,
     });
     expect(command).not.toHaveBeenCalledWith("fixture", {
       action: "stop-work",
       id: "queued",
     });
+    expect(command.mock.calls).toHaveLength(2);
   });
   it("rejects stale published streams after a membership generation changes", async () => {
     const { service, update } = fixture([fixtureWork("one", "a")]);

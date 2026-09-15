@@ -79,7 +79,10 @@ activity is explained as uncertain rather than presented as a failure.
   request and its descendants; unrelated Work stays current.
 - **Dispose** is Stop for the whole workspace: it freezes streams, rejects new
   serial work, and issues native `stop-work` for `running` / `awaiting-approval`
-  assignments, including orphans with no renderer session. Remount recovery
+  assignments, including orphans with no renderer session. Dispose binds each
+  `stop-work` to the generation captured at freeze (`expectedGeneration`). If
+  remount recovery or Continue already bumped that generation, the late stop
+  is a no-op and cannot cancel the newer assignment. Remount recovery
   (`recover_interrupted_execution_attempts`) fences leftover executing Work to
   `awaiting-user`, bumps generation, and clears `current_run_id` so late
   checkpoints fail `ensure_run_current`. Terminal attempts stay immutable

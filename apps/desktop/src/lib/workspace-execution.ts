@@ -521,7 +521,7 @@ export class WorkspaceExecution {
     const failure = cancelled.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") this.report(failure.reason);
   }
-  /** Freeze like Stop, then native `stop-work` for executing assignments. */
+  /** Freeze like Stop, then native generation-fenced `stop-work`. */
   dispose() {
     if (this.closing) return this.closing;
     this.disposed = true;
@@ -529,28 +529,31 @@ export class WorkspaceExecution {
     return this.closing;
   }
   private async closeOwnedExecution() {
-    const affected = new Set(this.executingWork().map((work) => work.id));
-    for (const id of affected) this.stopping.add(id);
+    const targets = this.executingWork().map((work) => ({
+      id: work.id,
+      expectedGeneration: work.generation,
+    }));
+    for (const { id } of targets) this.stopping.add(id);
     for (const session of this.state.sessions) session.cancelled = true;
     await Promise.allSettled([
       ...this.state.sessions.map((session) => session.cancel?.()),
       ...[...this.external.values()].map((cancel) => cancel()),
     ]);
     await this.tail.catch(() => undefined);
-    for (const work of this.executingWork()) affected.add(work.id);
     try {
-      for (const id of affected) {
+      for (const target of targets) {
         try {
           await this.transport.command(this.workspaceId, {
             action: "stop-work",
-            id,
+            id: target.id,
+            expectedGeneration: target.expectedGeneration,
           });
         } catch {
           /* remount recovery fences leftover executing Work */
         }
       }
     } finally {
-      for (const id of affected) this.stopping.delete(id);
+      for (const { id } of targets) this.stopping.delete(id);
       this.external.clear();
       this.approvals.cancelPending();
       this.listeners.clear();
