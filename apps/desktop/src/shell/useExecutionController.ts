@@ -15,6 +15,7 @@ import {
 } from "../lib/desktop-tool-runtime";
 import { chatConnectorIds, chatConnectorTools } from "../lib/connector-chat";
 import { isLocalComputerTool } from "../lib/computer-tools";
+import { resolveHostedComputerScope } from "../lib/hosted-computer-scope";
 import { modelsForProvider } from "../lib/provider-models";
 import { cancelRuntimeLocalComputer } from "../runtime/domains/local-computer";
 
@@ -92,16 +93,9 @@ export function useExecutionController({
       ),
     ),
   };
-  const hostedWorkspaceId =
-    runtime.accountWorkspaceStatus.workspaces.find(
-      (workspace) =>
-        workspace.workspaceStatus === "active" &&
-        workspace.membershipStatus === "active",
-    )?.fableWorkspaceId ?? null;
-  const activeHostedDeviceId =
-    runtime.accountWorkspaceStatus.devices.find(
-      (device) => device.status === "active",
-    )?.deviceId ?? null;
+  const hostedScope = resolveHostedComputerScope(runtime.accountWorkspaceStatus);
+  const hostedWorkspaceId = hostedScope?.workspaceId ?? null;
+  const activeHostedDeviceId = hostedScope?.deviceId ?? null;
 
   const localComputer = useLocalComputer({
     workspaceId: activeWorkspaceId,
