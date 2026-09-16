@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { api, internal } from "./_generated/api";
 import {
+  consumeExecutionCapabilityMint,
   getComputer,
   mintExecutionCapability,
   requestExecutionCapability,
@@ -32,6 +33,9 @@ describe("hosted execution capability minting", () => {
     expect(visibility(requestExecutionCapability).isAction).toBe(true);
     expect(visibility(requestExecutionCapability).isInternal).toBe(true);
     expect(isPublicClientFunction(requestExecutionCapability)).toBe(false);
+    expect(visibility(consumeExecutionCapabilityMint).isMutation).toBe(true);
+    expect(visibility(consumeExecutionCapabilityMint).isInternal).toBe(true);
+    expect(isPublicClientFunction(consumeExecutionCapabilityMint)).toBe(false);
     expect(isPublicClientFunction(requestProvision)).toBe(true);
     expect(isPublicClientFunction(getComputer)).toBe(true);
   });
@@ -66,12 +70,21 @@ describe("hosted execution capability minting", () => {
     }
       ? true
       : false;
+    type InternalConsume = InternalHosted extends {
+      consumeExecutionCapabilityMint: unknown;
+    }
+      ? true
+      : false;
     const publicClientCannotMint: PublicMint = false;
     const internalCanMint: InternalMint = true;
+    const internalCanConsume: InternalConsume = true;
     expect(publicClientCannotMint).toBe(false);
     expect(internalCanMint).toBe(true);
+    expect(internalCanConsume).toBe(true);
     // @ts-expect-error public Convex clients cannot mint hosted capabilities
     void api.hostedExecution.requestExecutionCapability;
+    // @ts-expect-error public Convex clients cannot consume mint windows
+    void api.hostedExecution.consumeExecutionCapabilityMint;
   });
 });
 

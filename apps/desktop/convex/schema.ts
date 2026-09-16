@@ -173,6 +173,12 @@ export default defineSchema({
     .index("by_workspace_agent", ["workspaceId", "agentId"])
     .index("by_computer", ["computerId"]),
 
+  execution_capability_mint_windows: defineTable({
+    mintKey: v.string(),
+    hits: v.array(v.number()),
+    updatedAt: v.number(),
+  }).index("by_mint_key", ["mintKey"]),
+
   hosted_execution_requests: defineTable({
     requestKey: v.string(),
     workspaceId: v.string(),
