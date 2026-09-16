@@ -129,6 +129,13 @@ signing uses a distinct secret from the lifecycle Bearer. Undeployed or
 incomplete configuration must remain unavailable rather than falling back to a
 fixture.
 
+Convex auth refuses the test mock Clerk issuer unless
+`MIVLET_CLERK_ALLOW_MOCK=1` (legacy `FABLE_CLERK_ALLOW_MOCK`). That pair is
+local/dev only: `anonymous:` and `dev:` Convex backends and in-memory tests may
+use it. Production, preview, and staging deployments fail closed at config
+load. CI runs `node scripts/ci/refuse-mock-clerk.mjs`, which rejects the same
+pair in GitHub Actions env and in tracked env/workflow/wrangler files.
+
 ### Supply chain and release
 
 Lockfiles, dependency audits, Rust advisory policy, typed builds, CSP tests,
