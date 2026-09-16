@@ -1099,7 +1099,7 @@ pub struct CustomApprovalSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FableAgentProfile {
+pub struct MivletAgentProfile {
     pub id: String,
     pub name: String,
     pub instructions: String,
@@ -1123,12 +1123,12 @@ pub struct FableAgentProfile {
     #[serde(default)]
     pub thread_ids: Vec<String>,
     #[serde(default)]
-    pub learned_tasks: Vec<FableLearnedTask>,
+    pub learned_tasks: Vec<MivletLearnedTask>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FableLearnedTask {
+pub struct MivletLearnedTask {
     pub id: String,
     pub title: String,
     pub instruction: String,
@@ -1150,7 +1150,7 @@ pub struct RuntimeSnapshot {
     pub approval_rules: Vec<ApprovalGrant>,
     /// User-owned agent identities and their non-secret execution preferences.
     #[serde(default)]
-    pub agents: Vec<FableAgentProfile>,
+    pub agents: Vec<MivletAgentProfile>,
     #[serde(default)]
     pub active_agent_id: Option<String>,
     pub pinned_source_ids: Vec<String>,

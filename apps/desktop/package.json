@@ -1,5 +1,5 @@
 {
-  "name": "@fable/desktop",
+  "name": "@mivlet/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -18,9 +18,9 @@
     "tauri:dev": "node scripts/tauri-dev.mjs"
   },
   "dependencies": {
-    "@fable/connectors": "workspace:*",
-    "@fable/knowledge": "workspace:*",
-    "@fable/protocol": "workspace:*",
+    "@mivlet/connectors": "workspace:*",
+    "@mivlet/knowledge": "workspace:*",
+    "@mivlet/protocol": "workspace:*",
     "@fontsource/inter": "^5.2.8",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.101.2",

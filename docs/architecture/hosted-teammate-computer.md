@@ -36,10 +36,10 @@ and workspace link; no public-key challenge) are rechecked inside the mint
 path. The runner rechecks the computer, generation, scope, expiry, nonce,
 and one-time use.
 
-Bearer `FABLE_HOSTED_RUNNER_API_KEY` authorizes only computer lifecycle
+Bearer `MIVLET_HOSTED_RUNNER_API_KEY` authorizes only computer lifecycle
 (provision/ensure, status, destroy). Process and browser effect routes reject
-Bearer and require a `FableCapability` signed with the distinct
-`FABLE_HOSTED_RUNNER_SIGNING_KEY`. The runner consumes the capability nonce in
+Bearer and require a `MivletCapability` signed with the distinct
+`MIVLET_HOSTED_RUNNER_SIGNING_KEY`. The runner consumes the capability nonce in
 Durable Object storage before the effect; a replay of the same token fails
 closed, including when the nonce store is unavailable. Re-running ensure on a
 computer that already has a generation bumps that generation so prior

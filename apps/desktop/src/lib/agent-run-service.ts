@@ -1,11 +1,11 @@
-import { resolveAgentBackend, type BackendDeps } from "@fable/connectors";
+import { resolveAgentBackend, type BackendDeps } from "@mivlet/connectors";
 import type {
   BackendModel,
   BackendProvider,
   ExecutionAttempt,
   ExecutionExchange,
-  FableAgentProfile,
-} from "@fable/protocol";
+  MivletAgentProfile,
+} from "@mivlet/protocol";
 import { createDesktopCodexAppServer } from "./codex-app-server";
 import { createDesktopTransport } from "./native-transport";
 import { createDesktopEmbeddedRuntime } from "./embedded-agent";
@@ -38,7 +38,7 @@ export interface ScheduledResearchRunInput {
   projectContext?: string;
   providerId: string;
   model: string;
-  agent: FableAgentProfile;
+  agent: MivletAgentProfile;
   provider: BackendProvider;
   modelDefinition: BackendModel;
   onQueued: (attempt: ExecutionAttempt) => Promise<void>;

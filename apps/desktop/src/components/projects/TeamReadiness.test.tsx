@@ -1,10 +1,10 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import type { BackendProvider, FableAgentProfile } from "@fable/protocol";
+import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
 import { TeamReadiness, teamRouteReadiness } from "./TeamReadiness";
 import type { ProviderModelOption } from "../../lib/provider-models";
 
-const agent = (id: string, name: string, modelId: string): FableAgentProfile => ({
+const agent = (id: string, name: string, modelId: string): MivletAgentProfile => ({
   id,
   name,
   instructions: "",

@@ -161,7 +161,7 @@ describe("hosted computer runtime boundary", () => {
       ["hosted_process_kill", { target }],
     ]);
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain(
-      "FableCapability",
+      "MivletCapability",
     );
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain("runnerUrl");
   });
@@ -231,7 +231,7 @@ describe("hosted computer runtime boundary", () => {
       ["hosted_browser_snapshot", { target }],
     ]);
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain(
-      "FableCapability",
+      "MivletCapability",
     );
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain("runnerUrl");
   });
@@ -283,7 +283,7 @@ describe("hosted computer runtime boundary", () => {
       ],
     ]);
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain(
-      "FableCapability",
+      "MivletCapability",
     );
     expect(JSON.stringify(mocks.invoke.mock.calls)).not.toContain("runnerUrl");
   });

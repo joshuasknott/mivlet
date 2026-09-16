@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MemoryRecord } from "@fable/protocol";
+import type { MemoryRecord } from "@mivlet/protocol";
 import { detectContradiction, detectDuplicate, isNearIdenticalNormalized, normalizeMemoryValue } from "./duplicate";
 
 // Full edit-distance matrix serves as an independent reference for the bounded scan.

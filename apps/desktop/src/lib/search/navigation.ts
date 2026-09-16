@@ -1,4 +1,4 @@
-import type { SearchResult } from "@fable/protocol";
+import type { SearchResult } from "@mivlet/protocol";
 
 /** Exact, side-effect-free routing target for a search result. Every variant
  * names an existing object; the shell opens or focuses it and never creates a

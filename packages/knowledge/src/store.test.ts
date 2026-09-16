@@ -4,8 +4,8 @@ import type {
   MemoryRecord,
   PinnedContextEntry,
   SourceChunk
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import {
   createKnowledgeStore,
   emptyKnowledgeStoreState,

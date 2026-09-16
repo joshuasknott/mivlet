@@ -10,9 +10,9 @@ import { affected } from './affected.mjs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
-const linuxPackageTests = "pnpm --filter '!@fable/agent-host' -r --if-present test";
+const linuxPackageTests = "pnpm --filter '!@mivlet/agent-host' -r --if-present test";
 const linuxAffectedTests = 'node --test scripts/ci/affected.test.mjs';
-const windowsHostTests = 'pnpm --filter @fable/agent-host test';
+const windowsHostTests = 'pnpm --filter @mivlet/agent-host test';
 
 test('documentation skips expensive jobs', () => {
   assert.deepEqual(affected(['README.md', 'docs/development/verification.md']), { code: false, native: false });

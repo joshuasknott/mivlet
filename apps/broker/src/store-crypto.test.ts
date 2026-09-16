@@ -6,10 +6,10 @@
 
 import { describe, expect, it } from "vitest";
 
-import { BROKER_PKCE_S256_EXAMPLE } from "@fable/connectors";
-import type { BrokerProviderId } from "@fable/connectors";
+import { BROKER_PKCE_S256_EXAMPLE } from "@mivlet/connectors";
+import type { BrokerProviderId } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { fixedClock } from "./clock.js";
 import { BrokerPending } from "./durable-stores.js";
 import { createSerialInMemoryEphemeralOps } from "./ephemeral-rpc.js";
@@ -146,7 +146,7 @@ describe("DO class direct drive + no-plaintext snapshot", () => {
     const clock = fixedClock(1000);
     const secret = makeSecretForTest();
     const { ops, pendingInst, handoffInst } = await createSerialInMemoryEphemeralOps(clock, secret);
-    const ENV = { FABLE_BROKER_GITHUB_CLIENT_ID: "id", FABLE_BROKER_GITHUB_CLIENT_SECRET: "sec" };
+    const ENV = { MIVLET_BROKER_GITHUB_CLIENT_ID: "id", MIVLET_BROKER_GITHUB_CLIENT_SECRET: "sec" };
     const pfetch = async (u: string) => {
       const url = new URL(u);
       if (url.href.includes("token")) {
@@ -160,7 +160,7 @@ describe("DO class direct drive + no-plaintext snapshot", () => {
       }
       return new Response("{}", { status: 200 });
     };
-    const broker = new FableBroker({
+    const broker = new MivletBroker({
       env: ENV,
       clock,
       fetch: pfetch,

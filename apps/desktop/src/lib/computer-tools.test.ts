@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { conversationComputerTools, conversationToolsForModel, supportsComputerVision, computerToolsReady, isLocalComputerTool } from "./computer-tools";
-import type { BackendProvider, LocalComputerSnapshot } from "@fable/protocol";
+import type { BackendProvider, LocalComputerSnapshot } from "@mivlet/protocol";
 
 describe("conversation computer tools", () => {
   const enabled = { computer: true };

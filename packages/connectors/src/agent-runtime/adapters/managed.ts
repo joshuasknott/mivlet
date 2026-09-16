@@ -3,7 +3,7 @@ import type {
   AgentTurnRequest,
   BackendAgentEvent,
   BackendProvider,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type {
   AgentBackend,
   BackendDeps,

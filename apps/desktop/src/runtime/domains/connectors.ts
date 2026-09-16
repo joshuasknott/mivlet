@@ -11,7 +11,7 @@ import type {
   ConnectorSyncRequest,
   ConnectorSyncState,
   KnowledgeSource,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   hasTauriRuntime,
   invoke,

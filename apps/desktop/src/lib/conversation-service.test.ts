@@ -4,7 +4,7 @@ import type {
   CollaborationSnapshot,
   ConversationRoom,
   MemoryControlState,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   createSideChat,
   deleteSideChat,

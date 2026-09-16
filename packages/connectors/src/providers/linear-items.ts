@@ -1,4 +1,4 @@
-import type { ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorSearchItem } from "@mivlet/protocol";
 import {
   classifyConnectorError,
   shapeConnectorSearchRequest,

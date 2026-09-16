@@ -10,7 +10,7 @@ import type {
   ConnectorSearchRequest,
   SupportedConnectorId,
   KnowledgeSource
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;

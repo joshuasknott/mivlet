@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { redactSecretText, SECRET_REDACTION_CASES, secretMarkerSurvives } from "@fable/protocol";
+import { redactSecretText, SECRET_REDACTION_CASES, secretMarkerSurvives } from "@mivlet/protocol";
 import { redactHostedProcessOutput } from "./secret-redact";
 
 describe("hosted process output redaction", () => {

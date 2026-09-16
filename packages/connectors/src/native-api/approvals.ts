@@ -9,7 +9,7 @@
  * them.
  */
 
-import type { ApprovalRequest } from "@fable/protocol";
+import type { ApprovalRequest } from "@mivlet/protocol";
 import { lookupTool } from "./tools";
 
 const ARGUMENT_DIGEST_PREFIX = "Arguments SHA-256: ";

@@ -70,7 +70,7 @@ async fn remote_http_client(endpoint: &Url) -> Result<reqwest::Client, String> {
     let mut builder = reqwest::Client::builder()
         .timeout(MCP_HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
-        .user_agent("Fable/0.1 (MCP)");
+        .user_agent("Mivlet/0.1 (MCP)");
     match endpoint.host() {
         Some(url::Host::Domain(host)) => {
             let port = endpoint.port_or_known_default().unwrap_or(443);
@@ -950,7 +950,7 @@ fn select_client_registration_from_availability(
 }
 
 fn configured_preregistered_client_id(issuer: &Url) -> Result<Option<String>, String> {
-    let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_PREREGISTERED_CLIENTS") else {
+    let Some(raw) = crate::env_compat::var_os_named("MIVLET_MCP_OAUTH_PREREGISTERED_CLIENTS") else {
         return Ok(None);
     };
     let raw = raw
@@ -974,7 +974,7 @@ fn configured_preregistered_client_id(issuer: &Url) -> Result<Option<String>, St
 }
 
 fn configured_client_metadata_document_url() -> Result<Option<Url>, String> {
-    let Some(raw) = std::env::var_os("FABLE_MCP_OAUTH_CLIENT_METADATA_DOCUMENT_URL") else {
+    let Some(raw) = crate::env_compat::var_os_named("MIVLET_MCP_OAUTH_CLIENT_METADATA_DOCUMENT_URL") else {
         return Ok(None);
     };
     let raw = raw

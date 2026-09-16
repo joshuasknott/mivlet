@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
+import type { ApprovalRequest, ApprovalResolutionRequest } from "@mivlet/protocol";
 import { resolveApprovalFallback, webviewEchoedConfirmation } from "./approval-fallbacks";
 
 function highRiskRequest(): ApprovalRequest {

@@ -72,9 +72,9 @@ jobs:
           workspaces: apps/desktop/src-tauri
           shared-key: mivlet-windows
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @fable/protocol build
-      - run: pnpm --filter @fable/connectors build
-      - run: pnpm --filter @fable/agent-host build
+      - run: pnpm --filter @mivlet/protocol build
+      - run: pnpm --filter @mivlet/connectors build
+      - run: pnpm --filter @mivlet/agent-host build
       - run: pnpm test:host
       - run: pnpm release:test
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@mivlet/protocol";
 import type { HttpTransport } from "./transport";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";
 

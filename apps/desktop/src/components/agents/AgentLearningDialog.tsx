@@ -3,7 +3,7 @@ import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
 import { Play } from "@phosphor-icons/react/dist/csr/Play";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
+import type { MivletAgentProfile, MivletLearnedTask } from "@mivlet/protocol";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
@@ -33,11 +33,11 @@ export function AgentLearningDialog({
   onRun,
 }: {
   open: boolean;
-  agent: FableAgentProfile;
+  agent: MivletAgentProfile;
   startCreating?: boolean;
   onClose: () => void;
-  onChange: (tasks: FableLearnedTask[]) => void;
-  onRun: (task: FableLearnedTask) => void;
+  onChange: (tasks: MivletLearnedTask[]) => void;
+  onRun: (task: MivletLearnedTask) => void;
 }) {
   const modalRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -71,7 +71,7 @@ export function AgentLearningDialog({
 
   if (!open) return null;
 
-  const editTask = (task: FableLearnedTask) => {
+  const editTask = (task: MivletLearnedTask) => {
     setEditingId(task.id);
     setCreating(false);
     setDraft({ title: task.title, instruction: task.instruction });
@@ -87,7 +87,7 @@ export function AgentLearningDialog({
       ? tasks.find((task) => task.id === editingId)
       : undefined;
     const now = new Date().toISOString();
-    const task: FableLearnedTask = {
+    const task: MivletLearnedTask = {
       id: existing?.id ?? newTaskId(),
       title,
       instruction,

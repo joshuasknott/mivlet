@@ -1,4 +1,4 @@
-import type { CollaborationWorkItem, WorkStatus } from "@fable/protocol";
+import type { CollaborationWorkItem, WorkStatus } from "@mivlet/protocol";
 
 export type WorkState =
   | "queued"

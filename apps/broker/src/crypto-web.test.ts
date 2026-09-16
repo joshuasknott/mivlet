@@ -32,9 +32,9 @@ describe("web crypto helpers", () => {
   });
 
   it("base64 encodes bytes without a Node Buffer", () => {
-    // "fable" -> base64 "ZmFibGU=" (RFC 4648 test vector spirit)
-    const bytes = new TextEncoder().encode("fable");
-    expect(base64(bytes)).toBe("ZmFibGU=");
+    // "mivlet" -> base64 "bWl2bGV0" (RFC 4648 test vector spirit)
+    const bytes = new TextEncoder().encode("mivlet");
+    expect(base64(bytes)).toBe("bWl2bGV0");
   });
 
   it("base64String encodes a UTF-8 string (Basic-auth client:secret shape)", () => {

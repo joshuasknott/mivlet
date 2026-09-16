@@ -12,7 +12,7 @@ import {
   createDurableMemoryHandoffStore,
   createDurableMemoryRateLimiter
 } from "./durable-stores.js";
-import { BROKER_HANDOFF_TTL_SECONDS, BROKER_PKCE_S256_EXAMPLE } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS, BROKER_PKCE_S256_EXAMPLE } from "@mivlet/connectors";
 
 function oauthState(tag: string): string {
   return tag.length >= BROKER_AUTHORIZE_STATE_MIN_LENGTH

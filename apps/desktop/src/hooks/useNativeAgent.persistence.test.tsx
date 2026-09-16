@@ -2,7 +2,7 @@ import { baseRequest,connectedCodexProvider,connectedOpenAiProvider,finishStop,i
 import type {
 AgentTurnRequest,
 ExecutionAttempt
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { act,renderHook,waitFor } from "@testing-library/react";
 import { describe,expect,it,vi } from "vitest";
 import type { DurableRunWriter } from "../lib/conversation-runtime";

@@ -1,4 +1,4 @@
-import type { VoicePromptControl } from "@fable/connectors/voice";
+import type { VoicePromptControl } from "@mivlet/connectors/voice";
 import { activeWork, type WorkspaceExecution } from "./workspace-execution";
 
 /** Voice owns only its submitted exchange; drafts and other panes stay independent. */

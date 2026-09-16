@@ -1,8 +1,8 @@
 import {
   MAX_LOCAL_FILE_BYTES,
   SUPPORTED_LOCAL_FILE_EXTENSIONS,
-} from "@fable/connectors/local-files";
-import type { ExecutionExchange } from "@fable/protocol";
+} from "@mivlet/connectors/local-files";
+import type { ExecutionExchange } from "@mivlet/protocol";
 import type { ComposerAttachment } from "./types";
 
 const readableExtensions = new Set<string>(SUPPORTED_LOCAL_FILE_EXTENSIONS);

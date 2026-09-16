@@ -2,7 +2,7 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { SpinnerGap } from "@phosphor-icons/react/dist/csr/SpinnerGap";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
-import type { SearchResult } from "@fable/protocol";
+import type { SearchResult } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { useWorkspaceSearch } from "../../lib/search/useWorkspaceSearch";
 import { SearchResults } from "./SearchResults";

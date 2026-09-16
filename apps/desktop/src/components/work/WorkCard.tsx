@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { CollaborationWorkItem } from "@fable/protocol";
+import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 import { WorkStatusBadge } from "./WorkStatusBadge";
 import "./work.css";

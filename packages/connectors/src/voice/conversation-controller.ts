@@ -1,4 +1,4 @@
-import type { ConversationVoice, VoiceConversationScope, VoiceConversationSession, VoiceConversationState } from "@fable/protocol";
+import type { ConversationVoice, VoiceConversationScope, VoiceConversationSession, VoiceConversationState } from "@mivlet/protocol";
 import { bytesToBase64, takeSpeechChunk, type VoiceConversationPort } from "./conversation";
 
 export interface VoiceMicrophone {

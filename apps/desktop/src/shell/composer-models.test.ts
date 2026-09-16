@@ -15,9 +15,9 @@ describe("composerModelsFor", () => {
     expect(
       composerModelsFor(undefined, [
         model("gpt-5", "codex"),
-        model("fable-smoke", "custom"),
+        model("mivlet-smoke", "custom"),
       ]).map((item) => item.id),
-    ).toEqual(["codex::gpt-5", "custom::fable-smoke"]);
+    ).toEqual(["codex::gpt-5", "custom::mivlet-smoke"]);
   });
 
   it("prefers current OpenAI and reasoning models when GPT-5 is available", () => {

@@ -1,26 +1,26 @@
 import {
   BACKEND_AUTH_STATE_VALUES as rootBackendAuthStateValues,
   CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION as rootConnectedSourceSearchVersion
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   BACKEND_AUTH_STATE_VALUES as domainBackendAuthStateValues
-} from "@fable/protocol/domains/agent-runtime";
-import { CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION as domainConnectedSourceSearchVersion } from "@fable/protocol/domains/connected-source-search";
+} from "@mivlet/protocol/domains/agent-runtime";
+import { CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION as domainConnectedSourceSearchVersion } from "@mivlet/protocol/domains/connected-source-search";
 
 await Promise.all([
-  import("@fable/protocol/domains/account-cloud"),
-  import("@fable/protocol/domains/agent-runtime"),
-  import("@fable/protocol/domains/approvals"),
-  import("@fable/protocol/domains/collaboration"),
-  import("@fable/protocol/domains/connected-source-search"),
-  import("@fable/protocol/domains/connectors"),
-  import("@fable/protocol/domains/hosted-computer"),
-  import("@fable/protocol/domains/hosted-execution-capability"),
-  import("@fable/protocol/domains/local-computer"),
-  import("@fable/protocol/domains/local-projects"),
-  import("@fable/protocol/domains/provider-routing"),
-  import("@fable/protocol/domains/search"),
-  import("@fable/protocol/domains/voice")
+  import("@mivlet/protocol/domains/account-cloud"),
+  import("@mivlet/protocol/domains/agent-runtime"),
+  import("@mivlet/protocol/domains/approvals"),
+  import("@mivlet/protocol/domains/collaboration"),
+  import("@mivlet/protocol/domains/connected-source-search"),
+  import("@mivlet/protocol/domains/connectors"),
+  import("@mivlet/protocol/domains/hosted-computer"),
+  import("@mivlet/protocol/domains/hosted-execution-capability"),
+  import("@mivlet/protocol/domains/local-computer"),
+  import("@mivlet/protocol/domains/local-projects"),
+  import("@mivlet/protocol/domains/provider-routing"),
+  import("@mivlet/protocol/domains/search"),
+  import("@mivlet/protocol/domains/voice")
 ]);
 
 if (rootBackendAuthStateValues !== domainBackendAuthStateValues) {

@@ -1,4 +1,4 @@
-import type { AgentTurnRequest } from "@fable/protocol";
+import type { AgentTurnRequest } from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import {
   CODEX_HISTORY_MAX_UTF8_BYTES,

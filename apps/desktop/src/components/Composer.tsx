@@ -16,7 +16,7 @@ import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
 import { ModelPicker } from "./ModelPicker";
 import { RecordingReview } from "./RecordingReview";
-import type { SpeechRecordingReview } from "@fable/connectors/voice";
+import type { SpeechRecordingReview } from "@mivlet/connectors/voice";
 
 export function Composer({
   composerRef,

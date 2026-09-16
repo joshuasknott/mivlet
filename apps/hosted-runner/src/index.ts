@@ -1,8 +1,9 @@
 import { Sandbox } from "@cloudflare/sandbox";
 import {
+  readMivletEnvValue,
   type HostedExecutionCapabilityScope,
   type HostedProcessLaunchRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   HostedRunnerRequestError,
   validateComputerId,
@@ -26,7 +27,7 @@ export default {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") {
         route = "health";
-        return json({ status: "ok", service: "fable-hosted-runner" });
+        return json({ status: "ok", service: "mivlet-hosted-runner" });
       }
       const parts = url.pathname.split("/").filter(Boolean);
       if (parts[0] !== "v1" || parts[1] !== "computers" || !parts[2]) {
@@ -38,7 +39,7 @@ export default {
       const authorization = capabilityScope
         ? await authorizeCapabilityRequest(
           request,
-          env.FABLE_HOSTED_RUNNER_SIGNING_KEY,
+          readMivletEnvValue(env as unknown as Record<string, string | undefined>, "HOSTED_RUNNER_SIGNING_KEY"),
           computerId,
           capabilityScope,
           {
@@ -50,7 +51,7 @@ export default {
             )
           }
         )
-        : { authorized: await serviceAuthorized(request, env.FABLE_HOSTED_RUNNER_API_KEY) };
+        : { authorized: await serviceAuthorized(request, readMivletEnvValue(env as unknown as Record<string, string | undefined>, "HOSTED_RUNNER_API_KEY")) };
       if (!authorization.authorized) {
         route = "unauthorized";
         return json({ error: "unauthorized" }, 401);

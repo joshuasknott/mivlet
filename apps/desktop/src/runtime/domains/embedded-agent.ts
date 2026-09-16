@@ -1,5 +1,5 @@
-import type { EmbeddedRuntimeEvent } from "@fable/connectors";
-import type { AgentTurnRequest } from "@fable/protocol";
+import type { EmbeddedRuntimeEvent } from "@mivlet/connectors";
+import type { AgentTurnRequest } from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, listen } from "../bridge";
 
 export async function startRuntimeEmbeddedMcp(requestId: string) {
@@ -24,7 +24,7 @@ export async function listenRuntimeEmbeddedMcp(
   receive: (frame: unknown) => void,
 ) {
   if (!hasTauriRuntime()) return null;
-  return listen<unknown>(`fable://embedded-mcp/${requestId}`, (event) =>
+  return listen<unknown>(`mivlet://embedded-mcp/${requestId}`, (event) =>
     receive(event.payload),
   );
 }
@@ -32,7 +32,7 @@ export async function listenRuntimeEmbeddedMcp(
 export async function startRuntimeEmbeddedAgent(input: {
   requestId: string;
   providerId: string;
-  request: import("@fable/protocol").AgentTurnRequest;
+  request: import("@mivlet/protocol").AgentTurnRequest;
   contextPrefix?: string;
   computer?: { workspaceId: string; agentId: string };
   maxTurns: number;
@@ -63,7 +63,7 @@ export async function listenRuntimeEmbeddedAgent(
 ) {
   if (!hasTauriRuntime()) return null;
   return listen<EmbeddedRuntimeEvent>(
-    `fable://embedded-agent/${requestId}`,
+    `mivlet://embedded-agent/${requestId}`,
     (event) => receive(event.payload),
   );
 }

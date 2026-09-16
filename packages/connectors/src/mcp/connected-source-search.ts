@@ -4,7 +4,7 @@ import {
   type ConnectedSourceCitation,
   type ConnectedSourceSearchResult,
   type ConnectionId
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { McpUntrustedToolResult } from "./client";
 
 const MAX_CITATIONS = 50;

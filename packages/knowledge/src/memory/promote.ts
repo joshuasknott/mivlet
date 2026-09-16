@@ -15,8 +15,8 @@ import type {
   MemoryProvenance,
   MemoryRecord,
   MemorySuggestion
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 
 /** Input for explicit, user-initiated promotion. */
 export interface PromoteMemoryInput {

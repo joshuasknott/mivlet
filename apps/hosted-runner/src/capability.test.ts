@@ -2,7 +2,7 @@ import {
   signHostedExecutionCapability,
   verifyHostedExecutionCapability,
   type HostedExecutionCapabilityPayload
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import { authorizeCapabilityRequest, type CapabilityNonceStore } from "./request-auth";
 
@@ -21,6 +21,27 @@ function payload(overrides: Partial<HostedExecutionCapabilityPayload> = {}): Hos
     nonce: "capability-test-nonce",
     ...overrides
   };
+}
+
+async function signHostedExecutionCapabilityWithDomain(
+  rootSecret: string,
+  capability: HostedExecutionCapabilityPayload,
+  domain: string
+): Promise<string> {
+  const encodedPayload = btoa(JSON.stringify(capability))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+  const root = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(`${domain}:${rootSecret}`)
+  );
+  const key = await crypto.subtle.importKey("raw", root, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(encodedPayload));
+  return `v1.${encodedPayload}.${btoa(String.fromCharCode(...new Uint8Array(signature)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "")}`;
 }
 
 class MemoryNonceStore implements CapabilityNonceStore {
@@ -100,7 +121,7 @@ describe("hosted execution capabilities", () => {
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/processes", {
       method: "POST",
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     await expect(authorizeCapabilityRequest(
       request,
@@ -116,6 +137,26 @@ describe("hosted execution capabilities", () => {
       "process:kill",
       new MemoryNonceStore()
     )).resolves.toEqual({ authorized: false });
+  });
+
+  it("accepts the deprecated FableCapability Authorization scheme", async () => {
+    const now = Date.now();
+    const token = await signHostedExecutionCapability(signingKey, payload({
+      issuedAt: now,
+      expiresAt: now + 120_000,
+      scopes: ["process:launch"]
+    }));
+    const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/processes", {
+      method: "POST",
+      headers: { Authorization: `FableCapability ${token}` }
+    });
+    await expect(authorizeCapabilityRequest(
+      request,
+      signingKey,
+      "computer-workspace-agent",
+      "process:launch",
+      new MemoryNonceStore()
+    )).resolves.toEqual({ authorized: true, expectedGeneration: 3 });
   });
 
   it("rejects service Bearer on process launch", async () => {
@@ -136,6 +177,26 @@ describe("hosted execution capabilities", () => {
     expect(store.consumed.size).toBe(0);
   });
 
+  it("verifies in-flight tokens signed with the deprecated HMAC domain", async () => {
+    const now = Date.now();
+    const token = await signHostedExecutionCapabilityWithDomain(
+      signingKey,
+      payload({
+        issuedAt: now,
+        expiresAt: now + 120_000,
+        scopes: ["process:launch"],
+        nonce: "legacy-hmac-nonce"
+      }),
+      "fable-hosted-execution-capability:v1"
+    );
+    await expect(verifyHostedExecutionCapability(signingKey, token, {
+      computerId: "computer-workspace-agent",
+      scope: "process:launch",
+      generation: 3,
+      now: now + 30_000
+    })).resolves.toMatchObject({ nonce: "legacy-hmac-nonce" });
+  });
+
   it("does not accept a capability signed with the service Bearer secret", async () => {
     const now = Date.now();
     const token = await signHostedExecutionCapability(serviceKey, payload({
@@ -145,7 +206,7 @@ describe("hosted execution capabilities", () => {
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/processes", {
       method: "POST",
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     await expect(authorizeCapabilityRequest(
       request,
@@ -166,7 +227,7 @@ describe("hosted execution capabilities", () => {
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/processes", {
       method: "POST",
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     const store = new MemoryNonceStore();
     await expect(authorizeCapabilityRequest(
@@ -194,7 +255,7 @@ describe("hosted execution capabilities", () => {
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/processes", {
       method: "POST",
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     await expect(authorizeCapabilityRequest(
       request,
@@ -219,7 +280,7 @@ describe("hosted execution capabilities", () => {
       scopes: ["browser:snapshot"]
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/browser/snapshot", {
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     await expect(authorizeCapabilityRequest(
       request,
@@ -253,7 +314,7 @@ describe("hosted execution capabilities", () => {
     }));
     const request = new Request("https://runner.example/v1/computers/computer-workspace-agent/browser/act", {
       method: "POST",
-      headers: { Authorization: `FableCapability ${token}` }
+      headers: { Authorization: `MivletCapability ${token}` }
     });
     await expect(authorizeCapabilityRequest(
       request,

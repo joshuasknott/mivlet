@@ -3,10 +3,10 @@ import type {
   CollaborationCommand,
   CollaborationSnapshot,
   CollaborationWorkItem,
-  FableAgentProfile,
+  MivletAgentProfile,
   PermissionMode,
   WorkAttachment,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
 import {
@@ -122,7 +122,7 @@ export function stagedAttachmentRefs(
 export interface ExecutionSession {
   key: string;
   work: CollaborationWorkItem;
-  profile: FableAgentProfile;
+  profile: MivletAgentProfile;
   model: ProviderModelOption;
   permissionMode: PermissionMode;
   attachments: ComposerAttachment[];
@@ -323,7 +323,7 @@ export class WorkspaceExecution {
   }
   /** Conservative app limits; native providers and the computer lease still arbitrate resources. */
   admit(
-    profiles: FableAgentProfile[],
+    profiles: MivletAgentProfile[],
     models: ProviderModelOption[],
     providers: BackendProvider[],
     permissionMode: PermissionMode,

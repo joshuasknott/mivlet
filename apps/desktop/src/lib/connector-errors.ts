@@ -1,4 +1,4 @@
-import { redactSecretsFromString } from "@fable/connectors/agent-runtime";
+import { redactSecretsFromString } from "@mivlet/connectors/agent-runtime";
 
 /** Provider tool errors are still untrusted text, not successful executions. */
 export function assertConnectorToolSucceeded(result: unknown): void {

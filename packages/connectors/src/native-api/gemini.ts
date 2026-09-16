@@ -9,7 +9,7 @@
  * owns the body and event parse.
  */
 
-import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@mivlet/protocol";
 import { buildToolApproval } from "./approvals";
 import { hasKnownPrice, priceFor } from "./pricing";
 import type { HttpTransport } from "./transport";

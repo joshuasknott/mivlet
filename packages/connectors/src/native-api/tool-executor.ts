@@ -22,7 +22,7 @@
  * tool-role error message and continues).
  */
 
-import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/protocol";
+import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@mivlet/protocol";
 import { lookupTool } from "./tools";
 import type { ToolExecutor } from "./agent-loop";
 import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
@@ -51,9 +51,9 @@ export interface ToolRuntime {
   openBrowser?(url: string): Promise<string>;
   /** Optional native Windows boundary; the desktop supplies its own exact approval executor. */
   listAppWindows?(): Promise<string>;
-  selectAppWindow?(windowId: string, deliveryMode?: import("@fable/protocol").NativeComputerDeliveryMode): Promise<string>;
+  selectAppWindow?(windowId: string, deliveryMode?: import("@mivlet/protocol").NativeComputerDeliveryMode): Promise<string>;
   observeApp?(): Promise<string>;
-  actApp?(input: import("@fable/protocol").NativeAppAction): Promise<string>;
+  actApp?(input: import("@mivlet/protocol").NativeAppAction): Promise<string>;
   /** Act on one opaque control ref from the latest hosted-browser observation. */
   actBrowser?(input: {
     action: "click" | "fill" | "press" | "select" | "scroll" | "history";
@@ -397,7 +397,7 @@ async function dispatch(
       const action = requireString(actionInput, toolName, "action");
       if (!["click", "type", "scroll", "key"].includes(action)) throw new Error("Unsupported Windows application action.");
       // Exact fields and native window authority are revalidated by the runtime.
-      return runtime.actApp({ ...actionInput, action: action as import("@fable/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
+      return runtime.actApp({ ...actionInput, action: action as import("@mivlet/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
     }
     case "cloud-browser-action": {
       if (!runtime.actBrowser) {

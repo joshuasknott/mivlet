@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 
 const native = vi.hoisted(() => ({ prepare: vi.fn(), execute: vi.fn() }));

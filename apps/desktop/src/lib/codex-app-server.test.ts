@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentTurnRequest, BackendProvider } from "@fable/protocol";
+import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
 import type { RuntimeCodexEvent } from "../runtime/domains/providers";
 import { createDesktopCodexAppServer } from "./codex-app-server";
 

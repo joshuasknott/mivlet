@@ -26,6 +26,7 @@ pub mod schema;
 pub mod vault;
 
 /// Filename of the durable database inside the Tauri app-data dir.
+/// On-disk name is unchanged so existing installs keep their encrypted vault.
 pub const DB_FILENAME: &str = "fable-vault.db";
 const BACKUP_FORMAT: &str = "fable.encrypted-sqlite-backup";
 const BACKUP_FORMAT_VERSION: u32 = 1;

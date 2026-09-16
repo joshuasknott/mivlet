@@ -1,4 +1,4 @@
-import type { ToolApprovalGate } from "@fable/connectors";
+import type { ToolApprovalGate } from "@mivlet/connectors";
 import type {
   ActionHistoryEvent,
   ApprovalAuditEntry,
@@ -7,7 +7,7 @@ import type {
   ApprovalModification,
   ApprovalRequest,
   PermissionMode,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { RefObject } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { resolveApprovalFallback } from "../../lib/approval-fallbacks";

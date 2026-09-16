@@ -1,11 +1,11 @@
 import type {
   CollaborationWorkItem,
   ConversationRoom,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalProject,
   WorkOutput,
   WorkspaceView,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import {
   lazy,
@@ -242,7 +242,7 @@ function ActiveWorkspace({
     "usage" | "sign-out" | null
   >(null);
   const [usage, setUsage] = useState<
-    NonNullable<import("@fable/protocol").ExecutionAttempt["usage"]>[]
+    NonNullable<import("@mivlet/protocol").ExecutionAttempt["usage"]>[]
   >([]);
   const {
     layout, narrow, phone,
@@ -469,7 +469,7 @@ function ActiveWorkspace({
     return id;
   };
   const selectAgent = async (
-    agent: FableAgentProfile,
+    agent: MivletAgentProfile,
     newConversation = false,
     text?: string,
   ) => {

@@ -8,7 +8,7 @@
  * existing approval UI lets them modify before granting.
  */
 
-import type { BackendTool, NativeToolSpec } from "@fable/protocol";
+import type { BackendTool, NativeToolSpec } from "@mivlet/protocol";
 import { OFFICE_TOOLS } from "./office-tools";
 import { tokenPluginDefinitions } from "../providers/token-plugins";
 import { COLLABORATION_TOOLS, isCollaborationTool } from "./collaboration-tools";

@@ -1,4 +1,4 @@
-import { createRfb } from "./viewer/fable-rfb.js";
+import { createRfb } from "./viewer/mivlet-rfb.js";
 
 const screen = document.querySelector("#screen");
 const status = document.querySelector("#status");

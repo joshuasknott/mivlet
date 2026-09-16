@@ -27,8 +27,8 @@ import type {
   PreparedExecutionContext,
   ExecutionContextAudience,
   ExecutionContextReceipt
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { redactKnowledgeText } from "../redact";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
 import { splitsSurrogatePair } from "../retrieval/retrieve";
@@ -83,7 +83,7 @@ export interface AssembledContext extends PreparedExecutionContext {
 
 export interface ContextAuthorizationRules {
   /**
-   * Predicate over a connector, optional account, and exact Fable Connection.
+   * Predicate over a connector, optional account, and exact Mivlet Connection.
    * Return false to exclude that source before it enters the turn (for example,
    * after revocation or selection change). Defaults to allow-all.
    */

@@ -7,9 +7,9 @@
 import { describe, expect, it } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerHandler } from "./http.js";
 import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
 import { BROKER_AUTHORIZE_STATE_MIN_LENGTH } from "./stores.js";
@@ -21,8 +21,8 @@ function oauthState(tag: string): string {
 }
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
 };
 
 function providerFetch(): (input: string, init?: RequestInit) => Promise<Response> {
@@ -44,7 +44,7 @@ function providerFetch(): (input: string, init?: RequestInit) => Promise<Respons
 }
 
 function broker() {
-  return new FableBroker({ env: ENV, fetch: providerFetch() });
+  return new MivletBroker({ env: ENV, fetch: providerFetch() });
 }
 
 interface DriveResult { status: number; body: string; headers: Record<string, string | string[] | undefined>; location?: string }
@@ -189,7 +189,7 @@ describe("broker http routing + security", () => {
 
   it("every response carries a correlation id header", async () => {
     const result = await drive(handler(), "GET", "/healthz");
-    expect(result.headers["x-fable-request-id"]).toBeTruthy();
+    expect(result.headers["x-mivlet-request-id"]).toBeTruthy();
   });
 
   it("revoke route maps to the broker revoke operation", async () => {

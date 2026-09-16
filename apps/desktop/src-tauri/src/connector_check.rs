@@ -105,7 +105,7 @@ async fn check_chat(app: &tauri::AppHandle) -> Value {
     }
     let request_id = format!("connector-check-{}", std::process::id());
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    let listener = app.listen(format!("fable://codex/{request_id}"), move |event| {
+    let listener = app.listen(format!("mivlet://codex/{request_id}"), move |event| {
         if let Ok(value) = serde_json::from_str(event.payload()) {
             let _ = sender.send(value);
         }

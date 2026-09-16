@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ConnectorSourceCandidate } from "@fable/protocol";
+import type { ConnectorSourceCandidate } from "@mivlet/protocol";
 import {
   MAX_CANDIDATE_BYTES,
   SUPPORTED_EXTENSIONS,
@@ -208,7 +208,7 @@ describe("extract: malformed structured files (CSV/YAML)", () => {
   });
 
   it("rejects tab-indented YAML", () => {
-    const yaml = "name: Fable\n\tdetails: x\n";
+    const yaml = "name: Mivlet\n\tdetails: x\n";
     const result = classifyCandidate(
       candidate({
         mimeType: "application/yaml",
@@ -236,7 +236,7 @@ describe("extract: malformed structured files (CSV/YAML)", () => {
   });
 
   it("accepts well-formed YAML", () => {
-    const yaml = "name: Fable\nkind: app\n";
+    const yaml = "name: Mivlet\nkind: app\n";
     const result = classifyCandidate(
       candidate({
         mimeType: "application/yaml",

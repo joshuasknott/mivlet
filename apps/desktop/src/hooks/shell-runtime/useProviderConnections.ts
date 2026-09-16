@@ -3,14 +3,14 @@ import type {
   BackendProvider,
   BackendVerifyOutcome,
   BackendVerifyResult,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   hasRunnableAdapter,
   listBackendProviders,
   mergeDiscoveredModels,
   resolveCapabilities,
   type ModelDiscoveryResult,
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 import {
   modelsForProvider,
   providerModelOptions,
@@ -36,14 +36,14 @@ import { type PersistedShellState } from "../../lib/types";
 import { hasTauriRuntime } from "../../lib/persistence";
 import type { ModelDiscoveryOutcome } from "../../lib/backend-state";
 import {
-  enabledFableProviders,
-  isFableProviderEnabled,
+  enabledMivletProviders,
+  isMivletProviderEnabled,
 } from "../../lib/provider-availability";
 
 async function resolveUsableBackendProviders(
   providers: BackendProvider[],
 ): Promise<BackendProvider[]> {
-  const resolved = enabledFableProviders(providers);
+  const resolved = enabledMivletProviders(providers);
   const nativeVerification = new Map<string, BackendVerifyResult | null>();
 
   await Promise.all(
@@ -99,7 +99,7 @@ export function useProviderConnections({
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
     hasTauriRuntime()
       ? []
-      : initialState.connectedBackendIds.filter(isFableProviderEnabled),
+      : initialState.connectedBackendIds.filter(isMivletProviderEnabled),
   );
 
   // Agent-runtime backends. The Rust credential boundary resolves auth state
@@ -107,7 +107,7 @@ export function useProviderConnections({
   // shell stays testable. Preview connections remain visibly synthetic, while
   // the same provider gate is enforced in preview and native builds.
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(
-    () => enabledFableProviders(listBackendProviders()),
+    () => enabledMivletProviders(listBackendProviders()),
   );
 
   // Dynamically discovered model ids per native provider id, plus whether
@@ -352,7 +352,7 @@ export function useProviderConnections({
     providerId: string,
     secret: string,
   ): Promise<BackendVerifyResult> => {
-    if (!isFableProviderEnabled(providerId)) {
+    if (!isMivletProviderEnabled(providerId)) {
       const message =
         "This provider is not available in the current Mivlet release.";
       setBackendStatus(message);

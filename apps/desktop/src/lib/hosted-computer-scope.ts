@@ -3,7 +3,7 @@ import type {
   AccountWorkspaceStatus,
   AccountWorkspaceSummary,
   ActiveWorkspaceSelection,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /** Exact hosted computer identity. Never inferred from list order. */
 export interface HostedComputerScope {

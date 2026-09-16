@@ -1251,7 +1251,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "fable-desktop"
+name = "mivlet-desktop"
 version = "0.1.0"
 dependencies = [
  "aes-gcm",

@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "fable-auth-broker",
+  "name": "mivlet-auth-broker",
   "main": "src/worker.ts",
   "compatibility_date": "2026-06-30",
   "observability": {
@@ -8,36 +8,36 @@
     "head_sampling_rate": 1
   },
   "vars": {
-    "FABLE_BROKER_ENVIRONMENT": "local",
-    "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+    "MIVLET_BROKER_ENVIRONMENT": "local",
+    "MIVLET_BROKER_RATE_LIMIT_PER_MINUTE": "60",
     // Local/default Worker development keeps memory storage for deterministic tests.
-    // Memory is refused when FABLE_BROKER_PUBLIC_URL is public HTTPS.
+    // Memory is refused when MIVLET_BROKER_PUBLIC_URL is public HTTPS.
     // Unlabeled or local plus a public URL fails closed. Staging and production
     // envs below override this to "durable".
-    "FABLE_BROKER_STORAGE_BACKEND": "memory"
+    "MIVLET_BROKER_STORAGE_BACKEND": "memory"
   },
 
   "env": {
     "local": {
-      "name": "fable-auth-broker-local",
+      "name": "mivlet-auth-broker-local",
       "vars": {
-        "FABLE_BROKER_ENVIRONMENT": "local",
+        "MIVLET_BROKER_ENVIRONMENT": "local",
         // Loopback only. A public HTTPS URL with this local label fails closed.
-        "FABLE_BROKER_PUBLIC_URL": "http://127.0.0.1:8788/",
-        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
-        "FABLE_BROKER_STORAGE_BACKEND": "memory"
+        "MIVLET_BROKER_PUBLIC_URL": "http://127.0.0.1:8788/",
+        "MIVLET_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "MIVLET_BROKER_STORAGE_BACKEND": "memory"
       }
     },
 
     "staging": {
-      "name": "fable-auth-broker",
+      "name": "mivlet-auth-broker",
       "vars": {
-        "FABLE_BROKER_ENVIRONMENT": "staging",
-        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
-        "FABLE_BROKER_STORAGE_BACKEND": "durable"
-        // FABLE_BROKER_PUBLIC_URL is environment-specific non-secret config.
+        "MIVLET_BROKER_ENVIRONMENT": "staging",
+        "MIVLET_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "MIVLET_BROKER_STORAGE_BACKEND": "durable"
+        // MIVLET_BROKER_PUBLIC_URL is environment-specific non-secret config.
         // The live certification broker uses:
-        // https://fable-auth-broker.joshhknott.workers.dev/
+        // https://mivlet-auth-broker.joshhknott.workers.dev/
         // Keep provider callback URLs matched to that origin.
       },
       // Durable Object bindings for pending OAuth exchanges, single-use handoffs,
@@ -61,11 +61,11 @@
     },
 
     "production": {
-      "name": "fable-auth-broker-production",
+      "name": "mivlet-auth-broker-production",
       "vars": {
-        "FABLE_BROKER_ENVIRONMENT": "production",
-        "FABLE_BROKER_RATE_LIMIT_PER_MINUTE": "60",
-        "FABLE_BROKER_STORAGE_BACKEND": "durable"
+        "MIVLET_BROKER_ENVIRONMENT": "production",
+        "MIVLET_BROKER_RATE_LIMIT_PER_MINUTE": "60",
+        "MIVLET_BROKER_STORAGE_BACKEND": "durable"
         // Production is declared for review only in Batch 4. Do not deploy or
         // route traffic until provider certification and the remaining broker
         // security gates are complete.

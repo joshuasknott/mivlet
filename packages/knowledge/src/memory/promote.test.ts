@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { MemoryProvenance, MemorySuggestion } from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+import type { MemoryProvenance, MemorySuggestion } from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { approveSuggestion, promoteToMemory } from "./promote";
 
 const NOW = "2026-06-28T12:00:00.000Z";

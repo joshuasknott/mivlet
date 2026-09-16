@@ -11,17 +11,17 @@ import type {
   ConnectorAccountOption,
   ConnectorManifest,
   CustomApprovalSettings,
-  FableAgentProfile,
+  MivletAgentProfile,
   IdentityStatus,
   KnowledgeSource,
   MemoryControlState,
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type {
   ToolApprovalGate,
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 import type {
   ModelDiscoveryOutcome,
 } from "../../lib/backend-state";
@@ -42,10 +42,10 @@ export interface ShellRuntime {
   activeItem: string;
   setActiveItem: (value: string) => void;
 
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   activeAgentId: string;
-  createAgent: (input: Omit<FableAgentProfile, "id" | "threadId">) => FableAgentProfile;
-  updateAgent: (agentId: string, patch: Partial<Omit<FableAgentProfile, "id">>) => void;
+  createAgent: (input: Omit<MivletAgentProfile, "id" | "threadId">) => MivletAgentProfile;
+  updateAgent: (agentId: string, patch: Partial<Omit<MivletAgentProfile, "id">>) => void;
   removeAgent: (agentId: string) => void;
 
   // voice and imports

@@ -52,7 +52,7 @@ export interface LocalComputerFileEntry {
 }
 
 /**
- * Bounded, read-only projection for the trusted Fable UI. Paths are relative
+ * Bounded, read-only projection for the trusted Mivlet UI. Paths are relative
  * to this teammate's private workspace; this listing never includes host paths
  * or file contents.
  */
@@ -101,7 +101,7 @@ export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarg
 }
 
 /**
- * An ephemeral, explicitly selected text-file preview for the trusted Fable UI.
+ * An ephemeral, explicitly selected text-file preview for the trusted Mivlet UI.
  * The content must not enter model context, logs, or persisted runtime state.
  */
 export interface LocalComputerFilePreview {

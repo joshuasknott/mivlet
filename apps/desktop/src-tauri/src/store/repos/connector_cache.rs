@@ -1175,7 +1175,7 @@ mod tests {
         let store = store();
         live_connection(&store, "ws-a", "github");
         let mut value = item("github", "i1", "Deploy Script");
-        value["provenance"] = serde_json::json!("github://fable/release");
+        value["provenance"] = serde_json::json!("github://mivlet/release");
         value["contentPreview"] = serde_json::json!("kubernetes rollout status");
         store
             .transaction(|tx| upsert_from_value(tx, &store, "ws-a", value, "now"))

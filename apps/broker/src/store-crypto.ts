@@ -16,7 +16,7 @@
  * Used only by durable adapters; memory path and Node tests never call here.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
+import type { BrokerProviderId } from "@mivlet/connectors";
 import {
   base64url,
   base64urlToBytes,
@@ -27,8 +27,8 @@ import {
 } from "./crypto-web.js";
 
 const ENVELOPE_VERSION = 1;
-const HKDF_INFO_PENDING = "fable-broker-store:v1:pending-verifier";
-const HKDF_INFO_HANDOFF = "fable-broker-store:v1:handoff-payload";
+const HKDF_INFO_PENDING = "mivlet-broker-store:v1:pending-verifier";
+const HKDF_INFO_HANDOFF = "mivlet-broker-store:v1:handoff-payload";
 
 const TEXT_ENCODER = new TextEncoder(); // local for AAD consts if needed
 

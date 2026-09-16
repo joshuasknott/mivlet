@@ -69,7 +69,7 @@ function markdownReport({ commandResults, assets, pnpmVersion, budgetCheck }) {
   const totalCssGzip = sum(cssAssets, "gzipBytes");
   const now = new Date().toISOString();
   const lines = [
-    "# Fable Performance Baseline",
+    "# Mivlet Performance Baseline",
     "",
     `Generated: ${now}`,
     "",

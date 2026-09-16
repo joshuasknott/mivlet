@@ -1,4 +1,4 @@
-import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
+import type { ApprovalRequest, ApprovalResolutionRequest } from "@mivlet/protocol";
 import { beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration, listRuntimeMcpServerConfigurations, prepareRuntimeMcpServerConfiguration, setRuntimeMcpEnablement, type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration } from "../runtime/domains/mcp";
 import { resolveRuntimeApprovalRequest } from "../runtime/domains/approvals";
 import { remoteConnectorServerId, type RemoteConnector } from "../components/marketplace/remote-connectors";

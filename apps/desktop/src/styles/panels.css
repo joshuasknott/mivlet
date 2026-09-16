@@ -402,7 +402,7 @@
 
 /* ---------- Shared page loading / error states ---------- */
 
-@keyframes fable-spin {
+@keyframes mivlet-spin {
   to {
     transform: rotate(360deg);
   }

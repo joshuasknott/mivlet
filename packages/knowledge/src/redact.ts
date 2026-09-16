@@ -7,8 +7,8 @@
  * shared omit sentinel.
  */
 
-import type { KnowledgeSource, SourceChunk } from "@fable/protocol";
-import { redactSecretTextOrOmit } from "@fable/protocol";
+import type { KnowledgeSource, SourceChunk } from "@mivlet/protocol";
+import { redactSecretTextOrOmit } from "@mivlet/protocol";
 import { contentHash } from "./ingestion/hash";
 
 /** Redact secret-shaped spans, or omit the whole string if a marker remains. */

@@ -10,7 +10,7 @@ import type {
   ScopedRecordMetadata
 } from "./primitives.js";
 
-/** The authorized-instance shapes Fable can expose without conflating transport. */
+/** The authorized-instance shapes Mivlet can expose without conflating transport. */
 export const CONNECTION_KINDS = [
   "native-connector",
   "provider-runtime",
@@ -43,6 +43,7 @@ export const CONNECTION_HEALTH_STATES = [
 ] as const;
 export type ConnectionHealthState = (typeof CONNECTION_HEALTH_STATES)[number];
 
+/** Includes persisted `fable-reviewed`; do not rename without a store migration. */
 export const CONNECTION_TRUST_LEVELS = [
   "first-party",
   "fable-reviewed",
@@ -89,6 +90,7 @@ export type McpTransport = (typeof MCP_TRANSPORTS)[number];
 export const MCP_DISCOVERY_STATES = ["not-started", "discovered", "stale", "failed"] as const;
 export type McpDiscoveryState = (typeof MCP_DISCOVERY_STATES)[number];
 
+/** Includes persisted `fable-managed`; do not rename without a store migration. */
 export const EXECUTION_PLACEMENT_KINDS = [
   "local-desktop",
   "fable-managed",
@@ -223,7 +225,7 @@ export interface CredentialBindingMetadata {
   refreshSupported: boolean;
 }
 
-/** An opaque external identity hint for display and audit, never Fable identity. */
+/** An opaque external identity hint for display and audit, never Mivlet identity. */
 export interface ExternalPrincipalReference {
   provider: string;
   opaqueSubjectReference?: string;
@@ -496,7 +498,7 @@ export interface CapabilityResolutionFailure {
 export const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION =
   "fable.connected-source-search.v1" as const;
 
-/** Fable-owned citation shape shared by native and MCP source-search routes. */
+/** Mivlet-owned citation shape shared by native and MCP source-search routes. */
 export interface ConnectedSourceCitation {
   citationId: string;
   sourceId: string;
@@ -510,7 +512,7 @@ export interface ConnectedSourceCitation {
 
 /**
  * Provider-neutral result consumed by the model when producing a cited brief.
- * External implementations supply source facts only; Fable stamps scope,
+ * External implementations supply source facts only; Mivlet stamps scope,
  * trust, authority, Connection, grants, and implementation evidence.
  */
 export interface ConnectedSourceSearchResult {

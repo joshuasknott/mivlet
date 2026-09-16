@@ -11,7 +11,7 @@
  * flows through the injected {@link BackendDeps}.
  */
 
-import type { BackendCapability, BackendProvider } from "@fable/protocol";
+import type { BackendCapability, BackendProvider } from "@mivlet/protocol";
 import type { AgentBackend, BackendDeps } from "./contract";
 import { createRegisteredBackend, hasRegisteredAdapter } from "./adapter-registry";
 

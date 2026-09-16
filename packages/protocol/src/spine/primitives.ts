@@ -1,4 +1,4 @@
-declare const fableIdBrand: unique symbol;
+declare const mivletIdBrand: unique symbol;
 
 /**
  * Version of the portable product-spine vocabulary. This advances only when a
@@ -9,27 +9,27 @@ export const PRODUCT_SPINE_CONTRACT_VERSION = "3.0.0" as const;
 /** Initial schema shape for records governed by the product spine. */
 export const PRODUCT_SPINE_SCHEMA_VERSION = 1 as const;
 
-export type FableId<Kind extends string> = string & {
-  readonly [fableIdBrand]: Kind;
+export type MivletId<Kind extends string> = string & {
+  readonly [mivletIdBrand]: Kind;
 };
 
-export type InternalUserId = FableId<"internal-user">;
-export type ExternalIdentityId = FableId<"external-identity">;
-export type WorkspaceId = FableId<"workspace">;
-export type MemberId = FableId<"member">;
-export type InvitationId = FableId<"invitation">;
-export type RoleId = FableId<"role">;
-export type DeviceId = FableId<"device">;
-export type ExecutionNodeId = FableId<"execution-node">;
-export type ThreadId = FableId<"thread">;
-export type MessageId = FableId<"message">;
-export type MessageRevisionId = FableId<"message-revision">;
-export type ConversationTombstoneId = FableId<"conversation-tombstone">;
-export type ConnectionId = FableId<"connection">;
-export type ProviderRouteId = FableId<"provider-route">;
-export type CapabilityId = FableId<"capability">;
-export type CapabilityGrantId = FableId<"capability-grant">;
-export type RunId = FableId<"run">;
+export type InternalUserId = MivletId<"internal-user">;
+export type ExternalIdentityId = MivletId<"external-identity">;
+export type WorkspaceId = MivletId<"workspace">;
+export type MemberId = MivletId<"member">;
+export type InvitationId = MivletId<"invitation">;
+export type RoleId = MivletId<"role">;
+export type DeviceId = MivletId<"device">;
+export type ExecutionNodeId = MivletId<"execution-node">;
+export type ThreadId = MivletId<"thread">;
+export type MessageId = MivletId<"message">;
+export type MessageRevisionId = MivletId<"message-revision">;
+export type ConversationTombstoneId = MivletId<"conversation-tombstone">;
+export type ConnectionId = MivletId<"connection">;
+export type ProviderRouteId = MivletId<"provider-route">;
+export type CapabilityId = MivletId<"capability">;
+export type CapabilityGrantId = MivletId<"capability-grant">;
+export type RunId = MivletId<"run">;
 
 export type IsoDateTime = string;
 export type SchemaVersion = number;

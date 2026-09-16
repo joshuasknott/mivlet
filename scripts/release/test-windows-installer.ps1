@@ -34,7 +34,7 @@ function Find-MivletUninstall {
   )
   foreach ($attempt in 1..20) {
     $record = Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -in @("Mivlet", "Fable") } |
+      Where-Object { $_.DisplayName -in @("Mivlet", "Mivlet") } |
       Select-Object -First 1
     if ($record) { return $record }
     Start-Sleep -Milliseconds 250
@@ -50,7 +50,7 @@ function Assert-MivletUnregistered {
   )
   foreach ($attempt in 1..20) {
     $record = Get-ItemProperty -Path $roots -ErrorAction SilentlyContinue |
-      Where-Object { $_.DisplayName -in @("Mivlet", "Fable") } |
+      Where-Object { $_.DisplayName -in @("Mivlet", "Mivlet") } |
       Select-Object -First 1
     if (-not $record) { return }
     Start-Sleep -Milliseconds 250

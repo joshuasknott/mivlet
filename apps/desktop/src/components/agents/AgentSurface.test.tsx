@@ -1,11 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import { AgentLearningDialog } from "./AgentLearningDialog";
 import { AgentSidebar } from "./AgentSidebar";
 
-const agent: FableAgentProfile = {
+const agent: MivletAgentProfile = {
   id: "agent-1",
   name: "Mira",
   instructions: "Help with product writing.",

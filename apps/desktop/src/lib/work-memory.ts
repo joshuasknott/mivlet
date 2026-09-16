@@ -3,7 +3,7 @@ import type {
   MemoryControlState,
   MemoryRecord,
   WorkOutput,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /** Native Memory bounds; the promotion editor enforces the same limits. */

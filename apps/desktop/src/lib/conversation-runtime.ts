@@ -1,6 +1,6 @@
-import { redactSecretsFromObject, redactSecretsFromString } from "@fable/connectors/agent-runtime";
-import { SECRET_CONTENT_OMITTED, secretMarkerSurvives } from "@fable/protocol";
-import type { Spine } from "@fable/protocol";
+import { redactSecretsFromObject, redactSecretsFromString } from "@mivlet/connectors/agent-runtime";
+import { SECRET_CONTENT_OMITTED, secretMarkerSurvives } from "@mivlet/protocol";
+import type { Spine } from "@mivlet/protocol";
 
 export type ConversationThread = Spine.Conversations.Thread;
 type ConversationMessage = Spine.Conversations.Message;

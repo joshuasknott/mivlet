@@ -37,6 +37,7 @@ mod conversations;
 mod diagnostics;
 mod embedded_agent;
 mod embedded_mcp;
+mod env_compat;
 mod execution_approvals;
 mod execution_attempts;
 mod execution_control;

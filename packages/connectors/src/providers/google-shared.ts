@@ -7,7 +7,7 @@ import type {
   ConnectorStatus,
   ConnectorTokenSet,
   SupportedConnectorId
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export const GOOGLE_CONNECTOR_IDS = [
   "google-drive",
@@ -294,7 +294,7 @@ export function googleReconnectMessage(connectorId: GoogleConnectorId): string {
 
 export function googleConfigurationMessage(connectorId: GoogleConnectorId): string {
   const profile = googleConnectorProfile(connectorId);
-  return `Enable ${profile.requiredApis.join(", ")}, configure OAuth consent, create a desktop OAuth client, and set FABLE_GOOGLE_OAUTH_CLIENT_ID.`;
+  return `Enable ${profile.requiredApis.join(", ")}, configure OAuth consent, create a desktop OAuth client, and set MIVLET_GOOGLE_OAUTH_CLIENT_ID.`;
 }
 
 export function assertGoogleConnectorId(connectorId: ConnectorId): asserts connectorId is GoogleConnectorId {

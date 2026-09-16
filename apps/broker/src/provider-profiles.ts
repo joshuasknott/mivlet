@@ -13,7 +13,7 @@ import {
   SLACK_OAUTH_SCOPES,
   VERCEL_OAUTH_SCOPES,
   type BrokerProviderId
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
 /**
  * How a provider wants PKCE handled by the broker.
@@ -81,8 +81,8 @@ const GITHUB_PROFILE: ProviderProfile = {
   revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/token`,
   identityEndpoint: "https://api.github.com/user",
   scopes: [...GITHUB_OAUTH_SCOPES],
-  clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_GITHUB_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_GITHUB_CLIENT_SECRET",
   pkce: "broker-pkce",
   supportsRefresh: false,
   tokenRequestStyle: "form",
@@ -108,8 +108,8 @@ const VERCEL_PROFILE: ProviderProfile = {
   revocationEndpoint: "",
   identityEndpoint: "https://api.vercel.com/v2/user",
   scopes: [...VERCEL_OAUTH_SCOPES],
-  clientIdEnv: "FABLE_BROKER_VERCEL_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_VERCEL_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_VERCEL_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_VERCEL_CLIENT_SECRET",
   pkce: "broker-pkce",
   supportsRefresh: false,
   tokenRequestStyle: "form-without-grant-type",
@@ -135,8 +135,8 @@ const LINEAR_PROFILE: ProviderProfile = {
   revocationEndpoint: "https://api.linear.app/oauth/revoke",
   identityEndpoint: "https://api.linear.app/graphql",
   scopes: [...LINEAR_OAUTH_SCOPES],
-  clientIdEnv: "FABLE_BROKER_LINEAR_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_LINEAR_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_LINEAR_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_LINEAR_CLIENT_SECRET",
   pkce: "broker-pkce",
   scopeSeparator: ",",
   supportsRefresh: true,
@@ -168,8 +168,8 @@ const NOTION_PROFILE: ProviderProfile = {
   identityEndpoint: "https://api.notion.com/v1/users/me",
   scopes: [],
   authorizationParams: { owner: "user" },
-  clientIdEnv: "FABLE_BROKER_NOTION_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_NOTION_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_NOTION_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_NOTION_CLIENT_SECRET",
   pkce: "none",
   supportsRefresh: true,
   tokenRequestStyle: "json-basic",
@@ -196,8 +196,8 @@ const SLACK_PROFILE: ProviderProfile = {
   revocationEndpoint: "https://slack.com/api/auth.revoke",
   identityEndpoint: "https://slack.com/api/auth.test",
   scopes: [...SLACK_OAUTH_SCOPES],
-  clientIdEnv: "FABLE_BROKER_SLACK_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_SLACK_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_SLACK_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_SLACK_CLIENT_SECRET",
   pkce: "none",
   scopeSeparator: ",",
   supportsRefresh: false,

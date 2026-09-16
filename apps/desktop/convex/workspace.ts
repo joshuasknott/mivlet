@@ -1,7 +1,7 @@
 import { mutationGeneric, queryGeneric } from "convex/server";
 import { v } from "convex/values";
 import { requireConvexAccountIdentity, type ValidatedDisplayProfile } from "./convexAuth";
-import { requireFableUser } from "./authorization";
+import { requireMivletUser } from "./authorization";
 
 const device = v.object({ deviceId: v.string(), kind: v.union(v.literal("desktop"), v.literal("mobile"), v.literal("web")), label: v.string(), publicKey: v.string() });
 const opaqueId = (kind: string) => `${kind}_${crypto.randomUUID()}`;
@@ -119,7 +119,7 @@ export const bootstrapAccount = mutationGeneric({
 export const listMine = queryGeneric({
   args: {},
   handler: async (ctx) => {
-    const { user } = await requireFableUser(ctx);
+    const { user } = await requireMivletUser(ctx);
     const memberships = await ctx.db.query("workspace_memberships").withIndex("by_internal_user", (q: any) => q.eq("internalUserId", user.internalUserId)).collect();
     const activeMemberships = memberships.filter((membership: any) => membership.status === "active");
     const entries = await Promise.all(activeMemberships.map(async (membership: any) => {

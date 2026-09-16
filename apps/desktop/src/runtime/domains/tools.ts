@@ -1,6 +1,6 @@
 import { invokeNative } from "../bridge";
 
-import type { ApprovalResolutionRequest } from "@fable/protocol";
+import type { ApprovalResolutionRequest } from "@mivlet/protocol";
 
 // Rust revalidates the exact approval and native scope before executing a tool.
 // This renderer module never grants host-shell access or performs file writes.

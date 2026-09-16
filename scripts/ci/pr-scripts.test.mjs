@@ -9,7 +9,7 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
 
 test('test:pr excludes the Windows agent-host package the way Linux PR CI does', () => {
-  assert.match(pkg.scripts['test:pr'], /--filter '!@fable\/agent-host'/);
+  assert.match(pkg.scripts['test:pr'], /--filter '!@mivlet\/agent-host'/);
   assert.equal(pkg.scripts['test:ci'], 'pnpm test:pr');
 });
 
@@ -17,6 +17,6 @@ test('Linux TypeScript job runs test:pr; Windows host job runs test:host', () =>
   assert.match(ci, /^\s+- run: pnpm test:pr$/m);
   assert.match(ci, /^\s+- run: pnpm test:host$/m);
   assert.doesNotMatch(ci, /^\s+- run: pnpm test$/m);
-  assert.equal(pkg.scripts['test:host'], 'pnpm --filter @fable/agent-host test');
+  assert.equal(pkg.scripts['test:host'], 'pnpm --filter @mivlet/agent-host test');
   assert.equal(pkg.scripts['check:pr'], 'pnpm typecheck && pnpm quality && pnpm test:pr');
 });

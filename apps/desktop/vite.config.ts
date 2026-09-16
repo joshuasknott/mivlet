@@ -16,23 +16,23 @@ export default defineConfig({
   resolve: {
     alias: [
       {
-        find: /^@fable\/connectors\/(.+)$/,
+        find: /^@mivlet\/connectors\/(.+)$/,
         replacement: `${fileURLToPath(new URL("../../packages/connectors/src", import.meta.url))}/$1`,
       },
       {
-        find: "@fable/protocol",
+        find: "@mivlet/protocol",
         replacement: fileURLToPath(
           new URL("../../packages/protocol/src/index.ts", import.meta.url),
         ),
       },
       {
-        find: "@fable/connectors",
+        find: "@mivlet/connectors",
         replacement: fileURLToPath(
           new URL("../../packages/connectors/src/index.ts", import.meta.url),
         ),
       },
       {
-        find: "@fable/knowledge",
+        find: "@mivlet/knowledge",
         replacement: fileURLToPath(
           new URL("../../packages/knowledge/src/index.ts", import.meta.url),
         ),

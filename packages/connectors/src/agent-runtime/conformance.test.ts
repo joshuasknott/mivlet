@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import { registeredToolSpecs } from "../native-api/tools";
-import type { BackendProvider, BackendAgentEvent, BackendCapability } from "@fable/protocol";
+import type { BackendProvider, BackendAgentEvent, BackendCapability } from "@mivlet/protocol";
 import { resolveAgentBackend, type BackendDeps } from "./index";
 import { createCodexBackend } from "./adapters/codex";
 import { createNativeApiBackend } from "./adapters/native-api";
 import { MockCodexAppServer, MockHttpTransport } from "./testing/fake-backend-utils";
 import { redactSecretsFromString, redactSecretsFromObject } from "./utils/redact";
-import type { AgentTurnRequest, AgentTurnOptions } from "@fable/protocol";
+import type { AgentTurnRequest, AgentTurnOptions } from "@mivlet/protocol";
 import type { CodexAppServerEvent } from "./contract";
 
 /** Connected, streaming native-API provider. */

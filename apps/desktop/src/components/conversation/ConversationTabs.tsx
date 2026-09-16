@@ -6,7 +6,7 @@ import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import type {
   ConversationLayout,
   ConversationLayoutNode,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { type LayoutAction } from "../../lib/conversation-layout";
 
 /** A contextual New target: it names the object it will create. */

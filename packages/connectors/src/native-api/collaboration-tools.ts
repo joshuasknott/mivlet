@@ -1,4 +1,4 @@
-import type { BackendTool, NativeToolSpec } from "@fable/protocol";
+import type { BackendTool, NativeToolSpec } from "@mivlet/protocol";
 
 const field = (maxLength: number) => ({
   type: "string",

@@ -1,5 +1,5 @@
 import { toRuntimeError } from "../errors";
-import type { ExecutionAttempt, RuntimeSnapshot } from "@fable/protocol";
+import type { ExecutionAttempt, RuntimeSnapshot } from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
 
 export async function loadRuntimeSnapshot(

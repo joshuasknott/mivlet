@@ -1,4 +1,4 @@
-The original SVG connector marks come from [Simple Icons 16.29.0](https://github.com/simple-icons/simple-icons/tree/16.29.0), distributed under CC0. The additional site icons below are obtained from the companies' own sites and are not covered by that CC0 license. Marks identify third-party integrations and remain the property of their respective owners. Fable does not imply endorsement.
+The original SVG connector marks come from [Simple Icons 16.29.0](https://github.com/simple-icons/simple-icons/tree/16.29.0), distributed under CC0. The additional site icons below are obtained from the companies' own sites and are not covered by that CC0 license. Marks identify third-party integrations and remain the property of their respective owners. Mivlet does not imply endorsement.
 
 | Mark | Original source |
 | --- | --- |

@@ -1,7 +1,7 @@
-import type { ConnectorManifest, NativeToolSpec } from "@fable/protocol";
-import { registeredToolSpecs } from "@fable/connectors/native-api/tools";
+import type { ConnectorManifest, NativeToolSpec } from "@mivlet/protocol";
+import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
 import { remoteConnectorFor } from "../components/marketplace/remote-connectors";
-import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
+import { tokenPluginFor } from "@mivlet/connectors/providers/token-plugins";
 
 export const CONNECTOR_READ_TOOLS: Record<string, string> = {
   "google-drive-read": "google-drive",

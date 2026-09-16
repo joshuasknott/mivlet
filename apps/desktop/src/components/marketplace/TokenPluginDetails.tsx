@@ -1,8 +1,8 @@
-import type { TokenPluginDefinition } from "@fable/connectors/providers/token-plugins";
+import type { TokenPluginDefinition } from "@mivlet/connectors/providers/token-plugins";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { useRef, useState } from "react";
 import { connectorConnectionsChanged } from "../../lib/connector-connections";
 import { connectRuntimeTokenPlugin } from "../../runtime/domains/connectors";
