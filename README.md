@@ -248,7 +248,9 @@ pnpm tauri:check
 ```
 
 Daily Linux PR loops can use `pnpm check:pr` (or `pnpm test:pr` for the package
-tests). The Windows embedded-host suite is `pnpm test:host`.
+tests). The Windows embedded-host suite is `pnpm test:host`. `pnpm lint` is
+security-subset ESLint (`lint:security`) plus the explicit-any ratchet, not
+typed or React lint.
 
 For Rust changes, also run:
 

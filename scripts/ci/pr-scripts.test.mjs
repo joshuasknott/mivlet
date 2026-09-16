@@ -20,3 +20,9 @@ test('Linux TypeScript job runs test:pr; Windows host job runs test:host', () =>
   assert.equal(pkg.scripts['test:host'], 'pnpm --filter @mivlet/agent-host test');
   assert.equal(pkg.scripts['check:pr'], 'pnpm typecheck && pnpm quality && pnpm test:pr');
 });
+
+test('lint:security is the ESLint security subset; lint stays the umbrella', () => {
+  assert.equal(pkg.scripts['lint:security'], 'eslint apps packages scripts --max-warnings=0');
+  assert.equal(pkg.scripts['lint'], 'pnpm lint:security && node scripts/quality/check-explicit-any.mjs');
+  assert.doesNotMatch(pkg.scripts['lint:security'], /audit/);
+});
