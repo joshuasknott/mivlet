@@ -1203,7 +1203,7 @@ pub(crate) fn validate_connector_execution_request(
     crate::permission_policy::ensure_permission_allowed(
         route_mode,
         action.permission_profile.as_deref(),
-        "connector-write",
+        crate::permission_policy::effect_for_connector_action(&action.action),
         &action.approval.risk_level,
     )
     .map_err(|message| command_error("approval-required", &action.connector_id, &message, false))?;
@@ -1287,7 +1287,7 @@ pub(crate) fn validate_connector_action(
     crate::permission_policy::ensure_permission_allowed(
         route_mode,
         request.permission_profile.as_deref(),
-        "connector-write",
+        crate::permission_policy::effect_for_connector_action(&request.action),
         request.approval.risk_level.as_str(),
     )
     .map_err(|message| command_error("approval-required", entry.id, &message, false))?;

@@ -72,8 +72,11 @@ conversation or provider secrets.
 
 Retrieved files, connector results, websites, and model output cannot grant
 authority. Tools use strict schemas and bounds. The approval record binds the
-exact proposed effect and is rechecked immediately before dispatch. Replayed or
-stale permits, changed browser controls, unknown tools, and scope changes fail.
+exact proposed effect and is rechecked immediately before dispatch. TypeScript
+and native permission-policy evaluators share one effect and allow-set
+vocabulary, including connector publish and delete effects; unknown tools fail
+closed. Replayed or stale permits, changed browser controls, and scope changes
+fail.
 
 ### Native application control
 
