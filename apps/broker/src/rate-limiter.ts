@@ -101,19 +101,36 @@ export function newCorrelationId(): string {
   return base64url(randomBytes(12));
 }
 
+/**
+ * Query, fragment, and JSON keys that carry the single-use handoff ticket (or an
+ * equivalent opaque ticket alias). Callers must run request lines through
+ * {@link redactForLog} before logging so these values never reach operator logs.
+ */
+export const BROKER_LOG_REDACT_TICKET_KEYS = ["handoff", "ticket"] as const;
+
 /** Redact any value that looks like a secret/token from a string before logging. */
 export function redactForLog(input: string): string {
   return input
     // Bearer tokens / long opaque strings after authorization keywords.
     .replace(/(Bearer\s+)[A-Za-z0-9._\-]+/gi, "$1[redacted]")
-    // URL query params that carry secrets/codes.
-    .replace(/(code=)[^&\s]+/gi, "$1[redacted]")
-    .replace(/(token=)[^&\s]+/gi, "$1[redacted]")
-    .replace(/(access_token=)[^&\s]+/gi, "$1[redacted]")
-    .replace(/(refresh_token=)[^&\s]+/gi, "$1[redacted]")
-    .replace(/(client_secret=)[^&\s]+/gi, "$1[redacted]")
-    // JSON string fields holding token-like values.
+    // URL query/fragment params that carry secrets, codes, or handoff tickets.
+    // Longer names first so generic `token=` / `code=` do not double-rewrite.
+    // `[^&\s#]+` stops at fragment delimiters as well as query separators.
+    .replace(/(access_token=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(refresh_token=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(client_secret=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(code_verifier=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(codeVerifier=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(handoff=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(ticket=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(code=)[^&\s#]+/gi, "$1[redacted]")
+    .replace(/(token=)[^&\s#]+/gi, "$1[redacted]")
+    // JSON string fields holding token-like or ticket values.
     .replace(/"access_token"\s*:\s*"[^"]*"/gi, '"access_token":"[redacted]"')
     .replace(/"refresh_token"\s*:\s*"[^"]*"/gi, '"refresh_token":"[redacted]"')
-    .replace(/"client_secret"\s*:\s*"[^"]*"/gi, '"client_secret":"[redacted]"');
+    .replace(/"client_secret"\s*:\s*"[^"]*"/gi, '"client_secret":"[redacted]"')
+    .replace(/"handoff"\s*:\s*"[^"]*"/gi, '"handoff":"[redacted]"')
+    .replace(/"ticket"\s*:\s*"[^"]*"/gi, '"ticket":"[redacted]"')
+    .replace(/"code_verifier"\s*:\s*"[^"]*"/gi, '"code_verifier":"[redacted]"')
+    .replace(/"codeVerifier"\s*:\s*"[^"]*"/gi, '"codeVerifier":"[redacted]"');
 }

@@ -9,9 +9,10 @@
  * same handler backs both transports.
  *
  * Security invariants (unchanged from the Node-only version):
- *   - Secrets and provider tokens never cross this layer into logs or responses.
- *     The token set appears only in the handoff-redeem response body (the one
- *     allowed crossing) and is never logged.
+ *   - Secrets, provider tokens, and handoff tickets never cross this layer into
+ *     logs or error responses. The token set appears only in the handoff-redeem
+ *     response body (the one allowed crossing) and is never logged. Request
+ *     lines including query and fragment go through {@link redactForLog}.
  *   - Every error response is a redacted {@link BrokerErrorResponse}.
  *   - `state` is single-use and consumed before any token exchange (enforced in
  *     the broker service, not here).
@@ -123,7 +124,7 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
       try {
         const limit = await limiter.check(rateLimitKey(url.pathname, peer));
         if (!limit.allowed) {
-          log(redactLog("rate-limited", request.method, url.pathname, correlation));
+          log(redactLog("rate-limited", request.method, url, correlation));
           return jsonResponse(
             429,
             new BrokerContractError("rate-limited", "Too many broker requests.", true).toResponse(),
@@ -138,7 +139,7 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
         return await route(request, url, segments, options.broker, corsHeaders, correlation);
       } catch (error) {
         const { status, response } = toBrokerErrorPayload(error);
-        log(redactLog(response.error, request.method, url.pathname, correlation));
+        log(redactLog(response.error, request.method, url, correlation));
         return jsonResponse(
           status,
           response,
@@ -194,7 +195,16 @@ async function route(
     const { redirect } = await broker.callback(provider, url.searchParams);
     return new Response(null, {
       status: 302,
-      headers: { ...headers, ...corsHeaders, location: redirect.toString(), "cache-control": "no-store" }
+      headers: {
+        ...headers,
+        ...corsHeaders,
+        location: redirect.toString(),
+        "cache-control": "no-store",
+        // The landing URL carries the single-use handoff ticket in the query
+        // (native loopback HTTP cannot observe fragments). Do not send that
+        // URL as a Referer to any subsequent request.
+        "referrer-policy": "no-referrer"
+      }
     });
   }
 
@@ -416,8 +426,9 @@ function loopbackOrigins(): string[] {
 }
 
 /** Redact-then-log a request line as structured JSON. Never logs bodies/tokens. */
-function redactLog(event: string, method: string | undefined, path: string, correlation: string): string {
-  const safe = redactForLog(`${method ?? "?"} ${path}`);
+function redactLog(event: string, method: string | undefined, url: URL, correlation: string): string {
+  const requestLine = `${method ?? "?"} ${url.pathname}${url.search}${url.hash}`;
+  const safe = redactForLog(requestLine);
   return JSON.stringify({ level: "info", event, path: safe, correlationId: correlation });
 }
 

@@ -16,7 +16,10 @@
  *      the confidential exchange with the provider secret + its verifier, resolves
  *      identity, issues a single-use short-lived handoff ticket bound to the state
  *      and desktop challenge, and 302-redirects the browser to the desktop's exact
- *      redirect_uri with the handoff + state as query params
+ *      redirect_uri with the handoff + state as query params. A URL fragment cannot
+ *      carry the ticket: native loopback HTTP omits fragments from the
+ *      request-target, so fragment delivery would break desktop redeem. The
+ *      desktop redeems immediately over POST /handoff in the same callback turn.
  *
  * 2. Handoff redemption, refresh, revocation: direct (non-browser) POSTs from the
  *    desktop. Redeem requires the desktop PKCE verifier. The token set crosses
@@ -302,9 +305,7 @@ export class MivletBroker {
           codeChallenge: pending.codeChallenge
         });
 
-    const redirect = new URL(pending.redirectUri);
-    redirect.searchParams.set("handoff", ticket);
-    redirect.searchParams.set("state", state);
+    const redirect = desktopHandoffRedirect(pending.redirectUri, ticket, state);
     return { redirect };
   }
 
@@ -450,6 +451,21 @@ function validateDesktopRedirect(value: string, allowed: Set<string>): void {
   if ((!loopback && !exact) || redirect.username || redirect.password || redirect.search || redirect.hash) {
     throw new BrokerContractError("invalid-request", "Desktop redirect URI is not allowed.", false);
   }
+}
+
+/**
+ * Build the desktop landing URL after a successful confidential exchange.
+ *
+ * The ticket stays in the query string (not a fragment): the native loopback
+ * HTTP parser only sees the request-target, and browsers omit fragments there.
+ * Fragment delivery would break desktop redeem. The desktop POSTs `/handoff`
+ * in the same callback turn; the ticket remains 60s TTL and single-use.
+ */
+function desktopHandoffRedirect(redirectUri: string, ticket: string, state: string): URL {
+  const redirect = new URL(redirectUri);
+  redirect.searchParams.set("handoff", ticket);
+  redirect.searchParams.set("state", state);
+  return redirect;
 }
 
 function rejectDuplicateCallbackParams(query: URLSearchParams, keys: readonly string[]): void {
