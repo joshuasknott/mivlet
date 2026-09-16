@@ -75,4 +75,40 @@ describe("approveSuggestion", () => {
     expect("duplicateOfId" in record).toBe(false);
     expect("contradictsId" in record).toBe(false);
   });
+
+  it("scrubs secret-shaped suggestion values before they become approved memory", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const suggestion: MemorySuggestion = {
+      id: "sug-secret-1",
+      title: "API key",
+      value: `Keep the launch key ${leaked} in the vault.`,
+      kind: "fact",
+      provenance: { origin: "chat", note: "Inferred." },
+      confidence: 0.8
+    };
+
+    const record = approveSuggestion(suggestion, NOW);
+
+    expect(record.value).toContain("Keep the launch key");
+    expect(record.value).not.toContain(leaked);
+    expect(record.value).toContain("[REDACTED]");
+  });
+});
+
+describe("promoteToMemory — secret-shaped values", () => {
+  it("scrubs secret-shaped values before they are stored as approved memory", () => {
+    const leaked = "sk-ant-12345678901234567890abc123";
+    const record = promoteToMemory({
+      title: "Deploy token",
+      value: `The deploy token is ${leaked} for staging.`,
+      kind: "fact",
+      provenance: chatProvenance,
+      now: NOW
+    });
+
+    expect(record.approved).toBe(true);
+    expect(record.value).toContain("The deploy token is");
+    expect(record.value).not.toContain(leaked);
+    expect(record.value).toContain("[REDACTED]");
+  });
 });

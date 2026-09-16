@@ -233,6 +233,13 @@ pub fn omitted_marker() -> &'static str {
     &vocabulary().omitted
 }
 
+/// True when redacted text still has surrounding prose. Empty strings and the
+/// omit sentinel must not re-enter model context.
+pub fn is_usable_redacted_text(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty() && trimmed != omitted_marker()
+}
+
 /// Scan a string for known credential shapes and replace them in place.
 pub fn redact_secret_text(value: &str) -> String {
     if value.is_empty() {
@@ -351,6 +358,9 @@ mod tests {
             redact_secret_text_or_omit("Launch plan milestone"),
             "Launch plan milestone"
         );
+        assert!(is_usable_redacted_text("Launch plan milestone"));
+        assert!(!is_usable_redacted_text(""));
+        assert!(!is_usable_redacted_text(omitted_marker()));
     }
 
     #[test]

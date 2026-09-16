@@ -15,6 +15,7 @@ export * from "./domains/search.js";
 export * from "./domains/voice.js";
 export {
   isSensitiveSecretKey,
+  isUsableRedactedText,
   looksLikeSecret,
   redactSecretText,
   redactSecretTextOrOmit,

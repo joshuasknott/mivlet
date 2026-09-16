@@ -24,6 +24,7 @@ use crate::paths::approval_audit_path;
 use crate::paths::{
     file_slug, imported_knowledge_path, memory_state_path, normalize_spaces, truncate_characters,
 };
+use crate::secret_redaction;
 use crate::store::repos::scope::PrivateDataScope;
 
 fn default_memory_state() -> MemoryControlState {
@@ -37,11 +38,11 @@ pub(crate) fn normalize_memory_record(record: MemoryRecord) -> Result<MemoryReco
     let id = normalize_spaces(&record.id);
     let kind = normalize_spaces(&record.kind).to_ascii_lowercase();
     let title = truncate_characters(
-        &normalize_spaces(&record.title),
+        &secret_redaction::redact_secret_text_or_omit(&normalize_spaces(&record.title)),
         MAX_MEMORY_TITLE_CHARACTERS,
     );
     let value = truncate_characters(
-        &normalize_spaces(&record.value),
+        &secret_redaction::redact_secret_text_or_omit(&normalize_spaces(&record.value)),
         MAX_MEMORY_VALUE_CHARACTERS,
     );
     let source = truncate_characters(
@@ -392,7 +393,7 @@ pub(crate) fn promote_knowledge_source(
         .source
         .content_preview
         .as_deref()
-        .map(normalize_spaces)
+        .map(|preview| secret_redaction::redact_secret_text_or_omit(&normalize_spaces(preview)))
         .unwrap_or_default();
 
     if source_id.is_empty() || title.is_empty() || provenance.is_empty() {
@@ -408,7 +409,7 @@ pub(crate) fn promote_knowledge_source(
         return Err("Memory is disabled.".to_string());
     }
 
-    let value = if preview.is_empty() {
+    let value = if preview.is_empty() || !secret_redaction::is_usable_redacted_text(&preview) {
         format!("{title} from {provenance}. Freshness: {freshness}.")
     } else {
         preview
@@ -652,8 +653,8 @@ fn apply_correction(
     if record.updated_at != correction.expected_updated_at {
         return Err("This memory changed. Reopen it before saving your correction.".into());
     }
-    record.title = correction.title.trim().into();
-    record.value = correction.value.trim().into();
+    record.title = secret_redaction::redact_secret_text_or_omit(correction.title.trim());
+    record.value = secret_redaction::redact_secret_text_or_omit(correction.value.trim());
     record.updated_at = Some(chrono::Utc::now().to_rfc3339());
     record.freshness = "Corrected by you".into();
     Ok(())
@@ -1122,5 +1123,39 @@ mod tests {
         let value: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         assert_eq!(value["records"].as_array().unwrap().len(), 1);
         assert_eq!(value["records"][0]["provenance"]["sourceId"], "source-1");
+    }
+
+    #[test]
+    fn promote_knowledge_source_scrubs_secret_shaped_preview() {
+        let leaked = "sk-12345678901234567890abc123";
+        let mut promotion = request("source-secret");
+        promotion.source.content_preview = Some(format!("Launch plan. my key is {leaked}"));
+        let response = promote_knowledge_source(promotion).unwrap();
+        assert!(response.record.value.contains("Launch plan"));
+        assert!(!response.record.value.contains(leaked));
+        assert!(response.record.value.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn promote_knowledge_source_does_not_store_omit_only_preview() {
+        let mut promotion = request("source-omit");
+        promotion.source.content_preview = Some("[content omitted: secret-shaped content]".into());
+        let response = promote_knowledge_source(promotion).unwrap();
+        assert!(!response
+            .record
+            .value
+            .contains("[content omitted: secret-shaped content]"));
+        assert!(response.record.value.contains("Forged title"));
+    }
+
+    #[test]
+    fn normalize_memory_record_scrubs_secret_shaped_values() {
+        let leaked = "sk-ant-12345678901234567890abc123";
+        let mut item = record("secret");
+        item.value = format!("Keep the launch key {leaked} in the vault.");
+        let normalized = normalize_memory_record(item).unwrap();
+        assert!(normalized.value.contains("Keep the launch key"));
+        assert!(!normalized.value.contains(leaked));
+        assert!(normalized.value.contains("[REDACTED]"));
     }
 }

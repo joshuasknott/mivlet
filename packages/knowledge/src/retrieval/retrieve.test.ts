@@ -774,4 +774,34 @@ describe("retrieve — secret-shaped content", () => {
     );
     expect(result.citations.every((citation) => !citation.snippet.includes(leaked))).toBe(true);
   });
+
+  it("drops omit-only chunks instead of returning them as citations", async () => {
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "omit-doc", title: "Launch omit", scope: GLOBAL_SCOPE }), [
+          makeChunk("omit-doc", 0, "[content omitted: secret-shaped content]")
+        ]),
+        src(makeSource({ id: "live-doc", title: "Launch plan" }), [
+          makeChunk("live-doc", 0, "Launch plan milestone")
+        ])
+      ],
+      { query: "launch plan" }
+    );
+    expect(result.citations.map((citation) => citation.sourceId)).toEqual(["live-doc"]);
+    expect(result.citations.every((citation) => !citation.snippet.includes("[content omitted"))).toBe(
+      true
+    );
+  });
+
+  it("does not auto-retrieve a global omit-only preview into a thread run", async () => {
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "global-omit", title: "Global notes", scope: GLOBAL_SCOPE }), [
+          makeChunk("global-omit", 0, "[content omitted: secret-shaped content]")
+        ])
+      ],
+      { query: "notes", scope: { level: "thread", threadId: "t1" } }
+    );
+    expect(result.citations).toEqual([]);
+  });
 });

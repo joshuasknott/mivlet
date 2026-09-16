@@ -29,7 +29,12 @@ import type {
   SourceStatus
 } from "@mivlet/protocol";
 import { GLOBAL_SCOPE } from "@mivlet/protocol";
-import { redactKnowledgeChunk, redactKnowledgeSourcePreview, redactKnowledgeText } from "../redact";
+import {
+  isUsableKnowledgeText,
+  redactKnowledgeChunk,
+  redactKnowledgeSourcePreview,
+  redactKnowledgeText
+} from "../redact";
 import { authorityScopeAllowsAudience, isLiveSource, scopeSatisfies } from "../store";
 import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
@@ -223,10 +228,12 @@ export async function retrieve(
     userSelectedSourceIds: options.userSelectedSourceIds,
     isAuthorized: options.isAuthorized,
     audience: options.audience
-  }).map(({ source, chunks }) => ({
-    source: redactKnowledgeSourcePreview(source),
-    chunks: chunks.map(redactKnowledgeChunk)
-  }));
+  })
+    .map(({ source, chunks }) => ({
+      source: redactKnowledgeSourcePreview(source),
+      chunks: chunks.map(redactKnowledgeChunk).filter((chunk) => isUsableKnowledgeText(chunk.text))
+    }))
+    .filter(({ chunks }) => chunks.length > 0);
   const queryTokens = tokenize(query);
 
   // Gather all chunks for corpus statistics (lexical IDF).
@@ -367,7 +374,7 @@ export async function retrieve(
     const snippet = redactKnowledgeText(
       makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining))
     );
-    if (!snippet) continue;
+    if (!isUsableKnowledgeText(snippet)) continue;
     citations.push(toCitation(scored0, snippet));
     used += snippet.length;
   }

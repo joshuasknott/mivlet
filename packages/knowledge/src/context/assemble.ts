@@ -29,7 +29,7 @@ import type {
   ExecutionContextReceipt
 } from "@mivlet/protocol";
 import { GLOBAL_SCOPE } from "@mivlet/protocol";
-import { redactKnowledgeText } from "../redact";
+import { isUsableKnowledgeText, redactKnowledgeText } from "../redact";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
 import { splitsSurrogatePair } from "../retrieval/retrieve";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
@@ -192,8 +192,10 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     if (!record || !isLiveMemory(record)) continue;
     if (!authorityScopeAllowsAudience(record.authorityScope, input.audience)) continue;
     if (!isMemoryAuthorized(record, isAuthorized)) continue;
+    const fields = redactedMemoryFields(record);
+    if (!fields) continue;
     pinnedMemorySeen.add(record.id);
-    pushPart(`Pinned memory — ${record.title}: ${record.value}`);
+    pushPart(`Pinned memory — ${fields.title}: ${fields.value}`);
     usage.push({ id: record.id, kind: "memory", reason: "pinned" });
   }
 
@@ -217,7 +219,9 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     const memoryLines: string[] = ["Approved memory (authoritative):"];
     for (const record of orderedMemory) {
       if (appliedMemory.has(record.id)) continue;
-      memoryLines.push(`- ${record.title}: ${record.value}`);
+      const fields = redactedMemoryFields(record);
+      if (!fields) continue;
+      memoryLines.push(`- ${fields.title}: ${fields.value}`);
       appliedMemory.add(record.id);
       usage.push({
         id: record.id,
@@ -319,7 +323,7 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     // the same defense-in-depth the memory path applies).
     if (!scopeSatisfies(citation.scope ?? GLOBAL_SCOPE, scope)) continue;
     const excerpt = truncate(redactKnowledgeText(citation.snippet), MAX_EXCERPT_CHARS);
-    if (!excerpt) continue;
+    if (!isUsableKnowledgeText(excerpt)) continue;
     const line = `- [${citation.sourceId}] ${citation.title}: ${excerpt}`;
     // Skip (not stop): a later, smaller line may still fit — inclusion stays
     // within the budget either way.
@@ -398,6 +402,20 @@ function immutableReceipt(receipt: ExecutionContextReceipt): ExecutionContextRec
   Object.freeze(receipt.citations);
   Object.freeze(receipt.contributions);
   return Object.freeze(receipt);
+}
+
+/**
+ * Scrub memory title/value before they enter the prefix. Omit-only values
+ * never contribute: they would otherwise re-enter as authoritative context.
+ */
+function redactedMemoryFields(record: MemoryRecord): { title: string; value: string } | null {
+  const title = redactKnowledgeText(record.title);
+  const value = redactKnowledgeText(record.value);
+  if (!isUsableKnowledgeText(value)) return null;
+  return {
+    title: isUsableKnowledgeText(title) ? title : "Memory",
+    value
+  };
 }
 
 /** A memory is authorized when its provenance source (if any) is authorized. */

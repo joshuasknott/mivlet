@@ -4,7 +4,7 @@ import {
   SECRET_REDACTED,
   SECRET_REDACTION_CASES
 } from "@mivlet/protocol";
-import { redactKnowledgeChunk, redactKnowledgeText } from "./redact";
+import { isUsableKnowledgeText, redactKnowledgeChunk, redactKnowledgeText } from "./redact";
 
 describe("knowledge secret redaction", () => {
   for (const fixture of SECRET_REDACTION_CASES) {
@@ -41,5 +41,12 @@ describe("knowledge secret redaction", () => {
     expect(chunk.contentHash).not.toBe("original");
     expect(chunk.charStart).toBe(0);
     expect(chunk.charEnd).toBe(40);
+  });
+
+  it("treats omit-only text as unusable for model context", () => {
+    expect(isUsableKnowledgeText("")).toBe(false);
+    expect(isUsableKnowledgeText("   ")).toBe(false);
+    expect(isUsableKnowledgeText(SECRET_CONTENT_OMITTED)).toBe(false);
+    expect(isUsableKnowledgeText("Launch plan milestone")).toBe(true);
   });
 });
