@@ -6,6 +6,7 @@ import {
 } from "@mivlet/connectors/native-api/tools";
 import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
+import type { NativeAgentRunControl } from "../hooks/useNativeAgent";
 import { useExecutionController } from "./useExecutionController";
 import type {
   ExecutionSession,
@@ -338,7 +339,7 @@ export function ExecutionWorker({
               attempt.current = attemptId;
               adopted = true;
             },
-          },
+          } satisfies NativeAgentRunControl,
         );
         if (!service.current(session)) return;
         if (attempt.current && outcome) {

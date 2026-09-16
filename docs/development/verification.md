@@ -22,6 +22,9 @@ snapshot persistence and execution ownership explicit when separating shell code
 `WorkspaceExecution` retains execution ownership. Native-agent regressions are
 split into context, persistence, recovery, cancellation and provider suites;
 their shared `native-agent-test-harness.ts` supplies deterministic native transport.
+The hook implementation lives in `hooks/native-agent/` behind the stable
+`hooks/useNativeAgent.ts` facade (`useNativeAgent`, `NativeAgentState`,
+`UseNativeAgentOptions`, `NativeAgentRunControl`).
 
 Generated logs, screenshots, reports and build comparisons belong under the
 ignored `output/` directory or the system temporary directory, not the repository

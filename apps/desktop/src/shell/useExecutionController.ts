@@ -3,7 +3,10 @@ import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useHostedBrowserController } from "../hooks/useHostedBrowserController";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
-import { useNativeAgent } from "../hooks/useNativeAgent";
+import {
+  useNativeAgent,
+  type UseNativeAgentOptions,
+} from "../hooks/useNativeAgent";
 import {
   createDesktopDurableRunWriter,
   loadDesktopConversation,
@@ -35,9 +38,7 @@ export function useExecutionController({
     executor: import("@mivlet/connectors").ToolExecutor,
   ) => import("@mivlet/connectors").ToolExecutor;
   onApproval: (id: string) => void;
-  attributeHistory: NonNullable<
-    import("../hooks/useNativeAgent").UseNativeAgentOptions["attributeHistory"]
-  >;
+  attributeHistory: NonNullable<UseNativeAgentOptions["attributeHistory"]>;
   threadId?: string;
   executionAgentId?: string;
   executionProviderId?: string;
