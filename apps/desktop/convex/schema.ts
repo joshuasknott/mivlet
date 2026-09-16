@@ -193,5 +193,6 @@ export default defineSchema({
     updatedAt: v.number(),
   })
     .index("by_request", ["requestKey"])
-    .index("by_workspace", ["workspaceId"]),
+    .index("by_workspace", ["workspaceId"])
+    .index("by_computer_operation_status", ["computerId", "operation", "status"]),
 });
