@@ -29,6 +29,7 @@ import type {
   SourceStatus
 } from "@fable/protocol";
 import { GLOBAL_SCOPE } from "@fable/protocol";
+import { redactKnowledgeChunk, redactKnowledgeSourcePreview, redactKnowledgeText } from "../redact";
 import { authorityScopeAllowsAudience, isLiveSource, scopeSatisfies } from "../store";
 import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
@@ -222,7 +223,10 @@ export async function retrieve(
     userSelectedSourceIds: options.userSelectedSourceIds,
     isAuthorized: options.isAuthorized,
     audience: options.audience
-  });
+  }).map(({ source, chunks }) => ({
+    source: redactKnowledgeSourcePreview(source),
+    chunks: chunks.map(redactKnowledgeChunk)
+  }));
   const queryTokens = tokenize(query);
 
   // Gather all chunks for corpus statistics (lexical IDF).
@@ -360,7 +364,9 @@ export async function retrieve(
   for (const scored0 of limited) {
     const remaining = budgetChars - used;
     if (remaining <= 0) break;
-    const snippet = makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining));
+    const snippet = redactKnowledgeText(
+      makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining))
+    );
     if (!snippet) continue;
     citations.push(toCitation(scored0, snippet));
     used += snippet.length;

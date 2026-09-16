@@ -744,3 +744,34 @@ describe("retrieve — audience privacy", () => {
     expect(result.citations.map((citation) => citation.sourceId)).toContain("legacy-missing");
   });
 });
+
+describe("retrieve — secret-shaped content", () => {
+  it("does not retrieve leaked credentials into citation snippets", async () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "secret-doc", title: "Launch notes" }), [
+          makeChunk("secret-doc", 0, `Launch plan milestone. my key is ${leaked}`)
+        ])
+      ],
+      { query: "launch plan" }
+    );
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0].snippet).toContain("Launch plan");
+    expect(result.citations[0].snippet).not.toContain(leaked);
+    expect(result.citations[0].snippet).toContain("[REDACTED]");
+  });
+
+  it("does not rank a source by an already-stored secret token", async () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "secret-doc", title: "Notes" }), [
+          makeChunk("secret-doc", 0, `export GITHUB_TOKEN=${leaked}`)
+        ])
+      ],
+      { query: leaked }
+    );
+    expect(result.citations.every((citation) => !citation.snippet.includes(leaked))).toBe(true);
+  });
+});

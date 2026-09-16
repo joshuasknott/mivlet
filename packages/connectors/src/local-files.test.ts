@@ -132,3 +132,19 @@ describe("local files connector: metadata preservation", () => {
     expect(imported.modifiedAt).toBe("2026-06-01T00:00:00.000Z");
   });
 });
+
+describe("local files connector: secret-shaped content", () => {
+  it("redacts secret-shaped previews before the import is stored", () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const content = `Ship Friday. export GITHUB_TOKEN=${leaked} then deploy.`;
+    const imported = importLocalTextFile({
+      name: "notes.md",
+      content,
+      sizeBytes: new TextEncoder().encode(content).byteLength
+    });
+    expect(imported.contentPreview).toContain("Ship Friday");
+    expect(imported.contentPreview).not.toContain(leaked);
+    expect(imported.contentPreview).toContain("[REDACTED]");
+    expect(imported.contentFingerprint).toBe(localFileFingerprint(content));
+  });
+});

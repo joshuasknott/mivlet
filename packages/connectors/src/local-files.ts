@@ -1,4 +1,5 @@
 import type { LocalFileImport } from "@fable/protocol";
+import { redactSecretTextOrOmit } from "@fable/protocol";
 
 export const MAX_LOCAL_FILE_BYTES = 2 * 1024 * 1024;
 export const MAX_LOCAL_FILE_PREVIEW_CHARACTERS = 6_000;
@@ -171,7 +172,9 @@ export function importLocalTextFile(candidate: LocalTextFileCandidate): LocalFil
     freshness: "Imported now",
     pinned: true,
     trust: "untrusted",
-    contentPreview: candidate.content.slice(0, MAX_LOCAL_FILE_PREVIEW_CHARACTERS),
+    contentPreview: redactSecretTextOrOmit(
+      candidate.content.slice(0, MAX_LOCAL_FILE_PREVIEW_CHARACTERS)
+    ),
     contentFingerprint: fingerprint,
     sizeBytes: actualSizeBytes,
     importedAt: candidate.importedAt ?? new Date().toISOString(),

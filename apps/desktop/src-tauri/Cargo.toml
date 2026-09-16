@@ -19,6 +19,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Compiles the shared TypeScript/Rust secret-redaction patterns from
+# packages/protocol/src/secret-redaction.json (already in the lockfile).
+regex = "1.12.4"
 tauri = { version = "2", features = [] }
 # Native OS notifications for completion, failure, and approval-needed states.
 # Pinned to the Tauri 2 plugin line; bodies are shaped (privacy-safe) in TS.

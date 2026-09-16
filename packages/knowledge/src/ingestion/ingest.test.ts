@@ -555,3 +555,46 @@ describe("ingest: incremental reindex + lifecycle", () => {
     expect(result.removedSourceIds).toHaveLength(0);
   });
 });
+
+describe("ingestCandidate: secret-shaped content", () => {
+  it("redacts secret-shaped previews and chunks before they are stored", () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const content = `# Notes\n\nShip Friday. export GITHUB_TOKEN=${leaked}\nthen deploy.`;
+    const outcome = ingestCandidate(candidate({ content, sizeBytes: content.length }), {
+      connectorId: "local-files"
+    });
+    expect(outcome.kind).toBe("created");
+    if (outcome.kind !== "created") return;
+    expect(outcome.source.contentPreview).toContain("Ship Friday");
+    expect(outcome.source.contentPreview).toContain("then deploy");
+    expect(outcome.source.contentPreview).not.toContain(leaked);
+    expect(outcome.source.contentPreview).toContain("[REDACTED]");
+    expect(outcome.source.contentFingerprint).toBe(contentHash(content));
+    expect(outcome.chunks.some((chunk) => chunk.text.includes("Ship Friday"))).toBe(true);
+    expect(outcome.chunks.some((chunk) => chunk.text.includes(leaked))).toBe(false);
+  });
+
+  it("omits a chunk when a secret marker survives surgical redaction", () => {
+    const leaked = "sk-live-this-is-not-a-real-openai-key-value-xxxxxxxx";
+    const content = `notes ${leaked}`;
+    const outcome = ingestCandidate(
+      candidate({ title: "notes.txt", mimeType: "text/plain", content, sizeBytes: content.length }),
+      { connectorId: "local-files" }
+    );
+    expect(outcome.kind).toBe("created");
+    if (outcome.kind !== "created") return;
+    const stored = `${outcome.source.contentPreview ?? ""}\n${outcome.chunks.map((chunk) => chunk.text).join("\n")}`;
+    expect(stored).not.toContain(leaked);
+  });
+
+  it("does not treat ordinary prose as secret-shaped", () => {
+    const content = "# Notes\n\nread-file src/index.ts and github-read repo issues.";
+    const outcome = ingestCandidate(candidate({ content, sizeBytes: content.length }), {
+      connectorId: "local-files"
+    });
+    expect(outcome.kind).toBe("created");
+    if (outcome.kind !== "created") return;
+    expect(outcome.source.contentPreview).toContain("read-file src/index.ts");
+    expect(outcome.chunks[0].text).toContain("github-read repo issues");
+  });
+});
