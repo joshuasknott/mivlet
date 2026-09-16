@@ -4,6 +4,7 @@ import type {
   PermissionMode,
   PermissionProfileId
 } from "@mivlet/protocol";
+import vocabulary from "./permission-policy.json" with { type: "json" };
 
 export type PermissionEffect =
   | "coordination"
@@ -38,55 +39,29 @@ export interface PermissionPolicyDecision {
   reason: string;
 }
 
-const PROFILE_FOR_MODE: Record<PermissionMode, PermissionProfileId> = {
-  "read-only": "read-only",
-  "trusted-scope": "trusted",
-  "full-access": "full-with-approvals"
-};
+const PROFILE_FOR_MODE = vocabulary.profileForMode as Record<PermissionMode, PermissionProfileId>;
 
-const MODE_FOR_PROFILE: Record<PermissionProfileId, PermissionMode> = {
-  "read-only": "read-only",
-  trusted: "trusted-scope",
-  "full-with-approvals": "full-access"
-};
+const MODE_FOR_PROFILE = Object.fromEntries(
+  Object.entries(PROFILE_FOR_MODE).map(([mode, profile]) => [profile, mode])
+) as Record<PermissionProfileId, PermissionMode>;
 
-const READ_ONLY_ALLOWED = new Set<PermissionEffect>([
-  "coordination",
-  "local-read",
-  "connector-read",
-  "web-fetch",
-  "browser-read",
-  "cache-read"
-]);
-
-const TRUSTED_ALLOWED = new Set<PermissionEffect>([
-  ...READ_ONLY_ALLOWED,
-  "local-write",
-  "connector-write",
-  "browser-state-mutation",
-  "app-state-mutation",
-  "delete",
-  "publish-external",
-  "memory-promotion"
-]);
-
-const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>([
-  "delete",
-  "shell-execution",
-  "connector-write",
-  "publish-external",
-  "cache-mutation",
-  "memory-promotion",
-  "browser-state-mutation"
-]);
-
-const CONSEQUENTIAL_EFFECTS = new Set<PermissionEffect>([
-  "local-write",
-  "app-state-mutation",
-  ...HIGH_SEVERITY_EFFECTS
-]);
-
-const HIGH_RISKS = new Set<ApprovalRiskLevel>(["high", "critical"]);
+const READ_ONLY_ALLOWED = new Set<PermissionEffect>(
+  vocabulary.readOnlyAllowed as PermissionEffect[]
+);
+const TRUSTED_ALLOWED = new Set<PermissionEffect>(
+  vocabulary.trustedAllowed as PermissionEffect[]
+);
+const HIGH_SEVERITY_EFFECTS = new Set<PermissionEffect>(
+  vocabulary.highSeverityEffects as PermissionEffect[]
+);
+const CONSEQUENTIAL_EFFECTS = new Set<PermissionEffect>(
+  vocabulary.consequentialEffects as PermissionEffect[]
+);
+const HIGH_RISKS = new Set<ApprovalRiskLevel>(vocabulary.highRisks as ApprovalRiskLevel[]);
+const TOOL_EFFECTS = vocabulary.toolEffects as Record<string, PermissionEffect>;
+const CONNECTOR_DELETE_ACTIONS = new Set<string>(vocabulary.connectorDeleteActions);
+const CONNECTOR_PUBLISH_ACTIONS = new Set<string>(vocabulary.connectorPublishActions);
+const BROWSER_ACTION_EFFECTS = vocabulary.browserActionEffects as Record<string, PermissionEffect>;
 
 export function permissionProfileForMode(mode: PermissionMode): PermissionProfileId {
   return PROFILE_FOR_MODE[mode];
@@ -114,73 +89,8 @@ export function normalizePermissionProfile(input: {
 }
 
 export function effectForTool(toolName: string): PermissionEffect | null {
-  switch (toolName) {
-    case "teammate-assign":
-    case "project-record":
-    case "team-await-user":
-      return "coordination";
-    case "read-file":
-    case "computer-artifact":
-      return "local-read";
-    case "write-file":
-    case "create-spreadsheet":
-    case "create-document":
-    case "generate-image":
-    case "edit-image":
-      return "local-write";
-    case "run-shell":
-      return "shell-execution";
-    case "web-fetch":
-      return "web-fetch";
-    case "local-app-observe":
-    case "local-app-list":
-    case "local-app-select":
-    case "local-desktop-observe":
-      return "browser-read";
-    case "local-app-action":
-    case "local-desktop-action":
-    case "cloud-browser":
-    case "cloud-browser-action":
-      return "browser-state-mutation";
-    case "connection-read":
-    case "connector-tools":
-    case "github-read":
-    case "plugin-read":
-    case "vercel-read":
-    case "linear-read":
-    case "google-drive-read":
-    case "gmail-read":
-    case "google-calendar-read":
-    case "search-notion":
-    case "search-slack":
-      return "connector-read";
-    case "connector-call":
-    case "connector-action":
-      return "connector-write";
-    default:
-      return null;
-  }
+  return TOOL_EFFECTS[toolName] ?? null;
 }
-
-const CONNECTOR_DELETE_ACTIONS = new Set<string>([
-  "google-drive.delete-file",
-  "notion.delete-block",
-  "slack.delete",
-  "google-calendar.delete-event",
-  "vercel.delete-domain"
-]);
-
-const CONNECTOR_PUBLISH_ACTIONS = new Set<string>([
-  "gmail.send",
-  "slack.post",
-  "slack.reply",
-  "slack.edit",
-  "notion.create-comment",
-  "google-drive.share-file",
-  "vercel.promote",
-  "vercel.rollback",
-  "google-calendar.cancel-event"
-]);
 
 export function effectForConnectorAction(action: string): PermissionEffect {
   if (CONNECTOR_DELETE_ACTIONS.has(action)) return "delete";
@@ -189,26 +99,7 @@ export function effectForConnectorAction(action: string): PermissionEffect {
 }
 
 export function effectForBrowserAction(action: string): PermissionEffect | null {
-  switch (action) {
-    case "browser.read-url":
-    case "browser.read-title":
-      return "browser-read";
-    case "browser.download":
-      return "local-write";
-    case "browser.submit":
-    case "browser.upload":
-    case "browser.clipboard-write":
-      return "publish-external";
-    case "browser.navigate":
-    case "browser.click":
-    case "browser.type":
-    case "browser.select":
-    case "browser.screenshot":
-    case "browser.clipboard-read":
-      return "browser-state-mutation";
-    default:
-      return null;
-  }
+  return BROWSER_ACTION_EFFECTS[action] ?? null;
 }
 
 export function isHighSeverityEffect(effect: PermissionEffect): boolean {
@@ -227,7 +118,7 @@ export function evaluatePermissionPolicy(input: PermissionPolicyInput): Permissi
       effect,
       allowed: false,
       approvalRequired: false,
-      reason: "Read-only only permits safe local, connector, cache, and web reads."
+      reason: vocabulary.reasons.readOnlyDenied
     };
   }
 
@@ -238,7 +129,7 @@ export function evaluatePermissionPolicy(input: PermissionPolicyInput): Permissi
       effect,
       allowed: false,
       approvalRequired: false,
-      reason: "Trusted profile blocks shell execution and cache mutation."
+      reason: vocabulary.reasons.trustedDenied
     };
   }
 
@@ -252,8 +143,8 @@ export function evaluatePermissionPolicy(input: PermissionPolicyInput): Permissi
     allowed: true,
     approvalRequired,
     reason: approvalRequired
-      ? "This action is allowed only through the approval and audit boundary."
-      : "This read-like action is allowed by the active permission profile."
+      ? vocabulary.reasons.approvalRequired
+      : vocabulary.reasons.readLikeAllowed
   };
 }
 
