@@ -299,3 +299,5 @@ export function useWorkspaceNavigation(options: {
     openPanelChat,
   };
 }
+
+export type WorkspaceNavigation = ReturnType<typeof useWorkspaceNavigation>;

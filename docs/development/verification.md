@@ -18,8 +18,13 @@ snapshot persistence and execution ownership explicit when separating shell code
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
-`shell/useWorkspaceNavigation.ts` owns view restoration and navigation, while
-`WorkspaceExecution` retains execution ownership. Native-agent regressions are
+`shell/TeammateWorkspace.tsx` remains the public shell entry (account, theme,
+and onboarding). `shell/ActiveWorkspace.tsx` owns live workspace composition
+and `WorkspaceExecution` service wiring. Conversation chrome, the context
+panel, and overlay dialogs live beside it; `workspace-presentation.ts` owns
+indicator, preview, and new-action parity. Lazy route islands stay in
+`workspace-lazy.tsx`. `shell/useWorkspaceNavigation.ts` owns view restoration
+and navigation, while `WorkspaceExecution` retains execution ownership. Native-agent regressions are
 split into context, persistence, recovery, cancellation and provider suites;
 their shared `native-agent-test-harness.ts` supplies deterministic native transport.
 The hook implementation lives in `hooks/native-agent/` behind the stable
