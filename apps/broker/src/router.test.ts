@@ -131,10 +131,14 @@ async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broke
     "127.0.0.1"
   );
   expect(callbackRes.status).toBe(302);
+  expect(callbackRes.headers.get("referrer-policy")).toBe("no-referrer");
   const location = callbackRes.headers.get("location")!;
   // The token never appears in the desktop redirect — only the opaque handoff.
   expect(location).not.toContain("provider-access-token");
   const url = new URL(location);
+  // Query (not fragment): native loopback HTTP cannot observe fragments.
+  expect(url.searchParams.get("handoff")).toBeTruthy();
+  expect(url.hash).toBe("");
   return { handoff: url.searchParams.get("handoff")!, state: url.searchParams.get("state")!, location };
 }
 
@@ -292,5 +296,24 @@ describe("router: lifecycle + transport", () => {
     expect(lines.join("\n")).not.toContain("gh-secret");
     expect(lines.join("\n")).not.toContain("provider-access-token");
     void router; // router built for symmetry; limiter path is the subject
+  });
+
+  it("redacts handoff tickets from logged request URLs", async () => {
+    const lines: string[] = [];
+    const log = (line: string) => lines.push(line);
+    const { router } = makeRouter(ENV, providerFetch("github"));
+    const ticket = "live-handoff-ticket-value";
+    const alias = "live-ticket-alias-value";
+    const res = await router.handle(
+      makeRequest("GET", `/oauth/github/handoff?handoff=${ticket}&ticket=${alias}`),
+      "127.0.0.1",
+      log
+    );
+    expect(res.status).toBe(400);
+    const joined = lines.join("\n");
+    expect(joined).not.toContain(ticket);
+    expect(joined).not.toContain(alias);
+    expect(joined).toContain("handoff=[redacted]");
+    expect(joined).toContain("ticket=[redacted]");
   });
 });

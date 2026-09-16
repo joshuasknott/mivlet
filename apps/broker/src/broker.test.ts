@@ -453,6 +453,10 @@ describe("broker token redaction invariant", () => {
     const { redirect } = await broker.callback("github", new URLSearchParams({ code: "c", state: oauthState("redact") }));
     expect(redirect.toString()).not.toContain("provider-access-token");
     expect(redirect.toString()).not.toContain("gh-secret");
+    // Desktop redeem reads query params from native loopback HTTP (no fragment).
+    expect(redirect.searchParams.get("handoff")).toBeTruthy();
+    expect(redirect.hash).toBe("");
+    expect(BROKER_HANDOFF_TTL_SECONDS).toBe(60);
     const health = broker.health();
     expect(JSON.stringify(health)).not.toContain("secret");
     expect(JSON.stringify(health)).not.toContain("token");

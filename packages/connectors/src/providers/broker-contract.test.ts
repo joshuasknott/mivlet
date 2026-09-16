@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BROKER_HANDOFF_TTL_SECONDS,
   BROKER_PKCE_CHALLENGE_METHOD,
   BROKER_PKCE_S256_EXAMPLE,
   BrokerContractError,
@@ -37,5 +38,9 @@ describe("broker PKCE contract", () => {
     expect(() => assertBrokerPkceVerifier(`${"a".repeat(42)}+`)).toThrow(/code_verifier is invalid/);
     expect(() => assertBrokerPkceVerifier("a".repeat(43))).not.toThrow();
     expect(() => assertBrokerPkceVerifier("a".repeat(128))).not.toThrow();
+  });
+
+  it("keeps the handoff ticket at a 60-second single-use TTL", () => {
+    expect(BROKER_HANDOFF_TTL_SECONDS).toBe(60);
   });
 });

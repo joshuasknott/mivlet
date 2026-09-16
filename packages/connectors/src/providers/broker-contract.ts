@@ -41,7 +41,12 @@ export type BrokerProviderId = (typeof BROKER_PROVIDER_IDS)[number];
 /** Contract schema version. Bumped on a breaking change to any shape below. */
 export const BROKER_CONTRACT_VERSION = 1 as const;
 
-/** Handoff token lifetime in seconds. Short by design: single-use and redeemed over a direct call. */
+/**
+ * Handoff token lifetime in seconds. Short by design: single-use and redeemed
+ * over a direct call immediately after the desktop loopback receives the
+ * callback (native HTTP cannot observe URL fragments, so the ticket remains in
+ * the loopback query for that one turn).
+ */
 export const BROKER_HANDOFF_TTL_SECONDS = 60;
 
 /** The only PKCE method this contract accepts. `plain` and omitted methods fail closed. */
@@ -101,8 +106,14 @@ export interface BrokerAuthorizeResponse {
 
 /**
  * The single-use handoff that the broker mints after it completes the
- * confidential exchange with the provider. It crosses to the desktop ONLY through
- * a short-lived redirect query parameter; the desktop then redeems it directly.
+ * confidential exchange with the provider. It crosses to the desktop ONLY as an
+ * opaque ticket on the short-lived loopback redirect; the desktop then redeems
+ * it directly over POST `/handoff` in the same callback turn.
+ *
+ * Native loopback HTTP cannot receive URL fragments (browsers omit them from
+ * the request-target), so the ticket is delivered as a query parameter rather
+ * than a fragment. Operator logs must redact `handoff=` and related ticket
+ * keys. TTL is {@link BROKER_HANDOFF_TTL_SECONDS}; redeeming twice fails closed.
  *
  * It intentionally carries NO token data — only an opaque ticket + the desktop
  * `state` it is bound to. Tokens are handed over only at handoff redemption.

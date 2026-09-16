@@ -142,6 +142,7 @@ describe("broker http routing + security", () => {
     expect(result.location).toContain("http://127.0.0.1:1/callback");
     expect(result.location).toContain("handoff=");
     expect(result.location).not.toContain("access-token");
+    expect(String(result.headers["referrer-policy"] ?? "")).toBe("no-referrer");
   });
 
   it("rejects an unsupported contract version with a structured redacted error", async () => {
