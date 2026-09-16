@@ -2,6 +2,10 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
+import {
+  EXECUTION_CAPABILITY_MINT_WINDOW_MS,
+  RATE_LIMITED_CODE,
+} from "./executionCapabilityMintRate";
 
 const EXECUTION_CAPABILITY_SCOPES = [
   "process:launch",
@@ -35,6 +39,7 @@ const KNOWN_FAILURES: ReadonlyArray<{
   { match: "invalid-request", status: 400, errorMessage: "invalid-request" },
   { match: "runner-configuration-required", status: 503, errorMessage: "runner-configuration-required" },
   { match: "runner-configuration-invalid", status: 503, errorMessage: "runner-configuration-invalid" },
+  { match: RATE_LIMITED_CODE, status: 429, errorMessage: RATE_LIMITED_CODE },
 ];
 
 const KEBAB_STATUS: Record<string, number> = {
@@ -51,10 +56,12 @@ const KEBAB_STATUS: Record<string, number> = {
   "runner-configuration-required": 503,
   "runner-configuration-invalid": 503,
   "invalid-request": 400,
+  [RATE_LIMITED_CODE]: 429,
 };
 
 export type ExecutionCapabilityHttpCtx = ConvexAuthReader & {
   runAction: Function;
+  runMutation: Function;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -110,14 +117,29 @@ export function classifyCapabilityHttpFailure(error: unknown): {
   return { status: 400, errorMessage: "capability-unavailable" };
 }
 
-function jsonError(status: number, errorMessage: string): Response {
-  return Response.json({ status: "error", errorMessage }, { status });
+function jsonError(
+  status: number,
+  errorMessage: string,
+  headers?: Record<string, string>,
+): Response {
+  return Response.json(
+    { status: "error", errorMessage },
+    headers ? { status, headers } : { status },
+  );
+}
+
+function rateLimitedResponse(): Response {
+  return jsonError(429, RATE_LIMITED_CODE, {
+    "Retry-After": String(Math.ceil(EXECUTION_CAPABILITY_MINT_WINDOW_MS / 1000)),
+  });
 }
 
 /**
  * Native-only capability mint. Clerk identity is asserted here before the
  * internal action so a missing or invalid session is 401 (native clears the
- * OS-keyring session) rather than a generic 400.
+ * OS-keyring session) rather than a generic 400. After identity and a valid
+ * body, a per-subject and per-subject+device mint window is consumed; excess
+ * mints fail closed as 429 `rate-limited` and never call the mint action.
  */
 export async function handleNativeExecutionCapability(
   ctx: ExecutionCapabilityHttpCtx,
@@ -139,6 +161,9 @@ export async function handleNativeExecutionCapability(
 
   try {
     const args = parseExecutionCapabilityArgs(body);
+    await ctx.runMutation(internal.hostedExecution.consumeExecutionCapabilityMint, {
+      deviceId: args.deviceId,
+    });
     const receipt = await ctx.runAction(
       internal.hostedExecution.requestExecutionCapability,
       args,
@@ -146,6 +171,7 @@ export async function handleNativeExecutionCapability(
     return Response.json({ status: "success", value: receipt });
   } catch (error) {
     const failure = classifyCapabilityHttpFailure(error);
+    if (failure.errorMessage === RATE_LIMITED_CODE) return rateLimitedResponse();
     return jsonError(failure.status, failure.errorMessage);
   }
 }

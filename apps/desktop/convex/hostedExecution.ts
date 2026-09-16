@@ -10,6 +10,7 @@ import { requireActiveDevice, requireActiveMembership, requireRole } from "./aut
 import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
 import { internal } from "./_generated/api";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { consumeExecutionCapabilityMintBudget } from "./executionCapabilityMintRate";
 import {
   hostedComputerId,
   hostedRunnerBaseUrl,
@@ -191,6 +192,16 @@ export async function mintExecutionCapability(
 export const requestExecutionCapability = internalAction({
   args: executionCapabilityArgs,
   handler: mintExecutionCapability,
+});
+
+/**
+ * HTTP mint gate consumes this before `requestExecutionCapability`. Internal so
+ * a renderer client cannot reset or inspect mint windows. Clerk identity is
+ * read from `ctx`; `deviceId` is only the per-device half of the key.
+ */
+export const consumeExecutionCapabilityMint = internalMutation({
+  args: { deviceId: v.string() },
+  handler: consumeExecutionCapabilityMintBudget,
 });
 
 export const loadProvisionRequest = internalQuery({

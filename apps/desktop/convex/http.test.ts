@@ -38,8 +38,10 @@ function ctx(options: {
   identity?: { [key: string]: unknown } | null;
   identityError?: Error;
   mint?: (ref: unknown, args: unknown) => Promise<unknown>;
+  consume?: (ref: unknown, args: unknown) => Promise<unknown>;
 }) {
   const runAction = vi.fn(options.mint ?? (async () => RECEIPT));
+  const runMutation = vi.fn(options.consume ?? (async () => ({ allowed: true })));
   return {
     ctx: {
       auth: {
@@ -49,8 +51,10 @@ function ctx(options: {
         },
       },
       runAction,
+      runMutation,
     },
     runAction,
+    runMutation,
   };
 }
 
@@ -63,7 +67,7 @@ async function read(response: Response) {
 
 describe("native execution-capability HTTP auth", () => {
   it("rejects a missing Clerk identity with 401 and does not mint", async () => {
-    const { ctx: httpCtx, runAction } = ctx({ identity: null });
+    const { ctx: httpCtx, runAction, runMutation } = ctx({ identity: null });
     const result = await read(
       await handleNativeExecutionCapability(httpCtx, jsonRequest(VALID_BODY)),
     );
@@ -71,6 +75,7 @@ describe("native execution-capability HTTP auth", () => {
       status: 401,
       body: { status: "error", errorMessage: "authentication-required" },
     });
+    expect(runMutation).not.toHaveBeenCalled();
     expect(runAction).not.toHaveBeenCalled();
   });
 
@@ -99,7 +104,7 @@ describe("native execution-capability HTTP auth", () => {
   });
 
   it("does not parse the body until Clerk identity is present", async () => {
-    const { ctx: httpCtx, runAction } = ctx({ identity: null });
+    const { ctx: httpCtx, runAction, runMutation } = ctx({ identity: null });
     const result = await read(
       await handleNativeExecutionCapability(
         httpCtx,
@@ -110,11 +115,12 @@ describe("native execution-capability HTTP auth", () => {
       ),
     );
     expect(result.status).toBe(401);
+    expect(runMutation).not.toHaveBeenCalled();
     expect(runAction).not.toHaveBeenCalled();
   });
 
   it("rejects invalid JSON after a valid Clerk session", async () => {
-    const { ctx: httpCtx, runAction } = ctx({});
+    const { ctx: httpCtx, runAction, runMutation } = ctx({});
     const result = await read(
       await handleNativeExecutionCapability(
         httpCtx,
@@ -129,11 +135,12 @@ describe("native execution-capability HTTP auth", () => {
       status: 400,
       body: { status: "error", errorMessage: "invalid-request" },
     });
+    expect(runMutation).not.toHaveBeenCalled();
     expect(runAction).not.toHaveBeenCalled();
   });
 
   it("rejects an authenticated request with an unknown scope", async () => {
-    const { ctx: httpCtx, runAction } = ctx({});
+    const { ctx: httpCtx, runAction, runMutation } = ctx({});
     const result = await read(
       await handleNativeExecutionCapability(
         httpCtx,
@@ -142,11 +149,12 @@ describe("native execution-capability HTTP auth", () => {
     );
     expect(result.status).toBe(400);
     expect(result.body.errorMessage).toBe("invalid-request");
+    expect(runMutation).not.toHaveBeenCalled();
     expect(runAction).not.toHaveBeenCalled();
   });
 
   it("mints through the internal action when Clerk identity is present", async () => {
-    const { ctx: httpCtx, runAction } = ctx({});
+    const { ctx: httpCtx, runAction, runMutation } = ctx({});
     const result = await read(
       await handleNativeExecutionCapability(httpCtx, jsonRequest(VALID_BODY)),
     );
@@ -154,9 +162,65 @@ describe("native execution-capability HTTP auth", () => {
       status: 200,
       body: { status: "success", value: RECEIPT },
     });
+    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runMutation.mock.calls[0]?.[1]).toEqual({ deviceId: VALID_BODY.deviceId });
     expect(runAction).toHaveBeenCalledTimes(1);
     expect(runAction.mock.calls[0]?.[1]).toEqual(VALID_BODY);
     expect(typeof runAction.mock.calls[0]?.[0]).toBe("object");
+    expect(runMutation.mock.invocationCallOrder[0]).toBeLessThan(
+      runAction.mock.invocationCallOrder[0] ?? 0,
+    );
+  });
+
+  it("fails closed with 429 rate-limited and does not mint when the window is exhausted", async () => {
+    const { ctx: httpCtx, runAction, runMutation } = ctx({
+      consume: async () => {
+        throw new Error("rate-limited");
+      },
+    });
+    const response = await handleNativeExecutionCapability(httpCtx, jsonRequest(VALID_BODY));
+    const result = await read(response);
+    expect(result).toEqual({
+      status: 429,
+      body: { status: "error", errorMessage: "rate-limited" },
+    });
+    expect(response.headers.get("Retry-After")).toBe("60");
+    expect(runMutation).toHaveBeenCalledTimes(1);
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it("maps a wrapped Convex mint-window denial to 429 rate-limited", async () => {
+    const { ctx: httpCtx, runAction } = ctx({
+      consume: async () => {
+        throw new Error(
+          "[CONVEX M(hostedExecution:consumeExecutionCapabilityMint)] Server Error\nUncaught Error: rate-limited",
+        );
+      },
+    });
+    const result = await read(
+      await handleNativeExecutionCapability(httpCtx, jsonRequest(VALID_BODY)),
+    );
+    expect(result).toEqual({
+      status: 429,
+      body: { status: "error", errorMessage: "rate-limited" },
+    });
+    expect(runAction).not.toHaveBeenCalled();
+  });
+
+  it("does not mint when the mint-window mutation fails closed", async () => {
+    const { ctx: httpCtx, runAction } = ctx({
+      consume: async () => {
+        throw new Error("The hosted execution mint window is unavailable.");
+      },
+    });
+    const result = await read(
+      await handleNativeExecutionCapability(httpCtx, jsonRequest(VALID_BODY)),
+    );
+    expect(result).toEqual({
+      status: 400,
+      body: { status: "error", errorMessage: "capability-unavailable" },
+    });
+    expect(runAction).not.toHaveBeenCalled();
   });
 
   it("maps a nested mint authentication failure to 401", async () => {
@@ -246,6 +310,10 @@ describe("capability HTTP argument and error classification", () => {
     expect(classifyCapabilityHttpFailure(new Error("HMAC key dump: secret-value"))).toEqual({
       status: 400,
       errorMessage: "capability-unavailable",
+    });
+    expect(classifyCapabilityHttpFailure(new Error("rate-limited"))).toEqual({
+      status: 429,
+      errorMessage: "rate-limited",
     });
   });
 });

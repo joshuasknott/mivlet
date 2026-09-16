@@ -30,7 +30,10 @@ single-use permit, obtains a scope-specific hosted capability, and sends it to
 the runner. Native mints that capability through Convex HTTP
 `/native/execution-capability` with the OS-keyring Clerk session. The HTTP
 gate asserts Clerk issuer and subject before the internal mint action; missing
-or invalid identity is `401 authentication-required`. Membership, role, and
+or invalid identity is `401 authentication-required`. After a valid body, the
+gate consumes a sliding mint window per Clerk subject and per subject+device
+(60 and 30 mints per minute); excess requests fail closed as
+`429 rate-limited` and never mint. Membership, role, and
 soft device binding (claimed `deviceId` must be this principal's active device
 and workspace link; no public-key challenge) are rechecked inside the mint
 path. The runner rechecks the computer, generation, scope, expiry, nonce,
