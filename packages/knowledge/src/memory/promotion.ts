@@ -10,6 +10,7 @@
  */
 
 import type { KnowledgeScope, MemoryKind, MemoryProvenance, MemoryRecord } from "@mivlet/protocol";
+import { isUsableKnowledgeText, redactKnowledgeText } from "../redact";
 
 export const MAX_PROMOTED_RECORDS = 6;
 export const MAX_PROMOTED_TITLE_CHARACTERS = 120;
@@ -86,9 +87,10 @@ function selectOutcomes(
 ): OutcomeCandidate[] {
   const candidates: OutcomeCandidate[] = [];
   for (const message of messages) {
-    const text = message.text.trim();
-    if (!text) continue;
+    const text = redactKnowledgeText(message.text.trim());
+    if (!isUsableKnowledgeText(text)) continue;
     const excerpt = clip(text, OUTCOME_EXCERPT_CHARACTERS);
+    if (!isUsableKnowledgeText(excerpt)) continue;
     candidates.push({
       kind: kindFor(excerpt),
       text: excerpt,
@@ -172,8 +174,8 @@ function buildRecord(
   provenance: MemoryProvenance,
   now: string
 ): MemoryRecord {
-  const title = clip(candidate.text, MAX_PROMOTED_TITLE_CHARACTERS);
-  const value = clip(candidate.text, MAX_PROMOTED_VALUE_CHARACTERS);
+  const title = clip(redactKnowledgeText(candidate.text), MAX_PROMOTED_TITLE_CHARACTERS);
+  const value = clip(redactKnowledgeText(candidate.text), MAX_PROMOTED_VALUE_CHARACTERS);
   return {
     id: `mem-promoted-${candidate.messageId}`.replace(/[^A-Za-z0-9._:-]+/gu, "-").slice(0, 120),
     kind: candidate.kind,
@@ -234,9 +236,12 @@ export function promoteCompletedWorkOutcome(
     note: `Promoted from completed Work ${workId}${input.reason ? ` (${clip(input.reason, 160)})` : ""}`,
     runId: workId
   };
-  const request = clip(input.request, OUTCOME_EXCERPT_CHARACTERS);
+  const request = clip(redactKnowledgeText(input.request), OUTCOME_EXCERPT_CHARACTERS);
   const candidates = selectOutcomes(input.results);
-  if (request && !candidates.some((candidate) => candidate.text === request)) {
+  if (
+    isUsableKnowledgeText(request) &&
+    !candidates.some((candidate) => candidate.text === request)
+  ) {
     candidates.unshift({
       kind: kindFor(request),
       text: request,

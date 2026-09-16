@@ -59,4 +59,23 @@ describe("buildContextPrefix", () => {
     expect(buildContextPrefix([memory({ pinned: false })], [])).toBe("");
     expect(buildContextPrefix([], [])).toBe("");
   });
+
+  it("scrubs secret-shaped memory and source previews before they enter the prefix", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const prefix = buildContextPrefix(
+      [memory({ value: `Keep the launch key ${leaked} in the vault.` })],
+      [source({ trust: "untrusted", contentPreview: `bearer ${leaked}` })]
+    );
+    expect(prefix).toContain("Keep the launch key");
+    expect(prefix).toContain("[REDACTED]");
+    expect(prefix).not.toContain(leaked);
+  });
+
+  it("drops omit-only memory and previews so they cannot re-enter model context", () => {
+    const prefix = buildContextPrefix(
+      [memory({ value: "[content omitted: secret-shaped content]" })],
+      [source({ trust: "trusted", contentPreview: "[content omitted: secret-shaped content]" })]
+    );
+    expect(prefix).toBe("");
+  });
 });

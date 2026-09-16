@@ -77,6 +77,15 @@ export function redactSecretTextOrOmit(value: string): string {
   return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
 }
 
+/**
+ * True when redacted text still has surrounding prose. Empty strings and the
+ * omit sentinel must not re-enter model context.
+ */
+export function isUsableRedactedText(value: string): boolean {
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed !== SECRET_CONTENT_OMITTED;
+}
+
 /** True when an object key name is always treated as a credential field. */
 export function isSensitiveSecretKey(key: string): boolean {
   SENSITIVE_KEY.lastIndex = 0;

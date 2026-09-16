@@ -35,6 +35,18 @@ describe("editMemory", () => {
     expect(edited.updatedAt).toBe(NOW);
     expect(original.value).toBe("The user prefers concise answers.");
   });
+
+  it("scrubs secret-shaped values before they are stored", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const edited = editMemory(
+      makeMemory(),
+      { value: `Keep the launch key ${leaked} in the vault.` },
+      NOW
+    );
+    expect(edited.value).toContain("Keep the launch key");
+    expect(edited.value).not.toContain(leaked);
+    expect(edited.value).toContain("[REDACTED]");
+  });
 });
 
 describe("pinMemory / unpinMemory", () => {

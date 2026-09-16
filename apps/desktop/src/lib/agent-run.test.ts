@@ -204,6 +204,21 @@ describe("buildContextPrefixForRun", () => {
     expect(prefix).toContain("in");
     expect(prefix).not.toContain("out");
   });
+
+  it("scrubs secret-shaped memory and previews before they enter the run prefix", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const prefix = buildContextPrefixForRun({
+      memoryRecords: [memory({ value: `Keep the launch key ${leaked} in the vault.` })],
+      knowledgeSources: [
+        source({ trust: "trusted", contentPreview: `Launch notes bearer ${leaked}` })
+      ],
+      pinnedSourceIds: ["s1"],
+      memoryDisabled: false
+    });
+    expect(prefix).toContain("Keep the launch key");
+    expect(prefix).toContain("Launch notes");
+    expect(prefix).not.toContain(leaked);
+  });
 });
 
 describe("selectMemoryForRun", () => {
