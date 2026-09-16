@@ -75,7 +75,9 @@ is not connected to this runner's routes or a real provider delegation contract.
 
 The path requires configured identity and Convex state, a deployed Cloudflare
 Worker, Container/Sandbox and Browser Rendering bindings, Durable Objects,
-secrets, quotas, and a live smoke test. A build or Wrangler dry-run verifies
+secrets, quotas, and a live smoke test. Convex production, preview, and staging
+deployments refuse `MIVLET_CLERK_ALLOW_MOCK=1` with the mock Clerk issuer; CI
+rejects that pair in tracked deploy configs. A build or Wrangler dry-run verifies
 source compatibility and packaging only.
 
 ## Not claimed

@@ -23,6 +23,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Refuse mock Clerk in production configs
+        run: node --test scripts/ci/refuse-mock-clerk.test.mjs && node scripts/ci/refuse-mock-clerk.mjs
       - id: paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
