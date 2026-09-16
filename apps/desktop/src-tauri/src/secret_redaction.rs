@@ -223,8 +223,7 @@ pub fn is_sensitive_key(key: &str) -> bool {
 }
 
 /// Shared surgical replacement marker (`[REDACTED]`).
-#[cfg(test)]
-fn redacted_marker() -> &'static str {
+pub fn redacted_marker() -> &'static str {
     &vocabulary().redacted
 }
 
