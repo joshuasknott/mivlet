@@ -38,6 +38,24 @@ export const requestProvision = mutation({
       }
       return { requestKey, executionNodeId, computerId, status: existing.status };
     }
+    const inFlight = await ctx.db.query("hosted_execution_requests")
+      .withIndex("by_computer_operation_status", (q) =>
+        q.eq("computerId", computerId).eq("operation", "provision").eq("status", "pending"),
+      )
+      .collect();
+    if (inFlight.length > 1) throw new Error("The hosted execution request is unavailable.");
+    const pending = inFlight[0];
+    if (pending) {
+      if (pending.workspaceId !== args.workspaceId || pending.agentId !== agentId || pending.computerId !== computerId) {
+        throw new Error("The hosted execution request is unavailable.");
+      }
+      return {
+        requestKey: pending.requestKey,
+        executionNodeId: pending.executionNodeId,
+        computerId,
+        status: pending.status,
+      };
+    }
     const nodes = await ctx.db.query("hosted_execution_nodes")
       .withIndex("by_workspace_agent", (q) => q.eq("workspaceId", args.workspaceId).eq("agentId", agentId)).collect();
     if (nodes.length > 1) throw new Error("The hosted execution node is unavailable.");
