@@ -56,7 +56,7 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@mivlet/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
 | Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
-| Code quality | `pnpm quality` (`format:check` is an allowlisted ratchet, not repository-wide Prettier) |
+| Code quality | `pnpm quality` (`lint` is security-subset ESLint via `lint:security` plus the explicit-any ratchet, not typed/React lint; `format:check` is an allowlisted ratchet, not repository-wide Prettier) |
 | Linux PR job | `pnpm check:pr` (`typecheck` + `quality` + `test:pr`) |
 | Production build validation | `pnpm verify:build` (includes hosted-runner `tsc` emit) |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
