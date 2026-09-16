@@ -4,6 +4,7 @@ import type { HostedBrowserActionRequest, HostedBrowserControl, HostedBrowserDow
 import { DurableObject } from "cloudflare:workers";
 import { Readable } from "node:stream";
 import { safeDownloadFileName } from "./browser-download";
+import { settleHostedBrowserRoute } from "./browser-route";
 import { assertPublicHttpsUrl, validateBrowserActionRequest, validateBrowserNavigateRequest, validateComputerId, validatePublicHttpsUrl } from "./contracts";
 import {
   MAX_BROWSER_HISTORY,
@@ -53,14 +54,14 @@ export class BrowserAuthority extends DurableObject<Env> {
   ): Promise<HostedBrowserSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const request = validateBrowserNavigateRequest(rawRequest);
-    await assertPublicHttpsUrl(request.url);
+    const target = await assertPublicHttpsUrl(request.url);
     const page = await this.page(computerId, generation);
     const stored = this.readState();
-    if (stored?.last_request_key !== request.requestKey || page.url() !== request.url) {
+    if (stored?.last_request_key !== request.requestKey || page.url() !== target.href) {
       await this.guardPage(page);
-      await page.goto(request.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
-    const currentUrl = await assertPublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     const title = (await page.title()).trim().slice(0, 240);
     const updatedAt = new Date().toISOString();
     const history = this.history(stored, currentUrl);
@@ -87,7 +88,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     const page = await this.page(computerId, generation);
     const stored = this.readState();
     if (stored?.last_action_request_key === request.requestKey) {
-      const currentUrl = await assertPublicHttpsUrl(page.url());
+      const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
       const title = (await page.title()).trim().slice(0, 240);
       const updatedAt = new Date().toISOString();
       const history = this.history(stored, currentUrl);
@@ -111,7 +112,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     if (
       !stored
       || stored.observation_id !== request.observationId
-      || stored.current_url !== await assertPublicHttpsUrl(page.url())
+      || stored.current_url !== (await assertPublicHttpsUrl(page.url())).href
     ) {
       throw new Error("browser-observation-stale");
     }
@@ -179,7 +180,7 @@ export class BrowserAuthority extends DurableObject<Env> {
         } else await locator.press(request.key ?? "", { timeout: 10_000 });
     }
     await page.waitForTimeout(250);
-    const currentUrl = await assertPublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     history = request.action === "history"
       ? replaceCurrentBrowserHistory(history, currentUrl)
       : appendBrowserHistory(history, currentUrl);
@@ -205,7 +206,7 @@ export class BrowserAuthority extends DurableObject<Env> {
   async snapshot(rawComputerId: string, generation: number): Promise<HostedBrowserSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const page = await this.page(computerId, generation);
-    const currentUrl = await assertPublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     const title = (await page.title()).trim().slice(0, 240);
     const updatedAt = new Date().toISOString();
     const stored = this.readState();
@@ -287,14 +288,21 @@ export class BrowserAuthority extends DurableObject<Env> {
 
   private async guardPage(page: Page): Promise<void> {
     await page.unroute("**/*");
-    await page.route("**/*", async (route) => {
-      try {
-        await assertPublicHttpsUrl(route.request().url());
-        await route.continue();
-      } catch {
-        await route.abort("blockedbyclient");
-      }
-    });
+    await page.route("**/*", (route) => settleHostedBrowserRoute({
+      request: () => {
+        const incoming = route.request();
+        return {
+          url: () => incoming.url(),
+          method: () => incoming.method(),
+          headers: () => incoming.headers(),
+          postDataBuffer: () => incoming.postDataBuffer(),
+          resourceType: () => incoming.resourceType()
+        };
+      },
+      continue: () => route.continue(),
+      abort: (errorCode) => route.abort(errorCode),
+      fulfill: (response) => route.fulfill(response)
+    }));
   }
 
   private async snapshotFromPage(

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   HostedRunnerRequestError,
   assertPublicHttpsUrl,
+  createPinnedDnsLookup,
   setPublicAddressLookupForTests,
   validateBrowserActionRequest,
   validateBrowserNavigateRequest,
@@ -91,10 +92,44 @@ describe("hosted runner contracts", () => {
       if (hostname === "mapped.example") return ["::ffff:127.0.0.1"];
       return [];
     });
-    await expect(assertPublicHttpsUrl("https://example.com/path")).resolves.toBe("https://example.com/path");
+    await expect(assertPublicHttpsUrl("https://example.com/path")).resolves.toEqual({
+      href: "https://example.com/path",
+      hostname: "example.com",
+      addresses: ["93.184.216.34"]
+    });
+    await expect(assertPublicHttpsUrl("https://1.1.1.1/dns")).resolves.toEqual({
+      href: "https://1.1.1.1/dns",
+      hostname: "1.1.1.1",
+      addresses: ["1.1.1.1"]
+    });
     await expect(assertPublicHttpsUrl("https://127.0.0.1.nip.io/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
     await expect(assertPublicHttpsUrl("https://metadata.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
     await expect(assertPublicHttpsUrl("https://mapped.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+  });
+
+  it("pins the validated public answer set and ignores a later hostname lookup", () => {
+    const lookup = createPinnedDnsLookup(["93.184.216.34", "104.16.0.1"]);
+    let all: unknown;
+    lookup("rebind.example", { all: true }, (error: unknown, addresses: unknown) => {
+      expect(error).toBeNull();
+      all = addresses;
+    });
+    expect(all).toEqual([
+      { address: "93.184.216.34", family: 4 },
+      { address: "104.16.0.1", family: 4 }
+    ]);
+    let address = "";
+    let family = 0;
+    lookup("169.254.169.254.nip.io", {}, (error: unknown, value: unknown, parsedFamily: unknown) => {
+      expect(error).toBeNull();
+      address = String(value);
+      family = Number(parsedFamily);
+    });
+    expect(address).toBe("93.184.216.34");
+    expect(family).toBe(4);
+    expect(() => createPinnedDnsLookup(["169.254.169.254"])).toThrowError(HostedRunnerRequestError);
+    expect(() => createPinnedDnsLookup(["10.0.0.1"])).toThrowError(HostedRunnerRequestError);
+    expect(() => createPinnedDnsLookup(["93.184.216.34", "169.254.169.254"])).toThrowError(HostedRunnerRequestError);
   });
 
   it("accepts only an observed control action with the matching visible description", () => {

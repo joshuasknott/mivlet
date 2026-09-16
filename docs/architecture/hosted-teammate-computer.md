@@ -46,8 +46,12 @@ computer that already has a generation bumps that generation so prior
 capabilities cannot target the replacement.
 
 Browser navigation accepts only public HTTPS targets, rejects embedded
-credentials and private or reserved destinations, strips fragments, and
-revalidates redirects and subrequests. Observations and actions are bounded to
+credentials and private or reserved destinations (including DNS answers),
+strips fragments, and revalidates redirects and subrequests. Cloudflare
+Browser Rendering cannot pin Chromium TCP peers (`route.continue()` would
+re-resolve). The Worker completes HTTPS with a lookup bound to the validated
+public address set, then fulfills the route. A later private, loopback,
+link-local, or cloud-metadata answer is aborted. Observations and actions are bounded to
 opaque current references; password, one-time-code, payment, transaction, and
 WebAuthn fields are excluded or blocked. Screens and temporary human takeover
 credentials stay in the trusted UI path.

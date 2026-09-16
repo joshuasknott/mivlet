@@ -162,6 +162,18 @@ export function validatePublicHttpsUrl(value: unknown): string {
 
 export type PublicAddressLookup = (hostname: string) => Promise<readonly string[]>;
 
+export type PublicHttpsTarget = {
+  href: string;
+  hostname: string;
+  /** Validated public A/AAAA answers (or the IP literal). Pin with createPinnedDnsLookup. */
+  addresses: readonly string[];
+};
+
+type PinnedAddress = {
+  address: string;
+  family: 4 | 6;
+};
+
 let lookupPublicAddresses: PublicAddressLookup = lookupAddressesWithNodeDns;
 
 /** Test-only DNS injection so encoded-IP and rebinding cases stay hermetic. */
@@ -172,22 +184,57 @@ export function setPublicAddressLookupForTests(lookup?: PublicAddressLookup): vo
 /**
  * Resolve the hostname and refuse the URL when any answer is a private,
  * loopback, link-local, multicast, unspecified, or cloud-metadata address.
- * Mirrors desktop web-fetch: check literals first, then pin the DNS answer set.
+ * Returns the validated public address set. Callers that open a socket must
+ * pin that set with `createPinnedDnsLookup` (desktop web-fetch uses
+ * `resolve_to_addrs`). Playwright `route.continue()` re-resolves and is not a pin.
  */
-export async function assertPublicHttpsUrl(value: unknown): Promise<string> {
+export async function assertPublicHttpsUrl(value: unknown): Promise<PublicHttpsTarget> {
   const href = validatePublicHttpsUrl(value);
   const hostname = new URL(href).hostname;
-  if (hostnameIp(hostname)) return href;
+  const literal = hostnameIp(hostname);
+  if (literal) {
+    return { href, hostname, addresses: pinPublicAddresses([literal]).map((entry) => entry.address) };
+  }
   let addresses: readonly string[];
   try {
     addresses = await lookupPublicAddresses(hostname);
   } catch {
     throw new HostedRunnerRequestError("The browser URL could not be resolved.", "browser-url-not-public");
   }
+  return { href, hostname, addresses: pinPublicAddresses(addresses).map((entry) => entry.address) };
+}
+
+/**
+ * Node `http`/`https`/`tls` lookup that returns only the already-validated
+ * public addresses. The hostname argument is ignored so a later DNS answer
+ * cannot steer the TCP peer toward a private or metadata address.
+ */
+export function createPinnedDnsLookup(
+  addresses: readonly string[]
+): (hostname: string, options: unknown, callback?: unknown) => void {
+  const pinned = pinPublicAddresses(addresses);
+  return (_hostname, options, callback) => {
+    const cb = typeof options === "function" ? options : callback;
+    const opts = typeof options === "function" || options === undefined || options === null
+      ? {}
+      : options as { all?: boolean };
+    if (typeof cb !== "function") return;
+    if (opts.all) {
+      cb(null, pinned);
+      return;
+    }
+    cb(null, pinned[0].address, pinned[0].family);
+  };
+}
+
+function pinPublicAddresses(addresses: readonly string[]): [PinnedAddress, ...PinnedAddress[]] {
   if (!addresses.length || addresses.some((address) => isForbiddenAddress(address))) {
     throw new HostedRunnerRequestError("Only public HTTPS browser URLs are allowed.", "browser-url-not-public");
   }
-  return href;
+  return addresses.map((address) => ({
+    address,
+    family: address.includes(":") ? 6 as const : 4 as const
+  })) as [PinnedAddress, ...PinnedAddress[]];
 }
 
 async function lookupAddressesWithNodeDns(hostname: string): Promise<string[]> {
