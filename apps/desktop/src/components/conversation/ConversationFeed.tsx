@@ -10,6 +10,7 @@ import { ConnectorMentionText } from "../ConnectorMention";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { CopyButton } from "../CopyButton";
+import { MessageAttachments } from "./MessageAttachments";
 import "./conversation.css";
 
 interface Props {
@@ -93,13 +94,10 @@ export function ConversationFeed(props: Props) {
   </>;
 }
 
-function UserMessage({ content, profileName, connectors, attachments, timestamp, onReusePrompt }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[]; timestamp?: string; onReusePrompt?: Props["onReusePrompt"] }) {
+function UserMessage({ content, profileName, connectors, attachments, timestamp, workspaceId, agent, threadId }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[]; timestamp?: string; workspaceId: string; agent: MivletAgentProfile; threadId?: string }) {
   return <article className="conversation-message conversation-message--user" aria-label={`${profileName}'s message`}>
     <p><ConnectorMentionText text={content} connectors={connectors} /></p>
-    {attachments?.length ? <ul className="conversation-message__attachments" aria-label="Attached files">{attachments.map((attachment) => <li key={attachment.id}>
-      <strong>{attachment.name}</strong>
-      <small>{attachment.availability === "workspace-file" && attachment.relativePath ? attachment.relativePath : attachment.availability === "project-file" ? "Saved to this project" : attachment.availability === "image-input" ? "Image for this message" : "Text for this conversation"}</small>
-    </li>)}</ul> : null}
+    {attachments?.length ? <MessageAttachments key={`${workspaceId}:${agent.id}:${threadId}`} attachments={attachments} workspaceId={workspaceId} agentId={agent.id} threadId={threadId} /> : null}
     <footer className="message-actions"><MessageTime value={timestamp} /><CopyButton text={content} label="Copy message" iconOnly /></footer>
   </article>;
 }

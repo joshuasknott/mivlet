@@ -20,6 +20,7 @@
 .turn-answer { min-width: 0; padding-top: 4px; }
 .turn-files { display: flex; flex-wrap: wrap; gap: 10px; }
 .turn-files .computer-artifact { flex: 1 1 220px; max-width: 360px; margin: 0; }
+.turn-files .computer-artifact--image { flex: 0 1 440px; max-width: 100%; }
 .message-markdown { min-width: 0; font-size: 15px; color: var(--ink); line-height: 1.75; overflow-wrap: anywhere; }
 .message-markdown > :first-child { margin-top: 0; }
 .message-markdown > :last-child { margin-bottom: 0; }

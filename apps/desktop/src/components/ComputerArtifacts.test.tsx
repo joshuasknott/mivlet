@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ComputerArtifacts } from "./ComputerArtifacts";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
@@ -67,5 +67,56 @@ describe("computer artifacts", () => {
     await act(async () => { reject(new Error("Old computer failed.")); });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("button").hasAttribute("disabled")).toBe(false);
+  });
+
+  const imageOutput = JSON.stringify({ ...artifact, title: "Ember logo", relativePath: "ember.png", mimeType: "image/png" });
+  it.each([
+    ["pdf", "application/pdf"], ["docx", artifact.mimeType],
+    ["xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation"],
+    ["csv", "text/csv"], ["md", "text/markdown"], ["txt", "text/plain"],
+  ])("routes %s file cards to the existing viewer without loading them automatically", (extension, mimeType) => {
+    const output = JSON.stringify({ ...artifact, relativePath: `file.${extension}`, mimeType });
+    const preview = vi.fn();
+    render(<ComputerArtifacts {...props} output={output} onPreview={preview} />);
+    fireEvent.click(screen.getByRole("button", { name: "Preview Research report" }));
+    expect(preview).toHaveBeenCalledWith(output);
+    expect(native.invoke).not.toHaveBeenCalled();
+  });
+  const imagePreview = { artifactId: artifact.id, imageDataUrl: "data:image/png;base64,aGVsbG8=", text: null, mimeType: "image/png", truncated: false };
+  it("shows a validated image inline and opens the existing viewer without opening an external app", async () => {
+    native.invoke.mockResolvedValue(imagePreview);
+    const preview = vi.fn();
+    render(<ComputerArtifacts {...props} output={imageOutput} onPreview={preview} />);
+    expect((await screen.findByRole("img", { name: "Ember logo" })).getAttribute("src")).toBe(imagePreview.imageDataUrl);
+    expect(native.invoke).toHaveBeenCalledWith("local_computer_preview_artifact", { request: { workspaceId: "local", agentId: "agent-a", expectedGeneration: 7, artifactId: artifact.id } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview Ember logo" }));
+    expect(preview).toHaveBeenCalledWith(imageOutput);
+    expect(native.invoke).toHaveBeenCalledTimes(1);
+  });
+  it("does not fetch image bytes for the compact viewer footer", () => {
+    render(<ComputerArtifacts {...props} output={imageOutput} compact />);
+    expect(native.invoke).not.toHaveBeenCalled();
+  });
+  it("discards loaded and pending images when scope changes", async () => {
+    native.invoke.mockResolvedValueOnce(imagePreview);
+    const view = render(<ComputerArtifacts {...props} output={imageOutput} />);
+    await screen.findByRole("img");
+    let finish!: (value: typeof imagePreview) => void;
+    native.invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    view.rerender(<ComputerArtifacts {...props} output={imageOutput} agentId="agent-b" />);
+    expect(screen.queryByRole("img")).toBeNull();
+    await waitFor(() => expect(native.invoke).toHaveBeenCalledTimes(2));
+    native.invoke.mockRejectedValueOnce(new Error("Unavailable"));
+    view.rerender(<ComputerArtifacts {...props} output={imageOutput} agentId="agent-c" />);
+    await act(async () => finish(imagePreview));
+    await screen.findByText("Preview unavailable · Open file");
+    expect(screen.queryByRole("img")).toBeNull();
+  });
+  it.each(["https://example.com/tracker.png", "data:image/svg+xml;base64,PHN2Zz4="])("does not load untrusted image URLs: %s", async imageDataUrl => {
+    native.invoke.mockResolvedValue({ ...imagePreview, imageDataUrl });
+    render(<ComputerArtifacts {...props} output={imageOutput} />);
+    await screen.findByText("Preview unavailable · Open file");
+    expect(screen.queryByRole("img")).toBeNull();
   });
 });
