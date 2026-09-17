@@ -86,7 +86,9 @@ describe("permission profile policy", () => {
     expect(effectForTool("cloud-browser-action")).toBe("browser-state-mutation");
     expect(effectForTool("connection-read")).toBe("connector-read");
     expect(effectForTool("gmail-read")).toBe("connector-read");
+    expect(effectForTool("workspace-agents")).toBe("coordination");
     expect(effectForTool("teammate-assign")).toBe("coordination");
+    expect(effectForTool("teammate-message")).toBe("coordination");
     expect(effectForTool("connector-call")).toBe("connector-write");
     expect(effectForTool("connector-action")).toBe("connector-write");
   });
