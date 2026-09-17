@@ -164,7 +164,18 @@ const base = {
 const context = (value: NavContext) => ({ ...base, context: value });
 
 describe("multifunctional right panel", () => {
-  it("keeps utilities available while a document is open and deduplicates repeated opens", () => {
+  it("replaces navigation with Library and restores focus on Back", () => {
+    render(<WorkspaceRightNav {...context(null)} library={<p>Saved files</p>} />);
+    expect(screen.getAllByRole("button").slice(0, 4).map(button => button.textContent)).toEqual(["Library", "Browser", "Side chat", "Schedules"]);
+    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.getByText("Saved files")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Back" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "Library" })).toHaveFocus();
+    expect(screen.queryByText("Saved files")).toBeNull();
+  });
+  it("returns to navigation from a document and deduplicates repeated opens", () => {
     const request = {
       id: "file:a",
       kind: "artifact" as const,
@@ -178,7 +189,9 @@ describe("multifunctional right panel", () => {
     };
     const view = render(<WorkspaceRightNav {...props} request={request} />);
     expect(screen.getByText("Document contents")).toBeInTheDocument();
-    for (const name of ["Browser", "Side chat", "Schedules"])
+    expect(screen.queryByRole("navigation")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    for (const name of ["Library", "Browser", "Side chat", "Schedules"])
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browser" }));
     expect(screen.queryByText("Document contents")).toBeNull();
@@ -283,6 +296,7 @@ describe("multifunctional right panel", () => {
       />,
     );
     expect(active).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: "Browser" }));
     expect(active).toHaveBeenLastCalledWith(false);
   });
