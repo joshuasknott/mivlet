@@ -21,6 +21,7 @@ mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
 mod codex_app_server;
+mod codex_images;
 mod collaboration;
 mod collaboration_connectors;
 mod connector_api;

@@ -47,6 +47,7 @@ const toolLabels: Record<string, [string, string]> = {
   "local-desktop-action": ["Working on the computer", "Input sent; awaiting observation"],
   "computer-artifact": ["Preparing a file", "Prepared a file"],
   "generate-image": ["Generating an image", "Generated an image"],
+  "codex-image-generation": ["Generating an image", "Generated an image"],
   "edit-image": ["Editing an image", "Edited an image"],
   "web-search": ["Searching the web", "Searched the web"],
   "connector-search": ["Searching connected apps", "Searched connected apps"],

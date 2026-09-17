@@ -30,7 +30,10 @@ export function conversationComputerTools(connectedTools: NativeToolSpec[], read
 
 /** Both new turns and retries resolve tools against the model actually executing. */
 export function conversationToolsForModel(connectedTools: NativeToolSpec[], ready: boolean, provider: BackendProvider | undefined, model: BackendModel | undefined, plugins?: BuiltinPlugins, imageApiConnected = false, runtimeAvailable = true): NativeToolSpec[] {
-  return conversationComputerTools(connectedTools, ready && supportsSharedComputerTools(provider) && model?.available === true, supportsComputerVision(provider, model), plugins, imageApiConnected, runtimeAvailable);
+  // Codex owns subscription image generation. Never offer an automatic metered
+  // API alternative on that route, even when an OpenAI API key is connected.
+  const directImageApi = provider?.backendType !== "codex-app-server" && imageApiConnected;
+  return conversationComputerTools(connectedTools, ready && supportsSharedComputerTools(provider) && model?.available === true, supportsComputerVision(provider, model), plugins, directImageApi, runtimeAvailable);
 }
 
 export function supportsComputerVision(provider: BackendProvider | undefined, model: BackendModel | undefined): boolean {

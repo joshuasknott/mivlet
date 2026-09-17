@@ -28,6 +28,16 @@ describe("conversation computer tools", () => {
     expect(isLocalComputerTool("create-spreadsheet", "{}")).toBe(true);
     expect(isLocalComputerTool("create-document", "{}")).toBe(true);
   });
+  it("keeps Codex on subscription images even with a connected image API", () => {
+    const provider = { backendType: "codex-app-server", authState: "connected", capabilities: ["tool-requests"] } as BackendProvider;
+    const model = { id: "image-capable", label: "Image capable", available: true };
+    const discovered = ["generate-image", "edit-image"].map(name => ({ name, description: "Metered API", parameters: "{}" }));
+    const tools = conversationToolsForModel(discovered, true, provider, model, enabled, true);
+    expect(tools.some(tool => ["generate-image", "edit-image"].includes(tool.name))).toBe(false);
+    expect(tools.map(tool => tool.name)).toContain("computer-artifact");
+    const direct = conversationToolsForModel(discovered, true, { ...provider, backendType: "native-api" }, model, enabled, true);
+    expect(direct.map(tool => tool.name)).toEqual(expect.arrayContaining(["generate-image", "edit-image"]));
+  });
   it("keeps computer tools alongside connected apps and excludes hosted runtimes", () => {
     const tools = conversationComputerTools([connector], true, false, enabled).map((tool) => tool.name);
     expect(tools).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "local-app-observe"]));
