@@ -284,6 +284,7 @@
    shifting sibling controls in the space-between controls row. The min-width:0
    lets the flex child shrink below its content size. */
 .composer-model > span {
+  font-weight: 600;
   min-width: 0;
   max-width: 180px;
   overflow: hidden;
@@ -469,10 +470,13 @@
   height: 34px;
 }
 
-.voice-chat-action {
-  color: var(--accent-strong);
-  background: var(--accent-subtle);
-  border-color: var(--accent-line);
+
+/* Keep voice controls icon-only without reducing their click or focus target. */
+.composer-glow .voice-action > button.composer-chip {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
 }
 
 .voice-action__cancel {
@@ -669,3 +673,9 @@
 .composer-secondary-model .composer-control-anchor--model { width: 1px; height: 32px; }
 .composer-secondary-model .composer-model { display: none; }
 .composer-secondary-model .composer-menu { left: 0; right: auto; }
+
+/* Anchor the add menu to the whole composer, clear of the writing surface. */
+.composer-control-anchor--add { position: static; }
+.composer .composer-add-menu { bottom: calc(100% + 10px); left: 0; padding: 6px; background: var(--surface); box-shadow: var(--shadow-3); }
+.composer-add-menu button { font-size: 13px; }
+.composer-add-menu button:focus-visible { outline: 2px solid var(--ink-soft); outline-offset: -2px; }

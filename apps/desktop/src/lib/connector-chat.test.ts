@@ -12,14 +12,9 @@ const manifests = [
   { id: "github", status: "needs-auth" },
 ] as ConnectorManifest[];
 describe("chat connector access", () => {
-  it("advertises only the selected connected token plugins and their bounded capabilities", () => {
-    const manifests = [{ id: "shopify", status: "connected" }, { id: "linkedin", status: "needs-auth" }, { id: "workday", status: "connected" }] as ConnectorManifest[];
-    const tools = chatConnectorTools(["shopify", "linkedin"], manifests);
-    expect(tools.map((tool) => tool.name)).toEqual(["plugin-read"]);
-    expect(tools[0].description).toContain("shopify: products.list");
-    expect(tools[0].description).not.toContain("profile.read");
-    expect(tools[0].description).not.toContain("workers.list");
-    expect(chatConnectorTools(["linkedin"], manifests)).toEqual([]);
+  it("does not expose tools for removed plugins, including stale saved connections", () => {
+    const manifests = [{ id: "shopify", status: "connected" }] as ConnectorManifest[];
+    expect(chatConnectorTools(["shopify"], manifests)).toEqual([]);
   });
   it("offers supported writes only for selected connected native apps", () => {
     const manifests = [{ id: "gmail", status: "connected", supportedActions: ["gmail.send"] }, { id: "google-drive", status: "connected", supportedActions: ["google-drive.delete-file"] }] as ConnectorManifest[];

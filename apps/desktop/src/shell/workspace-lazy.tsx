@@ -11,11 +11,6 @@ export const ProjectDetailsDialog = lazy(() =>
     default: module.ProjectDetailsDialog,
   })),
 );
-export const WorkModeView = lazy(() =>
-  import("../components/navigation/WorkModeView").then((module) => ({
-    default: module.WorkModeView,
-  })),
-);
 export const ExecutionWorker = lazy(() =>
   import("./ExecutionWorker").then((module) => ({
     default: module.ExecutionWorker,

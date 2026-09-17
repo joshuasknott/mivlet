@@ -3,12 +3,12 @@
 .og-frame {
   position: relative;
   display: grid;
-  grid-template-rows: minmax(min-content, 1fr) auto;
+  grid-template-rows: minmax(min-content, 1fr);
   height: 100dvh;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 64px 24px 32px;
+  padding: 32px 24px;
   color: var(--ink);
   background: var(--surface);
 }
@@ -39,8 +39,8 @@
 .og-heading h1 {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(26px, 3vw, 32px);
-  font-weight: 500;
+  font-size: clamp(28px, 3vw, 44px);
+  font-weight: 600;
   letter-spacing: -0.035em;
   line-height: 1.2;
 }
@@ -53,37 +53,38 @@
   max-width: 480px;
   margin: 0;
   color: var(--ink-muted);
-  font-size: var(--text-14);
+  font-size: 20px;
   line-height: 1.55;
 }
 
 .og-account-actions {
   display: flex;
-  width: min(100%, 360px);
+  width: min(100%, 396px);
   flex-direction: column;
   align-items: stretch;
-  gap: 10px;
+  gap: 12px;
 }
 
 .og-account-actions {
-  margin-top: 40px;
+  margin-top: 58px;
 }
 
-.og-primary-button {
+.og-primary-button,
+.og-secondary-button {
   display: inline-flex;
   width: 100%;
-  min-height: 46px;
+  min-height: 60px;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 12px;
   padding: 0 22px;
   color: var(--surface);
   background: var(--ink);
   border: 1px solid var(--ink);
   border-radius: 12px;
-  box-shadow: 0 3px 10px rgb(0 0 0 / 5%);
-  font-size: var(--text-14);
-  font-weight: 500;
+
+  font-size: 20px;
+  font-weight: 600;
   letter-spacing: -0.01em;
   transition:
     background 120ms ease,
@@ -100,48 +101,31 @@
 }
 
 .og-primary-button:disabled,
-.og-text-button:disabled {
+.og-secondary-button:disabled {
   cursor: default;
   opacity: 0.5;
 }
 
-.og-text-button,
-.og-privacy-link {
+.og-secondary-button {
   color: var(--ink);
   background: transparent;
-  border: 0;
-  border-radius: 4px;
-  text-decoration: none;
-  text-underline-offset: 4px;
+  border-color: color-mix(in srgb, var(--ink) 40%, var(--surface));
 }
 
-.og-text-button {
-  align-self: center;
-  min-height: 40px;
-  padding: 6px 8px;
-  font-size: var(--text-14);
-}
-
-.og-text-button:hover:not(:disabled),
-.og-privacy-link:hover {
-  text-decoration: underline;
+.og-secondary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
 }
 
 .og-primary-button:focus-visible,
-.og-text-button:focus-visible,
-.og-privacy-link:focus-visible {
+.og-secondary-button:focus-visible {
   outline: 0;
   box-shadow: var(--focus-ring);
 }
 
-.og-privacy-link {
-  min-height: 40px;
-  margin-top: 22px;
-  padding: 8px;
-  color: var(--ink-muted);
-  font-size: var(--text-12);
+.og-brand.mivlet-brand--compact {
+  width: 110px;
+  margin-bottom: 42px;
 }
-
 .og-feedback {
   max-width: 480px;
   margin: 18px 0 0;
@@ -156,7 +140,7 @@
 
 @media (max-width: 620px) {
   .og-frame {
-    padding: 64px 20px 24px;
+    padding: 32px 20px;
   }
 
   .og-heading h1 {
@@ -165,7 +149,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .og-primary-button {
+  .og-primary-button,
+  .og-secondary-button {
     transition: none;
   }
 }

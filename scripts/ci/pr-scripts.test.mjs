@@ -9,7 +9,7 @@ const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
 
 test('test:pr excludes the Windows agent-host package the way Linux PR CI does', () => {
-  assert.match(pkg.scripts['test:pr'], /--filter '!@mivlet\/agent-host'/);
+  assert.match(pkg.scripts['test:pr'], /--filter "!@mivlet\/agent-host"/);
   assert.equal(pkg.scripts['test:ci'], 'pnpm test:pr');
 });
 

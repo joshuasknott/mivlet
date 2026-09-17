@@ -194,6 +194,7 @@ function normalizeAgentProfiles(agents: MivletAgentProfile[] | undefined): Mivle
       : [];
     return {
       ...agent,
+      notificationsEnabled: agent.notificationsEnabled !== false,
       reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
       icon: "agent",
       iconColor,

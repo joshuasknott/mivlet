@@ -1,11 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConnectorManifest, MivletAgentProfile } from "@mivlet/protocol";
-import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
-import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
+import { PluginsIcon } from "../PluginsIcon";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
-import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
+import { Users } from "@phosphor-icons/react/dist/csr/Users";
 import { Brand } from "../Brand";
 import { ConnectorIcon } from "../ConnectorIcon";
 import { ProfileAgentAvatar } from "./agent-icons";
@@ -52,8 +51,6 @@ export function AgentSidebar({
   onSelectProject,
   onCreateProject,
   hidden = false,
-  collapsed = false,
-  onToggleCollapsed,
   conversations = [],
   selectedConversationId,
   onSelectConversation,
@@ -77,11 +74,9 @@ export function AgentSidebar({
   onSelectProject?: (project: AgentSidebarProject) => void;
   onCreateProject?: () => void;
   hidden?: boolean;
-  collapsed?: boolean;
-  onToggleCollapsed?: () => void;
   conversations?: SidebarRoom[];
   selectedConversationId?: string;
-  onSelectConversation?: (id: string, newTab?: boolean) => void;
+  onSelectConversation?: (id: string) => void;
   onSearch?: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -114,7 +109,7 @@ export function AgentSidebar({
       return changed ? next : current;
     });
   }, [previews]);
-  const search = collapsed ? "" : query.trim().toLowerCase();
+  const search = query.trim().toLowerCase();
   const visibleAgents = agents.filter((agent) =>
     agent.name.toLowerCase().includes(search),
   );
@@ -137,24 +132,13 @@ export function AgentSidebar({
   return (
     <aside
       ref={sidebar}
-      className={`agent-sidebar${collapsed ? " agent-sidebar--collapsed" : ""}`}
+      className="agent-sidebar"
       aria-label="Agents"
       hidden={hidden}
     >
       <div className="agent-sidebar__topline">
         <Brand className="agent-sidebar__brand" />
-        {collapsed && onToggleCollapsed ? (
-          <button
-            className="agent-sidebar__collapse"
-            type="button"
-            aria-label="Expand navigation"
-            title="Expand navigation"
-            aria-expanded={false}
-            onClick={onToggleCollapsed}
-          >
-            <SidebarSimple size={18} />
-          </button>
-        ) : null}
+
       </div>
       {onSearch ? <button type="button" className="agent-search" onClick={onSearch} aria-label="Search workspace"><MagnifyingGlass size={16} /><span>Search</span></button> : <label className="agent-search">
         <MagnifyingGlass size={16} aria-hidden="true" />
@@ -186,7 +170,12 @@ export function AgentSidebar({
               ) : null}
             </header>
             <div className="project-sidebar-list">
-              {visibleProjects.map((project) => (
+              {visibleProjects.map((project) => {
+                const memberIds = new Set(conversations
+                  .filter(room => room.projectId === project.id || room.id === project.threadId)
+                  .flatMap(room => room.participants?.map(member => member.agentId) ?? []));
+                const members = agents.filter(agent => memberIds.has(agent.id)).slice(0, 3);
+                return (
                 <button
                   key={project.id}
                   type="button"
@@ -202,14 +191,14 @@ export function AgentSidebar({
                   onClick={() => onSelectProject?.(project)}
                 >
                   <span
-                    className="project-sidebar-row__icon"
+                    className={`project-sidebar-row__icon project-sidebar-row__avatars project-sidebar-row__avatars--${members.length}`}
                     aria-hidden="true"
                   >
-                    <FolderSimple size={20} />
+                    {members.length ? members.map(member => <ProfileAgentAvatar key={member.id} agent={member} iconSize={members.length === 1 ? 34 : 23} />) : <Users size={22} />}
                   </span>
                   <strong>{project.name}</strong>
                 </button>
-              ))}
+              ); })}
             </div>
           </section>
         ) : null}
@@ -228,12 +217,7 @@ export function AgentSidebar({
                 title={room.title}
                 data-conversation-room={room.id}
                 onDragStart={(event) => event.preventDefault()}
-                onClick={(event) =>
-                  onSelectConversation?.(
-                    room.id,
-                    event.ctrlKey || event.metaKey,
-                  )
-                }
+                onClick={() => onSelectConversation?.(room.id)}
               >
                 <span>
                   {room.title}
@@ -311,7 +295,7 @@ export function AgentSidebar({
                         : current,
                     );
                     if (room && (event.ctrlKey || event.metaKey))
-                      onSelectConversation?.(room.id, true);
+                      onSelectConversation?.(room.id);
                     else onSelectAgent(agent);
                   }}
                   aria-current={active ? "page" : undefined}
@@ -367,7 +351,7 @@ export function AgentSidebar({
         onClick={onOpenMarketplace}
         aria-current={marketplaceActive ? "page" : undefined}
       >
-        <PlugsConnected size={16} />
+        <span className="agent-sidebar__plugins-icon"><PluginsIcon size={22} /></span>
         <span>Plugins</span>
         {installed.length ? (
           <span

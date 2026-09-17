@@ -1,4 +1,3 @@
-import { tokenPluginFor } from "@mivlet/connectors/providers/token-plugins";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
@@ -8,7 +7,9 @@ import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { listRuntimeMcpServerConfigurations, type RuntimeMcpServerSummary } from "../runtime/domains/mcp";
+import { PluginsIcon } from "./PluginsIcon";
 import { useModalFocusTrap } from "../hooks/useModalFocusTrap";
 import { builtinPluginEntries } from "../lib/builtin-plugins";
 import { ConnectorIcon } from "./ConnectorIcon";
@@ -18,7 +19,6 @@ import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
 import { PluginDetailHeader } from "./marketplace/PluginDetailHeader";
 import { PluginOverview } from "./marketplace/PluginOverview";
 import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
-import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
 import {
   findMarketplaceConnector,
   marketplaceConnectorSections,
@@ -69,7 +69,19 @@ export function PluginPanel({
   const [query, setQuery] = useState("");
   const [toolServersOpen, setToolServersOpen] = useState(false);
   const [toolServerStatus, setToolServerStatus] = useState("");
-  const [readiness, setReadiness] = useState<"available" | "connected" | "attention" | "planned">("available");
+  const [customServers, setCustomServers] = useState<RuntimeMcpServerSummary[]>([]);
+  const [customServerId, setCustomServerId] = useState<string>();
+  const [customRevision, setCustomRevision] = useState(0);
+  const customModalRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    let current = true;
+    setCustomServers([]);
+    if (workspaceId) void listRuntimeMcpServerConfigurations(workspaceId).then(servers => {
+      if (current) setCustomServers(servers ?? []);
+    }).catch(() => { if (current) setToolServerStatus("Custom plugins couldn’t be loaded. Open Add custom plugin to retry."); });
+    return () => { current = false; };
+  }, [workspaceId, customRevision]);
+  useModalFocusTrap({ active: toolServersOpen, containerRef: customModalRef, onClose: () => setToolServersOpen(false) });
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(initialConnectorId ?? null);
   const detailModalRef = useRef<HTMLDivElement>(null);
@@ -108,24 +120,20 @@ export function PluginPanel({
   });
 
   const normalizedQuery = query.trim().toLocaleLowerCase();
-  const matchesReadiness = (entry: MarketplaceConnectorEntry) => {
+  const visibleCustomServers = customServers.filter(server => server.displayName.toLocaleLowerCase().includes(normalizedQuery));
+  const isConnectable = (entry: MarketplaceConnectorEntry) => {
     const connector = manifestById.get(entry.id);
-    const usable = Boolean(connector || remoteConnectorFor(entry.id) || tokenPluginFor(entry.id));
-    if (readiness === "planned") return !usable;
-    if (readiness === "connected") return connector?.status === "connected" && ["connected", "syncing"].includes(resolveDetailedStatus(connector).className);
-    if (readiness === "attention") return !!connector && ["expired", "revoked", "failed", "unavailable", "permission-limited", "unverified", "configuration-required", "needs-auth"].includes(resolveDetailedStatus(connector).className);
+    const usable = Boolean(connector || remoteConnectorFor(entry.id));
     return usable;
   };
-  const visibleBuiltins = readiness === "available"
-    ? builtinPluginEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery))
-    : [];
+  const visibleBuiltins = builtinPluginEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery));
   const showBuiltins = visibleBuiltins.length > 0;
   const visibleSections = useMemo(() => {
     return marketplaceConnectorSections
       .map((section) => ({
         ...section,
         connectors: section.connectors.filter((entry) => {
-          if (!matchesReadiness(entry)) return false;
+          if (!isConnectable(entry)) return false;
           const manifest = manifestById.get(entry.id);
           return [
             entry.name,
@@ -142,7 +150,7 @@ export function PluginPanel({
         }),
       }))
       .filter((section) => section.connectors.length > 0);
-  }, [manifestById, normalizedQuery, readiness]);
+  }, [manifestById, normalizedQuery]);
   const installedManifests = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase();
     return manifests
@@ -185,7 +193,7 @@ export function PluginPanel({
   ) => {
     const connector = manifestById.get(entry.id);
     const remote = remoteConnectorFor(entry.id);
-    const connectable = Boolean(connector || remote || tokenPluginFor(entry.id));
+    const connectable = Boolean(connector || remote);
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const connected = connector?.status === "connected" && !!cardDetail && ["connected", "syncing"].includes(cardDetail.className);
     const needsReconnect =
@@ -245,6 +253,9 @@ export function PluginPanel({
           <h1>Plugins</h1>
           <p>Give your agents access to the tools you use.</p>
         </div>
+        {workspaceId ? <button type="button" className="button button--secondary marketplace-add-custom" onClick={() => {
+          setCustomServerId(undefined); setToolServerStatus(""); setToolServersOpen(true);
+        }}><Plus size={16} aria-hidden="true" />Add custom plugin</button> : null}
         <label className="connections-search">
           <MagnifyingGlass size={17} aria-hidden="true" />
           <span className="sr-only">Search plugins</span>
@@ -256,16 +267,20 @@ export function PluginPanel({
           />
         </label>
       </header>
-      {workspaceId ? <details className="settings-disclosure" onToggle={(event) => setToolServersOpen(event.currentTarget.open)}><summary>Custom tool servers</summary>{toolServersOpen ? <LocalMcpSettings workspaceId={workspaceId} onStatus={setToolServerStatus} /> : null}{toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}</details> : null}
-      <div className="marketplace-readiness" role="group" aria-label="Filter plugins by readiness">{([ ["available", "Available"], ["connected", "Connected"], ["attention", "Needs attention"], ["planned", "Planned"] ] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={readiness === value} onClick={() => setReadiness(value)}>{label}</button>)}</div>
-      {readiness === "planned" ? <p className="marketplace-section__empty">Planned integrations are not available to connect yet.</p> : null}
-      {readiness === "available" ? <section
+      {!toolServersOpen && toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}
+      <section
         className="marketplace-section marketplace-section--installed"
         aria-labelledby="installed-connections-title"
       >
         <h2 id="installed-connections-title">Installed</h2>
-        {installedManifests.length ? (
+        {installedManifests.length || visibleCustomServers.length ? (
           <div className="marketplace-installed-list">
+            {visibleCustomServers.map(server => <button type="button"
+              className="marketplace-installed-connector" key={`custom-${server.id}`} aria-label={`Manage ${server.displayName} custom plugin`}
+              onClick={() => { setCustomServerId(server.id); setToolServerStatus(""); setToolServersOpen(true); }}>
+              <span className="marketplace-installed-connector__icon" aria-hidden="true"><PluginsIcon size={26} /></span>
+              <span>{server.displayName}</span>
+            </button>)}
             {installedManifests.map((connector) => {
               const entry = findMarketplaceConnector(connector.id);
               if (!entry) return null;
@@ -303,10 +318,10 @@ export function PluginPanel({
               : "Connect an app and it will appear here."}
           </p>
         )}
-      </section> : null}
+      </section>
 
       {[
-        ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : CONNECTOR_PRIORITY.map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(matchesReadiness) }] : []),
+        ...(showBuiltins ? [{ id: "featured", title: "Featured", connectors: normalizedQuery ? [] : CONNECTOR_PRIORITY.map(findMarketplaceConnector).filter((entry): entry is MarketplaceConnectorEntry => Boolean(entry)).filter(isConnectable) }] : []),
         ...visibleSections,
       ].map((section) => {
         const expanded = Boolean(normalizedQuery) || expandedSections.includes(section.id);
@@ -350,12 +365,20 @@ export function PluginPanel({
         </section>;
       })}
 
-      {!hasDirectoryMatches ? (
+      {!hasDirectoryMatches && !visibleCustomServers.length ? (
         <p className="marketplace-search-empty" role="status">
-          {query.trim() ? `No plugins match “${query.trim()}” in this filter.` : "No plugins in this filter."}
+          {query.trim() ? `No plugins match “${query.trim()}”.` : "No plugins found."}
         </p>
       ) : null}
 
+      {toolServersOpen && workspaceId ? <div ref={customModalRef} className="connector-detail-modal" role="dialog" aria-modal="true" aria-labelledby="custom-plugin-title" tabIndex={-1}>
+        <div className="connector-detail-modal__panel custom-plugin-dialog">
+          <button type="button" className="connector-detail-modal__close" aria-label="Close custom plugin setup" onClick={() => setToolServersOpen(false)}><X size={17} /></button>
+          <h2 id="custom-plugin-title">{customServerId ? "Manage custom plugin" : "Add custom plugin"}</h2>
+          <LocalMcpSettings workspaceId={workspaceId} initialAdding={!customServerId} serverId={customServerId} onStatus={setToolServerStatus} onSaved={() => setCustomRevision(value => value + 1)} />
+          {toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}
+        </div>
+      </div> : null}
       {selectedEntryId && (selectedEntry || selectedBuiltinEntry) ? (
         <div
           ref={detailModalRef}
@@ -395,8 +418,6 @@ export function PluginPanel({
                 onToggle={(enabled) => { void builtin.setEnabled(selectedBuiltinEntry.id, enabled); }}
                 onUse={onUseBuiltinPlugin}
               />
-            ) : selectedEntry && tokenPluginFor(selectedEntry.id) ? (
-              <TokenPluginDetails key={`${workspaceId}-${selectedEntry.id}`} plugin={tokenPluginFor(selectedEntry.id)!} connector={selectedConnector} workspaceId={workspaceId} onUseConnector={onUseConnector} onDisconnect={onDisconnect} accounts={accounts[selectedEntry.id]} onSwitchAccount={onSwitchAccount} titleId={`connector-detail-${selectedEntry.id}`} />
             ) : selectedEntry && (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
                 titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} />

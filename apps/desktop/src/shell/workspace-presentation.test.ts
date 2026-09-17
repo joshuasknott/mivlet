@@ -306,7 +306,7 @@ describe("conversation chrome presentation", () => {
       openApprovals: [],
     }).mira;
     expect(idle).toMatchObject({
-      message: "Open a conversation",
+      message: "",
       presence: "idle",
       status: "idle",
     });

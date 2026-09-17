@@ -130,7 +130,7 @@ pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
 // Supported connector vocabularies.
-pub const SUPPORTED_CONNECTOR_IDS: [&str; 21] = [
+pub const SUPPORTED_CONNECTOR_IDS: [&str; 8] = [
     "github",
     "vercel",
     "google-drive",
@@ -139,19 +139,6 @@ pub const SUPPORTED_CONNECTOR_IDS: [&str; 21] = [
     "slack",
     "google-calendar",
     "linear",
-    "outlook",
-    "microsoft-teams",
-    "zoom",
-    "linkedin",
-    "instagram",
-    "youtube",
-    "google-ads",
-    "meta-ads",
-    "shopify",
-    "docusign",
-    "greenhouse",
-    "lever",
-    "workday",
 ];
 pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "needs-auth",
@@ -1106,6 +1093,8 @@ pub struct MivletAgentProfile {
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications_enabled: Option<bool>,
     pub icon: String,
     #[serde(default)]
     pub icon_color: String,

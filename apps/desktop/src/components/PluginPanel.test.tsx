@@ -77,23 +77,25 @@ describe("Connector Connection selection", () => {
   it("opens custom tool servers from Plugins", async () => {
     render(<PluginPanel workspaceId="workspace-test" manifests={[]} accounts={{}} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} onSwitchAccount={vi.fn()} />);
     expect(screen.queryByText("Tool servers are available only in the desktop app.")).toBeNull();
-    fireEvent.click(screen.getByText("Custom tool servers"));
+    expect(screen.queryByText("Custom tool servers")).toBeNull();
+    const add = screen.getByRole("button", { name: "Add custom plugin" });
+    add.focus();
+    fireEvent.click(add);
+    expect(screen.getByRole("dialog", { name: "Add custom plugin" })).toBeVisible();
     expect(await screen.findByText("Tool servers are available only in the desktop app.")).toBeVisible();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Add custom plugin" })).toBeNull();
+    expect(add).toHaveFocus();
   });
-  it("filters ready connections separately from missing authorization and unhealthy connections", () => {
+  it("shows connections together without status filters and keeps recovery actions", () => {
     const props = { manifests: [gmail, github], accounts: {}, onUseConnector: vi.fn(), onConnect: vi.fn(), onDisconnect: vi.fn(), onRefresh: vi.fn(), onSelect: vi.fn(), onSwitchAccount: vi.fn() };
     const view = render(<PluginPanel {...props} />);
-    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
+    expect(screen.queryByRole("group", { name: "Filter plugins by readiness" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Manage Gmail" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("button", { name: "Connect GitHub" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Needs attention" }));
-    expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
     expect(screen.getAllByRole("button", { name: "Connect GitHub" }).length).toBeGreaterThan(0);
     view.rerender(<PluginPanel {...props} manifests={[{ ...gmail, health: { ...gmail.health!, state: "error", summary: "Connection expired." } }, github]} />);
     expect(screen.getAllByRole("button", { name: "Reconnect Gmail" }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: "Connected" }));
     expect(screen.queryByRole("button", { name: "Manage Gmail" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Reconnect Gmail" })).toBeNull();
   });
   it("prepares a connected plugin example without starting a connection or action", async () => {
     const user = userEvent.setup();
@@ -236,29 +238,10 @@ describe("Connector Connection selection", () => {
     ).toBeVisible();
   });
 
-  it("offers explicit token setup for formerly planned plugins", async () => {
-    const user = userEvent.setup();
-    render(
-      <PluginPanel
-        manifests={[github]}
-        onUseConnector={vi.fn()}
-        onConnect={vi.fn()}
-        onDisconnect={vi.fn()}
-        onRefresh={vi.fn()}
-        onSelect={vi.fn()}
-        accounts={{}}
-        onSwitchAccount={vi.fn()}
-      />,
-    );
-
-    await user.click(
-      screen.getAllByRole("button", { name: "Connect Outlook" })[0],
-    );
-
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Microsoft Graph delegated access token");
-    expect(
-      screen.getByRole("button", { name: "Verify and connect" }),
-    ).toBeDisabled();
+  it("excludes removed integrations from the directory", () => {
+    render(<PluginPanel manifests={[github]} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} accounts={{}} onSwitchAccount={vi.fn()} />);
+    for (const name of ["Outlook", "Microsoft Teams", "Zoom", "LinkedIn", "Instagram", "YouTube", "Google Ads", "Meta Ads", "Shopify", "DocuSign", "Greenhouse", "Lever", "Workday"]) {
+      expect(screen.queryByRole("button", { name: `Connect ${name}` })).not.toBeInTheDocument();
+    }
   });
 });

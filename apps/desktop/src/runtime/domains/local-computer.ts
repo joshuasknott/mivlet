@@ -12,24 +12,6 @@ import type {
 } from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
-export async function importRuntimeRepository(
-  target: LocalComputerTarget,
-  expectedGeneration: number,
-): Promise<{
-  relativePath: string;
-  files: number;
-  skipped: number;
-  sizeBytes: number;
-} | null> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind !== "native")
-    throw new Error("Repository import requires the desktop app.");
-  return adapter.invoke("local_computer_import_repository", {
-    ...target,
-    expectedGeneration,
-  });
-}
-
 async function nativeComputerCommand<T>(
   command: string,
   args: Record<string, unknown>,

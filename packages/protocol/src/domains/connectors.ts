@@ -7,19 +7,6 @@ export type SupportedConnectorId =
   | "gmail"
   | "slack"
   | "google-calendar"
-  | "linear"
-  | "outlook"
-  | "microsoft-teams"
-  | "zoom"
-  | "linkedin"
-  | "instagram"
-  | "youtube"
-  | "google-ads"
-  | "meta-ads"
-  | "shopify"
-  | "docusign"
-  | "greenhouse"
-  | "lever"
-  | "workday";
+  | "linear";
 
 export type ConnectorId = "local-files" | SupportedConnectorId | (string & {});

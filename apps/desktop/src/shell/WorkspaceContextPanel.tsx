@@ -23,6 +23,7 @@ import type { RenderWorkspaceConversation } from "./WorkspaceConversationChrome"
 import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
 
 export function WorkspaceContextPanel({
+  hidden,
   nav,
   runtime,
   service,
@@ -31,6 +32,7 @@ export function WorkspaceContextPanel({
   renderConversation,
   onNewSideChat,
 }: {
+  hidden: boolean;
   nav: WorkspaceNavigation;
   runtime: ShellRuntime;
   service: WorkspaceExecution;
@@ -52,7 +54,7 @@ export function WorkspaceContextPanel({
       rooms={state.data.conversations}
       work={state.data.work}
       runtime={runtime}
-      open={nav.contextOpen || Boolean(nav.computer)}
+      open={!hidden && (nav.contextOpen || Boolean(nav.computer))}
       onClose={() => {
         nav.setComputer(null);
         nav.setContextOpen(false);

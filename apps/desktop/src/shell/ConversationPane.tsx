@@ -1,10 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { WorkDetails } from "../components/work/WorkDetails";
+import { promoteWorkOutputToMemory } from "../lib/work-memory";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConversationRoom,
   MivletAgentProfile,
   LocalProject,
   WorkspaceView,
-  VoiceConversationPhase,
 } from "@mivlet/protocol";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
@@ -21,7 +22,6 @@ import { insertDictation } from "../lib/insert-dictation";
 import { prepareComposerImage } from "../lib/composer-images";
 import { prepareReadableComposerAttachment, composerSubmissionText } from "../lib/composer-attachments";
 import { builtinPluginMentions } from "../lib/builtin-plugins";
-import { importRuntimeRepository } from "../runtime/domains/local-computer";
 import { composerModelsFor } from "./composer-models";
 import { Composer } from "../components/Composer";
 import { RecipientPicker } from "../components/conversation/RecipientPicker";
@@ -30,12 +30,9 @@ import type { ComposerAttachment } from "../lib/types";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
-import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
-import { runWorkspaceVoice } from "../lib/workspace-voice";
 import { selectResponder } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
-import { WorkCard } from "../components/work/WorkCard";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
 import {
   conversationTurns,
@@ -56,7 +53,6 @@ const ApprovalPanel = lazy(() =>
     default: module.ApprovalPanel,
   })),
 );
-const VoiceConversation = lazy(() => import("../components/voice/VoiceConversation").then(module => ({ default: module.VoiceConversation })));
 const ArtifactPreview = lazy(() =>
   import("../components/conversation/ArtifactPreview").then((module) => ({
     default: module.ArtifactPreview,
@@ -89,8 +85,7 @@ export function ConversationPane({
   onClose,
   onArtifact,
   onEdit,
-  onPlace,
-  onMigrate,
+  onAgentSettings,
   onNew,
   onComputer,
   onPlugins,
@@ -98,7 +93,7 @@ export function ConversationPane({
   onProjectUpdate,
   onDraftReady,
   onOpenWork,
-  headerActions,
+  selectedWorkId,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -111,8 +106,7 @@ export function ConversationPane({
   onClose: () => void;
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
-  onPlace: () => void;
-  onMigrate: () => void;
+  onAgentSettings: (agentId: string) => void;
   onNew: (draft?: string) => Promise<string | void>;
   onComputer: (agentId: string) => void;
   onPlugins: (id?: string) => void;
@@ -122,8 +116,8 @@ export function ConversationPane({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
-  onOpenWork?: (id: string) => void;
-  headerActions?: ReactNode;
+  onOpenWork?: (id: string | null) => void;
+  selectedWorkId?: string | null;
 }) {
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
   const composer = useScopedComposer({
@@ -160,18 +154,7 @@ export function ConversationPane({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
-  const [voiceOpen, setVoiceOpen] = useState(false);
-  const [voicePhase, setVoicePhase] = useState<VoiceConversationPhase>("ready");
-  const closeVoice = () => { setVoiceOpen(false); setVoicePhase("ready"); requestAnimationFrame(() => composerRef.current?.focus()); };
-  useEffect(() => { setVoiceOpen(false); setVoicePhase("ready"); }, [active, room.id, recipientId, profile?.modelId, profile?.reasoningEffort]);
-  const optionsRef = useRef<HTMLDetailsElement>(null);
-  useEffect(() => {
-    const dismiss = (event: PointerEvent) => {
-      if (optionsRef.current && !optionsRef.current.contains(event.target as Node)) optionsRef.current.open = false;
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, []);
+
   const submission = useRef(false);
   const currentComposer = useRef(composer);
   currentComposer.current = composer;
@@ -283,6 +266,13 @@ export function ConversationPane({
     }));
   const baseState = liveStates[0]?.state ?? idleAgentState;
 
+  const activityDetailsRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (selectedWorkId) {
+      activityDetailsRef.current?.scrollIntoView({ block: "nearest" });
+      activityDetailsRef.current?.focus({ preventScroll: true });
+    }
+  }, [selectedWorkId, room.id]);
   const scroll = useConversationScroll(
     `${service.workspaceId}:${view.id}`,
     `${state.revision}:${history?.messages.length}`,
@@ -293,15 +283,6 @@ export function ConversationPane({
     [runtime.modelOptions],
   );
   const model = models.find((model) => model.id === profile?.modelId);
-  const voiceUnavailable =
-    !runtime.backendProviders.some(
-      (provider) =>
-        provider.id === "openai" && provider.authState === "connected",
-    )
-      ? "Connect an OpenAI API account for transcription and speech."
-      : !model?.available
-        ? "Connect this agent's model provider before starting voice."
-        : undefined;
   const approvals = active
     ? runtime.openApprovals.filter((approval) =>
         sessions.some((session) => session.approvalIds.has(approval.id)),
@@ -468,31 +449,6 @@ export function ConversationPane({
         );
     }
   };
-  const importRepository = async () => {
-    if (pending || !profile) return;
-    setPending(true);
-    setError("");
-    const draft = composer;
-    try {
-      const node = await localComputer.prepareForTool("read-file");
-      const receipt = await importRuntimeRepository(
-        { workspaceId: service.workspaceId, agentId: profile.id },
-        node.generation,
-      );
-      if (receipt)
-        draft.setText(
-          `${draft.text}${draft.text ? "\n\n" : ""}I imported a repository snapshot into Workspace/${receipt.relativePath} (${receipt.files} files; ${receipt.skipped} excluded entries). Inspect its structure and instructions before editing. This private snapshot is not connected to an execution runtime. Do not claim to run builds, tests or Git commands without a separately configured and approved execution environment.`,
-        );
-    } catch (error) {
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Could not import this repository.",
-      );
-    } finally {
-      setPending(false);
-    }
-  };
   const contextFailure = sessions.find(
     (session) => session.state?.contextFailure,
   )?.state?.contextFailure;
@@ -559,62 +515,22 @@ export function ConversationPane({
       </Suspense>
     );
   return (
-    <div className={`conversation-pane-content${empty && !voiceOpen ? " conversation-pane-content--empty" : ""}`}>
-      <header className={`team-conversation-header${headerActions ? " team-conversation-header--with-mode" : ""}`}>
+    <div className={`conversation-pane-content${empty ? " conversation-pane-content--empty" : ""}`}>
+      <header className="team-conversation-header">
         <div className="team-conversation-identity">
+          <button type="button" className="team-agent-settings-trigger" disabled={!profile} aria-label={`Agent settings for ${displayAgent.name}`} onClick={() => onAgentSettings(displayAgent.id)}>
           <ProfileAgentAvatar
             agent={displayAgent}
             iconSize={29}
-            presence={agentPresence(baseState, approvals.length > 0, false, {
-              speaking: voicePhase === "speaking",
-              listening: voicePhase === "listening" || voicePhase === "hearing",
-            })}
+            presence={agentPresence(baseState, approvals.length > 0)}
           />
+          </button>
           <div className="team-conversation-title">
-            <div className="team-conversation-actions conversation-title-menu">
-              <details
-                ref={optionsRef}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    event.currentTarget.open = false;
-                    event.currentTarget.querySelector("summary")?.focus();
-                  }
-                }}
-              >
-                <summary aria-label="Conversation options">
-                  <strong>{room.kind === "direct" && room.title === `Chat with ${displayAgent.name}` ? displayAgent.name : room.title}</strong>
-                  <CaretDown size={12} />
-                </summary>
-                <div
-                  onClick={() => {
-                    if (optionsRef.current) optionsRef.current.open = false;
-                  }}
-                >
-                  <button type="button" onClick={() => void onNew()}>
-                    New conversation
-                  </button>
-                  <button type="button" onClick={onEdit}>
-                    {project
-                      ? "Project settings"
-                      : room.kind === "group"
-                        ? "Edit participants and title"
-                        : "Edit conversation"}
-                  </button>
-                  {!project ? (
-                    <button type="button" onClick={onPlace}>
-                      Place in project…
-                    </button>
-                  ) : null}
-                  {!project && room.kind === "group" ? (
-                    <button type="button" onClick={onMigrate}>
-                      Convert to project…
-                    </button>
-                  ) : null}
-                </div>
-              </details>
-            </div>
+            <button type="button" className="team-agent-settings-trigger" disabled={!project && room.kind === "direct" && !profile}
+              title={room.kind === "direct" && !project ? `Agent settings for ${displayAgent.name}` : undefined}
+              onClick={() => project || room.kind === "group" ? onEdit() : onAgentSettings(displayAgent.id)}>
+              <strong>{room.kind === "direct" && !sideChat ? displayAgent.name : room.title}</strong>
+            </button>
             {sideChat ? (
               <small className="side-chat-marker">
                 Side Chat · separate conversation
@@ -622,17 +538,7 @@ export function ConversationPane({
             ) : null}
           </div>
         </div>
-        {headerActions}
       </header>
-      {voiceOpen && active ? <Suspense fallback={<p role="status">Opening voice…</p>}><VoiceConversation
-        key={`${service.workspaceId}:${room.id}:${recipientId}:${profile?.modelId}`}
-        agent={displayAgent} modelLabel={model?.label ?? "Choose model"}
-        scope={{ workspaceId: service.workspaceId, agentId: recipientId, threadId: room.id }}
-        unavailable={voiceUnavailable}
-        approvals={approvalPanel} onPhase={setVoicePhase} onClose={closeVoice}
-        onOpenProviders={() => { closeVoice(); onProviders(); }}
-        onPrompt={(text, control) => runWorkspaceVoice(service, text, control)}
-      /></Suspense> : <>
       <div
         className="conversation-pane-scroll"
         ref={scroll.scrollRef}
@@ -651,7 +557,7 @@ export function ConversationPane({
             agent={displayAgent}
             authors={authors}
             requireAuthor
-            showAuthor
+            showAuthor={room.kind === "group"}
             state={idleAgentState}
             liveStates={liveStates}
             threadId={room.id}
@@ -673,15 +579,14 @@ export function ConversationPane({
               focus();
             }}
           />
-          {work.filter(item => !item.parentId).slice(-6).map(item => <div className="conversation-attention conversation-recovery" key={item.id} aria-label={`Work for ${item.agentName}'s request`}>
-            {item.runIds.length && ["failed", "blocked", "awaiting-user"].includes(item.status) ? <p role="alert">{item.agentName}: {item.reason || item.status.replaceAll("-", " ")}</p> : null}
-            <WorkCard item={item} onOpen={() => onOpenWork?.(item.id)} onOpenWork={onOpenWork}
+          {work.filter(item => item.id === selectedWorkId).map(item => <section key={item.id} ref={activityDetailsRef} tabIndex={-1} className="conversation-attention" aria-label="Activity details">
+            <button type="button" onClick={() => onOpenWork?.(null)}>Close details</button>
+            <WorkDetails item={item} onOpen={() => onOpenWork?.(null)}
               onStop={id => service.stop(id)}
               onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}
-              onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }} />
-            <button type="button" onClick={() => { composer.setText(item.userRequest || item.prompt); focus(); }}>Restore request to composer</button>
-            {/computer|runtime|plugin/i.test(item.reason ?? "") ? <button type="button" onClick={() => onComputer(item.agentId)}>Check Computer Use</button> : /provider|connect|model/i.test(item.reason ?? "") ? <button type="button" onClick={() => onPlugins()}>Check connections</button> : null}
-          </div>)}
+              onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }}
+              onPromote={async (output, workItem, value) => { await promoteWorkOutputToMemory(workItem, output, value, runtime.memoryState); }} />
+          </section>)}
           {running
             .filter(
               (item) =>
@@ -746,7 +651,6 @@ export function ConversationPane({
           </button>
         ) : null}
         <Composer
-          secondaryControlsInMenu
           onConnectProvider={onProviders}
           onSaveConclusion={latestConclusion ? () => setMemoryOpen(true) : undefined}
           composerRef={composerRef}
@@ -767,25 +671,9 @@ export function ConversationPane({
           onStopVoice={() => void voice.stop()}
           onCancelVoice={voice.cancel}
           onDismissVoice={voice.dismiss}
-          onStartVoiceChat={() => {
-            voice.reset();
-            setVoiceOpen(true);
-          }}
-          voiceChatDisabled={!active || pending || !profile}
-          voiceChatDescription={
-            !active
-              ? "Open this conversation to start voice chat."
-              : pending
-                ? "Wait for this message to finish sending."
-                : !profile
-                  ? "Choose an available participant before starting voice."
-                  : voiceUnavailable ??
-                    `Start voice chat with ${displayAgent.name}. Your draft stays in this conversation.`
-          }
           onAttach={() => fileInput.current?.click()}
-          onImportRepository={() => void importRepository()}
           addMenuOpen={addOpen}
-          onToggleAddMenu={() => { if (optionsRef.current) optionsRef.current.open = false; setAddOpen(!addOpen); }}
+          onToggleAddMenu={() => setAddOpen(!addOpen)}
           onOpenTool={() => onPlugins()}
           onRunCommand={composer.setText}
           onFileChange={(event) => {
@@ -802,7 +690,7 @@ export function ConversationPane({
               runtime.updateAgent(profile.id, { reasoningEffort: effort });
           }}
           onSelectModel={(modelId) => {
-            if (profile) runtime.updateAgent(profile.id, { modelId });
+            if (profile) runtime.updateAgent(profile.id, { modelId, reasoningEffort: undefined });
           }}
           placeholder="Message…"
           inThread
@@ -858,7 +746,7 @@ export function ConversationPane({
           }
         />
       </div>
-      </>}
+
       {memoryOpen ? (
         <ConversationMemoryPromotion
           chatTitle={room.title}

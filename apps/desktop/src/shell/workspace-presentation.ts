@@ -1,3 +1,4 @@
+import { latestAgentReply } from "../lib/agent-preview";
 import type {
   AccountWorkspaceStatus,
   CollaborationWorkItem,
@@ -10,7 +11,7 @@ import type {
   SearchResult,
 } from "@mivlet/protocol";
 import type { AgentSidebarPreview } from "../components/agents/AgentSidebar";
-import type { NewAction } from "../components/conversation/ConversationTabs";
+interface NewAction { id: string; label: string; run: () => void; }
 import type { NavContext } from "../components/navigation/WorkspaceRightNav";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import type { RightPanelTab } from "../components/navigation/right-panel-state";
@@ -144,9 +145,7 @@ export function agentSidebarPreviews(input: {
       return [
         agent.id,
         {
-          message: current
-            ? workPresentation(current).label
-            : "Open a conversation",
+          message: latestAgentReply(agentWork),
           time: "",
           presence,
           status:

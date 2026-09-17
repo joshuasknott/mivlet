@@ -1,7 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { avatarVariant } from "../../lib/blob-avatar";
 import { AgentEditor } from "./AgentEditor";
@@ -12,6 +12,31 @@ const profile: MivletAgentProfile = {
 };
 const props = { models: [], connectors: [], knowledgeSources: [], canDelete: false, onClose: vi.fn(), onDelete: vi.fn() };
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+beforeEach(() => vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+
+it("traps focus inside the settings panel on a narrow screen", async () => {
+  vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  render(<><button>Conversation</button><AgentEditor {...props} open presentation="panel" agent={profile} onSave={vi.fn()} /></>);
+  expect(screen.getByRole("dialog", { name: "Agent settings" })).toHaveAttribute("aria-modal", "true");
+  expect(screen.getByText("Conversation")).toHaveAttribute("inert");
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  await userEvent.tab();
+  expect(screen.getByRole("button", { name: "Close" })).toHaveFocus();
+});
+
+it("edits from a non-modal right panel and saves the notification preference without a label field", async () => {
+  const save = vi.fn();
+  const close = vi.fn();
+  render(<AgentEditor {...props} open presentation="panel" agent={profile} onSave={save} onClose={close} />);
+  expect(screen.getByRole("dialog", { name: "Agent settings" })).not.toHaveAttribute("aria-modal");
+  expect(screen.queryByLabelText(/^Label/)).toBeNull();
+  expect(screen.getByLabelText("Name")).toHaveFocus();
+  await userEvent.click(screen.getByRole("switch", { name: "Notifications" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ name: "Ava", notificationsEnabled: false, connectorIds: profile.connectorIds }));
+  await userEvent.keyboard("{Escape}");
+  expect(close).toHaveBeenCalledOnce();
+});
 
 describe("agent portrait ownership", () => {
   it("selects the new character's native colour and keeps recolouring separate from shape", async () => {

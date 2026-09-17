@@ -59,6 +59,7 @@ function runtime(patch: Partial<ShellRuntime> = {}): ShellRuntime {
     accountWorkspaceStatus: account,
     identityStatus: identity,
     identityPending: false,
+    connectedAgentBackends: ["codex"],
     signInIdentity: vi.fn(),
     reconcileAccountWorkspace: vi.fn(),
     ...patch,

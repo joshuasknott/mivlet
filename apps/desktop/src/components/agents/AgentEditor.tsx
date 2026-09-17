@@ -1,3 +1,4 @@
+import "../../styles/agent-settings.css";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { X } from "@phosphor-icons/react/dist/csr/X";
@@ -5,6 +6,7 @@ import type { MivletAgentProfile, MivletLearnedTask } from "@mivlet/protocol";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
 import { AVATAR_SHAPES, AVATAR_COLOURS, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
 
@@ -84,6 +86,7 @@ export function AgentEditor({
   onDelete,
   onSkillsChange,
   onUseSkill,
+  presentation = "modal",
 }: {
   open: boolean;
   agent: MivletAgentProfile | null;
@@ -95,6 +98,7 @@ export function AgentEditor({
   onDelete: () => void;
   onSkillsChange?: (tasks: MivletLearnedTask[]) => void;
   onUseSkill?: (task: MivletLearnedTask) => void;
+  presentation?: "modal" | "panel";
 }) {
   const [draft, setDraft] = useState<AgentDraft>(emptyDraft);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -105,7 +109,15 @@ export function AgentEditor({
   const [imagePending, setImagePending] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
-  useModalFocusTrap({ active: open, containerRef: modalRef, initialFocusRef: nameRef, onClose });
+  const compact = useMediaQuery("(max-width: 850px)");
+  const modal = presentation === "modal" || compact;
+  useModalFocusTrap({ active: open && modal, containerRef: modalRef, initialFocusRef: nameRef, onClose });
+  useEffect(() => {
+    if (!open || modal) return;
+    const previous = document.activeElement;
+    nameRef.current?.focus();
+    return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, [open, modal, agent?.id]);
 
   useEffect(() => {
     imageRequestRef.current++;
@@ -120,6 +132,7 @@ export function AgentEditor({
       instructions: agent.instructions,
       modelId: agent.modelId,
       reasoningEffort: agent.reasoningEffort,
+      notificationsEnabled: agent.notificationsEnabled !== false,
       icon: "agent",
       iconColor: agent.iconColor || DEFAULT_AGENT_COLOR,
       avatarSeed: agent.avatarSeed ?? `blob-v1:${agent.id}`,
@@ -134,18 +147,22 @@ export function AgentEditor({
   if (!open) return null;
 
   return (
-    <div className="agent-editor-backdrop" role="presentation">
-      <div ref={modalRef} className="agent-editor" role="dialog" aria-modal="true" aria-labelledby="agent-editor-title">
+    <div className={presentation === "panel" ? "workspace-context agent-settings-panel" : "agent-editor-backdrop"} role="presentation">
+      <div ref={modalRef} className="agent-editor" role="dialog" aria-modal={modal || undefined} aria-labelledby="agent-editor-title"
+        onKeyDown={(event) => { if (!modal && event.key === "Escape" && !skillsOpen) { event.stopPropagation(); onClose(); } }}>
         <header className="agent-editor__header">
-          <div><h2 id="agent-editor-title">{agent ? `Edit ${agent.name}` : "Create agent"}</h2></div>
+          <div><h2 id="agent-editor-title">{presentation === "panel" ? "Agent settings" : agent ? `Edit ${agent.name}` : "Create agent"}</h2></div>
           <button type="button" onClick={onClose} aria-label="Close"><X size={18} /></button>
         </header>
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
+          <div className="agent-editor__body">
           <div className="agent-editor__identity">
             <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
+          <details className="agent-editor__appearance" open={presentation === "modal" ? true : undefined}>
+          <summary>Change appearance</summary>
           <fieldset className="agent-icon-picker">
             <legend className="agent-editor__sr-only">Agent image</legend>
             <div className="agent-shape-picker" role="group" aria-label="Character shape">
@@ -188,8 +205,14 @@ export function AgentEditor({
 
           <AgentColourPicker key={`${agent?.id ?? "new"}:${draft.avatarSeed}`} value={draft.iconColor} onChange={(iconColor) => setDraft({ ...draft, iconColor })} />
           {draft.iconImageDataUrl && <small>Colour applies to the generated portrait when you remove the uploaded image.</small>}
+          </details>
 
           <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this agent work with you?" /></label>
+
+          <label className="agent-editor__notifications"><span>Notifications<small>In-app notices when this agent finishes or needs your attention.</small></span>
+            <input type="checkbox" role="switch" aria-label="Notifications" checked={draft.notificationsEnabled !== false}
+              onChange={(event) => setDraft({ ...draft, notificationsEnabled: event.target.checked })} />
+          </label>
 
           <div className="agent-editor__model-settings">
             <div className="agent-editor__field agent-editor__model"><span>Model</span>
@@ -203,6 +226,7 @@ export function AgentEditor({
 
           {agent && onSkillsChange ? <button type="button" className="agent-editor__skills" onClick={() => setSkillsOpen(true)}>Skills for {agent.name}<span>{agent.learnedTasks?.length ?? 0}</span></button> : null}
 
+          </div>
           <footer className="agent-editor__footer">
             {agent && canDelete ? <button className="agent-editor__delete" type="button" onClick={onDelete}><Trash size={15} />Delete</button> : <span />}
             <div><button type="button" onClick={onClose}>Cancel</button><button className="agent-editor__save" type="submit" disabled={!draft.name.trim() || imagePending}>{agent ? "Save changes" : "Create agent"}</button></div>

@@ -1,7 +1,6 @@
 import type { ConversationLayout, LocalProject } from "@mivlet/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RightPanelTab } from "../components/navigation/right-panel-state";
-import { scopedRoomIds, scopeWork } from "../components/navigation/work-order";
 import type { NavContext } from "../components/navigation/WorkspaceRightNav";
 import { useConversationDrag } from "../hooks/useConversationDrag";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -28,7 +27,7 @@ export function useWorkspaceNavigation(options: {
   onNavigate: () => void;
   onSearch: () => void;
 }) {
-  const { runtime, service, state, projects, marketplace } = options;
+  const { runtime, service, state, projects } = options;
   const callbacks = useRef(options);
   callbacks.current = options;
   const [layout, setLayout] = useState<ConversationLayout>(emptyLayout);
@@ -37,12 +36,10 @@ export function useWorkspaceNavigation(options: {
   const phone = useMediaQuery("(max-width: 700px)");
   // One contextual right panel replaces history, details and computer panels.
   const [contextOpen, setContextOpen] = useState(!narrow);
-  const [mode, setMode] = useState<"chat" | "work">("chat");
   const [projectDetailsId, setProjectDetailsId] = useState<string | null>(null);
   const [panelFocused, setPanelFocused] = useState(false);
   const [panelRequest, setPanelRequest] = useState<RightPanelTab | null>(null);
   const [navWorkId, setNavWorkId] = useState<string | null>(null);
-  const [navigationCollapsed, setNavigationCollapsed] = useState(false);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [computer, setComputer] = useState<string | null>(null);
   const activeView = layout.views.find(
@@ -51,13 +48,12 @@ export function useWorkspaceNavigation(options: {
   const activeRoom = state.data.conversations.find(
     (room) => room.id === activeView?.conversationId,
   );
-  const showWorkspaceNavigation = !marketplace && Boolean(activeRoom);
   const activeProfile =
     runtime.agents.find((agent) => agent.id === activeRoom?.facilitatorId) ??
     runtime.agents.find((agent) => agent.id === runtime.activeAgentId) ??
     runtime.agents[0];
 
-  // The context the right panel and modes describe: an explicitly selected
+  // The context the right panel describes: an explicitly selected
   // Work item, else the active view's loaded Project, else its Agent, else the
   // remembered active agent. A Project that has not loaded yet is not faked.
   const activeProject = projects.find(
@@ -91,26 +87,6 @@ export function useWorkspaceNavigation(options: {
   const navTeam = state.data.teams.find(
     (team) => team.projectId === navProject?.id,
   );
-  const navRoomIds = new Set(
-    scopedRoomIds(navAgent?.id, navProject?.id, state.data.conversations),
-  );
-  const navWork =
-    navContext?.kind === "work"
-      ? [navContext.item]
-      : scopeWork(state.data.work, {
-          agentId: navContext?.kind === "agent" ? navAgent?.id : undefined,
-          projectId: navProject?.id,
-        });
-  const navApprovals = runtime.openApprovals.filter((approval) =>
-    state.sessions.some(
-      (session) =>
-        session.approvalIds.has(approval.id) &&
-        (navContext?.kind === "work"
-          ? session.work.id === navContext.item.id
-          : navRoomIds.has(session.work.conversationId)),
-    ),
-  );
-
   useEffect(() => {
     if (state.loading || restored.current) return;
     restored.current = true;
@@ -124,7 +100,7 @@ export function useWorkspaceNavigation(options: {
           (room) => room.id === activeProfile?.threadId,
         ) ?? state.data.conversations.at(-1)!;
       saved = reduceLayout(saved, {
-        type: "open",
+        type: "navigate",
         view: {
           id: `view-${crypto.randomUUID()}`,
           conversationId: room.id,
@@ -150,7 +126,7 @@ export function useWorkspaceNavigation(options: {
     callbacks.current.onNavigate();
     setMobileNavigation(false);
   };
-  const open = (id: string, newTab = false) => {
+  const open = (id: string) => {
     if (
       !service.getSnapshot().data.conversations.some((room) => room.id === id)
     ) {
@@ -163,7 +139,7 @@ export function useWorkspaceNavigation(options: {
     }
     setNavWorkId(null);
     actLayout({
-      type: newTab ? "open" : "navigate",
+      type: "navigate",
       view: {
         id: `view-${crypto.randomUUID()}`,
         kind: "conversation",
@@ -188,14 +164,6 @@ export function useWorkspaceNavigation(options: {
       ) {
         event.preventDefault();
         actLayout({ type: "single" });
-      }
-      if (
-        event.ctrlKey &&
-        event.shiftKey &&
-        event.key.toLocaleLowerCase() === "t"
-      ) {
-        event.preventDefault();
-        actLayout({ type: "reopen" });
       }
     };
     window.addEventListener("keydown", key);
@@ -244,16 +212,15 @@ export function useWorkspaceNavigation(options: {
   const onConversationPointerDown = useConversationDrag(
     layout,
     actLayout,
-    open,
     !narrow,
   );
   const selectNavWork = (id: string | null) => {
-    setNavWorkId(id);
     if (id) {
-      setMode("work");
-      setContextOpen(false);
-      setComputer(null);
+      const item = state.data.work.find(work => work.id === id);
+      if (!item) return;
+      open(item.conversationId);
     }
+    setNavWorkId(id);
   };
 
   return {
@@ -262,8 +229,6 @@ export function useWorkspaceNavigation(options: {
     phone,
     contextOpen,
     setContextOpen,
-    mode,
-    setMode,
     projectDetailsId,
     setProjectDetailsId,
     panelFocused,
@@ -272,15 +237,12 @@ export function useWorkspaceNavigation(options: {
     setPanelRequest,
     navWorkId,
     setNavWorkId,
-    navigationCollapsed,
-    setNavigationCollapsed,
     mobileNavigation,
     setMobileNavigation,
     computer,
     setComputer,
     activeView,
     activeRoom,
-    showWorkspaceNavigation,
     activeProfile,
     activeProject,
     selectedWork,
@@ -288,8 +250,6 @@ export function useWorkspaceNavigation(options: {
     navAgent,
     navProject,
     navTeam,
-    navWork,
-    navApprovals,
     actLayout,
     open,
     onConversationPointerDown,

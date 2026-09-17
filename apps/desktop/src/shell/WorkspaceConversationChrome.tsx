@@ -5,13 +5,9 @@ import type {
   WorkOutput,
   WorkspaceView,
 } from "@mivlet/protocol";
-import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import { Suspense, type MutableRefObject, type ReactNode } from "react";
-import {
-  ConversationGrid,
-  ConversationTabs,
-  type NewAction,
-} from "../components/conversation/ConversationTabs";
+import { ConversationGrid } from "../components/conversation/ConversationGrid";
+interface NewAction { id: string; label: string; run: () => void; }
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
@@ -22,44 +18,9 @@ import {
   type WorkspaceExecutionState,
 } from "../lib/workspace-execution";
 import { ConversationPane } from "./ConversationPane";
-import { MarketplacePage, WorkModeView } from "./workspace-lazy";
+import { MarketplacePage } from "./workspace-lazy";
 import { continueConversationDraft } from "./workspace-presentation";
 import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
-
-function WorkspaceModeBar({
-  mode,
-  onChat,
-  onWork,
-}: {
-  mode: "chat" | "work";
-  onChat: () => void;
-  onWork: () => void;
-}) {
-  return (
-    <div
-      className="workspace-mode-bar"
-      role="tablist"
-      aria-label="Workspace mode"
-    >
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "chat"}
-        onClick={onChat}
-      >
-        Chat
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "work"}
-        onClick={onWork}
-      >
-        Work
-      </button>
-    </div>
-  );
-}
 
 function WorkspaceConversationView({
   view,
@@ -70,13 +31,12 @@ function WorkspaceConversationView({
   state,
   active,
   profileName,
-  headerActions,
+  onAgentSettings,
+  selectedWorkId,
   onOpenWork,
   onClose,
   onArtifact,
   onEdit,
-  onPlace,
-  onMigrate,
   onComputer,
   onPlugins,
   onProviders,
@@ -92,13 +52,12 @@ function WorkspaceConversationView({
   state: WorkspaceExecutionState;
   active: boolean;
   profileName: string;
-  headerActions?: ReactNode;
+  onAgentSettings: (id: string) => void;
+  selectedWorkId: string | null;
   onOpenWork: (id: string | null) => void;
   onClose: () => void;
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
-  onPlace: () => void;
-  onMigrate: () => void;
   onComputer: (agentId: string) => void;
   onPlugins: (id?: string) => void;
   onProviders: () => void;
@@ -120,13 +79,12 @@ function WorkspaceConversationView({
       state={state}
       active={active}
       profileName={profileName}
-      headerActions={headerActions}
+      onAgentSettings={onAgentSettings}
+      selectedWorkId={selectedWorkId}
       onOpenWork={onOpenWork}
       onClose={onClose}
       onArtifact={onArtifact}
       onEdit={onEdit}
-      onPlace={onPlace}
-      onMigrate={onMigrate}
       onComputer={onComputer}
       onPlugins={onPlugins}
       onProviders={onProviders}
@@ -160,6 +118,7 @@ export function buildConversationRenderer(input: {
   onOpenMarketplace: (value: { id?: string } | null) => void;
   onSetSettingsTab: (tab: SettingsTab) => void;
   onOpenSettings: () => void;
+  onAgentSettings: (id: string) => void;
   onEditConversation: (roomId: string) => void;
   onPlaceConversation: (id: string) => void;
   onMigrateConversation: (id: string) => void;
@@ -167,7 +126,6 @@ export function buildConversationRenderer(input: {
     project: LocalProject,
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
-  headerActions?: ReactNode;
 }): RenderWorkspaceConversation {
   return (view, room, project, active, onClose) => (
     <WorkspaceConversationView
@@ -179,9 +137,8 @@ export function buildConversationRenderer(input: {
       state={input.state}
       active={active}
       profileName={input.profileName}
-      headerActions={
-        view.id === input.nav.activeView?.id ? input.headerActions : undefined
-      }
+      onAgentSettings={input.onAgentSettings}
+      selectedWorkId={input.nav.navWorkId}
       onOpenWork={input.nav.selectNavWork}
       onClose={onClose}
       onArtifact={input.nav.openPanelArtifact}
@@ -189,8 +146,6 @@ export function buildConversationRenderer(input: {
         if (project) input.nav.setProjectDetailsId(project.id);
         else input.onEditConversation(room.id);
       }}
-      onPlace={() => input.onPlaceConversation(room.id)}
-      onMigrate={() => input.onMigrateConversation(room.id)}
       onComputer={(agentId) => {
         input.nav.setComputer(agentId);
         input.nav.setContextOpen(true);
@@ -232,9 +187,12 @@ export function WorkspaceConversationChrome({
   createRoom,
   onNewConversation,
   onOpenMarketplace,
+  panelOpen,
+  onTogglePanel,
   onOpenSchedules,
   onSetSettingsTab,
   onOpenSettings,
+  onAgentSettings,
   onEditConversation,
   onPlaceConversation,
   onMigrateConversation,
@@ -251,6 +209,8 @@ export function WorkspaceConversationChrome({
   projects: ReturnType<typeof useLocalProjects>;
   profileName: string;
   marketplace: { id?: string } | null;
+  panelOpen: boolean;
+  onTogglePanel: () => void;
   indicators: Record<string, string>;
   tabMeta: {
     titles: Record<string, string>;
@@ -269,6 +229,7 @@ export function WorkspaceConversationChrome({
   onOpenSchedules: (value: { agentId?: string; projectId?: string }) => void;
   onSetSettingsTab: (tab: SettingsTab) => void;
   onOpenSettings: () => void;
+  onAgentSettings: (id: string) => void;
   onEditConversation: (roomId: string) => void;
   onPlaceConversation: (id: string) => void;
   onMigrateConversation: (id: string) => void;
@@ -289,17 +250,6 @@ export function WorkspaceConversationChrome({
     value: string,
   ) => Promise<void>;
 }) {
-  const workspaceModeControl = (
-    <WorkspaceModeBar
-      mode={nav.mode}
-      onChat={() => nav.setMode("chat")}
-      onWork={() => {
-        nav.setMode("work");
-        nav.setContextOpen(false);
-        nav.setComputer(null);
-      }}
-    />
-  );
   const renderConversation = buildConversationRenderer({
     nav,
     runtime,
@@ -315,48 +265,14 @@ export function WorkspaceConversationChrome({
     onPlaceConversation,
     onMigrateConversation,
     onProjectUpdate,
-    headerActions: workspaceModeControl,
+    onAgentSettings,
   });
   return (
     <section
       className="workspace-views"
       aria-label="Conversation workspace"
     >
-      {nav.showWorkspaceNavigation && nav.mode === "work"
-        ? workspaceModeControl
-        : null}
-      {nav.showWorkspaceNavigation && nav.mode === "chat" ? (
-        <ConversationTabs
-          layout={nav.layout}
-          titles={tabMeta.titles}
-          indicators={indicators}
-          descriptions={tabMeta.descriptions}
-          onAction={nav.actLayout}
-          onCreate={onNewConversation}
-          newActions={newActions}
-        />
-      ) : null}
-      <button
-        type="button"
-        className="workspace-history-toggle"
-        aria-label={
-          nav.contextOpen || nav.computer
-            ? "Hide workspace panel"
-            : "Show workspace panel"
-        }
-        title={
-          nav.contextOpen || nav.computer
-            ? "Hide workspace panel"
-            : "Show workspace panel"
-        }
-        aria-expanded={nav.contextOpen || Boolean(nav.computer)}
-        onClick={() => {
-          nav.setComputer(null);
-          nav.setContextOpen(!(nav.contextOpen || nav.computer));
-        }}
-      >
-        <SidebarSimple size={19} />
-      </button>
+      <button type="button" className="workspace-history-toggle" aria-label={panelOpen ? "Hide workspace panel" : "Show workspace panel"} title={panelOpen ? "Hide workspace panel" : "Show workspace panel"} aria-expanded={panelOpen} onClick={onTogglePanel}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg></button>
       {nav.phone ? (
         <button
           type="button"
@@ -433,36 +349,6 @@ export function WorkspaceConversationChrome({
             }
           />
         </Suspense>
-      ) : nav.mode === "work" ? (
-        <Suspense fallback={<p role="status">Loading work…</p>}>
-          <WorkModeView
-            project={nav.navProject}
-            agent={nav.navAgent}
-            work={nav.navWork}
-            runtime={runtime}
-            service={service}
-            approvals={nav.navApprovals}
-            selectedWork={nav.selectedWork ?? undefined}
-            onOpen={nav.open}
-            onOpenWork={nav.selectNavWork}
-            onStopWork={onStopWork}
-            onContinueWork={onContinueWork}
-            onSteerWork={onSteerWork}
-            onPromoteWorkOutput={onPromoteWorkOutput}
-            onOpenArtifact={nav.openPanelArtifact}
-            onOpenComputer={(agentId) => {
-              nav.setComputer(agentId);
-              nav.setContextOpen(true);
-            }}
-            onSchedules={() =>
-              onOpenSchedules({
-                agentId: nav.navAgent?.id,
-                projectId: nav.navProject?.id,
-              })
-            }
-            onOpenPlugins={() => onOpenMarketplace({})}
-          />
-        </Suspense>
       ) : (
         <ConversationGrid
           layout={nav.layout}
@@ -492,9 +378,9 @@ export function WorkspaceConversationChrome({
                 }}
               >
                 <div
-                  role="tabpanel"
+                  role="region"
                   id={view ? `panel-${view.id}` : undefined}
-                  aria-labelledby={view ? `tab-${view.id}` : undefined}
+                  aria-label={room?.title ?? "Conversation"}
                   className="conversation-panel"
                   tabIndex={0}
                 >
@@ -518,14 +404,7 @@ export function WorkspaceConversationChrome({
                       >
                         New conversation
                       </button>
-                      {nav.layout.closed.length ? (
-                        <button
-                          type="button"
-                          onClick={() => nav.actLayout({ type: "reopen" })}
-                        >
-                          Reopen last closed tab
-                        </button>
-                      ) : null}
+
                     </div>
                   )}
                 </div>

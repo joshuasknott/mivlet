@@ -624,6 +624,7 @@ fn normalize_runtime_agents(
         normalized.push(MivletAgentProfile {
             id,
             name,
+            notifications_enabled: agent.notifications_enabled,
             reasoning_effort: agent.reasoning_effort.filter(|value| {
                 !value.is_empty()
                     && value.len() <= 32
@@ -853,7 +854,7 @@ mod tests {
         let agent: MivletAgentProfile = serde_json::from_value(serde_json::json!({
             "id": "ava", "name": "Ava", "instructions": "Keep things simple.",
             "modelId": "codex::model", "reasoningEffort": "high", "icon": "agent",
-            "avatarSeed": "blob-v1:stable-ava",
+            "avatarSeed": "blob-v1:stable-ava", "notificationsEnabled": false,
             "permissionLabel": "Ask Me", "threadId": "new-chat", "threadIds": ["old-chat", "old-chat"],
             "learnedTasks": [{ "id": "weekly", "title": "Weekly plan", "instruction": "Ask about priorities.", "createdAt": "2026-09-04", "updatedAt": "2026-09-04" }]
         })).unwrap();
@@ -861,6 +862,7 @@ mod tests {
         let encoded = serde_json::to_value(&normalized).unwrap();
         let restored: MivletAgentProfile = serde_json::from_value(encoded).unwrap();
         assert_eq!(restored.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(restored.notifications_enabled, Some(false));
         assert_eq!(restored.avatar_seed.as_deref(), Some("blob-v1:stable-ava"));
         assert_eq!(restored.thread_ids, vec!["old-chat", "new-chat"]);
         assert_eq!(restored.learned_tasks.len(), 1);

@@ -1,5 +1,5 @@
 import type { IdentityStatus } from "@mivlet/protocol";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -40,36 +40,32 @@ function props(
 }
 
 describe("account entry", () => {
-  it("starts with Google and email account entry and no setup wizard", () => {
+  it("starts with login and signup account entry and no setup wizard", () => {
     render(<OnboardingPage {...props()} />);
     expect(
       screen.getByRole("heading", { name: "Welcome to Mivlet" }),
     ).toHaveFocus();
-    expect(
-      screen.getByText("Sign in or create an account to get started."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Continue with Google" }),
-    ).toHaveClass("og-primary-button");
-    expect(
-      screen.getByRole("button", { name: "Continue with email" }),
-    ).toHaveClass("og-text-button");
+    expect(screen.getByText("Your personal AI workspace")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Log in" })).toHaveClass(
+      "og-primary-button",
+    );
+    expect(screen.getByRole("button", { name: "Sign up" })).toHaveClass(
+      "og-secondary-button",
+    );
     expect(screen.queryByLabelText(/Onboarding step/)).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Skip|Enter Mivlet/ }),
     ).toBeNull();
   });
 
-  it.each(["Google", "email"] as const)(
+  it.each(["Log in", "Sign up"] as const)(
     "opens %s sign-in without treating completion as workspace authority",
     async (entry) => {
       const user = userEvent.setup();
       const input = props();
       render(<OnboardingPage {...input} />);
-      await user.click(
-        screen.getByRole("button", { name: `Continue with ${entry}` }),
-      );
-      expect(input.onSignIn).toHaveBeenCalledWith(entry.toLowerCase());
+      await user.click(screen.getByRole("button", { name: entry }));
+      expect(input.onSignIn).toHaveBeenCalledWith();
       expect(input.onOpenWorkspace).not.toHaveBeenCalled();
       expect(
         screen.getByRole("heading", { name: "Welcome to Mivlet" }),
@@ -93,30 +89,20 @@ describe("account entry", () => {
           }),
       );
     render(<OnboardingPage {...props({ onSignIn })} />);
-    await user.click(
-      screen.getByRole("button", { name: "Continue with Google" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Log in" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Browser sign-in could not open.",
     );
-    await user.click(
-      screen.getByRole("button", { name: "Continue with email" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Sign up" }));
     expect(
       screen.getByRole("button", { name: "Opening sign in" }),
     ).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Continue with email" }),
-    ).toBeDisabled();
-    await user.click(
-      screen.getByRole("button", { name: "Continue with email" }),
-    );
+    expect(screen.getByRole("button", { name: "Sign up" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Sign up" }));
     expect(onSignIn).toHaveBeenCalledTimes(2);
     await act(async () => finish());
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: "Continue with Google" }),
-    ).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeEnabled();
   });
 
   it("retries the native workspace for an authenticated account without opening provider setup", async () => {
@@ -142,26 +128,9 @@ describe("account entry", () => {
         {...props({ identityStatus: { ...signedOut, state: "offline" } })}
       />,
     );
-    expect(
-      screen.getByRole("button", { name: "Continue with Google" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Try opening workspace again" }),
     ).toBeNull();
-  });
-
-  it("shows local privacy information with keyboard dismissal and focus return", async () => {
-    const user = userEvent.setup();
-    render(<OnboardingPage {...props()} />);
-    const privacy = screen.getByRole("button", { name: "Privacy & data" });
-    await user.click(privacy);
-    const dialog = screen.getByRole("dialog", { name: "Privacy & data" });
-    expect(within(dialog).getByText("Model providers")).toBeVisible();
-    expect(
-      within(dialog).getByText(/Clerk handles account sign-in/),
-    ).toBeVisible();
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).toBeNull();
-    expect(privacy).toHaveFocus();
   });
 });

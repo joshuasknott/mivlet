@@ -8,7 +8,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 const islands = [
   "../components/search/SearchOverlay",
   "../components/projects/ProjectDetailsDialog",
-  "../components/navigation/WorkModeView",
   "./ExecutionWorker",
   "../components/agents/AgentEditor",
   "../components/pages/OnboardingPage",
@@ -20,7 +19,7 @@ const islands = [
 ];
 
 describe("workspace lazy route islands", () => {
-  it("keeps search, settings, marketplace, work, and execution islands lazy", () => {
+  it("keeps search, settings, marketplace and execution islands lazy", () => {
     const source = readFileSync(join(here, "workspace-lazy.tsx"), "utf8");
     expect(source).toContain("import { lazy } from \"react\"");
     for (const specifier of islands) {

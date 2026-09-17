@@ -1,3 +1,4 @@
+import { ProviderOnboardingGate } from "../components/pages/ProviderOnboardingPage";
 import {
   Suspense,
   useEffect,
@@ -81,7 +82,7 @@ export function TeammateWorkspace() {
     );
   const scope = activeWorkspaceScope(account);
   return (
-    <ActiveWorkspace
+    <ProviderOnboardingGate key={scope} runtime={runtime}><ActiveWorkspace
       key={scope}
       runtime={runtime}
       approvals={approvals}
@@ -91,6 +92,6 @@ export function TeammateWorkspace() {
       onService={(service) => {
         current.current = service;
       }}
-    />
+    /></ProviderOnboardingGate>
   );
 }

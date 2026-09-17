@@ -53,7 +53,6 @@ authorization. App actions retain exact connection and approval checks.
 | --- | --- | --- |
 | Native public OAuth | Gmail, Drive, Calendar | Google PKCE and token exchange stay behind the native credential boundary |
 | Confidential broker OAuth | GitHub, Vercel, Notion, Linear, Slack | Separate broker owns client secrets; desktop configuration and broker deployment are required |
-| Native token plugins | Outlook, Teams, Zoom and other documented token integrations | Native verification and OS credential storage; bounded reads, manual renewal, no writes or knowledge sync |
 | Official remote MCP | Vercel, Notion, Linear, Canva, Figma and other official presets | Native MCP OAuth, discovery and enabled-tool checks against the exact provider endpoint |
 
 [Connector capabilities and setup](connectors.md) maintains the full service list,
@@ -88,7 +87,7 @@ The [provider matrix](../architecture/local-teammate-computer.md#tool-and-provid
 defines screenshot delivery; advertising vision alone is insufficient. See also
 [Work execution](../architecture/work-execution.md),
 [memory and context](../architecture/memory-context.md),
-[voice conversations](../architecture/voice-conversations.md) and the
+[speech input](../architecture/voice-conversations.md) and the
 [hosted OpenCode prototype](../architecture/hosted-opencode-prototype.md).
 
 ## State ownership and history

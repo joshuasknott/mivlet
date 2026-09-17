@@ -1,0 +1,42 @@
+.agent-settings-panel { grid-column: 3; grid-row: 1; }
+.agent-settings-panel .agent-editor {
+  display: flex; flex-direction: column; width: 100%; height: 100%; max-height: none;
+  min-height: 0; overflow: hidden; border: 0; border-radius: 0; box-shadow: none;
+  color: var(--ink); background: var(--surface);
+}
+.agent-settings-panel .agent-editor__header { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.agent-settings-panel .agent-editor__header h2 { font-size: 14px; letter-spacing: 0; }
+.agent-settings-panel .agent-editor__header button { min-width: 36px; min-height: 36px; }
+.agent-editor__body { display: contents; }
+.agent-settings-panel .agent-editor form { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding: 0; gap: 0; }
+.agent-settings-panel .agent-editor__body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 24px 20px; gap: 24px; }
+.agent-settings-panel .agent-editor__identity { display: flex; flex-direction: column; align-items: stretch; gap: 28px; }
+.agent-settings-panel .agent-editor__identity > .agent-avatar { align-self: center; }
+.agent-editor__appearance { min-width: 0; }
+.agent-editor__appearance > summary { color: var(--ink-muted); font-size: 12px; cursor: pointer; padding-block: 8px; }
+.agent-editor-backdrop .agent-editor__appearance > summary { display: none; }
+.agent-settings-panel .agent-editor .agent-icon-picker { margin-top: 12px; }
+.agent-settings-panel .agent-shape-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.agent-settings-panel .agent-editor__footer { position: static; flex-shrink: 0; margin: 0; padding: 16px 20px; gap: 8px; }
+.agent-settings-panel .agent-editor__footer > div { gap: 6px; }
+.agent-settings-panel .agent-editor__footer button { padding-inline: 10px; }
+.agent-editor__notifications { display: flex !important; align-items: center; justify-content: space-between; gap: 20px; padding-block: 18px; border-block: 1px solid var(--line); }
+.agent-editor__notifications > span { display: grid; gap: 6px; }
+.agent-editor__notifications small { color: var(--ink-muted); font-weight: 400; line-height: 1.5; }
+.agent-editor__notifications input { appearance: none; flex: 0 0 36px; width: 36px; height: 22px; min-height: 22px; padding: 2px; margin: 0; border: 1px solid var(--line-strong); border-radius: 20px; background: var(--surface-hover); cursor: pointer; }
+.agent-editor__notifications input::before { content: ""; display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ink-muted); }
+.agent-editor__notifications input:checked { background: var(--ink); border-color: var(--ink); }
+.agent-editor__notifications input:checked::before { transform: translateX(14px); background: var(--surface); }
+.agent-notifications { position: fixed; z-index: 90; bottom: 20px; right: 20px; display: grid; gap: 8px; width: min(380px, calc(100vw - 40px)); pointer-events: none; }
+.agent-notification { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-2); pointer-events: auto; }
+.agent-notification > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.agent-notification button { background: transparent; border: 0; color: inherit; min-height: 36px; }
+.team-agent-settings-trigger { display: inline-flex; align-items: center; min-width: 0; gap: 8px; border: 0; border-radius: 8px; padding: 4px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.team-agent-settings-trigger:hover { background: var(--surface-hover); }
+.team-agent-settings-trigger:focus-visible { outline: 2px solid var(--ink-muted); outline-offset: 2px; }
+.team-agent-settings-trigger strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.team-conversation-title { display: flex; align-items: center; min-width: 0; gap: 4px; }
+.team-conversation-title .side-chat-marker { margin-left: 6px; }
+@media (max-width: 850px) {
+  .agent-settings-panel .agent-editor__header button { min-width: 44px; min-height: 44px; }
+}

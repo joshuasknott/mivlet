@@ -135,29 +135,29 @@ describe("SearchOverlay", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("requests archived rows only when asked", async () => {
-    mocks.searchWorkspace
-      .mockResolvedValueOnce(response([]))
-      .mockResolvedValueOnce(response([]));
-    render(
-      <SearchOverlay
-        workspaceId="ws"
-        open
-        onClose={vi.fn()}
-        onOpenResult={vi.fn()}
-        debounceMs={0}
-      />,
-    );
-    fireEvent.change(screen.getByRole("combobox", { name: /search agents/i }), {
-      target: { value: "aurora" },
-    });
-    await waitFor(() => expect(mocks.searchWorkspace).toHaveBeenCalledTimes(1));
-    expect(
-      mocks.searchWorkspace.mock.calls[0][0].includeArchived,
-    ).toBeUndefined();
-    fireEvent.click(screen.getByLabelText("Include archived"));
-    await waitFor(() => expect(mocks.searchWorkspace).toHaveBeenCalledTimes(2));
-    expect(mocks.searchWorkspace.mock.calls[1][0].includeArchived).toBe(true);
+  it("shows current agents immediately, filters a single character and opens with the keyboard", async () => {
+    const onOpenResult = vi.fn();
+    const agents = [
+      { id: "bug", name: "Bug Hunter", instructions: "Reviews code", modelId: "test", icon: "agent" as const, iconColor: "#ff7700", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" as const, iconImageDataUrl: "data:image/png;base64,fixture" },
+      { id: "chief", name: "Chief of Staff", instructions: "Manages agents", modelId: "test", icon: "agent" as const, iconColor: "#ff7700", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" as const },
+    ];
+    const { rerender } = render(<SearchOverlay workspaceId="ws" agents={agents} open onClose={vi.fn()} onOpenResult={onOpenResult} />);
+    const input = screen.getByRole("combobox");
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    expect(screen.getByRole("option", { name: /Bug Hunter/ }).querySelector("img")).toHaveAttribute("src", agents[0].iconImageDataUrl);
+    expect(mocks.searchWorkspace).not.toHaveBeenCalled();
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(onOpenResult).toHaveBeenCalledWith(expect.objectContaining({
+      reference: { workspaceId: "ws", kind: "agent", id: "chief" },
+    }));
+    fireEvent.change(input, { target: { value: "B" } });
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    fireEvent.change(input, { target: { value: "" } });
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    rerender(<SearchOverlay workspaceId="ws" agents={agents} enabled={false} open onClose={vi.fn()} onOpenResult={onOpenResult} />);
+    expect(screen.queryByRole("option")).not.toBeInTheDocument();
   });
 
   it("reports empty, error and prerequisite states accessibly", async () => {

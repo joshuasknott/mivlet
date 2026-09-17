@@ -83,7 +83,7 @@ Model Studio endpoint, so a key is never redirected to another host.
 
 Local Files is available through the native file boundary. The OAuth connector
 catalogue contains GitHub, Vercel, Google Drive, Notion, Gmail,
-Slack, Google Calendar, and Linear, alongside the native token plugins below. These integrations are
+Slack, Google Calendar, and Linear. These integrations are
 configuration-gated source code, not evidence of a deployed or provider-
 certified service.
 
@@ -91,46 +91,6 @@ certified service.
 | ------------------------------------- | ---------------------------------- |
 | Google Drive, Gmail, Calendar         | Public desktop OAuth with PKCE     |
 | GitHub, Vercel, Linear, Notion, Slack | Separate confidential OAuth broker |
-| Outlook, Teams, Zoom, LinkedIn, Instagram, YouTube, Google Ads, Meta Ads, Shopify, Docusign, Greenhouse, Lever, Workday | Provider-issued API access token or API key, verified and stored by native Rust |
-
-### Native token plugins
-
-The 13 formerly planned integrations have a deliberately bounded first release.
-Their setup pages identify permissions and account prerequisites, clear submitted
-secret fields, and enable chat only after an authenticated read succeeds. Native
-Rust stores credentials in the OS secure store and rechecks the selected
-Connection before egress and before returning results. The `plugin-read` tool
-is offered only for selected connected apps and names their implemented operations.
-There is no arbitrary URL, query language, mutation, or shell endpoint.
-
-| Plugin | Implemented reads | Official setup/API reference |
-| --- | --- | --- |
-| Outlook | Mail list/search, message content, events | [Microsoft Graph](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0) |
-| Microsoft Teams | Chats and chat messages | [Graph chats](https://learn.microsoft.com/en-us/graph/api/chat-list?view=graph-rest-1.0) |
-| Zoom | Meetings, meeting details, recording metadata | [Zoom Meetings API](https://developers.zoom.us/docs/api/meetings/) |
-| LinkedIn | Basic profile for the authenticated member | [LinkedIn OpenID Connect](https://learn.microsoft.com/en-us/linkedin/consumer/integrations/self-serve/sign-in-with-linkedin-v2) |
-| Instagram | Professional account profile, media, comments | [Instagram API with Facebook Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-facebook-login/) |
-| YouTube | Own channels, playlist items, video details, comment threads | [YouTube Data API v3](https://developers.google.com/youtube/v3/docs/) |
-| Google Ads | Accessible customers and campaign performance | [Google Ads REST authorization](https://developers.google.com/google-ads/api/rest/auth) |
-| Meta Ads | Ad accounts, campaigns, performance insights | [Marketing API](https://developers.facebook.com/docs/marketing-api/) |
-| Shopify | Products and accessible orders | [Admin GraphQL API](https://shopify.dev/docs/api/admin-graphql) |
-| Docusign | Envelopes, status changes, recipients | [Account discovery](https://developers.docusign.com/platform/auth/user-info/) |
-| Greenhouse | Jobs, candidates, applications | [Harvest v3 OAuth](https://harvestdocs.greenhouse.io/docs/authentication), [pagination](https://harvestdocs.greenhouse.io/docs/pagination) |
-| Lever | Opportunities, opportunity details, users | [Lever API](https://hire.lever.co/developer/documentation) |
-| Workday | Worker list and worker details | [Workday REST fundamentals](https://developer.workday.com/documentation/GUID-85810465-bcfb-4fdf-a26d-55eaff3968a8-enHYPHENus/) |
-
-These plugins do not yet renew tokens, start OAuth sign-in, import/sync knowledge,
-or perform writes. Supply a current provider-issued access token (a Lever API key
-for Lever); an API subscription, approved application, tenant administrator grant,
-or vendor review may be required. Extra operations can require permissions beyond
-the connection probe. LinkedIn's basic OIDC permissions do not provide general
-feed, messaging or recruiting access. Instagram requires a Business or Creator
-account linked through Facebook Login. Google Ads also needs a developer token.
-Shopify and Workday use allowlisted tenant hosts; Docusign discovers and validates
-the account's regional API host. Secrets never enter tool input or result metadata.
-Redirects are disabled, responses are bounded, and secret-bearing response fields
-and tokenized URL parameters are removed. Local fixture tests establish transport
-and authorization behavior, not a live connection to these providers.
 
 Google needs `MIVLET_GOOGLE_OAUTH_CLIENT_ID` and
 `MIVLET_GOOGLE_OAUTH_CLIENT_SECRET`; the secret is provisioned from the ignored local
@@ -344,3 +304,30 @@ Unit and integration tests use controlled provider responses. They prove
 request shaping, scope checks, token custody, redaction, approval enforcement,
 and error handling. They do not prove live provider credentials, certification,
 entitlement, deployment, quotas, billing, or current third-party behavior.
+## Suggested additions with browser sign-in
+
+These are product ideas, researched against official documentation on 2026-09-17;
+none are newly enabled by this change. The end-user flow should be **Connect →
+provider sign-in → approve access → return to Mivlet**. Mivlet owns app registration,
+any required vendor review, confidential credentials, token refresh, and reconnect.
+Users should never create developer apps, paste tokens, enter server URLs, or run commands.
+Plans and organization policies can still limit access.
+
+| Section | Candidates and useful first workflows | Supported sign-in route |
+| --- | --- | --- |
+| Work & knowledge | **Asana** for task updates and project summaries; **Dropbox** for finding and summarizing files | [Asana MCP v2](https://developers.asana.com/docs/integrating-with-asanas-mcp-server) requires Mivlet to pre-register its app; [Dropbox OAuth](https://www.dropbox.com/developers/reference/auth-types) supports user authorization |
+| Communication & meetings | **Calendly** for upcoming bookings and interview preparation; keep **Granola** for meeting notes | [Calendly OAuth](https://developer.calendly.com/docs/authentication/creating-an-oauth-app); [Granola browser OAuth](https://help.granola.ai/article/granola-mcp) |
+| Product & design | **Miro** for workshop boards and planning; retain Canva and Figma | [Miro OAuth authorization code flow](https://developers.miro.com/reference/overview); [Canva OAuth with PKCE](https://www.canva.dev/docs/connect/authentication/); [Figma remote server](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/) |
+| Engineering & delivery | **GitLab** for issues, merge requests, and pipeline summaries; strengthen the existing Linear integration | [GitLab OAuth with PKCE](https://docs.gitlab.com/api/oauth2/); [Linear MCP](https://linear.app/docs/mcp) |
+| Marketing & social | **Mailchimp** for campaign reports and draft preparation; **HubSpot** for contact and campaign context | [Mailchimp OAuth](https://mailchimp.com/developer/marketing/guides/access-user-data-oauth-2/); [HubSpot MCP](https://developers.hubspot.com/docs/apps/developer-platform/build-apps/integrate-with-the-remote-hubspot-mcp-server) needs a Mivlet-owned OAuth app |
+| Commerce & support | **Intercom** for support summaries and draft replies; retain Stripe for payment context | [Intercom MCP](https://developers.intercom.com/docs/guides/mcp) offers automatic browser OAuth |
+| Legal & compliance | **Dropbox Sign** for signature-request status and outstanding agreements | [Dropbox Sign OAuth](https://developers.hellosign.com/docs/guides/o-auth/overview); validate production app approval and account entitlements before listing |
+| People & recruiting | **Typeform** for application intake and onboarding questionnaires; **Calendly** for interview bookings | [Typeform OAuth](https://www.typeform.com/developers/get-started/applications/) supports authorization and refresh; its [MCP route](https://developer.typeform.com/developers/mcp/build-a-connector/) additionally requires a connector request |
+
+Prioritize Intercom, Asana, Dropbox, Calendly, and Miro. Keep the existing Notion,
+Granola, Figma, and Linear sign-in paths prominent. Restore empty categories only
+when an addition has a tested connection flow and useful tools.
+
+For a later HR-system integration, [Gusto offers OAuth](https://docs.gusto.com/app-integrations/docs/oauth2),
+but [production access requires vendor pre-approval and security review](https://docs.gusto.com/app-integrations/docs/introduction).
+Treat it as a partnership candidate, not an immediately available Connect button.

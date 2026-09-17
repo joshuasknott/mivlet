@@ -391,97 +391,6 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
             "linear.comment",
         ],
     },
-    ConnectorCatalogEntry {
-        id: "outlook", name: "Outlook", auth_mode: "api-token",
-        permissions: &["Read mail and calendar events from your Microsoft account."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "microsoft-teams", name: "Microsoft Teams", auth_mode: "api-token",
-        permissions: &["Read your Teams chats and messages."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "zoom", name: "Zoom", auth_mode: "api-token",
-        permissions: &["Read meetings and cloud recording metadata."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "linkedin", name: "LinkedIn", auth_mode: "api-token",
-        permissions: &["Read the basic profile associated with your LinkedIn token."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "instagram", name: "Instagram", auth_mode: "api-token",
-        permissions: &["Read a professional Instagram profile, media and comments."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "youtube", name: "YouTube", auth_mode: "api-token",
-        permissions: &["Read your channel, playlists, videos and comments."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "google-ads", name: "Google Ads", auth_mode: "api-token",
-        permissions: &["Read accessible accounts and campaign performance."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "meta-ads", name: "Meta Ads", auth_mode: "api-token",
-        permissions: &["Read ad accounts, campaigns and performance."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "shopify", name: "Shopify", auth_mode: "api-token",
-        permissions: &["Read your store's products and orders."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "docusign", name: "Docusign", auth_mode: "api-token",
-        permissions: &["Read envelopes, their status and recipients."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "greenhouse", name: "Greenhouse", auth_mode: "api-token",
-        permissions: &["Read jobs, candidates and applications through Harvest."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "lever", name: "Lever", auth_mode: "api-token",
-        permissions: &["Read recruiting opportunities and users."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
-    ConnectorCatalogEntry {
-        id: "workday", name: "Workday", auth_mode: "api-token",
-        permissions: &["Read worker records from your Workday tenant."],
-        scopes: &[("token-read", "Read operations permitted by this token", "read", true)],
-        setup_message: "Connect with a provider-issued API access token. Tokens remain in the OS secure store; reconnect when they expire.",
-        actions: &[],
-    },
 ];
 
 fn require_connector(
@@ -939,8 +848,8 @@ fn build_manifest_with_health(
                 entry.setup_message.to_string()
             }
         }),
-        supports_search: connector_available && !crate::token_plugins::IDS.contains(&entry.id),
-        supports_import: connector_available && !crate::token_plugins::IDS.contains(&entry.id),
+        supports_search: connector_available,
+        supports_import: connector_available,
         supported_actions: entry
             .actions
             .iter()
@@ -1085,9 +994,6 @@ async fn probe_connector_health(
             Some(connector_api::probe_health(app, connector_id).await)
         }
         "notion" | "slack" => Some(collaboration_connectors::probe_health(app, connector_id).await),
-        id if crate::token_plugins::IDS.contains(&id) => {
-            Some(crate::token_plugins::probe_health(app, id).await)
-        }
         _ => None,
     }
 }
@@ -2098,29 +2004,10 @@ pub async fn read_connector_capability(
 ) -> Result<ConnectorCapabilityResult, ConnectorCommandError> {
     require_connector_workspace(workspace_id)?;
     let entry = require_connector(&request.connector_id)?;
-    if crate::token_plugins::IDS.contains(&entry.id) {
-        return crate::token_plugins::read(&app, request).await;
-    }
     if !matches!(entry.id, "github" | "vercel" | "linear") {
         return Err(configuration_required(entry.id));
     }
     connector_api::read_capability(&app, request).await
-}
-
-#[tauri::command]
-pub async fn connect_token_plugin(
-    app: tauri::AppHandle,
-    connector_id: String,
-    credential: crate::token_plugins::Credential,
-    workspace_id: Option<String>,
-) -> Result<ConnectorManifest, ConnectorCommandError> {
-    let entry = require_connector(&connector_id)?;
-    if !crate::token_plugins::IDS.contains(&entry.id) {
-        return Err(configuration_required(entry.id));
-    }
-    let scope = connector_authorization_context(workspace_id.clone(), entry.id)?;
-    crate::connector_auth::connect_token_plugin(&app, entry.id, credential, &scope).await?;
-    refresh_connector_health(app, entry.id.to_string(), workspace_id).await
 }
 
 #[tauri::command]

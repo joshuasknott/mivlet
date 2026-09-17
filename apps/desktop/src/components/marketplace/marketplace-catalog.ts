@@ -1,4 +1,3 @@
-import { tokenPluginFor } from "@mivlet/connectors/providers/token-plugins";
 
 export interface MarketplaceConnectorEntry {
   id: string;
@@ -20,19 +19,12 @@ export type MarketplaceIconName =
   | "cloud"
   | "commerce"
   | "communication"
-  | "docusign"
   | "figma"
   | "finance"
   | "google"
-  | "instagram"
-  | "linkedin"
-  | "meta"
-  | "microsoft-outlook"
-  | "microsoft-teams"
   | "people"
   | "product"
-  | "security"
-  | "youtube";
+  | "security";
 
 const entry = (
   id: string,
@@ -43,7 +35,7 @@ const entry = (
 ): MarketplaceConnectorEntry => ({
   id,
   name,
-  description: tokenPluginFor(id)?.description ?? description,
+  description,
   icon,
   ...(recommended ? { recommended: true } : {}),
 });
@@ -105,24 +97,6 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
         true,
       ),
       entry(
-        "outlook",
-        "Outlook",
-        "Work with Microsoft email and calendars",
-        "microsoft-outlook",
-      ),
-      entry(
-        "microsoft-teams",
-        "Microsoft Teams",
-        "Find conversations, meetings, and files",
-        "microsoft-teams",
-      ),
-      entry(
-        "zoom",
-        "Zoom",
-        "Use meeting details and recordings",
-        "communication",
-      ),
-      entry(
         "granola",
         "Granola",
         "Bring meeting notes into agent context",
@@ -177,93 +151,14 @@ export const marketplaceConnectorSections: MarketplaceConnectorSection[] = [
     ],
   },
   {
-    id: "marketing-social",
-    title: "Marketing & social",
-    connectors: [
-      entry(
-        "linkedin",
-        "LinkedIn",
-        "Prepare and review professional content",
-        "linkedin",
-      ),
-      entry(
-        "instagram",
-        "Instagram",
-        "Plan and review social content",
-        "instagram",
-      ),
-      entry(
-        "youtube",
-        "YouTube",
-        "Work with channels, videos, and analytics",
-        "youtube",
-      ),
-      entry(
-        "google-ads",
-        "Google Ads",
-        "Review campaigns and performance",
-        "google",
-      ),
-      entry(
-        "meta-ads",
-        "Meta Ads",
-        "Review campaigns across Meta properties",
-        "meta",
-      ),
-    ],
-  },
-  {
     id: "commerce-support",
     title: "Commerce & support",
     connectors: [
-      entry(
-        "shopify",
-        "Shopify",
-        "Work with products, orders, and customers",
-        "commerce",
-        true,
-      ),
       entry(
         "stripe",
         "Stripe",
         "Inspect payments, customers, and subscriptions",
         "finance",
-      ),
-    ],
-  },
-  {
-    id: "legal-compliance",
-    title: "Legal & compliance",
-    connectors: [
-      entry(
-        "docusign",
-        "DocuSign",
-        "Review envelopes and agreement status",
-        "docusign",
-      ),
-    ],
-  },
-  {
-    id: "people-recruiting",
-    title: "People & recruiting",
-    connectors: [
-      entry(
-        "greenhouse",
-        "Greenhouse",
-        "Work with candidates and hiring plans",
-        "people",
-      ),
-      entry(
-        "lever",
-        "Lever",
-        "Manage recruiting pipelines and interviews",
-        "people",
-      ),
-      entry(
-        "workday",
-        "Workday",
-        "Use approved people and finance records",
-        "people",
       ),
     ],
   },

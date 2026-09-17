@@ -1,21 +1,20 @@
-import { useEffect, useId, useReducer, useRef, type ReactNode } from "react";
+import { useEffect, useId, useReducer, useRef, useState, type ReactNode } from "react";
 import type {
   CollaborationWorkItem,
   ConversationRoom,
   MivletAgentProfile,
   LocalProject,
 } from "@mivlet/protocol";
-import { Folder } from "@phosphor-icons/react/dist/csr/Folder";
 import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
-import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
-import { parseComputerArtifact } from "../../lib/computer-artifacts";
-import { sideChatsFor, scopeWork } from "./work-order";
+import { safeConversationLink } from "../../lib/safe-output";
+import { sideChatsFor } from "./work-order";
 import { reduceRightPanel, type RightPanelTab } from "./right-panel-state";
 import "./navigation.css";
 import "./right-panel.css";
@@ -30,8 +29,6 @@ export type NavContext =
 export function WorkspaceRightNav({
   context,
   rooms,
-  work,
-  runtime,
   open,
   onClose,
   onOpenConversation,
@@ -52,7 +49,7 @@ export function WorkspaceRightNav({
   runtime: ShellRuntime;
   open: boolean;
   onClose: () => void;
-  onOpenConversation: (id: string, newTab?: boolean) => void;
+  onOpenConversation: (id: string) => void;
   onNewSideChat?: () => void;
   sideChats?: ReactNode;
   schedules?: ReactNode;
@@ -65,12 +62,14 @@ export function WorkspaceRightNav({
   onChatActiveChange?: (active: boolean) => void;
 }) {
   const panel = useRef<HTMLElement>(null);
+  const [address, setAddress] = useState("");
+  const [addressError, setAddressError] = useState("");
   const compact = useMediaQuery("(max-width: 850px)");
   useModalFocusTrap({ active: open && compact, containerRef: panel, onClose });
   const prefix = useId();
   const [state, dispatch] = useReducer(reduceRightPanel, {
     tabs: [],
-    selected: "files",
+    selected: "navigation",
   });
   useEffect(() => {
     if (request) dispatch({ type: "open", tab: request });
@@ -81,9 +80,8 @@ export function WorkspaceRightNav({
     lastSelection.current = state.selected;
     if (open)
       (
-        panel.current?.querySelector(
-          '[role="tab"][aria-selected="true"], nav [aria-pressed="true"]',
-        ) as HTMLElement | null
+        (panel.current?.querySelector('[role="tab"][aria-selected="true"]') ??
+          panel.current?.querySelector('nav [aria-pressed="true"]')) as HTMLElement | null
       )?.focus();
   }, [state.selected, open]);
   const agentId =
@@ -101,47 +99,25 @@ export function WorkspaceRightNav({
         : null,
     rooms,
   );
-  const files = (
-    context ? scopeWork(work, { agentId, projectId: project?.id }) : []
-  )
-    .flatMap((item) =>
-      item.outputs.flatMap((output) => {
-        const artifact = parseComputerArtifact(output.text);
-        return artifact
-          ? [
-              {
-                id: `artifact:${item.agentId}:${artifact.id}`,
-                kind: "artifact" as const,
-                title: artifact.title,
-                output: output.text,
-                agentId: item.agentId,
-              },
-            ]
-          : [];
-      }),
-    )
-    .filter(
-      (file, index, all) =>
-        all.findIndex((other) => other.id === file.id) === index,
-    );
   const selected = state.tabs.find((tab) => tab.id === state.selected);
   useEffect(() => {
-    onChatActiveChange?.(!computerAgentId && selected?.kind === "chat");
-  }, [selected?.id, computerAgentId, onChatActiveChange]);
+    onChatActiveChange?.(open && !computerAgentId && selected?.kind === "chat");
+  }, [selected?.id, open, computerAgentId, onChatActiveChange]);
   const select = (id: string) => {
     onCloseComputer?.();
     dispatch({ type: "select", id });
   };
   const closeTab = (id: string) => dispatch({ type: "close", id });
   const utilities = [
-    { id: "files", label: "Files", Icon: Folder },
-    { id: "chats", label: "Side chats", Icon: ChatCircle },
-    { id: "schedules", label: "Schedules", Icon: Clock },
+    { id: "browser", label: "Browser", Icon: Globe },
+    { id: "chats", label: "Side chat", Icon: ChatCircle },
+    { id: "schedules", label: "Schedules", Icon: CalendarBlank },
   ];
   return (
     <aside
       ref={panel}
       className="workspace-context right-panel"
+      data-navigation-only={!computerAgentId && state.selected === "navigation"}
       aria-label="Workspace panel"
       role={compact ? "dialog" : undefined}
       aria-modal={(compact && open) || undefined}
@@ -153,7 +129,7 @@ export function WorkspaceRightNav({
             <button
               key={id}
               type="button"
-              aria-pressed={!computerAgentId && state.selected === id}
+              aria-pressed={!computerAgentId && (state.selected === id || (id === "browser" && selected?.kind === "web") || (id === "chats" && selected?.kind === "chat"))}
               onClick={() => {
                 select(id);
                 if (id === "schedules" && !schedules) onSchedules?.();
@@ -170,10 +146,10 @@ export function WorkspaceRightNav({
           aria-label="Close workspace panel"
           onClick={onClose}
         >
-          <X size={16} />
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg>
         </button>
       </header>
-      {state.tabs.length ? (
+      {state.tabs.length && state.selected !== "navigation" ? (
         <div
           className="right-panel__tabs"
           role="tablist"
@@ -249,6 +225,7 @@ export function WorkspaceRightNav({
       <div
         id={`${prefix}-content`}
         className="right-panel__content"
+        hidden={!computerAgentId && state.selected === "navigation"}
         role={selected && !computerAgentId ? "tabpanel" : undefined}
         aria-labelledby={
           selected && !computerAgentId
@@ -298,38 +275,26 @@ export function WorkspaceRightNav({
               </p>
             )}
           </div>
-        ) : (
-          <div className="right-panel__library">
-            <div className="right-panel__section-heading">
-              <h2>Files</h2>
-              <small>
-                {project?.name ??
-                  runtime.agents.find((agent) => agent.id === agentId)?.name}
-              </small>
+        ) : state.selected === "browser" ? (
+          <form className="right-panel__browser" onSubmit={(event) => {
+            event.preventDefault();
+            const value = address.trim();
+            const url = safeConversationLink(/^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`);
+            if (!url || !/^https?:/.test(url)) {
+              setAddressError("Enter a valid website address.");
+              return;
+            }
+            setAddressError("");
+            dispatch({ type: "open", tab: { id: `web:${url}`, kind: "web", title: new URL(url).hostname, url } });
+          }}>
+            <label htmlFor={`${prefix}-address`}>Website address</label>
+            <div>
+              <input id={`${prefix}-address`} type="text" inputMode="url" autoComplete="url" placeholder="https://example.com" value={address} onChange={(event) => setAddress(event.target.value)} required />
+              <button type="submit">Open</button>
             </div>
-            {files.map((file) => (
-              <button
-                type="button"
-                className="right-panel__file"
-                key={file.id}
-                onClick={() => dispatch({ type: "open", tab: file })}
-              >
-                <FileText size={19} />
-                <span>{file.title}</span>
-              </button>
-            ))}
-            {!files.length ? (
-              <div className="right-panel__empty">
-                <Folder size={28} />
-                <p>Files your agent creates will appear here.</p>
-                <small>
-                  Open a file in the conversation to preview it alongside your
-                  chat.
-                </small>
-              </div>
-            ) : null}
-          </div>
-        )}
+            {addressError ? <p role="alert">{addressError}</p> : null}
+          </form>
+        ) : null}
       </div>
     </aside>
   );

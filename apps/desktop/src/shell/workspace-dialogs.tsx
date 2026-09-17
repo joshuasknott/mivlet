@@ -137,7 +137,6 @@ export function WorkspaceDialogs({
               }
               setSearchOpen(false);
               setMarketplace(null);
-              nav.setMode("chat");
               if (plan.kind === "conversation") nav.open(plan.conversationId);
               else if (plan.kind === "project") nav.open(plan.threadId);
               else if (plan.kind === "work") {
@@ -230,6 +229,7 @@ export function WorkspaceDialogs({
       {agentEditor ? (
         <Suspense fallback={null}>
           <AgentEditor
+            presentation={agentEditor.id ? "panel" : "modal"}
             open
             agent={
               runtime.agents.find((agent) => agent.id === agentEditor.id) ??

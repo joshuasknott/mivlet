@@ -17,23 +17,32 @@ interface PendingConfiguration {
 
 export function LocalMcpSettings({
   workspaceId,
-  onStatus
+  onStatus,
+  initialAdding = false,
+  serverId,
+  onSaved
 }: {
   workspaceId: string;
   onStatus: (message: string) => void;
+  initialAdding?: boolean;
+  serverId?: string;
+  onSaved?: () => void;
 }) {
-  return <WorkspaceMcpSettings key={workspaceId} workspaceId={workspaceId} onNotice={onStatus} />;
+  return <WorkspaceMcpSettings key={workspaceId} workspaceId={workspaceId} onNotice={onStatus} initialAdding={initialAdding} serverId={serverId} onSaved={onSaved} />;
 }
 
-function WorkspaceMcpSettings({ workspaceId, onNotice }: {
+function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, onSaved }: {
   workspaceId: string;
   onNotice: (message: string) => void;
+  initialAdding: boolean;
+  serverId?: string;
+  onSaved?: () => void;
 }) {
   const [servers, setServers] = useState<RuntimeMcpServerSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [desktopAvailable, setDesktopAvailable] = useState(false);
   const [loadError, setLoadError] = useState("");
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState(initialAdding);
   const loadGeneration = useRef(0);
   const mounted = useRef(false);
   const onStatus = (message: string) => { if (mounted.current) onNotice(message); };
@@ -136,6 +145,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
         setArgsText("");
         setEndpoint("");
         setAdding(false);
+        onSaved?.();
         onStatus(`${pending.configuration.transport === "stdio" ? "Local" : "Remote"} tool server saved. Check it before enabling any tools.`);
       } else {
         onStatus("Tool server wasn’t added.");
@@ -295,9 +305,9 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
             ) : (
               <>
               {!desktopAvailable ? <p className="mcp-settings__empty">Tool servers are available only in the desktop app.</p> :
-              servers.length > 0 ? (
+              initialAdding && adding ? null : servers.length > 0 ? (
                 <div className="provider-access-list">
-                  {servers.map((server) => {
+                  {servers.filter(server => !serverId || server.id === serverId).map((server) => {
                     const discovery = discoveries[server.id];
                     const draft = enablementDrafts[server.id];
                     return <div className="mcp-settings__server" key={server.id}>
@@ -382,7 +392,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
                 </div>
               ) : <p className="mcp-settings__empty">No tool servers yet.</p>}
 
-              <details className="mcp-settings__add" open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}>
+              {!serverId ? <details className="mcp-settings__add" open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}>
                 <summary ref={addServerRef}><Plus size={15} aria-hidden="true" /> Add server</summary>
                 <p>Only add software you trust. Credentials in commands, arguments, or web addresses are blocked.</p>
                 <div className="mcp-settings__form">
@@ -414,7 +424,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice }: {
                     Review and save
                   </button>
                 </div>
-              </details>
+              </details> : null}
               </>
             )}
         </section>

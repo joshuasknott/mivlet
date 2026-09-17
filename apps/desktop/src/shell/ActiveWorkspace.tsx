@@ -1,3 +1,5 @@
+import "../styles/agent-settings.css";
+import { AgentNotifications } from "../components/agents/AgentNotifications";
 import type {
   CollaborationWorkItem,
   MivletAgentProfile,
@@ -379,6 +381,7 @@ export function ActiveWorkspace({
     onOpenMarketplace: setMarketplace,
     onSetSettingsTab: setSettingsTab,
     onOpenSettings: () => setSettings(true),
+    onAgentSettings: (id) => { nav.setPanelFocused(false); setAgentEditor({ id }); },
     onEditConversation: (roomId) =>
       setConversationDialog({ kind: "edit", roomId }),
     onPlaceConversation: (id) =>
@@ -391,17 +394,14 @@ export function ActiveWorkspace({
     <OpenWebPreview.Provider value={nav.openPanelWeb}>
       <main
         onPointerDownCapture={nav.onConversationPointerDown}
-        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${nav.navigationCollapsed ? " teammates-workspace--collapsed" : ""}${nav.contextOpen || nav.computer ? " teammates-workspace--history" : ""}`}
+        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${nav.contextOpen || nav.computer || agentEditor?.id ? " teammates-workspace--history" : ""}`}
         data-theme={theme}
         data-mobile-navigation={nav.mobileNavigation}
       >
+        <AgentNotifications agents={runtime.agents} work={state.data.work} onOpen={nav.open} />
         <AgentSidebar
           onSearch={() => setSearchOpen(true)}
-          collapsed={nav.navigationCollapsed && !nav.phone}
           hidden={nav.phone && !nav.mobileNavigation}
-          onToggleCollapsed={() =>
-            nav.setNavigationCollapsed(!nav.navigationCollapsed)
-          }
           agents={runtime.agents}
           projects={projects.projects}
           selectedProjectId={nav.activeRoom?.projectId}
@@ -446,6 +446,9 @@ export function ActiveWorkspace({
           projects={projects}
           profileName={profileName}
           marketplace={marketplace}
+          panelOpen={nav.contextOpen || Boolean(nav.computer) || Boolean(agentEditor?.id)}
+          onTogglePanel={() => { nav.setComputer(null); nav.setContextOpen(!(nav.contextOpen || nav.computer || agentEditor?.id)); setAgentEditor(null); }}
+          onAgentSettings={(id) => { nav.setPanelFocused(false); setAgentEditor({ id }); }}
           indicators={indicators}
           tabMeta={conversationTabMeta(
             state.data.conversations,
@@ -487,6 +490,7 @@ export function ActiveWorkspace({
           ))}
         </Suspense>
         <WorkspaceContextPanel
+          hidden={Boolean(agentEditor?.id)}
           nav={nav}
           runtime={runtime}
           service={service}

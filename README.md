@@ -15,8 +15,8 @@ Mivlet is local-first: conversations and workspace data are stored on the device
 provider credentials stay in native secure storage, and the default agent computer
 runs locally. Connected providers and apps receive the context needed for their
 requests. Signed-out users authenticate with a Mivlet account. Authenticated
-users open their local workspace directly; a supported model provider must be
-validated before running an agent, and app connections are optional.
+users connect a supported AI provider before entering their local workspace.
+Returning users with a usable provider open chat directly; app connections are optional.
 
 ## Maturity
 
@@ -34,23 +34,20 @@ a deployed or production-validated service.
 
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
-  selection with supported reasoning levels. Dictation stays beside one
-  bottom-right action that sends when the draft or attachments have content and
-  starts voice chat when the composer is empty; attachment-only sends keep
-  working.
-- Voice conversations with the selected named agent: automatic speech turns,
-  sentence-by-sentence spoken replies, captions, mute, interruption, and End.
-  Start voice from the composer when the message is empty; the call continues
-  the active conversation. Speech requires a separate
-  OpenAI API connection and explicit per-call consent; the selected agent/model
-  still owns reasoning and tools. Microphone interruption requires confirmed
-  echo cancellation; an Interrupt button is always available during replies.
-  Calls retain normal tool approvals and stop on conversation/model changes.
-  Raw audio is transient. See [voice architecture](docs/architecture/voice-conversations.md)
-  for limits and the remaining live-audio acceptance checks.
-- Google-first account sign-in for signed-out users. Authenticated users skip
-  onboarding and enter their workspace, including when provider setup is incomplete.
-  Agent execution still requires a verified model-provider connection.
+  selection with supported reasoning levels. Clicking an agent's name opens
+  its settings in the right panel. The composer keeps model selection and
+  dictation visible, with uploads and a connected-plugin submenu under +.
+  Per-agent notifications show in-app completion and attention notices while
+  the workspace is open; approval prompts remain independently enforced.
+  The dictation mic sits immediately left of Send. Send stays visible and is
+  disabled until the draft or attachments contain content. While the agent is
+  working, Stop remains available. Voice-to-voice conversations are not offered.
+  Dictation still requires a connected OpenAI API account and explicit recording
+  review before upload; it fills the draft without sending it. See the
+  [speech guide](docs/architecture/voice-conversations.md).
+- Log in and Sign up account entry for signed-out users, followed by required
+  AI provider setup. Users with a usable provider open chat directly.
+  Provider setup uses native credential storage and existing connection checks.
 - One provider-driver registry with stable instance ids for ChatGPT/Codex,
   Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
   connections. Codex and Antigravity have provider-owned agent adapters;
@@ -71,9 +68,7 @@ a deployed or production-validated service.
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
 - Provider and plugin-style Connections, including connector and MCP
-  boundaries. The 13 formerly planned plugins now offer bounded native reads
-  with provider-issued API credentials; see [plugin capabilities and setup](docs/product/connectors.md#native-token-plugins).
-  These token plugins require manual renewal and do not yet support writes or knowledge sync.
+  boundaries. App connections use browser sign-in through native OAuth or official remote services.
   The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
@@ -90,16 +85,17 @@ a deployed or production-validated service.
   the Codex and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge remain unavailable for project work and show that
   prerequisite.
-- A single workspace panel keeps Files, Side chats and Schedules available above
-  closable content tabs. Created files, search previews and side conversations
+- A collapsible right navigation lists Browser, Side chat and Schedules above
+  closable content tabs. Collapsing it hides the entire panel except its window-bar
+  toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations
   open alongside the main chat. Text, Markdown and images preview locally;
   PDF and Office files retain their native external-open flow. Explicit web-link
   clicks open script-free HTTPS frames; sites that block embedding or require
   interaction can be opened in the browser. Frames receive no native capabilities,
   while the application renderer retains its IPC-only network policy.
-- Conversation tabs and two-pane splits arrange durable conversations and
-  supported artifacts. Closing a tab leaves work running and discoverable from
-  Work mode and the contextual right panel. Projects contain focused chats, shared files and occurrence-tracked
+- Conversation split panes arrange durable conversations and
+  supported artifacts. Closing a pane leaves work running and discoverable in
+  Activity. Projects contain focused chats, shared files and occurrence-tracked
   local research schedules. Work runs while the app is open and Windows is awake;
   interrupted work requires review before continuation. Steering and explicit
   continuation are recorded at safe boundaries without replaying external
@@ -180,6 +176,7 @@ their separate trust boundaries.
 
 ```text
 apps/desktop        React UI, Convex functions, and the Tauri Rust boundary
+apps/accounts       Mivlet-themed browser authentication and OAuth consent
 apps/hosted-runner  deployment-gated Cloudflare computer/browser worker
 apps/broker         narrow confidential connector OAuth broker
 packages/protocol   shared product and authority contracts

@@ -12,54 +12,34 @@ const view = (id: string, conversationId = `room-${id}`) => ({
 });
 const opened = (...ids: string[]) =>
   ids.reduce(
-    (layout, id) => reduceLayout(layout, { type: "open", view: view(id) }),
+    (layout, id) => reduceLayout(layout, { type: "navigate", view: view(id) }),
     emptyLayout(),
   );
 describe("conversation view layout", () => {
-  it("starts with one pane and ordinary navigation replaces the active tab", () => {
+  it("restores only the selected legacy tab without retaining closed views", () => {
+    const saved = { ...emptyLayout(), panes: [["a", "b"]], views: [view("a"), view("b")], active: ["b"], closed: [view("c")] };
+    const ids = new Set(["room-a", "room-b", "room-c"]);
+    const restored = restoreLayout(saved, ids);
+    expect(restored.panes).toEqual([["b"]]);
+    expect(restored.views).toEqual([view("b")]);
+    expect(restored.closed).toEqual([]);
+    expect(saved.views).toHaveLength(2);
+    expect(ids.size).toBe(3);
+  });
+  it("starts with one pane and ordinary navigation replaces the visible conversation", () => {
     const layout = reduceLayout(opened("a"), {
       type: "navigate",
       view: view("b"),
     });
     expect(layout.panes).toEqual([["b"]]);
-    expect(layout.closed.map((view) => view.id)).toEqual(["a"]);
-    expect(reduceLayout(layout, { type: "reopen" }).panes).toEqual([
-      ["b", "a"],
-    ]);
+    expect(layout.closed).toEqual([]);
+    expect(layout.views).toEqual([view("b")]);
   });
-  it("reorders, docks, resizes and restores stable IDs without duplicating conversations", () => {
-    let layout = reduceLayout(opened("a", "b", "c"), {
-      type: "move",
-      id: "c",
-      pane: 0,
-      index: 0,
-    });
-    expect(layout.panes[0]).toEqual(["c", "a", "b"]);
-    layout = reduceLayout(layout, {
-      type: "dock",
-      id: "b",
-      pane: 0,
-      edge: "right",
-    });
+  it("docks, resizes and restores stable pane IDs", () => {
+    let layout = reduceLayout(opened("a"), { type: "dock", view: view("b"), pane: 0, edge: "right" });
     layout = reduceLayout(layout, { type: "resize", path: [], ratio: 0.64 });
-    expect(layout.tree).toEqual({
-      kind: "split",
-      axis: "row",
-      ratio: 0.64,
-      children: [
-        { kind: "pane", pane: 0 },
-        { kind: "pane", pane: 1 },
-      ],
-    });
-    expect(
-      restoreLayout(
-        JSON.parse(JSON.stringify(layout)),
-        new Set(["room-a", "room-b", "room-c"]),
-      ),
-    ).toEqual(layout);
-    layout = reduceLayout(layout, { type: "move", id: "b", pane: 0, index: 1 });
-    expect(layout.panes).toEqual([["c", "b", "a"]]);
-    expect(layout.tree).toEqual({ kind: "pane", pane: 0 });
+    expect(layout.tree.kind === "split" && layout.tree.ratio).toBe(0.64);
+    expect(restoreLayout(layout, new Set(["room-a", "room-b"]))).toEqual(layout);
   });
   it("allows three panes and refuses a fourth without losing its views", () => {
     let layout = opened("a");
@@ -125,7 +105,7 @@ describe("conversation view layout", () => {
       ),
     ).toEqual(layout);
   });
-  it("folds larger saved layouts into the last kept pane and clamps the active view", () => {
+  it("limits restored panes and clamps the active view", () => {
     const saved: ConversationLayout = {
       version: 2,
       panes: [["a"], ["b"], ["c"], ["d"]],
@@ -163,13 +143,12 @@ describe("conversation view layout", () => {
       saved,
       new Set(["room-a", "room-b", "room-c", "room-d"]),
     );
-    // Every open view survives; only the arrangement folds.
-    expect(restored.panes).toEqual([["a"], ["b"], ["c", "d"]]);
+    // Hidden views are discarded without changing saved conversations.
+    expect(restored.panes).toEqual([["a"], ["b"], ["c"]]);
     expect(restored.views.map((item) => item.id)).toEqual([
       "a",
       "b",
       "c",
-      "d",
     ]);
     // The active pane clamps to a kept pane and the tree prunes the folded leaf.
     expect(restored.activePane).toBe(2);
@@ -194,7 +173,7 @@ describe("conversation view layout", () => {
   it("normal opening activates an existing view; dragging history can show the same conversation twice", () => {
     let layout = opened("a");
     layout = reduceLayout(layout, {
-      type: "open",
+      type: "navigate",
       view: view("other", "room-a"),
     });
     expect(layout.views).toHaveLength(1);
@@ -212,7 +191,7 @@ describe("conversation view layout", () => {
       reduceLayout(layout, { type: "close", id: "duplicate" }).views,
     ).toEqual([view("a")]);
   });
-  it("migrates fixed two-pane layouts to one pane while retaining tabs", () => {
+  it("migrates legacy layouts without retaining hidden tabs", () => {
     const legacy = {
       version: 1,
       panes: [["a"], ["b"]],
@@ -228,7 +207,7 @@ describe("conversation view layout", () => {
       new Set(["room-a", "room-b"]),
     );
     expect(layout.version).toBe(2);
-    expect(layout.panes).toEqual([["a", "b"]]);
+    expect(layout.panes).toEqual([["b"]]);
     expect(layout.tree).toEqual({ kind: "pane", pane: 0 });
   });
   it("restores only the current workspace and collapses removed branches", () => {
@@ -248,16 +227,17 @@ describe("conversation view layout", () => {
     expect(restored.views).toEqual([view("a")]);
     expect(restoreLayout(layout, new Set())).toEqual(emptyLayout());
   });
-  it("closing the last tab keeps it reopenable and merging panes keeps every view", () => {
+  it("closing a pane clears its view and merging retains only the active conversation", () => {
     const closed = reduceLayout(opened("a"), { type: "close", id: "a" });
     expect(closed.panes).toEqual([[]]);
-    expect(reduceLayout(closed, { type: "reopen" }).views).toEqual([view("a")]);
+    expect(closed.views).toEqual([]);
+    expect(closed.closed).toEqual([]);
     const split = reduceLayout(opened("a"), {
       type: "dock",
       view: view("b"),
       pane: 0,
       edge: "right",
     });
-    expect(reduceLayout(split, { type: "single" }).panes).toEqual([["a", "b"]]);
+    expect(reduceLayout(split, { type: "single" }).panes).toEqual([["b"]]);
   });
 });

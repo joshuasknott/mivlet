@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 25] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 24] = [
     "read-file",
     "write-file",
     "create-spreadsheet",
@@ -101,7 +101,6 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 25] = [
     "local-desktop-action",
     "connection-read",
     "github-read",
-    "plugin-read",
     "vercel-read",
     "linear-read",
     "google-drive-read",
@@ -243,19 +242,6 @@ pub(crate) fn execute_tool_outcome(
         "google-drive-read" | "gmail-read" | "google-calendar-read" => {
             ToolOutcome::NeedsGoogleRead { tool, arguments }
         }
-        "plugin-read" => {
-            let connector_id = arguments
-                .get("connectorId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if !crate::token_plugins::IDS.contains(&connector_id) {
-                return ToolOutcome::Done(Err("This plugin is not registered.".into()));
-            }
-            match connector_request_from_args(connector_id, &arguments) {
-                Ok(request) => ToolOutcome::NeedsConnectorRead { request },
-                Err(error) => ToolOutcome::Done(Err(error)),
-            }
-        }
         "search-notion" | "search-slack" => ToolOutcome::Done(Err(
             "connector searches must be executed through the async command boundary.".to_string(),
         )),
@@ -294,7 +280,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "computer-artifact" => Some(("read-only", "low")),
         "generate-image" | "edit-image" => Some(("full-access", "high")),
         "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
-        "connection-read" | "github-read" | "vercel-read" | "linear-read" | "plugin-read" => {
+        "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
         }
         "google-drive-read" => Some(("read-only", "low")),
@@ -314,7 +300,6 @@ fn routine_connector_read(tool: &str) -> bool {
             | "gmail-read"
             | "google-calendar-read"
             | "github-read"
-            | "plugin-read"
             | "vercel-read"
             | "linear-read"
             | "search-notion"
@@ -1708,12 +1693,9 @@ pub async fn execute_tool_call(
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
         ToolOutcome::NeedsConnectorRead { request } => {
-            let result = if crate::token_plugins::IDS.contains(&request.connector_id.as_str()) {
-                crate::token_plugins::read(&app, request).await
-            } else {
-                connector_api::read_capability(&app, request).await
-            }
-            .map_err(|error| error.message)?;
+            let result = connector_api::read_capability(&app, request)
+                .await
+                .map_err(|error| error.message)?;
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Mivlet could not encode the connector result.".to_string())

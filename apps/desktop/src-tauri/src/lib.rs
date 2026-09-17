@@ -54,7 +54,6 @@ mod memory;
 mod models;
 mod native_api;
 mod native_speech;
-mod native_voice;
 mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
@@ -65,7 +64,6 @@ mod search;
 mod secret_redaction;
 mod snapshot;
 mod store;
-mod token_plugins;
 pub mod tools;
 mod window_controls;
 
@@ -211,12 +209,6 @@ pub fn run() {
             native_speech::native_speech_prepare_recording,
             native_speech::native_speech_cancel_recording,
             native_speech::native_speech_transcribe_recording,
-            native_voice::native_voice_start,
-            native_voice::native_voice_heartbeat,
-            native_voice::native_voice_interrupt,
-            native_voice::native_voice_end,
-            native_voice::native_voice_transcribe,
-            native_voice::native_voice_speak,
             snapshot::load_runtime_snapshot,
             snapshot::save_runtime_snapshot,
             backends::list_backends,
@@ -261,7 +253,6 @@ pub fn run() {
             connector_sync::cancel_connector_sync,
             connectors::search_connector,
             connectors::read_connector_capability,
-            connectors::connect_token_plugin,
             connectors::import_connector_item,
             connectors::list_connector_knowledge_sources,
             connectors::set_connector_knowledge_source_disabled,

@@ -1,3 +1,4 @@
+export * from "./domains/voice.js";
 export * as Spine from "./spine/index.js";
 export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
@@ -1133,6 +1134,8 @@ export interface MivletAgentProfile {
   modelId: string;
   reasoningEffort?: string;
   icon: MivletAgentIcon;
+  /** In-app completion and attention notices; never controls approval prompts. */
+  notificationsEnabled?: boolean;
   /** Legacy appearance metadata retained for saved-profile compatibility. */
   iconColor: string;
   /** Versioned, non-secret seed for a stable generated blob portrait. */

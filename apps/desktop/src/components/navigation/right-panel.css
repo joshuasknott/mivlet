@@ -17,56 +17,77 @@
   width: 100%;
   max-width: none;
 }
-@container right-panel (max-width: 340px) {
-  .right-panel__navigation {
-    padding-inline: 4px;
-  }
-  .right-panel__navigation button {
-    padding-inline: 5px;
-    gap: 4px;
-    font-size: 12px;
-  }
-}
 .right-panel__navigation {
-  display: flex;
-  align-items: center;
-  min-height: 52px;
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--team-border);
+  padding: 18px 12px;
   flex-shrink: 0;
-  gap: 2px;
+  border-bottom: 1px solid var(--team-border);
 }
 .right-panel__navigation nav {
   display: flex;
-  flex: 1;
-  justify-content: space-between;
-  gap: 2px;
+  flex-direction: column;
+  gap: 6px;
 }
-.right-panel__navigation button {
-  display: inline-flex;
+.right-panel__navigation nav button {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 7px;
-  min-height: 34px;
-  padding: 6px 9px;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 0;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--team-muted);
   font: inherit;
+  text-align: left;
   cursor: pointer;
-  white-space: nowrap;
 }
-.right-panel__navigation button[aria-pressed="true"] {
-  color: var(--ink);
-  background: color-mix(in srgb, var(--ink) 5%, transparent);
-}
+.right-panel__navigation button[aria-pressed="true"],
 .right-panel__navigation button:hover {
   color: var(--ink);
   background: color-mix(in srgb, var(--ink) 5%, transparent);
 }
-.right-panel__navigation .right-panel__close {
-  padding: 6px;
+.right-panel[data-navigation-only="true"] .right-panel__navigation { border-bottom: 0; }
+.right-panel__close {
+  display: none;
+}
+@media (max-width: 850px) {
+  .right-panel__close {
+    display: grid;
+    place-items: center;
+    position: absolute;
+    top: 2px;
+    right: 4px;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    background: transparent;
+    color: var(--ink-muted);
+    cursor: pointer;
+  }
+  .right-panel__navigation { padding-top: 38px; }
+}
+.right-panel__content[hidden] { display: none; }
+.right-panel__browser { padding: 20px; }
+.right-panel__browser label { display: block; margin-bottom: 10px; }
+.right-panel__browser > div { display: flex; gap: 8px; }
+.right-panel__browser input {
+  min-width: 0;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--team-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+}
+.right-panel__browser button {
+  padding: 8px 12px;
+  border: 1px solid var(--team-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
 }
 .right-panel__tabs {
   display: flex;

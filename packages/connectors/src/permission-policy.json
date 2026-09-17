@@ -95,7 +95,6 @@
     "connection-read": "connector-read",
     "connector-tools": "connector-read",
     "github-read": "connector-read",
-    "plugin-read": "connector-read",
     "vercel-read": "connector-read",
     "linear-read": "connector-read",
     "google-drive-read": "connector-read",
