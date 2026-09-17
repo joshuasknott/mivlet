@@ -15,6 +15,13 @@ describe("verified artifact previews", () => {
     await screen.findByRole("heading", { name: "Published notes" });
     expect(previewComputerArtifact).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "agent", artifactId: `artifact-${"a".repeat(64)}`, expectedGeneration: 7 });
   });
+  it("keeps the external-open fallback for PDF documents", async () => {
+    vi.mocked(previewComputerArtifact).mockResolvedValue({ artifactId: `artifact-${"a".repeat(64)}`, mimeType: "application/pdf", text: null, imageDataUrl: null, truncated: false });
+    const pdf = JSON.stringify({ ...JSON.parse(output), mimeType: "application/pdf", relativePath: "notes.pdf" });
+    render(<ArtifactPreview output={pdf} workspaceId="workspace" agentId="agent" generation={7} onClose={() => {}} />);
+    expect(await screen.findByText("This file is ready to open.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Notes" })).toBeVisible();
+  });
   it("discards an old preview after a generation change", async () => {
     let finish!: (value: Awaited<ReturnType<typeof previewComputerArtifact>>) => void;
     vi.mocked(previewComputerArtifact).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; })).mockRejectedValueOnce(new Error("Computer changed"));

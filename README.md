@@ -67,6 +67,13 @@ a deployed or production-validated service.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
+- Published images appear directly in chat and open the existing file viewer;
+  documents, spreadsheets and other published files use clickable file cards.
+  Text and Markdown render in the viewer; PDF and Office files retain the
+  existing default-app fallback. Uploaded images and text can be previewed
+  during the current session (bounded to 32 MB of preview memory). Upload pixels
+  are not added to saved conversations; unavailable originals ask for reattachment.
+  Saved workspace text files remain previewable through their scoped file path.
 - Provider and plugin-style Connections, including connector and MCP
   boundaries. App connections use browser sign-in through native OAuth or official remote services.
   The official MCP SDK owns negotiation and discovery in the bundled

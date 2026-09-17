@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
+import { ArtifactThumbnail } from "./ArtifactThumbnail";
 import { artifactSize, canOpenComputerArtifact, openComputerArtifact, parseComputerArtifact } from "../lib/computer-artifacts";
 import "./ComputerArtifacts.css";
 
@@ -27,6 +28,7 @@ export function ComputerArtifacts({ output, workspaceId, agentId, expectedGenera
   const pending = pendingEpoch === epoch;
   const available = canOpenComputerArtifact() && expectedGeneration !== undefined && Number.isSafeInteger(expectedGeneration) && expectedGeneration >= 0;
   const error = failure?.epoch === epoch ? failure.message : null;
+  const inlineImage = !compact && artifact.mimeType.startsWith("image/") && available;
   const open = async () => {
     if (!available || pending || opening.current === epoch || expectedGeneration === undefined) return;
     opening.current = epoch;
@@ -42,12 +44,12 @@ export function ComputerArtifacts({ output, workspaceId, agentId, expectedGenera
     }
   };
   return (
-    <div className="computer-artifact">
+    <div className={`computer-artifact${inlineImage ? " computer-artifact--image" : ""}`}>
       <button type="button" onClick={() => { if (onPreview) onPreview(output); else void open(); }} disabled={!onPreview && (!available || pending)}
         aria-label={`${onPreview ? "Preview" : "Open"} ${artifact.title}`} aria-busy={pending} aria-disabled={!onPreview && (pending || !available)}
         title={onPreview ? "Preview this file" : available ? "Open in your default app" : "Open the computer in Mivlet to access this file"}
         className="computer-artifact__open">
-        <FileText size={22} aria-hidden className="computer-artifact__icon" />
+        {inlineImage ? <ArtifactThumbnail key={scope} title={artifact.title} request={{ workspaceId, agentId, artifactId: artifact.id, expectedGeneration: expectedGeneration! }} /> : <FileText size={22} aria-hidden className="computer-artifact__icon" />}
         <span className="computer-artifact__copy">
           <span className="computer-artifact__title">{compact ? pending ? "Opening…" : "Open file" : artifact.title}</span>
           <span className="computer-artifact__meta">{compact ? "In your default app" : pending ? "Opening…" : `${artifact.relativePath.split(".").at(-1)?.toUpperCase()} · ${artifactSize(artifact.sizeBytes)}`}</span>

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { CollaborationAgentCommand, LocalProject } from "@mivlet/protocol";
+import { retainAttachmentPreviews } from "../lib/attachment-previews";
 import {
   collaborationToolSpecs,
   isCollaborationTool,
@@ -297,6 +298,7 @@ export function ExecutionWorker({
         ]
           .filter(Boolean)
           .join("\n\n");
+        retainAttachmentPreviews(service.workspaceId, session.work.conversationId, staged.attachments);
         const outcome = await controller.agent.run(
           buildAgentRequest({
             model: session.model.modelId,
