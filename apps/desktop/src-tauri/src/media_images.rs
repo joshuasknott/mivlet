@@ -183,6 +183,15 @@ fn png_has_exact_end(bytes: &[u8]) -> bool {
 /// Fully decode PNG output with CRC/decompression validation and strict bounds
 /// before any provider bytes can enter the workspace or immutable artifact store.
 fn validate_png(bytes: &[u8], size: &str) -> Result<(), String> {
+    if validate_generated_png(bytes)? != expected_dimensions(size)? {
+        return Err("OpenAI returned an image with unexpected dimensions.".into());
+    }
+    Ok(())
+}
+
+/// Validate provider-owned image output before importing it as an artifact.
+/// Codex chooses its own dimensions; byte, decode, CRC and end bounds still apply.
+pub(crate) fn validate_generated_png(bytes: &[u8]) -> Result<(u32, u32), String> {
     if bytes.len() < 45
         || bytes.len() > MAX_IMAGE_BYTES
         || !bytes.starts_with(b"\x89PNG\r\n\x1a\n")
@@ -190,7 +199,6 @@ fn validate_png(bytes: &[u8], size: &str) -> Result<(), String> {
     {
         return Err("OpenAI returned an invalid or oversized PNG image.".into());
     }
-    let expected = expected_dimensions(size)?;
     let mut decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     decoder.set_limits(png::Limits {
         bytes: MAX_DECODED_IMAGE_BYTES,
@@ -202,8 +210,14 @@ fn validate_png(bytes: &[u8], size: &str) -> Result<(), String> {
     let mut reader = decoder
         .read_info()
         .map_err(|_| "OpenAI returned an invalid PNG image.".to_string())?;
-    if (reader.info().width, reader.info().height) != expected {
-        return Err("OpenAI returned an image with unexpected dimensions.".into());
+    let dimensions = (reader.info().width, reader.info().height);
+    if dimensions.0 == 0
+        || dimensions.1 == 0
+        || dimensions.0 > 8192
+        || dimensions.1 > 8192
+        || reader.info().animation_control.is_some()
+    {
+        return Err("The generated PNG has unsupported dimensions or animation.".into());
     }
     let decoded_size = reader.output_buffer_size();
     if decoded_size == 0 || decoded_size > MAX_DECODED_IMAGE_BYTES {
@@ -213,10 +227,10 @@ fn validate_png(bytes: &[u8], size: &str) -> Result<(), String> {
     let frame = reader
         .next_frame(&mut decoded)
         .map_err(|_| "OpenAI returned a corrupt PNG image.".to_string())?;
-    if (frame.width, frame.height) != expected || frame.buffer_size() == 0 {
+    if (frame.width, frame.height) != dimensions || frame.buffer_size() == 0 {
         return Err("OpenAI returned an incomplete PNG image.".into());
     }
-    Ok(())
+    Ok(dimensions)
 }
 
 fn credential() -> Result<String, String> {

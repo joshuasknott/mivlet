@@ -46,6 +46,37 @@ is not used or bundled. Cua cloud services and orchestration are not dependencie
 
 ## Permission and input
 
+### Codex subscription images
+
+Codex conversations use the provider's built-in image generator through the
+user's ChatGPT sign-in. These consume the subscription's Codex allowance;
+Mivlet does not offer the separate metered `generate-image` / `edit-image` API
+tools on Codex turns, even when an OpenAI API key is connected. Other supported
+model routes retain the explicit, approval-gated direct API image tools.
+
+`codex_images.rs` imports completed `imageGeneration` app-server items from
+their base64 PNG `result`. It validates complete PNG data, CRCs, dimensions and
+decode limits before publishing through the existing immutable artifact store.
+It never reads `savedPath` or sends raw provider image data to the renderer or
+conversation history. The conversation persists an artifact receipt and shows
+an openable file card; its preview displays the image.
+
+Delivery requires a saved agent, enabled Computer Use, a current generation and
+write access. No desktop window selection or foreground control is needed.
+Thread/turn identity, duplicate-item checks and Stop fence every import.
+Missing image data, quota failures and rejected imports produce failed activity
+instead of a successful image receipt. There is no paid API fallback. The wire
+contract was checked against Codex CLI 0.155.0-alpha.2.6; fixture tests do not
+establish a user's live subscription entitlement.
+
+To test: connect ChatGPT/Codex, enable Computer Use, choose Ask Me or Full Access,
+and request a logo in a new message. Open the generated image card, then reopen
+the conversation to check persistence. Also test Stop while generating and a
+second request after Stop. Leave the OpenAI API disconnected to verify the
+subscription-only route. Merge only after the live image is visible and usable.
+
+### Windows application control
+
 Computer Use follows the existing global approvals setting. Full Access still
 queues the same exact single-use tool approval; high-risk minting requires a
 native OS confirm, and WebView cannot mint by echoing a confirmation phrase.

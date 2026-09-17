@@ -158,9 +158,13 @@ describe("native agent providers", () => {
     expect(result.current.state.running).toBe(false);
   });
 
-  it("renders and persists provider-owned tool activity without invoking Mivlet's tool callback", async () => {
+  it.each(["web-search", "codex-image-generation"])("renders and persists %s without invoking Mivlet's tool callback", async (tool) => {
     installDesktopRuntime();
-    const output = JSON.stringify({
+    const output = JSON.stringify(tool === "codex-image-generation" ? {
+      kind: "computer-artifact", version: 1, id: `artifact-${"a".repeat(64)}`,
+      computerId: `local-${"b".repeat(24)}`, title: "Generated image", mimeType: "image/png",
+      sizeBytes: 1024, relativePath: "generated/logo.png", createdAt: "2026-09-17T12:00:00Z",
+    } : {
       untrusted: true,
       results: [{ title: "Release notes", url: "https://example.com/release" }],
     });
@@ -168,14 +172,14 @@ describe("native agent providers", () => {
       {
         type: "provider-tool",
         callId: "search-1",
-        tool: "web-search",
+        tool,
         arguments: '{"query":"current release"}',
         status: "running",
       },
       {
         type: "provider-tool",
         callId: "search-1",
-        tool: "web-search",
+        tool,
         arguments: '{"query":"current release"}',
         status: "succeeded",
         output,
@@ -208,7 +212,7 @@ describe("native agent providers", () => {
       expect.objectContaining({
         id: "search-1",
         kind: "tool",
-        tool: "web-search",
+        tool,
         content: output,
         state: "succeeded",
       }),
@@ -218,12 +222,12 @@ describe("native agent providers", () => {
         expect.objectContaining({
           kind: "tool-call",
           callId: "search-1",
-          toolName: "web-search",
+          toolName: tool,
         }),
         expect.objectContaining({
           kind: "tool-result",
           callId: "search-1",
-          toolName: "web-search",
+          toolName: tool,
           ok: true,
           content: output,
         }),
@@ -234,7 +238,7 @@ describe("native agent providers", () => {
       expect.objectContaining({
         role: "tool",
         toolCallId: "search-1",
-        toolName: "web-search",
+        toolName: tool,
         ok: true,
         content: output,
       }),
