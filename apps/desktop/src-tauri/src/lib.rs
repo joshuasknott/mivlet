@@ -53,7 +53,6 @@ mod memory;
 mod models;
 mod native_api;
 mod native_speech;
-mod native_voice;
 mod oauth_loopback;
 pub mod paths;
 mod permission_policy;
@@ -209,12 +208,6 @@ pub fn run() {
             native_speech::native_speech_prepare_recording,
             native_speech::native_speech_cancel_recording,
             native_speech::native_speech_transcribe_recording,
-            native_voice::native_voice_start,
-            native_voice::native_voice_heartbeat,
-            native_voice::native_voice_interrupt,
-            native_voice::native_voice_end,
-            native_voice::native_voice_transcribe,
-            native_voice::native_voice_speak,
             snapshot::load_runtime_snapshot,
             snapshot::save_runtime_snapshot,
             backends::list_backends,

@@ -15,13 +15,13 @@ const initial: NativeAgentState = { transcript: "", usage: null, running: true, 
 const props = { messages: [], agent, threadId: "thread-1", profileName: "Joshua", connectors: [], optimisticPrompt: "", workspaceId: "workspace-1" };
 
 describe("conversation turns", () => {
-  it("keeps a request rejected before execution visible and reusable", () => {
+  it("keeps a request rejected before execution visible without resend controls", () => {
     const reuse = vi.fn();
     render(<ConversationFeed {...props} state={{ ...initial, currentAttemptId: null, running: false }} onReusePrompt={reuse} pendingTurns={[{ id: "failed", prompt: "Create the fixture file", startedAt: "2026-09-12T10:00:00Z", parts: [{ id: "error", kind: "notice", error: true, content: "Computer status unavailable" }] }]} />);
     expect(screen.getByText("Create the fixture file")).toBeVisible();
     expect(screen.getByText("Computer status unavailable")).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Edit & resend" }));
-    expect(reuse).toHaveBeenCalledWith("Create the fixture file", "edit");
+    expect(screen.queryByRole("button", { name: "Edit & resend" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Retry…" })).toBeNull();
     expect(screen.getByRole("button", { name: "Copy message" })).toBeVisible();
     expect(document.querySelector("time")).toHaveAttribute("datetime", "2026-09-12T10:00:00Z");
   });

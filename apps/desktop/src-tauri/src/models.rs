@@ -1115,6 +1115,8 @@ pub struct FableAgentProfile {
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notifications_enabled: Option<bool>,
     pub icon: String,
     #[serde(default)]
     pub icon_color: String,

@@ -87,7 +87,7 @@ The [provider matrix](../architecture/local-teammate-computer.md#tool-and-provid
 defines screenshot delivery; advertising vision alone is insufficient. See also
 [Work execution](../architecture/work-execution.md),
 [memory and context](../architecture/memory-context.md),
-[voice conversations](../architecture/voice-conversations.md) and the
+[speech input](../architecture/voice-conversations.md) and the
 [hosted OpenCode prototype](../architecture/hosted-opencode-prototype.md).
 
 ## State ownership and history

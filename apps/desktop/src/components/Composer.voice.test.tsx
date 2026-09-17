@@ -28,8 +28,6 @@ function propsFor(
     onStopVoice: vi.fn(),
     onCancelVoice: vi.fn(),
     onDismissVoice: vi.fn(),
-    onStartVoiceChat: vi.fn(),
-    voiceChatDescription: "Start voice chat",
     onAttach: vi.fn(),
     addMenuOpen: false,
     onToggleAddMenu: vi.fn(),
@@ -54,11 +52,18 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it("keeps provider setup reachable beside the plus button when no model is available", () => {
+    const onConnectProvider = vi.fn();
+    render(<Composer {...propsFor("idle", { models: [], onConnectProvider })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Connect a provider" }));
+    expect(onConnectProvider).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+  });
   it("keeps secondary controls in the menu and routes missing-provider setup", () => {
     const props = propsFor("idle", { secondaryControlsInMenu: true, models: [], addMenuOpen: true, onConnectProvider: vi.fn() });
     render(<Composer {...props} />);
-    expect(screen.queryByRole("button", { name: "Start dictation" })).toBeNull();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Dictate message" }));
+    expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Start dictation" }));
     expect(props.onStartVoice).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Connect a provider" }));
     expect(props.onConnectProvider).toHaveBeenCalledOnce();
@@ -115,14 +120,14 @@ describe("Composer dictation controls", () => {
     expect(props.onAuthorizeVoice).toHaveBeenCalledOnce();
     expect(props.onStartVoice).not.toHaveBeenCalled();
   });
-  it("switches between dictation, Send and Start voice chat with trimmed text", () => {
+  it("keeps dictation beside Send and enables sending only with content", () => {
     const { rerender } = render(
       <Composer {...propsFor("idle", { composerValue: "" })} />
     );
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Start voice chat" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start voice chat" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
 
     rerender(<Composer {...propsFor("idle", { composerValue: "Draft reply" })} />);
 
@@ -136,8 +141,8 @@ describe("Composer dictation controls", () => {
     render(<Composer {...propsFor("idle", { composerValue: "   " })} />);
 
     expect(screen.getByRole("button", { name: "Start dictation" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Start voice chat" })).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Send prompt" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Start voice chat" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Send prompt" })).toBeDisabled();
   });
 
   it("keeps attachment-only drafts sendable and keeps voice chat out of the action", () => {
@@ -186,25 +191,13 @@ describe("Composer dictation controls", () => {
     expect(screen.queryByRole("button", { name: "Stop response" })).not.toBeInTheDocument();
   });
 
-  it("starts voice chat from the combined action with a setup description", () => {
-    const onStartVoiceChat = vi.fn();
-    render(
-      <Composer
-        {...propsFor("idle", {
-          composerValue: "",
-          onStartVoiceChat,
-          voiceChatDescription: "Connect an OpenAI API account for transcription and speech.",
-        })}
-      />
-    );
-
-    const voiceChat = screen.getByRole("button", { name: "Start voice chat" });
-    expect(voiceChat).toHaveAttribute(
-      "title",
-      "Connect an OpenAI API account for transcription and speech."
-    );
-    fireEvent.click(voiceChat);
-    expect(onStartVoiceChat).toHaveBeenCalledOnce();
+  it("places dictation immediately before Send in the compact composer", () => {
+    render(<Composer {...propsFor("idle", { composerValue: "", secondaryControlsInMenu: true })} />);
+    const mic = screen.getByRole("button", { name: "Start dictation" });
+    const send = screen.getByRole("button", { name: "Send prompt" });
+    expect(mic.closest(".voice-actions")?.nextElementSibling).toBe(send);
+    expect(send).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Start voice chat" })).toBeNull();
   });
 
   it("keeps Enter sending, Shift+Enter multiline and IME composition local", () => {
@@ -332,16 +325,20 @@ describe("Composer dictation controls", () => {
 
 });
 
-it("uses one keyboard-accessible menu and inserts connected app context", () => {
+it("uses a keyboard-accessible plugin flyout and inserts connected app context", async () => {
   const onComposerChange = vi.fn(); const onToggleAddMenu = vi.fn();
   render(<Composer {...propsFor("idle", { addMenuOpen: true, composerValue: "Check", onComposerChange, onToggleAddMenu, connectedConnectors: [{ id: "gmail", name: "Gmail", status: "connected" }] })} />);
   const upload = screen.getByRole("menuitem", { name: "Upload files" });
   expect(upload).toHaveFocus();
   fireEvent.keyDown(upload, { key: "ArrowDown" });
+  const plugins = screen.getByRole("menuitem", { name: "Plugins" });
+  expect(plugins).toHaveFocus();
+  fireEvent.keyDown(plugins, { key: "ArrowRight" });
   const gmail = screen.getByRole("menuitem", { name: "Gmail" });
-  expect(gmail).toHaveFocus();
+  await vi.waitFor(() => expect(gmail).toHaveFocus());
+  expect(screen.getAllByRole("menu")).toHaveLength(2);
   fireEvent.click(gmail);
   expect(onComposerChange).toHaveBeenCalledWith("Check @gmail ");
   expect(onToggleAddMenu).toHaveBeenCalledOnce();
-  expect(screen.getAllByRole("menu")).toHaveLength(1);
+  expect(screen.queryByRole("menu", { name: "Attached plugins" })).toBeNull();
 });

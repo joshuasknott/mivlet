@@ -121,7 +121,7 @@ const base = {
   rooms: [
     room({
       id: "side",
-      title: "Side chat",
+      title: "Agent side conversation",
       chat: { role: "side", ownerKind: "agent", ownerId: "agent" },
     }),
     room({
@@ -178,33 +178,30 @@ describe("multifunctional right panel", () => {
     };
     const view = render(<WorkspaceRightNav {...props} request={request} />);
     expect(screen.getByText("Document contents")).toBeInTheDocument();
-    for (const name of ["Files", "Side chats", "Schedules"])
+    for (const name of ["Browser", "Side chat", "Schedules"])
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
     expect(screen.queryByText("Document contents")).toBeNull();
     view.rerender(<WorkspaceRightNav {...props} request={{ ...request }} />);
     expect(screen.getAllByRole("tab")).toHaveLength(1);
     expect(screen.getByText("Document contents")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close Launch brief" }));
     expect(screen.queryByRole("tablist")).toBeNull();
-    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("complementary")).toHaveAttribute("data-navigation-only", "true");
   });
   it("shows only the selected owner's side chats", () => {
     const view = render(
       <WorkspaceRightNav {...context({ kind: "agent", agent })} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Side chats" }));
     fireEvent.click(screen.getByRole("button", { name: "Side chat" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agent side conversation" }));
     expect(base.onOpenConversation).toHaveBeenCalledWith("side");
     expect(screen.queryByText("Launch side")).toBeNull();
     view.rerender(
       <WorkspaceRightNav {...context({ kind: "project", project })} />,
     );
     expect(screen.getByText("Launch side")).toBeInTheDocument();
-    expect(screen.queryByText("Side chat")).toBeNull();
+    expect(screen.queryByText("Agent side conversation")).toBeNull();
     expect(screen.queryByText("Launch main")).toBeNull();
   });
   it("embeds schedules and removes the old inventory sections", () => {
@@ -254,38 +251,27 @@ describe("multifunctional right panel", () => {
     expect(onClose).toHaveBeenCalledOnce();
     expect(base.onStopWork).not.toHaveBeenCalled();
   });
-  it("lists only validated files in the selected agent scope", () => {
-    const output = (title: string) => ({
-      runId: title,
-      conversationId: "side",
-      evidence: "agent-report" as const,
-      createdAt: "2026-09-14T00:00:00Z",
-      text: JSON.stringify({
-        kind: "computer-artifact",
-        version: 1,
-        id: `artifact-${"a".repeat(64)}`,
-        computerId: `local-${"b".repeat(24)}`,
-        title,
-        relativePath: "brief.md",
-        mimeType: "text/markdown",
-        sizeBytes: 20,
-        createdAt: "2026-09-14T00:00:00Z",
-      }),
-    });
-    render(
-      <WorkspaceRightNav
-        {...context({ kind: "agent", agent })}
-        work={[
-          item({ outputs: [output("My brief"), output("My brief")] }),
-          item({ agentId: "other", outputs: [output("Private brief")] }),
-        ]}
-        renderTab={(tab) => <p>{tab.title} contents</p>}
-      />,
-    );
-    expect(screen.getAllByRole("button", { name: "My brief" })).toHaveLength(1);
-    expect(screen.queryByText("Private brief")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "My brief" }));
-    expect(screen.getByText("My brief contents")).toBeInTheDocument();
+  it("opens a validated website and rejects unsafe schemes", () => {
+    render(<WorkspaceRightNav {...context(null)} renderTab={(tab) => <p>{tab.kind === "web" ? tab.url : tab.title}</p>} />);
+    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
+    const address = screen.getByLabelText("Website address");
+    fireEvent.change(address, { target: { value: "javascript:alert(1)" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid website address");
+    expect(screen.queryByRole("tab")).toBeNull();
+    fireEvent.change(address, { target: { value: "example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.getByText("https://example.com/")).toBeVisible();
+  });
+  it("hides all navigation and preserves content when collapsed", () => {
+    const props = { ...context(null), request: { id: "web:a", kind: "web" as const, title: "Example", url: "https://example.com" }, renderTab: () => <p>Saved page</p> };
+    const view = render(<WorkspaceRightNav {...props} />);
+    view.rerender(<WorkspaceRightNav {...props} open={false} />);
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browser" })).toBeNull();
+    expect(screen.getByText("Saved page")).not.toBeVisible();
+    view.rerender(<WorkspaceRightNav {...props} open />);
+    expect(screen.getByText("Saved page")).toBeVisible();
   });
   it("releases side-chat focus when switching to a utility", () => {
     const active = vi.fn();
@@ -297,7 +283,7 @@ describe("multifunctional right panel", () => {
       />,
     );
     expect(active).toHaveBeenLastCalledWith(true);
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
     expect(active).toHaveBeenLastCalledWith(false);
   });
 });

@@ -1,14 +1,12 @@
 import type { IdentityStatus } from "@fable/protocol";
-import { GoogleLogo } from "@phosphor-icons/react/dist/csr/GoogleLogo";
+
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "../Brand";
-import { PrivacyNotice } from "../settings/PrivacyNotice";
+
 import "../../styles/routes/onboarding.css";
 
-type AccountEntryPoint = "google" | "email";
-
-/** Account entry only; the shell opens a validated local workspace directly. */
+/** Account entry only; the shell then checks required provider setup. */
 export function OnboardingPage({
   identityStatus,
   identityPending,
@@ -19,13 +17,13 @@ export function OnboardingPage({
   identityStatus: IdentityStatus;
   identityPending: boolean;
   workspaceMessage: string;
-  onSignIn: (entryPoint: AccountEntryPoint) => void | Promise<void>;
+  onSignIn: () => void | Promise<void>;
   onOpenWorkspace: () => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
-  const [privacyOpen, setPrivacyOpen] = useState(false);
+
   const headingRef = useRef<HTMLHeadingElement>(null);
   const actionPending = useRef(false);
   const signedIn =
@@ -38,7 +36,7 @@ export function OnboardingPage({
     headingRef.current?.focus();
   }, [signedIn]);
 
-  const enter = async (entryPoint: AccountEntryPoint) => {
+  const enter = async () => {
     if (identityPending || actionPending.current) return;
     actionPending.current = true;
     setPending(true);
@@ -46,7 +44,7 @@ export function OnboardingPage({
     setError("");
     try {
       if (signedIn) await onOpenWorkspace();
-      else await onSignIn(entryPoint);
+      else await onSignIn();
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -62,7 +60,7 @@ export function OnboardingPage({
   return (
     <main className="og-frame" aria-label="Mivlet account">
       <div className="og-center">
-        <Brand className="og-brand" />
+        <Brand compact className="og-brand" />
         <section
           className="og-screen og-screen--account"
           aria-labelledby="onboarding-title"
@@ -71,11 +69,7 @@ export function OnboardingPage({
             <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
               {signedIn ? "Open your workspace" : "Welcome to Mivlet"}
             </h1>
-            <p>
-              {signedIn
-                ? workspaceMessage
-                : "Sign in or create an account to get started."}
-            </p>
+            <p>{signedIn ? workspaceMessage : "Your personal AI workspace"}</p>
           </div>
           <div className="og-account-actions">
             {signedIn ? (
@@ -83,7 +77,7 @@ export function OnboardingPage({
                 type="button"
                 className="og-primary-button"
                 disabled={busy}
-                onClick={() => void enter("email")}
+                onClick={() => void enter()}
               >
                 {busy ? (
                   <>
@@ -98,9 +92,9 @@ export function OnboardingPage({
               <>
                 <button
                   type="button"
-                  className="og-primary-button og-primary-button--google"
+                  className="og-primary-button"
                   disabled={busy}
-                  onClick={() => void enter("google")}
+                  onClick={() => void enter()}
                 >
                   {busy ? (
                     <>
@@ -108,19 +102,16 @@ export function OnboardingPage({
                       in
                     </>
                   ) : (
-                    <>
-                      <GoogleLogo size={20} weight="bold" aria-hidden="true" />{" "}
-                      Continue with Google
-                    </>
+                    "Log in"
                   )}
                 </button>
                 <button
                   type="button"
-                  className="og-text-button"
+                  className="og-secondary-button"
                   disabled={busy}
-                  onClick={() => void enter("email")}
+                  onClick={() => void enter()}
                 >
-                  Continue with email
+                  Sign up
                 </button>
               </>
             )}
@@ -142,18 +133,8 @@ export function OnboardingPage({
               {identityStatus.message}
             </p>
           ) : null}
-          <button
-            type="button"
-            className="og-privacy-link"
-            onClick={() => setPrivacyOpen(true)}
-          >
-            Privacy &amp; data
-          </button>
         </section>
       </div>
-      {privacyOpen ? (
-        <PrivacyNotice onClose={() => setPrivacyOpen(false)} />
-      ) : null}
     </main>
   );
 }

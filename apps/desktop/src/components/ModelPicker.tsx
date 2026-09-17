@@ -2,7 +2,6 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties
 import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
-import { ArrowCounterClockwise } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 import type { ProviderModelOption } from "../lib/provider-models";
@@ -110,7 +109,9 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       const panelWidth = Math.min(naturalWidth, Math.max(0, availableWidth));
       if (panelWidth < naturalWidth) menu.style.width = `${panelWidth}px`;
       menu.style.right = "auto";
-      const desiredLeft = anchorBox.right - panelWidth;
+      const desiredLeft = showEffort
+        ? anchorBox.left + (anchorBox.width - panelWidth) / 2
+        : anchorBox.right - panelWidth;
       const left = Math.min(Math.max(desiredLeft, frame.left + PANEL_GUTTER), Math.max(frame.left + PANEL_GUTTER, frame.right - PANEL_GUTTER - panelWidth));
       menu.style.left = `${Math.round(left - anchorBox.left)}px`;
       const spaceAbove = anchorBox.top - frame.top - PANEL_GUTTER;
@@ -166,20 +167,14 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
-    {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}`} role="dialog" aria-label="Model and reasoning">
-      {scopeLabel ? <p className="model-picker__scope">{scopeLabel}</p> : null}
+    {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}${providers.length <= 1 ? " model-picker--single-provider" : ""}`} role="dialog" aria-label="Model and reasoning">
       {showEffort ? <div className="model-picker__effort-view">
         <div className="model-picker__summary">
-          <ProviderIcon provider={selected!.providerId} size={20} />
           <button type="button" className="model-picker__model-link" aria-label="Change model" onClick={() => setView("models")}>
             <strong>{currentEffort ? effortLabel(currentEffort) : "Default"}<CaretRight size={12} /></strong>
             <span title={`${selected!.providerLabel} · ${label}`}>{label}</span>
           </button>
-          <button type="button" className="model-picker__reset" aria-label="Reset reasoning to default" title="Reset to default" disabled={!effort} onClick={() => onSelectEffort?.(undefined)}>
-            <ArrowCounterClockwise size={16} />
-          </button>
         </div>
-        <div className="model-picker__scale" role="group" aria-label="Reasoning levels">{levels.map(level => <button type="button" key={level} aria-pressed={level === currentEffort} onClick={() => onSelectEffort?.(level)}>{effortLabel(level)}</button>)}</div>
         <div className="model-picker__slider" style={{ "--effort-progress": `${levels.length > 1 ? effortIndex / (levels.length - 1) * 100 : 0}%` } as CSSProperties}>
           <input type="range" min={0} max={Math.max(0, levels.length - 1)} step={1} value={effortIndex}
             aria-label="Reasoning effort" aria-valuetext={currentEffort ? effortLabel(currentEffort) : "Default"}
@@ -189,17 +184,17 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       </div> : <div className="model-picker__browse">
         <div className="model-picker__toolbar">
           {levels.length > 0 ? <button type="button" aria-label="Back to reasoning" onClick={() => setView("effort")}><CaretLeft size={16} /></button> : null}
-          <span>Choose model</span><small>{models.length}</small>
+          <span>Select model</span>
         </div>
         <label className="model-picker__search"><MagnifyingGlass size={16} /><input type="search" aria-label="Search models" placeholder="Search models…" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
         {providers.length > 1 ? <div className="model-picker__providers" role="group" aria-label="Filter by provider">
           {[["", "All providers"], ...providers].map(([id, name]) => <button key={id} type="button" aria-pressed={activeProvider === id} onClick={() => setProvider(id)}>{id ? <ProviderIcon provider={id} size={14} /> : null}<span>{name}</span></button>)}
         </div> : null}
         <div className="model-picker__models" role="menu" aria-label="Models">
-          {allowAutomatic && !query.trim() && !activeProvider ? <button type="button" role="menuitemradio" aria-checked={!selectedId} onClick={() => chooseModel("")}><span>Automatic</span>{!selectedId ? <Check size={15} /> : null}</button> : null}
-          {visibleModels.map((model) => <button type="button" role="menuitemradio" key={model.id} disabled={!model.available}
+          {allowAutomatic && !query.trim() && !activeProvider ? <button type="button" role="menuitemradio" aria-checked={!selectedId} onClick={() => chooseModel("")}><span className="model-picker__model-name"><span>Default</span><small>Use an available connected model</small></span>{!selectedId ? <Check size={15} /> : null}</button> : null}
+          {visibleModels.map((model) => <button type="button" className="model-picker__option" role="menuitemradio" key={model.id} disabled={!model.available}
             aria-checked={selectedId === model.id} aria-label={`${model.providerLabel} ${model.label}${model.available ? "" : ", unavailable"}`} onClick={() => chooseModel(model.id)}>
-            <ProviderIcon provider={model.providerId} size={18} /><span className="model-picker__model-name"><span title={model.label}>{model.label}</span><small>{model.providerLabel}{!model.available ? " · Unavailable" : ""}</small></span>
+            {providers.length > 1 ? <ProviderIcon provider={model.providerId} size={18} /> : null}<span className="model-picker__model-name"><span title={model.label}>{model.label}</span><small>{model.providerLabel}{!model.available ? " · Unavailable" : ""}</small></span>
             {selectedId === model.id ? <Check size={15} aria-hidden="true" /> : null}
           </button>)}
           {!visibleModels.length ? <p className="model-picker__note" role="status">{models.length ? "No matching models." : "Connect a provider to choose a model."}</p> : null}

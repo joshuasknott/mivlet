@@ -1,93 +1,28 @@
-# Voice conversations
+# Speech input
 
-Voice is an input/output layer around Mivlet's existing named agent. The user's
-selected provider, conversation context, tools, one-use approvals, execution
-journal, and Stop path remain the authority for agent work. Dictation remains a
-separate way to edit a draft; starting a call preserves that draft and does not
-silently submit its attachments.
+Mivlet currently offers dictation only. Voice-to-voice calls, automatic spoken
+turns, and generated speech are not available.
 
-## Request flow
+The microphone sits immediately left of Send. Send is visible but disabled for
+an empty draft without attachments. Dictation fills the current draft; it does
+not submit it. Existing agent Stop and tool approvals retain their authority.
 
-1. The composer's voice action opens the voice view for the active
-   conversation. Start voice explicitly authorizes automatic transcription and
-   AI-generated speech for this call, using the
-   user's separately connected, metered OpenAI API account.
-2. A bundled AudioWorklet captures mono microphone frames. Local turn detection
-   keeps 350 ms of pre-roll, recognizes speech onset, and ends a turn after
-   approximately 900 ms of silence or one minute. Echo cancellation, noise
-   suppression and automatic gain control are requested from the device.
-3. Native Rust validates a bounded 24 kHz PCM WAV request and transcribes it
-   with `gpt-4o-mini-transcribe`. Neither the key nor network egress enters the
-   renderer. The transcript automatically enters the ordinary agent execution
-   path and encrypted conversation history.
-4. Only assistant text deltas that have reached the durable checkpoint feed
-   the speech queue. Complete sentences use `gpt-4o-mini-tts` and a chosen built-in
-   voice. WAV playback begins sentence by sentence, including while the agent
-   is still generating. Reasoning events never feed speech. Markdown formatting,
-   code and URL destinations are omitted from speech; full text stays in chat.
-   One additional sentence is prepared ahead of playback to reduce gaps without
-   creating an unbounded queue of paid requests.
-5. New speech immediately interrupts playback and invalidates that voice turn.
-   The native speech generation changes, and the existing agent Stop path
-   revokes pending approvals and computer work. The next transcript waits for
-   the previous agent turn to settle, preventing overlapping execution.
+## Dictation boundary
 
-Microphone interruption is enabled only when the device confirms echo
-cancellation. Otherwise the microphone pauses during playback and the user uses
-Interrupt. Mute disables the track and discards unfinished input. Pending tool
-approvals also pause microphone input and show the existing approval controls
-inside the call. Speech cannot approve those actions.
+`useComposerVoice` and `useVoice` own the composer recording flow. Users review
+recordings before authorizing upload for OpenAI transcription. Native
+`native_speech` validates the recording and uses the separately connected API
+credential from secure storage. Cancel, account changes, and composer scope
+changes retain their existing cancellation and freshness fences.
 
-## Call authority and limits
-
-One native call may exist at a time. Its random session capability is bound to
-the installation owner, workspace, agent, thread and expiry. Native speech
-requests also bind a monotonic turn generation and unique single-use request
-ID. Failed requests are consumed, stale generations are refused, and End or a
-replacement call revokes the old session. In-flight HTTP requests monitor
-revocation every 100 ms and drop the connection on revocation. A renderer
-heartbeat every 10 seconds maintains a 45-second lease; a renderer crash cannot
-leave indefinite native speech authority.
-
-- 30 minutes per call; the UI also ends after 3 minutes waiting for input.
-- 60 seconds per utterance, with native format/length validation.
-- 10 minutes of captured audio and 24,000 synthesized characters per call.
-- 512 unique requests and at most 3 in flight, with bounded response bodies
-  and 45-second HTTP timeouts.
-- Replies longer than approximately 6,000 spoken characters direct the user to
-  the remainder in chat. Voice instructions request short conversational replies.
-
-These limits bound traffic; they are not a quoted price or a currency budget.
-No raw input/output audio is written to disk, conversation records or logs by
-Mivlet. OpenAI's processing policies apply to the audio and speech text it receives.
-Credentials remain in native secure storage. Production CSP adds only local
-`blob:` media playback; provider network access remains unavailable to React.
+The removed call UI, speech playback pipeline, automatic turn detector, and
+native voice-call commands must not be used as evidence of available features.
+Any future voice conversation implementation needs its own design and live
+Windows audio validation.
 
 ## Verification
 
-Focused controller tests cover automatic turns, early speech, cancellation,
-late-result fences, mute, approval pauses, missing echo cancellation, connection
-cleanup and expiry. Audio tests cover silence/click rejection, pre-roll,
-discarding input, PCM bounds and speech text shaping. Native tests cover scope,
-owner, lease, replay, generation, concurrency, quotas and format validation.
-
-Inspect the voice view in the actual app at relevant sizes and states. Focused
-component/controller tests cover synthetic states without duplicating the shell.
-
-Live acceptance still requires the packaged Windows app with a connected agent
-and OpenAI API account: actual device permissions, ambient noise, speaker echo,
-headset interruption, latency, provider failure/reconnect, tool approval and
-Stop. Fixtures and local test passes do not establish that live acceptance.
-
-API reference: [OpenAI speech generation](https://developers.openai.com/api/docs/guides/text-to-speech)
-and [AudioWorkletNode](https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletNode).
-
-## Workspace integration
-
-ConversationPane opens the call in its active conversation; the composer action
-replaces the former separate pane-header voice button. The workspace execution
-service owns each voice exchange and the headless ExecutionWorker forwards
-assistant text only after its durable checkpoint. Voice never submits the draft
-or its attachments. Leaving the view, changing recipient/model, or ending the
-call aborts its exchange through the existing Stop path. Other conversations
-remain independent. The call displays the same exact approval panel as chat.
+Run the composer voice tests, dictation hook tests, connector recording and
+transcription-boundary tests, and native speech tests for changes to this flow.
+Synthetic tests and component previews do not establish live microphone,
+provider, or packaged-device acceptance.

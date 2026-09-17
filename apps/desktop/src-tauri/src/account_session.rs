@@ -130,7 +130,6 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
         let _ = window.hide();
         let _ = window.destroy();
     }
-    crate::native_voice::shutdown_account();
     crate::native_api::shutdown_account();
     crate::codex_app_server::shutdown_all_runs();
     crate::managed_runtime::shutdown_account();

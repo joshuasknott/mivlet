@@ -49,4 +49,3 @@
 .desktop-frame[data-theme="dark"] .mivlet-brand { background-image: url("/brand/mivlet-lockup-dark.png"); }
 :root[data-theme="dark"] .mivlet-brand--compact,
 .desktop-frame[data-theme="dark"] .mivlet-brand--compact { background-image: url("/brand/mivlet-symbol-dark.png"); }
-.og-brand { width: 180px; margin-bottom: 36px; }

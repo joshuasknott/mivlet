@@ -45,7 +45,7 @@ export function reduceRightPanel(
     tabs,
     selected:
       state.selected === action.id
-        ? (tabs[Math.max(0, index - 1)]?.id ?? "files")
+        ? (tabs[Math.max(0, index - 1)]?.id ?? "navigation")
         : state.selected,
   };
 }

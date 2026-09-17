@@ -143,9 +143,9 @@ describe("SettingsPage", () => {
     renderTab("providers", stubRuntime({ backendProviders: [provider] }));
 
     expect(screen.getByRole("heading", { name: "Providers" })).toBeInTheDocument();
-    expect(screen.getByText(/connect your AI providers/i)).toBeInTheDocument();
+    expect(screen.getByText(/Connect the AI you want to work with/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /ChatGPT/ })).toBeInTheDocument();
-    expect(screen.getByText(/credentials in your device.s secure storage/i)).toBeInTheDocument();
+    expect(screen.getByText(/Your credentials stay on this device/i)).toBeInTheDocument();
   });
 
   it("gives models their own page and keeps them out of Providers", () => {

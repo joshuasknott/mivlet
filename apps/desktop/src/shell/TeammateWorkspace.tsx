@@ -1,12 +1,12 @@
+import "../styles/agent-settings.css";
+import { AgentNotifications } from "../components/agents/AgentNotifications";
+import { ProviderOnboardingGate } from "../components/pages/ProviderOnboardingPage";
 import type {
-  CollaborationWorkItem,
   ConversationRoom,
   FableAgentProfile,
   LocalProject,
-  WorkOutput,
   WorkspaceView,
 } from "@fable/protocol";
-import { SidebarSimple } from "@phosphor-icons/react/dist/csr/SidebarSimple";
 import {
   lazy,
   Suspense,
@@ -20,11 +20,7 @@ import {
   type AgentSidebarPreview,
 } from "../components/agents/AgentSidebar";
 import { SchedulesDialog } from "../components/agents/SchedulesDialog";
-import {
-  ConversationGrid,
-  ConversationTabs,
-  type NewAction,
-} from "../components/conversation/ConversationTabs";
+import { ConversationGrid } from "../components/conversation/ConversationGrid";
 import { SideChatList } from "../components/conversation/SideChats";
 import {
   OpenWebPreview,
@@ -36,7 +32,7 @@ import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { SearchFileDialog } from "../components/search/SearchFileDialog";
 import { SettingsModal } from "../components/settings/SettingsModal";
-import { workPresentation } from "../components/work/WorkStatusBadge";
+import { latestAgentReply } from "../lib/agent-preview";
 import { useLocalProjects } from "../hooks/useLocalProjects";
 import {
   useLocalScheduleDispatcher,
@@ -53,7 +49,6 @@ import {
 } from "../lib/conversation-service";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import { navigationTargetFor } from "../lib/search/navigation";
-import { promoteWorkOutputToMemory } from "../lib/work-memory";
 import { activeWork, WorkspaceExecution } from "../lib/workspace-execution";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { runtimeAccountTheme } from "../runtime/domains/account";
@@ -78,7 +73,6 @@ import {
 
 const SearchOverlay = lazy(() => import("../components/search/SearchOverlay").then(module => ({ default: module.SearchOverlay })));
 const ProjectDetailsDialog = lazy(() => import("../components/projects/ProjectDetailsDialog").then(module => ({ default: module.ProjectDetailsDialog })));
-const WorkModeView = lazy(() => import("../components/navigation/WorkModeView").then(module => ({ default: module.WorkModeView })));
 
 const ExecutionWorker = lazy(() =>
   import("./ExecutionWorker").then((module) => ({
@@ -175,7 +169,7 @@ export function TeammateWorkspace() {
     );
   const scope = `${account.activeWorkspace.localWorkspaceId}:${account.activeContextOwner?.internalUserId}:${account.activeContextOwner?.memberId ?? ""}`;
   return (
-    <ActiveWorkspace
+    <ProviderOnboardingGate key={scope} runtime={runtime}><ActiveWorkspace
       key={scope}
       runtime={runtime}
       approvals={approvals}
@@ -184,7 +178,7 @@ export function TeammateWorkspace() {
       onService={(service) => {
         current.current = service;
       }}
-    />
+    /></ProviderOnboardingGate>
   );
 }
 
@@ -239,26 +233,25 @@ function ActiveWorkspace({
   const {
     layout, narrow, phone,
     contextOpen, setContextOpen,
-    mode, setMode,
     projectDetailsId, setProjectDetailsId,
     panelFocused, setPanelFocused,
     panelRequest, setPanelRequest,
-    navWorkId, setNavWorkId,
-    navigationCollapsed, setNavigationCollapsed,
+    navWorkId,
     mobileNavigation, setMobileNavigation,
     computer, setComputer,
-    activeView, activeRoom, showWorkspaceNavigation,
-    activeProfile, activeProject, selectedWork,
-    navContext, navAgent, navProject, navTeam, navWork, navApprovals,
+    activeView, activeRoom,
+    activeProfile, activeProject,
+    navContext, navAgent, navProject, navTeam,
     actLayout, open, onConversationPointerDown, selectNavWork,
     openPanelWeb, openPanelArtifact, openPanelChat,
   } = useWorkspaceNavigation({
     runtime, service, state,
     projects: projects.projects,
     marketplace: Boolean(marketplace),
-    onNavigate: () => setMarketplace(null),
+    onNavigate: () => { setMarketplace(null); setAgentEditor(null); },
     onSearch: () => setSearchOpen(true),
   });
+  useEffect(() => { setAgentEditor(null); }, [panelRequest, computer]);
   const appendDraft = useRef<(text: string) => void>(() => undefined);
   const seen = useRef(new Map<string, string>());
   const profileName =
@@ -451,7 +444,7 @@ function ActiveWorkspace({
       });
     if (seedText && draft.facilitatorId)
       await saveDraft(id, draft.facilitatorId, seedText, projectId);
-    open(id, true);
+    open(id);
     return id;
   };
   const selectAgent = async (
@@ -580,9 +573,7 @@ function ActiveWorkspace({
       return [
         agent.id,
         {
-          message: current
-            ? workPresentation(current).label
-            : "Open a conversation",
+          message: latestAgentReply(agentWork),
           time: "",
           presence,
           status:
@@ -666,99 +657,8 @@ function ActiveWorkspace({
       },
     });
   };
-  const newActions: NewAction[] =
-    navContext?.kind === "agent"
-      ? [
-          {
-            id: "side-chat",
-            label: `New side chat with ${navContext.agent.name}`,
-            run: newSideChat,
-          },
-        ]
-      : navProject
-        ? [
-            {
-              id: "side-chat",
-              label: `New side chat in ${navProject.name}`,
-              run: newSideChat,
-            },
-          ]
-        : [
-            {
-              id: "agent",
-              label: "New agent",
-              run: () => setAgentEditor({}),
-            },
-            {
-              id: "project",
-              label: "New project",
-              run: () =>
-                setConversationDialog({ kind: "edit",
-                  draft: {
-                    kind: "project",
-                    ...(activeProfile
-                      ? { participantIds: [activeProfile.id] }
-                      : {}),
-                  },
-                }),
-            },
-          ];
-  // Narrow shared work actions: the shell routes Work UI callbacks to the
-  // service, keeping result snapshots out of the component contracts.
-  const stopWork = (id: string) => service.stop(id);
-  const continueWork = (id: string, generation: number) =>
-    service
-      .command({
-        action: "continue-work",
-        id,
-        expectedGeneration: generation,
-        reconcile: true,
-      })
-      .then(() => undefined);
-  const steerWork = (id: string, generation: number, text: string) =>
-    service.steer(id, generation, text).then(() => undefined);
-  const promoteWorkOutput = async (
-    output: WorkOutput,
-    workItem: CollaborationWorkItem,
-    value: string,
-  ) => {
-    await promoteWorkOutputToMemory(
-      workItem,
-      output,
-      value,
-      runtime.memoryState,
-    );
-  };
   const detailsProject = projects.projects.find(project => project.id === projectDetailsId);
   const detailsRoom = state.data.conversations.find(room => room.id === detailsProject?.threadId);
-  const workspaceModeControl = (
-    <div
-            className="workspace-mode-bar"
-            role="tablist"
-            aria-label="Workspace mode"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "chat"}
-              onClick={() => setMode("chat")}
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={mode === "work"}
-              onClick={() => {
-                setMode("work");
-                setContextOpen(false);
-                setComputer(null);
-              }}
-            >
-              Work
-            </button>
-          </div>
-  );
   const renderConversation = (
     view: WorkspaceView,
     room: ConversationRoom,
@@ -776,13 +676,12 @@ function ActiveWorkspace({
       state={state}
       active={active}
       profileName={profileName}
-      headerActions={view.id === activeView?.id ? workspaceModeControl : undefined}
+      selectedWorkId={navWorkId}
       onOpenWork={selectNavWork}
       onClose={onClose}
       onArtifact={openPanelArtifact}
       onEdit={() => { if (project) setProjectDetailsId(project.id); else setConversationDialog({ kind: "edit", roomId: room.id }); }}
-      onPlace={() => setConversationDialog({ kind: "place", id: room.id })}
-      onMigrate={() => setConversationDialog({ kind: "migrate", id: room.id })}
+      onAgentSettings={(id) => { setPanelFocused(false); setAgentEditor({ id }); }}
       onComputer={(agentId) => {
         setComputer(agentId);
         setContextOpen(true);
@@ -819,14 +718,16 @@ function ActiveWorkspace({
     <OpenWebPreview.Provider value={openPanelWeb}>
       <main
         onPointerDownCapture={onConversationPointerDown}
-        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${navigationCollapsed ? " teammates-workspace--collapsed" : ""}${contextOpen || computer ? " teammates-workspace--history" : ""}`}
+        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${contextOpen || computer || agentEditor?.id ? " teammates-workspace--history" : ""}`}
         data-theme={theme}
         data-mobile-navigation={mobileNavigation}
       >
+        <AgentNotifications agents={runtime.agents} work={state.data.work} onOpen={open} />
         {searchOpen ? (
           <Suspense fallback={null}>
             <SearchOverlay
               workspaceId={workspaceId}
+              agents={runtime.agents}
               open={searchOpen}
               onClose={() => setSearchOpen(false)}
               enabled={!runtime.accountWorkspacePending}
@@ -844,7 +745,6 @@ function ActiveWorkspace({
                 }
                 setSearchOpen(false);
                 setMarketplace(null);
-                setMode("chat");
                 if (target.type === "conversation") open(target.conversationId);
                 else if (target.type === "project") open(target.threadId);
                 else if (target.type === "work") {
@@ -889,9 +789,7 @@ function ActiveWorkspace({
         ) : null}
         <AgentSidebar
           onSearch={() => setSearchOpen(true)}
-          collapsed={navigationCollapsed && !phone}
           hidden={phone && !mobileNavigation}
-          onToggleCollapsed={() => setNavigationCollapsed(!navigationCollapsed)}
           agents={runtime.agents}
           projects={projects.projects}
           selectedProjectId={activeRoom?.projectId}
@@ -926,7 +824,7 @@ function ActiveWorkspace({
             void selectAgent(agent).catch((error) => service.report(error))
           }
           onCreateAgent={() => setAgentEditor({})}
-          onEditAgent={(agent) => setAgentEditor({ id: agent.id })}
+          onEditAgent={(agent) => { setPanelFocused(false); setAgentEditor({ id: agent.id }); }}
           onOpenMarketplace={() => setMarketplace({})}
           onOpenSettings={() => setSettings(true)}
           onOpenUsage={() => setAccountDialog("usage")}
@@ -936,52 +834,27 @@ function ActiveWorkspace({
           className="workspace-views"
           aria-label="Conversation workspace"
         >
-          {showWorkspaceNavigation && mode === "work" ? workspaceModeControl : null}
-          {showWorkspaceNavigation && mode === "chat" ? (
-            <ConversationTabs
-              layout={layout}
-              titles={Object.fromEntries(
-                state.data.conversations.map((room) => [room.id, room.title]),
-              )}
-              indicators={indicators}
-              descriptions={Object.fromEntries(
-                state.data.conversations.map((room) => [
-                  room.id,
-                  [
-                    projects.projects.find(
-                      (project) => project.id === room.projectId,
-                    )?.name,
-                    room.participants.map((member) => member.name).join(", "),
-                  ]
-                    .filter(Boolean)
-                    .join(" · "),
-                ]),
-              )}
-              onAction={actLayout}
-              onCreate={newConversation}
-              newActions={newActions}
-            />
-          ) : null}
           <button
             type="button"
             className="workspace-history-toggle"
             aria-label={
-              contextOpen || computer
+              contextOpen || computer || agentEditor?.id
                 ? "Hide workspace panel"
                 : "Show workspace panel"
             }
             title={
-              contextOpen || computer
+              contextOpen || computer || agentEditor?.id
                 ? "Hide workspace panel"
                 : "Show workspace panel"
             }
-            aria-expanded={contextOpen || Boolean(computer)}
+            aria-expanded={contextOpen || Boolean(computer) || Boolean(agentEditor?.id)}
             onClick={() => {
               setComputer(null);
-              setContextOpen(!(contextOpen || computer));
+              setContextOpen(!(contextOpen || computer || agentEditor?.id));
+              setAgentEditor(null);
             }}
           >
-            <SidebarSimple size={19} />
+            <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg>
           </button>
           {phone ? (
             <button
@@ -1058,36 +931,6 @@ function ActiveWorkspace({
                 }
               />
             </Suspense>
-          ) : mode === "work" ? (
-            <Suspense fallback={<p role="status">Loading work…</p>}>
-              <WorkModeView
-                project={navProject}
-                agent={navAgent}
-                work={navWork}
-                runtime={runtime}
-                service={service}
-                approvals={navApprovals}
-                selectedWork={selectedWork ?? undefined}
-                onOpen={open}
-                onOpenWork={selectNavWork}
-                onStopWork={stopWork}
-                onContinueWork={continueWork}
-                onSteerWork={steerWork}
-                onPromoteWorkOutput={promoteWorkOutput}
-                onOpenArtifact={openPanelArtifact}
-                onOpenComputer={(agentId) => {
-                  setComputer(agentId);
-                  setContextOpen(true);
-                }}
-                onSchedules={() =>
-                  setSchedules({
-                    agentId: navAgent?.id,
-                    projectId: navProject?.id,
-                  })
-                }
-                onOpenPlugins={() => setMarketplace({})}
-              />
-            </Suspense>
           ) : (
             <ConversationGrid
               layout={layout}
@@ -1117,9 +960,9 @@ function ActiveWorkspace({
                     }}
                   >
                     <div
-                      role="tabpanel"
+                      role="region"
                       id={view ? `panel-${view.id}` : undefined}
-                      aria-labelledby={view ? `tab-${view.id}` : undefined}
+                      aria-label={room?.title ?? "Conversation"}
                       className="conversation-panel"
                       tabIndex={0}
                     >
@@ -1143,14 +986,7 @@ function ActiveWorkspace({
                           >
                             New conversation
                           </button>
-                          {layout.closed.length ? (
-                            <button
-                              type="button"
-                              onClick={() => actLayout({ type: "reopen" })}
-                            >
-                              Reopen last closed tab
-                            </button>
-                          ) : null}
+
                         </div>
                       )}
                     </div>
@@ -1177,7 +1013,7 @@ function ActiveWorkspace({
           rooms={state.data.conversations}
           work={state.data.work}
           runtime={runtime}
-          open={contextOpen || Boolean(computer)}
+          open={!agentEditor?.id && (contextOpen || Boolean(computer))}
           onClose={() => {
             setComputer(null);
             setContextOpen(false);
@@ -1343,6 +1179,7 @@ function ActiveWorkspace({
         {agentEditor ? (
           <Suspense fallback={null}>
             <AgentEditor
+              presentation={agentEditor.id ? "panel" : "modal"}
               open
               agent={
                 runtime.agents.find((agent) => agent.id === agentEditor.id) ??

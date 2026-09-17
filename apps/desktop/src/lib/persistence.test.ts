@@ -10,6 +10,13 @@ import {
 } from "./persistence";
 
 describe("conversation shell persistence", () => {
+  it("persists per-agent notification preferences and enables old profiles by default", () => {
+    for (const enabled of [true, false, undefined]) {
+      const profile = { ...defaultShellState.agents![0], notificationsEnabled: enabled };
+      const restored = shellStateFromRuntimeSnapshot(shellStateToRuntimeSnapshot({ ...defaultShellState, agents: [profile] }), defaultShellState);
+      expect(restored.agents![0].notificationsEnabled).toBe(enabled !== false);
+    }
+  });
   it("retains ambiguous browser data without importing or mirroring it into a native account", () => {
     const legacy = JSON.stringify({ ...defaultShellState, composerValue: "OTHER_ACCOUNT_DRAFT" });
     localStorage.setItem(STORAGE_KEY, legacy);

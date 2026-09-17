@@ -18,6 +18,19 @@ const agent: FableAgentProfile = {
 };
 
 describe("quiet agent surface", () => {
+  it("caps project avatars at three distinct current members and preserves uploaded images", () => {
+    const members = Array.from({ length: 5 }, (_, index) => ({ ...agent, id: `member-${index}`, name: `Member ${index}`,
+      iconImageDataUrl: index === 0 ? "data:image/png;base64,fixture" : undefined }));
+    render(<AgentSidebar agents={[agent, ...members]} activeAgentId={agent.id} profileName="Local" connectors={[]}
+      previews={{}} marketplaceActive={false} projects={[{ id: "project", name: "Launch", threadId: "main" }, { id: "empty", name: "Empty" }]}
+      conversations={[{ id: "main", title: "Launch", kind: "group", participants: [...members.map(member => ({ agentId: member.id })), { agentId: members[0].id }, { agentId: "deleted" }] }]}
+      onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} onEditAgent={vi.fn()} onOpenMarketplace={vi.fn()}
+      onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />);
+    const project = screen.getByRole("button", { name: "Launch" });
+    expect(project.querySelectorAll(".agent-avatar")).toHaveLength(3);
+    expect(project.querySelector("img")).toHaveAttribute("src", members[0].iconImageDataUrl);
+    expect(screen.getByRole("button", { name: "Empty" }).querySelectorAll(".agent-avatar")).toHaveLength(0);
+  });
   it("opens projects and agents directly without standalone group routing", () => {
     const onSelect = vi.fn(),
       onSelectAgent = vi.fn(),
@@ -69,6 +82,7 @@ describe("quiet agent surface", () => {
     // Legacy standalone groups are not routed from the sidebar; they stay
     // reachable by reference through search and migrate into projects through
     // the conversation menu.
+    expect(screen.queryByRole("button", { name: /Collapse navigation|Expand navigation/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /Review group/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "New group" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Mira" }));
@@ -82,39 +96,6 @@ describe("quiet agent surface", () => {
     expect(
       screen.queryByRole("button", { name: /Show conversations/ }),
     ).toBeNull();
-  });
-  it("keeps agents reachable in collapsed navigation even after a search", () => {
-    const onSelectAgent = vi.fn();
-    const sidebar = (collapsed: boolean) => (
-      <AgentSidebar
-        agents={[agent]}
-        activeAgentId={agent.id}
-        profileName="Local"
-        connectors={[]}
-        previews={{}}
-        marketplaceActive={false}
-        onSelectAgent={onSelectAgent}
-        onCreateAgent={vi.fn()}
-        onEditAgent={vi.fn()}
-        onOpenMarketplace={vi.fn()}
-        onOpenSettings={vi.fn()}
-        onOpenUsage={vi.fn()}
-        onSignOut={vi.fn()}
-        collapsed={collapsed}
-        onToggleCollapsed={vi.fn()}
-      />
-    );
-    const view = render(sidebar(false));
-    fireEvent.change(screen.getByRole("searchbox"), {
-      target: { value: "No match" },
-    });
-    expect(screen.queryByRole("button", { name: /^Mira/ })).toBeNull();
-    view.rerender(sidebar(true));
-    expect(
-      screen.getByRole("button", { name: "Expand navigation" }),
-    ).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Mira" }));
-    expect(onSelectAgent).toHaveBeenCalledWith(agent);
   });
   it("shows work in progress, then a completion dot until selected, and rearms for the next task", () => {
     const onSelectAgent = vi.fn();

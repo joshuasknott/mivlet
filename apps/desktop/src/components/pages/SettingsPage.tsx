@@ -1,5 +1,4 @@
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
-import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
 import { useState } from "react";
@@ -51,12 +50,12 @@ export function SettingsPage({
   const reportStatus = (message: string) => setStatus({ tab: activeTab, message });
 
   return (
-    <section className="settings-page" aria-labelledby={titleId}>
+    <section className={`settings-page${activeTab === "providers" ? " settings-page--providers" : ""}`} aria-labelledby={titleId}>
       <div className="settings-page__content">
-        <div className="settings-page__header">
-          <h1 id={titleId}>
+        <div className={activeTab === "providers" ? "sr-only" : "settings-page__header"}>
+          {activeTab === "providers" ? <span id={titleId}>Providers</span> : <h1 id={titleId}>
             {tabs.find((tab) => tab.id === activeTab)?.label ?? "Settings"}
-          </h1>
+          </h1>}
         </div>
 
         {activeTab === "general" ? (
@@ -228,16 +227,13 @@ function ConfiguredAccountSettings({
 
 function ProviderSettings({
   runtime,
-  onStatus
+  onStatus,
 }: {
   runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
   return (
     <div className="settings-page__body">
-      <div className="settings-section-heading">
-        <p>Connect your AI providers. Select one to manage its connection.</p>
-      </div>
       <ProviderCatalogue
         providers={runtime.backendProviders}
         connectedBackendIds={runtime.connectedBackendIds}
@@ -257,20 +253,11 @@ function ProviderSettings({
           onStatus(providerId + " connection checked.");
           return result;
         }}
-        onStartBrowserLogin={(providerId) => runtime.startBackendBrowserLogin(providerId)}
+        onStartBrowserLogin={(providerId) =>
+          runtime.startBackendBrowserLogin(providerId)
+        }
         onStatus={onStatus}
       />
-      <div className="settings-local-storage">
-        <span aria-hidden="true">
-          <LockKey size={18} />
-        </span>
-        <div>
-          <strong>Connected securely</strong>
-          <p>
-            Your provider handles model access and billing. Mivlet keeps connection credentials in your device&apos;s secure storage.
-          </p>
-        </div>
-      </div>
     </div>
   );
 }

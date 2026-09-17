@@ -1,19 +1,19 @@
+:root:not([data-theme="dark"]) .teammates-workspace:not([data-theme="dark"]) {
+  --surface: #fff;
+  --shell: var(--surface);
+  --canvas: var(--surface);
+}
+
 .teammates-workspace {
   --team-border: color-mix(in srgb, var(--ink, #292724) 12%, transparent);
   --team-muted: var(--ink-muted, #7b7770);
   display: grid !important;
-  grid-template-columns: 224px minmax(0, 1fr) !important;
+  grid-template-columns: 280px minmax(0, 1fr) !important;
   gap: 0;
   overflow: hidden;
 }
-.teammates-workspace--collapsed {
-  grid-template-columns: 74px minmax(0, 1fr) !important;
-}
 .teammates-workspace--history {
-  grid-template-columns: 224px minmax(0, 1fr) 380px !important;
-}
-.teammates-workspace--collapsed.teammates-workspace--history {
-  grid-template-columns: 74px minmax(0, 1fr) 380px !important;
+  grid-template-columns: 280px minmax(0, 1fr) 380px !important;
 }
 .team-loading {
   display: grid;
@@ -56,126 +56,6 @@
   min-height: 0;
   flex-direction: column;
 }
-.conversation-tabs {
-  height: 43px;
-  flex: 0 0 43px;
-  display: flex;
-  align-items: center;
-  gap: 3px;
-  padding: 6px 7px 0;
-  border-bottom: 1px solid var(--team-border);
-  background: color-mix(in srgb, var(--surface, #fbfaf7) 94%, #777 6%);
-  position: relative;
-  z-index: 5;
-}
-.conversation-tabs__list {
-  display: flex;
-  flex: 1;
-  min-width: 0;
-  height: 36px;
-  overflow: auto hidden;
-  scrollbar-width: thin;
-}
-.conversation-tab {
-  display: flex;
-  flex: 1 1 175px;
-  min-width: 98px;
-  max-width: 230px;
-  border-radius: 8px 8px 0 0;
-  position: relative;
-}
-.conversation-tab--active {
-  background: var(--surface, #fbfaf7);
-  border: 1px solid var(--team-border);
-  border-bottom-color: transparent;
-}
-.conversation-tab > [role="tab"] {
-  min-width: 0;
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 2px 8px 9px;
-  color: var(--team-muted);
-  font-size: 12px;
-  text-align: left;
-  border: 0;
-  background: transparent;
-}
-.conversation-tab > [role="tab"][aria-selected="true"] {
-  color: var(--ink, #302f2b);
-}
-.conversation-tab > [role="tab"] > span:last-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.conversation-tab__close {
-  display: grid;
-  place-items: center;
-  align-self: center;
-  flex: 0 0 23px;
-  height: 24px;
-  margin-right: 4px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  border-radius: 5px;
-  color: var(--team-muted);
-}
-.conversation-tab__close:hover,
-.conversation-tabs__new:hover {
-  background: var(--team-border);
-}
-.conversation-tab__indicator {
-  width: 8px;
-  min-width: 8px;
-  font-size: 15px;
-  line-height: 1;
-  color: #a46e2d;
-}
-.conversation-tab__indicator--working {
-  color: #718763;
-}
-.conversation-tabs__new {
-  display: grid;
-  place-items: center;
-  height: 29px;
-  width: 28px;
-  background: none;
-  border: 0;
-  border-radius: 5px;
-  color: var(--team-muted);
-  cursor: pointer;
-}
-.team-conversation-actions summary::-webkit-details-marker {
-  display: none;
-}
-.team-conversation-actions details > div {
-  position: absolute;
-  right: 7px;
-  display: flex;
-  flex-direction: column;
-  z-index: 40;
-  width: 222px;
-  padding: 6px;
-  border: 1px solid var(--team-border);
-  border-radius: 9px;
-  background: var(--surface, #fbfaf7);
-  box-shadow: 0 9px 32px #0002;
-}
-.team-conversation-actions details button {
-  background: none;
-  border: 0;
-  padding: 9px 10px;
-  text-align: left;
-  border-radius: 5px;
-  font-size: 12px;
-  color: inherit;
-}
-.team-conversation-actions details button:hover {
-  background: var(--team-border);
-}
 .conversation-divider {
   cursor: col-resize;
   background: color-mix(in srgb, var(--team-border) 55%, transparent);
@@ -211,31 +91,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.team-conversation-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  flex-shrink: 0;
-}
-.team-conversation-actions > button,
-.team-conversation-actions summary {
-  height: 30px;
-  width: 30px;
-  display: grid;
-  place-items: center;
-  list-style: none;
-  background: none;
-  color: var(--team-muted);
-  border: 0;
-  border-radius: 6px;
-  cursor: pointer;
-}
-.team-conversation-actions details {
-  position: relative;
-}
-.team-conversation-actions details > div {
-  top: 31px;
 }
 .conversation-pane-scroll {
   flex: 1;
@@ -666,7 +521,7 @@
 }
 @media (max-width: 1300px) {
   .teammates-workspace--history {
-    grid-template-columns: 224px minmax(0, 1fr) 360px !important;
+    grid-template-columns: 280px minmax(0, 1fr) 360px !important;
   }
   .team-conversation-header {
     padding-inline: 15px;
@@ -674,13 +529,10 @@
 }
 @media (max-width: 1100px) {
   .teammates-workspace {
-    grid-template-columns: 210px minmax(0, 1fr) !important;
-  }
-  .teammates-workspace--collapsed {
-    grid-template-columns: 74px minmax(0, 1fr) !important;
+    grid-template-columns: 260px minmax(0, 1fr) !important;
   }
   .teammates-workspace--history {
-    grid-template-columns: 210px minmax(0, 1fr) 360px !important;
+    grid-template-columns: 260px minmax(0, 1fr) 360px !important;
   }
   .conversation-pane-messages {
     padding-inline: 22px;
@@ -703,17 +555,17 @@
   }
 }
 @media (max-width: 700px) {
-  .teammates-workspace,
-  .teammates-workspace--collapsed {
+.teammates-workspace {
     grid-template-columns: minmax(0, 1fr) !important;
   }
   .teammates-workspace > .agent-sidebar:not([hidden]) {
     position: fixed;
     z-index: 30;
     inset: 72px 0 0;
+    height: auto;
     width: 100%;
     max-width: none;
-    background: var(--surface, #fbfaf7);
+    background: var(--sidebar-surface);
   }
   .conversation-pane-composer {
     padding: 8px 12px 12px;
@@ -733,10 +585,6 @@
   .team-dialog {
     padding: 20px;
   }
-  .conversation-tab__close,
-  .conversation-tabs__new {
-    min-height: 32px;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .teammates-workspace *,
@@ -747,40 +595,8 @@
     scroll-behavior: auto !important;
   }
 }
-/* One application chrome, navigation and history around the pane tree. */
-.window-controls__tabs {
-  min-width: 0;
-  max-width: calc(100% - 190px);
-  flex: 0 1 auto;
-  pointer-events: auto;
-  --team-border: var(--line);
-  --team-muted: var(--ink-muted);
-}
-.window-controls__tabs:empty {
-  display: none;
-}
 .window-controls__drag {
   min-width: 50px;
-}
-.window-controls .conversation-tabs {
-  height: 42px;
-  padding-top: 4px;
-  border: 0;
-  background: transparent;
-}
-.window-controls .conversation-tabs__list {
-  flex: 0 1 auto;
-}
-.window-controls .conversation-tab {
-  flex: 0 1 175px;
-  min-width: 148px;
-}
-.window-controls .conversation-tab > [role="tab"] {
-  display: flex;
-  width: auto;
-}
-.window-controls .conversation-tab__close {
-  width: 23px;
 }
 .conversation-panes {
   min-width: 0;
@@ -856,7 +672,7 @@
   background: var(--surface-hover);
 }
 .teammates-workspace .agent-sidebar {
-  padding-top: 16px;
+  padding-top: 6px;
 }
 .agent-sidebar__scopes {
   flex: 1;
@@ -868,24 +684,24 @@
   overflow: visible;
 }
 .teammates-workspace .agent-row__select {
-  min-height: 48px;
+  min-height: 58px;
   padding-block: 8px;
   gap: 10px;
 }
 .teammates-workspace .agent-row__copy strong {
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 400;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .teammates-workspace .project-sidebar-row {
-  min-height: 44px;
+  min-height: 58px;
   padding-block: 7px;
 }
 .teammates-workspace .project-sidebar-row > strong {
-  font-weight: 500;
-  font-size: 12px;
+  font-weight: 400;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -901,23 +717,6 @@
   gap: 10px;
   min-height: 46px;
   align-items: center;
-}
-.teammates-workspace .agent-sidebar--collapsed .project-sidebar-row > strong,
-.teammates-workspace
-  .agent-sidebar--collapsed
-  .conversation-sidebar__row
-  > span:nth-child(2) {
-  display: none;
-}
-.teammates-workspace .agent-sidebar--collapsed .conversation-sidebar__row {
-  padding: 6px;
-  justify-content: center;
-}
-.teammates-workspace
-  .agent-sidebar--collapsed
-  .agent-sidebar__agents-heading
-  > div {
-  flex-direction: column;
 }
 .team-dialog select,
 .project-facts select {
@@ -958,20 +757,13 @@
 }
 @media (max-width: 850px) {
   .teammates-workspace--history {
-    grid-template-columns: 210px minmax(0, 1fr) !important;
-  }
-  .teammates-workspace--collapsed.teammates-workspace--history {
-    grid-template-columns: 74px minmax(0, 1fr) !important;
+    grid-template-columns: 260px minmax(0, 1fr) !important;
   }
   .teammates-workspace--history > .agent-sidebar:not([hidden]) {
     display: flex;
   }
 }
 @media (max-width: 700px) {
-  .teammates-workspace--history,
-  .teammates-workspace--collapsed.teammates-workspace--history {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
 }
 .team-recipient {
   position: relative;
@@ -1038,31 +830,6 @@
   touch-action: none;
   user-select: none;
 }
-.conversation-tabs--drop-target {
-  box-shadow: inset 0 -2px var(--ink-muted);
-}
-.teammates-workspace .agent-sidebar--collapsed .project-sidebar-section {
-  display: block;
-  margin-top: 10px;
-}
-.teammates-workspace
-  .agent-sidebar--collapsed
-  .project-sidebar-section
-  > header
-  > span {
-  display: none;
-}
-.teammates-workspace
-  .agent-sidebar--collapsed
-  .project-sidebar-section
-  > header {
-  justify-content: center;
-  padding: 3px 0;
-}
-.teammates-workspace .agent-sidebar--collapsed .project-sidebar-row {
-  justify-content: center;
-  padding-inline: 4px;
-}
 @container conversation-pane (max-width: 480px) {
   .teammates-workspace .composer-controls {
     display: flex;
@@ -1094,35 +861,16 @@
 }
 
 /* The title owns conversation actions, leaving a single workspace panel toggle. */
-.conversation-title-menu { min-width: 0; }
-.team-conversation-actions.conversation-title-menu summary { display: flex; align-items: center; justify-content: flex-start; gap: 6px; width: auto; max-width: 100%; padding: 0; color: inherit; }
-.conversation-title-menu summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-title-menu summary svg { flex-shrink: 0; color: var(--team-muted); }
-.team-conversation-actions.conversation-title-menu details > div { left: 0; right: auto; }
 
 .team-conversation-title { min-width: 0; }
-.conversation-title-menu details { min-width: 0; width: 100%; }
 
 /* Keep the first request and its greeting together without remounting the editor. */
 .conversation-pane-content--empty .conversation-pane-scroll { flex: 1 1 0; }
 .conversation-pane-content--empty .conversation-pane-messages { min-height: 0; padding-block: 0; }
 .conversation-pane-content--empty .conversation-pane-composer { flex: 0 0 auto; }
 .conversation-pane-content--empty::after { content: ""; flex: 1.25 1 0; }
-.teammates-workspace .conversation-pane-composer .composer { min-height: 96px; padding: 10px 12px 8px; gap: 4px; }
-.teammates-workspace .conversation-pane-composer .composer-input { min-height: 38px; }
-.team-conversation-header--with-mode {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-  padding-inline: 18px;
-}
-.team-conversation-header--with-mode .team-conversation-identity { min-width: 0; }
-.team-conversation-header--with-mode .conversation-title-menu { min-width: 0; }
-.team-conversation-header--with-mode .conversation-title-menu details { min-width: 0; width: 100%; }
-.team-conversation-header--with-mode .conversation-title-menu summary { max-width: 100%; }
-.team-conversation-header .workspace-mode-bar { margin: 0; width: 144px; align-self: center; }
 .team-conversation-header .team-conversation-identity { flex: 1; overflow: visible; }
 .team-conversation-title { min-width: 0; }
-.conversation-title-menu summary strong { min-width: 0; }
 .teammates-workspace .agent-row__copy strong { display: block; }
 @media (max-height: 520px) {
   .conversation-pane-content--empty::after { flex: 0; }
@@ -1130,7 +878,64 @@
 }
 @container conversation-pane (max-width: 480px) {
   .team-conversation-header { gap: 8px; }
-  .team-conversation-header .workspace-mode-bar { width: 112px; }
-  .team-conversation-header .workspace-mode-bar button { padding-inline: 8px; }
   .team-conversation-welcome h1 { font-size: 22px; }
+}
+/* Integrate desktop navigation with native window chrome. Interactive controls
+   sit above the drag region; panel backgrounds continue to the window edge. */
+@media (min-width: 851px) {
+  #root:has(.window-controls):has(.teammates-workspace) {
+    padding-top: 0;
+  }
+  #root:has(.window-controls):has(.teammates-workspace) .desktop-frame.teammates-workspace {
+    height: 100dvh;
+  }
+  #root:has(.teammates-workspace) .window-controls {
+    background: transparent;
+  }
+  #root:has(.window-controls) .teammates-workspace .agent-sidebar {
+    padding-top: 0;
+  }
+  #root:has(.window-controls) .agent-sidebar__topline {
+    height: 48px;
+    min-height: 48px;
+    padding-left: 0;
+  }
+  #root:has(.window-controls) .workspace-history-toggle {
+    position: fixed;
+    top: 5px;
+    right: 132px;
+    z-index: 1001;
+    width: 32px;
+    height: 32px;
+  }
+  #root:has(.window-controls) .team-conversation-header {
+    padding-block: 4px;
+  }
+  #root:has(.window-controls) .team-conversation-header button {
+    position: relative;
+    z-index: 1001;
+  }
+  #root:has(.window-controls) .teammates-workspace:not(.teammates-workspace--history) .team-conversation-header {
+    padding-right: 174px;
+  }
+  #root:has(.window-controls) .teammates-workspace > .workspace-context {
+    padding-top: var(--window-chrome-height);
+  }
+}
+
+/* A closed right navigation occupies no column; the window toggle remains. */
+@media (min-width: 851px) {
+  .teammates-workspace--history:has(> .right-panel[data-navigation-only="true"]:not([hidden])) {
+    grid-template-columns: 280px minmax(0, 1fr) 200px !important;
+  }
+}
+@media (min-width: 851px) and (max-width: 1100px) {
+  .teammates-workspace--history:has(> .right-panel[data-navigation-only="true"]:not([hidden])) {
+    grid-template-columns: 260px minmax(0, 1fr) 200px !important;
+  }
+}
+
+.workspace-history-toggle:focus-visible {
+  outline: 2px solid var(--ink-muted);
+  outline-offset: -2px;
 }

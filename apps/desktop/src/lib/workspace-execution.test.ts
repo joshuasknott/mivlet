@@ -10,7 +10,6 @@ import {
   restrictedPermission,
 } from "./workspace-execution";
 import { providerModelOptions } from "./provider-models";
-import { runWorkspaceVoice } from "./workspace-voice";
 
 const reads = vi.hoisted(() => ({ load: vi.fn(async () => null) }));
 vi.mock("../hooks/useDurableConversation", () => ({
@@ -114,53 +113,6 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("workspace execution (deterministic fixtures, no live provider)", () => {
-  it("keeps voice out of drafts, scopes streamed text, and stops only its exchange on interruption", async () => {
-    const { service, update, command } = fixture([]);
-    await service.refresh();
-    const abort = new AbortController();
-    const onText = vi.fn();
-    const submit = vi.spyOn(service, "submit");
-    const pending = runWorkspaceVoice(service, "Spoken request", { signal: abort.signal, scope: { workspaceId: "fixture", agentId: "a", threadId: "voice-room" }, onText });
-    await vi.waitFor(() => expect(submit).toHaveResolved());
-    const id = await submit.mock.results[0].value;
-    const work = fixtureWork(id, "a", { conversationId: "voice-room" });
-    update([work, fixtureWork("other", "b")]);
-    await service.refresh();
-    service.admit(agents, models, [provider], "trusted-scope");
-    const session = service.getSnapshot().sessions.find(item => item.work.id === id)!;
-    expect(session.attachments).toEqual([]);
-    expect(submit).toHaveBeenCalledWith("voice-room", "a", "Spoken request", false, [], expect.any(Function));
-    service.voiceText(session, "Confirmed reply.");
-    expect(onText).toHaveBeenCalledExactlyOnceWith("Confirmed reply.");
-    abort.abort();
-    await pending;
-    service.voiceText(session, "Late reply.");
-    expect(onText).toHaveBeenCalledTimes(1);
-    expect(command).toHaveBeenCalledWith("fixture", { action: "stop-work", id });
-    expect(service.getSnapshot().data.work.find(item => item.id === "other")?.status).toBe("queued");
-    expect(service.isVoice(session)).toBe(false);
-    service.dispose();
-  });
-
-  it("waits for a voice worker to release before accepting the next utterance", async () => {
-    const { service, update } = fixture([]);
-    await service.refresh();
-    const submit = vi.spyOn(service, "submit");
-    let finished = false;
-    const pending = runWorkspaceVoice(service, "Hello", { signal: new AbortController().signal, scope: { workspaceId: "fixture", agentId: "a", threadId: "voice-room" }, onText: vi.fn() }).then(() => { finished = true; });
-    await vi.waitFor(() => expect(submit).toHaveResolved());
-    const id = await submit.mock.results[0].value;
-    const work = fixtureWork(id, "a", { conversationId: "voice-room" });
-    update([work]); await service.refresh();
-    service.admit(agents, models, [provider], "trusted-scope");
-    const session = service.getSnapshot().sessions[0];
-    update([{ ...work, status: "completed" }]); await service.refresh();
-    expect(finished).toBe(false);
-    await service.released(session);
-    await pending;
-    expect(finished).toBe(true);
-    service.dispose();
-  });
   it("keeps attachments for an unstarted retry and releases them after a durable run", async () => {
     const { service, update } = fixture([]);
     await service.refresh();

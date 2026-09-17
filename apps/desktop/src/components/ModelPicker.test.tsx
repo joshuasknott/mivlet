@@ -18,30 +18,17 @@ function Harness({ choose = () => undefined, options = models }: { choose?: (val
 const openPicker = () => fireEvent.click(screen.getByRole("button", { name: /^Select model:/ }));
 const browse = () => fireEvent.click(screen.getByRole("button", { name: "Change model" }));
 describe("Model picker", () => {
-  it("announces the current model and supports directly choosing every labelled reasoning level", () => {
+  it("announces each supported slider step and the selected model", () => {
     const choose = vi.fn();
-    render(<Harness choose={choose} options={[{ ...models[0], reasoning: { supportedEfforts: ["low", "medium", "high"], defaultEffort: "low" } }]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Select model: Reasoner, Low" }));
-    fireEvent.click(screen.getByRole("button", { name: "Medium" }));
-    expect(choose).toHaveBeenLastCalledWith("medium");
-    expect(screen.getByRole("button", { name: "Select model: Reasoner, Medium" })).toBeVisible();
-  });
-  it("keeps one labelled row above the slider instead of a duplicate lower row", () => {
-    render(<Harness options={[{ ...models[0], reasoning: { supportedEfforts: ["low", "medium", "high"], defaultEffort: "low" } }]} />);
+    render(<Harness choose={choose} options={[{ ...models[0], reasoning: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "low" } }]} />);
     openPicker();
     const slider = screen.getByRole("slider", { name: "Reasoning effort" });
-    for (const label of ["Low", "Medium", "High"]) {
-      const button = screen.getByRole("button", { name: label });
-      expect(screen.getAllByRole("button", { name: label })).toHaveLength(1);
-      expect(button.compareDocumentPosition(slider) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const [index, label] of ["Low", "Medium", "High", "Extra High", "Max"].entries()) {
+      fireEvent.change(slider, { target: { value: String(index) } });
+      expect(slider).toHaveAttribute("aria-valuetext", label);
+      expect(screen.getByRole("button", { name: `Select model: Reasoner, ${label}` })).toBeVisible();
     }
-  });
-  it("labels the highest supported levels Extra High and Max", () => {
-    render(<Harness options={[{ ...models[0], reasoning: { supportedEfforts: ["high", "xhigh", "max"], defaultEffort: "xhigh" } }]} />);
-    openPicker();
-    expect(screen.getByRole("button", { name: "Extra High" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Max" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Select model: Reasoner, Extra High" })).toBeVisible();
+    expect(choose).toHaveBeenLastCalledWith("max");
   });
   it("falls back to a supported level when the saved effort is not advertised", () => {
     render(<ModelPicker models={[models[0]]} selectedId="codex::reasoner" label="Reasoner" effort="ultra"
@@ -53,7 +40,7 @@ describe("Model picker", () => {
       "Low"
     );
   });
-  it("uses only supported effort steps, keeps adjustments open, and resets to the provider default", () => {
+  it("uses only supported effort steps and keeps adjustments open", () => {
     const choose = vi.fn(); render(<Harness choose={choose} />); openPicker();
     const slider = screen.getByRole("slider", { name: "Reasoning effort" });
     expect(slider).toHaveFocus();
@@ -62,9 +49,6 @@ describe("Model picker", () => {
     fireEvent.change(slider, { target: { value: "1" } });
     expect(choose).toHaveBeenLastCalledWith("high");
     expect(slider).toHaveAttribute("aria-valuetext", "High");
-    fireEvent.click(screen.getByRole("button", { name: "Reset reasoning to default" }));
-    expect(choose).toHaveBeenLastCalledWith(undefined);
-    expect(slider).toHaveAttribute("aria-valuetext", "Low");
     expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
   it("filters multiple providers and searches without changing the selection", () => {

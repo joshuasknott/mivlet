@@ -26,13 +26,11 @@ export const emptyLayout = (): ConversationLayout => ({
 });
 export type LayoutAction =
   | {
-      type: "open" | "navigate";
+      type: "navigate";
       view: WorkspaceView;
       pane?: number;
-      duplicate?: boolean;
     }
   | { type: "activate" | "close"; id: string }
-  | { type: "move"; id: string; pane: number; index: number }
   | {
       type: "dock";
       id?: string;
@@ -41,12 +39,18 @@ export type LayoutAction =
       edge: DockEdge;
     }
   | { type: "single" }
-  | { type: "resize"; path: number[]; ratio: number }
-  | { type: "reopen" };
+  | { type: "resize"; path: number[]; ratio: number };
 
 function compact(layout: ConversationLayout): ConversationLayout {
+  layout = {
+    ...layout,
+    panes: layout.active.map(id => id ? [id] : []),
+    views: layout.views.filter(view => layout.active.includes(view.id)),
+    // Retain the persisted schema field for backwards compatibility only.
+    closed: [],
+  };
   const keep = layout.panes.flatMap((ids, i) => (ids.length ? [i] : []));
-  if (!keep.length) return { ...emptyLayout(), closed: layout.closed };
+  if (!keep.length) return emptyLayout();
   const prune = (
     node: ConversationLayoutNode,
   ): ConversationLayoutNode | null => {
@@ -77,7 +81,7 @@ export function reduceLayout(
     panes: state.panes.map((ids) => [...ids]),
     views: [...state.views],
     active: [...state.active],
-    closed: [...state.closed],
+    closed: [],
   };
   const owner = (id: string) => next.panes.findIndex((ids) => ids.includes(id));
   const activate = (id: string) => {
@@ -96,12 +100,6 @@ export function reduceLayout(
       next.active[pane] =
         next.panes[pane][Math.min(index, next.panes[pane].length - 1)] ?? null;
   };
-  const remember = (view: WorkspaceView) => {
-    next.closed = [
-      ...next.closed.filter((old) => old.id !== view.id),
-      view,
-    ].slice(-20);
-  };
   const add = (view: WorkspaceView, pane: number) => {
     if (
       next.views.length >= 40 ||
@@ -111,17 +109,14 @@ export function reduceLayout(
       return false;
     next.views.push(view);
     next.panes[pane].push(view.id);
-    next.closed = next.closed.filter((old) => old.id !== view.id);
     activate(view.id);
     return true;
   };
   switch (action.type) {
-    case "open":
     case "navigate": {
       const pane = action.pane ?? next.activePane;
       if (!next.panes[pane]) return state;
       const existing =
-        !action.duplicate &&
         next.views.find(
           (view) =>
             JSON.stringify(referenceForView("", view)) === JSON.stringify(referenceForView("", action.view)),
@@ -130,13 +125,10 @@ export function reduceLayout(
         activate(existing.id);
         break;
       }
-      if (action.type === "navigate") {
-        const old = next.views.find((view) => view.id === next.active[pane]);
-        if (old) {
-          remove(old.id);
-          next.views = next.views.filter((view) => view.id !== old.id);
-          remember(old);
-        }
+      const old = next.views.find((view) => view.id === next.active[pane]);
+      if (old) {
+        remove(old.id);
+        next.views = next.views.filter((view) => view.id !== old.id);
       }
       add(action.view, pane);
       break;
@@ -149,18 +141,6 @@ export function reduceLayout(
       if (!view) return state;
       remove(view.id);
       next.views = next.views.filter((old) => old.id !== view.id);
-      remember(view);
-      break;
-    }
-    case "move": {
-      if (owner(action.id) < 0 || !next.panes[action.pane]) return state;
-      remove(action.id);
-      next.panes[action.pane].splice(
-        Math.max(0, Math.min(action.index, next.panes[action.pane].length)),
-        0,
-        action.id,
-      );
-      activate(action.id);
       break;
     }
     case "dock": {
@@ -232,19 +212,11 @@ export function reduceLayout(
       next.tree = resize(next.tree, 0);
       break;
     }
-    case "reopen": {
-      const view = next.closed.pop();
-      if (view && !add(view, next.activePane)) next.closed.push(view);
-      break;
-    }
   }
   return compact(next);
 }
 
-/** v1 used two fixed panes. Preserve its tabs in the new single-pane default.
- *  Saved desktop layouts with more than three panes fold extras into the last
- *  kept pane so every open view survives; narrow sessions restore this same
- *  desktop layout instead of persisting their own single-pane arrangement. */
+/** Restore visible panes from legacy layouts; conversation records remain untouched. */
 export function restoreLayout(
   layout: ConversationLayout | null,
   conversationIds: Set<string>,
@@ -259,16 +231,10 @@ export function restoreLayout(
   const filtered = panes.map((pane) =>
     pane.filter((id) => ids.has(id) && !seen.has(id) && Boolean(seen.add(id))),
   );
-  const extra = filtered.splice(MAX_PANES);
-  if (extra.length) {
-    const tail = extra
-      .flat()
-      .filter((id) => !filtered[MAX_PANES - 1]?.includes(id));
-    filtered[MAX_PANES - 1].push(...tail);
-  }
+  filtered.splice(MAX_PANES);
   const active = filtered.map((pane, i) =>
-    pane.includes(layout.active[i] ?? "")
-      ? layout.active[i]
+    pane.includes(layout.active[layout.version !== 2 ? layout.activePane : i] ?? "")
+      ? layout.active[layout.version !== 2 ? layout.activePane : i]
       : (pane[0] ?? null),
   );
   return compact({
@@ -278,8 +244,6 @@ export function restoreLayout(
     active,
     activePane: layout.version === 2 ? Math.min(layout.activePane, filtered.length - 1) : 0,
     tree: layout.version === 2 ? layout.tree : { kind: "pane", pane: 0 },
-    closed: layout.closed
-      .filter((view) => conversationIds.has(view.conversationId))
-      .slice(-20),
+    closed: [],
   });
 }

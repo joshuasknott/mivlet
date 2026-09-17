@@ -6,18 +6,15 @@ import {
 import type { ConversationLayout } from "@fable/protocol";
 import { MAX_PANES, type DockEdge, type LayoutAction } from "../lib/conversation-layout";
 
-type Drop =
-  | { kind: "tab"; pane: number; index: number }
-  | { kind: "pane"; pane: number; edge: DockEdge };
-/** Pointer capture keeps internal tab drags inside WebView2 instead of its OS file-drop loop. */
+type Drop = { pane: number; edge: DockEdge };
+/** Pointer capture keeps internal pane drags inside WebView2 instead of its OS file-drop loop. */
 export function useConversationDrag(
   layout: ConversationLayout,
   onAction: (action: LayoutAction) => void,
-  onOpen: (id: string, newTab: boolean) => void,
   allowDock: boolean,
 ) {
-  const latest = useRef({ layout, onAction, onOpen, allowDock });
-  latest.current = { layout, onAction, onOpen, allowDock };
+  const latest = useRef({ layout, onAction, allowDock });
+  latest.current = { layout, onAction, allowDock };
   const cleanup = useRef<(() => void) | null>(null);
   useEffect(() => () => cleanup.current?.(), []);
   return (event: ReactPointerEvent) => {
@@ -36,8 +33,7 @@ export function useConversationDrag(
     const start = { x: event.clientX, y: event.clientY },
       pointerId = event.pointerId;
     let dragging = false,
-      drop: Drop | null = null,
-      markedTab: Element | null = null;
+      drop: Drop | null = null;
     // Suppresses only the click that follows a completed drag. It is armed in
     // finish() and cleared with the deferred listener removal, so a leaked
     // listener can never swallow later clicks on a stale dragging flag.
@@ -48,8 +44,6 @@ export function useConversationDrag(
     source.setPointerCapture(pointerId);
     const clearHint = () => {
       hint.remove();
-      markedTab?.classList.remove("conversation-tabs--drop-target");
-      markedTab = null;
     };
     const move = (moveEvent: PointerEvent) => {
       if (moveEvent.pointerId !== pointerId) return;
@@ -67,24 +61,6 @@ export function useConversationDrag(
         moveEvent.clientY,
       );
       const { layout, allowDock } = latest.current;
-      const tabs = target?.closest("[data-conversation-tabs]");
-      if (tabs) {
-        const tabId = target?.closest<HTMLElement>("[data-conversation-tab]")
-          ?.dataset.conversationTab;
-        const pane = tabId
-          ? layout.panes.findIndex((ids) => ids.includes(tabId))
-          : layout.activePane;
-        if (pane >= 0) {
-          drop = {
-            kind: "tab",
-            pane,
-            index: tabId ? layout.panes[pane].indexOf(tabId) : 999,
-          };
-          markedTab = tabs;
-          tabs.classList.add("conversation-tabs--drop-target");
-        }
-        return;
-      }
       const paneElement = target?.closest<HTMLElement>(
         "[data-conversation-pane]",
       );
@@ -109,7 +85,7 @@ export function useConversationDrag(
         layout.panes[pane][0] === viewId
       )
         return;
-      drop = { kind: "pane", pane, edge };
+      drop = { pane, edge };
       const horizontal = edge === "left" || edge === "right";
       hint.textContent = "Split here";
       hint.style.cssText = `position:fixed;left:${rect.left + (edge === "right" ? rect.width / 2 : 0) + 4}px;top:${rect.top + (edge === "bottom" ? rect.height / 2 : 0) + 4}px;width:${rect.width / (horizontal ? 2 : 1) - 8}px;height:${rect.height / (horizontal ? 1 : 2) - 8}px;z-index:1100`;
@@ -146,17 +122,8 @@ export function useConversationDrag(
       const wasDragging = dragging;
       finish();
       if (!wasDragging || !target) return;
-      const { onAction, onOpen } = latest.current;
-      if (target.kind === "tab") {
-        if (viewId)
-          onAction({
-            type: "move",
-            id: viewId,
-            pane: target.pane,
-            index: target.index,
-          });
-        else if (roomId) onOpen(roomId, true);
-      } else if (viewId)
+      const { onAction } = latest.current;
+      if (viewId)
         onAction({
           type: "dock",
           id: viewId,

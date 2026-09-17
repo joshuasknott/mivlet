@@ -100,7 +100,7 @@ function UserMessage({ content, profileName, connectors, attachments, timestamp,
       <strong>{attachment.name}</strong>
       <small>{attachment.availability === "workspace-file" && attachment.relativePath ? attachment.relativePath : attachment.availability === "project-file" ? "Saved to this project" : attachment.availability === "image-input" ? "Image for this message" : "Text for this conversation"}</small>
     </li>)}</ul> : null}
-    <footer className="message-actions"><MessageTime value={timestamp} /><CopyButton text={content} label="Copy message" />{onReusePrompt ? <button type="button" onClick={() => onReusePrompt(content, "edit")}>Edit & resend</button> : null}</footer>
+    <footer className="message-actions"><MessageTime value={timestamp} /><CopyButton text={content} label="Copy message" iconOnly /></footer>
   </article>;
 }
 
@@ -158,7 +158,7 @@ function Turn({ turn, live, ...props }: Props & { turn: ConversationTurn; live: 
       {files.length ? <div className="turn-files" aria-label="Files from this response">{files.map((part) => <ComputerArtifacts key={part.id} output={part.content}
         workspaceId={props.workspaceId} agentId={props.agent.id} expectedGeneration={props.generation} onPreview={props.onPreviewArtifact ? (output) => props.onPreviewArtifact!(output, props.agent.id) : undefined} />)}</div> : null}
       {savedFile && !files.length && props.onOpenWorkspaceFiles && props.agent.id !== "unavailable-author" ? <p className="turn-notice">A file was saved in this agent's workspace. <button type="button" onClick={() => props.onOpenWorkspaceFiles!(props.agent.id)}>Open workspace files</button></p> : null}
-      {!running ? <footer className="message-actions"><MessageTime value={endedAt ?? startedAt} />{turn.parts.some(part => part.kind === "text") ? <CopyButton text={turn.parts.filter(part => part.kind === "text").map(part => part.content).join("\n\n")} label="Copy response" /> : null}{turn.prompt && props.onReusePrompt ? <button type="button" onClick={() => props.onReusePrompt!(turn.prompt!, "retry")}>Retry…</button> : null}</footer> : null}
+      {!running ? <footer className="message-actions"><MessageTime value={endedAt ?? startedAt} />{turn.parts.some(part => part.kind === "text") ? <CopyButton text={turn.parts.filter(part => part.kind === "text").map(part => part.content).join("\n\n")} label="Copy response" iconOnly /> : null}</footer> : null}
       {live ? <>{props.approval ? <div className="conversation-attention">{props.approval}</div> : null}{props.interruption}</> : null}
     </article>
   </section>;

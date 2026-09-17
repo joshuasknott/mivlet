@@ -1058,8 +1058,7 @@ export function useShellRuntime(
     }
   };
 
-  // Returning authenticated accounts open their workspace directly. Provider
-  // readiness still gates execution, not entry into the app.
+  // Account readiness is separate from the provider setup gate in the shell.
   const onboardingRequired =
     !(
       identityStatus.state === "signed-in" ||

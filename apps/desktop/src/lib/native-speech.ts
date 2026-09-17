@@ -1,20 +1,5 @@
 import type { NativeSpeechPort, StagedRecordingReceipt } from "@fable/connectors/voice";
 import { getRuntimeAdapter } from "../runtime/adapters/select";
-import type { VoiceConversationPort } from "@fable/connectors/voice";
-import type { VoiceConversationSession } from "@fable/protocol";
-
-export function createNativeVoiceConversationPort(): VoiceConversationPort {
-  const invoke = <T>(command: string, request: object) => getRuntimeAdapter().invoke<T>(command, { request });
-  return {
-    start: (scope) => invoke<VoiceConversationSession>("native_voice_start", scope),
-    heartbeat: (session) => invoke<void>("native_voice_heartbeat", session),
-    interrupt: (session, generation) => invoke<void>("native_voice_interrupt", { session, generation }),
-    end: (session) => invoke<void>("native_voice_end", session),
-    transcribe: (request) => invoke<{ transcript: string }>("native_voice_transcribe", request),
-    speak: (request) => invoke<{ audioBase64: string }>("native_voice_speak", request),
-  };
-}
-
 export function createNativeSpeechPort(): NativeSpeechPort {
   const invoke = <T>(command: string, request: object) =>
     getRuntimeAdapter().invoke<T>(command, { request });

@@ -1,11 +1,11 @@
+import "../styles/composer-plugins.css";
 import { ChangeEvent, FormEvent, RefObject, type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ComposerInput, type ComposerInputHandle } from "./ComposerInput";
-import { PaperPlaneTilt } from "@phosphor-icons/react/dist/csr/PaperPlaneTilt";
+import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { UploadSimple } from "@phosphor-icons/react/dist/csr/UploadSimple";
 import { Microphone } from "@phosphor-icons/react/dist/csr/Microphone";
-import { Waveform } from "@phosphor-icons/react/dist/csr/Waveform";
-import { PlugsConnected } from "@phosphor-icons/react/dist/csr/PlugsConnected";
+import { ComposerPluginsMenu } from "./ComposerPluginsMenu";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { Stop } from "@phosphor-icons/react/dist/csr/Stop";
 import { X } from "@phosphor-icons/react/dist/csr/X";
@@ -34,11 +34,7 @@ export function Composer({
   onStopVoice,
   onCancelVoice,
   onDismissVoice,
-  onStartVoiceChat,
-  voiceChatDisabled = false,
-  voiceChatDescription,
   onAttach,
-  onImportRepository,
   addMenuOpen,
   onToggleAddMenu,
   onOpenTool,
@@ -81,11 +77,7 @@ export function Composer({
   onStopVoice: () => void;
   onCancelVoice: () => void;
   onDismissVoice: () => void;
-  onStartVoiceChat?: () => void;
-  voiceChatDisabled?: boolean;
-  voiceChatDescription?: string;
   onAttach: () => void;
-  onImportRepository?: () => void;
   addMenuOpen: boolean;
   onToggleAddMenu: () => void;
   onOpenTool: (tool: "Plugins") => void;
@@ -171,7 +163,6 @@ export function Composer({
   const hasMeaningfulContent = hasComposerText || hasComposerAttachments;
   const dictationBusy = voiceListening || voiceTransitioning;
   const showStop = isWorking && (!allowQueue || !hasMeaningfulContent);
-  const voiceChatLabel = voiceChatDescription ?? "Start voice chat";
   const currentToken = useMemo(() => {
     const match = composerValue.match(/(^|\s)([\/@][^\s]*)$/);
     if (!match) return null;
@@ -319,7 +310,7 @@ export function Composer({
 
         <div className="composer-controls">
           <div className="composer-control-group">
-            <div className="composer-control-anchor">
+            <div className="composer-control-anchor composer-control-anchor--add">
               <button
                 ref={addTrigger}
                 type="button"
@@ -337,29 +328,22 @@ export function Composer({
                 <div className="composer-menu composer-add-menu" role="menu" aria-label="Add to prompt" onKeyDown={(event) => {
                   if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
                   event.preventDefault();
-                  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+                  const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(':scope > button[role="menuitem"], :scope > .composer-plugins > button')];
                   const index = items.indexOf(document.activeElement as HTMLButtonElement);
                   items[event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
                 }}>
                   <button type="button" role="menuitem" onClick={() => { onAttach(); closeExternalMenus(); }}>
                     <UploadSimple size={18} /><span>Upload files</span>
                   </button>
-                  {onImportRepository && <button type="button" role="menuitem" onClick={() => { onImportRepository(); closeExternalMenus(); }}>
-                    <UploadSimple size={18} /><span>Import repository ZIP</span>
-                  </button>}
                   {secondaryControlsInMenu ? <>
                     <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); setModelOpen(true); }}>Model and reasoning…</button>
-                    <button type="button" role="menuitem" disabled={!voiceCanStart || isWorking || dictationBusy} onClick={() => { closeExternalMenus(); onStartVoice(); }}><Microphone size={18} /><span>Dictate message</span></button>
                     {onSaveConclusion ? <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); onSaveConclusion(); }}>Save conclusion to Memory…</button> : null}
                   </> : null}
-                  {connectedConnectors.length > 0 && <span className="composer-menu__heading">Plugins</span>}
-                  {connectedConnectors.map((connector) => <button key={connector.id} type="button" role="menuitem" onClick={() => {
-                    const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + connector.id + " ";
+                  {!secondaryControlsInMenu && onSaveConclusion ? <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); onSaveConclusion(); }}>Save conclusion to Memory…</button> : null}
+                  <ComposerPluginsMenu connectors={connectedConnectors} onMention={(id) => {
+                    const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + id + " ";
                     onComposerChange(prompt); closeExternalMenus(); composerRef.current?.focus();
-                  }}><ConnectorIcon id={connector.id} /><span>{connector.name}</span></button>)}
-                  <button type="button" role="menuitem" className="composer-add-menu__manage" onClick={() => { closeExternalMenus(); onOpenTool("Plugins"); }}>
-                    <PlugsConnected size={18} /><span>Manage plugins</span>
-                  </button>
+                  }} onAdd={() => { closeExternalMenus(); onOpenTool("Plugins"); }} />
                 </div>
               ) : null}
             </div>
@@ -375,16 +359,19 @@ export function Composer({
           </div>
 
           <div className="composer-control-group composer-control-group--end">
+            {!compactAgentSurface && !secondaryControlsInMenu && (modelControl ?? (!models.some(model => model.available) && onConnectProvider
+              ? <button type="button" className="composer-model" onClick={() => { closeExternalMenus(); onConnectProvider(); }}>Connect a provider</button>
+              : <ModelPicker models={models} selectedId={selectedModelId}
+              label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
+              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
+              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />))}
             {secondaryControlsInMenu && !models.some(model => model.id === selectedModelId && model.available) ? <button type="button" className="composer-model" onClick={() => {
               closeExternalMenus();
               if (models.some(model => model.available)) setModelOpen(true);
               else onConnectProvider?.();
             }}>{models.some(model => model.available) ? "Choose model" : "Connect a provider"}</button> : null}
-            {!compactAgentSurface && !secondaryControlsInMenu && (modelControl ?? <ModelPicker models={models} selectedId={selectedModelId}
-              label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
-              onSelectEffort={onSelectReasoningEffort} open={modelOpen}
-              onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />)}
-            {!isWorking && (!secondaryControlsInMenu || dictationBusy || voiceCancelable) ? (
+
+            {!isWorking ? (
               <div className="voice-actions" data-state={voiceStatus}>
                 <div className="voice-action">
                   <button
@@ -431,33 +418,18 @@ export function Composer({
               {showStop ? (
                 <Stop size={14} weight="fill" />
               ) : (
-                <PaperPlaneTilt size={20} />
+                <ArrowUp size={20} />
               )}
             </button> : null}
-            {!dictationBusy && !isWorking && hasMeaningfulContent ? <button
+            {!dictationBusy && !isWorking ? <button
               className="send-button"
               type="submit"
+              disabled={!hasMeaningfulContent}
               aria-label="Send prompt"
             >
-              <PaperPlaneTilt size={20} />
+              <ArrowUp size={20} />
             </button> : null}
-            {!dictationBusy && !isWorking && !hasMeaningfulContent && onStartVoiceChat ? (
-              <div className="voice-action voice-action--chat">
-                <button
-                  type="button"
-                  className="composer-chip voice-chat-action"
-                  onClick={onStartVoiceChat}
-                  aria-label="Start voice chat"
-                  disabled={voiceChatDisabled}
-                  title={voiceChatLabel}
-                >
-                  <Waveform size={19} />
-                </button>
-                <span className="voice-tooltip" role="tooltip" aria-hidden="true">
-                  {voiceChatLabel}
-                </span>
-              </div>
-            ) : null}
+
           </div>
         </div>
 
